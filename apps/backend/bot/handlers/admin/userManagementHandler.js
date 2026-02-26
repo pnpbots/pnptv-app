@@ -412,7 +412,7 @@ Baneado: ${user.status === 'banned' ? 'Sí ⛔' : 'No ✅'}
       const isAdmin = await PermissionService.isAdmin(adminId);
       if (!isAdmin) return;
 
-      const newTier = tier === 'prime' ? 'Prime' : 'Free';
+      const newTier = tier === 'prime' ? 'prime' : 'free';
       await query('UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2', [newTier, userId]);
       await require('../../../config/redis').cache.del(`user:${userId}`);
 

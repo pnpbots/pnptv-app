@@ -1,9 +1,21 @@
 const axios = require('axios');
 const MockAdapter = require('axios-mock-adapter');
+
+// Mock config modules before requiring worker
+jest.mock('../../config/worker.config', () => ({
+  queue: { host: 'localhost', port: 6379, password: '' },
+  pollTimeout: 1,
+}), { virtual: true });
+
+jest.mock('../../config/payment.config', () => ({
+  apiUrl: 'http://localhost:3001',
+  retryAttempts: 1,
+}), { virtual: true });
+
 const PaymentWorker = require('./paymentWorker');
 
 // Minimal fake redis client with brPop behavior
-class FakeRedisWorker {
+class MockRedisWorker {
   constructor() {
     this.lists = new Map();
     this.store = new Map();
@@ -40,7 +52,7 @@ class FakeRedisWorker {
   async quit() {}
 }
 
-jest.mock('redis', () => ({ createClient: () => new FakeRedisWorker() }));
+jest.mock('redis', () => ({ createClient: () => new MockRedisWorker() }));
 
 describe('PaymentWorker', () => {
   let worker;

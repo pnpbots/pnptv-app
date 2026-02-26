@@ -68,7 +68,7 @@ class UserManagementController {
       }
 
       // Check if already FREE
-      if (user.tier === 'Free' && user.subscriptionStatus === 'free') {
+      if ((user.tier || '').toLowerCase() === 'free' && user.subscriptionStatus === 'free') {
         return res.status(400).json({
           success: false,
           error: 'User is already in FREE tier',

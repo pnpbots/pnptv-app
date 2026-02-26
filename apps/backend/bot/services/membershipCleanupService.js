@@ -390,13 +390,13 @@ Type /subscribe to view membership plans and reactivate your access!`;
         logger.info(`Churned ${churnResult.rowCount} users with expired subscriptions`);
       }
 
-      // Step 4: Ensure 'Free' tier for all churned users
+      // Step 4: Ensure 'free' tier for all churned users
       const fixChurnedTierResult = await query(`
         UPDATE users
         SET tier = 'free',
             updated_at = NOW()
         WHERE subscription_status IN ('churned', 'expired', 'free')
-          AND tier != 'Free'
+          AND tier != 'free'
         RETURNING id
       `);
       if (fixChurnedTierResult.rowCount > 0) {

@@ -1,8 +1,18 @@
 const request = require('supertest');
+
+// Mock agent config before requiring server
+jest.mock('../../config/agent.config', () => ({
+  port: 0,
+  queue: { host: 'localhost', port: 6379, password: '' },
+}), { virtual: true });
+
+// Set required env var for auth
+process.env.AGENT_SHARED_SECRET = 'test-agent-secret';
+
 const AgentServer = require('./server');
 
 // Minimal in-memory fake Redis client used to mock redis.createClient
-class FakeRedis {
+class MockRedis {
   constructor() {
     this.store = new Map();
     this.lists = new Map();
@@ -27,7 +37,7 @@ class FakeRedis {
 
 // Mock the redis module used by server.js
 jest.mock('redis', () => ({
-  createClient: () => new FakeRedis(),
+  createClient: () => new MockRedis(),
 }));
 
 describe('AgentServer', () => {
@@ -42,9 +52,20 @@ describe('AgentServer', () => {
     await agent.stop();
   });
 
+  const AUTH = `Bearer ${process.env.AGENT_SHARED_SECRET}`;
+
+  test('should reject requests without bearer token', async () => {
+    const res = await request(agent.app)
+      .post('/process-payment')
+      .send({ userId: 'u1', amount: 10 });
+
+    expect(res.status).toBe(401);
+  });
+
   test('should enqueue a payment task', async () => {
     const res = await request(agent.app)
       .post('/process-payment')
+      .set('Authorization', AUTH)
       .send({ userId: 'u1', amount: 10, currency: 'USD', paymentMethod: 'card' });
 
     expect(res.status).toBe(200);
@@ -60,7 +81,9 @@ describe('AgentServer', () => {
     const taskId = 'status-test-1';
     await agent.redisClient.set(`task:${taskId}:status`, 'completed');
 
-    const res = await request(agent.app).get(`/task-status/${taskId}`);
+    const res = await request(agent.app)
+      .get(`/task-status/${taskId}`)
+      .set('Authorization', AUTH);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('completed');
   });

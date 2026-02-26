@@ -44,7 +44,7 @@ const fetchUserRecord = async (userId) => {
 
 const isPrimeUserRecord = (user) => {
   if (!user) return false;
-  return normalizeSubscriptionStatus(user.subscription_status) === 'active';
+  return (user.tier || '').toLowerCase() === 'prime';
 };
 
 const isAdminRecord = (user) => {
