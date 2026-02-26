@@ -2119,6 +2119,14 @@ class PaymentService {
       // 2. Token comes from frontend tokenization with ePayco.js
       const tokenId = tokenCard.trim();
 
+      // Sanitize email before sending to ePayco (defense-in-depth)
+      if (customer?.email) {
+        customer.email = String(customer.email).trim().toLowerCase();
+      }
+      if (!customer?.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email)) {
+        return { success: false, error: 'Email del titular es requerido y debe tener un formato válido.' };
+      }
+
       // 3. Create or reuse customer to avoid duplicates on retries.
       let customerId = payment.metadata?.epayco_customer_id || null;
       if (!customerId) {

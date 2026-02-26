@@ -669,6 +669,14 @@
                 return;
             }
 
+            // Validate email format (ePayco requires valid email)
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                formError.textContent = 'Please enter a valid email address.';
+                formError.style.display = 'block';
+                return;
+            }
+
             if (cardNumber.length < 13 || cardNumber.length > 16) {
                 formError.textContent = 'Invalid card number.';
                 formError.style.display = 'block';
@@ -745,6 +753,7 @@
                         'card[exp_year]': '20' + year,
                         'card[exp_month]': month,
                         'card[cvc]': cvc,
+                        'hasCvv': true,
                     }, function(tokenData) {
                         if (tokenData && tokenData.status && tokenData.id) {
                             resolve(tokenData.id);

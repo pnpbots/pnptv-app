@@ -615,10 +615,21 @@ class PaymentController {
         });
       }
 
-      if (!paymentId || !hasToken || !name || !email || !docType || !docNumber) {
+      // Sanitize and validate email before sending to ePayco
+      const sanitizedEmail = (typeof email === 'string' ? email : '').trim().toLowerCase();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+      if (!paymentId || !hasToken || !name || !sanitizedEmail || !docType || !docNumber) {
         return res.status(400).json({
           success: false,
           error: 'Faltan campos requeridos. Debes enviar paymentId, tokenCard y datos de titular.',
+        });
+      }
+
+      if (!emailRegex.test(sanitizedEmail)) {
+        return res.status(400).json({
+          success: false,
+          error: 'El formato del email no es válido.',
         });
       }
 
@@ -712,7 +723,7 @@ class PaymentController {
         customer: {
           name,
           last_name: lastName || name,
-          email,
+          email: sanitizedEmail,
           doc_type: docType,
           doc_number: String(docNumber),
           city: city || 'Bogota',

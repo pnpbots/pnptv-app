@@ -115,11 +115,21 @@ class SubscriptionController {
         email, name, telegramId, planId, docNumber, docType = 'CC',
       } = req.body;
 
-      // Validate required fields
-      if (!email || !name || !planId) {
+      // Sanitize and validate email
+      const sanitizedEmail = (typeof email === 'string' ? email : '').trim().toLowerCase();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+      if (!sanitizedEmail || !name || !planId) {
         return res.status(400).json({
           success: false,
           error: 'email, name, and planId are required',
+        });
+      }
+
+      if (!emailRegex.test(sanitizedEmail)) {
+        return res.status(400).json({
+          success: false,
+          error: 'El formato del email no es válido.',
         });
       }
 
@@ -187,7 +197,7 @@ class SubscriptionController {
         currencyCode,
         invoice,
         epaycoSignature,
-        email,
+        email: sanitizedEmail,
         name,
         telegramId,
         docNumber: docNumber || '0000000',
@@ -199,7 +209,7 @@ class SubscriptionController {
       };
 
       logger.info('Checkout session created', {
-        email,
+        email: sanitizedEmail,
         telegramId,
         planId,
         amountCOP,

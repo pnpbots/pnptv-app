@@ -671,6 +671,14 @@
                 return;
             }
 
+            // Validate email format (ePayco rejects emails with spaces or invalid format)
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                formError.textContent = 'Please enter a valid email address.';
+                formError.style.display = 'block';
+                return;
+            }
+
             if (cardNumber.length < 13 || cardNumber.length > 16) {
                 formError.textContent = 'Invalid card number.';
                 formError.style.display = 'block';
