@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PNPtv! - Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.cdnfonts.com/css/ethnocentric" rel="stylesheet">
+    <style>
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: #121212;
+            color: #FFFFFF;
+            font-family: 'Roboto Mono', monospace;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            padding: 16px;
+        }
+
+        /* Background gradient orbs */
+        .bg-orb {
+            position: absolute;
+            width: 500px;
+            height: 500px;
+            border-radius: 50%;
+            opacity: 0.2;
+            filter: blur(80px);
+            pointer-events: none;
+        }
+
+        .bg-orb-pink {
+            top: -20%;
+            left: -10%;
+            background: radial-gradient(circle, #D4007A, transparent 70%);
+        }
+
+        .bg-orb-amber {
+            bottom: -20%;
+            right: -10%;
+            background: radial-gradient(circle, #E69138, transparent 70%);
+        }
+
+        /* Glass card */
+        .glass-card {
+            background: rgba(30, 30, 30, 0.7);
+            border: 1px solid rgba(212, 0, 122, 0.3);
+            border-radius: 24px;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            width: 100%;
+            max-width: 420px;
+            padding: 32px;
+            position: relative;
+            z-index: 10;
+            animation: fadeInUp 0.6s ease-out forwards, subtleGlow 3s ease-in-out infinite;
+        }
+
+        @media (min-width: 640px) {
+            .glass-card {
+                padding: 40px;
+            }
+        }
+
+        /* Logo */
+        .logo-container {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .logo-container img {
+            height: 56px;
+            width: auto;
+        }
+
+        .logo-text {
+            font-family: 'Ethnocentric Rg', 'Roboto Mono', monospace;
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            background: linear-gradient(135deg, #D4007A, #E69138);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Buttons */
+        .btn-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .btn-telegram {
+            background: linear-gradient(135deg, #D4007A, #E69138);
+            color: #FFFFFF;
+            border: none;
+            border-radius: 12px;
+            padding: 14px 24px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            width: 100%;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            text-decoration: none;
+        }
+
+        .btn-telegram:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(212, 0, 122, 0.3), 0 4px 15px rgba(230, 145, 56, 0.2);
+        }
+
+        .btn-telegram:active {
+            transform: translateY(0);
+        }
+
+        .btn-telegram:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-telegram .spinner {
+            animation: spin 1s linear infinite;
+        }
+
+        .btn-x {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 14px 24px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 16px;
+            font-weight: 600;
+            color: #FFFFFF;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            width: 100%;
+            transition: background 0.2s ease;
+            position: relative;
+        }
+
+        .btn-x:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: absolute;
+            top: -40px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(30, 30, 30, 0.9);
+            border: 1px solid rgba(212, 0, 122, 0.4);
+            border-radius: 8px;
+            padding: 6px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            white-space: nowrap;
+            animation: fadeInUp 0.3s ease-out forwards;
+            display: none;
+        }
+
+        .tooltip.show {
+            display: block;
+        }
+
+        /* Status messages */
+        .status-msg {
+            text-align: center;
+            font-size: 12px;
+            color: #8E8E93;
+            margin-top: 4px;
+        }
+
+        .status-error {
+            color: #FF453A;
+        }
+
+        /* Divider & footer */
+        .footer {
+            margin-top: 32px;
+            padding-top: 24px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            text-align: center;
+        }
+
+        .footer p {
+            font-size: 12px;
+            color: #8E8E93;
+        }
+
+        .footer a {
+            color: #D4007A;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes subtleGlow {
+            0%, 100% {
+                box-shadow: 0 0 30px rgba(212, 0, 122, 0.15), 0 0 60px rgba(230, 145, 56, 0.1);
+            }
+            50% {
+                box-shadow: 0 0 40px rgba(212, 0, 122, 0.25), 0 0 80px rgba(230, 145, 56, 0.15);
+            }
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Background orbs -->
+    <div class="bg-orb bg-orb-pink"></div>
+    <div class="bg-orb bg-orb-amber"></div>
+
+    <!-- Glass card -->
+    <div class="glass-card">
+        <!-- Logo -->
+        <div class="logo-container">
+            <img src="/Logo2-50.png" alt="PNPtv!" style="height:56px;width:auto;">
+        </div>
+
+        <!-- Buttons -->
+        <div class="btn-stack">
+            <!-- Login with Telegram -->
+            <button class="btn-telegram" id="telegramBtn" onclick="handleTelegramLogin()">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.492-1.302.48-.428-.013-1.252-.242-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                </svg>
+                <span id="telegramBtnText">Login with Telegram</span>
+            </button>
+            <div id="statusMsg" class="status-msg" style="display:none;"></div>
+
+            <!-- Register with X -->
+            <div style="position:relative;">
+                <button class="btn-x" onclick="handleXClick()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                    </svg>
+                    Register with X
+                </button>
+                <div class="tooltip" id="xTooltip">Coming Soon</div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>By continuing, you agree to our <a href="/terms">Terms of Service</a></p>
+        </div>
+    </div>
+
+    <script>
+        let pollInterval = null;
+
+        async function handleTelegramLogin() {
+            const btn = document.getElementById('telegramBtn');
+            const btnText = document.getElementById('telegramBtnText');
+            const statusMsg = document.getElementById('statusMsg');
+
+            try {
+                btn.disabled = true;
+                btnText.innerHTML = '<svg class="spinner" width="20" height="20" viewBox="0 0 24 24" fill="none"><circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Waiting for Telegram...';
+                statusMsg.style.display = 'block';
+                statusMsg.className = 'status-msg';
+                statusMsg.textContent = 'Open Telegram and press Start to log in';
+
+                // Request login token
+                const res = await fetch('/api/webapp/auth/telegram/token', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json();
+
+                if (!data.success || !data.token || !data.deepLink) {
+                    throw new Error('Failed to get login token');
+                }
+
+                // Open Telegram deep link
+                window.open(data.deepLink, '_blank');
+
+                // Poll for auth
+                let attempts = 0;
+                pollInterval = setInterval(async () => {
+                    attempts++;
+                    if (attempts > 60) {
+                        clearInterval(pollInterval);
+                        btn.disabled = false;
+                        btnText.textContent = 'Login with Telegram';
+                        statusMsg.className = 'status-msg status-error';
+                        statusMsg.textContent = 'Login timed out. Please try again.';
+                        return;
+                    }
+                    try {
+                        const check = await fetch('/api/webapp/auth/telegram/check?token=' + data.token, {
+                            credentials: 'include'
+                        });
+                        const result = await check.json();
+                        if (result.authenticated) {
+                            clearInterval(pollInterval);
+                            window.location.href = '/app';
+                        }
+                    } catch (e) {
+                        // Keep polling
+                    }
+                }, 5000);
+
+            } catch (e) {
+                btn.disabled = false;
+                btnText.textContent = 'Login with Telegram';
+                statusMsg.style.display = 'block';
+                statusMsg.className = 'status-msg status-error';
+                statusMsg.textContent = 'Login failed. Please try again.';
+            }
+        }
+
+        function handleXClick() {
+            const tooltip = document.getElementById('xTooltip');
+            tooltip.classList.add('show');
+            setTimeout(() => tooltip.classList.remove('show'), 2000);
+        }
+    </script>
+</body>
+</html>

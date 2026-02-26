@@ -1,0 +1,402 @@
+# ============================================
+# PNPTVAPP - Docker Compose Stack v3
+# 17 containers | 9 blocks | 1 network
+# Authentik + Redis | Cal.com + Redis
+# Frontend: pnptv-web (nginx SPA)
+# ============================================
+
+networks:
+  pnptvapp_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+services:
+
+  # ===========================================
+  # BLOCK A - Reverse Proxy (Entry Point)
+  # ONLY container exposing HTTP/S ports
+  # ===========================================
+
+  npm-proxy:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: npm-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./infrastructure/data/npm/data:/data
+      - ./infrastructure/data/npm/letsencrypt:/etc/letsencrypt
+    networks:
+      - pnptvapp_net
+
+  # ===========================================
+  # BLOCK B - Identity & SSO (Authentik)
+  # Redis required for cache/sessions
+  # ===========================================
+
+  redis-authentik:
+    image: redis:7-alpine
+    container_name: redis-authentik
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/authentik/redis:/data
+    networks:
+      - pnptvapp_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  pg-authentik:
+    image: postgres:16-alpine
+    container_name: pg-authentik
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/authentik/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${PG_AUTH_DB}
+      POSTGRES_USER: ${PG_AUTH_USER}
+      POSTGRES_PASSWORD: ${PG_AUTH_PASSWORD}
+    networks:
+      - pnptvapp_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_AUTH_USER} -d ${PG_AUTH_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  authentik-server:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: authentik-server
+    restart: unless-stopped
+    command: server
+    volumes:
+      - ./infrastructure/data/authentik/media:/media
+      - ./infrastructure/data/authentik/custom-templates:/templates
+    environment:
+      AUTHENTIK_POSTGRESQL__HOST: pg-authentik
+      AUTHENTIK_POSTGRESQL__NAME: ${PG_AUTH_DB}
+      AUTHENTIK_POSTGRESQL__USER: ${PG_AUTH_USER}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_AUTH_PASSWORD}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: ${AUTHENTIK_ERROR_REPORTING}
+      AUTHENTIK_REDIS__HOST: redis-authentik
+    networks:
+      - pnptvapp_net
+    depends_on:
+      pg-authentik:
+        condition: service_healthy
+      redis-authentik:
+        condition: service_healthy
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: authentik-worker
+    restart: unless-stopped
+    command: worker
+    volumes:
+      - ./infrastructure/data/authentik/media:/media
+      - ./infrastructure/data/authentik/custom-templates:/templates
+    environment:
+      AUTHENTIK_POSTGRESQL__HOST: pg-authentik
+      AUTHENTIK_POSTGRESQL__NAME: ${PG_AUTH_DB}
+      AUTHENTIK_POSTGRESQL__USER: ${PG_AUTH_USER}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_AUTH_PASSWORD}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: ${AUTHENTIK_ERROR_REPORTING}
+      AUTHENTIK_REDIS__HOST: redis-authentik
+    networks:
+      - pnptvapp_net
+    depends_on:
+      pg-authentik:
+        condition: service_healthy
+      redis-authentik:
+        condition: service_healthy
+
+  # ===========================================
+  # BLOCK C - Data & CRM (Directus)
+  # Separate PostgreSQL for security isolation
+  # ===========================================
+
+  pg-directus:
+    image: postgres:16-alpine
+    container_name: pg-directus
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/directus/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${PG_DIRECTUS_DB}
+      POSTGRES_USER: ${PG_DIRECTUS_USER}
+      POSTGRES_PASSWORD: ${PG_DIRECTUS_PASSWORD}
+    networks:
+      - pnptvapp_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_DIRECTUS_USER} -d ${PG_DIRECTUS_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  directus:
+    image: directus/directus:latest
+    container_name: directus
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/directus/uploads:/directus/uploads
+      - ./infrastructure/data/directus/extensions:/directus/extensions
+    environment:
+      DB_CLIENT: pg
+      DB_HOST: pg-directus
+      DB_PORT: "5432"
+      DB_DATABASE: ${PG_DIRECTUS_DB}
+      DB_USER: ${PG_DIRECTUS_USER}
+      DB_PASSWORD: ${PG_DIRECTUS_PASSWORD}
+      KEY: ${DIRECTUS_KEY}
+      SECRET: ${DIRECTUS_SECRET}
+      ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASS}
+      PUBLIC_URL: https://cms.${DOMAIN_ROOT}
+      AUTH_PROVIDERS: "authentik"
+      AUTH_AUTHENTIK_DRIVER: "openid"
+      AUTH_AUTHENTIK_CLIENT_ID: ${DIRECTUS_OIDC_CLIENT_ID}
+      AUTH_AUTHENTIK_CLIENT_SECRET: ${DIRECTUS_OIDC_CLIENT_SECRET}
+      AUTH_AUTHENTIK_ISSUER_URL: "https://auth.${DOMAIN_ROOT}/application/o/directus/.well-known/openid-configuration"
+      AUTH_AUTHENTIK_IDENTIFIER_KEY: "sub"
+      AUTH_AUTHENTIK_ALLOW_PUBLIC_REGISTRATION: "true"
+      AUTH_AUTHENTIK_ICON: "lock"
+      AUTH_AUTHENTIK_LABEL: "Sign in with PNPTV"
+      CORS_ENABLED: "true"
+      CORS_ORIGIN: "true"
+    networks:
+      - pnptvapp_net
+    depends_on:
+      pg-directus:
+        condition: service_healthy
+
+  # ===========================================
+  # BLOCK D - Multimedia VOD/Radio (Ampache)
+  # ===========================================
+
+  mariadb-ampache:
+    image: mariadb:10.11
+    container_name: mariadb-ampache
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/ampache/mariadb:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_AMPACHE_DB}
+      MYSQL_USER: ${MYSQL_AMPACHE_USER}
+      MYSQL_PASSWORD: ${MYSQL_AMPACHE_PASSWORD}
+    networks:
+      - pnptvapp_net
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  ampache:
+    image: ampache/ampache:latest
+    container_name: ampache
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/ampache/config:/var/www/config
+      - ./infrastructure/data/ampache/log:/var/log/ampache
+      - /var/www/pnptvbot-sandbox/public/media:/media:ro
+    networks:
+      - pnptvapp_net
+    depends_on:
+      mariadb-ampache:
+        condition: service_healthy
+
+  # ===========================================
+  # BLOCK E - Booking (Cal.com)
+  # Dedicated PostgreSQL + Redis for API v2
+  # ===========================================
+
+  pg-calcom:
+    image: postgres:16-alpine
+    container_name: pg-calcom
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/calcom/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${PG_CALCOM_DB}
+      POSTGRES_USER: ${PG_CALCOM_USER}
+      POSTGRES_PASSWORD: ${PG_CALCOM_PASSWORD}
+    networks:
+      - pnptvapp_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_CALCOM_USER} -d ${PG_CALCOM_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis-calcom:
+    image: redis:7-alpine
+    container_name: redis-calcom
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/calcom/redis:/data
+    networks:
+      - pnptvapp_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  calcom:
+    image: calcom/cal.com:latest
+    container_name: calcom
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${PG_CALCOM_USER}:${PG_CALCOM_PASSWORD}@pg-calcom:5432/${PG_CALCOM_DB}
+      DATABASE_DIRECT_URL: postgresql://${PG_CALCOM_USER}:${PG_CALCOM_PASSWORD}@pg-calcom:5432/${PG_CALCOM_DB}
+      NEXTAUTH_SECRET: ${CALCOM_NEXTAUTH_SECRET}
+      CALENDSO_ENCRYPTION_KEY: ${CALCOM_ENCRYPTION_KEY}
+      NEXT_PUBLIC_WEBAPP_URL: https://booking.${DOMAIN_ROOT}
+      NEXT_PUBLIC_APP_URL: https://booking.${DOMAIN_ROOT}
+      NEXTAUTH_URL: https://booking.${DOMAIN_ROOT}
+      REDIS_URL: redis://redis-calcom:6379
+      CALCOM_LICENSE_KEY: ${CALCOM_LICENSE_KEY}
+      OIDC_CLIENT_ID: ${CALCOM_OIDC_CLIENT_ID}
+      OIDC_CLIENT_SECRET: ${CALCOM_OIDC_CLIENT_SECRET}
+      OIDC_WELL_KNOWN_URL: "https://auth.${DOMAIN_ROOT}/application/o/calcom/.well-known/openid-configuration"
+      NODE_ENV: production
+      ALLOWED_HOSTNAMES: '["booking.${DOMAIN_ROOT}"]'
+    networks:
+      - pnptvapp_net
+    depends_on:
+      pg-calcom:
+        condition: service_healthy
+      redis-calcom:
+        condition: service_healthy
+
+  # ===========================================
+  # BLOCK F - Social Feed (Bluesky PDS)
+  # Internal SQLite - no external DB needed
+  # ===========================================
+
+  bluesky-pds:
+    image: ghcr.io/bluesky-social/pds:latest
+    container_name: bluesky-pds
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/bluesky-pds:/pds
+    environment:
+      PDS_HOSTNAME: ${PDS_HOSTNAME}
+      PDS_JWT_SECRET: ${PDS_JWT_SECRET}
+      PDS_ADMIN_PASSWORD: ${PDS_ADMIN_PASSWORD}
+      PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX: ${PDS_PLC_ROTATION_KEY}
+      PDS_DATA_DIRECTORY: /pds
+      PDS_BLOBSTORE_DISK_LOCATION: /pds/blocks
+      PDS_DID_PLC_URL: https://plc.directory
+      PDS_BSKY_APP_VIEW_URL: https://api.bsky.app
+      PDS_BSKY_APP_VIEW_DID: did:web:api.bsky.app
+      PDS_REPORT_SERVICE_URL: https://mod.bsky.app
+      PDS_REPORT_SERVICE_DID: did:plc:ar7c4by46qjdydhdevvrndak
+      PDS_CRAWLERS: https://bsky.network
+      # PDS_EMAIL_FROM_ADDRESS: ${PDS_EMAIL_FROM_ADDRESS}
+      # PDS_EMAIL_SMTP_URL: ${PDS_EMAIL_SMTP_URL}
+      LOG_ENABLED: "true"
+    networks:
+      - pnptvapp_net
+
+  # ===========================================
+  # BLOCK G - Chat & Video Calls
+  # Matrix Synapse + Element Web
+  # ===========================================
+
+  pg-synapse:
+    image: postgres:16-alpine
+    container_name: pg-synapse
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/synapse/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${PG_SYNAPSE_DB}
+      POSTGRES_USER: ${PG_SYNAPSE_USER}
+      POSTGRES_PASSWORD: ${PG_SYNAPSE_PASSWORD}
+      POSTGRES_INITDB_ARGS: --encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    networks:
+      - pnptvapp_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_SYNAPSE_USER} -d ${PG_SYNAPSE_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  synapse:
+    image: matrixdotorg/synapse:latest
+    container_name: synapse
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/synapse/data:/data
+    environment:
+      SYNAPSE_SERVER_NAME: ${SYNAPSE_SERVER_NAME}
+      SYNAPSE_REPORT_STATS: ${SYNAPSE_REPORT_STATS}
+      SYNAPSE_CONFIG_DIR: /data
+      UID: "991"
+      GID: "991"
+    networks:
+      - pnptvapp_net
+    depends_on:
+      pg-synapse:
+        condition: service_healthy
+
+  element-web:
+    image: vectorim/element-web:latest
+    container_name: element-web
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/configs/element/config.json:/usr/share/nginx/html/config.json
+      - ./infrastructure/configs/element/default.conf.template:/etc/nginx/templates/default.conf.template
+    networks:
+      - pnptvapp_net
+
+  # ===========================================
+  # BLOCK H - Live Streaming (Restreamer)
+  # Port 1935 exposed for RTMP ingestion
+  # ===========================================
+
+  restreamer:
+    image: datarhei/restreamer:latest
+    container_name: restreamer
+    restart: unless-stopped
+    ports:
+      - "1935:1935"
+    volumes:
+      - ./infrastructure/data/restreamer/config:/core/config
+      - ./infrastructure/data/restreamer/data:/core/data
+    networks:
+      - pnptvapp_net
+
+  # ===========================================
+  # BLOCK I - Frontend Web App
+  # Static SPA served by nginx, proxied via NPM
+  # ===========================================
+
+  pnptv-web:
+    image: nginx:alpine
+    container_name: pnptv-web
+    restart: unless-stopped
+    volumes:
+      - ./apps/web/dist:/usr/share/nginx/html:ro
+      - ./infrastructure/configs/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - pnptvapp_net

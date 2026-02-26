@@ -1,6 +1,8 @@
 node_modules/
+dist/
 .env
 .env.production
 logs/
 backups/
 *.log
+*.backup-emergency

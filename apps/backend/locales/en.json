@@ -1,0 +1,16 @@
+{
+  "select_language": "🌐 Welcome to PNPtv!\n\nPlease select your preferred language:",
+  "age_verification": "🔞 Age Verification\n\nPlease enter your age to continue.\nYou must be 18 or older to use this service.",
+  "invalid_age": "❌ Please enter a valid age (a number).",
+  "age_too_young": "🚫 Sorry, you must be at least 18 years old to use this service.",
+  "terms_accept": "📜 *Terms of Service*\n\nBy using PNPtv, you agree to our Terms of Service and Privacy Policy.\n\nPlease review and accept to continue.",
+  "terms_accepted": "✅ Terms accepted! Let's set up your profile.",
+  "enter_username": "👤 Choose a Username\n\nEnter a display name (3-30 characters).\nThis is how other users will see you.",
+  "invalid_username": "❌ Invalid username. Please use 3-30 characters, letters and numbers only.",
+  "enter_bio": "📝 Tell us about yourself\n\nWrite a short bio (up to 500 characters).\nThis will appear on your profile.",
+  "invalid_bio": "❌ Bio is too long. Please keep it under 500 characters.",
+  "enter_location": "📍 Share Your Location\n\nShare your location to find nearby events and users, or tap Skip.",
+  "profile_complete": "🎉 *Profile Complete!*\n\nYou're all set! Explore PNPtv using the menu below.",
+  "error_occurred": "⚠️ Something went wrong. Please try again later or contact /support.",
+  "support": "💬 *Support*\n\nUse this command in a private chat with the bot to create a support ticket."
+}

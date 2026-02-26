@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PNPTV — Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    @font-face {
+      font-family: "CC Stormtrooper";
+      src: url("https://db.onlinewebfonts.com/t/1215f064d4c88d45e5b2a9141f61e936.woff2") format("woff2"),
+           url("https://db.onlinewebfonts.com/t/1215f064d4c88d45e5b2a9141f61e936.woff") format("woff");
+      font-weight: normal;
+      font-style: normal;
+      font-display: swap;
+    }
+  </style>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #121212;
+      font-family: 'Roboto Mono', monospace;
+      color: #fff;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Background gradient orbs */
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      pointer-events: none;
+      filter: blur(80px);
+    }
+    .orb-pink {
+      top: -20%;
+      left: -10%;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, #D4007A, transparent 70%);
+      opacity: 0.2;
+    }
+    .orb-amber {
+      bottom: -20%;
+      right: -10%;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, #E69138, transparent 70%);
+      opacity: 0.2;
+    }
+
+    /* Glass card */
+    .glass-card {
+      background: rgba(30, 30, 30, 0.7);
+      border: 1px solid rgba(212, 0, 122, 0.3);
+      border-radius: 24px;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      width: 100%;
+      max-width: 420px;
+      padding: 2rem 2.5rem;
+      position: relative;
+      z-index: 10;
+      animation: fadeInUp 0.6s ease-out forwards, subtleGlow 3s ease-in-out infinite;
+    }
+
+    /* Brand */
+    .brand { text-align: center; margin-bottom: 2rem; }
+    .brand-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #D4007A, #E69138);
+      margin-bottom: 1rem;
+    }
+    .brand-icon span {
+      font-weight: 900;
+      font-size: 1.5rem;
+      color: #fff;
+    }
+    .brand h1 {
+      font-family: 'CC Stormtrooper', 'Roboto Mono', monospace;
+      font-size: 1.875rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+    .brand p {
+      margin-top: 0.5rem;
+      font-size: 0.875rem;
+      color: #8E8E93;
+    }
+
+    /* Buttons */
+    .btn-stack { display: flex; flex-direction: column; gap: 1rem; }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.75rem;
+      width: 100%;
+      padding: 0.875rem 1.5rem;
+      border-radius: 0.75rem;
+      font-size: 1rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      border: none;
+      text-decoration: none;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .btn:hover { transform: translateY(-2px); }
+    .btn:active { transform: translateY(0); }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #D4007A, #E69138);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      box-shadow: 0 8px 25px rgba(212, 0, 122, 0.3), 0 4px 15px rgba(230, 145, 56, 0.2);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      position: relative;
+    }
+    .btn-secondary:hover { background: rgba(255, 255, 255, 0.1); }
+
+    .btn svg { flex-shrink: 0; }
+
+    /* Tooltip */
+    .tooltip {
+      position: absolute;
+      top: -2.5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 0.375rem 1rem;
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: #fff;
+      white-space: nowrap;
+      background: rgba(30, 30, 30, 0.9);
+      border: 1px solid rgba(212, 0, 122, 0.4);
+      animation: fadeInUp 0.3s ease-out forwards;
+      pointer-events: none;
+    }
+    .tooltip.hidden { display: none; }
+
+    /* Footer */
+    .footer {
+      margin-top: 2rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      text-align: center;
+    }
+    .footer p {
+      font-size: 0.75rem;
+      color: #8E8E93;
+    }
+
+    /* Animations */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes subtleGlow {
+      0%, 100% { box-shadow: 0 0 30px rgba(212, 0, 122, 0.15), 0 0 60px rgba(230, 145, 56, 0.1); }
+      50% { box-shadow: 0 0 40px rgba(212, 0, 122, 0.25), 0 0 80px rgba(230, 145, 56, 0.15); }
+    }
+
+    @media (max-width: 480px) {
+      .glass-card { padding: 1.5rem 1.25rem; margin: 0 1rem; }
+      .brand h1 { font-size: 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="orb orb-pink"></div>
+  <div class="orb orb-amber"></div>
+
+  <div class="glass-card">
+    <div class="brand">
+      <img src="/logo.png" alt="PNPTV" style="height:56px;width:auto">
+    </div>
+
+    <div class="btn-stack">
+      <button class="btn btn-primary" id="tg-login-btn" onclick="handleTelegramLogin()">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.492-1.302.48-.428-.013-1.252-.242-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+        </svg>
+        <span id="tg-btn-text">Login with Telegram</span>
+      </button>
+      <p id="tg-hint" class="tg-hint" style="display:none; text-align:center; font-size:0.8rem; color:#8E8E93; margin-top:-0.5rem;">
+        Open Telegram and press Start to log in
+      </p>
+
+      <div style="position:relative">
+        <button class="btn btn-secondary" onclick="showTooltip()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+          </svg>
+          Register with X
+        </button>
+        <div class="tooltip hidden" id="tooltip">Coming Soon</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <p>By continuing, you agree to our Terms of Service</p>
+    </div>
+  </div>
+
+  <script>
+    function showTooltip() {
+      var el = document.getElementById('tooltip');
+      el.classList.remove('hidden');
+      setTimeout(function() { el.classList.add('hidden'); }, 2000);
+    }
+
+    var pollTimer = null;
+    function handleTelegramLogin() {
+      var btn = document.getElementById('tg-login-btn');
+      var btnText = document.getElementById('tg-btn-text');
+      var hint = document.getElementById('tg-hint');
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+      btnText.textContent = 'Waiting for Telegram...';
+
+      fetch('/api/webapp/auth/telegram/token', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.success || !data.token || !data.deepLink) {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+          btnText.textContent = 'Login with Telegram';
+          return;
+        }
+        window.open(data.deepLink, '_blank');
+        hint.style.display = 'block';
+        var attempts = 0;
+        pollTimer = setInterval(function() {
+          attempts++;
+          if (attempts > 60) {
+            clearInterval(pollTimer);
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btnText.textContent = 'Login with Telegram';
+            hint.style.display = 'none';
+            return;
+          }
+          fetch('/api/webapp/auth/telegram/check?token=' + data.token, { credentials: 'include' })
+          .then(function(r) { return r.json(); })
+          .then(function(result) {
+            if (result.authenticated) {
+              clearInterval(pollTimer);
+              window.location.href = 'https://app.pnptv.app';
+            }
+          })
+          .catch(function() {});
+        }, 5000);
+      })
+      .catch(function() {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btnText.textContent = 'Login with Telegram';
+      });
+    }
+  </script>
+</body>
+</html>

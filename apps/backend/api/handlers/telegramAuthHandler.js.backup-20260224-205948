@@ -1,0 +1,274 @@
+const { query } = require('../../config/postgres');
+const logger = require('../../utils/logger');
+const PDSProvisioningService = require('../../bot/services/PDSProvisioningService');
+const { isAdminUser } = require('../../bot/utils/helpers');
+const crypto = require('crypto');
+
+/**
+ * Validate Telegram WebApp initData HMAC signature
+ * @param {string} initData - The initData string from Telegram WebApp
+ * @param {string} botToken - The bot token
+ * @returns {{valid: boolean, data: object}} - Validation result and parsed data
+ */
+function validateTelegramWebAppData(initData, botToken) {
+  try {
+    const urlParams = new URLSearchParams(initData);
+    const hash = urlParams.get('hash');
+    urlParams.delete('hash');
+
+    // Create data-check-string
+    const dataCheckArr = [];
+    for (const [key, value] of urlParams.entries()) {
+      dataCheckArr.push(`${key}=${value}`);
+    }
+    dataCheckArr.sort();
+    const dataCheckString = dataCheckArr.join('\n');
+
+    // Calculate HMAC
+    const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+    const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+    if (calculatedHash !== hash) {
+      return { valid: false, data: null };
+    }
+
+    // Parse user data
+    const userJson = urlParams.get('user');
+    if (!userJson) {
+      return { valid: false, data: null };
+    }
+
+    const userData = JSON.parse(userJson);
+    const authDate = parseInt(urlParams.get('auth_date') || '0', 10);
+
+    // Check if data is not too old (24 hours)
+    const now = Math.floor(Date.now() / 1000);
+    if (now - authDate > 86400) {
+      return { valid: false, data: null };
+    }
+
+    return { valid: true, data: userData };
+  } catch (error) {
+    logger.error('Telegram WebApp validation error:', error);
+    return { valid: false, data: null };
+  }
+}
+
+/**
+ * Handle Telegram authentication callback
+ */
+const handleTelegramAuth = async (req, res) => {
+  try {
+    const { initData } = req.body;
+
+    if (!initData) {
+      logger.warn('Telegram auth: No initData received');
+      return res.status(400).json({
+        error: 'Invalid request',
+        redirect: '/auth/telegram-login'
+      });
+    }
+
+    // Validate Telegram WebApp data
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    if (!botToken) {
+      logger.error('Telegram auth: Bot token not configured');
+      return res.status(500).json({
+        error: 'Authentication service misconfigured'
+      });
+    }
+
+    const validation = validateTelegramWebAppData(initData, botToken);
+    if (!validation.valid) {
+      logger.warn('Telegram auth: Invalid initData signature');
+      return res.status(401).json({
+        error: 'Invalid authentication data',
+        redirect: '/auth/telegram-login'
+      });
+    }
+
+    const telegramUser = validation.data;
+    logger.info(`Telegram auth attempt for user: ${telegramUser.id} (${telegramUser.username || 'no username'})`);
+
+    // Check if user exists in our database
+    const userQuery = await query(
+      `SELECT id, telegram, username, email, subscription_status, accepted_terms,
+              first_name, language,
+              COALESCE(age_verified, false) as age_verified,
+              COALESCE(role, 'user') as role
+       FROM users
+       WHERE telegram = $1`,
+      [telegramUser.id]
+    );
+
+    if (userQuery.rows.length === 0) {
+      // User not in our database - store Telegram data in session and redirect to onboarding
+      req.session.telegramUser = {
+        id: telegramUser.id,
+        username: telegramUser.username,
+        first_name: telegramUser.first_name,
+        last_name: telegramUser.last_name,
+        photo_url: telegramUser.photo_url,
+        auth_date: telegramUser.auth_date
+      };
+
+      logger.info(`User ${telegramUser.id} not in database, redirecting to onboarding`);
+      return res.json({
+        redirect: '/auth/not-registered',
+        telegramUser: {
+          id: telegramUser.id,
+          username: telegramUser.username,
+          first_name: telegramUser.first_name
+        }
+      });
+    }
+
+    const user = userQuery.rows[0];
+
+    // Determine role: DB role or env-based admin override
+    let role = user.role;
+    if (role === 'user' && isAdminUser(user.telegram)) {
+      role = 'admin';
+    }
+
+    // Store user in session
+    req.session.user = {
+      id: user.id,
+      telegramId: user.telegram,
+      username: user.username,
+      firstName: user.first_name || telegramUser.first_name || '',
+      displayName: user.first_name || telegramUser.first_name || user.username || '',
+      language: user.language || 'en',
+      email: user.email,
+      subscriptionStatus: user.subscription_status,
+      acceptedTerms: user.accepted_terms,
+      ageVerified: user.age_verified,
+      role
+    };
+
+    logger.info(`User ${user.id} authenticated successfully, terms accepted: ${user.accepted_terms}`);
+
+    // ASYNC: Provision PDS in background (don't block login)
+    // This runs independently without awaiting
+    setImmediate(async () => {
+      try {
+        const pdsResult = await PDSProvisioningService.createOrLinkPDS(user);
+        logger.info(`[Auth] PDS provisioning completed for user ${user.id}:`, {
+          success: pdsResult.success,
+          status: pdsResult.status
+        });
+
+        // Optionally store PDS info in session for frontend
+        if (pdsResult.success) {
+          req.session.user.pds = {
+            pnptv_uuid: pdsResult.pnptv_uuid,
+            pds_handle: pdsResult.pds_handle,
+            pds_did: pdsResult.pds_did,
+            status: pdsResult.status
+          };
+          req.session.save();
+        }
+      } catch (pdsError) {
+        logger.warn(`[Auth] PDS provisioning failed (non-blocking):`, pdsError.message);
+        // Continue - login succeeds even if PDS provisioning fails
+      }
+    });
+
+    // Return success with terms status and role
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        subscriptionStatus: user.subscription_status,
+        role
+      },
+      termsAccepted: user.accepted_terms
+    });
+
+  } catch (error) {
+    logger.error('Telegram auth error:', error);
+    res.status(500).json({
+      error: 'Authentication failed',
+      redirect: '/auth/telegram-login'
+    });
+  }
+};
+
+/**
+ * Handle terms acceptance
+ */
+const handleAcceptTerms = async (req, res) => {
+  try {
+    const user = req.session?.user;
+    
+    if (!user) {
+      logger.warn('Terms acceptance: No user in session');
+      return res.status(401).json({ 
+        error: 'Unauthorized', 
+        redirect: '/auth/telegram-login'
+      });
+    }
+    
+    // Update user's terms acceptance in database
+    await query(
+      'UPDATE users SET accepted_terms = TRUE WHERE id = $1',
+      [user.id]
+    );
+    
+    // Update session
+    req.session.user.acceptedTerms = true;
+    
+    logger.info(`User ${user.id} accepted terms and conditions`);
+    
+    // Get the original URL from localStorage (will be handled by frontend)
+    res.json({ success: true });
+    
+  } catch (error) {
+    logger.error('Error accepting terms:', error);
+    res.status(500).json({ error: 'Failed to accept terms' });
+  }
+};
+
+/**
+ * Check authentication status
+ */
+const checkAuthStatus = (req, res) => {
+  try {
+    const user = req.session?.user;
+    
+    if (!user) {
+      return res.json({
+        authenticated: false,
+        redirect: '/auth/telegram-login'
+      });
+    }
+    
+    res.json({
+      authenticated: true,
+      user: {
+        id: user.id,
+        telegram_id: user.telegramId || user.id,
+        username: user.username || '',
+        first_name: user.firstName || user.username || '',
+        display_name: user.displayName || user.username || '',
+        language: user.language || 'en',
+        terms_accepted: Boolean(user.acceptedTerms),
+        age_verified: Boolean(user.ageVerified),
+        subscription_type: user.subscriptionStatus || 'free',
+        role: user.role || 'user',
+        photo_url: user.photoUrl || null,
+      }
+    });
+    
+  } catch (error) {
+    logger.error('Auth status check error:', error);
+    res.status(500).json({ error: 'Failed to check auth status' });
+  }
+};
+
+module.exports = {
+  handleTelegramAuth,
+  handleAcceptTerms,
+  checkAuthStatus
+};

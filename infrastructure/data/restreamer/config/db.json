@@ -1,0 +1,73 @@
+{
+    "version": 4,
+    "process": {
+        "restreamer-ui:ingest:pnptv-main": {
+            "id": "restreamer-ui:ingest:pnptv-main",
+            "reference": "pnptv-main",
+            "config": {
+                "id": "restreamer-ui:ingest:pnptv-main",
+                "reference": "pnptv-main",
+                "ffversion": "^6.1.1",
+                "input": [
+                    {
+                        "id": "input_0",
+                        "address": "rtmp://localhost:1935/live/pnptv",
+                        "options": [
+                            "-fflags",
+                            "+genpts",
+                            "-thread_queue_size",
+                            "512"
+                        ],
+                        "cleanup": []
+                    }
+                ],
+                "output": [
+                    {
+                        "id": "output_0",
+                        "address": "{memfs}/pnptv-main.m3u8",
+                        "options": [
+                            "-codec",
+                            "copy",
+                            "-f",
+                            "hls",
+                            "-hls_time",
+                            "2",
+                            "-hls_list_size",
+                            "6",
+                            "-hls_flags",
+                            "delete_segments+append_list",
+                            "-hls_segment_filename",
+                            "{memfs}/pnptv-main_%04d.ts",
+                            "-master_pl_name",
+                            "pnptv-main.m3u8",
+                            "-method",
+                            "PUT"
+                        ],
+                        "cleanup": []
+                    }
+                ],
+                "options": [
+                    "-err_detect",
+                    "ignore_err",
+                    "-y"
+                ],
+                "reconnect": true,
+                "reconnect_delay_seconds": 15,
+                "autostart": true,
+                "stale_timeout_seconds": 30,
+                "limit_cpu_usage": 0,
+                "limit_memory_bytes": 0,
+                "limit_waitfor_seconds": 5
+            },
+            "created_at": 1771826559,
+            "updated_at": 1771826559,
+            "order": "start"
+        }
+    },
+    "metadata": {
+        "system": {},
+        "process": {
+            "restreamer-ui:ingest:pnptv-main": null
+        }
+    }
+}

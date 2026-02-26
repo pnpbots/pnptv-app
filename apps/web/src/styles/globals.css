@@ -1,0 +1,160 @@
+@import url('https://fonts.cdnfonts.com/css/ethnocentric');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-pnp-background text-pnp-textPrimary;
+    font-family: "Roboto Mono", monospace;
+  }
+
+  h1, h2, h3 {
+    font-family: "Ethnocentric Rg", "Roboto Mono", monospace;
+    letter-spacing: 0.05em;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-pnp-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-pnp-textSecondary;
+  }
+}
+
+@layer components {
+  .page-container {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 py-6;
+  }
+
+  .embed-frame {
+    @apply w-full rounded-xl border border-pnp-border overflow-hidden bg-pnp-surface;
+  }
+
+  /* Glassmorphism utilities */
+  .glass-card {
+    background: rgba(30, 30, 30, 0.7);
+    border: 1px solid rgba(212, 0, 122, 0.3);
+    border-radius: 24px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  .neon-glow {
+    box-shadow: 0 0 30px rgba(212, 0, 122, 0.15), 0 0 60px rgba(230, 145, 56, 0.1);
+  }
+
+  .btn-gradient {
+    background: linear-gradient(135deg, #D4007A, #E69138);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .btn-gradient:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(212, 0, 122, 0.3), 0 4px 15px rgba(230, 145, 56, 0.2);
+  }
+
+  .btn-gradient:active {
+    transform: translateY(0);
+  }
+
+  .glass-card-sm {
+    background: rgba(30, 30, 30, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .nav-active {
+    background: linear-gradient(135deg, #D4007A, #E69138);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .nav-active svg {
+    color: #D4007A;
+  }
+
+  .glass-nav {
+    background: rgba(18, 18, 18, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  /* Gradient text utility */
+  .text-gradient {
+    background: linear-gradient(135deg, #D4007A, #E69138);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Gradient badge */
+  .badge-gradient {
+    background: linear-gradient(135deg, rgba(212, 0, 122, 0.2), rgba(230, 145, 56, 0.2));
+    border: 1px solid rgba(212, 0, 122, 0.3);
+  }
+
+  .badge-gradient-text {
+    background: linear-gradient(135deg, #D4007A, #E69138);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Gradient border-left for cards */
+  .border-l-gradient {
+    border-image: linear-gradient(to bottom, #D4007A, #E69138) 1;
+    border-left-width: 4px;
+    border-left-style: solid;
+  }
+
+  /* Gradient dot (for LIVE indicators etc) */
+  .dot-gradient {
+    background: linear-gradient(135deg, #D4007A, #E69138);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes subtleGlow {
+  0%, 100% {
+    box-shadow: 0 0 30px rgba(212, 0, 122, 0.15), 0 0 60px rgba(230, 145, 56, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(212, 0, 122, 0.25), 0 0 80px rgba(230, 145, 56, 0.15);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.6s ease-out forwards;
+}
+
+.animate-subtle-glow {
+  animation: subtleGlow 3s ease-in-out infinite;
+}

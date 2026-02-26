@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PNPtv! - Checkout</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: #121212;
+            color: #FFFFFF;
+            font-family: 'Roboto Mono', monospace;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+
+        .bg-orb {
+            position: fixed;
+            width: 500px;
+            height: 500px;
+            border-radius: 50%;
+            opacity: 0.2;
+            filter: blur(80px);
+            pointer-events: none;
+        }
+
+        .bg-orb-pink {
+            top: -20%;
+            left: -10%;
+            background: radial-gradient(circle, #D4007A, transparent 70%);
+        }
+
+        .bg-orb-amber {
+            bottom: -20%;
+            right: -10%;
+            background: radial-gradient(circle, #E69138, transparent 70%);
+        }
+
+        .glass-card {
+            background: rgba(30, 30, 30, 0.7);
+            border: 1px solid rgba(212, 0, 122, 0.3);
+            border-radius: 24px;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            width: 100%;
+            max-width: 480px;
+            padding: 32px;
+            position: relative;
+            z-index: 10;
+            animation: fadeInUp 0.6s ease-out forwards, subtleGlow 3s ease-in-out infinite;
+        }
+
+        @media (min-width: 640px) {
+            .glass-card { padding: 40px; }
+        }
+
+        .logo-container {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .logo-container img {
+            height: 48px;
+            width: auto;
+        }
+
+        /* Plan summary */
+        .plan-summary {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 24px;
+            text-align: center;
+        }
+
+        .plan-icon { font-size: 32px; margin-bottom: 8px; }
+        .plan-name { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+        .plan-price { font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #D4007A, #E69138); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .plan-ref { font-size: 11px; color: #8E8E93; margin-top: 6px; }
+
+        /* Form */
+        .form-section { margin-bottom: 20px; }
+        .section-title { font-size: 13px; font-weight: 600; color: #8E8E93; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+
+        .field-row { display: flex; gap: 10px; margin-bottom: 10px; }
+        .field-row > * { flex: 1; }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 10px;
+        }
+
+        .field label {
+            font-size: 11px;
+            color: #8E8E93;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .field input, .field select {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 10px;
+            padding: 12px 14px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 14px;
+            color: #FFFFFF;
+            outline: none;
+            transition: border-color 0.2s;
+            width: 100%;
+        }
+
+        .field input:focus, .field select:focus {
+            border-color: #D4007A;
+        }
+
+        .field input::placeholder {
+            color: rgba(255, 255, 255, 0.25);
+        }
+
+        .field select option {
+            background: #1C1C1E;
+            color: #FFFFFF;
+        }
+
+        .field-error input, .field-error select {
+            border-color: #FF453A;
+        }
+
+        /* Button */
+        .btn-pay {
+            background: linear-gradient(135deg, #D4007A, #E69138);
+            color: #FFFFFF;
+            border: none;
+            border-radius: 12px;
+            padding: 16px 24px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .btn-pay:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(212, 0, 122, 0.3); }
+        .btn-pay:active { transform: translateY(0); }
+        .btn-pay:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 14px 24px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 14px;
+            font-weight: 500;
+            color: #FFFFFF;
+            cursor: pointer;
+            width: 100%;
+            transition: background 0.2s;
+            margin-top: 12px;
+        }
+
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.1); }
+
+        /* Status messages */
+        .msg { text-align: center; font-size: 13px; margin-top: 12px; }
+        .msg-error { color: #FF453A; }
+        .msg-info { color: #8E8E93; }
+
+        /* States */
+        .state { display: none; }
+        .state.active { display: block; }
+
+        /* Loading spinner */
+        .spinner-container { text-align: center; padding: 48px 0; }
+        .spinner {
+            width: 48px; height: 48px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #D4007A;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        /* Success checkmark */
+        .success-icon {
+            width: 72px; height: 72px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #30D158, #34C759);
+            display: flex; align-items: center; justify-content: center;
+            margin: 0 auto 20px;
+            animation: scaleIn 0.4s ease-out;
+        }
+
+        .success-icon svg { width: 36px; height: 36px; }
+
+        /* Error icon */
+        .error-icon {
+            width: 72px; height: 72px;
+            border-radius: 50%;
+            background: rgba(255, 69, 58, 0.15);
+            display: flex; align-items: center; justify-content: center;
+            margin: 0 auto 20px;
+        }
+
+        .error-icon svg { width: 36px; height: 36px; color: #FF453A; }
+
+        /* Polling dots */
+        .polling-dots span {
+            animation: blink 1.4s infinite both;
+        }
+        .polling-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .polling-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        /* 3DS iframe */
+        .threeds-frame {
+            width: 100%;
+            min-height: 400px;
+            border: none;
+            border-radius: 12px;
+            background: #FFFFFF;
+        }
+
+        /* OTP input */
+        .otp-input {
+            text-align: center;
+            font-size: 24px;
+            letter-spacing: 0.3em;
+            font-weight: 700;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            text-align: center;
+        }
+
+        .footer p { font-size: 11px; color: #8E8E93; }
+        .footer a { color: #D4007A; text-decoration: none; }
+        .footer .secure-badge { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 8px; }
+        .footer .secure-badge svg { width: 14px; height: 14px; color: #30D158; }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes subtleGlow {
+            0%, 100% { box-shadow: 0 0 30px rgba(212, 0, 122, 0.15), 0 0 60px rgba(230, 145, 56, 0.1); }
+            50% { box-shadow: 0 0 40px rgba(212, 0, 122, 0.25), 0 0 80px rgba(230, 145, 56, 0.15); }
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes scaleIn {
+            from { transform: scale(0); }
+            to { transform: scale(1); }
+        }
+
+        @keyframes blink {
+            0%, 80%, 100% { opacity: 0; }
+            40% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-orb bg-orb-pink"></div>
+    <div class="bg-orb bg-orb-amber"></div>
+
+    <div class="glass-card">
+        <div class="logo-container">
+            <img src="/Logo2-50.png" alt="PNPtv!" onerror="this.style.display='none'">
+        </div>
+
+        <!-- STATE: Loading -->
+        <div id="state-loading" class="state active">
+            <div class="spinner-container">
+                <div class="spinner"></div>
+                <p style="color:#8E8E93; font-size:14px;">Loading payment details...</p>
+            </div>
+        </div>
+
+        <!-- STATE: Form -->
+        <div id="state-form" class="state">
+            <div id="plan-summary" class="plan-summary"></div>
+
+            <form id="payment-form" autocomplete="on">
+                <!-- Cardholder info -->
+                <div class="form-section">
+                    <div class="section-title">Cardholder Information</div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="name">First Name</label>
+                            <input type="text" id="name" name="given-name" autocomplete="given-name" required placeholder="John">
+                        </div>
+                        <div class="field">
+                            <label for="lastName">Last Name</label>
+                            <input type="text" id="lastName" name="family-name" autocomplete="family-name" required placeholder="Doe">
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="email">Email</label>
+                        <input type="email" id="email" name="email" autocomplete="email" required placeholder="john@example.com">
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="docType">Doc Type</label>
+                            <select id="docType" name="docType">
+                                <option value="CC">CC (Citizenship)</option>
+                                <option value="CE">CE (Foreign ID)</option>
+                                <option value="NIT">NIT (Tax ID)</option>
+                                <option value="PP">PP (Passport)</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="docNumber">Doc Number</label>
+                            <input type="text" id="docNumber" name="docNumber" required placeholder="1234567890" inputmode="numeric">
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="phone">Phone</label>
+                        <input type="tel" id="phone" name="tel" autocomplete="tel" placeholder="3101234567" inputmode="tel">
+                    </div>
+                </div>
+
+                <!-- Card info -->
+                <div class="form-section">
+                    <div class="section-title">Card Details</div>
+                    <div class="field">
+                        <label for="cardNumber">Card Number</label>
+                        <input type="text" id="cardNumber" autocomplete="cc-number" required placeholder="4111 1111 1111 1111" inputmode="numeric" maxlength="19">
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="expMonth">Month</label>
+                            <select id="expMonth" autocomplete="cc-exp-month" required>
+                                <option value="">MM</option>
+                                <option value="01">01</option><option value="02">02</option>
+                                <option value="03">03</option><option value="04">04</option>
+                                <option value="05">05</option><option value="06">06</option>
+                                <option value="07">07</option><option value="08">08</option>
+                                <option value="09">09</option><option value="10">10</option>
+                                <option value="11">11</option><option value="12">12</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="expYear">Year</label>
+                            <select id="expYear" autocomplete="cc-exp-year" required>
+                                <option value="">YY</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="cvc">CVC</label>
+                            <input type="text" id="cvc" autocomplete="cc-csc" required placeholder="123" inputmode="numeric" maxlength="4">
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="dues">Installments</label>
+                        <select id="dues">
+                            <option value="1">1 (Full payment)</option>
+                            <option value="2">2</option><option value="3">3</option>
+                            <option value="6">6</option><option value="12">12</option>
+                            <option value="24">24</option><option value="36">36</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="form-error" class="msg msg-error" style="display:none;"></div>
+                <button type="submit" class="btn-pay" id="btn-pay">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                    <span id="btn-pay-text">Pay Now</span>
+                </button>
+            </form>
+        </div>
+
+        <!-- STATE: Processing (tokenizing + charging) -->
+        <div id="state-processing" class="state">
+            <div class="spinner-container">
+                <div class="spinner"></div>
+                <p id="processing-msg" style="color:#8E8E93; font-size:14px;">Processing your payment...</p>
+            </div>
+        </div>
+
+        <!-- STATE: 3DS Redirect (iframe for bank auth) -->
+        <div id="state-3ds" class="state">
+            <p style="font-size:13px; color:#8E8E93; text-align:center; margin-bottom:12px;">Complete authentication with your bank</p>
+            <iframe id="threeds-iframe" class="threeds-frame" sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation allow-popups"></iframe>
+            <p class="msg msg-info" style="margin-top:12px;">After completing bank verification, your payment will be confirmed automatically.</p>
+        </div>
+
+        <!-- STATE: Polling -->
+        <div id="state-polling" class="state">
+            <div class="spinner-container">
+                <div class="spinner"></div>
+                <p style="color:#8E8E93; font-size:14px;">Confirming your payment<span class="polling-dots"><span>.</span><span>.</span><span>.</span></span></p>
+                <p id="polling-detail" style="color:#555; font-size:12px; margin-top:8px;"></p>
+            </div>
+        </div>
+
+        <!-- STATE: 2FA / OTP -->
+        <div id="state-2fa" class="state">
+            <div style="text-align:center; margin-bottom:20px;">
+                <div style="font-size:40px; margin-bottom:12px;">🔐</div>
+                <p style="font-size:16px; font-weight:600; margin-bottom:4px;">Verification Required</p>
+                <p style="font-size:13px; color:#8E8E93;">Enter the code sent to your registered contact</p>
+            </div>
+            <div class="field">
+                <input type="text" id="otp-input" class="otp-input" maxlength="6" placeholder="000000" inputmode="numeric" autocomplete="one-time-code">
+            </div>
+            <div id="otp-error" class="msg msg-error" style="display:none;"></div>
+            <button class="btn-pay" id="btn-verify-otp" onclick="handleVerifyOTP()" style="margin-top:12px;">Verify Code</button>
+        </div>
+
+        <!-- STATE: Success -->
+        <div id="state-success" class="state">
+            <div style="text-align:center;">
+                <div class="success-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <p style="font-size:20px; font-weight:700; margin-bottom:8px;">Payment Confirmed!</p>
+                <p id="success-detail" style="font-size:13px; color:#8E8E93; margin-bottom:24px;">Your subscription has been activated.</p>
+                <button class="btn-pay" onclick="window.close() || (window.location.href='/app')">Return to App</button>
+            </div>
+        </div>
+
+        <!-- STATE: Error -->
+        <div id="state-error" class="state">
+            <div style="text-align:center;">
+                <div class="error-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                </div>
+                <p style="font-size:18px; font-weight:700; margin-bottom:8px;">Payment Failed</p>
+                <p id="error-detail" style="font-size:13px; color:#8E8E93; margin-bottom:24px;"></p>
+                <button class="btn-pay" id="btn-retry" onclick="handleRetry()">Try Again</button>
+                <button class="btn-secondary" onclick="window.close() || (window.location.href='/app')">Return to App</button>
+            </div>
+        </div>
+
+        <!-- STATE: Fatal (payment not found / expired) -->
+        <div id="state-fatal" class="state">
+            <div style="text-align:center;">
+                <div class="error-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                </div>
+                <p style="font-size:18px; font-weight:700; margin-bottom:8px;">Unable to Process</p>
+                <p id="fatal-detail" style="font-size:13px; color:#8E8E93; margin-bottom:24px;"></p>
+                <button class="btn-secondary" onclick="window.close() || (window.location.href='/subscribe')">Back to Plans</button>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <div class="secure-badge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                <span style="font-size:11px; color:#30D158;">Secure checkout powered by ePayco</span>
+            </div>
+            <p>PNPtv! &copy; 2026</p>
+        </div>
+    </div>
+
+    <!-- ePayco SDK for frontend card tokenization -->
+    <script src="https://cdn.epayco.co/sdk/epayco-2.0.0.min.js"></script>
+
+    <script>
+        // ── State machine ──────────────────────────────────────────
+        let currentState = 'loading';
+        let paymentId = null;
+        let paymentData = null;
+        let pollTimer = null;
+        let pollCount = 0;
+        const MAX_POLLS = 60;
+        const POLL_INTERVAL_MS = 3000;
+
+        function showState(state) {
+            currentState = state;
+            document.querySelectorAll('.state').forEach(el => el.classList.remove('active'));
+            const el = document.getElementById('state-' + state);
+            if (el) el.classList.add('active');
+        }
+
+        // ── Extract paymentId from URL ─────────────────────────────
+        function extractPaymentId() {
+            const path = window.location.pathname;
+            const parts = path.split('/').filter(Boolean);
+            // Handles /payment/:id, /checkout/:id
+            if (parts.length >= 2) {
+                const id = parts[parts.length - 1];
+                // Validate UUID format
+                if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+                    return id;
+                }
+                // Also accept non-UUID for checkout/pnp or smart checkout
+                if (id !== 'pnp' && id !== 'checkout' && id !== 'payment') {
+                    return id;
+                }
+            }
+            // Check query params for smart checkout
+            const params = new URLSearchParams(window.location.search);
+            return params.get('paymentId') || params.get('id') || null;
+        }
+
+        // ── Format currency ────────────────────────────────────────
+        function formatCOP(amount) {
+            return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(amount);
+        }
+
+        function formatUSD(amount) {
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+        }
+
+        // ── Populate year dropdown ─────────────────────────────────
+        function populateYears() {
+            const select = document.getElementById('expYear');
+            const currentYear = new Date().getFullYear();
+            for (let y = currentYear; y <= currentYear + 15; y++) {
+                const opt = document.createElement('option');
+                opt.value = String(y).slice(-2);
+                opt.textContent = String(y);
+                select.appendChild(opt);
+            }
+        }
+
+        // ── Card number formatting ─────────────────────────────────
+        function formatCardNumber(input) {
+            let value = input.value.replace(/\D/g, '');
+            if (value.length > 16) value = value.slice(0, 16);
+            input.value = value.replace(/(\d{4})(?=\d)/g, '$1 ');
+        }
+
+        // ── Collect browser info for 3DS ───────────────────────────
+        function getBrowserInfo() {
+            return {
+                language: navigator.language || 'es-CO',
+                colorDepth: screen.colorDepth || 24,
+                screenWidth: screen.width || 1920,
+                screenHeight: screen.height || 1080,
+                timezoneOffset: new Date().getTimezoneOffset(),
+                javaEnabled: false,
+                userAgent: navigator.userAgent,
+            };
+        }
+
+        // ── Initialize ────────────────────────────────────────────
+        async function init() {
+            populateYears();
+
+            document.getElementById('cardNumber').addEventListener('input', function() {
+                formatCardNumber(this);
+            });
+
+            paymentId = extractPaymentId();
+
+            if (!paymentId) {
+                showState('fatal');
+                document.getElementById('fatal-detail').textContent =
+                    'No payment ID found. Please generate a new payment link from the app.';
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/payment/' + encodeURIComponent(paymentId));
+                const data = await res.json();
+
+                if (!res.ok || !data.success) {
+                    showState('fatal');
+                    document.getElementById('fatal-detail').textContent =
+                        data.error || 'Payment not found or already processed.';
+                    return;
+                }
+
+                paymentData = data.payment;
+                renderPlanSummary();
+                showState('form');
+            } catch (err) {
+                showState('fatal');
+                document.getElementById('fatal-detail').textContent =
+                    'Could not load payment details. Please check your connection and try again.';
+            }
+        }
+
+        // ── Render plan summary ────────────────────────────────────
+        function renderPlanSummary() {
+            const p = paymentData;
+            const plan = p.plan;
+            const priceDisplay = formatCOP(p.amountCOP);
+            const usdDisplay = formatUSD(p.amountUSD);
+
+            let promoHtml = '';
+            if (p.isPromo && p.promoCode) {
+                promoHtml = '<div style="margin-top:6px;"><span style="background:rgba(48,209,88,0.15);color:#30D158;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;">PROMO: ' +
+                    escapeHtml(p.promoCode) + ' (-' + formatUSD(p.discountAmount) + ')</span></div>';
+            }
+
+            document.getElementById('plan-summary').innerHTML =
+                '<div class="plan-icon">' + escapeHtml(plan.icon) + '</div>' +
+                '<div class="plan-name">' + escapeHtml(plan.name) + '</div>' +
+                '<div class="plan-price">' + priceDisplay + '</div>' +
+                '<div style="font-size:12px;color:#8E8E93;">' + usdDisplay + ' USD</div>' +
+                promoHtml +
+                '<div class="plan-ref">Ref: ' + escapeHtml(p.paymentRef) + '</div>';
+
+            // Update pay button with amount
+            document.getElementById('btn-pay-text').textContent = 'Pay ' + priceDisplay;
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = String(str);
+            return div.innerHTML;
+        }
+
+        // ── Form submission ────────────────────────────────────────
+        document.addEventListener('DOMContentLoaded', function() {
+            init();
+
+            document.getElementById('payment-form').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                await handlePayment();
+            });
+        });
+
+        async function handlePayment() {
+            const formError = document.getElementById('form-error');
+            formError.style.display = 'none';
+
+            // Collect form values
+            const name = document.getElementById('name').value.trim();
+            const lastName = document.getElementById('lastName').value.trim();
+            const email = document.getElementById('email').value.trim();
+            const docType = document.getElementById('docType').value;
+            const docNumber = document.getElementById('docNumber').value.trim();
+            const phone = document.getElementById('phone').value.trim();
+            const cardNumber = document.getElementById('cardNumber').value.replace(/\s/g, '');
+            const expMonth = document.getElementById('expMonth').value;
+            const expYear = document.getElementById('expYear').value;
+            const cvc = document.getElementById('cvc').value.trim();
+            const dues = document.getElementById('dues').value;
+
+            // Validate
+            if (!name || !email || !docNumber || !cardNumber || !expMonth || !expYear || !cvc) {
+                formError.textContent = 'Please fill in all required fields.';
+                formError.style.display = 'block';
+                return;
+            }
+
+            if (cardNumber.length < 13 || cardNumber.length > 16) {
+                formError.textContent = 'Invalid card number.';
+                formError.style.display = 'block';
+                return;
+            }
+
+            if (cvc.length < 3) {
+                formError.textContent = 'Invalid CVC.';
+                formError.style.display = 'block';
+                return;
+            }
+
+            // Disable form
+            document.getElementById('btn-pay').disabled = true;
+            showState('processing');
+            document.getElementById('processing-msg').textContent = 'Tokenizing your card securely...';
+
+            try {
+                // Step 1: Tokenize card with ePayco.js SDK
+                const tokenCard = await tokenizeCard(cardNumber, expYear, expMonth, cvc);
+                if (!tokenCard) {
+                    throw new Error('Card tokenization failed. Please check your card details.');
+                }
+
+                document.getElementById('processing-msg').textContent = 'Processing payment...';
+
+                // Step 2: Send tokenized charge to backend
+                const chargeRes = await fetch('/api/payment/tokenized-charge', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        paymentId: paymentId,
+                        tokenCard: tokenCard,
+                        name: name,
+                        lastName: lastName,
+                        email: email,
+                        docType: docType,
+                        docNumber: docNumber,
+                        phone: phone || '0000000000',
+                        city: 'Bogota',
+                        address: 'N/A',
+                        dues: dues,
+                        browserInfo: getBrowserInfo(),
+                    }),
+                });
+
+                const result = await chargeRes.json();
+                handleChargeResult(result);
+            } catch (err) {
+                showState('error');
+                document.getElementById('error-detail').textContent =
+                    err.message || 'An unexpected error occurred.';
+                document.getElementById('btn-pay').disabled = false;
+            }
+        }
+
+        // ── ePayco card tokenization ──────────────────────────────
+        async function tokenizeCard(number, year, month, cvc) {
+            return new Promise(function(resolve, reject) {
+                // Check if ePayco SDK is loaded
+                if (typeof ePayco === 'undefined') {
+                    reject(new Error('Payment SDK failed to load. Please refresh and try again.'));
+                    return;
+                }
+
+                try {
+                    var handler = ePayco.checkout.configure({
+                        key: paymentData.epaycoPublicKey,
+                        test: paymentData.testMode || false,
+                    });
+
+                    handler.token.create({
+                        'card[number]': number,
+                        'card[exp_year]': '20' + year,
+                        'card[exp_month]': month,
+                        'card[cvc]': cvc,
+                    }, function(tokenData) {
+                        if (tokenData && tokenData.status && tokenData.id) {
+                            resolve(tokenData.id);
+                        } else if (tokenData && tokenData.token) {
+                            resolve(tokenData.token);
+                        } else {
+                            var errorMsg = 'Card tokenization failed';
+                            if (tokenData && tokenData.data && tokenData.data.errors) {
+                                var errors = tokenData.data.errors;
+                                if (typeof errors === 'object') {
+                                    errorMsg = Object.values(errors).flat().join('. ');
+                                }
+                            } else if (tokenData && tokenData.message) {
+                                errorMsg = tokenData.message;
+                            }
+                            reject(new Error(errorMsg));
+                        }
+                    });
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        }
+
+        // ── Handle charge result ──────────────────────────────────
+        function handleChargeResult(result) {
+            if (result.status === 'processing' || (result.success && result.status === 'processing')) {
+                // Approved via API, waiting for webhook — start polling
+                startPolling();
+                return;
+            }
+
+            if (result.status === 'pending' && result.redirectUrl) {
+                // 3DS 1.0 — bank redirect
+                handle3DSRedirect(result.redirectUrl);
+                return;
+            }
+
+            if (result.status === 'pending' && result.threeDSecure) {
+                // 3DS 2.0 — Cardinal Commerce
+                handle3DS2(result.threeDSecure);
+                return;
+            }
+
+            if (result.status === 'pending') {
+                // Generic pending — start polling
+                startPolling();
+                return;
+            }
+
+            if (result.status === 'requires_2fa') {
+                showState('2fa');
+                return;
+            }
+
+            if (result.status === 'approved' && result.success) {
+                showState('success');
+                document.getElementById('success-detail').textContent =
+                    result.message || 'Your subscription has been activated.';
+                return;
+            }
+
+            // Rejected or failed
+            showState('error');
+            document.getElementById('error-detail').textContent =
+                result.error || 'Your payment was declined. Please try a different card or payment method.';
+            document.getElementById('btn-pay').disabled = false;
+        }
+
+        // ── 3DS 1.0: Bank redirect in iframe ──────────────────────
+        function handle3DSRedirect(url) {
+            showState('3ds');
+            var iframe = document.getElementById('threeds-iframe');
+            iframe.src = url;
+
+            // Start polling alongside — the bank may redirect back, or webhook may fire
+            setTimeout(function() { startPolling(); }, 5000);
+        }
+
+        // ── 3DS 2.0: Cardinal Commerce device data collection ─────
+        function handle3DS2(threeDSecure) {
+            showState('processing');
+            document.getElementById('processing-msg').textContent = 'Completing 3D Secure verification...';
+
+            var data = threeDSecure.data || {};
+
+            if (data.deviceDataCollectionUrl && data.accessToken) {
+                // Create hidden iframe for device data collection
+                var iframe = document.createElement('iframe');
+                iframe.style.display = 'none';
+                iframe.id = 'cardinal-ddc-iframe';
+                document.body.appendChild(iframe);
+
+                // Post access token to Cardinal Commerce
+                iframe.onload = function() {
+                    // After DDC completes, notify backend
+                    setTimeout(function() {
+                        complete3DS2({
+                            version: threeDSecure.version || '2.0',
+                            provider: threeDSecure.provider || 'CardinalCommerce',
+                            referenceId: data.referenceId,
+                            authenticated: true,
+                            challengeCompleted: true,
+                            validationData: {
+                                accessToken: data.accessToken,
+                                referenceId: data.referenceId,
+                                token: data.token,
+                            },
+                        });
+                    }, 3000);
+                };
+
+                // Build form to post to DDC URL
+                var form = document.createElement('form');
+                form.method = 'POST';
+                form.action = data.deviceDataCollectionUrl;
+                form.target = 'cardinal-ddc-iframe';
+
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'JWT';
+                input.value = data.accessToken;
+                form.appendChild(input);
+
+                document.body.appendChild(form);
+                iframe.name = 'cardinal-ddc-iframe';
+                form.submit();
+                form.remove();
+            } else {
+                // No DDC URL — just mark as authenticated and poll
+                complete3DS2({
+                    version: threeDSecure.version || '2.0',
+                    provider: threeDSecure.provider || 'CardinalCommerce',
+                    referenceId: data.referenceId,
+                    authenticated: true,
+                    challengeCompleted: true,
+                    validationData: data,
+                });
+            }
+        }
+
+        async function complete3DS2(threeDSecureData) {
+            try {
+                var res = await fetch('/api/payment/complete-3ds-2', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        paymentId: paymentId,
+                        threeDSecure: threeDSecureData,
+                    }),
+                });
+
+                var result = await res.json();
+
+                if (result.status === 'authenticated' || result.status === 'completed') {
+                    showState('success');
+                    document.getElementById('success-detail').textContent =
+                        result.message || 'Payment authenticated and approved.';
+                } else if (result.status === 'failed' || result.status === 'refunded') {
+                    showState('error');
+                    document.getElementById('error-detail').textContent =
+                        result.message || 'Payment was not approved after 3DS verification.';
+                } else {
+                    // Still pending — poll
+                    startPolling();
+                }
+            } catch (err) {
+                startPolling();
+            }
+        }
+
+        // ── Polling ────────────────────────────────────────────────
+        function startPolling() {
+            showState('polling');
+            pollCount = 0;
+
+            if (pollTimer) clearInterval(pollTimer);
+
+            pollTimer = setInterval(async function() {
+                pollCount++;
+
+                if (pollCount > MAX_POLLS) {
+                    clearInterval(pollTimer);
+                    showState('error');
+                    document.getElementById('error-detail').textContent =
+                        'Payment confirmation timed out. If you were charged, your subscription will be activated automatically. Please check back later.';
+                    document.getElementById('btn-pay').disabled = false;
+                    return;
+                }
+
+                try {
+                    var res = await fetch('/api/payment/' + encodeURIComponent(paymentId) + '/status');
+                    var data = await res.json();
+
+                    document.getElementById('polling-detail').textContent =
+                        'Attempt ' + pollCount + '/' + MAX_POLLS;
+
+                    if (data.status === 'completed') {
+                        clearInterval(pollTimer);
+                        showState('success');
+                        document.getElementById('success-detail').textContent =
+                            data.message || 'Your subscription has been activated!';
+                        return;
+                    }
+
+                    if (data.status === 'failed' || data.status === 'refunded') {
+                        clearInterval(pollTimer);
+                        showState('error');
+                        document.getElementById('error-detail').textContent =
+                            data.message || 'Payment was not approved.';
+                        document.getElementById('btn-pay').disabled = false;
+                        return;
+                    }
+
+                    if (data.status === 'processing_recovery') {
+                        document.getElementById('polling-detail').textContent =
+                            'Recovering payment status...';
+                    }
+                } catch (err) {
+                    // Network error — keep polling
+                }
+            }, POLL_INTERVAL_MS);
+        }
+
+        // ── 2FA / OTP verification ─────────────────────────────────
+        async function handleVerifyOTP() {
+            var otp = document.getElementById('otp-input').value.trim();
+            var otpError = document.getElementById('otp-error');
+            otpError.style.display = 'none';
+
+            if (!otp || otp.length < 4) {
+                otpError.textContent = 'Please enter a valid code.';
+                otpError.style.display = 'block';
+                return;
+            }
+
+            document.getElementById('btn-verify-otp').disabled = true;
+
+            try {
+                var res = await fetch('/api/payment/verify-2fa', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        paymentId: paymentId,
+                        otp: otp,
+                    }),
+                });
+
+                var result = await res.json();
+
+                if (result.success) {
+                    // Re-submit the payment
+                    showState('processing');
+                    document.getElementById('processing-msg').textContent = 'Retrying payment after verification...';
+                    // Re-trigger the form
+                    await handlePayment();
+                } else {
+                    otpError.textContent = result.error || 'Verification failed.';
+                    otpError.style.display = 'block';
+                    document.getElementById('btn-verify-otp').disabled = false;
+                }
+            } catch (err) {
+                otpError.textContent = 'Verification failed. Please try again.';
+                otpError.style.display = 'block';
+                document.getElementById('btn-verify-otp').disabled = false;
+            }
+        }
+
+        // ── Retry ──────────────────────────────────────────────────
+        function handleRetry() {
+            document.getElementById('btn-pay').disabled = false;
+            showState('form');
+        }
+    </script>
+</body>
+</html>
