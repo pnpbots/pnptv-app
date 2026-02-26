@@ -1,8 +1,9 @@
 # ============================================
-# PNPTVAPP - Docker Compose Stack v3
-# 17 containers | 9 blocks | 1 network
+# PNPTVAPP - Docker Compose Stack v4
+# 21 containers | 10 blocks | 1 network
 # Authentik + Redis | Cal.com + Redis
 # Frontend: pnptv-web (nginx SPA)
+# Backend: pnptv-bot + pg-pnptv + redis-pnptv
 # ============================================
 
 networks:
@@ -400,3 +401,76 @@ services:
       - ./infrastructure/configs/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - pnptvapp_net
+
+  # ===========================================
+  # BLOCK J - PNPtv Backend (Bot + API)
+  # PostgreSQL + Redis + Node.js application
+  # ===========================================
+
+  pg-pnptv:
+    image: postgres:16-alpine
+    container_name: pg-pnptv
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/pnptv/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${PG_PNPTV_DB}
+      POSTGRES_USER: ${PG_PNPTV_USER}
+      POSTGRES_PASSWORD: ${PG_PNPTV_PASSWORD}
+    networks:
+      - pnptvapp_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_PNPTV_USER} -d ${PG_PNPTV_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis-pnptv:
+    image: redis:7-alpine
+    container_name: redis-pnptv
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/pnptv/redis:/data
+    networks:
+      - pnptvapp_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  pnptv-bot:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    container_name: pnptv-bot
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
+      POSTGRES_HOST: pg-pnptv
+      POSTGRES_PORT: "5432"
+      REDIS_HOST: redis-pnptv
+      REDIS_PORT: "6379"
+      AMPACHE_URL: "http://ampache:80"
+      DIRECTUS_URL: "http://directus:8055"
+      BLUESKY_PDS_URL: "http://bluesky-pds:3000"
+      PUPPETEER_EXECUTABLE_PATH: "/usr/bin/chromium"
+      BOT_LOCK_ENABLED: "false"
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./public/uploads:/app/public/uploads
+      - ./logs:/app/logs
+    networks:
+      - pnptvapp_net
+    depends_on:
+      pg-pnptv:
+        condition: service_healthy
+      redis-pnptv:
+        condition: service_healthy

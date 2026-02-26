@@ -16,7 +16,7 @@ module.exports = {
       NODE_ENV: 'production',
       PORT: '3001',
       NODE_OPTIONS: "--dns-result-order=ipv4first",
-      AMPACHE_URL: "http://172.20.0.16:80",
+      AMPACHE_URL: "http://ampache:80",
       BOT_LOCK_ENABLED: 'false',
       AMPACHE_USER: 'admin',
       // All sensitive values must be in .env.production
@@ -26,7 +26,7 @@ module.exports = {
       NODE_ENV: 'production',
       PORT: '3001',
       NODE_OPTIONS: "--dns-result-order=ipv4first",
-      AMPACHE_URL: "http://172.20.0.16:80",
+      AMPACHE_URL: "http://ampache:80",
       BOT_LOCK_ENABLED: 'false',
       AMPACHE_USER: 'admin',
       // SECURITY: All secrets must be in .env.production
