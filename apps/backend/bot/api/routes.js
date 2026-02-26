@@ -49,6 +49,8 @@ const modelRoutes = require('./routes/modelRoutes');
 const pdsRoutes = require('./routes/pdsRoutes');
 const blueskyRoutes = require('./routes/blueskyRoutes');
 const elementRoutes = require('./routes/elementRoutes');
+const atprotoOAuthRoutes = require('./routes/atprotoOAuthRoutes');
+const webappXOAuthRoutes = require('./routes/xOAuthRoutes');
 
 /**
  * Page-level authentication middleware
@@ -188,6 +190,10 @@ if (!resolvedSessionSecret) {
   throw new Error('SESSION_SECRET must be configured (separate from JWT_SECRET)');
 }
 // Session middleware with explicit response hooks to ensure Set-Cookie header is set
+// sameSite: 'none' + secure: true is required for iOS Safari compatibility.
+// The Telegram deep link login flow sends users to t.me and back — iOS Safari
+// treats this as a cross-site navigation and drops 'lax' cookies entirely.
+// 'none' requires 'secure: true' (HTTPS only) per RFC 6265bis.
 const sessionMiddleware = session({
   store: new RedisStore({ client: redisClient, prefix: 'sess:' }),
   secret: resolvedSessionSecret,
@@ -196,9 +202,9 @@ const sessionMiddleware = session({
   rolling: true, // Refresh session TTL on each request
   name: '__pnptv_sid', // Obscure session cookie name (was: connect.sid)
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    secure: true, // Required for sameSite=none; always true in production (HTTPS)
     httpOnly: true,
-    sameSite: 'lax',
+    sameSite: 'none', // Required for iOS Safari cross-site cookie survival
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/',
     domain: process.env.NODE_ENV === 'production' ? '.pnptv.app' : undefined
@@ -318,6 +324,10 @@ function sendCheckoutHtml(res, file) {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.setHeader('Content-Security-Policy', CHECKOUT_CSP);
+  // Remove restrictive headers that break 3DS bank redirects and popups
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
+  res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
   res.sendFile(path.join(__dirname, '../../../public/' + file));
 }
 
@@ -836,6 +846,23 @@ app.get('/health', healthLimiter, async (req, res) => {
     });
   }
 });
+
+// ==========================================
+// ATProto OAuth Routes (PUBLIC — no auth guard)
+// These MUST be before any auth-protected routes.
+// /oauth/client-metadata.json and /.well-known/oauth-protected-resource
+// are fetched by authorization servers and must be publicly accessible.
+// ==========================================
+app.use(atprotoOAuthRoutes);
+
+// ==========================================
+// X (Twitter) OAuth 2.0 PKCE Webapp Routes (PUBLIC — no auth guard)
+// GET /api/webapp/auth/x/login    — initiate PKCE flow
+// GET /api/webapp/auth/x/callback — exchange code, create session
+// These are mounted BEFORE the per-method wiring below (lines 1711-1712) so
+// the dedicated route file with its own rate limiters takes precedence.
+// ==========================================
+app.use('/api/webapp/auth/x', webappXOAuthRoutes);
 
 // API routes
 // Authentication API endpoints
@@ -1691,12 +1718,67 @@ app.post('/api/webapp/auth/email/register', authLimiter, asyncHandler(webAppCont
 app.post('/api/webapp/auth/email/login', authLimiter, asyncHandler(webAppController.emailLogin));
 app.get('/api/webapp/auth/verify-email', asyncHandler(webAppController.verifyEmail));
 app.post('/api/webapp/auth/resend-verification', authLimiter, asyncHandler(webAppController.resendVerification));
-app.get('/api/webapp/auth/x/start', asyncHandler(webAppController.xLoginStart));
-app.get('/api/webapp/auth/x/callback', asyncHandler(webAppController.xLoginCallback));
+// X OAuth routes now handled by webappXOAuthRoutes (mounted earlier at /api/webapp/auth/x)
+// app.get('/api/webapp/auth/x/start', asyncHandler(webAppController.xLoginStart));
+// app.get('/api/webapp/auth/x/callback', asyncHandler(webAppController.xLoginCallback));
 app.get('/api/me', asyncHandler(webAppController.authStatus));
 app.post('/api/webapp/auth/logout', asyncHandler(webAppController.logout));
 app.post('/api/webapp/auth/forgot-password', asyncHandler(webAppController.forgotPassword));
 app.post('/api/webapp/auth/reset-password', asyncHandler(webAppController.resetPassword));
+
+// ATProto identity unlink — removes the Bluesky/ATProto identity from the user's account.
+// The Telegram session is preserved. The stored OAuth session row is deleted.
+app.post('/api/webapp/auth/atproto/unlink', authenticateUser, asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const did = req.session?.user?.atproto_did;
+
+  if (!did) {
+    return res.status(400).json({ success: false, error: 'No ATProto identity is linked to this account.' });
+  }
+
+  const { query: dbQuery } = require('../../config/postgres');
+
+  // Clear ATProto fields from the users table using parameterized query
+  await dbQuery(
+    `UPDATE users SET atproto_did = NULL, atproto_handle = NULL, atproto_pds_url = NULL, updated_at = NOW() WHERE id = $1`,
+    [userId]
+  );
+
+  // Delete the stored OAuth session for this DID (best-effort; row may not exist if session expired)
+  try {
+    await dbQuery('DELETE FROM atproto_oauth_sessions WHERE did = $1', [did]);
+  } catch (oauthSessionErr) {
+    logger.warn('[ATProto] Could not delete oauth session row (non-blocking):', oauthSessionErr.message);
+  }
+
+  // Attempt to revoke the remote ATProto session token (best-effort; don't fail the unlink if this errors)
+  try {
+    const atproto = require('../services/atprotoOAuthService');
+    const client = await atproto.getClient();
+    const oauthSession = await client.restore(did);
+    if (oauthSession && typeof oauthSession.signOut === 'function') {
+      await oauthSession.signOut();
+    }
+  } catch (revokeErr) {
+    logger.debug('[ATProto] Remote session revocation during unlink (non-blocking):', revokeErr.message);
+  }
+
+  // Update the express session in-place so the frontend reflects the change immediately
+  if (req.session?.user) {
+    req.session.user.atproto_did = null;
+    req.session.user.atproto_handle = null;
+    req.session.user.atproto_pds_url = null;
+    if (req.session.user.auth_methods) {
+      req.session.user.auth_methods.atproto = false;
+    }
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => (err ? reject(err) : resolve()));
+    });
+  }
+
+  logger.info('[ATProto] Unlinked ATProto identity from user', { userId, did });
+  res.json({ success: true, message: 'Bluesky account unlinked successfully.' });
+}));
 
 // Web App Profile
 app.get('/api/webapp/profile', asyncHandler(webAppController.getProfile));
@@ -1737,6 +1819,18 @@ app.post('/api/webapp/hangouts/create', asyncHandler(webappHangoutsController.cr
 app.post('/api/webapp/hangouts/join/:callId', asyncHandler(webappHangoutsController.joinRoom));
 app.post('/api/webapp/hangouts/leave/:callId', asyncHandler(webappHangoutsController.leaveRoom));
 app.delete('/api/webapp/hangouts/:callId', asyncHandler(webappHangoutsController.endRoom));
+
+// Web App Hangout Groups (session auth)
+const hangoutGroupController = require('./controllers/hangoutGroupController');
+app.get('/api/webapp/hangouts/groups', asyncHandler(hangoutGroupController.listGroups));
+app.post('/api/webapp/hangouts/groups', asyncHandler(hangoutGroupController.createGroup));
+app.get('/api/webapp/hangouts/groups/:id', asyncHandler(hangoutGroupController.getGroup));
+app.post('/api/webapp/hangouts/groups/:id/join', asyncHandler(hangoutGroupController.joinGroup));
+app.post('/api/webapp/hangouts/groups/:id/leave', asyncHandler(hangoutGroupController.leaveGroup));
+app.delete('/api/webapp/hangouts/groups/:id', asyncHandler(hangoutGroupController.deleteGroup));
+app.get('/api/webapp/hangouts/groups/:id/messages', asyncHandler(hangoutGroupController.getMessages));
+app.post('/api/webapp/hangouts/groups/:id/messages', asyncHandler(hangoutGroupController.sendMessage));
+app.post('/api/webapp/hangouts/groups/:id/call', asyncHandler(hangoutGroupController.startCall));
 
 // Web App Live Streaming Routes
 const webappLiveController = require('./controllers/webappLiveController');

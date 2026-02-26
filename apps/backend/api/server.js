@@ -107,15 +107,20 @@ app.post('/api/verify-age-manual', telegramAuth, async (req, res) => {
 
     logger.info(`Manual age verification: user ${userId}, method: ${method}, lang: ${lang}`);
 
-    const User = require('../models/userModel');
-    const user = await User.findOne({ where: { telegram_id: userId } });
-
-    if (user) {
-      user.age_verified = true;
-      user.age_verification_method = method || 'manual_web';
-      user.age_verification_date = new Date();
-      await user.save();
+    const { query } = require('../config/postgres');
+    const result = await query(
+      `UPDATE users
+       SET age_verified = TRUE,
+           age_verification_method = $2,
+           age_verified_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [userId.toString(), method || 'manual_web']
+    );
+    if (result.rowCount > 0) {
       logger.info(`Age verification updated for user ${userId}`);
+    } else {
+      logger.warn(`Age verification: no user found with id ${userId}`);
     }
 
     res.json({ success: true, message: 'Age verification recorded' });

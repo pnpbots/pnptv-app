@@ -79,7 +79,7 @@ class PNPLiveTipsService {
       const result = await query(
         `SELECT t.*, u.username as user_username
          FROM pnp_tips t
-         LEFT JOIN users u ON t.user_id = u.telegram_id
+         LEFT JOIN users u ON t.user_id = u.id
          WHERE t.model_id = $1 AND t.created_at >= $2
          ORDER BY t.created_at DESC`,
         [modelId, startDate]
@@ -141,7 +141,7 @@ class PNPLiveTipsService {
         `SELECT t.*, m.name as model_name, u.username as user_username
          FROM pnp_tips t
          JOIN pnp_models m ON t.model_id = m.id
-         LEFT JOIN users u ON t.user_id = u.telegram_id
+         LEFT JOIN users u ON t.user_id = u.id
          WHERE t.created_at >= $1
          ORDER BY t.created_at DESC
          LIMIT $2`,
@@ -191,7 +191,7 @@ class PNPLiveTipsService {
         `SELECT t.*, m.name as model_name, u.username as user_username
          FROM pnp_tips t
          JOIN pnp_models m ON t.model_id = m.id
-         LEFT JOIN users u ON t.user_id = u.telegram_id
+         LEFT JOIN users u ON t.user_id = u.id
          WHERE t.id = $1`,
         [tipId]
       );

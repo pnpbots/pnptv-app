@@ -502,140 +502,105 @@ const handleDaimoWebhook = async (req, res) => {
 };
 
 /**
- * Handle payment response page
- * @param {Request} req - Express request
- * @param {Response} res - Express response
+ * Handle payment response page (3DS bank redirect callback)
+ *
+ * ePayco redirects the user's browser here after 3DS bank authentication.
+ * Query params may include: ref_payco, x_transaction_state, x_ref_payco, etc.
+ * OR a simple ?status=success/failed from our own url_response.
+ *
+ * Strategy: recover the paymentId from sessionStorage (set before redirect)
+ * and redirect back to the checkout page so polling can confirm the payment.
  */
 const handlePaymentResponse = async (req, res) => {
   try {
-    const { status } = req.query;
+    const {
+      ref_payco, x_ref_payco, x_transaction_state,
+      status, x_extra3,
+    } = req.query;
 
-    if (status === 'success' || status === 'approved') {
-      res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-          <title>Payment Successful</title>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              display: flex;
-              justify-content: center;
-              align-items: center;
-              min-height: 100vh;
-              margin: 0;
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            }
-            .container {
-              background: white;
-              padding: 40px;
-              border-radius: 10px;
-              box-shadow: 0 10px 40px rgba(0,0,0,0.1);
-              text-align: center;
-              max-width: 400px;
-            }
-            .success-icon {
-              font-size: 60px;
-              margin-bottom: 20px;
-            }
-            h1 {
-              color: #667eea;
-              margin-bottom: 10px;
-            }
-            p {
-              color: #666;
-              margin-bottom: 30px;
-            }
-            .button {
-              display: inline-block;
-              padding: 12px 30px;
-              background: #667eea;
-              color: white;
-              text-decoration: none;
-              border-radius: 5px;
-              transition: background 0.3s;
-            }
-            .button:hover {
-              background: #764ba2;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="success-icon">✅</div>
-            <h1>Payment Successful!</h1>
-            <p>Your PRIME subscription has been activated. Return to the Telegram bot to enjoy premium features!</p>
-            <a href="https://t.me/${sanitizeBotUsername(process.env.BOT_USERNAME)}" class="button">Open Telegram Bot</a>
-          </div>
-        </body>
-        </html>
-      `);
-    } else {
-      res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-          <title>Payment Failed</title>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              display: flex;
-              justify-content: center;
-              align-items: center;
-              min-height: 100vh;
-              margin: 0;
-              background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            }
-            .container {
-              background: white;
-              padding: 40px;
-              border-radius: 10px;
-              box-shadow: 0 10px 40px rgba(0,0,0,0.1);
-              text-align: center;
-              max-width: 400px;
-            }
-            .error-icon {
-              font-size: 60px;
-              margin-bottom: 20px;
-            }
-            h1 {
-              color: #f5576c;
-              margin-bottom: 10px;
-            }
-            p {
-              color: #666;
-              margin-bottom: 30px;
-            }
-            .button {
-              display: inline-block;
-              padding: 12px 30px;
-              background: #f5576c;
-              color: white;
-              text-decoration: none;
-              border-radius: 5px;
-              transition: background 0.3s;
-              margin: 5px;
-            }
-            .button:hover {
-              background: #f093fb;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="error-icon">❌</div>
-            <h1>Payment Failed</h1>
-            <p>Your payment could not be processed. Please try again or contact support.</p>
-            <a href="https://t.me/${sanitizeBotUsername(process.env.BOT_USERNAME)}" class="button">Return to Bot</a>
-          </div>
-        </body>
-        </html>
-      `);
-    }
+    const refPayco = ref_payco || x_ref_payco || null;
+    const epaycoState = x_transaction_state || status || null;
+    const paymentIdFromQuery = x_extra3 || null;
+
+    logger.info('Payment response page hit', {
+      refPayco,
+      epaycoState,
+      paymentIdFromQuery,
+      queryKeys: Object.keys(req.query),
+    });
+
+    const botUsername = sanitizeBotUsername(process.env.BOT_USERNAME);
+    const botLink = botUsername ? `https://t.me/${botUsername}` : '#';
+
+    // Determine if this looks like a success
+    const isSuccess = epaycoState === 'Aceptada'
+      || epaycoState === 'Aprobada'
+      || status === 'success'
+      || status === 'approved';
+
+    // Serve a bridge page that:
+    // 1. Reads paymentId from sessionStorage (set by checkout before 3DS redirect)
+    // 2. Redirects back to /checkout/<paymentId>?poll=1 so polling picks up
+    // 3. Falls back to a friendly message with Telegram bot link
+    res.removeHeader('X-Frame-Options');
+    res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
+    res.send(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PNPtv! - ${isSuccess ? 'Payment Processing' : 'Payment Result'}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #121212; color: #fff; font-family: 'Segoe UI', Arial, sans-serif;
+           display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+    .card { background: rgba(30,30,30,0.9); border: 1px solid rgba(212,0,122,0.3);
+            border-radius: 16px; padding: 32px; max-width: 420px; width: 100%; text-align: center; }
+    h2 { margin-bottom: 12px; }
+    p { color: #aaa; margin-bottom: 20px; font-size: 14px; }
+    .spinner { width: 40px; height: 40px; border: 3px solid rgba(212,0,122,0.2);
+               border-top-color: #D4007A; border-radius: 50%; margin: 0 auto 16px;
+               animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .btn { display: inline-block; padding: 12px 24px; background: #D4007A; color: #fff;
+           text-decoration: none; border-radius: 8px; font-weight: 600; margin-top: 12px; }
+    .muted { color: #666; font-size: 12px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="spinner" id="spinner"></div>
+    <h2 id="title">${isSuccess ? 'Verifying payment...' : 'Returning to checkout...'}</h2>
+    <p id="msg">Please wait while we confirm your bank authentication.</p>
+    <div id="fallback" style="display:none;">
+      <a class="btn" href="${botLink}">Open Telegram Bot</a>
+      <p class="muted">If you completed bank verification, your subscription will activate automatically.</p>
+    </div>
+  </div>
+  <script>
+    (function() {
+      // Try to recover paymentId
+      var pid = ${paymentIdFromQuery ? `'${paymentIdFromQuery.replace(/'/g, '')}'` : 'null'};
+      try {
+        if (!pid) pid = sessionStorage.getItem('pnptv_3ds_payment_id');
+      } catch(e) {}
+
+      if (pid) {
+        // Redirect back to checkout page — it will start polling automatically
+        window.location.replace('/checkout/' + encodeURIComponent(pid) + '?poll=1');
+      } else {
+        // No paymentId — show fallback with bot link
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('title').textContent = '${isSuccess ? 'Payment received!' : 'Bank verification complete'}';
+        document.getElementById('msg').textContent = '${isSuccess
+    ? 'Your PRIME subscription is being activated. Return to Telegram to enjoy premium features!'
+    : 'Your payment is being processed. You can close this page and return to the bot.'}';
+        document.getElementById('fallback').style.display = 'block';
+      }
+    })();
+  </script>
+</body>
+</html>`);
   } catch (error) {
     logger.error('Error handling payment response:', error);
     res.status(500).send('Error processing payment response');

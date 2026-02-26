@@ -30,7 +30,7 @@ class AuthController {
 
       // Find user and verify role
       const result = await query(
-        `SELECT id, email, password_hash, role, username, created_at
+        `SELECT id, email, password_hash, role, tier, username, created_at
          FROM users
          WHERE email = $1 AND (role = 'admin' OR role = 'superadmin')`,
         [email.toLowerCase()]
@@ -75,6 +75,7 @@ class AuthController {
         email: user.email,
         username: user.username,
         role: user.role,
+        tier: user.tier || 'free',
       };
 
       // Set cookie maxAge if remember me
@@ -130,7 +131,7 @@ class AuthController {
       }
 
       const result = await query(
-        `SELECT id, email, password_hash, role, username, telegram, subscription_status
+        `SELECT id, email, password_hash, role, tier, username, telegram, subscription_status
          FROM users
          WHERE email = $1 AND (role = 'model' OR role = 'admin' OR role = 'superadmin')`,
         [email.toLowerCase()]
@@ -173,6 +174,7 @@ class AuthController {
         email: user.email,
         username: user.username,
         role: user.role,
+        tier: user.tier || 'free',
         telegramId: user.telegram,
       };
 

@@ -141,7 +141,7 @@ const handleCallback = async (req, res) => {
 
       // Find or create user
       let result = await query(
-        `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status,
+        `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status, tier,
                 terms_accepted, photo_file_id, bio, language
          FROM users WHERE twitter = $1`,
         [xHandle]
@@ -152,7 +152,7 @@ const handleCallback = async (req, res) => {
         if (req.session?.user?.id) {
           await query('UPDATE users SET twitter = $1 WHERE id = $2', [xHandle, req.session.user.id]);
           result = await query(
-            `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status,
+            `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status, tier,
                     terms_accepted, photo_file_id, bio, language FROM users WHERE id = $1`,
             [req.session.user.id]
           );
@@ -181,6 +181,7 @@ const handleCallback = async (req, res) => {
         firstName: user.first_name,
         lastName: user.last_name,
         subscriptionStatus: user.subscription_status,
+        tier: user.tier || 'free',
         acceptedTerms: user.terms_accepted,
         photoUrl: user.photo_file_id,
         bio: user.bio,

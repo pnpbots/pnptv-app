@@ -95,7 +95,8 @@ const handleTelegramAuth = async (req, res) => {
       `SELECT id, telegram, username, email, subscription_status, tier, terms_accepted,
               first_name, language,
               COALESCE(age_verified, false) as age_verified,
-              COALESCE(role, 'user') as role
+              COALESCE(role, 'user') as role,
+              atproto_did, atproto_handle, atproto_pds_url
        FROM users
        WHERE telegram = $1`,
       [telegramUser.id]
@@ -108,8 +109,8 @@ const handleTelegramAuth = async (req, res) => {
       try {
         // Create user with default 'free' status (will be auto-upgraded if they have active subscription)
         await query(
-          `INSERT INTO users (telegram, username, first_name, language, subscription_status, terms_accepted, age_verified, role)
-           VALUES ($1, $2, $3, $4, 'free', false, false, 'user')
+          `INSERT INTO users (telegram, username, first_name, language, subscription_status, tier, terms_accepted, age_verified, role)
+           VALUES ($1, $2, $3, $4, 'free', 'free', false, false, 'user')
            ON CONFLICT (telegram) DO NOTHING`,
           [
             telegramUser.id,
@@ -189,7 +190,7 @@ const handleTelegramAuth = async (req, res) => {
       role = 'admin';
     }
 
-    // Store user in session
+    // Store user in session (hybrid model: preserves ATProto fields if linked)
     req.session.user = {
       id: user.id,
       telegramId: user.telegram,
@@ -202,10 +203,26 @@ const handleTelegramAuth = async (req, res) => {
       tier: user.tier || 'free',
       acceptedTerms: user.terms_accepted,
       ageVerified: user.age_verified,
-      role
+      role,
+      // ATProto fields (preserved from DB if user has linked an ATProto identity)
+      atproto_did: user.atproto_did || null,
+      atproto_handle: user.atproto_handle || null,
+      atproto_pds_url: user.atproto_pds_url || null,
+      // Auth method flags for hybrid session
+      auth_methods: {
+        telegram: true,
+        atproto: !!user.atproto_did,
+        x: false, // populated if user later links X via webapp OAuth
+      },
     };
 
     logger.info(`User ${user.id} authenticated successfully, terms accepted: ${user.terms_accepted}`);
+
+    // Explicitly save session to Redis before responding — critical for iOS Safari
+    // where the response may be processed before the session store flushes
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => (err ? reject(err) : resolve()));
+    });
 
     // ASYNC: Provision PDS in background (don't block login)
     // This runs independently without awaiting
@@ -328,6 +345,16 @@ const checkAuthStatus = (req, res) => {
         tier: user.tier || 'free',
         role: user.role || 'user',
         photo_url: user.photoUrl || null,
+        // ATProto identity (hybrid session)
+        atproto_did: user.atproto_did || null,
+        atproto_handle: user.atproto_handle || null,
+        // X identity (hybrid session)
+        x_handle: user.xHandle || null,
+        auth_methods: user.auth_methods || {
+          telegram: !!user.telegramId,
+          atproto: !!user.atproto_did,
+          x: !!user.xHandle,
+        },
       }
     });
     

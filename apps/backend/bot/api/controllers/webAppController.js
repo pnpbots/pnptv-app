@@ -104,7 +104,7 @@ async function createWebUser({ id, firstName, lastName, username, email, passwor
  */
 async function findOrLinkUser({ telegramId, twitterHandle, xId, email, firstName, lastName, username, photoFileId } = {}) {
   const RETURN_COLS = `id, pnptv_id, first_name, last_name, username, email,
-    subscription_status, terms_accepted, photo_file_id, bio, language, telegram, twitter, x_id, role`;
+    subscription_status, tier, terms_accepted, photo_file_id, bio, language, telegram, twitter, x_id, role`;
 
   let user = null;
 
@@ -180,11 +180,24 @@ function buildSession(user, extra = {}) {
     firstName: user.first_name,
     lastName: user.last_name,
     subscriptionStatus: user.subscription_status,
+    tier: user.tier || 'free',
     acceptedTerms: user.terms_accepted,
     photoUrl: user.photo_file_id,
     bio: user.bio,
     language: user.language,
     role: user.role || 'user',
+    // ATProto identity fields (preserved for hybrid session)
+    atproto_did: user.atproto_did || null,
+    atproto_handle: user.atproto_handle || null,
+    atproto_pds_url: user.atproto_pds_url || null,
+    // X identity
+    xHandle: user.twitter || user.x_username || extra.xHandle || null,
+    // Hybrid auth method flags — derived from available identity fields
+    auth_methods: {
+      telegram: !!(user.telegram),
+      atproto: !!(user.atproto_did),
+      x: !!(user.twitter || user.x_user_id || user.x_id || extra.xHandle),
+    },
     ...extra,
   };
 }

@@ -39,7 +39,7 @@ class PrivateCallBookingService {
       }
 
       // Check terms acceptance
-      if (!user.terms_accepted_at) {
+      if (!user.termsAccepted && !user.terms_accepted) {
         reasons.push('terms_not_accepted');
       }
 

@@ -191,7 +191,7 @@ class RoleService {
 
   async filterUsersByRole(roleName, offset = 0, limit = 20) {
     const query = `
-      SELECT DISTINCT u.id, u.email, u.username, u.telegram_id, u.status, r.name as role, r.display_name, r.rank
+      SELECT DISTINCT u.id, u.email, u.username, u.telegram_chat_id, u.status, r.name as role, r.display_name, r.rank
       FROM users u
       LEFT JOIN user_roles ur ON u.id = ur.user_id
       LEFT JOIN roles r ON COALESCE(ur.role_id, u.role_id) = r.id

@@ -431,8 +431,8 @@ class N8nAutomationController {
         try {
           // Get admin emails from users table
           const adminEmails = await query(
-            `SELECT email FROM users WHERE telegram_id = ANY($1)`,
-            [adminIds.map(id => parseInt(id))]
+            `SELECT email FROM users WHERE id = ANY($1)`,
+            [adminIds.map(id => id.toString())]
           );
 
           for (const admin of adminEmails.rows) {
