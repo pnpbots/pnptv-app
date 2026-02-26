@@ -232,13 +232,9 @@
         .polling-dots span:nth-child(2) { animation-delay: 0.2s; }
         .polling-dots span:nth-child(3) { animation-delay: 0.4s; }
 
-        /* 3DS iframe */
-        .threeds-frame {
-            width: 100%;
-            min-height: 400px;
-            border: none;
-            border-radius: 12px;
-            background: #FFFFFF;
+        /* 3DS redirect state */
+        #state-3ds .spinner-container {
+            padding: 20px 0;
         }
 
         /* OTP input */
@@ -406,11 +402,13 @@
             </div>
         </div>
 
-        <!-- STATE: 3DS Redirect (iframe for bank auth) -->
+        <!-- STATE: 3DS Redirect (full-page redirect to bank) -->
         <div id="state-3ds" class="state">
-            <p style="font-size:13px; color:#8E8E93; text-align:center; margin-bottom:12px;">Complete authentication with your bank</p>
-            <iframe id="threeds-iframe" class="threeds-frame" sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation allow-popups"></iframe>
-            <p class="msg msg-info" style="margin-top:12px;">After completing bank verification, your payment will be confirmed automatically.</p>
+            <div class="spinner-container">
+                <div class="spinner"></div>
+                <p style="color:#8E8E93; font-size:14px; text-align:center;">Redirecting to your bank for authentication...</p>
+                <p class="msg msg-info" style="margin-top:12px;">You will be redirected to your bank's secure page. After completing verification, you'll be brought back here automatically.</p>
+            </div>
         </div>
 
         <!-- STATE: Polling -->
@@ -584,11 +582,27 @@
                 return;
             }
 
+            // Check if returning from 3DS bank redirect (?poll=1)
+            var urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('poll') === '1') {
+                // Clean the URL so refresh doesn't re-trigger
+                try { history.replaceState(null, '', window.location.pathname); } catch(e) {}
+                startPolling();
+                return;
+            }
+
             try {
                 const res = await fetch('/api/payment/' + encodeURIComponent(paymentId));
                 const data = await res.json();
 
                 if (!res.ok || !data.success) {
+                    // If payment is already completed, show success
+                    if (data.error && data.error.includes('ya fue completado')) {
+                        showState('success');
+                        document.getElementById('success-detail').textContent =
+                            'Your subscription has been activated!';
+                        return;
+                    }
                     showState('fatal');
                     document.getElementById('fatal-detail').textContent =
                         data.error || 'Payment not found or already processed.';
@@ -850,14 +864,16 @@
             document.getElementById('btn-pay').disabled = false;
         }
 
-        // ── 3DS 1.0: Bank redirect in iframe ──────────────────────
+        // ── 3DS 1.0: Full-page redirect to bank ─────────────────
         function handle3DSRedirect(url) {
             showState('3ds');
-            var iframe = document.getElementById('threeds-iframe');
-            iframe.src = url;
-
-            // Start polling alongside — the bank may redirect back, or webhook may fire
-            setTimeout(function() { startPolling(); }, 5000);
+            // Save paymentId to sessionStorage so we can resume polling when the user returns
+            try { sessionStorage.setItem('pnptv_3ds_payment_id', paymentId); } catch(e) {}
+            // Redirect the entire page to the bank's 3DS authentication URL.
+            // Banks block iframe embedding (X-Frame-Options: DENY), so full redirect is the
+            // only reliable approach. After 3DS, the bank redirects to url_response which
+            // redirects back to /checkout/<paymentId>?poll=1 for polling.
+            setTimeout(function() { window.location.href = url; }, 600);
         }
 
         // ── 3DS 2.0: Cardinal Commerce device data collection ─────

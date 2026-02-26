@@ -2208,7 +2208,7 @@ class PaymentService {
         browser_info: normalizedBrowserInfo,
         user_agent: normalizedBrowserInfo.user_agent,
         accept_header: normalizedBrowserInfo.accept_header,
-        url_response: `${webhookDomain}/api/payment-response`,
+        url_response: `${webhookDomain}/api/payment-response?x_extra3=${encodeURIComponent(paymentId)}`,
         url_confirmation: `${epaycoWebhookDomain}${confirmationPath}`,
         method_confirmation: 'POST',
         use_default_card_customer: true,

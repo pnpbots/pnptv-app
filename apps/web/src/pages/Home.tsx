@@ -150,7 +150,7 @@ export default function Home() {
       )}
 
       {/* Subscribe CTA */}
-      {tier !== "prime" && (
+      {tier?.toLowerCase() !== "prime" && (
         <button
           onClick={() => navigate("/subscribe")}
           className="btn-gradient w-full py-3 px-6 rounded-xl text-white font-semibold text-sm mb-6 font-display tracking-wider whitespace-nowrap"

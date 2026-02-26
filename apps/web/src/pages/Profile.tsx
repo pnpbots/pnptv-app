@@ -10,8 +10,12 @@ import {
   togglePostLike,
   deleteSocialPost,
   createSocialPost,
+  checkAuthStatus,
+  unlinkAtproto,
+  getAtprotoLoginUrl,
   type UserProfile,
   type SocialPostItem,
+  type AuthMethods,
 } from "@/lib/api";
 
 function resolvePhotoUrl(url: string | null | undefined): string | null {
@@ -397,6 +401,219 @@ function ComposePost({
   );
 }
 
+// ── Identity & Connections Section ───────────────────────────────────────────
+
+interface AtprotoState {
+  linked: boolean;
+  handle: string | null;
+  did: string | null;
+  loading: boolean;
+}
+
+function IdentityConnections({ telegramUsername }: { telegramUsername?: string }) {
+  const [atproto, setAtproto] = useState<AtprotoState>({
+    linked: false,
+    handle: null,
+    did: null,
+    loading: true,
+  });
+  const [handleInput, setHandleInput] = useState("");
+  const [showHandleInput, setShowHandleInput] = useState(false);
+  const [handleError, setHandleError] = useState<string | null>(null);
+  const [unlinking, setUnlinking] = useState(false);
+  const [unlinkError, setUnlinkError] = useState<string | null>(null);
+  const [unlinkSuccess, setUnlinkSuccess] = useState(false);
+
+  // Load current ATProto identity from auth-status
+  useEffect(() => {
+    let cancelled = false;
+    checkAuthStatus()
+      .then((status) => {
+        if (cancelled) return;
+        if (status.authenticated && status.user) {
+          setAtproto({
+            linked: !!(status.user.auth_methods as AuthMethods | undefined)?.atproto,
+            handle: status.user.atproto_handle ?? null,
+            did: status.user.atproto_did ?? null,
+            loading: false,
+          });
+        } else {
+          setAtproto({ linked: false, handle: null, did: null, loading: false });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAtproto({ linked: false, handle: null, did: null, loading: false });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [unlinkSuccess]);
+
+  const handleLink = () => {
+    const raw = handleInput.trim().replace(/^@/, "");
+    if (!raw || raw.length < 3) {
+      setHandleError("Enter a valid Bluesky handle, e.g. yourname.bsky.social");
+      return;
+    }
+    // Redirect to the backend OAuth initiation — the backend will resolve the handle,
+    // send PAR, and redirect the user to the Bluesky authorization server.
+    window.location.href = getAtprotoLoginUrl(raw);
+  };
+
+  const handleUnlink = async () => {
+    setUnlinking(true);
+    setUnlinkError(null);
+    try {
+      await unlinkAtproto();
+      setAtproto({ linked: false, handle: null, did: null, loading: false });
+      setUnlinkSuccess((prev) => !prev); // Toggle to re-trigger useEffect
+    } catch (err: unknown) {
+      setUnlinkError(err instanceof Error ? err.message : "Failed to unlink account");
+    } finally {
+      setUnlinking(false);
+    }
+  };
+
+  return (
+    <div className="glass-card-sm p-5 mt-4">
+      <h2 className="text-sm font-semibold text-white mb-4 tracking-wide uppercase opacity-60">
+        Identity &amp; Connections
+      </h2>
+
+      <div className="space-y-3">
+        {/* Telegram row — always connected */}
+        <div className="flex items-center justify-between py-3 border-b border-white/5">
+          <div className="flex items-center gap-3">
+            {/* Telegram logo SVG */}
+            <div
+              className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{ background: "linear-gradient(135deg, #2AABEE, #229ED9)" }}
+            >
+              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-white">Telegram</p>
+              {telegramUsername ? (
+                <p className="text-xs" style={{ color: "#8E8E93" }}>@{telegramUsername}</p>
+              ) : (
+                <p className="text-xs" style={{ color: "#8E8E93" }}>Connected</p>
+              )}
+            </div>
+          </div>
+          <span
+            className="text-xs font-semibold px-2.5 py-1 rounded-full"
+            style={{ background: "rgba(52, 199, 89, 0.15)", color: "#34C759" }}
+          >
+            Connected
+          </span>
+        </div>
+
+        {/* ATProto / Bluesky row */}
+        <div className="py-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {/* Bluesky butterfly logo */}
+              <div
+                className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: "linear-gradient(135deg, #0085FF, #00BAFF)" }}
+              >
+                <svg className="w-5 h-5 text-white" viewBox="0 0 360 320" fill="currentColor">
+                  <path d="M180 142c-16.3-31.7-60.7-90.8-102-120C38.5-2.9 27.2 1 18.8 1 8.3 1 0 7.8 0 25.4 0 39 6.6 116.7 10.3 132.9 23 187.7 74.3 207 122.7 202c-71 10.5-133.3 41-67.3 147.9 51.7 81.4 103.3 27.8 127.2 0 24-27.9 53.7-87.3 53.7-87.3s29.7 59.4 53.7 87.3c23.9 27.8 75.5 81.4 127.2 0 66-106.9 3.7-137.4-67.3-147.9 48.4 5 99.7-14.3 112.4-69.1 3.7-16.2 10.3-93.9 10.3-107.5C360 7.8 351.7 1 341.2 1c-8.4 0-19.7-3.9-59.2 21C240.7 51.2 196.3 110.3 180 142z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-white">Bluesky</p>
+                {atproto.loading ? (
+                  <p className="text-xs" style={{ color: "#8E8E93" }}>Loading...</p>
+                ) : atproto.linked && atproto.handle ? (
+                  <p className="text-xs" style={{ color: "#8E8E93" }}>@{atproto.handle}</p>
+                ) : (
+                  <p className="text-xs" style={{ color: "#8E8E93" }}>Not linked</p>
+                )}
+              </div>
+            </div>
+
+            {atproto.loading ? null : atproto.linked ? (
+              <button
+                onClick={handleUnlink}
+                disabled={unlinking}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+              >
+                {unlinking ? "Unlinking..." : "Unlink"}
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setShowHandleInput((v) => !v);
+                  setHandleError(null);
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg btn-gradient text-white"
+              >
+                Link Account
+              </button>
+            )}
+          </div>
+
+          {/* Handle input (shown when user clicks "Link Account") */}
+          {!atproto.linked && showHandleInput && (
+            <div className="mt-3">
+              <div className="flex gap-2">
+                <div className="flex-1 relative">
+                  <span
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-sm select-none pointer-events-none"
+                    style={{ color: "#8E8E93" }}
+                  >
+                    @
+                  </span>
+                  <input
+                    type="text"
+                    value={handleInput}
+                    onChange={(e) => {
+                      setHandleInput(e.target.value);
+                      setHandleError(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleLink();
+                    }}
+                    placeholder="yourname.bsky.social"
+                    autoFocus
+                    className="w-full pl-7 pr-3 py-2 rounded-lg border text-sm bg-transparent text-white outline-none focus:border-pnp-accent transition-colors"
+                    style={{ borderColor: handleError ? "#FF453A" : "rgba(255,255,255,0.15)" }}
+                    spellCheck={false}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                  />
+                </div>
+                <button
+                  onClick={handleLink}
+                  className="btn-gradient px-4 py-2 rounded-lg text-white text-sm font-semibold whitespace-nowrap"
+                >
+                  Connect
+                </button>
+              </div>
+              {handleError && (
+                <p className="text-xs text-red-400 mt-1.5">{handleError}</p>
+              )}
+              <p className="text-xs mt-1.5" style={{ color: "#8E8E93" }}>
+                You will be redirected to Bluesky to authorize the connection.
+              </p>
+            </div>
+          )}
+
+          {/* Unlink error */}
+          {unlinkError && (
+            <p className="text-xs text-red-400 mt-2">{unlinkError}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Profile Page ────────────────────────────────────────────────────────
 
 export default function Profile() {
@@ -593,7 +810,7 @@ export default function Profile() {
   const photoUrl = resolvePhotoUrl(profile.photoUrl);
   const displayName = profile.firstName + (profile.lastName ? ` ${profile.lastName}` : "");
   const initial = displayName[0]?.toUpperCase() || "U";
-  const isPrime = profile.tier === "prime";
+  const isPrime = profile.tier?.toLowerCase() === "prime";
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
@@ -734,6 +951,11 @@ export default function Profile() {
           )}
         </div>
       </div>
+
+      {/* ── Identity & Connections (own profile only) ── */}
+      {isOwnProfile && (
+        <IdentityConnections telegramUsername={profile.username} />
+      )}
 
       {/* ── Tabs ── */}
       <div className="flex border-b border-white/10 mb-4">

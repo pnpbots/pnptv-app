@@ -15,7 +15,7 @@ export function PrimeGate({ children }: PrimeGateProps) {
     return <>{children}</>;
   }
 
-  const isPrime = user.tier === "prime";
+  const isPrime = user.tier?.toLowerCase() === "prime";
 
   if (isPrime) {
     return <>{children}</>;
