@@ -6,3 +6,4 @@ logs/
 backups/
 *.log
 *.backup-emergency
+infrastructure/data/
