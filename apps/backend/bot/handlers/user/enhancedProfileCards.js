@@ -136,7 +136,7 @@ const registerEnhancedProfileCards = (bot) => {
     if (user.badges && user.badges.length > 0) {
       // Show first badge
       text += ` ${user.badges[0]}`;
-    } else if (user.subscriptionStatus && user.subscriptionStatus !== 'basic') {
+    } else if ((user.tier || '').toLowerCase() === 'prime') {
       const tierInfo = getUserTierInfo(user);
       text += ` ${tierInfo.badge}`;
     }
@@ -438,19 +438,18 @@ const registerEnhancedProfileCards = (bot) => {
   }
 
   function getUserTierInfo(user) {
-    const tier = user.subscriptionStatus || 'basic';
-    
+    const tierValue = (user.tier || 'free').toLowerCase();
+    const role = (user.role || '').toLowerCase();
+
     const tiers = {
-      basic: { name: 'Basic', badge: '', benefits: 'Standard features' },
-      premium: { name: 'Premium', badge: '💎', benefits: 'Enhanced visibility, advanced features' },
-      crystal: { name: 'Crystal', badge: '💠', benefits: 'Priority support, exclusive content' },
-      diamond: { name: 'Diamond', badge: '🔷', benefits: 'VIP access, all premium features' },
-      pnp: { name: 'PNP', badge: '🏆', benefits: 'Elite status, special privileges' },
+      free: { name: 'Free', badge: '', benefits: 'Standard features' },
+      prime: { name: 'Prime', badge: '💎', benefits: 'Enhanced visibility, advanced features' },
       admin: { name: 'Admin', badge: '👑', benefits: 'Full access, moderation tools' },
-      superadmin: { name: 'Super Admin', badge: '👑⚡', benefits: 'Complete control, all features' }
+      superadmin: { name: 'Super Admin', badge: '👑', benefits: 'Complete control, all features' }
     };
-    
-    return tiers[tier] || tiers.basic;
+
+    if (role === 'admin' || role === 'superadmin') return tiers[role] || tiers.admin;
+    return tiers[tierValue] || tiers.free;
   }
 
   function getSocialMediaLinks(user) {

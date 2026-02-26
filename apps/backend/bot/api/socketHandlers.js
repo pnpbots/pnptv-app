@@ -1,6 +1,6 @@
 const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
-const { getRedisClient } = require('../../config/redis');
+const { getRedis } = require('../../config/redis');
 
 // Parse session cookie to authenticate Socket.IO connections
 async function getUserFromSocket(socket) {
@@ -10,7 +10,7 @@ async function getUserFromSocket(socket) {
     if (!match) return null;
     const raw = decodeURIComponent(match[1]);
     const sid = raw.startsWith('s:') ? raw.slice(2).split('.')[0] : raw.split('.')[0];
-    const redis = getRedisClient();
+    const redis = getRedis();
     const data = await redis.get(`sess:${sid}`);
     if (!data) return null;
     const session = JSON.parse(data);

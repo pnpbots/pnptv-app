@@ -82,7 +82,8 @@ const softAuth = (req, res, next) => {
   if (req.session?.user?.id) {
     req.user = {
       id: req.session.user.id,
-      subscriptionStatus: req.session.user.subscription_status || 'free',
+      tier: req.session.user.tier || 'free',
+      subscriptionStatus: req.session.user.subscriptionStatus || req.session.user.subscription_status || 'free',
     };
   }
   next();
@@ -2083,14 +2084,14 @@ const usersController = require('./controllers/usersController');
 app.get('/api/webapp/chat/:room/history', asyncHandler(chatController.getChatHistory));
 app.post('/api/webapp/chat/:room/send', asyncHandler(chatController.sendMessage));
 
-// Nearby (webapp session-auth proxy)
-app.post('/api/webapp/nearby/update-location', asyncHandler(async (req, res) => {
+// Nearby (webapp session-auth proxy — Prime only)
+app.post('/api/webapp/nearby/update-location', requirePrimeTier, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
   req.user = { id: user.id, userId: user.id };
   return NearbyController.updateLocation(req, res);
 }));
-app.get('/api/webapp/nearby/search', asyncHandler(async (req, res) => {
+app.get('/api/webapp/nearby/search', requirePrimeTier, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
   req.user = { id: user.id, userId: user.id };

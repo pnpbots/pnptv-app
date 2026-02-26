@@ -14,6 +14,7 @@ const Social = lazy(() => import("@/pages/Social"));
 const Profile = lazy(() => import("@/pages/Profile"));
 const AdminDashboard = lazy(() => import("@/pages/admin/Dashboard"));
 const Subscribe = lazy(() => import("@/pages/Subscribe"));
+const DirectMessages = lazy(() => import("@/pages/DirectMessages"));
 const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
 
 export const router = createBrowserRouter([
@@ -69,6 +70,26 @@ export const router = createBrowserRouter([
           <ModuleLoader>
             <VerificationGate>
               <Chat />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "dm",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <DirectMessages />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "dm/:userId",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <DirectMessages />
             </VerificationGate>
           </ModuleLoader>
         ),

@@ -17,7 +17,7 @@ ID: \`${user.id}\`
 Username: @${user.username || 'N/A'}
 Email: ${user.email || 'N/A'}
 Tier: ${user.tier || 'Free'}
-Estado: ${user.subscription_status || 'free'}
+Estado: ${user.subscriptionStatus || user.subscription_status || 'free'}
 Baneado: ${user.status === 'banned' ? 'Sí ⛔' : 'No ✅'}
   `.trim();
 
@@ -339,7 +339,7 @@ ID: \`${user.id}\`
 Username: @${user.username || 'N/A'}
 Email: ${user.email || 'N/A'}
 Tier: ${user.tier || 'Free'}
-Estado: ${user.subscription_status || 'free'}
+Estado: ${user.subscriptionStatus || user.subscription_status || 'free'}
 Baneado: ${user.status === 'banned' ? 'Sí ⛔' : 'No ✅'}
         `.trim();
 

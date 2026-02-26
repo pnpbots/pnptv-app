@@ -36,6 +36,19 @@ initializeGeoService();
 // Middleware
 router.use(authenticateUser);
 
+// Tier gate — only prime users can access Nearby
+const requirePrimeTier = (req, res, next) => {
+  const tier = (req.user?.tier || 'free').toLowerCase();
+  if (tier !== 'prime') {
+    return res.status(403).json({
+      error: 'Prime subscription required',
+      code: 'PRIME_REQUIRED'
+    });
+  }
+  next();
+};
+router.use(requirePrimeTier);
+
 // Update user location
 router.post('/update-location', (req, res) => {
   NearbyController.updateLocation(req, res);
@@ -56,8 +69,15 @@ router.post('/clear', (req, res) => {
   NearbyController.clearLocation(req, res);
 });
 
-// Batch update locations (for testing/admin)
-router.post('/batch-update', (req, res) => {
+// Batch update locations (admin only)
+const requireAdmin = (req, res, next) => {
+  const role = (req.user?.role || '').toLowerCase();
+  if (role !== 'admin' && role !== 'superadmin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+};
+router.post('/batch-update', requireAdmin, (req, res) => {
   NearbyController.batchUpdate(req, res);
 });
 

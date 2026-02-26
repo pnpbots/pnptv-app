@@ -275,7 +275,7 @@ class NearbyPlaceService {
         const user = await UserModel.getById(submission.submittedByUserId);
         if (user) {
           submission.submitterUsername = user.username;
-          submission.userTier = user.subscriptionStatus;
+          submission.userTier = user.tier || 'free';
         }
       }
 

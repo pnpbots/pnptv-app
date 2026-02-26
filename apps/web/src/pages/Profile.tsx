@@ -943,7 +943,7 @@ export default function Profile() {
             </>
           ) : (
             <button
-              onClick={() => navigate(`/chat`)}
+              onClick={() => navigate(`/dm/${profile.id || paramUserId}`)}
               className="flex-1 btn-gradient py-2 rounded-lg text-white text-sm font-semibold"
             >
               Message

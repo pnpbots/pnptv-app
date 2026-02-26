@@ -47,7 +47,7 @@ const registerBusinessSubmissionHandlers = (bot) => {
         step: 'welcome',
         userId: user.id.toString(),
         username: user.username || `@${user.id}`,
-        userTier: user.subscriptionStatus || 'basic',
+        userTier: user.tier || 'free',
         submissionDate: new Date().toISOString(),
         metadata: {
           source: 'mobile',

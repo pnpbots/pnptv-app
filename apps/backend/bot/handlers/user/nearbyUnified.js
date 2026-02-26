@@ -3,8 +3,31 @@ const UserService = require('../../services/userService');
 const NearbyPlaceService = require('../../services/nearbyPlaceService');
 const { t } = require('../../../utils/i18n');
 const logger = require('../../../utils/logger');
-const { getLanguage } = require('../../utils/helpers');
+const { getLanguage, isPrimeUser } = require('../../utils/helpers');
 const FeatureUrlService = require('../../services/featureUrlService');
+
+/**
+ * Tier gate for bot actions — only Prime users can access Nearby
+ * Returns true if user should be blocked (not Prime)
+ */
+const checkNearbyAccess = async (ctx) => {
+  try {
+    const user = await UserService.getOrCreateFromContext(ctx);
+    if (isPrimeUser(user)) return false; // access granted
+    const lang = getLanguage(ctx);
+    const msg = lang === 'es'
+      ? '🔒 *Nearby* es una función exclusiva de PRIME.\n\nSuscríbete para desbloquear.'
+      : '🔒 *Nearby* is a PRIME-only feature.\n\nSubscribe to unlock.';
+    if (ctx.callbackQuery) {
+      await ctx.answerCbQuery(lang === 'es' ? '🔒 Solo para PRIME' : '🔒 PRIME only', { show_alert: true });
+    }
+    await ctx.reply(msg, { parse_mode: 'Markdown' });
+    return true; // blocked
+  } catch (error) {
+    logger.error('Error checking nearby access:', error);
+    return false; // fail open to avoid breaking existing users
+  }
+};
 
 // Helper function to safely edit message or send new if editing fails
 // This handles cases where the original message is a photo or was deleted
@@ -37,6 +60,9 @@ const showNearbyMenu = async (ctx, options = {}) => {
   const { isNewMessage = false } = options;
 
   try {
+    // Tier gate: only Prime users can access Nearby
+    if (await checkNearbyAccess(ctx)) return;
+
     const lang = getLanguage(ctx);
     const user = await UserService.getOrCreateFromContext(ctx);
     const locationStatus = user.locationSharingEnabled ? '🟢 ON' : '🔴 OFF';
@@ -96,6 +122,7 @@ const registerNearbyUnifiedHandlers = (bot) => {
   // Toggle location sharing
   bot.action('toggle_location_sharing', async (ctx) => {
     try {
+      if (await checkNearbyAccess(ctx)) return;
       const lang = getLanguage(ctx);
 
       if (!ctx.from?.id) {
@@ -147,6 +174,7 @@ const registerNearbyUnifiedHandlers = (bot) => {
   // Show all nearby items (users + businesses + places)
   bot.action('nearby_all', async (ctx) => {
     try {
+      if (await checkNearbyAccess(ctx)) return;
       const lang = getLanguage(ctx);
       const userId = ctx.from.id.toString();
 
@@ -299,6 +327,7 @@ const registerNearbyUnifiedHandlers = (bot) => {
   // Show only nearby users
   bot.action('nearby_users', async (ctx) => {
     try {
+      if (await checkNearbyAccess(ctx)) return;
       const lang = getLanguage(ctx);
       const userId = ctx.from.id.toString();
 
@@ -394,6 +423,7 @@ const registerNearbyUnifiedHandlers = (bot) => {
   // Show only nearby businesses
   bot.action('nearby_businesses', async (ctx) => {
     try {
+      if (await checkNearbyAccess(ctx)) return;
       const lang = getLanguage(ctx);
       const userId = ctx.from.id.toString();
 
@@ -473,6 +503,7 @@ const registerNearbyUnifiedHandlers = (bot) => {
   // Show only nearby places
   bot.action('nearby_places', async (ctx) => {
     try {
+      if (await checkNearbyAccess(ctx)) return;
       const lang = getLanguage(ctx);
       const userId = ctx.from.id.toString();
 
@@ -585,6 +616,7 @@ const registerNearbyUnifiedHandlers = (bot) => {
   // Handle DM button clicks (imported from original nearby.js)
   bot.action(/^dm_user_(.+)$/, async (ctx) => {
     try {
+      if (await checkNearbyAccess(ctx)) return;
       if (!ctx.match || !ctx.match[1]) {
         logger.error('Invalid DM user action format');
         return;
@@ -650,6 +682,7 @@ const registerNearbyUnifiedHandlers = (bot) => {
   // Import place viewing functionality from nearbyPlaces.js
   bot.action(/^view_place_(\d+)$/, async (ctx) => {
     try {
+      if (await checkNearbyAccess(ctx)) return;
       const placeId = parseInt(ctx.match[1]);
       const lang = getLanguage(ctx);
 
@@ -743,6 +776,7 @@ const registerNearbyUnifiedHandlers = (bot) => {
   // Unified nearby command
   bot.command('nearby', async (ctx) => {
     try {
+      if (await checkNearbyAccess(ctx)) return;
       const lang = getLanguage(ctx);
       const userId = ctx.from?.id;
 

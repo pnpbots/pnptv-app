@@ -233,19 +233,30 @@ async function sendMessage(req, res) {
     // Upsert thread
     await upsertThread(userId, recipientId, content);
 
+    const responseMessage = {
+      id: message.id,
+      senderId: message.sender_id,
+      recipientId: message.recipient_id,
+      content: message.content,
+      isRead: message.is_read,
+      createdAt: message.created_at,
+      isMine: true
+    };
+
+    // Emit real-time Socket.IO event to recipient
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user:${recipientId}`).emit('dm:received', {
+        ...message,
+        sender: { id: userId }
+      });
+    }
+
     logger.info(`User ${userId} sent DM to ${recipientId}`);
 
     res.json({
       success: true,
-      message: {
-        id: message.id,
-        senderId: message.sender_id,
-        recipientId: message.recipient_id,
-        content: message.content,
-        isRead: message.is_read,
-        createdAt: message.created_at,
-        isMine: true
-      }
+      message: responseMessage
     });
 
   } catch (error) {
