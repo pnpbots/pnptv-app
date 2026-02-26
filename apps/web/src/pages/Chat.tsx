@@ -29,7 +29,7 @@ type View = "list" | "chat";
 export default function Chat() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const isPrime = user?.subscriptionType === "prime" || user?.subscriptionType === "active";
+  const isPrime = user?.tier === "prime";
 
   // Group list state
   const [groups, setGroups] = useState<HangoutGroup[]>([]);

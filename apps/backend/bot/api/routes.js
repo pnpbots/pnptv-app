@@ -2691,6 +2691,9 @@ app.post('/api/verify-age-self', asyncHandler(async (req, res) => {
     );
 
     req.session.user.ageVerified = true;
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => err ? reject(err) : resolve());
+    });
     logger.info(`User ${user.id} self-declared age verification`);
     res.json({ success: true });
   } catch (error) {

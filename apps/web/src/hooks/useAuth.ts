@@ -19,6 +19,7 @@ interface PnptvUser {
   termsAccepted: boolean;
   ageVerified: boolean;
   subscriptionType: string;
+  tier: string;
   role: string;
 }
 
@@ -48,6 +49,7 @@ function mapTelegramUser(u: NonNullable<TelegramAuthResponse["user"]>): PnptvUse
     ageVerified: u.age_verified,
     photoUrl: u.photo_url || undefined,
     subscriptionType: u.subscription_type,
+    tier: u.tier || "free",
     role: u.role || "user",
   };
 }
@@ -62,6 +64,7 @@ function mapOidcUser(u: User): PnptvUser {
     termsAccepted: true,
     ageVerified: false,
     subscriptionType: "free",
+    tier: "free",
     role: (u.profile as Record<string, unknown>).role as string || "user",
   };
 }

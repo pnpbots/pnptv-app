@@ -41,6 +41,7 @@ export interface TelegramAuthResponse {
     terms_accepted: boolean;
     age_verified: boolean;
     subscription_type: string;
+    tier: string;
     role: string;
     photo_url?: string | null;
   };

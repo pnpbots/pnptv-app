@@ -64,7 +64,7 @@ export default function Home() {
   });
 
   const username = user?.username || user?.displayName || "user";
-  const subscription = user?.subscriptionType || "free";
+  const tier = user?.tier || "free";
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
@@ -79,7 +79,7 @@ export default function Home() {
         </p>
         <p className="text-sm mt-1" style={{ color: "#8E8E93" }}>
           You are a{" "}
-          <span className="font-semibold text-white capitalize">{subscription}</span>{" "}
+          <span className="font-semibold text-white capitalize">{tier}</span>{" "}
           member.
         </p>
       </div>
@@ -150,7 +150,7 @@ export default function Home() {
       )}
 
       {/* Subscribe CTA */}
-      {subscription !== "prime" && (
+      {tier !== "prime" && (
         <button
           onClick={() => navigate("/subscribe")}
           className="btn-gradient w-full py-3 px-6 rounded-xl text-white font-semibold text-sm mb-6 font-display tracking-wider whitespace-nowrap"

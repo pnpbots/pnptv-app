@@ -89,7 +89,7 @@ const authStatus = async (req, res) => {
     const userStats = await query(
       `SELECT 
         COUNT(*) as total_users,
-        SUM(CASE WHEN accepted_terms = TRUE THEN 1 ELSE 0 END) as terms_accepted,
+        SUM(CASE WHEN terms_accepted = TRUE THEN 1 ELSE 0 END) as terms_accepted_count,
         SUM(CASE WHEN subscription_status = 'free' THEN 1 ELSE 0 END) as free_users,
         SUM(CASE WHEN subscription_status = 'active' THEN 1 ELSE 0 END) as active_users,
         SUM(CASE WHEN subscription_status = 'expired' THEN 1 ELSE 0 END) as expired_users,

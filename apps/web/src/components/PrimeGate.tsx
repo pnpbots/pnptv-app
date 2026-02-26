@@ -15,8 +15,7 @@ export function PrimeGate({ children }: PrimeGateProps) {
     return <>{children}</>;
   }
 
-  const isPrime =
-    user.subscriptionType === "prime" || user.subscriptionType === "active";
+  const isPrime = user.tier === "prime";
 
   if (isPrime) {
     return <>{children}</>;

@@ -142,7 +142,7 @@ const handleCallback = async (req, res) => {
       // Find or create user
       let result = await query(
         `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status,
-                accepted_terms, photo_file_id, bio, language
+                terms_accepted, photo_file_id, bio, language
          FROM users WHERE twitter = $1`,
         [xHandle]
       );
@@ -153,7 +153,7 @@ const handleCallback = async (req, res) => {
           await query('UPDATE users SET twitter = $1 WHERE id = $2', [xHandle, req.session.user.id]);
           result = await query(
             `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status,
-                    accepted_terms, photo_file_id, bio, language FROM users WHERE id = $1`,
+                    terms_accepted, photo_file_id, bio, language FROM users WHERE id = $1`,
             [req.session.user.id]
           );
           user = result.rows[0];
@@ -162,9 +162,9 @@ const handleCallback = async (req, res) => {
           const [firstName, ...rest] = ((xData?.name || xHandle)).split(' ');
           const { rows } = await query(
             `INSERT INTO users (id, pnptv_id, first_name, last_name, twitter,
-              subscription_status, tier, role, accepted_terms, is_active, created_at, updated_at)
+              subscription_status, tier, role, terms_accepted, is_active, created_at, updated_at)
              VALUES ($1,$2,$3,$4,$5,'free','free','user',false,true,NOW(),NOW())
-             RETURNING id, pnptv_id, first_name, last_name, username, subscription_status, accepted_terms, photo_file_id, bio, language, twitter`,
+             RETURNING id, pnptv_id, first_name, last_name, username, subscription_status, terms_accepted, photo_file_id, bio, language, twitter`,
             [uuidv4(), uuidv4(), firstName, rest.join(' ') || null, xHandle]
           );
           user = rows[0];
@@ -181,7 +181,7 @@ const handleCallback = async (req, res) => {
         firstName: user.first_name,
         lastName: user.last_name,
         subscriptionStatus: user.subscription_status,
-        acceptedTerms: user.accepted_terms,
+        acceptedTerms: user.terms_accepted,
         photoUrl: user.photo_file_id,
         bio: user.bio,
         xHandle,

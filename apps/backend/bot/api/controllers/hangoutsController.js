@@ -35,7 +35,7 @@ const normalizeSubscriptionStatus = (status) => {
 
 const fetchUserRecord = async (userId) => {
   const result = await query(
-    `SELECT id, subscription_status, tier, role, accepted_terms, is_active
+    `SELECT id, subscription_status, tier, role, terms_accepted, is_active
      FROM users WHERE id = $1`,
     [String(userId)]
   );

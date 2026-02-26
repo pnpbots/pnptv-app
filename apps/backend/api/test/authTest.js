@@ -51,16 +51,16 @@ class AuthTester {
   }
 
   async testDatabaseSchema() {
-    const testName = 'Database Schema - accepted_terms column';
+    const testName = 'Database Schema - terms_accepted column';
     this.testResults.total++;
-    
+
     try {
       // Check if we have permission to query information_schema
       const result = await query(
-        `SELECT column_name 
-         FROM information_schema.columns 
-         WHERE table_name = 'users' 
-         AND column_name = 'accepted_terms'`
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_name = 'users'
+         AND column_name = 'terms_accepted'`
       );
       
       if (result.rows.length === 0) {

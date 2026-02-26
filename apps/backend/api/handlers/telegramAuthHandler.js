@@ -92,7 +92,7 @@ const handleTelegramAuth = async (req, res) => {
 
     // Check if user exists in our database
     let userQuery = await query(
-      `SELECT id, telegram, username, email, subscription_status, accepted_terms,
+      `SELECT id, telegram, username, email, subscription_status, tier, terms_accepted,
               first_name, language,
               COALESCE(age_verified, false) as age_verified,
               COALESCE(role, 'user') as role
@@ -108,7 +108,7 @@ const handleTelegramAuth = async (req, res) => {
       try {
         // Create user with default 'free' status (will be auto-upgraded if they have active subscription)
         await query(
-          `INSERT INTO users (telegram, username, first_name, language, subscription_status, accepted_terms, age_verified, role)
+          `INSERT INTO users (telegram, username, first_name, language, subscription_status, terms_accepted, age_verified, role)
            VALUES ($1, $2, $3, $4, 'free', false, false, 'user')
            ON CONFLICT (telegram) DO NOTHING`,
           [
@@ -121,7 +121,7 @@ const handleTelegramAuth = async (req, res) => {
 
         // Re-query to get the created user
         userQuery = await query(
-          `SELECT id, telegram, username, email, subscription_status, accepted_terms,
+          `SELECT id, telegram, username, email, subscription_status, tier, terms_accepted,
                   first_name, language,
                   COALESCE(age_verified, false) as age_verified,
                   COALESCE(role, 'user') as role
@@ -199,12 +199,13 @@ const handleTelegramAuth = async (req, res) => {
       language: user.language || 'en',
       email: user.email,
       subscriptionStatus: user.subscription_status,
-      acceptedTerms: user.accepted_terms,
+      tier: user.tier || 'free',
+      acceptedTerms: user.terms_accepted,
       ageVerified: user.age_verified,
       role
     };
 
-    logger.info(`User ${user.id} authenticated successfully, terms accepted: ${user.accepted_terms}`);
+    logger.info(`User ${user.id} authenticated successfully, terms accepted: ${user.terms_accepted}`);
 
     // ASYNC: Provision PDS in background (don't block login)
     // This runs independently without awaiting
@@ -242,13 +243,14 @@ const handleTelegramAuth = async (req, res) => {
         first_name: user.first_name || telegramUser.first_name || '',
         display_name: user.first_name || telegramUser.first_name || user.username || '',
         language: user.language || 'en',
-        terms_accepted: Boolean(user.accepted_terms),
+        terms_accepted: Boolean(user.terms_accepted),
         age_verified: Boolean(user.age_verified),
         subscription_type: user.subscription_status || 'free',
+        tier: user.tier || 'free',
         role,
         photo_url: telegramUser.photo_url || null,
       },
-      termsAccepted: user.accepted_terms
+      termsAccepted: user.terms_accepted
     });
 
   } catch (error) {
@@ -277,16 +279,18 @@ const handleAcceptTerms = async (req, res) => {
     
     // Update user's terms acceptance in database
     await query(
-      'UPDATE users SET accepted_terms = TRUE WHERE id = $1',
+      'UPDATE users SET terms_accepted = TRUE WHERE id = $1',
       [user.id]
     );
-    
-    // Update session
+
+    // Update session and persist to Redis
     req.session.user.acceptedTerms = true;
-    
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => err ? reject(err) : resolve());
+    });
+
     logger.info(`User ${user.id} accepted terms and conditions`);
-    
-    // Get the original URL from localStorage (will be handled by frontend)
+
     res.json({ success: true });
     
   } catch (error) {
@@ -321,6 +325,7 @@ const checkAuthStatus = (req, res) => {
         terms_accepted: Boolean(user.acceptedTerms),
         age_verified: Boolean(user.ageVerified),
         subscription_type: user.subscriptionStatus || 'free',
+        tier: user.tier || 'free',
         role: user.role || 'user',
         photo_url: user.photoUrl || null,
       }

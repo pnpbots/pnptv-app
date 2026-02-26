@@ -76,10 +76,10 @@ async function createWebUser({ id, firstName, lastName, username, email, passwor
     `INSERT INTO users
        (id, pnptv_id, first_name, last_name, username, email, password_hash,
         telegram, twitter, x_id, photo_file_id, subscription_status, tier, role,
-        accepted_terms, is_active, created_at, updated_at)
+        terms_accepted, is_active, created_at, updated_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'free','free','user',false,true,NOW(),NOW())
      RETURNING id, pnptv_id, first_name, last_name, username, email,
-               subscription_status, accepted_terms, photo_file_id, bio, language, telegram, twitter, x_id, role`,
+               subscription_status, terms_accepted, photo_file_id, bio, language, telegram, twitter, x_id, role`,
     [userId, pnptvId, firstName || 'User', lastName || null, displayName || null,
      email || null, passwordHash || null, telegramId || null, twitterHandle || null, xId || null, photoFileId || null]
   );
@@ -104,7 +104,7 @@ async function createWebUser({ id, firstName, lastName, username, email, passwor
  */
 async function findOrLinkUser({ telegramId, twitterHandle, xId, email, firstName, lastName, username, photoFileId } = {}) {
   const RETURN_COLS = `id, pnptv_id, first_name, last_name, username, email,
-    subscription_status, accepted_terms, photo_file_id, bio, language, telegram, twitter, x_id, role`;
+    subscription_status, terms_accepted, photo_file_id, bio, language, telegram, twitter, x_id, role`;
 
   let user = null;
 
@@ -180,7 +180,7 @@ function buildSession(user, extra = {}) {
     firstName: user.first_name,
     lastName: user.last_name,
     subscriptionStatus: user.subscription_status,
-    acceptedTerms: user.accepted_terms,
+    acceptedTerms: user.terms_accepted,
     photoUrl: user.photo_file_id,
     bio: user.bio,
     language: user.language,
@@ -559,7 +559,7 @@ const telegramLogin = async (req, res) => {
       registered: true,
       isNew,
       pnptvId: user.pnptv_id,
-      termsAccepted: user.accepted_terms,
+      termsAccepted: user.terms_accepted,
       user: {
         id: user.id,
         pnptvId: user.pnptv_id,
@@ -674,7 +674,7 @@ const emailLogin = async (req, res) => {
     const emailLower = email.toLowerCase().trim();
     const result = await query(
       `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status,
-              accepted_terms, photo_file_id, bio, language, password_hash, email, role, email_verified
+              terms_accepted, photo_file_id, bio, language, password_hash, email, role, email_verified
        FROM users WHERE email = $1`,
       [emailLower]
     );
@@ -767,7 +767,7 @@ const verifyEmail = async (req, res) => {
 
       const userResult = await query(
         `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status,
-                accepted_terms, photo_file_id, bio, language, role, email
+                terms_accepted, photo_file_id, bio, language, role, email
          FROM users WHERE id = $1`,
         [tokenRow.user_id]
       );
@@ -811,7 +811,7 @@ const verifyEmail = async (req, res) => {
     // Lookup full user data for session
     const result = await query(
       `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status,
-              accepted_terms, photo_file_id, bio, language, role, email
+              terms_accepted, photo_file_id, bio, language, role, email
        FROM users WHERE id = $1`,
       [tokenRow.user_id]
     );
@@ -1118,7 +1118,7 @@ const xLoginCallback = async (req, res) => {
       );
       const { rows: updated } = await query(
         `SELECT id, pnptv_id, first_name, last_name, username, email,
-                subscription_status, accepted_terms, photo_file_id, bio, language, telegram, twitter, x_id, role
+                subscription_status, terms_accepted, photo_file_id, bio, language, telegram, twitter, x_id, role
          FROM users WHERE id = $1`,
         [existingId]
       );
@@ -1212,7 +1212,7 @@ const getProfile = async (req, res) => {
               email, subscription_status, plan_id, plan_expiry,
               language, interests, location_name, twitter,
               instagram, tiktok, youtube,
-              accepted_terms, created_at
+              terms_accepted, created_at
        FROM users WHERE id = $1`,
       [user.id]
     );
