@@ -101,6 +101,186 @@
             gap: 16px;
         }
 
+        /* Bluesky button — initial state */
+        .btn-bluesky {
+            background: rgba(0, 133, 255, 0.12);
+            border: 1px solid rgba(0, 133, 255, 0.35);
+            border-radius: 12px;
+            padding: 14px 24px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 16px;
+            font-weight: 600;
+            color: #FFFFFF;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            width: 100%;
+            transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+            min-height: 52px;
+        }
+
+        .btn-bluesky:hover {
+            background: rgba(0, 133, 255, 0.2);
+            border-color: rgba(0, 133, 255, 0.6);
+        }
+
+        .btn-bluesky:active {
+            transform: scale(0.98);
+        }
+
+        .btn-bluesky:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(0, 133, 255, 0.45);
+        }
+
+        /* Bluesky expanded state — handle input panel */
+        .bluesky-panel {
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+            animation: fadeInUp 0.25s ease-out forwards;
+        }
+
+        .bluesky-panel.active {
+            display: flex;
+        }
+
+        .bluesky-panel-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 2px;
+        }
+
+        .bluesky-panel-header svg {
+            flex-shrink: 0;
+        }
+
+        .bluesky-panel-label {
+            font-size: 14px;
+            font-weight: 600;
+            color: #A8D0FF;
+            letter-spacing: 0.02em;
+        }
+
+        .bluesky-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+
+        .bluesky-handle-input {
+            flex: 1;
+            min-width: 0;
+            background: rgba(0, 133, 255, 0.08);
+            border: 1px solid rgba(0, 133, 255, 0.35);
+            border-radius: 10px;
+            padding: 12px 14px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 14px;
+            color: #FFFFFF;
+            outline: none;
+            transition: border-color 0.2s ease, background 0.2s ease;
+            min-height: 48px;
+        }
+
+        .bluesky-handle-input::placeholder {
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        .bluesky-handle-input:focus {
+            border-color: rgba(0, 133, 255, 0.7);
+            background: rgba(0, 133, 255, 0.13);
+        }
+
+        .bluesky-handle-input.input-error {
+            border-color: #FF453A;
+            background: rgba(255, 69, 58, 0.08);
+        }
+
+        .btn-bluesky-continue {
+            background: #0085FF;
+            border: none;
+            border-radius: 10px;
+            padding: 12px 18px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 14px;
+            font-weight: 700;
+            color: #FFFFFF;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
+            min-height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .btn-bluesky-continue:hover {
+            background: #1A93FF;
+        }
+
+        .btn-bluesky-continue:active {
+            transform: scale(0.97);
+        }
+
+        .btn-bluesky-continue:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(0, 133, 255, 0.45);
+        }
+
+        .btn-bluesky-continue:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .bluesky-hint {
+            font-size: 11px;
+            color: rgba(168, 208, 255, 0.55);
+            text-align: center;
+        }
+
+        .bluesky-back-link {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.35);
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-family: 'Roboto Mono', monospace;
+            text-align: center;
+            padding: 2px 0;
+            text-decoration: underline;
+            transition: color 0.15s ease;
+        }
+
+        .bluesky-back-link:hover {
+            color: rgba(255, 255, 255, 0.65);
+        }
+
+        /* OAuth error banner */
+        .oauth-error-banner {
+            background: rgba(255, 69, 58, 0.1);
+            border: 1px solid rgba(255, 69, 58, 0.35);
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 13px;
+            color: #FF6B63;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            line-height: 1.5;
+            margin-bottom: 4px;
+        }
+
+        .oauth-error-banner svg {
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
         .btn-telegram {
             background: linear-gradient(135deg, #D4007A, #E69138);
             color: #FFFFFF;
@@ -162,24 +342,36 @@
             background: rgba(255, 255, 255, 0.1);
         }
 
-        /* Tooltip */
-        .tooltip {
-            position: absolute;
-            top: -40px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(30, 30, 30, 0.9);
-            border: 1px solid rgba(212, 0, 122, 0.4);
-            border-radius: 8px;
-            padding: 6px 16px;
-            font-size: 14px;
-            font-weight: 500;
-            white-space: nowrap;
-            animation: fadeInUp 0.3s ease-out forwards;
+        /* X button interactive states */
+        .btn-x:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25);
+        }
+
+        .btn-x:active {
+            transform: scale(0.98);
+        }
+
+        .btn-x:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* X error banner — shown when ?x_error= is present in URL */
+        .x-error-banner {
+            background: rgba(255, 69, 58, 0.1);
+            border: 1px solid rgba(255, 69, 58, 0.35);
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 13px;
+            color: #FF6B63;
+            text-align: center;
+            margin-bottom: 8px;
             display: none;
         }
 
-        .tooltip.show {
+        .x-error-banner.show {
             display: block;
         }
 
@@ -258,25 +450,77 @@
 
         <!-- Buttons -->
         <div class="btn-stack">
+            <!-- OAuth error banner (shown when ?error= is present in URL) -->
+            <div id="oauthErrorBanner" class="oauth-error-banner" style="display:none;" role="alert" aria-live="polite">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FF6B63" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <span id="oauthErrorText"></span>
+            </div>
+
             <!-- Login with Telegram -->
             <button class="btn-telegram" id="telegramBtn" onclick="handleTelegramLogin()">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.492-1.302.48-.428-.013-1.252-.242-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
                 </svg>
                 <span id="telegramBtnText">Login with Telegram</span>
             </button>
             <div id="statusMsg" class="status-msg" style="display:none;"></div>
 
-            <!-- Register with X -->
-            <div style="position:relative;">
-                <button class="btn-x" onclick="handleXClick()">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+            <!-- Login with Bluesky -->
+            <div id="blueskySection">
+                <!-- Initial button -->
+                <button class="btn-bluesky" id="blueskyBtn" onclick="showBlueskyPanel()" aria-expanded="false" aria-controls="blueskyPanel">
+                    <!-- Bluesky butterfly SVG (official mark) -->
+                    <svg width="22" height="22" viewBox="0 0 600 530" fill="#FFFFFF" aria-hidden="true">
+                        <path d="M135.72 44.03C202.216 93.951 273.74 195.17 300 249.49c26.262-54.316 97.782-155.54 164.28-205.46C512.26 8.009 590-19.862 590 68.825c0 17.712-10.155 148.79-16.111 170.07-20.703 73.984-96.144 92.854-163.25 81.433 117.3 19.964 147.14 86.092 82.697 152.22-122.39 125.59-175.91-31.511-189.63-71.766-2.514-7.38-3.69-10.832-3.708-7.896-.017-2.936-1.193.516-3.707 7.896-13.714 40.255-67.233 197.36-189.63 71.766-64.444-66.128-34.605-132.26 82.697-152.22-67.108 11.421-142.55-7.449-163.25-81.433C20.15 217.613 10 86.532 10 68.825c0-88.687 77.742-60.816 125.72-24.795z"/>
                     </svg>
-                    Register with X
+                    Login with Bluesky
                 </button>
-                <div class="tooltip" id="xTooltip">Coming Soon</div>
+
+                <!-- Expanded handle input panel -->
+                <div class="bluesky-panel" id="blueskyPanel" role="group" aria-label="Bluesky login">
+                    <div class="bluesky-panel-header">
+                        <svg width="18" height="18" viewBox="0 0 600 530" fill="#0085FF" aria-hidden="true">
+                            <path d="M135.72 44.03C202.216 93.951 273.74 195.17 300 249.49c26.262-54.316 97.782-155.54 164.28-205.46C512.26 8.009 590-19.862 590 68.825c0 17.712-10.155 148.79-16.111 170.07-20.703 73.984-96.144 92.854-163.25 81.433 117.3 19.964 147.14 86.092 82.697 152.22-122.39 125.59-175.91-31.511-189.63-71.766-2.514-7.38-3.69-10.832-3.708-7.896-.017-2.936-1.193.516-3.707 7.896-13.714 40.255-67.233 197.36-189.63 71.766-64.444-66.128-34.605-132.26 82.697-152.22-67.108 11.421-142.55-7.449-163.25-81.433C20.15 217.613 10 86.532 10 68.825c0-88.687 77.742-60.816 125.72-24.795z"/>
+                        </svg>
+                        <span class="bluesky-panel-label">Enter your Bluesky handle</span>
+                    </div>
+                    <div class="bluesky-input-row">
+                        <input
+                            class="bluesky-handle-input"
+                            id="blueskyHandleInput"
+                            type="text"
+                            placeholder="yourname.bsky.social"
+                            autocomplete="username"
+                            autocapitalize="none"
+                            autocorrect="off"
+                            spellcheck="false"
+                            aria-label="Bluesky handle"
+                            aria-describedby="blueskyHint blueskyInputError"
+                            onkeydown="handleBlueskyKeydown(event)"
+                            oninput="clearBlueskyInputError()"
+                        >
+                        <button class="btn-bluesky-continue" id="blueskyContinueBtn" onclick="handleBlueskyLogin()" aria-label="Continue with this Bluesky handle">
+                            <span id="blueskyContinueBtnText">Continue</span>
+                        </button>
+                    </div>
+                    <div id="blueskyInputError" class="status-msg status-error" style="display:none;" role="alert" aria-live="polite"></div>
+                    <p class="bluesky-hint" id="blueskyHint">or enter a custom PDS handle (e.g. yourname.example.com)</p>
+                    <button class="bluesky-back-link" onclick="hideBlueskyPanel()" aria-label="Go back to login options">Cancel</button>
+                </div>
             </div>
+
+            <!-- Login / Register with X -->
+            <button class="btn-x" id="xBtn" onclick="handleXLogin()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                </svg>
+                <span id="xBtnText">Continue with X</span>
+            </button>
+            <div id="xErrorBanner" class="x-error-banner" role="alert" aria-live="polite"></div>
         </div>
 
         <!-- Footer -->
@@ -287,6 +531,45 @@
 
     <script>
         let pollInterval = null;
+        let loginToken = null;
+
+        // Detect iOS (Safari, WebKit, Telegram in-app browser)
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+        // ── OAuth error banner ──────────────────────────────────────────────
+        // Check for ?error= on page load (set by /oauth/callback on failure)
+        (function checkOAuthError() {
+            const params = new URLSearchParams(window.location.search);
+            const errorCode = params.get('error');
+            if (!errorCode) return;
+
+            const banner = document.getElementById('oauthErrorBanner');
+            const text = document.getElementById('oauthErrorText');
+
+            const errorMessages = {
+                'handle_not_found': 'Bluesky handle not found. Please check the handle and try again.',
+                'pds_unreachable':  'Could not reach the Bluesky server. Please try again shortly.',
+                'oauth_denied':     'Authorization was cancelled. You can try again whenever you are ready.',
+                'state_mismatch':   'The login session expired. Please start again.',
+                'missing_code':     'Authorization did not complete. Please try again.',
+                'token_exchange':   'Failed to complete sign-in. Please try again.',
+                'session_error':    'Could not create a session. Please try again.',
+            };
+
+            text.textContent = errorMessages[errorCode] || 'Sign-in failed (' + errorCode + '). Please try again.';
+            banner.style.display = 'flex';
+
+            // Remove ?error= from the URL so a reload does not re-show the banner
+            const cleanUrl = window.location.pathname + (params.toString().replace(/error=[^&]*&?/, '').replace(/&$/, '') ? '?' + params.toString().replace(/error=[^&]*&?/, '').replace(/&$/, '') : '');
+            window.history.replaceState(null, '', cleanUrl || window.location.pathname);
+
+            // Auto-expand the Bluesky panel when there was an auth error so
+            // the user can immediately correct their handle
+            if (errorCode !== 'oauth_denied') {
+                showBlueskyPanel();
+            }
+        })();
 
         async function handleTelegramLogin() {
             const btn = document.getElementById('telegramBtn');
@@ -312,34 +595,19 @@
                     throw new Error('Failed to get login token');
                 }
 
-                // Open Telegram deep link
-                window.open(data.deepLink, '_blank');
+                // Save token so polling can resume after iOS app switch
+                loginToken = data.token;
+                try { sessionStorage.setItem('pnptv_login_token', data.token); } catch(e) {}
 
-                // Poll for auth
-                let attempts = 0;
-                pollInterval = setInterval(async () => {
-                    attempts++;
-                    if (attempts > 60) {
-                        clearInterval(pollInterval);
-                        btn.disabled = false;
-                        btnText.textContent = 'Login with Telegram';
-                        statusMsg.className = 'status-msg status-error';
-                        statusMsg.textContent = 'Login timed out. Please try again.';
-                        return;
-                    }
-                    try {
-                        const check = await fetch('/api/webapp/auth/telegram/check?token=' + data.token, {
-                            credentials: 'include'
-                        });
-                        const result = await check.json();
-                        if (result.authenticated) {
-                            clearInterval(pollInterval);
-                            window.location.href = '/app';
-                        }
-                    } catch (e) {
-                        // Keep polling
-                    }
-                }, 5000);
+                // iOS: use location.href instead of window.open to avoid popup blocker
+                // and ensure the page stays alive when returning from Telegram app
+                if (isIOS) {
+                    window.location.href = data.deepLink;
+                } else {
+                    window.open(data.deepLink, '_blank');
+                }
+
+                startPolling(data.token);
 
             } catch (e) {
                 btn.disabled = false;
@@ -350,11 +618,225 @@
             }
         }
 
-        function handleXClick() {
-            const tooltip = document.getElementById('xTooltip');
-            tooltip.classList.add('show');
-            setTimeout(() => tooltip.classList.remove('show'), 2000);
+        function startPolling(token) {
+            if (pollInterval) clearInterval(pollInterval);
+
+            let attempts = 0;
+            const maxAttempts = 60;
+            // iOS: poll faster after returning, desktop: standard 5s
+            const interval = isIOS ? 3000 : 5000;
+
+            const btn = document.getElementById('telegramBtn');
+            const btnText = document.getElementById('telegramBtnText');
+            const statusMsg = document.getElementById('statusMsg');
+
+            pollInterval = setInterval(async () => {
+                attempts++;
+                if (attempts > maxAttempts) {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                    btn.disabled = false;
+                    btnText.textContent = 'Login with Telegram';
+                    statusMsg.className = 'status-msg status-error';
+                    statusMsg.textContent = 'Login timed out. Please try again.';
+                    return;
+                }
+                try {
+                    const check = await fetch('/api/webapp/auth/telegram/check?token=' + token, {
+                        credentials: 'include'
+                    });
+                    const result = await check.json();
+                    if (result.authenticated) {
+                        clearInterval(pollInterval);
+                        pollInterval = null;
+                        window.location.href = '/app';
+                    }
+                } catch (e) {
+                    // Keep polling — network hiccup during app switch
+                }
+            }, interval);
         }
+
+        // iOS: resume polling when user comes back from Telegram app
+        // visibilitychange fires when Safari re-activates the tab
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') {
+                const token = loginToken || (function() {
+                    try { return sessionStorage.getItem('pnptv_login_token'); } catch(e) { return null; }
+                })();
+                if (token && !pollInterval) {
+                    const btn = document.getElementById('telegramBtn');
+                    const btnText = document.getElementById('telegramBtnText');
+                    const statusMsg = document.getElementById('statusMsg');
+                    btn.disabled = true;
+                    btnText.innerHTML = '<svg class="spinner" width="20" height="20" viewBox="0 0 24 24" fill="none"><circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Checking...';
+                    statusMsg.style.display = 'block';
+                    statusMsg.className = 'status-msg';
+                    statusMsg.textContent = 'Checking authentication...';
+                    startPolling(token);
+                }
+            }
+        });
+
+        // iOS: also handle pageshow (back-forward cache)
+        window.addEventListener('pageshow', function(event) {
+            if (event.persisted) {
+                const token = loginToken || (function() {
+                    try { return sessionStorage.getItem('pnptv_login_token'); } catch(e) { return null; }
+                })();
+                if (token && !pollInterval) {
+                    startPolling(token);
+                }
+            }
+        });
+
+        // ── Bluesky login ───────────────────────────────────────────────────
+        function showBlueskyPanel() {
+            const btn = document.getElementById('blueskyBtn');
+            const panel = document.getElementById('blueskyPanel');
+
+            btn.style.display = 'none';
+            btn.setAttribute('aria-expanded', 'true');
+            panel.classList.add('active');
+
+            // Focus the input on the next frame so the animation has started
+            requestAnimationFrame(function() {
+                requestAnimationFrame(function() {
+                    document.getElementById('blueskyHandleInput').focus();
+                });
+            });
+        }
+
+        function hideBlueskyPanel() {
+            const btn = document.getElementById('blueskyBtn');
+            const panel = document.getElementById('blueskyPanel');
+            const input = document.getElementById('blueskyHandleInput');
+            const errorEl = document.getElementById('blueskyInputError');
+
+            panel.classList.remove('active');
+            btn.style.display = '';
+            btn.setAttribute('aria-expanded', 'false');
+
+            // Reset input state
+            input.value = '';
+            input.classList.remove('input-error');
+            errorEl.style.display = 'none';
+
+            // Restore continue button
+            resetContinueBtn();
+
+            btn.focus();
+        }
+
+        function handleBlueskyKeydown(event) {
+            if (event.key === 'Enter') {
+                handleBlueskyLogin();
+            } else if (event.key === 'Escape') {
+                hideBlueskyPanel();
+            }
+        }
+
+        function clearBlueskyInputError() {
+            const input = document.getElementById('blueskyHandleInput');
+            const errorEl = document.getElementById('blueskyInputError');
+            input.classList.remove('input-error');
+            errorEl.style.display = 'none';
+        }
+
+        function setBlueskyInputError(message) {
+            const input = document.getElementById('blueskyHandleInput');
+            const errorEl = document.getElementById('blueskyInputError');
+            input.classList.add('input-error');
+            errorEl.textContent = message;
+            errorEl.style.display = 'block';
+            input.focus();
+        }
+
+        function resetContinueBtn() {
+            const btn = document.getElementById('blueskyContinueBtn');
+            const btnText = document.getElementById('blueskyContinueBtnText');
+            btn.disabled = false;
+            btnText.textContent = 'Continue';
+        }
+
+        function handleBlueskyLogin() {
+            const input = document.getElementById('blueskyHandleInput');
+            const continueBtn = document.getElementById('blueskyContinueBtn');
+            const continueBtnText = document.getElementById('blueskyContinueBtnText');
+
+            const raw = input.value.trim();
+
+            // Strip leading @ if the user typed it
+            const handle = raw.startsWith('@') ? raw.slice(1).trim() : raw;
+
+            if (!handle) {
+                setBlueskyInputError('Please enter your Bluesky handle.');
+                return;
+            }
+
+            // Basic sanity: must contain at least one dot (e.g. name.bsky.social)
+            if (!handle.includes('.')) {
+                setBlueskyInputError('Enter the full handle, e.g. yourname.bsky.social');
+                return;
+            }
+
+            // Loading state — disable button, show spinner
+            continueBtn.disabled = true;
+            continueBtnText.innerHTML =
+                '<svg style="animation:spin 1s linear infinite;flex-shrink:0" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+                '<circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>' +
+                '<path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>' +
+                '</svg>Wait';
+
+            // Redirect to OAuth initiation endpoint
+            window.location.href = '/oauth/login?handle=' + encodeURIComponent(handle);
+        }
+
+        // ── X OAuth login ────────────────────────────────────────────────────
+        function handleXLogin() {
+            const btn = document.getElementById('xBtn');
+            const btnText = document.getElementById('xBtnText');
+
+            btn.disabled = true;
+            btnText.innerHTML =
+                '<svg style="animation:spin 1s linear infinite;flex-shrink:0" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+                '<circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>' +
+                '<path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>' +
+                '</svg> Redirecting...';
+
+            // Server-side redirect — the backend generates PKCE and redirects to X.
+            window.location.href = '/api/webapp/auth/x/login';
+        }
+
+        // ── X error banner ────────────────────────────────────────────────────
+        // Show a user-friendly message when the X OAuth callback returned ?x_error=
+        (function() {
+            const params = new URLSearchParams(window.location.search);
+            const xError = params.get('x_error');
+            if (!xError) return;
+
+            const messages = {
+                access_denied: 'You cancelled the X login. Try again anytime.',
+                state_mismatch: 'Login session expired. Please try again.',
+                token_exchange_failed: 'Could not complete X login. Please try again.',
+                profile_fetch_failed: 'Could not retrieve your X profile. Please try again.',
+                login_failed: 'X login failed. Please try again.',
+                server_error: 'A server error occurred. Please try again in a moment.',
+            };
+
+            const banner = document.getElementById('xErrorBanner');
+            if (banner) {
+                banner.textContent = messages[xError] || 'X login was unsuccessful. Please try again.';
+                banner.classList.add('show');
+
+                // Auto-hide after 8 seconds
+                setTimeout(function() { banner.classList.remove('show'); }, 8000);
+            }
+
+            // Remove the query param from the URL without a page reload
+            const cleanUrl = window.location.pathname + (params.toString().replace(/x_error=[^&]*&?/, '').replace(/&$/, '') ? '?' + params.toString().replace(/x_error=[^&]*&?/, '').replace(/&$/, '') : '');
+            window.history.replaceState(null, '', cleanUrl);
+        })();
     </script>
 </body>
 </html>

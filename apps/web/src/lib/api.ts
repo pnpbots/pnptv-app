@@ -49,9 +49,18 @@ export interface TelegramAuthResponse {
   error?: string;
 }
 
+export interface AuthMethods {
+  telegram: boolean;
+  atproto: boolean;
+}
+
 export interface AuthStatusResponse {
   authenticated: boolean;
-  user?: TelegramAuthResponse["user"];
+  user?: TelegramAuthResponse["user"] & {
+    atproto_did?: string | null;
+    atproto_handle?: string | null;
+    auth_methods?: AuthMethods;
+  };
 }
 
 export function telegramAuth(initData: string): Promise<TelegramAuthResponse> {
@@ -71,6 +80,20 @@ export function acceptTerms(): Promise<{ success: boolean }> {
 
 export function apiLogout(): Promise<{ success: boolean }> {
   return request("/api/logout", { method: "POST" });
+}
+
+export function unlinkAtproto(): Promise<{ success: boolean; message: string }> {
+  return request("/api/webapp/auth/atproto/unlink", { method: "POST" });
+}
+
+/**
+ * Initiates an ATProto/Bluesky OAuth flow for the given handle.
+ * This is a redirect — the function builds the URL and navigates to it.
+ * The backend /oauth/login?handle=X will redirect to the Bluesky authorization server.
+ */
+export function getAtprotoLoginUrl(handle: string): string {
+  const base = import.meta.env.VITE_API_URL || "https://pnptv.app";
+  return `${base}/oauth/login?handle=${encodeURIComponent(handle)}`;
 }
 
 // Age verification (self-declaration)
