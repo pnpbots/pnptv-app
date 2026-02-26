@@ -9,6 +9,9 @@
     "dev": "nodemon bot/core/bot.js"
   },
   "dependencies": {
+    "@atproto/api": "^0.19.0",
+    "@atproto/jwk-jose": "^0.1.11",
+    "@atproto/oauth-client-node": "^0.3.17",
     "@daimo/pay": "^1.19.0",
     "@daimo/pay-common": "^1.19.0",
     "@noble/hashes": "^2.0.1",
