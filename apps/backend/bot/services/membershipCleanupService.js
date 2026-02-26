@@ -96,7 +96,7 @@ class MembershipCleanupService {
       // Get all active Prime users from the database
       const primeUsers = await query(`
         SELECT id, username FROM users
-        WHERE subscription_status = 'active' AND tier = 'Prime'
+        WHERE subscription_status = 'active' AND tier = 'prime'
       `);
 
       logger.info(`Found ${primeUsers.rows.length} active Prime users to check for PRIME channel access`);
@@ -345,11 +345,11 @@ Type /subscribe to view membership plans and reactivate your access!`;
       const activateResult = await query(`
         UPDATE users
         SET subscription_status = 'active',
-            tier = 'Prime',
+            tier = 'prime',
             updated_at = NOW()
         WHERE plan_expiry IS NOT NULL
           AND plan_expiry > NOW()
-          AND (subscription_status != 'active' OR tier != 'Prime')
+          AND (subscription_status != 'active' OR tier != 'prime')
         RETURNING id, username
       `);
       results.toActive += activateResult.rowCount;
@@ -361,10 +361,10 @@ Type /subscribe to view membership plans and reactivate your access!`;
       const lifetimeResult = await query(`
         UPDATE users
         SET subscription_status = 'active',
-            tier = 'Prime',
+            tier = 'prime',
             updated_at = NOW()
         WHERE (plan_id ILIKE '%lifetime%' OR plan_id ILIKE '%life-time%')
-          AND (subscription_status != 'active' OR tier != 'Prime')
+          AND (subscription_status != 'active' OR tier != 'prime')
         RETURNING id, username
       `);
       results.toActive += lifetimeResult.rowCount;
@@ -376,7 +376,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
       const churnResult = await query(`
         UPDATE users
         SET subscription_status = 'churned',
-            tier = 'Free',
+            tier = 'free',
             updated_at = NOW()
         WHERE plan_expiry IS NOT NULL
           AND plan_expiry <= NOW()
@@ -393,7 +393,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
       // Step 4: Ensure 'Free' tier for all churned users
       const fixChurnedTierResult = await query(`
         UPDATE users
-        SET tier = 'Free',
+        SET tier = 'free',
             updated_at = NOW()
         WHERE subscription_status IN ('churned', 'expired', 'free')
           AND tier != 'Free'
@@ -420,7 +420,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
       const freeResult = await query(`
         UPDATE users
         SET subscription_status = 'free',
-            tier = 'Free',
+            tier = 'free',
             updated_at = NOW()
         WHERE plan_id IS NULL
           AND plan_expiry IS NULL

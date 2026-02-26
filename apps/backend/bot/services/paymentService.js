@@ -8,6 +8,7 @@ const SubscriberModel = require('../../models/subscriberModel');
 const ModelService = require('./modelService');
 const PNPLiveService = require('./pnpLiveService');
 const { cache } = require('../../config/redis');
+const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const crypto = require('crypto');
 const { Telegraf } = require('telegraf');
@@ -868,15 +869,71 @@ class PaymentService {
       }
 
       if (!payment && paymentIdOrType && paymentIdOrType !== 'pnp_live' && this.isUuidLike(paymentIdOrType)) {
-        logger.error('ePayco webhook references unknown internal payment id', {
-          paymentId: paymentIdOrType,
+        // The x_extra3 UUID may come from an external checkout site (e.g. easybots.site) that
+        // generates its own payment record with a different UUID than the one stored in our DB.
+        // Before hard-failing, attempt to recover the local payment using x_extra1 (userId)
+        // and x_extra2 (planId) by finding the most recent pending payment for that user+plan.
+        logger.warn('ePayco webhook x_extra3 UUID not found locally — attempting recovery via userId+planId', {
+          externalPaymentId: paymentIdOrType,
+          userId,
+          planId: planIdOrBookingId,
           refPayco: x_ref_payco,
         });
-        return {
-          success: false,
-          code: 'PAYMENT_NOT_FOUND',
-          message: 'Webhook paymentId was not found in local records',
-        };
+
+        if (userId && planIdOrBookingId) {
+          try {
+            const recoveryResult = await query(
+              `SELECT * FROM payments
+               WHERE user_id = $1
+                 AND plan_id = $2
+                 AND status IN ('pending', 'processing')
+               ORDER BY created_at DESC
+               LIMIT 1`,
+              [String(userId), String(planIdOrBookingId)]
+            );
+            if (recoveryResult.rows.length > 0) {
+              payment = PaymentModel._formatPayment(recoveryResult.rows[0]);
+              paymentIdOrType = payment.id;
+              logger.info('ePayco webhook: recovered local payment via userId+planId fallback', {
+                externalPaymentId: webhookData.x_extra3,
+                recoveredPaymentId: payment.id,
+                userId,
+                planId: planIdOrBookingId,
+                refPayco: x_ref_payco,
+              });
+            }
+          } catch (recoveryErr) {
+            logger.error('ePayco webhook: payment recovery query failed', {
+              error: recoveryErr.message,
+              userId,
+              planId: planIdOrBookingId,
+            });
+          }
+        }
+
+        // If recovery failed, log an error but do NOT return early for accepted payments —
+        // instead continue with userId+planId from the webhook extras so the subscription
+        // can still be activated even without a matching local payment record.
+        if (!payment) {
+          logger.error('ePayco webhook references unknown internal payment id and recovery failed', {
+            externalPaymentId: paymentIdOrType,
+            userId,
+            planId: planIdOrBookingId,
+            refPayco: x_ref_payco,
+          });
+          // Only abort if we also lack userId and planId (nothing to work with).
+          // If we have both userId and planId, fall through to state processing below
+          // so that accepted webhooks can still activate the subscription.
+          if (!userId || !planIdOrBookingId) {
+            return {
+              success: false,
+              code: 'PAYMENT_NOT_FOUND',
+              message: 'Webhook paymentId was not found in local records and userId/planId missing',
+            };
+          }
+          // Clear paymentIdOrType so downstream updateStatus calls are skipped gracefully
+          paymentIdOrType = null;
+        }
       }
 
       // Recover missing extras from the internal payment record.

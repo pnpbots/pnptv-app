@@ -352,11 +352,11 @@ class StreamingService {
                 return { allowed: true };
             }
 
-            // Check subscription status
-            if (viewer.subscriptionStatus !== 'active' && viewer.subscriptionStatus !== 'trial') {
+            // Check tier for prime access
+            if ((viewer.tier || '').toLowerCase() !== 'prime') {
                 return {
                     allowed: false,
-                    reason: 'You need an active subscription to view this stream'
+                    reason: 'You need a Prime membership to view this stream'
                 };
             }
 

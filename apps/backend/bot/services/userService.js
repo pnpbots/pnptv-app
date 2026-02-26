@@ -208,8 +208,8 @@ class UserService {
       let legacyMerged = false;
       if (value.email) {
         const currentUser = await UserModel.getById(userId);
-        // Only check if user doesn't already have an active subscription
-        if (currentUser && currentUser.subscriptionStatus !== 'active') {
+        // Only check if user doesn't already have a prime tier
+        if (currentUser && (currentUser.tier || '').toLowerCase() !== 'prime') {
           const merged = await UserModel.checkAndMergeLegacy(userId, value.email, value.username);
           if (merged) {
             legacyMerged = true;
@@ -251,13 +251,13 @@ class UserService {
         return { success: false, merged: false, user: null, message: 'User not found' };
       }
 
-      // Check if user already has an active subscription
-      if (currentUser.subscriptionStatus === 'active') {
+      // Check if user already has prime tier
+      if ((currentUser.tier || '').toLowerCase() === 'prime') {
         return {
           success: true,
           merged: false,
           user: currentUser,
-          message: 'User already has an active subscription',
+          message: 'User already has a prime subscription',
         };
       }
 
@@ -370,8 +370,8 @@ class UserService {
 
       if (!user) return false;
 
-      // If user has no subscription or status is not active/prime, return false
-      if (user.subscriptionStatus !== 'active' && user.subscriptionStatus !== 'prime') return false;
+      // If user tier is not prime, return false
+      if ((user.tier || '').toLowerCase() !== 'prime') return false;
 
       // Check if subscription is expired
       if (user.planExpiry) {

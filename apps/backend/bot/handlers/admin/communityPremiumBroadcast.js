@@ -79,7 +79,7 @@ const registerCommunityPremiumBroadcast = (bot) => {
           const userLang = user.language || 'en';
 
           // Check if user already has active premium (including lifetime)
-          const hasActivePremium = user.subscriptionStatus === 'active' && (
+          const hasActivePremium = (user.tier || '').toLowerCase() === 'prime' && (
             user.lifetimeAccess === true || // Lifetime members
             (user.planExpiry && new Date(user.planExpiry) > new Date()) // Time-limited premium
           );
@@ -201,7 +201,7 @@ const registerCommunityPremiumBroadcast = (bot) => {
       }
 
       // Check if user already has active premium (including lifetime)
-      const hasActivePremium = user.subscriptionStatus === 'active' && (
+      const hasActivePremium = (user.tier || '').toLowerCase() === 'prime' && (
         user.lifetimeAccess === true || // Lifetime members
         (user.planExpiry && new Date(user.planExpiry) > new Date()) // Time-limited premium
       );

@@ -5,13 +5,11 @@ const performanceMonitor = require('../utils/performanceMonitor');
 
 const TABLE = 'users';
 
-const normalizeSubscriptionStatus = (status) => {
-  const normalized = String(status || '').toLowerCase();
-  if (normalized === 'active' || normalized === 'prime' || normalized === 'trial') {
-    return 'active';
-  }
-  return 'inactive';
-};
+/**
+ * Check if user has prime tier access
+ * tier = 'prime' means paid membership, 'free' means no paid membership
+ */
+const isPrimeTier = (tier) => String(tier || '').toLowerCase() === 'prime';
 
 /**
  * User Model - Handles all user data operations with PostgreSQL
@@ -50,11 +48,12 @@ class UserModel {
       tier: row.tier,
       // Subscription object for access control compatibility
       subscription: {
-        isPrime: normalizeSubscriptionStatus(row.subscription_status) === 'active',
+        isPrime: isPrimeTier(row.tier),
         status: row.subscription_status,
         planId: row.plan_id,
         expiry: row.plan_expiry
       },
+      isPremium: isPrimeTier(row.tier),
       role: row.role,
       status: row.status,
       assignedBy: row.assigned_by,
@@ -461,10 +460,10 @@ class UserModel {
       const status = (subscription.status || '').toLowerCase();
 
       // Determine tier based on status
-      // prime/active = PRIME tier (membership active)
-      // churned/expired/free/empty = Free tier (membership not active)
+      // prime/active = prime tier (membership active)
+      // churned/expired/free/empty = free tier (membership not active)
       const isActive = status === 'active' || status === 'prime';
-      const tier = isActive ? 'Prime' : 'Free';
+      const tier = isActive ? 'prime' : 'free';
 
       // Normalize status: churned/expired should remain as 'churned' for tracking,
       // but tier will be 'Free' for access control

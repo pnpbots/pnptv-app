@@ -73,7 +73,7 @@ class SubscriptionService {
       const now = new Date();
       const expiry = user.plan_expiry ? new Date(user.plan_expiry) : null;
 
-      return user.subscription_status === 'active' && expiry && expiry > now;
+      return (user.tier || '').toLowerCase() === 'prime' && expiry && expiry > now;
     } catch (error) {
       logger.error('Error checking subscription status:', { userId, error: error.message });
       return false;

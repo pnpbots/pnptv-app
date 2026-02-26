@@ -296,6 +296,7 @@ export interface UserProfile {
   bio: string | null;
   photoUrl: string | null;
   subscriptionStatus: string;
+  tier: string;
   subscriptionPlan?: string;
   subscriptionExpires?: string;
   language?: string;

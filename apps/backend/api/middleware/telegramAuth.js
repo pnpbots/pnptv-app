@@ -20,10 +20,10 @@ const telegramAuth = async (req, res, next) => {
     
     // Check if user exists in our database
     const userQuery = await query(
-      'SELECT id, telegram, username, subscription_status, accepted_terms FROM users WHERE telegram = $1',
+      'SELECT id, telegram, username, subscription_status, tier, accepted_terms FROM users WHERE telegram = $1',
       [telegramUser.id]
     );
-    
+
     if (userQuery.rows.length === 0) {
       // User not in our database - redirect to onboarding
       logger.info(`User ${telegramUser.id} not in database, redirecting to onboarding`);
@@ -37,14 +37,15 @@ const telegramAuth = async (req, res, next) => {
         }
       });
     }
-    
+
     const user = userQuery.rows[0];
-    
+
     // Attach user to request
     req.user = {
       id: user.id,
-      telegramId: user.telegram_id,
+      telegramId: user.telegram,
       username: user.username,
+      tier: user.tier || 'free',
       subscriptionStatus: user.subscription_status,
       acceptedTerms: user.accepted_terms
     };
@@ -68,10 +69,10 @@ const checkTermsAccepted = (req, res, next) => {
 };
 
 const requirePrime = (req, res, next) => {
-  if (req.user?.subscriptionStatus === 'active') {
+  if (req.user?.tier === 'prime') {
     return next();
   }
-  
+
   res.status(403).json({
     error: 'Prime membership required',
     redirect: '/auth/upgrade-required'

@@ -423,7 +423,7 @@ class BroadcastService {
             ${sinceDays ? 'WHERE p.created_at >= NOW() - ($1 || \' days\')::interval' : ''}
             ORDER BY p.user_id, p.created_at DESC
           )
-          SELECT u.id, u.language, u.subscription_status
+          SELECT u.id, u.language, u.tier, u.subscription_status
           FROM users u
           INNER JOIN latest_payments lp ON lp.user_id = u.id
           WHERE lp.status IN ('pending', 'processing', 'failed', 'cancelled', 'expired')
@@ -446,18 +446,18 @@ class BroadcastService {
         return result.rows;
       }
 
-      let query = 'SELECT id, language, subscription_status FROM users WHERE 1=1';
+      let query = 'SELECT id, language, tier, subscription_status FROM users WHERE 1=1';
       const params = [];
 
-      // Filter by target type
+      // Segment by tier (access level) and subscription_status (lifecycle)
       if (targetType === 'premium') {
-        query += ' AND LOWER(COALESCE(subscription_status, \'\')) IN ($1, $2, $3)';
-        params.push('active', 'prime', 'trial');
+        query += ' AND LOWER(tier) = $1';
+        params.push('prime');
       } else if (targetType === 'free') {
-        query += ' AND (subscription_status IS NULL OR LOWER(subscription_status) = $1)';
+        query += ' AND LOWER(tier) = $1';
         params.push('free');
       } else if (targetType === 'churned') {
-        query += ' AND LOWER(subscription_status) = $1';
+        query += ' AND subscription_status = $1';
         params.push('churned');
       }
 

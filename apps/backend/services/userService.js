@@ -110,8 +110,8 @@ class UserService {
         return true;
       }
       
-      const user = await UserModel.getById(userId); // Use getById
-      return user && user.subscriptionStatus === 'active';
+      const user = await UserModel.getById(userId);
+      return user && (user.tier || '').toLowerCase() === 'prime';
     } catch (error) {
       logger.error('Error checking premium status:', error);
       return false;
