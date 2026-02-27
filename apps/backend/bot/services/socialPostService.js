@@ -3,6 +3,26 @@ const logger = require('../../utils/logger');
 const axios = require('axios');
 const MediaCleanupService = require('./mediaCleanupService');
 
+/**
+ * Check if a photo_file_id is a valid web-servable URL (local path or http URL).
+ * Telegram file IDs (base64-like strings) are NOT valid web URLs.
+ */
+const isValidPhotoUrl = (photo) => {
+  if (!photo || typeof photo !== 'string') return false;
+  return photo.startsWith('/') || photo.startsWith('http');
+};
+
+/**
+ * Sanitize post rows: convert Telegram file IDs to null so the frontend
+ * shows a gradient fallback instead of a broken <img> tag.
+ */
+const sanitizePostRows = (rows) => {
+  return rows.map(row => ({
+    ...row,
+    author_photo: isValidPhotoUrl(row.author_photo) ? row.author_photo : null,
+  }));
+};
+
 class SocialPostService {
   // ── Feed ──────────────────────────────────────────────────────────────────
 
@@ -29,7 +49,7 @@ class SocialPostService {
       params
     );
     const nextCursor = rows.length === lim ? String(rows[rows.length - 1].id) : null;
-    return { posts: rows, nextCursor };
+    return { posts: sanitizePostRows(rows), nextCursor };
   }
 
   // ── Wall ──────────────────────────────────────────────────────────────────
@@ -60,8 +80,9 @@ class SocialPostService {
       ),
     ]);
     const profile = profileRes.rows[0] || null;
+    if (profile) profile.photo_file_id = isValidPhotoUrl(profile.photo_file_id) ? profile.photo_file_id : null;
     const nextCursor = postsRes.rows.length === lim ? String(postsRes.rows[postsRes.rows.length - 1].id) : null;
-    return { profile, posts: postsRes.rows, nextCursor };
+    return { profile, posts: sanitizePostRows(postsRes.rows), nextCursor };
   }
 
   // ── Create Post ───────────────────────────────────────────────────────────
@@ -135,7 +156,7 @@ class SocialPostService {
        ORDER BY sp.id ASC LIMIT 20`,
       params
     );
-    return { replies: rows };
+    return { replies: sanitizePostRows(rows) };
   }
 
   // ── Public Profile ────────────────────────────────────────────────────────
@@ -183,7 +204,8 @@ class SocialPostService {
     ]);
 
     const profile = profileRes.rows[0] || null;
-    const posts = postsRes.rows.map(p => ({
+    if (profile) profile.photo_file_id = isValidPhotoUrl(profile.photo_file_id) ? profile.photo_file_id : null;
+    const posts = sanitizePostRows(postsRes.rows).map(p => ({
       ...p,
       liked_by_me: viewerId ? p.liked_by_me : false,
     }));

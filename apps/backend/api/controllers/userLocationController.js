@@ -232,8 +232,8 @@ async function getNearbyUsers(req, res) {
       `SELECT
         u.id,
         u.username,
-        u."firstName",
-        u."photoUrl",
+        u.first_name,
+        u.photo_file_id,
         ul.latitude,
         ul.longitude,
         ul.is_online,
@@ -267,8 +267,8 @@ async function getNearbyUsers(req, res) {
       users: result.rows.map(row => ({
         id: row.id,
         username: row.username,
-        firstName: row.firstName,
-        photoUrl: row.photoUrl,
+        firstName: row.first_name,
+        photoUrl: row.photo_file_id,
         distance: Math.round(row.distance), // meters
         isOnline: row.is_online,
         lastSeen: row.last_seen

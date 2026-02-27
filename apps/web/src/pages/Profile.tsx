@@ -20,7 +20,9 @@ import {
 
 function resolvePhotoUrl(url: string | null | undefined): string | null {
   if (!url) return null;
-  return url;
+  // Only accept valid web paths, not Telegram file IDs
+  if (url.startsWith("/") || url.startsWith("http")) return url;
+  return null;
 }
 
 function timeAgo(dateStr: string): string {

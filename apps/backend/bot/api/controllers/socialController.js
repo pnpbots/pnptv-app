@@ -5,10 +5,29 @@ const logger = require('../../../utils/logger');
 const SocialPostService = require('../../services/socialPostService');
 const axios = require('axios');
 
+const { query: dbQuery } = require('../../../config/postgres');
+
 const authGuard = (req, res) => {
   const user = req.session?.user;
   if (!user) { res.status(401).json({ error: 'Not authenticated' }); return null; }
   return user;
+};
+
+/**
+ * Check if a photo path is a valid web-servable URL (not a Telegram file ID).
+ */
+const isValidPhotoUrl = (photo) => {
+  if (!photo || typeof photo !== 'string') return false;
+  return photo.startsWith('/') || photo.startsWith('http');
+};
+
+// Look up fresh avatar URL from DB for the given user
+const getUserPhotoFromDb = async (userId) => {
+  try {
+    const result = await dbQuery('SELECT photo_file_id FROM users WHERE id = $1', [userId]);
+    const photo = result.rows[0]?.photo_file_id || null;
+    return isValidPhotoUrl(photo) ? photo : null;
+  } catch { return null; }
 };
 
 // ── Feed ──────────────────────────────────────────────────────────────────────
@@ -51,12 +70,13 @@ const createPost = async (req, res) => {
       SocialPostService.mirrorToMastodon(content.trim(), post.id);
     }
 
+    const authorPhoto = await getUserPhotoFromDb(user.id) || user.photoUrl || null;
     const fullPost = {
       ...post,
       author_id: user.id,
       author_username: user.username,
       author_first_name: user.firstName || user.first_name,
-      author_photo: user.photoUrl || user.photo_url,
+      author_photo: authorPhoto,
       liked_by_me: false,
     };
 
@@ -178,12 +198,13 @@ const createPostWithMedia = async (req, res) => {
       SocialPostService.mirrorToMastodon(content.toString().trim(), post.id);
     }
 
+    const authorPhoto = await getUserPhotoFromDb(user.id) || user.photoUrl || null;
     const fullPost = {
       ...post,
       author_id: user.id,
       author_username: user.username,
       author_first_name: user.firstName || user.first_name,
-      author_photo: user.photoUrl || user.photo_url,
+      author_photo: authorPhoto,
       liked_by_me: false,
     };
 

@@ -33,8 +33,8 @@ async function getNotifications(req, res) {
         spl.created_at,
         spl.user_id AS actor_id,
         u.username AS actor_username,
-        u."firstName" AS actor_first_name,
-        u."photoUrl" AS actor_photo_url,
+        u.first_name AS actor_first_name,
+        u.photo_file_id AS actor_photo_url,
         sp.id AS post_id,
         'like' AS type
       FROM social_post_likes spl
@@ -68,8 +68,8 @@ async function getNotifications(req, res) {
         dm.created_at,
         dm.sender_id AS actor_id,
         u.username AS actor_username,
-        u."firstName" AS actor_first_name,
-        u."photoUrl" AS actor_photo_url,
+        u.first_name AS actor_first_name,
+        u.photo_file_id AS actor_photo_url,
         dm.content,
         'message' AS type
       FROM direct_messages dm
@@ -103,8 +103,8 @@ async function getNotifications(req, res) {
         cm.created_at,
         cm.user_id AS actor_id,
         u.username AS actor_username,
-        u."firstName" AS actor_first_name,
-        u."photoUrl" AS actor_photo_url,
+        u.first_name AS actor_first_name,
+        u.photo_file_id AS actor_photo_url,
         cm.group_id,
         hg.name AS group_name,
         cm.message AS content,

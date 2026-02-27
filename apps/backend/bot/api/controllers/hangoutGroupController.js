@@ -1,9 +1,13 @@
+'use strict';
+
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const userService = require('../../../services/userService');
 const VideoCallModel = require('../../../models/videoCallModel');
 const { buildJitsiHangoutsUrl } = require('../../utils/jitsiHangoutsWebApp');
 const jaasService = require('../../services/jaasService');
+// Check if a photo path is a valid web URL (not a Telegram file ID)
+const isValidPhotoUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -29,6 +33,12 @@ const ensureMainGroupMembership = async (userId) => {
     [userId]
   );
 };
+
+// Normalize a message row: strip invalid photo_urls, include all media fields
+const normalizeMessage = (m) => ({
+  ...m,
+  photo_url: isValidPhotoUrl(m.photo_url) ? m.photo_url : null,
+});
 
 // GET /api/webapp/hangouts/groups
 const listGroups = async (req, res) => {
@@ -172,7 +182,7 @@ const getGroup = async (req, res) => {
         hasActiveCall: g.has_active_call,
         activeCallId: g.active_call_id,
       },
-      members,
+      members: members.map(m => ({ ...m, photo_url: isValidPhotoUrl(m.photo_url) ? m.photo_url : null })),
     });
   } catch (err) {
     logger.error('getGroup error', err);
@@ -266,6 +276,7 @@ const deleteGroup = async (req, res) => {
 };
 
 // GET /api/webapp/hangouts/groups/:id/messages
+// Now returns all media fields so clients can render attachments inline.
 const getMessages = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
@@ -279,15 +290,21 @@ const getMessages = async (req, res) => {
 
     const room = `hangout:${groupId}`;
     const { rows } = await query(
-      `SELECT id, room, user_id, username, first_name, photo_url, content, created_at
-       FROM chat_messages
-       WHERE room=$1 AND is_deleted=false
-         ${cursor ? 'AND created_at < $2' : ''}
-       ORDER BY created_at DESC LIMIT 50`,
+      `SELECT cm.id, cm.room, cm.user_id, cm.username, cm.first_name,
+              COALESCE(u.photo_file_id, cm.photo_url) as photo_url,
+              cm.content,
+              cm.media_url, cm.media_type, cm.media_mime,
+              cm.media_thumb_url, cm.media_width, cm.media_height,
+              cm.created_at
+       FROM chat_messages cm
+       LEFT JOIN users u ON u.id = cm.user_id
+       WHERE cm.room=$1 AND cm.is_deleted=false
+         ${cursor ? 'AND cm.created_at < $2' : ''}
+       ORDER BY cm.created_at DESC LIMIT 50`,
       cursor ? [room, cursor] : [room]
     );
 
-    return res.json({ success: true, messages: rows.reverse() });
+    return res.json({ success: true, messages: rows.reverse().map(normalizeMessage) });
   } catch (err) {
     logger.error('getMessages error', err);
     return res.status(500).json({ error: 'Failed to load messages' });
@@ -295,6 +312,7 @@ const getMessages = async (req, res) => {
 };
 
 // POST /api/webapp/hangouts/groups/:id/messages
+// Sends a text-only message. For media, use sendMediaMessage below.
 const sendMessage = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
@@ -309,13 +327,22 @@ const sendMessage = async (req, res) => {
 
     const room = `hangout:${groupId}`;
     const text = content.trim().slice(0, 2000);
+
+    // Look up fresh photo from DB for storage and response (only use valid web URLs)
+    const photoResult = await query('SELECT photo_file_id FROM users WHERE id = $1', [user.id]);
+    const rawPhoto = photoResult.rows[0]?.photo_file_id || user.photoUrl || null;
+    const photoUrl = isValidPhotoUrl(rawPhoto) ? rawPhoto : null;
+
     const { rows } = await query(
       `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [room, user.id, user.username || null, user.firstName || user.first_name || null, user.photoUrl || user.photo_url || null, text]
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, room, user_id, username, first_name, photo_url, content,
+                 media_url, media_type, media_mime, media_thumb_url,
+                 media_width, media_height, created_at`,
+      [room, user.id, user.username || null, user.firstName || user.first_name || null, photoUrl, text]
     );
 
-    const msg = rows[0];
+    const msg = normalizeMessage(rows[0]);
 
     // Broadcast via Socket.IO
     const io = req.app.get('io');
@@ -405,4 +432,14 @@ const startCall = async (req, res) => {
   }
 };
 
-module.exports = { listGroups, createGroup, getGroup, joinGroup, leaveGroup, deleteGroup, getMessages, sendMessage, startCall };
+module.exports = {
+  listGroups,
+  createGroup,
+  getGroup,
+  joinGroup,
+  leaveGroup,
+  deleteGroup,
+  getMessages,
+  sendMessage,
+  startCall,
+};

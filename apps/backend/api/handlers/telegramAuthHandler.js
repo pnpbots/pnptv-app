@@ -91,18 +91,15 @@ const handleTelegramAuth = async (req, res) => {
     logger.info(`Telegram auth attempt for user: ${telegramUser.id} (${telegramUser.username || 'no username'})`);
 
     // Check if user exists in our database
-    // Search by telegram column first, then fall back to id (for bot-created users where id = Telegram ID)
     let userQuery = await query(
-      `SELECT id, telegram, username, email, subscription_status, tier, terms_accepted,
-              first_name, language,
+      `SELECT id, telegram, username, email, subscription_status, terms_accepted,
+              first_name, language, photo_file_id,
               COALESCE(age_verified, false) as age_verified,
-              COALESCE(role, 'user') as role,
-              atproto_did, atproto_handle, atproto_pds_url
+              COALESCE(onboarding_complete, false) as onboarding_complete,
+              COALESCE(role, 'user') as role
        FROM users
-       WHERE telegram = $1 OR id = $1::text
-       ORDER BY CASE WHEN telegram = $1 THEN 0 ELSE 1 END
-       LIMIT 1`,
-      [String(telegramUser.id)]
+       WHERE telegram = $1`,
+      [telegramUser.id]
     );
 
     if (userQuery.rows.length === 0) {
@@ -111,14 +108,12 @@ const handleTelegramAuth = async (req, res) => {
 
       try {
         // Create user with default 'free' status (will be auto-upgraded if they have active subscription)
-        const newUserId = crypto.randomUUID();
         await query(
-          `INSERT INTO users (id, telegram, username, first_name, language, subscription_status, tier, terms_accepted, age_verified, role)
-           VALUES ($1, $2, $3, $4, $5, 'free', 'free', false, false, 'user')
+          `INSERT INTO users (telegram, username, first_name, language, subscription_status, terms_accepted, age_verified, role)
+           VALUES ($1, $2, $3, $4, 'free', false, false, 'user')
            ON CONFLICT (telegram) DO NOTHING`,
           [
-            newUserId,
-            String(telegramUser.id),
+            telegramUser.id,
             telegramUser.username || '',
             telegramUser.first_name || '',
             telegramUser.language_code || 'en'
@@ -127,15 +122,14 @@ const handleTelegramAuth = async (req, res) => {
 
         // Re-query to get the created user
         userQuery = await query(
-          `SELECT id, telegram, username, email, subscription_status, tier, terms_accepted,
-                  first_name, language,
+          `SELECT id, telegram, username, email, subscription_status, terms_accepted,
+                  first_name, language, photo_file_id,
                   COALESCE(age_verified, false) as age_verified,
+                  COALESCE(onboarding_complete, false) as onboarding_complete,
                   COALESCE(role, 'user') as role
            FROM users
-           WHERE telegram = $1 OR id = $1::text
-           ORDER BY CASE WHEN telegram = $1 THEN 0 ELSE 1 END
-           LIMIT 1`,
-          [String(telegramUser.id)]
+           WHERE telegram = $1`,
+          [telegramUser.id]
         );
 
         if (userQuery.rows.length === 0) {
@@ -155,17 +149,6 @@ const handleTelegramAuth = async (req, res) => {
     }
 
     let user = userQuery.rows[0];
-
-    // Backfill telegram column if bot user was found by id (id = Telegram numeric ID, telegram = NULL)
-    if (!user.telegram && String(user.id) === String(telegramUser.id)) {
-      try {
-        await query('UPDATE users SET telegram = $1 WHERE id = $2 AND (telegram IS NULL OR telegram = \'\')', [String(telegramUser.id), user.id]);
-        user.telegram = String(telegramUser.id);
-        logger.info(`Backfilled telegram column for bot user ${user.id}`);
-      } catch (backfillErr) {
-        logger.warn('Telegram backfill failed (non-blocking):', backfillErr.message);
-      }
-    }
 
     // Check for subscription migration: if user has 'free' status but should have 'active' from bot usage
     // This happens when users first used the bot, then access the webapp
@@ -188,13 +171,12 @@ const handleTelegramAuth = async (req, res) => {
 
           // Only migrate if subscription is still active (not expired)
           if (!expiresAt || expiresAt > now) {
-            logger.info(`Migrating active subscription for user ${user.telegram || user.id}`);
+            logger.info(`Migrating active subscription for user ${user.telegram}`);
             await query(
-              `UPDATE users SET subscription_status = 'active', tier = 'prime' WHERE id = $1`,
+              `UPDATE users SET subscription_status = 'active' WHERE id = $1`,
               [user.id]
             );
-            user.subscription_status = 'active';
-            user.tier = 'prime';
+            user.subscription_status = 'active'; // Update local object
           }
         }
       } catch (migrationError) {
@@ -205,43 +187,32 @@ const handleTelegramAuth = async (req, res) => {
 
     // Determine role: DB role or env-based admin override
     let role = user.role;
-    if (role === 'user' && isAdminUser(user.telegram || user.id)) {
+    if (role === 'user' && isAdminUser(user.telegram)) {
       role = 'admin';
     }
 
-    // Store user in session (hybrid model: preserves ATProto fields if linked)
+    // Only use photo_file_id if it's a valid web URL (not a Telegram file ID)
+    const isValidPhoto = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
+    const photoUrl = isValidPhoto(user.photo_file_id) ? user.photo_file_id : null;
+
+    // Store user in session
     req.session.user = {
       id: user.id,
-      telegramId: user.telegram || user.id,
+      telegramId: user.telegram,
       username: user.username,
       firstName: user.first_name || telegramUser.first_name || '',
       displayName: user.first_name || telegramUser.first_name || user.username || '',
       language: user.language || 'en',
       email: user.email,
+      photoUrl,
       subscriptionStatus: user.subscription_status,
-      tier: user.tier || 'free',
       acceptedTerms: user.terms_accepted,
       ageVerified: user.age_verified,
-      role,
-      // ATProto fields (preserved from DB if user has linked an ATProto identity)
-      atproto_did: user.atproto_did || null,
-      atproto_handle: user.atproto_handle || null,
-      atproto_pds_url: user.atproto_pds_url || null,
-      // Auth method flags for hybrid session
-      auth_methods: {
-        telegram: true,
-        atproto: !!user.atproto_did,
-        x: false, // populated if user later links X via webapp OAuth
-      },
+      onboardingComplete: user.onboarding_complete,
+      role
     };
 
     logger.info(`User ${user.id} authenticated successfully, terms accepted: ${user.terms_accepted}`);
-
-    // Explicitly save session to Redis before responding — critical for iOS Safari
-    // where the response may be processed before the session store flushes
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => (err ? reject(err) : resolve()));
-    });
 
     // ASYNC: Provision PDS in background (don't block login)
     // This runs independently without awaiting
@@ -261,9 +232,7 @@ const handleTelegramAuth = async (req, res) => {
             pds_did: pdsResult.pds_did,
             status: pdsResult.status
           };
-          req.session.save((saveErr) => {
-            if (saveErr) logger.warn('[Auth] PDS session save failed (non-blocking):', saveErr.message);
-          });
+          req.session.save();
         }
       } catch (pdsError) {
         logger.warn(`[Auth] PDS provisioning failed (non-blocking):`, pdsError.message);
@@ -283,10 +252,10 @@ const handleTelegramAuth = async (req, res) => {
         language: user.language || 'en',
         terms_accepted: Boolean(user.terms_accepted),
         age_verified: Boolean(user.age_verified),
+        onboarding_complete: Boolean(user.onboarding_complete),
         subscription_type: user.subscription_status || 'free',
-        tier: user.tier || 'free',
         role,
-        photo_url: telegramUser.photo_url || null,
+        photo_url: photoUrl,
       },
       termsAccepted: user.terms_accepted
     });
@@ -320,15 +289,13 @@ const handleAcceptTerms = async (req, res) => {
       'UPDATE users SET terms_accepted = TRUE WHERE id = $1',
       [user.id]
     );
-
-    // Update session and persist to Redis
+    
+    // Update session
     req.session.user.acceptedTerms = true;
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => err ? reject(err) : resolve());
-    });
-
+    
     logger.info(`User ${user.id} accepted terms and conditions`);
-
+    
+    // Get the original URL from localStorage (will be handled by frontend)
     res.json({ success: true });
     
   } catch (error) {
@@ -362,20 +329,10 @@ const checkAuthStatus = (req, res) => {
         language: user.language || 'en',
         terms_accepted: Boolean(user.acceptedTerms),
         age_verified: Boolean(user.ageVerified),
+        onboarding_complete: Boolean(user.onboardingComplete),
         subscription_type: user.subscriptionStatus || 'free',
-        tier: user.tier || 'free',
         role: user.role || 'user',
         photo_url: user.photoUrl || null,
-        // ATProto identity (hybrid session)
-        atproto_did: user.atproto_did || null,
-        atproto_handle: user.atproto_handle || null,
-        // X identity (hybrid session)
-        x_handle: user.xHandle || null,
-        auth_methods: user.auth_methods || {
-          telegram: !!user.telegramId,
-          atproto: !!user.atproto_did,
-          x: !!user.xHandle,
-        },
       }
     });
     

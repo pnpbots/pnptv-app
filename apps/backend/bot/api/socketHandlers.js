@@ -1,6 +1,11 @@
+'use strict';
+
 const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const { getRedis } = require('../../config/redis');
+const { processChatMedia } = require('../services/chatMediaService');
+
+// ── Session resolution ────────────────────────────────────────────────────────
 
 // Parse session cookie to authenticate Socket.IO connections
 async function getUserFromSocket(socket) {
@@ -20,7 +25,9 @@ async function getUserFromSocket(socket) {
   }
 }
 
-// Rate limit: allow maxCount per windowMs per key
+// ── Rate limiting ─────────────────────────────────────────────────────────────
+
+// In-process rate limit: allow maxCount per windowMs per key
 const rateLimitCounters = new Map();
 function rateLimit(key, maxCount, windowMs) {
   const now = Date.now();
@@ -31,7 +38,20 @@ function rateLimit(key, maxCount, windowMs) {
   return entry.count <= maxCount;
 }
 
+// ── Message SELECT columns helper ─────────────────────────────────────────────
+
+// All the columns we return for every chat message — text or media.
+// Keep in sync with the migration 072_chat_media_attachments.sql columns.
+const MSG_RETURNING_COLS = `
+  id, room, user_id, username, first_name, photo_url, content,
+  media_url, media_type, media_mime, media_thumb_url,
+  media_width, media_height, created_at
+`;
+
+// ── Socket.IO initialisation ──────────────────────────────────────────────────
+
 function initSocketIO(io) {
+  // Auth middleware: reject connections with no valid session
   io.use(async (socket, next) => {
     const user = await getUserFromSocket(socket);
     if (!user) return next(new Error('Unauthorized'));
@@ -43,19 +63,19 @@ function initSocketIO(io) {
     const user = socket.data.user;
     logger.info(`Socket connected: user ${user.id}`);
 
-    // Join personal room for DMs
+    // Join personal room for DMs and targeted notifications
     socket.join(`user:${user.id}`);
 
-    // ── Group Chat ──────────────────────────────────────────────────────
+    // ── Group Chat ───────────────────────────────────────────────────────────
+
     socket.on('chat:join', async ({ room = 'general' } = {}) => {
       socket.join(`chat:${room}`);
       try {
         const { rows } = await query(
-          `SELECT cm.id, cm.content, cm.created_at, cm.user_id,
-                  cm.username, cm.first_name, cm.photo_url
-           FROM chat_messages cm
-           WHERE cm.room = $1 AND cm.is_deleted = false
-           ORDER BY cm.created_at DESC LIMIT 50`,
+          `SELECT ${MSG_RETURNING_COLS}
+           FROM chat_messages
+           WHERE room = $1 AND is_deleted = false
+           ORDER BY created_at DESC LIMIT 50`,
           [room]
         );
         socket.emit('chat:history', rows.reverse());
@@ -64,6 +84,7 @@ function initSocketIO(io) {
       }
     });
 
+    // Text message
     socket.on('chat:message', async ({ room = 'general', content } = {}) => {
       if (!content || !content.trim()) return;
       if (content.length > 2000) return;
@@ -72,14 +93,13 @@ function initSocketIO(io) {
         return;
       }
       try {
-        // Use camelCase fields from session user object
         const firstName = user.firstName || user.first_name || null;
         const photoUrl = user.photoUrl || user.photo_url || null;
 
         const { rows } = await query(
           `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content)
            VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING id, room, user_id, username, first_name, photo_url, content, created_at`,
+           RETURNING ${MSG_RETURNING_COLS}`,
           [room, user.id, user.username || null, firstName, photoUrl, content.trim()]
         );
         io.to(`chat:${room}`).emit('chat:message', rows[0]);
@@ -89,7 +109,75 @@ function initSocketIO(io) {
       }
     });
 
-    // ── Direct Messages ─────────────────────────────────────────────────
+    // Media message sent over Socket.IO.
+    // Payload: { room, file: { buffer (base64 string), mimetype, size } }
+    // The client encodes the file buffer as a base64 string before emitting,
+    // because Socket.IO serialises payloads as JSON by default.
+    //
+    // Note: for large files (videos) the HTTP REST endpoint
+    // POST /api/webapp/chat/:room/media is strongly preferred because
+    // Socket.IO is not optimised for large binary payloads.
+    socket.on('chat:media', async ({ room = 'general', file, content } = {}) => {
+      if (!file || !file.buffer || !file.mimetype) {
+        socket.emit('chat:error', { message: 'Invalid media payload' });
+        return;
+      }
+
+      // Enforce a 20 MB cap over Socket.IO (images only — videos should use REST)
+      const MAX_SOCKET_MEDIA_BYTES = 20 * 1024 * 1024;
+      const buffer = Buffer.from(file.buffer, 'base64');
+      if (buffer.length > MAX_SOCKET_MEDIA_BYTES) {
+        socket.emit('chat:error', { message: 'File too large. Use the upload button for videos.' });
+        return;
+      }
+
+      if (!rateLimit(`chat:media:${user.id}`, 10, 60000)) {
+        socket.emit('chat:error', { message: 'Too many media uploads. Please slow down.' });
+        return;
+      }
+
+      const caption = typeof content === 'string' ? content.trim().slice(0, 500) : null;
+
+      try {
+        const multerLike = { buffer, mimetype: file.mimetype, size: buffer.length };
+        const mediaResult = await processChatMedia(multerLike, user.id);
+
+        const firstName = user.firstName || user.first_name || null;
+        const photoUrl = user.photoUrl || user.photo_url || null;
+
+        const { rows } = await query(
+          `INSERT INTO chat_messages
+             (room, user_id, username, first_name, photo_url, content,
+              media_url, media_type, media_mime, media_thumb_url,
+              media_width, media_height)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           RETURNING ${MSG_RETURNING_COLS}`,
+          [
+            room,
+            user.id,
+            user.username || null,
+            firstName,
+            photoUrl,
+            caption || null,
+            mediaResult.mediaUrl,
+            mediaResult.mediaType,
+            mediaResult.mediaMime,
+            mediaResult.thumbUrl || null,
+            mediaResult.width || null,
+            mediaResult.height || null,
+          ]
+        );
+
+        io.to(`chat:${room}`).emit('chat:message', rows[0]);
+      } catch (err) {
+        logger.error('chat:media error', err);
+        const userMsg = err.userMessage || 'Failed to process media. Please try again.';
+        socket.emit('chat:error', { message: userMsg });
+      }
+    });
+
+    // ── Direct Messages ──────────────────────────────────────────────────────
+
     socket.on('dm:send', async ({ recipientId, content } = {}) => {
       if (!recipientId || !content || !content.trim()) return;
       if (recipientId === user.id) return;
@@ -123,7 +211,15 @@ function initSocketIO(io) {
         );
 
         // Deliver to sender and recipient
-        const payload = { ...msg, sender: { id: user.id, username: user.username, firstName: user.firstName, photoUrl: user.photoUrl } };
+        const payload = {
+          ...msg,
+          sender: {
+            id: user.id,
+            username: user.username,
+            firstName: user.firstName,
+            photoUrl: user.photoUrl,
+          },
+        };
         socket.emit('dm:sent', payload);
         io.to(`user:${recipientId}`).emit('dm:received', payload);
       } catch (err) {

@@ -158,8 +158,8 @@ async function getBlockedUsers(req, res) {
         bu.blocked_user_id,
         bu.blocked_at,
         u.username,
-        u."firstName",
-        u."photoUrl"
+        u.first_name,
+        u.photo_file_id
       FROM blocked_users bu
       JOIN users u ON bu.blocked_user_id = u.id
       WHERE bu.user_id = $1
@@ -172,8 +172,8 @@ async function getBlockedUsers(req, res) {
       blockedUsers: result.rows.map(row => ({
         id: row.blocked_user_id,
         username: row.username,
-        firstName: row.firstName,
-        photoUrl: row.photoUrl,
+        firstName: row.first_name,
+        photoUrl: row.photo_file_id,
         blockedAt: row.blocked_at
       })),
       count: result.rows.length

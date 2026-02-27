@@ -1,6 +1,9 @@
 const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 
+// Check if a photo path is a valid web URL (not a Telegram file ID)
+const isValidPhotoUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
+
 /**
  * Direct Messages Controller
  * Handles private messaging between users
@@ -35,8 +38,8 @@ async function getThreads(req, res) {
           ELSE dt.unread_for_b
         END AS unread_count,
         u.username,
-        u."firstName",
-        u."photoUrl"
+        u.first_name,
+        u.photo_file_id
       FROM dm_threads dt
       JOIN users u ON (
         CASE
@@ -54,8 +57,8 @@ async function getThreads(req, res) {
       threads: result.rows.map(row => ({
         userId: row.other_user_id,
         username: row.username,
-        firstName: row.firstName,
-        photoUrl: row.photoUrl,
+        firstName: row.first_name,
+        photoUrl: isValidPhotoUrl(row.photo_file_id) ? row.photo_file_id : null,
         lastMessage: row.last_message,
         lastMessageAt: row.last_message_at,
         unreadCount: row.unread_count
@@ -105,6 +108,10 @@ async function getMessages(req, res) {
         dm.sender_id,
         dm.recipient_id,
         dm.content,
+        dm.media_url,
+        dm.media_type,
+        dm.media_mime,
+        dm.media_thumb_url,
         dm.is_read,
         dm.is_deleted,
         dm.created_at
@@ -143,7 +150,11 @@ async function getMessages(req, res) {
         id: row.id,
         senderId: row.sender_id,
         recipientId: row.recipient_id,
-        content: row.content,
+        content: row.content || null,
+        mediaUrl: row.media_url || null,
+        mediaType: row.media_type || null,
+        mediaMime: row.media_mime || null,
+        mediaThumbUrl: row.media_thumb_url || null,
         isRead: row.is_read,
         createdAt: row.created_at,
         isMine: row.sender_id === userId
@@ -237,7 +248,11 @@ async function sendMessage(req, res) {
       id: message.id,
       senderId: message.sender_id,
       recipientId: message.recipient_id,
-      content: message.content,
+      content: message.content || null,
+      mediaUrl: null,
+      mediaType: null,
+      mediaMime: null,
+      mediaThumbUrl: null,
       isRead: message.is_read,
       createdAt: message.created_at,
       isMine: true

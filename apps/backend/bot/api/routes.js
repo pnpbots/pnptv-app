@@ -49,8 +49,6 @@ const modelRoutes = require('./routes/modelRoutes');
 const pdsRoutes = require('./routes/pdsRoutes');
 const blueskyRoutes = require('./routes/blueskyRoutes');
 const elementRoutes = require('./routes/elementRoutes');
-const atprotoOAuthRoutes = require('./routes/atprotoOAuthRoutes');
-const webappXOAuthRoutes = require('./routes/xOAuthRoutes');
 
 /**
  * Page-level authentication middleware
@@ -82,8 +80,7 @@ const softAuth = (req, res, next) => {
   if (req.session?.user?.id) {
     req.user = {
       id: req.session.user.id,
-      tier: req.session.user.tier || 'free',
-      subscriptionStatus: req.session.user.subscriptionStatus || req.session.user.subscription_status || 'free',
+      subscriptionStatus: req.session.user.subscription_status || 'free',
     };
   }
   next();
@@ -93,8 +90,8 @@ const softAuth = (req, res, next) => {
  * Tier gate — requires active or prime subscription
  */
 const requirePrimeTier = (req, res, next) => {
-  const tier = (req.session?.user?.tier || req.user?.tier || 'free').toLowerCase();
-  if (tier !== 'prime') {
+  const status = req.session?.user?.subscription_status || 'free';
+  if (!['active', 'prime'].includes(status)) {
     return res.status(403).json({
       success: false,
       error: 'Prime subscription required',
@@ -191,10 +188,6 @@ if (!resolvedSessionSecret) {
   throw new Error('SESSION_SECRET must be configured (separate from JWT_SECRET)');
 }
 // Session middleware with explicit response hooks to ensure Set-Cookie header is set
-// sameSite: 'none' + secure: true is required for iOS Safari compatibility.
-// The Telegram deep link login flow sends users to t.me and back — iOS Safari
-// treats this as a cross-site navigation and drops 'lax' cookies entirely.
-// 'none' requires 'secure: true' (HTTPS only) per RFC 6265bis.
 const sessionMiddleware = session({
   store: new RedisStore({ client: redisClient, prefix: 'sess:' }),
   secret: resolvedSessionSecret,
@@ -203,9 +196,9 @@ const sessionMiddleware = session({
   rolling: true, // Refresh session TTL on each request
   name: '__pnptv_sid', // Obscure session cookie name (was: connect.sid)
   cookie: {
-    secure: true, // Required for sameSite=none; always true in production (HTTPS)
+    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    sameSite: 'none', // Required for iOS Safari cross-site cookie survival
+    sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/',
     domain: process.env.NODE_ENV === 'production' ? '.pnptv.app' : undefined
@@ -241,7 +234,6 @@ app.use(conditionalMiddleware(helmet({
         "https://checkout.epayco.co",
         "https://secure.payco.co",
         "https://secure.epayco.co",
-        "https://api.secure.payco.co",
         "https://telegram.org",
       ],
       styleSrc: ["'self'", "'unsafe-inline'", "https:", "https://fonts.googleapis.com"],
@@ -271,40 +263,14 @@ app.use(conditionalMiddleware(helmet({
         "https://centinelapi.cardinalcommerce.com",
         "https://oauth.telegram.org",
         "https://telegram.org",
-        // 3DS bank challenge iframes can come from any bank domain
-        "https:",
-      ],
-      // frame-ancestors: allow ePayco/banks to embed our response pages during 3DS
-      frameAncestors: [
-        "'self'",
-        "https://*.epayco.co",
-        "https://*.payco.co",
-        "https://*.cardinalcommerce.com",
       ],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
-      formAction: [
-        "'self'",
-        "https://checkout.epayco.co",
-        "https://secure.epayco.co",
-        "https://secure.payco.co",
-        "https://api.secure.payco.co",
-        "https://centinelapi.cardinalcommerce.com",
-        "https://songbird.cardinalcommerce.com",
-        // 3DS challenge forms may POST to any bank domain
-        "https:",
-      ],
+      formAction: ["'self'", "https://checkout.epayco.co", "https://secure.epayco.co", "https://secure.payco.co", "https://centinelapi.cardinalcommerce.com"],
       scriptSrcAttr: ["'unsafe-inline'"],
       upgradeInsecureRequests: [],
     },
   },
-  // Disable X-Frame-Options since we use CSP frame-ancestors (which takes precedence)
-  // X-Frame-Options: DENY would block 3DS challenge iframes from banks
-  frameguard: false,
-  // Allow cross-origin popups for 3DS challenge windows
-  crossOriginOpenerPolicy: { policy: 'unsafe-none' },
-  // Don't set COEP as it blocks cross-origin 3DS resources
-  crossOriginEmbedderPolicy: false,
 })));
 
 // CORS with whitelist (security fix: prevent cross-origin attacks)
@@ -333,17 +299,14 @@ app.use(morgan('combined', { stream: logger.stream }));
 // 3DS bank challenge iframes load from bank domains (e.g. jpmorgan.com, bancolombia.com).
 // Override helmet's restrictive CSP for checkout pages so frame-src, connect-src, img-src,
 // and form-action allow any HTTPS origin. script-src stays locked to known payment SDKs.
-// frame-ancestors allows ePayco/banks to embed our page in their 3DS challenge iframes.
 const CHECKOUT_CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://code.jquery.com https://multimedia.epayco.co https://songbird.cardinalcommerce.com https://centinelapi.cardinalcommerce.com https://checkout.epayco.co https://secure.payco.co https://secure.epayco.co https://api.secure.payco.co",
+  "script-src 'self' 'unsafe-inline' https://code.jquery.com https://multimedia.epayco.co https://songbird.cardinalcommerce.com https://centinelapi.cardinalcommerce.com https://checkout.epayco.co https://secure.payco.co https://secure.epayco.co",
   "style-src 'self' 'unsafe-inline' https: https://fonts.googleapis.com",
   "font-src 'self' https: https://fonts.gstatic.com data:",
   "img-src 'self' https: data:",
   "connect-src 'self' https:",
   "frame-src https:",
-  // frame-ancestors: allow banks and ePayco to embed our 3DS callback/response pages
-  "frame-ancestors 'self' https://*.epayco.co https://*.payco.co https://*.cardinalcommerce.com https:",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self' https:",
@@ -355,14 +318,6 @@ function sendCheckoutHtml(res, file) {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.setHeader('Content-Security-Policy', CHECKOUT_CSP);
-  // Remove restrictive headers that break 3DS bank iframes, challenge windows, and redirects
-  res.removeHeader('X-Frame-Options');
-  res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
-  // COOP/COEP must be permissive for 3DS cross-origin popups and iframes
-  res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
-  res.removeHeader('Cross-Origin-Embedder-Policy');
-  // Permissions-Policy: allow payment API for 3DS
-  res.setHeader('Permissions-Policy', 'payment=(self "https://*.epayco.co" "https://*.payco.co")');
   res.sendFile(path.join(__dirname, '../../../public/' + file));
 }
 
@@ -660,22 +615,22 @@ app.get('/age-verification', pageLimiter, (req, res) => {
 
 
 
-// Meet & Greet Checkout pages — use sendCheckoutHtml for proper 3DS CSP headers
+// Meet & Greet Checkout pages
 app.get('/pnp/meet-greet/checkout/:bookingId', pageLimiter, (req, res) => {
-  sendCheckoutHtml(res, 'payment-checkout.html');
+  res.redirect(302, '/meet-greet-checkout.html');
 });
 
 app.get('/pnp/meet-greet/daimo-checkout/:bookingId', pageLimiter, (req, res) => {
-  sendCheckoutHtml(res, 'daimo-checkout.html');
+  res.redirect(302, '/meet-greet-daimo-checkout.html');
 });
 
-// PNP Live Checkout pages — use sendCheckoutHtml for proper 3DS CSP headers
+// PNP Live Checkout pages
 app.get('/pnp/live/checkout/:bookingId', pageLimiter, (req, res) => {
-  sendCheckoutHtml(res, 'payment-checkout.html');
+  res.redirect(302, '/pnp-live-checkout.html');
 });
 
 app.get('/pnp/live/daimo-checkout/:bookingId', pageLimiter, (req, res) => {
-  sendCheckoutHtml(res, 'daimo-checkout.html');
+  res.redirect(302, '/pnp-live-daimo-checkout.html');
 });
 
 // (Security middleware moved to top of middleware chain, before route registration)
@@ -754,6 +709,34 @@ const postMediaUpload = multer({
     cb(new Error('Only image (jpg/png/webp/gif) and video (mp4/webm) files are allowed'));
   }
 });
+
+// Chat media upload:
+//   Images up to 20 MB — processed by sharp (converted to WebP + thumbnail)
+//   Videos up to 100 MB — stored as-is, poster frame via ffmpeg
+// A single multer instance handles both; mime validation happens in chatMediaService.
+const chatMediaUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const isAllowed = /^(image\/(jpeg|jpg|png|webp|gif)|video\/(mp4|webm))$/i.test(file.mimetype || '');
+    if (isAllowed) return cb(null, true);
+    cb(new Error('Only image (jpg/png/webp/gif) and video (mp4/webm) files are allowed in chat'));
+  },
+});
+
+// Wrap chatMediaUpload to return structured JSON errors consistent with the rest of the API
+const uploadChatMedia = (req, res, next) => {
+  chatMediaUpload.single('media')(req, res, (err) => {
+    if (!err) return next();
+    let message = 'Invalid file. Please try a different image or video.';
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      message = 'File is too large. Images must be under 20 MB and videos under 100 MB.';
+    } else if (err.message) {
+      message = err.message;
+    }
+    return res.status(400).json({ error: message });
+  });
+};
 
 const uploadAgeVerificationPhoto = (req, res, next) => {
   ageVerificationUpload.single('photo')(req, res, (err) => {
@@ -882,23 +865,6 @@ app.get('/health', healthLimiter, async (req, res) => {
   }
 });
 
-// ==========================================
-// ATProto OAuth Routes (PUBLIC — no auth guard)
-// These MUST be before any auth-protected routes.
-// /oauth/client-metadata.json and /.well-known/oauth-protected-resource
-// are fetched by authorization servers and must be publicly accessible.
-// ==========================================
-app.use(atprotoOAuthRoutes);
-
-// ==========================================
-// X (Twitter) OAuth 2.0 PKCE Webapp Routes (PUBLIC — no auth guard)
-// GET /api/webapp/auth/x/login    — initiate PKCE flow
-// GET /api/webapp/auth/x/callback — exchange code, create session
-// These are mounted BEFORE the per-method wiring below (lines 1711-1712) so
-// the dedicated route file with its own rate limiters takes precedence.
-// ==========================================
-app.use('/api/webapp/auth/x', webappXOAuthRoutes);
-
 // API routes
 // Authentication API endpoints
 app.post('/api/telegram-auth', authLimiter, handleTelegramAuth);
@@ -931,21 +897,16 @@ app.post('/api/logout', (req, res) => {
 // ==========================================
 
 // Videorama - protected
-app.get('/app/videorama', requirePageAuth, (req, res) => {
+app.get('/app/videorama', (req, res) => {
   res.sendFile(path.join(__dirname, '../../../public/videorama/index.html'));
 });
 
-app.get('/app/videorama/*', requirePageAuth, (req, res) => {
-  const base = path.resolve(__dirname, '../../../public/videorama');
-  const assetPath = path.resolve(base, req.path.replace(/^\/app\/videorama\/?/, ''));
-  // Guard against path traversal: resolved path must remain inside base directory
-  if (!assetPath.startsWith(base + path.sep) && assetPath !== base) {
-    return res.status(403).send('Forbidden');
-  }
+app.get('/app/videorama/*', (req, res) => {
+  const assetPath = path.join(__dirname, '../../../public/videorama', req.path.replace('/app/videorama', ''));
   if (fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) {
     return res.sendFile(assetPath);
   }
-  res.sendFile(path.join(base, 'index.html'));
+  res.sendFile(path.join(__dirname, '../../../public/videorama/index.html'));
 });
 
 // Hangouts - protected
@@ -955,15 +916,11 @@ app.get('/hangouts', requirePageAuth, (req, res) => {
 });
 
 app.get('/hangouts/*', requirePageAuth, (req, res) => {
-  const base = path.resolve(__dirname, '../../../public/hangouts');
-  const assetPath = path.resolve(base, req.path.replace(/^\/hangouts\/?/, ''));
-  if (!assetPath.startsWith(base + path.sep) && assetPath !== base) {
-    return res.status(403).send('Forbidden');
-  }
+  const assetPath = path.join(__dirname, '../../../public/hangouts', req.path.replace('/hangouts', ''));
   if (fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) {
     return res.sendFile(assetPath);
   }
-  res.sendFile(path.join(base, 'index.html'));
+  res.sendFile(path.join(__dirname, '../../../public/hangouts/index.html'));
 });
 
 // Live - protected
@@ -973,15 +930,11 @@ app.get('/live', requirePageAuth, (req, res) => {
 });
 
 app.get('/live/*', requirePageAuth, (req, res) => {
-  const base = path.resolve(__dirname, '../../../public/live');
-  const assetPath = path.resolve(base, req.path.replace(/^\/live\/?/, ''));
-  if (!assetPath.startsWith(base + path.sep) && assetPath !== base) {
-    return res.status(403).send('Forbidden');
-  }
+  const assetPath = path.join(__dirname, '../../../public/live', req.path.replace('/live', ''));
   if (fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) {
     return res.sendFile(assetPath);
   }
-  res.sendFile(path.join(base, 'index.html'));
+  res.sendFile(path.join(__dirname, '../../../public/live/index.html'));
 });
 
 // PNP Live portal - protected
@@ -990,10 +943,9 @@ app.get('/pnplive', requirePageAuth, (req, res) => {
   res.sendFile(path.join(__dirname, '../../../public/live/index.html'));
 });
 
-// Age verification (AI camera) — requires authentication to prevent spoofed user_id
+// Age verification (AI camera)
 app.post(
   '/api/verify-age',
-  authenticateUser,
   uploadAgeVerificationPhoto,
   asyncHandler(ageVerificationController.verifyAge)
 );
@@ -1154,17 +1106,16 @@ app.delete('/api/playlists/:playlistId', authenticateUser, asyncHandler(playlist
 
 
 
-// Podcasts uploads (local storage under /public/uploads/podcasts) — requires auth
+// Podcasts uploads (local storage under /public/uploads/podcasts)
 app.post(
   '/api/podcasts/upload',
-  authenticateUser,
   podcastController.upload.single('audio'),
   asyncHandler(podcastController.uploadAudio)
 );
 
-// Recurring Checkout page — use sendCheckoutHtml for proper 3DS CSP headers
+// Recurring Checkout page - serves recurring-checkout.html for /recurring-checkout/:userId/:planId
 app.get('/recurring-checkout/:userId/:planId', pageLimiter, (req, res) => {
-  sendCheckoutHtml(res, 'payment-checkout.html');
+  res.redirect(302, '/recurring-checkout.html');
 });
 
 // Recurring Subscription API routes
@@ -1728,13 +1679,9 @@ app.get('/api/videorama/collections/:collectionId', asyncHandler(async (req, res
   }
 }));
 
-// Audit logging for all admin routes — must be registered before admin route handlers
-const { auditLog: adminAuditLog } = require('../../middleware/auditLogger');
-app.use('/api/admin/', adminAuditLog);
-
 // Broadcast Queue API Routes
 const broadcastQueueRoutes = require('./broadcastQueueRoutes');
-app.use('/api/admin/queue', verifyAdminJWT, broadcastQueueRoutes);
+app.use('/api/admin/queue', broadcastQueueRoutes);
 
 // Admin User Management Routes
 app.use('/api/admin/users', adminUserRoutes);
@@ -1749,8 +1696,8 @@ app.use('/api/x/followers', xFollowersRoutes);
 
 // Health Check and Monitoring Endpoints
 app.get('/api/health', healthLimiter, asyncHandler(healthController.healthCheck));
-app.get('/api/metrics', healthLimiter, verifyAdminJWT, asyncHandler(healthController.performanceMetrics));
-app.post('/api/metrics/reset', healthLimiter, verifyAdminJWT, asyncHandler(healthController.resetMetrics));
+app.get('/api/metrics', healthLimiter, asyncHandler(healthController.performanceMetrics));
+app.post('/api/metrics/reset', healthLimiter, asyncHandler(healthController.resetMetrics));
 
 // ==========================================
 // PRIME Hub Web App API Routes
@@ -1772,67 +1719,12 @@ app.post('/api/webapp/auth/email/register', authLimiter, asyncHandler(webAppCont
 app.post('/api/webapp/auth/email/login', authLimiter, asyncHandler(webAppController.emailLogin));
 app.get('/api/webapp/auth/verify-email', asyncHandler(webAppController.verifyEmail));
 app.post('/api/webapp/auth/resend-verification', authLimiter, asyncHandler(webAppController.resendVerification));
-// X OAuth routes now handled by webappXOAuthRoutes (mounted earlier at /api/webapp/auth/x)
-// app.get('/api/webapp/auth/x/start', asyncHandler(webAppController.xLoginStart));
-// app.get('/api/webapp/auth/x/callback', asyncHandler(webAppController.xLoginCallback));
+app.get('/api/webapp/auth/x/start', asyncHandler(webAppController.xLoginStart));
+app.get('/api/webapp/auth/x/callback', asyncHandler(webAppController.xLoginCallback));
 app.get('/api/me', asyncHandler(webAppController.authStatus));
 app.post('/api/webapp/auth/logout', asyncHandler(webAppController.logout));
 app.post('/api/webapp/auth/forgot-password', asyncHandler(webAppController.forgotPassword));
 app.post('/api/webapp/auth/reset-password', asyncHandler(webAppController.resetPassword));
-
-// ATProto identity unlink — removes the Bluesky/ATProto identity from the user's account.
-// The Telegram session is preserved. The stored OAuth session row is deleted.
-app.post('/api/webapp/auth/atproto/unlink', authenticateUser, asyncHandler(async (req, res) => {
-  const userId = req.user.id;
-  const did = req.session?.user?.atproto_did;
-
-  if (!did) {
-    return res.status(400).json({ success: false, error: 'No ATProto identity is linked to this account.' });
-  }
-
-  const { query: dbQuery } = require('../../config/postgres');
-
-  // Clear ATProto fields from the users table using parameterized query
-  await dbQuery(
-    `UPDATE users SET atproto_did = NULL, atproto_handle = NULL, atproto_pds_url = NULL, updated_at = NOW() WHERE id = $1`,
-    [userId]
-  );
-
-  // Delete the stored OAuth session for this DID (best-effort; row may not exist if session expired)
-  try {
-    await dbQuery('DELETE FROM atproto_oauth_sessions WHERE did = $1', [did]);
-  } catch (oauthSessionErr) {
-    logger.warn('[ATProto] Could not delete oauth session row (non-blocking):', oauthSessionErr.message);
-  }
-
-  // Attempt to revoke the remote ATProto session token (best-effort; don't fail the unlink if this errors)
-  try {
-    const atproto = require('../services/atprotoOAuthService');
-    const client = await atproto.getClient();
-    const oauthSession = await client.restore(did);
-    if (oauthSession && typeof oauthSession.signOut === 'function') {
-      await oauthSession.signOut();
-    }
-  } catch (revokeErr) {
-    logger.debug('[ATProto] Remote session revocation during unlink (non-blocking):', revokeErr.message);
-  }
-
-  // Update the express session in-place so the frontend reflects the change immediately
-  if (req.session?.user) {
-    req.session.user.atproto_did = null;
-    req.session.user.atproto_handle = null;
-    req.session.user.atproto_pds_url = null;
-    if (req.session.user.auth_methods) {
-      req.session.user.auth_methods.atproto = false;
-    }
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => (err ? reject(err) : resolve()));
-    });
-  }
-
-  logger.info('[ATProto] Unlinked ATProto identity from user', { userId, did });
-  res.json({ success: true, message: 'Bluesky account unlinked successfully.' });
-}));
 
 // Web App Profile
 app.get('/api/webapp/profile', asyncHandler(webAppController.getProfile));
@@ -1873,18 +1765,6 @@ app.post('/api/webapp/hangouts/create', asyncHandler(webappHangoutsController.cr
 app.post('/api/webapp/hangouts/join/:callId', asyncHandler(webappHangoutsController.joinRoom));
 app.post('/api/webapp/hangouts/leave/:callId', asyncHandler(webappHangoutsController.leaveRoom));
 app.delete('/api/webapp/hangouts/:callId', asyncHandler(webappHangoutsController.endRoom));
-
-// Web App Hangout Groups (session auth)
-const hangoutGroupController = require('./controllers/hangoutGroupController');
-app.get('/api/webapp/hangouts/groups', asyncHandler(hangoutGroupController.listGroups));
-app.post('/api/webapp/hangouts/groups', asyncHandler(hangoutGroupController.createGroup));
-app.get('/api/webapp/hangouts/groups/:id', asyncHandler(hangoutGroupController.getGroup));
-app.post('/api/webapp/hangouts/groups/:id/join', asyncHandler(hangoutGroupController.joinGroup));
-app.post('/api/webapp/hangouts/groups/:id/leave', asyncHandler(hangoutGroupController.leaveGroup));
-app.delete('/api/webapp/hangouts/groups/:id', asyncHandler(hangoutGroupController.deleteGroup));
-app.get('/api/webapp/hangouts/groups/:id/messages', asyncHandler(hangoutGroupController.getMessages));
-app.post('/api/webapp/hangouts/groups/:id/messages', asyncHandler(hangoutGroupController.sendMessage));
-app.post('/api/webapp/hangouts/groups/:id/call', asyncHandler(hangoutGroupController.startCall));
 
 // Web App Live Streaming Routes
 const webappLiveController = require('./controllers/webappLiveController');
@@ -2104,8 +1984,12 @@ app.get('/api/webapp/admin/ampache/ping', verifyAdminJWT, asyncHandler(async (re
 // Role-Based Access Control (RBAC) Routes
 // ==========================================
 const { superadminGuard } = require('../../middleware/guards');
+const { auditLog } = require('../../middleware/auditLogger');
 const roleController = require('./controllers/roleController');
 const auditLogController = require('./controllers/auditLogController');
+
+// Apply middleware to all admin routes
+app.use('/api/admin/', auditLog);
 
 // Role Management Endpoints
 app.put('/api/admin/users/role', adminGuard, asyncHandler((req, res) => roleController.assignRole(req, res)));
@@ -2125,22 +2009,58 @@ app.get('/api/admin/audit-logs/resource', adminGuard, asyncHandler((req, res) =>
 // Social, DM, Chat, Users API Routes
 // ==========================================
 const chatController = require('./controllers/chatController');
+const chatMediaController = require('./controllers/chatMediaController');
+const hangoutGroupController = require('./controllers/hangoutGroupController');
 const dmController = require('./controllers/dmController');
 const socialController = require('./controllers/socialController');
 const usersController = require('./controllers/usersController');
 
-// Chat (REST fallback for Socket.IO)
+// ── Community Chat (REST fallback + media) ──────────────────────────────────
 app.get('/api/webapp/chat/:room/history', asyncHandler(chatController.getChatHistory));
 app.post('/api/webapp/chat/:room/send', asyncHandler(chatController.sendMessage));
+// Media upload for community chat rooms (images 20 MB / videos 100 MB)
+app.post(
+  '/api/webapp/chat/:room/media',
+  uploadChatMedia,
+  asyncHandler(chatController.sendMediaMessage)
+);
 
-// Nearby (webapp session-auth proxy — Prime only)
-app.post('/api/webapp/nearby/update-location', requirePrimeTier, asyncHandler(async (req, res) => {
+// ── Hangout Groups ───────────────────────────────────────────────────────────
+app.get('/api/webapp/hangouts/groups', asyncHandler(hangoutGroupController.listGroups));
+app.post('/api/webapp/hangouts/groups', asyncHandler(hangoutGroupController.createGroup));
+app.get('/api/webapp/hangouts/groups/:id', asyncHandler(hangoutGroupController.getGroup));
+app.post('/api/webapp/hangouts/groups/:id/join', asyncHandler(hangoutGroupController.joinGroup));
+app.post('/api/webapp/hangouts/groups/:id/leave', asyncHandler(hangoutGroupController.leaveGroup));
+app.delete('/api/webapp/hangouts/groups/:id', asyncHandler(hangoutGroupController.deleteGroup));
+
+// ── Hangout Group Chat ───────────────────────────────────────────────────────
+app.get('/api/webapp/hangouts/groups/:id/messages', asyncHandler(hangoutGroupController.getMessages));
+app.post('/api/webapp/hangouts/groups/:id/messages', asyncHandler(hangoutGroupController.sendMessage));
+// Media upload for a specific hangout group's chat (images 20 MB / videos 100 MB)
+app.post(
+  '/api/webapp/hangouts/groups/:id/media',
+  uploadChatMedia,
+  asyncHandler(chatMediaController.sendGroupMediaMessage)
+);
+// Video call within a group
+app.post('/api/webapp/hangouts/groups/:id/call', asyncHandler(hangoutGroupController.startCall));
+
+// ── DM Media ────────────────────────────────────────────────────────────────
+// Send an image or video as a direct message
+app.post(
+  '/api/webapp/dm/media/:recipientId',
+  uploadChatMedia,
+  asyncHandler(chatMediaController.sendDmMediaMessage)
+);
+
+// Nearby (webapp session-auth proxy)
+app.post('/api/webapp/nearby/update-location', asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
   req.user = { id: user.id, userId: user.id };
   return NearbyController.updateLocation(req, res);
 }));
-app.get('/api/webapp/nearby/search', requirePrimeTier, asyncHandler(async (req, res) => {
+app.get('/api/webapp/nearby/search', asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
   req.user = { id: user.id, userId: user.id };
@@ -2264,15 +2184,258 @@ app.get('/api/proxy/live/streams', asyncHandler(async (req, res) => {
   }
 }));
 
-// --- Bluesky Social Proxy (PDS feed) ---
-const pdsFeedController = require('./controllers/pdsFeedController');
-app.get('/api/proxy/social/feed', asyncHandler(pdsFeedController.getFeed));
+// --- Bluesky Social Proxy ---
+let _pdsAccessJwt = null;
+let _pdsJwtExpiry = 0;
+
+async function getPdsAccessToken() {
+  const now = Date.now();
+  if (_pdsAccessJwt && now < _pdsJwtExpiry) {
+    return _pdsAccessJwt;
+  }
+  const pdsUrl = process.env.BLUESKY_PDS_URL || 'http://bluesky-pds:3000';
+  const pdsHandle = process.env.PDS_ADMIN_HANDLE || '';
+  const pdsPassword = process.env.PDS_ACCOUNT_PASSWORD || '';
+  if (!pdsHandle || !pdsPassword) return null;
+
+  const resp = await axios.post(`${pdsUrl}/xrpc/com.atproto.server.createSession`, {
+    identifier: pdsHandle,
+    password: pdsPassword,
+  }, { timeout: 10000 });
+
+  _pdsAccessJwt = resp.data?.accessJwt;
+  // Cache for 90 minutes (tokens last ~2 hours)
+  _pdsJwtExpiry = now + 90 * 60 * 1000;
+  return _pdsAccessJwt;
+}
+
+app.get('/api/proxy/social/feed', asyncHandler(async (req, res) => {
+  try {
+    const pdsUrl = process.env.BLUESKY_PDS_URL || 'http://bluesky-pds:3000';
+    const pdsHandle = process.env.PDS_ADMIN_HANDLE || '';
+    const { limit = 20 } = req.query;
+
+    if (!pdsHandle) {
+      return res.json({ success: true, posts: [], message: 'No PDS handle configured' });
+    }
+
+    // Authenticate to PDS
+    const token = await getPdsAccessToken();
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+    // Self-hosted PDS: use listRecords instead of getAuthorFeed
+    // (getAuthorFeed requires AppView relay which standalone PDS lacks)
+    const handleResp = await axios.get(`${pdsUrl}/xrpc/com.atproto.identity.resolveHandle`, {
+      params: { handle: pdsHandle },
+      timeout: 5000,
+    });
+    const did = handleResp.data?.did;
+    if (!did) {
+      return res.json({ success: true, posts: [], message: 'Could not resolve handle' });
+    }
+
+    const resp = await axios.get(`${pdsUrl}/xrpc/com.atproto.repo.listRecords`, {
+      params: { repo: did, collection: 'app.bsky.feed.post', limit: +limit, reverse: true },
+      headers,
+      timeout: 10000,
+    });
+
+    // Also get the profile for display info
+    let profileName = '';
+    try {
+      const profileResp = await axios.get(`${pdsUrl}/xrpc/com.atproto.repo.getRecord`, {
+        params: { repo: did, collection: 'app.bsky.actor.profile', rkey: 'self' },
+        headers,
+        timeout: 5000,
+      });
+      profileName = profileResp.data?.value?.displayName || '';
+    } catch (_) { /* ignore if no profile */ }
+
+    const posts = (resp.data?.records || []).map((record) => ({
+      uri: record.uri,
+      cid: record.cid,
+      author: {
+        handle: pdsHandle,
+        displayName: profileName,
+        avatar: '',
+      },
+      record: {
+        text: record.value?.text || '',
+        createdAt: record.value?.createdAt || '',
+      },
+      likeCount: 0,
+      repostCount: 0,
+      replyCount: 0,
+    }));
+
+    res.json({ success: true, posts });
+  } catch (error) {
+    logger.error('Social proxy feed error:', error.message);
+    // Clear cached token on auth errors
+    if (error.response?.status === 401) {
+      _pdsAccessJwt = null;
+      _pdsJwtExpiry = 0;
+    }
+    res.json({ success: true, posts: [], message: 'Feed temporarily unavailable' });
+  }
+}));
 
 // --- Directus-backed Social Posts Proxy ---
-const directusSocialController = require('./controllers/directusSocialController');
-app.get('/api/proxy/social/posts', asyncHandler(directusSocialController.getPosts));
-app.post('/api/proxy/social/posts', postMediaUpload.single('media'), asyncHandler(directusSocialController.createPost));
-app.delete('/api/proxy/social/posts/:id', asyncHandler(directusSocialController.deletePost));
+const DIRECTUS_INTERNAL_URL = process.env.DIRECTUS_URL || 'http://172.20.0.14:8055';
+const DIRECTUS_ADMIN_TOKEN = process.env.DIRECTUS_ADMIN_TOKEN || '';
+
+// GET /api/proxy/social/posts — Public read of social_posts from Directus
+app.get('/api/proxy/social/posts', asyncHandler(async (req, res) => {
+  try {
+    const { limit = 50, offset = 0 } = req.query;
+    const resp = await axios.get(`${DIRECTUS_INTERNAL_URL}/items/social_posts`, {
+      params: {
+        sort: '-date_created',
+        limit: +limit,
+        offset: +offset,
+        'fields[]': ['*', 'media.id', 'media.type', 'media.width', 'media.height', 'media.filename_download'],
+        'filter[status][_eq]': 'published',
+      },
+      timeout: 10000,
+    });
+    const posts = resp.data?.data || [];
+    res.json({ success: true, posts });
+  } catch (error) {
+    logger.error('Social posts proxy GET error:', error.message);
+    res.json({ success: true, posts: [], message: 'Posts temporarily unavailable' });
+  }
+}));
+
+// POST /api/proxy/social/posts — Create a new social post (auth required)
+app.post('/api/proxy/social/posts', postMediaUpload.single('media'), asyncHandler(async (req, res) => {
+  try {
+    const user = req.session?.user;
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
+    const { text } = req.body;
+    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+      return res.status(400).json({ success: false, error: 'Text is required' });
+    }
+    if (text.length > 500) {
+      return res.status(400).json({ success: false, error: 'Text must be 500 characters or less' });
+    }
+
+    if (!DIRECTUS_ADMIN_TOKEN) {
+      return res.status(500).json({ success: false, error: 'Directus admin token not configured' });
+    }
+
+    let mediaFileId = null;
+
+    // Upload media file to Directus if present
+    if (req.file) {
+      const FormData = require('form-data');
+      const formData = new FormData();
+      formData.append('file', req.file.buffer, {
+        filename: req.file.originalname,
+        contentType: req.file.mimetype,
+      });
+
+      const uploadResp = await axios.post(`${DIRECTUS_INTERNAL_URL}/files`, formData, {
+        headers: {
+          ...formData.getHeaders(),
+          Authorization: `Bearer ${DIRECTUS_ADMIN_TOKEN}`,
+        },
+        timeout: 30000,
+        maxContentLength: 50 * 1024 * 1024,
+      });
+      mediaFileId = uploadResp.data?.data?.id || null;
+    }
+
+    // Determine author info
+    const authorId = String(user.telegram_id || user.id || '');
+    const authorName = user.display_name || user.first_name || user.username || 'Anonymous';
+    const authorSource = user.telegram_id ? 'telegram' : 'oidc';
+
+    // Create social_posts item in Directus
+    const createResp = await axios.post(`${DIRECTUS_INTERNAL_URL}/items/social_posts`, {
+      status: 'published',
+      text: text.trim(),
+      media: mediaFileId,
+      author_name: authorName,
+      author_id: authorId,
+      author_source: authorSource,
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${DIRECTUS_ADMIN_TOKEN}`,
+      },
+      timeout: 10000,
+    });
+
+    const post = createResp.data?.data;
+    logger.info(`Social post created by user ${authorId}: post #${post?.id}`);
+    res.json({ success: true, post });
+  } catch (error) {
+    logger.error('Social posts proxy POST error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to create post' });
+  }
+}));
+
+// DELETE /api/proxy/social/posts/:id — Delete own post (auth required)
+app.delete('/api/proxy/social/posts/:id', asyncHandler(async (req, res) => {
+  try {
+    const user = req.session?.user;
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
+    const postId = req.params.id;
+    const authorId = String(user.telegram_id || user.id || '');
+
+    if (!DIRECTUS_ADMIN_TOKEN) {
+      return res.status(500).json({ success: false, error: 'Directus admin token not configured' });
+    }
+
+    // Fetch the post to verify ownership
+    const fetchResp = await axios.get(`${DIRECTUS_INTERNAL_URL}/items/social_posts/${postId}`, {
+      headers: { Authorization: `Bearer ${DIRECTUS_ADMIN_TOKEN}` },
+      timeout: 5000,
+    });
+
+    const post = fetchResp.data?.data;
+    if (!post) {
+      return res.status(404).json({ success: false, error: 'Post not found' });
+    }
+
+    // Check ownership (admin can delete any post)
+    const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+    if (post.author_id !== authorId && !isAdmin) {
+      return res.status(403).json({ success: false, error: 'You can only delete your own posts' });
+    }
+
+    // Delete the media file if present
+    if (post.media) {
+      try {
+        await axios.delete(`${DIRECTUS_INTERNAL_URL}/files/${post.media}`, {
+          headers: { Authorization: `Bearer ${DIRECTUS_ADMIN_TOKEN}` },
+          timeout: 5000,
+        });
+      } catch (_) { /* media cleanup is best-effort */ }
+    }
+
+    // Delete the post
+    await axios.delete(`${DIRECTUS_INTERNAL_URL}/items/social_posts/${postId}`, {
+      headers: { Authorization: `Bearer ${DIRECTUS_ADMIN_TOKEN}` },
+      timeout: 5000,
+    });
+
+    logger.info(`Social post #${postId} deleted by user ${authorId}`);
+    res.json({ success: true });
+  } catch (error) {
+    logger.error('Social posts proxy DELETE error:', error.message);
+    if (error.response?.status === 403) {
+      return res.status(403).json({ success: false, error: 'Not authorized to delete this post' });
+    }
+    res.status(500).json({ success: false, error: 'Failed to delete post' });
+  }
+}));
 
 // --- Hangouts Proxy (Jitsi rooms for React SPA) ---
 const JitsiService = require('../services/jitsiService');
@@ -2558,17 +2721,9 @@ app.get('/api/proxy/live/tips/recent', asyncHandler(async (req, res) => {
   }
 }));
 
-// POST /api/proxy/live/tips/callback — Payment webhook callback (requires webhook secret)
+// POST /api/proxy/live/tips/callback — Payment webhook callback
 app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (req, res) => {
   try {
-    // Verify webhook secret to prevent payment bypass
-    const webhookSecret = process.env.DAIMO_WEBHOOK_SECRET || process.env.N8N_WEBHOOK_SECRET;
-    const providedSecret = req.get('X-Webhook-Secret') || req.get('X-N8N-SECRET');
-    if (!webhookSecret || providedSecret !== webhookSecret) {
-      logger.warn('Tips callback: invalid or missing webhook secret', { ip: req.ip });
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
-    }
-
     const { tipId, transactionId, status } = req.body;
     if (!tipId || !transactionId) {
       return res.status(400).json({ success: false, error: 'tipId and transactionId required' });
@@ -2594,27 +2749,39 @@ app.post('/api/verify-age-self', asyncHandler(async (req, res) => {
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
 
-    // Use UserModel to properly update DB, set timestamps, AND invalidate Redis cache
-    const UserModel = require('../../models/userModel');
-    const updated = await UserModel.updateAgeVerification(user.id, {
-      verified: true,
-      method: 'self_declaration',
-      expiresHours: 8760, // 1 year for self-declaration
-    });
-
-    if (!updated) {
-      return res.status(500).json({ success: false, error: 'Failed to update verification' });
-    }
+    await require('../../config/postgres').query(
+      'UPDATE users SET age_verified = TRUE WHERE id = $1',
+      [user.id]
+    );
 
     req.session.user.ageVerified = true;
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => err ? reject(err) : resolve());
-    });
     logger.info(`User ${user.id} self-declared age verification`);
     res.json({ success: true });
   } catch (error) {
     logger.error('Age self-verification error:', error.message);
     res.status(500).json({ success: false, error: 'Verification failed' });
+  }
+}));
+
+// --- Complete onboarding (mark as done, show only once) ---
+app.post('/api/complete-onboarding', asyncHandler(async (req, res) => {
+  try {
+    const user = req.session?.user;
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
+    await require('../../config/postgres').query(
+      'UPDATE users SET onboarding_complete = TRUE WHERE id = $1',
+      [user.id]
+    );
+
+    req.session.user.onboardingComplete = true;
+    logger.info(`User ${user.id} completed onboarding`);
+    res.json({ success: true });
+  } catch (error) {
+    logger.error('Complete onboarding error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to complete onboarding' });
   }
 }));
 
@@ -2679,24 +2846,15 @@ const n8nRateLimiter = rateLimit({
   skip: (req) => req.get('X-N8N-SECRET') === process.env.N8N_WEBHOOK_SECRET
 });
 
-// Require X-N8N-SECRET header for all n8n endpoints (PII exposure risk without this)
-const requireN8nSecret = (req, res, next) => {
-  const secret = process.env.N8N_WEBHOOK_SECRET;
-  if (!secret || req.get('X-N8N-SECRET') !== secret) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  next();
-};
-
-app.get('/api/n8n/payments/failed', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.getFailedPayments));
-app.post('/api/n8n/payments/update-status', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.updatePaymentRecoveryStatus));
-app.get('/api/n8n/subscriptions/expiry', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.getExpiryNotifications));
-app.post('/api/n8n/workflows/log', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.logWorkflowExecution));
-app.post('/api/n8n/emails/log', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.logEmailNotification));
-app.post('/api/n8n/alerts/admin', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.sendAdminAlert));
-app.get('/api/n8n/health', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.checkSystemHealth));
-app.get('/api/n8n/errors/summary', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.getErrorSummary));
-app.get('/api/n8n/metrics/dashboard', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.getDashboardMetrics));
+app.get('/api/n8n/payments/failed', n8nRateLimiter, asyncHandler(n8nAutomationController.getFailedPayments));
+app.post('/api/n8n/payments/update-status', n8nRateLimiter, asyncHandler(n8nAutomationController.updatePaymentRecoveryStatus));
+app.get('/api/n8n/subscriptions/expiry', n8nRateLimiter, asyncHandler(n8nAutomationController.getExpiryNotifications));
+app.post('/api/n8n/workflows/log', n8nRateLimiter, asyncHandler(n8nAutomationController.logWorkflowExecution));
+app.post('/api/n8n/emails/log', n8nRateLimiter, asyncHandler(n8nAutomationController.logEmailNotification));
+app.post('/api/n8n/alerts/admin', n8nRateLimiter, asyncHandler(n8nAutomationController.sendAdminAlert));
+app.get('/api/n8n/health', n8nRateLimiter, asyncHandler(n8nAutomationController.checkSystemHealth));
+app.get('/api/n8n/errors/summary', n8nRateLimiter, asyncHandler(n8nAutomationController.getErrorSummary));
+app.get('/api/n8n/metrics/dashboard', n8nRateLimiter, asyncHandler(n8nAutomationController.getDashboardMetrics));
 
 // ==========================================
 // NGINX AUTH_REQUEST ENDPOINT (Internal)

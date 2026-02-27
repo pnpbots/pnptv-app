@@ -502,7 +502,13 @@ export interface GroupMessage {
   username: string;
   first_name: string;
   photo_url: string | null;
-  content: string;
+  content: string | null;
+  media_url: string | null;
+  media_type: "image" | "video" | null;
+  media_mime: string | null;
+  media_thumb_url: string | null;
+  media_width: number | null;
+  media_height: number | null;
   created_at: string;
 }
 
@@ -563,6 +569,32 @@ export function sendGroupMessage(
     method: "POST",
     body: { content },
   });
+}
+
+export async function sendGroupMediaMessage(
+  groupId: number,
+  mediaFile: File,
+  caption?: string
+): Promise<{ success: boolean; message: GroupMessage }> {
+  const formData = new FormData();
+  formData.append("media", mediaFile);
+  if (caption?.trim()) formData.append("content", caption.trim());
+
+  const res = await fetch(
+    `${API_BASE}/api/webapp/hangouts/groups/${groupId}/media`,
+    {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    }
+  );
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error || `API error ${res.status}`);
+  }
+
+  return res.json();
 }
 
 export function startGroupCall(
@@ -697,7 +729,11 @@ export interface DirectMessage {
   id: number;
   senderId: string;
   recipientId: string;
-  content: string;
+  content: string | null;
+  mediaUrl: string | null;
+  mediaType: "image" | "video" | null;
+  mediaMime: string | null;
+  mediaThumbUrl: string | null;
   isRead: boolean;
   createdAt: string;
   isMine: boolean;
@@ -735,6 +771,32 @@ export function sendMessage(recipientId: string, content: string): Promise<{
     method: "POST",
     body: { recipientId, content },
   });
+}
+
+export async function sendDmMediaMessage(
+  recipientId: string,
+  mediaFile: File,
+  caption?: string
+): Promise<{ success: boolean; message: DirectMessage }> {
+  const formData = new FormData();
+  formData.append("media", mediaFile);
+  if (caption?.trim()) formData.append("content", caption.trim());
+
+  const res = await fetch(
+    `${API_BASE}/api/webapp/dm/media/${encodeURIComponent(recipientId)}`,
+    {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    }
+  );
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error || `API error ${res.status}`);
+  }
+
+  return res.json();
 }
 
 export function deleteMessage(messageId: number): Promise<{

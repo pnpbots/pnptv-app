@@ -24,6 +24,11 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(days / 30)}mo`;
 }
 
+/** Check if a photo value is a valid web URL (not a Telegram file ID) */
+function isValidPhotoUrl(photo: string | null | undefined): photo is string {
+  return !!photo && (photo.startsWith("/") || photo.startsWith("http"));
+}
+
 // ── Post Card ────────────────────────────────────────────────────────────────
 
 function PostCard({
@@ -98,20 +103,20 @@ function PostCard({
       <div className="flex gap-3">
         {/* Avatar — show real photo or gradient fallback */}
         <button onClick={() => onNavigate(authorPath)} className="flex-shrink-0">
-          {post.author_photo ? (
+          {isValidPhotoUrl(post.author_photo) ? (
             <img
               src={post.author_photo}
               alt=""
               className="w-10 h-10 rounded-full object-cover"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty("display"); }}
             />
-          ) : (
-            <div
-              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
-              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
-            >
-              {(post.author_first_name || post.author_username || "?")[0].toUpperCase()}
-            </div>
-          )}
+          ) : null}
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: isValidPhotoUrl(post.author_photo) ? "none" : undefined }}
+          >
+            {(post.author_first_name || post.author_username || "?")[0].toUpperCase()}
+          </div>
         </button>
 
         {/* Content */}
@@ -152,9 +157,21 @@ function PostCard({
           {post.media_url && (
             <div className="mt-3">
               {post.media_type === "video" ? (
-                <video src={post.media_url} controls className="w-full max-h-80 rounded-lg object-cover" preload="metadata" />
+                <video
+                  src={post.media_url}
+                  controls
+                  className="w-full max-h-80 rounded-lg object-cover"
+                  preload="metadata"
+                  onError={(e) => { (e.target as HTMLVideoElement).parentElement!.style.display = "none"; }}
+                />
               ) : (
-                <img src={post.media_url} alt="" className="w-full max-h-80 rounded-lg object-cover" loading="lazy" />
+                <img
+                  src={post.media_url}
+                  alt=""
+                  className="w-full max-h-80 rounded-lg object-cover"
+                  loading="lazy"
+                  onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = "none"; }}
+                />
               )}
             </div>
           )}
@@ -208,13 +225,12 @@ function PostCard({
                   {replies.map((reply) => (
                     <div key={reply.id} className="flex gap-2">
                       <button onClick={() => onNavigate(reply.author_id === currentUserId ? "/profile" : `/profile/${reply.author_id}`)} className="flex-shrink-0">
-                        {reply.author_photo ? (
-                          <img src={reply.author_photo} alt="" className="w-7 h-7 rounded-full object-cover" />
-                        ) : (
-                          <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
-                            {(reply.author_first_name || reply.author_username || "?")[0].toUpperCase()}
-                          </div>
-                        )}
+                        {isValidPhotoUrl(reply.author_photo) ? (
+                          <img src={reply.author_photo} alt="" className="w-7 h-7 rounded-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty("display"); }} />
+                        ) : null}
+                        <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: isValidPhotoUrl(reply.author_photo) ? "none" : undefined }}>
+                          {(reply.author_first_name || reply.author_username || "?")[0].toUpperCase()}
+                        </div>
                       </button>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
@@ -381,8 +397,8 @@ export default function Social() {
         <div className="glass-card-sm p-4 mb-6">
           <div className="flex gap-3">
             {/* Composer avatar — show user photo */}
-            {user?.photoUrl ? (
-              <img src={user.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+            {isValidPhotoUrl(user?.photoUrl) ? (
+              <img src={user.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
             ) : (
               <div
                 className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"

@@ -39,6 +39,10 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(days / 30)}mo`;
 }
 
+function isValidPhotoUrl(photo: string | null | undefined): photo is string {
+  return !!photo && (photo.startsWith("/") || photo.startsWith("http"));
+}
+
 export default function Home() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -188,8 +192,8 @@ export default function Home() {
         onClick={() => navigate("/social")}
       >
         <div className="flex gap-3">
-          {user?.photoUrl ? (
-            <img src={user.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+          {isValidPhotoUrl(user?.photoUrl) ? (
+            <img src={user.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
           ) : (
             <div
               className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
@@ -275,16 +279,15 @@ export default function Home() {
                 <div className="flex gap-3">
                   {/* Avatar */}
                   <button onClick={() => navigate(authorPath)} className="flex-shrink-0">
-                    {post.author_photo ? (
-                      <img src={post.author_photo} alt="" className="w-10 h-10 rounded-full object-cover" />
-                    ) : (
-                      <div
-                        className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
-                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
-                      >
-                        {(post.author_first_name || post.author_username || "?")[0].toUpperCase()}
-                      </div>
-                    )}
+                    {isValidPhotoUrl(post.author_photo) ? (
+                      <img src={post.author_photo} alt="" className="w-10 h-10 rounded-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty("display"); }} />
+                    ) : null}
+                    <div
+                      className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: isValidPhotoUrl(post.author_photo) ? "none" : undefined }}
+                    >
+                      {(post.author_first_name || post.author_username || "?")[0].toUpperCase()}
+                    </div>
                   </button>
 
                   {/* Content */}
@@ -306,12 +309,23 @@ export default function Home() {
                     {/* Media */}
                     {post.media_url && (
                       <div className="mt-2">
-                        <img
-                          src={post.media_url}
-                          alt=""
-                          className="w-full max-h-48 rounded-lg object-cover"
-                          loading="lazy"
-                        />
+                        {post.media_type === "video" ? (
+                          <video
+                            src={post.media_url}
+                            controls
+                            className="w-full max-h-48 rounded-lg object-cover"
+                            preload="metadata"
+                            onError={(e) => { (e.target as HTMLVideoElement).parentElement!.style.display = "none"; }}
+                          />
+                        ) : (
+                          <img
+                            src={post.media_url}
+                            alt=""
+                            className="w-full max-h-48 rounded-lg object-cover"
+                            loading="lazy"
+                            onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = "none"; }}
+                          />
+                        )}
                       </div>
                     )}
                     {/* Actions */}
