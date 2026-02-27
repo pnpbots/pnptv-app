@@ -430,6 +430,8 @@ services:
     image: node:18-slim
     container_name: pnptv-bot
     restart: unless-stopped
+    ports:
+      - "3001:3001"
     working_dir: /app
     volumes:
       - .:/app
@@ -445,6 +447,7 @@ services:
       PORT: 3001
       POSTGRES_HOST: pg-pnptv
       REDIS_HOST: redis-pnptv
+      BOT_LOCK_ENABLED: "false"
       AMPACHE_URL: http://ampache:80
       DIRECTUS_URL: http://directus:8055
       BLUESKY_PDS_URL: http://bluesky-pds:3000
