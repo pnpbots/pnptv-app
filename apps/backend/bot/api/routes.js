@@ -660,22 +660,22 @@ app.get('/age-verification', pageLimiter, (req, res) => {
 
 
 
-// Meet & Greet Checkout pages
+// Meet & Greet Checkout pages — use sendCheckoutHtml for proper 3DS CSP headers
 app.get('/pnp/meet-greet/checkout/:bookingId', pageLimiter, (req, res) => {
-  res.redirect(302, '/meet-greet-checkout.html');
+  sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
 app.get('/pnp/meet-greet/daimo-checkout/:bookingId', pageLimiter, (req, res) => {
-  res.redirect(302, '/meet-greet-daimo-checkout.html');
+  sendCheckoutHtml(res, 'daimo-checkout.html');
 });
 
-// PNP Live Checkout pages
+// PNP Live Checkout pages — use sendCheckoutHtml for proper 3DS CSP headers
 app.get('/pnp/live/checkout/:bookingId', pageLimiter, (req, res) => {
-  res.redirect(302, '/pnp-live-checkout.html');
+  sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
 app.get('/pnp/live/daimo-checkout/:bookingId', pageLimiter, (req, res) => {
-  res.redirect(302, '/pnp-live-daimo-checkout.html');
+  sendCheckoutHtml(res, 'daimo-checkout.html');
 });
 
 // (Security middleware moved to top of middleware chain, before route registration)
@@ -1162,9 +1162,9 @@ app.post(
   asyncHandler(podcastController.uploadAudio)
 );
 
-// Recurring Checkout page - serves recurring-checkout.html for /recurring-checkout/:userId/:planId
+// Recurring Checkout page — use sendCheckoutHtml for proper 3DS CSP headers
 app.get('/recurring-checkout/:userId/:planId', pageLimiter, (req, res) => {
-  res.redirect(302, '/recurring-checkout.html');
+  sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
 // Recurring Subscription API routes

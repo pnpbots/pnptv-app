@@ -354,6 +354,18 @@ class SubscriptionController {
 
       logger.info('Payment response page accessed', { ref_payco, estado });
 
+      // Set 3DS-compatible headers so banks can redirect/frame this page
+      res.removeHeader('X-Frame-Options');
+      res.removeHeader('Cross-Origin-Embedder-Policy');
+      res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
+      res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
+      res.setHeader('Content-Security-Policy', [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        "frame-ancestors 'self' https://*.epayco.co https://*.payco.co https://*.cardinalcommerce.com https:",
+      ].join(';'));
+
       // Return a simple HTML page with the result
       const isSuccess = estado === 'Aceptada' || estado === 'Aprobada';
 

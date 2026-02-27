@@ -486,6 +486,8 @@
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <!-- ePayco SDK for frontend card tokenization -->
     <script src="https://checkout.epayco.co/epayco.min.js"></script>
+    <!-- ePayco 3DS 2.0 validation (Cardinal Commerce DDC + challenge) -->
+    <script src="https://multimedia.epayco.co/general/3DS/validateThreeds.min.js"></script>
 
     <script>
         // ── State machine ──────────────────────────────────────────
@@ -894,127 +896,72 @@
             setTimeout(function() { window.location.href = url; }, 600);
         }
 
-        // ── 3DS 2.0: Cardinal Commerce device data collection ─────
+        // ── 3DS 2.0: ePayco validate3ds() ─────────────────────────
         function handle3DS2(threeDSecure) {
             showState('processing');
             document.getElementById('processing-msg').textContent = 'Completing 3D Secure verification...';
 
-            var data = threeDSecure.data || {};
+            // Save paymentId so we can resume after 3DS
+            try { sessionStorage.setItem('pnptv_3ds_payment_id', paymentId); } catch(e) {}
 
-            if (data.deviceDataCollectionUrl && data.accessToken) {
-                // Create hidden iframe for device data collection
-                var iframe = document.createElement('iframe');
-                iframe.style.display = 'none';
-                iframe.id = 'cardinal-ddc-iframe';
-                iframe.name = 'cardinal-ddc-iframe';
-                // Allow cross-origin for 3DS bank iframes
-                iframe.setAttribute('allow', 'payment');
-                document.body.appendChild(iframe);
+            var txData = threeDSecure.transactionData || {};
 
-                var ddcCompleted = false;
-                var ddcTimeout = null;
+            // Build data3DS object per ePayco docs
+            var data3DS = {
+                franquicia: txData.franquicia || '',
+                '3DS': txData['3DS'] || {},
+                ref_payco: txData.ref_payco || '',
+                cc_network_response: txData.cc_network_response || '',
+                cod_error: txData.cod_error || '',
+                cod_respuesta: txData.cod_respuesta || '',
+                estado: txData.estado || '',
+                respuesta: txData.respuesta || '',
+            };
 
-                function onDDCComplete() {
-                    if (ddcCompleted) return;
-                    ddcCompleted = true;
-                    if (ddcTimeout) clearTimeout(ddcTimeout);
-                    complete3DS2({
-                        version: threeDSecure.version || '2.0',
-                        provider: threeDSecure.provider || 'CardinalCommerce',
-                        referenceId: data.referenceId,
-                        authenticated: true,
-                        challengeCompleted: true,
-                        validationData: {
-                            accessToken: data.accessToken,
-                            referenceId: data.referenceId,
-                            token: data.token,
-                        },
-                    });
-                }
+            console.log('Calling ePayco validate3ds with data:', JSON.stringify(data3DS));
 
-                // Listen for Cardinal Commerce DDC completion message
-                window.addEventListener('message', function ddcListener(event) {
-                    // Cardinal sends a message when DDC is complete
-                    if (event.origin && (
-                        event.origin.includes('cardinalcommerce.com') ||
-                        event.origin.includes('epayco.co') ||
-                        event.origin.includes('payco.co')
-                    )) {
-                        window.removeEventListener('message', ddcListener);
-                        onDDCComplete();
-                    }
-                });
+            // Listen for completion events from ePayco's validate3ds library
+            var validate3dsCompleted = false;
+            function onValidate3dsMessage(event) {
+                // ePayco validate3ds sends postMessage events on completion
+                if (validate3dsCompleted) return;
 
-                // Fallback timeout: if DDC doesn't complete within 10s, proceed anyway
-                ddcTimeout = setTimeout(function() {
-                    if (!ddcCompleted) {
-                        console.warn('3DS DDC timeout — proceeding without DDC confirmation');
-                        onDDCComplete();
-                    }
-                }, 10000);
+                var d = event.data;
+                if (!d) return;
 
-                // Also listen for iframe load as a secondary signal
-                iframe.onload = function() {
-                    // Wait a short period after load for any postMessage to arrive
-                    setTimeout(function() {
-                        if (!ddcCompleted) onDDCComplete();
-                    }, 2000);
-                };
+                // ePayco sends { success: true } or { ref_payco: ... } or { message: ... }
+                var isEpaycoEvent = (
+                    (typeof d === 'object' && (d.success !== undefined || d.ref_payco || d.message)) ||
+                    (typeof d === 'string' && (d.includes('ref_payco') || d.includes('success')))
+                );
 
-                // Build form to post to DDC URL
-                var form = document.createElement('form');
-                form.method = 'POST';
-                form.action = data.deviceDataCollectionUrl;
-                form.target = 'cardinal-ddc-iframe';
-
-                var input = document.createElement('input');
-                input.type = 'hidden';
-                input.name = 'JWT';
-                input.value = data.accessToken;
-                form.appendChild(input);
-
-                document.body.appendChild(form);
-                form.submit();
-                form.remove();
-            } else {
-                // No DDC URL — just mark as authenticated and poll
-                complete3DS2({
-                    version: threeDSecure.version || '2.0',
-                    provider: threeDSecure.provider || 'CardinalCommerce',
-                    referenceId: data.referenceId,
-                    authenticated: true,
-                    challengeCompleted: true,
-                    validationData: data,
-                });
-            }
-        }
-
-        async function complete3DS2(threeDSecureData) {
-            try {
-                var res = await fetch('/api/payment/complete-3ds-2', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        paymentId: paymentId,
-                        threeDSecure: threeDSecureData,
-                    }),
-                });
-
-                var result = await res.json();
-
-                if (result.status === 'authenticated' || result.status === 'completed') {
-                    showState('success');
-                    document.getElementById('success-detail').textContent =
-                        result.message || 'Payment authenticated and approved.';
-                } else if (result.status === 'failed' || result.status === 'refunded') {
-                    showState('error');
-                    document.getElementById('error-detail').textContent =
-                        result.message || 'Payment was not approved after 3DS verification.';
-                } else {
-                    // Still pending — poll
+                if (isEpaycoEvent) {
+                    validate3dsCompleted = true;
+                    window.removeEventListener('message', onValidate3dsMessage);
+                    console.log('validate3ds completed, event data:', JSON.stringify(d));
+                    // 3DS flow complete — start polling to check final status
                     startPolling();
                 }
-            } catch (err) {
+            }
+            window.addEventListener('message', onValidate3dsMessage);
+
+            // Fallback: if validate3ds doesn't emit event within 120s, start polling
+            setTimeout(function() {
+                if (!validate3dsCompleted) {
+                    validate3dsCompleted = true;
+                    window.removeEventListener('message', onValidate3dsMessage);
+                    console.warn('validate3ds timeout after 120s — starting polling');
+                    startPolling();
+                }
+            }, 120000);
+
+            // Call ePayco's validate3ds function (from validateThreeds.min.js)
+            if (typeof validate3ds === 'function') {
+                validate3ds(data3DS);
+            } else {
+                console.error('validate3ds function not available — falling back to polling');
+                validate3dsCompleted = true;
+                window.removeEventListener('message', onValidate3dsMessage);
                 startPolling();
             }
         }
