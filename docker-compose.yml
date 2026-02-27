@@ -437,7 +437,7 @@ services:
       - .:/app
       - pnptv-bot-nm:/app/node_modules
     command: >
-      sh -c "npm install --omit=dev 2>/dev/null;
+      sh -c "npm install --omit=dev;
              node --dns-result-order=ipv4first apps/backend/bot/core/bot.js"
     env_file:
       - .env

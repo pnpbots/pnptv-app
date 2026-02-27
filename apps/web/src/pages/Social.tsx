@@ -52,7 +52,7 @@ function PostCard({
   const [replyText, setReplyText] = useState("");
   const [sendingReply, setSendingReply] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const isOwn = post.author_id === currentUserId;
+  const isOwn = String(post.author_id) === currentUserId;
   const canDelete = isOwn || isAdmin;
 
   const loadReplies = useCallback(async () => {
@@ -96,7 +96,7 @@ function PostCard({
     }
   }, [post]);
 
-  const authorPath = post.author_id === currentUserId ? "/profile" : `/profile/${post.author_id}`;
+  const authorPath = String(post.author_id) === currentUserId ? "/profile" : `/profile/${post.author_id}`;
 
   return (
     <div className="glass-card-sm p-4" id={`post-${post.id}`}>
@@ -224,7 +224,7 @@ function PostCard({
                 <div className="space-y-3 mb-3">
                   {replies.map((reply) => (
                     <div key={reply.id} className="flex gap-2">
-                      <button onClick={() => onNavigate(reply.author_id === currentUserId ? "/profile" : `/profile/${reply.author_id}`)} className="flex-shrink-0">
+                      <button onClick={() => onNavigate(String(reply.author_id) === currentUserId ? "/profile" : `/profile/${reply.author_id}`)} className="flex-shrink-0">
                         {isValidPhotoUrl(reply.author_photo) ? (
                           <img src={reply.author_photo} alt="" className="w-7 h-7 rounded-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty("display"); }} />
                         ) : null}
