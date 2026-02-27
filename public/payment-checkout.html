@@ -695,35 +695,52 @@
             document.getElementById('processing-msg').textContent = 'Tokenizing your card securely...';
 
             try {
-                // Step 1: Tokenize card with ePayco.js SDK
-                const tokenCard = await tokenizeCard(cardNumber, expYear, expMonth, cvc);
-                if (!tokenCard) {
-                    throw new Error('Card tokenization failed. Please check your card details.');
+                // Step 1: Try client-side tokenization, fallback to server-side
+                let tokenCard = null;
+                try {
+                    tokenCard = await tokenizeCard(cardNumber, expYear, expMonth, cvc);
+                } catch (tokenErr) {
+                    console.warn('Client-side tokenization failed, falling back to server-side:', tokenErr.message);
                 }
 
                 document.getElementById('processing-msg').textContent = 'Processing payment...';
 
-                // Step 2: Send tokenized charge to backend
+                // Step 2: Send charge to backend (with token or raw card data for server-side tokenization)
+                const chargeBody = {
+                    paymentId: paymentId,
+                    name: name,
+                    lastName: lastName,
+                    email: email,
+                    docType: docType,
+                    docNumber: docNumber,
+                    phone: phone || '0000000000',
+                    city: 'Bogota',
+                    address: 'N/A',
+                    dues: dues,
+                    browserInfo: getBrowserInfo(),
+                };
+                if (tokenCard) {
+                    chargeBody.tokenCard = tokenCard;
+                } else {
+                    chargeBody.cardNumber = cardNumber;
+                    chargeBody.expYear = expYear;
+                    chargeBody.expMonth = expMonth;
+                    chargeBody.cvc = cvc;
+                }
                 const chargeRes = await fetch('/api/payment/tokenized-charge', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        paymentId: paymentId,
-                        tokenCard: tokenCard,
-                        name: name,
-                        lastName: lastName,
-                        email: email,
-                        docType: docType,
-                        docNumber: docNumber,
-                        phone: phone || '0000000000',
-                        city: 'Bogota',
-                        address: 'N/A',
-                        dues: dues,
-                        browserInfo: getBrowserInfo(),
-                    }),
+                    body: JSON.stringify(chargeBody),
                 });
 
                 const result = await chargeRes.json();
+                if (result.retryable) {
+                    showState('error');
+                    document.getElementById('error-detail').textContent =
+                        result.error || 'El procesador de pagos no está disponible. Intenta en unos minutos.';
+                    document.getElementById('btn-pay').disabled = false;
+                    return;
+                }
                 handleChargeResult(result);
             } catch (err) {
                 showState('error');

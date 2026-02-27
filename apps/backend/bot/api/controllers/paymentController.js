@@ -733,17 +733,32 @@ class PaymentController {
             resolvedToken = tokenResult.data.id;
             logger.info('Server-side card tokenization succeeded (data.id)', { paymentId });
           } else {
-            logger.error('Server-side tokenization returned unexpected format', { paymentId, result: JSON.stringify(tokenResult).substring(0, 200) });
-            return res.status(400).json({
+            const resultStr = JSON.stringify(tokenResult).substring(0, 300);
+            logger.error('Server-side tokenization returned unexpected format', { paymentId, result: resultStr });
+            // Detect ePayco API outage (502/HTML response parsed as invalid JWT)
+            const isEpaycoDown = resultStr.includes('Wrong number of segments')
+              || resultStr.includes('Bad Gateway')
+              || (tokenResult?.status === false && resultStr.includes('invalido o expirado'));
+            return res.status(isEpaycoDown ? 503 : 400).json({
               success: false,
-              error: 'No se pudo tokenizar la tarjeta. Verifica los datos e intenta de nuevo.',
+              error: isEpaycoDown
+                ? 'El procesador de pagos (ePayco) no está disponible en este momento. Por favor, intenta de nuevo en unos minutos.'
+                : 'No se pudo tokenizar la tarjeta. Verifica los datos e intenta de nuevo.',
+              retryable: isEpaycoDown,
             });
           }
         } catch (tokenError) {
           logger.error('Server-side card tokenization failed', { paymentId, error: tokenError.message });
-          return res.status(400).json({
+          const isEpaycoDown = tokenError.message?.includes('Wrong number of segments')
+            || tokenError.message?.includes('502')
+            || tokenError.message?.includes('ECONNREFUSED')
+            || tokenError.message?.includes('ETIMEDOUT');
+          return res.status(isEpaycoDown ? 503 : 400).json({
             success: false,
-            error: 'Error al tokenizar la tarjeta: ' + (tokenError.message || 'Verifica los datos de la tarjeta.'),
+            error: isEpaycoDown
+              ? 'El procesador de pagos (ePayco) no está disponible en este momento. Por favor, intenta de nuevo en unos minutos.'
+              : 'Error al tokenizar la tarjeta: ' + (tokenError.message || 'Verifica los datos de la tarjeta.'),
+            retryable: isEpaycoDown,
           });
         }
       }
