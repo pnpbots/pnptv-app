@@ -166,7 +166,9 @@ const createPostWithMedia = async (req, res) => {
   try {
     if (req.file) {
       const { mimetype, buffer } = req.file;
-      const uploadDir = path.join(__dirname, '../../../../public/uploads/posts');
+      // __dirname = /app/apps/backend/bot/api/controllers
+      // 5 levels up reaches /app (monorepo root), then /public
+      const uploadDir = path.join(__dirname, '../../../../../public/uploads/posts');
       await fs.mkdir(uploadDir, { recursive: true });
 
       if (/^image\/(jpeg|jpg|png|webp|gif)$/i.test(mimetype)) {
@@ -218,6 +220,18 @@ const createPostWithMedia = async (req, res) => {
   }
 };
 
+// ── Home Feed (public, no auth required) ─────────────────────────────────────
+
+const getHomeFeed = async (req, res) => {
+  try {
+    const result = await SocialPostService.getHomeFeed(req.query.limit);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    logger.error('getHomeFeed error', err);
+    return res.status(500).json({ error: 'Failed to load home feed' });
+  }
+};
+
 // ── Public Profile ───────────────────────────────────────────────────────────
 
 const getPublicProfile = async (req, res) => {
@@ -252,4 +266,4 @@ const getPublicProfile = async (req, res) => {
   }
 };
 
-module.exports = { getFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, getPublicProfile };
+module.exports = { getFeed, getHomeFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, getPublicProfile };

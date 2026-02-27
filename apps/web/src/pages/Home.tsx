@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useDirectus } from "@/hooks/useDirectus";
 import {
-  getSocialFeedPosts,
+  getHomeFeedPosts,
   togglePostLike,
   type SocialPostItem,
 } from "@/lib/api";
@@ -67,7 +67,7 @@ export default function Home() {
   });
 
   useEffect(() => {
-    getSocialFeedPosts(5)
+    getHomeFeedPosts(10)
       .then((res) => {
         if (res.success) setPosts(res.posts);
       })
@@ -78,15 +78,18 @@ export default function Home() {
   const handleLike = async (postId: number) => {
     try {
       const res = await togglePostLike(postId);
-      if (res.success) {
-        setPosts((prev) =>
-          prev.map((p) =>
-            p.id === postId
-              ? { ...p, liked_by_me: res.liked, likes_count: res.likesCount }
-              : p
-          )
-        );
-      }
+      // Response is { liked: boolean } — use optimistic count update
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? {
+                ...p,
+                liked_by_me: res.liked,
+                likes_count: p.likes_count + (res.liked ? 1 : -1),
+              }
+            : p
+        )
+      );
     } catch { /* silent */ }
   };
 

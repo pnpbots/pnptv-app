@@ -442,7 +442,7 @@ export function createSocialPost(
   return request("/api/webapp/social/posts", { method: "POST", body: { content } });
 }
 
-export function togglePostLike(postId: number): Promise<{ success: boolean; liked: boolean; likes_count: number }> {
+export function togglePostLike(postId: number): Promise<{ liked: boolean }> {
   return request(`/api/webapp/social/posts/${postId}/like`, { method: "POST" });
 }
 
@@ -476,6 +476,18 @@ export function getInternalFeed(
   limit = 20
 ): Promise<{ success: boolean; posts: InternalPost[] }> {
   return getSocialFeedPosts(undefined, limit);
+}
+
+/**
+ * Home page preview feed — no auth required, returns latest N posts.
+ * liked_by_me is always false; use getSocialFeedPosts on the Social page for
+ * accurate per-viewer like state.
+ */
+export function getHomeFeedPosts(
+  limit = 10
+): Promise<{ success: boolean; posts: SocialPostItem[] }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return request(`/api/webapp/social/home-feed?${params}`);
 }
 
 // Hangout Groups

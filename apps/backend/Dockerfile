@@ -49,8 +49,12 @@ COPY --chown=pnptv:pnptv public/ ./public/
 COPY --chown=pnptv:pnptv packages/ ./packages/
 COPY --chown=pnptv:pnptv package.json ./
 
-RUN mkdir -p /app/logs /app/public/uploads/avatars \
-    && chown pnptv:pnptv /app/logs /app/public/uploads /app/public/uploads/avatars \
+RUN mkdir -p /app/logs /app/public/uploads/avatars /app/public/uploads/posts /app/public/uploads/chat \
+    && chown pnptv:pnptv /app/logs \
+                         /app/public/uploads \
+                         /app/public/uploads/avatars \
+                         /app/public/uploads/posts \
+                         /app/public/uploads/chat \
     && chown pnptv:pnptv /tmp
 
 USER pnptv

@@ -2074,6 +2074,9 @@ app.get('/api/webapp/dm/user/:partnerId', asyncHandler(dmController.getPartnerIn
 app.post('/api/webapp/dm/send/:recipientId', asyncHandler(dmController.sendMessage));
 
 // Social feed, wall, posts
+// Public home-feed — no auth required, returns latest posts for the home page preview
+app.get('/api/webapp/social/home-feed', asyncHandler(socialController.getHomeFeed));
+// Authenticated feed — full paginated feed with liked_by_me per viewer
 app.get('/api/webapp/social/feed', asyncHandler(socialController.getFeed));
 app.get('/api/webapp/social/wall/:userId', asyncHandler(socialController.getWall));
 app.get('/api/webapp/social/profile/:userId', asyncHandler(socialController.getPublicProfile));

@@ -15,7 +15,9 @@ class MediaCleanupService {
   static async deleteMediaFile(mediaUrl) {
     if (!mediaUrl) return;
     try {
-      const filePath = path.join(__dirname, '../../..', 'public', mediaUrl.replace(/^\//, ''));
+      // __dirname = /app/apps/backend/bot/services
+      // 4 levels up reaches /app (monorepo root), then /public
+      const filePath = path.join(__dirname, '../../../..', 'public', mediaUrl.replace(/^\//, ''));
       await fs.unlink(filePath);
       logger.info(`Deleted media file: ${mediaUrl}`);
     } catch (error) {
@@ -76,7 +78,8 @@ class MediaCleanupService {
   static async cleanupOldAvatars() {
     try {
       logger.info('Starting avatar cleanup');
-      const uploadsDir = path.join(__dirname, '../../../public/uploads/avatars');
+      // __dirname = /app/apps/backend/bot/services → 4 levels up = /app
+      const uploadsDir = path.join(__dirname, '../../../../public/uploads/avatars');
 
       // Get all users with their current photo_file_id
       const { rows: users } = await query(

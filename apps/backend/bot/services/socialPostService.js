@@ -26,6 +26,11 @@ const sanitizePostRows = (rows) => {
 class SocialPostService {
   // ── Feed ──────────────────────────────────────────────────────────────────
 
+  /**
+   * Full paginated feed for the Social page (/api/webapp/social/feed).
+   * Requires userId for the liked_by_me subquery.
+   * Uses ID-based cursor pagination for consistent, index-friendly fetching.
+   */
   static async getFeed(userId, cursor, limit = 20) {
     const lim = Math.min(Number(limit) || 20, 50);
     const cursorId = cursor ? parseInt(cursor, 10) : null;
@@ -50,6 +55,34 @@ class SocialPostService {
     );
     const nextCursor = rows.length === lim ? String(rows[rows.length - 1].id) : null;
     return { posts: sanitizePostRows(rows), nextCursor };
+  }
+
+  /**
+   * Home page preview feed (/api/webapp/social/home-feed).
+   * Returns the latest N posts without a liked_by_me check.
+   * Does NOT require authentication — the home page shows this before/after login.
+   * liked_by_me is always false; the Social page full feed provides accurate state.
+   */
+  static async getHomeFeed(limit = 10) {
+    const lim = Math.min(Number(limit) || 10, 20);
+    const { rows } = await query(
+      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
+              sp.likes_count, sp.reposts_count, sp.replies_count, sp.created_at,
+              u.id as author_id, u.username as author_username,
+              u.first_name as author_first_name, u.photo_file_id as author_photo,
+              false as liked_by_me,
+              rp.content as repost_content, rp.created_at as repost_created_at,
+              ru.username as repost_author_username, ru.first_name as repost_author_first_name
+       FROM social_posts sp
+       JOIN users u ON sp.user_id = u.id
+       LEFT JOIN social_posts rp ON sp.repost_of_id = rp.id
+       LEFT JOIN users ru ON rp.user_id = ru.id
+       WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL
+       ORDER BY sp.id DESC
+       LIMIT $1`,
+      [lim]
+    );
+    return { posts: sanitizePostRows(rows) };
   }
 
   // ── Wall ──────────────────────────────────────────────────────────────────

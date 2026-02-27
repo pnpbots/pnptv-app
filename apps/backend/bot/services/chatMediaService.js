@@ -37,7 +37,9 @@ const IMAGE_MAX_DIMENSION = 1280; // px, longest edge
 const IMAGE_THUMB_DIMENSION = 400; // px, longest edge for thumbnail
 const IMAGE_QUALITY = 78;
 const THUMB_QUALITY = 72;
-const UPLOAD_BASE = path.join(__dirname, '../../../public/uploads/chat');
+// __dirname = /app/apps/backend/bot/services
+// 4 levels up reaches /app (monorepo root), then /public
+const UPLOAD_BASE = path.join(__dirname, '../../../../public/uploads/chat');
 
 /**
  * Ensure the upload directory exists.
