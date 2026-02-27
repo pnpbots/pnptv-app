@@ -7,33 +7,41 @@ const logger = require('../../utils/logger');
  */
 const telegramAuth = async (req, res, next) => {
   try {
-    // Check if user is authenticated via Telegram Web Login
-    const telegramUser = req.session?.telegramUser;
-    
-    if (!telegramUser) {
-      logger.warn('Unauthorized access attempt - no Telegram user in session');
+    // Check if user is authenticated. The session is written by handleTelegramAuth
+    // under req.session.user (new unified session schema).
+    const sessionUser = req.session?.user;
+
+    if (!sessionUser) {
+      logger.warn('Unauthorized access attempt - no user in session');
       return res.status(401).json({
         error: 'Unauthorized',
         redirect: '/auth/telegram-login'
       });
     }
-    
-    // Check if user exists in our database
+
+    // Resolve the lookup key: prefer telegramId stored in session, fall back to id
+    const lookupKey = String(sessionUser.telegramId || sessionUser.id || '');
+
+    // Check if user exists in our database (search both telegram column and id column)
     const userQuery = await query(
-      'SELECT id, telegram, username, subscription_status, tier, terms_accepted FROM users WHERE telegram = $1',
-      [telegramUser.id]
+      `SELECT id, telegram, username, subscription_status, tier, terms_accepted
+       FROM users
+       WHERE telegram = $1 OR id = $1
+       ORDER BY CASE WHEN telegram = $1 THEN 0 ELSE 1 END
+       LIMIT 1`,
+      [lookupKey]
     );
 
     if (userQuery.rows.length === 0) {
       // User not in our database - redirect to onboarding
-      logger.info(`User ${telegramUser.id} not in database, redirecting to onboarding`);
+      logger.info(`User ${lookupKey} not in database, redirecting to onboarding`);
       return res.status(403).json({
         error: 'User not registered',
         redirect: '/auth/not-registered',
         telegramUser: {
-          id: telegramUser.id,
-          username: telegramUser.username,
-          first_name: telegramUser.first_name
+          id: sessionUser.telegramId || sessionUser.id,
+          username: sessionUser.username,
+          first_name: sessionUser.firstName
         }
       });
     }

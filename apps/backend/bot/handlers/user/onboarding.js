@@ -12,6 +12,7 @@ const { showNearbyMenu } = require('./nearbyUnified');
 const supportRoutingService = require('../../services/supportRoutingService');
 const { handlePromoDeepLink } = require('../promo/promoHandler');
 const { getPrimeInviteLink, activateMembership, fetchActivationCode, markCodeUsed, logActivation } = require('../payments/activation');
+const SubscriptionService = require('../../services/subscriptionService');
 const MessageTemplates = require('../../services/messageTemplates');
 const BusinessNotificationService = require('../../services/businessNotificationService');
 const meruPaymentService = require('../../../services/meruPaymentService');
@@ -401,11 +402,15 @@ const registerOnboardingHandlers = (bot) => {
     }
   });
 
-  // Age confirmation
+  // Age confirmation — persist to DB + invalidate Redis cache
   bot.action('age_confirm_yes', async (ctx) => {
     try {
       const lang = getLanguage(ctx);
       ctx.session.temp.ageConfirmed = true;
+
+      // Persist age verification to database and invalidate cache
+      const { updateAgeVerificationStatus } = require('../../core/middleware/ageVerificationRequired');
+      await updateAgeVerificationStatus(ctx, true, 'manual');
 
       await ctx.editMessageText(t('termsAccepted', lang));
 
@@ -989,6 +994,14 @@ const completeOnboarding = async (ctx) => {
 
     // Log onboarding completion
     logger.info('User completed onboarding', { userId, language: lang });
+
+    // Grant 7-day free trial to new users
+    const monetizationConfig = require('../../../config/monetizationConfig');
+    const trialDays = monetizationConfig.subscription.freeTrialDays || 7;
+    const trialResult = await SubscriptionService.addFreeTrial(userId, trialDays, 'new_user_activation');
+    if (trialResult.success) {
+      logger.info('Free trial granted on activation', { userId, days: trialDays, expiry: trialResult.newExpiry });
+    }
 
     // Clear temp session data
     ctx.session.temp = {};

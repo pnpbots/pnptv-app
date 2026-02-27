@@ -186,6 +186,57 @@ class PaymentService {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || ''));
   }
 
+  /**
+   * Extract 3DS authentication fields (CAVV, ECI, xid) from ePayco webhook or charge response.
+   * These fields confirm 3DS authentication and qualify for liability shift.
+   * ECI values: 05/02 = fully authenticated (Visa/MC), 06/01 = attempted, 07/00 = no 3DS
+   * @param {Object} data - Webhook or charge response data
+   * @returns {Object} Extracted 3DS fields
+   */
+  static extract3DSFields(data) {
+    if (!data || typeof data !== 'object') {
+      return { hasData: false };
+    }
+
+    // ePayco may nest 3DS data in different locations
+    const sources = [data, data.data, data['3DS'], data.three_ds, data.threeDSecure].filter(Boolean);
+
+    let cavv = null;
+    let eci = null;
+    let xid = null;
+    let version = null;
+    let dsTransId = null;
+
+    for (const src of sources) {
+      if (typeof src !== 'object') continue;
+      cavv = cavv || src.cavv || src.CAVV || src.x_cavv || null;
+      eci = eci || src.eci || src.ECI || src.x_eci || null;
+      xid = xid || src.xid || src.XID || src.x_xid || null;
+      version = version || src.threeDSVersion || src.three_ds_version || src.version || null;
+      dsTransId = dsTransId || src.dsTransID || src.ds_trans_id || src.x_ds_trans_id || null;
+    }
+
+    const hasData = !!(cavv || eci || xid);
+
+    // Determine liability shift based on ECI value
+    // Visa: 05 = full auth, 06 = attempted; Mastercard: 02 = full auth, 01 = attempted
+    let liabilityShift = false;
+    if (eci) {
+      const eciStr = String(eci).trim();
+      liabilityShift = ['05', '02', '5', '2'].includes(eciStr);
+    }
+
+    return {
+      hasData,
+      cavv,
+      eci,
+      xid,
+      version,
+      dsTransId,
+      liabilityShift,
+    };
+  }
+
   static resolveExpectedEpaycoAmountAndCurrency(payment) {
     const metadata = payment?.metadata || {};
     const rawCurrencyCandidates = [
@@ -1054,6 +1105,19 @@ class PaymentService {
         }
       }
 
+      // Extract 3DS authentication fields (CAVV, ECI, xid) for liability shift qualification
+      const threeDSFields = this.extract3DSFields(webhookData);
+      if (threeDSFields.hasData) {
+        logger.info('3DS authentication data received in webhook', {
+          refPayco: x_ref_payco,
+          eci: threeDSFields.eci,
+          hasCavv: !!threeDSFields.cavv,
+          hasXid: !!threeDSFields.xid,
+          threeDSVersion: threeDSFields.version,
+          liabilityShift: threeDSFields.liabilityShift,
+        });
+      }
+
       // Process based on transaction state
       if (effectiveState === 'Aceptada' || effectiveState === 'Aprobada') {
         // Activate user subscription
@@ -1305,14 +1369,26 @@ class PaymentService {
         // Mark payment as completed only after business processing finishes.
         // This prevents polling from showing "completed" before subscription activation.
         if (payment) {
-          await PaymentModel.updateStatus(paymentIdOrType, 'completed', {
+          const completedMeta = {
             transaction_id: x_transaction_id,
             approval_code: x_approval_code,
             reference: x_ref_payco,
             epayco_ref: x_ref_payco,
             webhook_processed_at: new Date().toISOString(),
             amount_currency_validated: true,
-          });
+          };
+          // Store 3DS authentication fields for liability shift and audit
+          if (threeDSFields.hasData) {
+            completedMeta.three_ds = {
+              cavv: threeDSFields.cavv,
+              eci: threeDSFields.eci,
+              xid: threeDSFields.xid,
+              version: threeDSFields.version,
+              ds_trans_id: threeDSFields.dsTransId,
+              liability_shift: threeDSFields.liabilityShift,
+            };
+          }
+          await PaymentModel.updateStatus(paymentIdOrType, 'completed', completedMeta);
         }
 
         return { success: true };
@@ -2014,6 +2090,8 @@ class PaymentService {
       java_enabled: Boolean(safeBrowserInfo.javaEnabled),
       javascript_enabled: true,
       ip: String(ip || '').slice(0, 64),
+      // 3DS 2.0 challenge window size preference (05 = full screen)
+      challenge_window_size: safeBrowserInfo.challengeWindowSize || '05',
     };
   }
 
@@ -2184,6 +2262,9 @@ class PaymentService {
       // All payments in pnptv-bot context use the new route
       const confirmationPath = '/checkout/pnp';
 
+      // 3DS notification URL: ePayco sends the 3DS challenge result here
+      const threeDSNotificationUrl = `${epaycoWebhookDomain}${confirmationPath}`;
+
       logger.info('Creating ePayco tokenized charge', { paymentId, amountCOP, tokenId });
       const chargeResult = await epaycoClient.charge.create({
         token_card: tokenId,
@@ -2212,20 +2293,35 @@ class PaymentService {
         url_confirmation: `${epaycoWebhookDomain}${confirmationPath}`,
         method_confirmation: 'POST',
         use_default_card_customer: true,
-        // 3D Secure: Hint to API (actual 3DS enforcement is via ePayco dashboard rules)
-        // Configure in ePayco Dashboard: Configuración → Seguridad → Enable 3D Secure
+        // 3D Secure 2.0 parameters per ePayco protocol specification
         three_d_secure: true,
+        // threeDSRequestor: identifies the merchant to the issuer during 3DS
+        threeDSRequestor: {
+          threeDSRequestorAuthenticationInd: '01', // 01 = payment transaction
+          threeDSRequestorName: process.env.EPAYCO_MERCHANT_NAME || 'PNPtv',
+          threeDSRequestorURL: webhookDomain,
+        },
+        // notificationURL: where the 3DS server sends the challenge result callback
+        notificationURL: threeDSNotificationUrl,
+        // deviceChannel: 02 = Browser (BRW) per EMVCo 3DS spec
+        deviceChannel: '02',
         country: customer.country || 'CO',
         extra1: String(userId),
         extra2: planId,
         extra3: paymentId,
       });
 
+      // Extract 3DS authentication fields from charge response for audit
+      const chargeThreeDSFields = this.extract3DSFields(chargeResult?.data);
+
       logger.info('ePayco charge result', {
         paymentId,
         chargeStatus: chargeResult?.data?.estado,
         chargeResponse: chargeResult?.data?.respuesta,
         refPayco: chargeResult?.data?.ref_payco,
+        threeDSAuthenticated: chargeThreeDSFields.hasData,
+        eci: chargeThreeDSFields.eci,
+        liabilityShift: chargeThreeDSFields.liabilityShift,
       });
 
       // 5. Process result
@@ -2237,7 +2333,7 @@ class PaymentService {
       if (estado === 'Aceptada' || estado === 'Aprobada' || respuesta === 'Aprobada') {
         // Charge approved via API. Mark as processing and wait for webhook confirmation.
         // The webhook is the single source of truth for activating subscriptions.
-        await PaymentModel.updateStatus(paymentId, 'pending', {
+        const approvedMeta = {
           transaction_id: transactionId,
           reference: refPayco,
           epayco_ref: refPayco,
@@ -2245,7 +2341,18 @@ class PaymentService {
           api_charge_status: 'approved',
           expected_epayco_amount: String(amountCOP),
           expected_epayco_currency: 'COP',
-        });
+        };
+        // Store 3DS fields from charge response for liability shift tracking
+        if (chargeThreeDSFields.hasData) {
+          approvedMeta.three_ds = {
+            cavv: chargeThreeDSFields.cavv,
+            eci: chargeThreeDSFields.eci,
+            xid: chargeThreeDSFields.xid,
+            version: chargeThreeDSFields.version,
+            liability_shift: chargeThreeDSFields.liabilityShift,
+          };
+        }
+        await PaymentModel.updateStatus(paymentId, 'pending', approvedMeta);
 
         logger.info('ePayco charge approved via API, waiting for webhook confirmation', {
           paymentId,

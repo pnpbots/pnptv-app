@@ -91,8 +91,8 @@ const registerAgeVerificationHandlers = (bot) => {
       await ctx.answerCbQuery();
       const { updateAgeVerificationStatus } = require('../../middleware/ageVerificationRequired');
 
-      // Update verification status
-      await updateAgeVerificationStatus(ctx, true);
+      // Update verification status with correct method
+      await updateAgeVerificationStatus(ctx, true, 'manual');
 
       // Continue with onboarding
       const { showTermsAndPrivacy } = require('./onboarding');
@@ -173,8 +173,14 @@ Manually confirm that you are of legal age.
 
 How would you like to verify your age?`;
 
+  const userId = ctx.from?.id;
+  if (!userId) {
+    logger.warn('showAgeVerificationOptions called without ctx.from.id');
+    return;
+  }
+
   const webhookDomain = process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
-  const cameraUrl = `${webhookDomain}/age-verification-camera.html?user_id=${ctx.from.id}&lang=${lang}`;
+  const cameraUrl = `${webhookDomain}/age-verification-camera.html?user_id=${userId}&lang=${lang}`;
 
   await ctx.reply(
     message,
@@ -438,9 +444,9 @@ Thank you for completing the verification!`;
 
   await ctx.reply(successMessage, { parse_mode: 'Markdown' });
 
-  // Update age verification status
+  // Update age verification status (session + cache invalidation)
   const { updateAgeVerificationStatus } = require('../../middleware/ageVerificationRequired');
-  await updateAgeVerificationStatus(ctx, true);
+  await updateAgeVerificationStatus(ctx, true, 'ai_photo');
 
   // Update session
   ctx.session.temp.ageConfirmed = true;

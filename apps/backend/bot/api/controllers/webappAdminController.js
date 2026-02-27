@@ -2,6 +2,7 @@ const logger = require('../../../utils/logger');
 const { query } = require('../../../config/postgres');
 const AdminDashboardService = require('../../../services/adminDashboardService');
 const VideoCallModel = require('../../../models/videoCallModel');
+const SocialPostService = require('../../services/socialPostService');
 
 // Note: Admin guard is now handled by JWT middleware (verifyAdminJWT in routes.js)
 // req.user is populated by the middleware and contains user data
@@ -199,31 +200,10 @@ const listPosts = async (req, res) => {
 
   try {
     const page = Math.max(1, parseInt(req.query.page || '1'));
-    const limit = 20;
-    const offset = (page - 1) * limit;
-
-    const result = await query(
-      `SELECT p.id, p.user_id, p.content, p.created_at, u.username, u.first_name,
-              (SELECT COUNT(*) FROM social_likes WHERE post_id = p.id) as likes,
-              (SELECT COUNT(*) FROM social_replies WHERE post_id = p.id) as replies
-       FROM social_posts p
-       JOIN users u ON p.user_id = u.id
-       WHERE p.deleted = false
-       ORDER BY p.created_at DESC
-       LIMIT $1 OFFSET $2`,
-      [limit, offset]
-    );
-
-    const countResult = await query(`SELECT COUNT(*) as count FROM social_posts WHERE deleted = false`);
-    const total = parseInt(countResult.rows[0]?.count || 0);
-    const totalPages = Math.ceil(total / limit);
+    const result = await SocialPostService.adminListPosts(page, 20);
 
     logger.info('Admin listed posts', { adminId: user.id, page });
-    return res.json({
-      success: true,
-      posts: result.rows,
-      pagination: { page, limit, total, totalPages },
-    });
+    return res.json({ success: true, ...result });
   } catch (error) {
     logger.error('Error listing admin posts:', error);
     return res.status(500).json({ error: error.message });
@@ -232,15 +212,16 @@ const listPosts = async (req, res) => {
 
 /**
  * DELETE /api/webapp/admin/posts/:id
- * Delete a post
+ * Delete a post (admin — no ownership check)
  */
 const deletePost = async (req, res) => {
   const user = req.user;
 
   try {
     const { id: postId } = req.params;
+    const deleted = await SocialPostService.deletePost(postId, null, true);
 
-    await query('UPDATE social_posts SET deleted = true, updated_at = NOW() WHERE id = $1', [postId]);
+    if (!deleted) return res.status(404).json({ error: 'Post not found' });
 
     logger.info('Admin deleted post', { adminId: user.id, postId });
     return res.json({ success: true, message: 'Post deleted' });

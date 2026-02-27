@@ -62,7 +62,7 @@ async function showAgeVerification(ctx) {
   await ctx.reply(
     t('ageVerification', lang),
     Markup.inlineKeyboard([
-      [Markup.button.callback(t('confirmAge', lang), 'confirm_age')],
+      [Markup.button.callback(t('confirmAge', lang), 'age_confirm_yes')],
     ])
   );
 }
@@ -82,21 +82,18 @@ async function handleAgeConfirmation(ctx) {
     const lang = ctx.session.language || 'en';
     const userId = ctx.from.id.toString();
 
-    // Calculate age verification expiry (7 days from now)
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + (168 * 60 * 60 * 1000)); // 168 hours = 7 days
+    // Persist age verification to DB with timestamps + cache invalidation
+    await UserModel.updateAgeVerification(userId, {
+      verified: true,
+      method: 'manual',
+      expiresHours: 168, // 7 days
+    });
 
     // Update session
     ctx.session.ageVerified = true;
-    ctx.session.ageVerifiedAt = now;
-    ctx.session.ageVerificationExpiresAt = expiresAt;
     ctx.session.onboardingStep = 'terms';
 
-    console.log(`[Onboarding] User ${userId} confirmed age, valid until ${expiresAt.toISOString()}`);
-
-    await UserModel.updateProfile(userId, {
-      ageVerified: true,
-    });
+    logger.info(`[Onboarding] User ${userId} confirmed age verification`);
 
     // Confirm and proceed to terms
     try {

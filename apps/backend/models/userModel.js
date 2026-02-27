@@ -138,10 +138,10 @@ class UserModel {
           subscription_status, plan_id, plan_expiry, tier, role, status, privacy,
           profile_views, favorites, blocked, badges, onboarding_complete,
           age_verified, terms_accepted, privacy_accepted, language, is_active,
-          x_id, created_at, updated_at
+          x_id, telegram, created_at, updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-          $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, NOW(), NOW()
+          $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, NOW(), NOW()
         )
       ON CONFLICT (id) DO UPDATE SET
         username = COALESCE(EXCLUDED.username, ${TABLE}.username),
@@ -149,10 +149,11 @@ class UserModel {
         last_name = COALESCE(EXCLUDED.last_name, ${TABLE}.last_name),
         status = COALESCE(EXCLUDED.status, ${TABLE}.status),
         x_id = COALESCE(EXCLUDED.x_id, ${TABLE}.x_id),
-        onboarding_complete = CASE WHEN $31 THEN EXCLUDED.onboarding_complete ELSE ${TABLE}.onboarding_complete END,
-        age_verified = CASE WHEN $32 THEN EXCLUDED.age_verified ELSE ${TABLE}.age_verified END,
-        terms_accepted = CASE WHEN $33 THEN EXCLUDED.terms_accepted ELSE ${TABLE}.terms_accepted END,
-        privacy_accepted = CASE WHEN $34 THEN EXCLUDED.privacy_accepted ELSE ${TABLE}.privacy_accepted END,
+        telegram = COALESCE(EXCLUDED.telegram, ${TABLE}.telegram),
+        onboarding_complete = CASE WHEN $32 THEN EXCLUDED.onboarding_complete ELSE ${TABLE}.onboarding_complete END,
+        age_verified = CASE WHEN $33 THEN EXCLUDED.age_verified ELSE ${TABLE}.age_verified END,
+        terms_accepted = CASE WHEN $34 THEN EXCLUDED.terms_accepted ELSE ${TABLE}.terms_accepted END,
+        privacy_accepted = CASE WHEN $35 THEN EXCLUDED.privacy_accepted ELSE ${TABLE}.privacy_accepted END,
         language = COALESCE(EXCLUDED.language, ${TABLE}.language),
         updated_at = NOW()
       RETURNING *
@@ -200,6 +201,7 @@ class UserModel {
         userData.language || 'en',
         userData.isActive !== false,
         userData.xId || userData.x_id || null,
+        /^[0-9]+$/.test(userId) ? userId : (userData.telegram || null),
         onboardingCompleteProvided,
         ageVerifiedProvided,
         termsAcceptedProvided,
@@ -375,12 +377,12 @@ class UserModel {
         xId: 'x_id',
         locationSharingEnabled: 'location_sharing_enabled',
         onboardingComplete: 'onboarding_complete',
-      hasSeenTutorial: 'has_seen_tutorial',
-      ageVerified: 'age_verified',
-      termsAccepted: 'terms_accepted',
-      privacyAccepted: 'privacy_accepted',
-      lastActive: 'last_active',
-      language: 'language',
+        hasSeenTutorial: 'has_seen_tutorial',
+        ageVerified: 'age_verified',
+        termsAccepted: 'terms_accepted',
+        privacyAccepted: 'privacy_accepted',
+        lastActive: 'last_active',
+        language: 'language',
       };
 
       for (const [key, col] of Object.entries(fieldMap)) {

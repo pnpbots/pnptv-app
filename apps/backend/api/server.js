@@ -36,6 +36,7 @@ app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
+  name: '__pnptv_sid', // Must match the cookie name used in bot/api/routes.js
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
@@ -88,12 +89,6 @@ app.post('/webhook/daimo', (req, res) => {
   res.status(410).json({ error: 'Gone. This endpoint has been removed.' });
 });
 
-// Error handler
-app.use((error, req, res, _next) => {
-  logger.error('Express error:', error);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
 // Telegram Authentication API endpoints
 app.post('/api/telegram-auth', handleTelegramAuth);
 app.post('/api/accept-terms', handleAcceptTerms);
@@ -102,25 +97,30 @@ app.get('/api/auth-status', checkAuthStatus);
 // Manual age verification endpoint (for web page) — requires Telegram auth
 app.post('/api/verify-age-manual', telegramAuth, async (req, res) => {
   try {
-    const userId = req.session.telegramUser.id;
+    const userId = req.session.user?.id;
     const { method, lang } = req.body;
 
     logger.info(`Manual age verification: user ${userId}, method: ${method}, lang: ${lang}`);
 
-    const { query } = require('../config/postgres');
-    const result = await query(
-      `UPDATE users
-       SET age_verified = TRUE,
-           age_verification_method = $2,
-           age_verified_at = NOW(),
-           updated_at = NOW()
-       WHERE id = $1`,
-      [userId.toString(), method || 'manual_web']
-    );
-    if (result.rowCount > 0) {
+    // Use UserModel for proper DB update, timestamps, AND Redis cache invalidation
+    const UserModel = require('../models/userModel');
+    const updated = await UserModel.updateAgeVerification(userId, {
+      verified: true,
+      method: method || 'manual_web',
+      expiresHours: 8760, // 1 year
+    });
+
+    if (updated) {
       logger.info(`Age verification updated for user ${userId}`);
+      // Update Express session so web app reflects the change immediately
+      if (req.session.user) {
+        req.session.user.ageVerified = true;
+        await new Promise((resolve, reject) => {
+          req.session.save((err) => err ? reject(err) : resolve());
+        });
+      }
     } else {
-      logger.warn(`Age verification: no user found with id ${userId}`);
+      logger.warn(`Age verification: failed to update user ${userId}`);
     }
 
     res.json({ success: true, message: 'Age verification recorded' });
@@ -135,7 +135,7 @@ app.get('/api/health', healthCheck);
 
 // Admin-only monitoring endpoints
 const requireAdmin = (req, res, next) => {
-  const telegramId = String(req.session?.telegramUser?.id || '');
+  const telegramId = String(req.session?.user?.telegramId || req.session?.user?.id || '');
   if (!ADMIN_IDS.includes(telegramId)) {
     return res.status(403).json({ error: 'Admin access required' });
   }
@@ -154,7 +154,7 @@ app.post('/api/logout', (req, res) => {
       logger.error('Logout error:', err);
       return res.status(500).json({ error: 'Logout failed' });
     }
-    res.clearCookie('connect.sid');
+    res.clearCookie('__pnptv_sid');
     logger.info('User logged out successfully');
     res.json({ success: true });
   });
@@ -209,6 +209,12 @@ app.get('/api/features/nearby/url', ...featureAuthMiddleware, (req, res) => {
     logger.error('Error getting Nearby URL:', error);
     res.status(500).json({ success: false, error: 'Could not retrieve Nearby URL.' });
   }
+});
+
+// Error handler — must be registered AFTER all routes
+app.use((error, req, res, _next) => {
+  logger.error('Express error:', error);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 // Start server

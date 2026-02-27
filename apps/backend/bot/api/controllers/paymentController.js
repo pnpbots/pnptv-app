@@ -1018,6 +1018,10 @@ class PaymentController {
         });
       }
 
+      // Calculate 3DS authentication latency for monitoring
+      const createdAt = payment.createdAt || payment.created_at;
+      const threeDSLatencyMs = createdAt ? (Date.now() - new Date(createdAt).getTime()) : null;
+
       // Store 3DS 2.0 authentication data in payment metadata
       await PaymentModel.updateStatus(paymentId, 'pending', {
         three_ds_authentication: {
@@ -1025,12 +1029,19 @@ class PaymentController {
           provider: threeDSecure.provider,
           referenceId: threeDSecure.referenceId,
           authenticated_at: new Date().toISOString(),
+          latency_ms: threeDSLatencyMs,
+          // Store CAVV/ECI if provided by the 3DS challenge
+          cavv: threeDSecure.validationData?.cavv || null,
+          eci: threeDSecure.validationData?.eci || null,
+          xid: threeDSecure.validationData?.xid || null,
         },
       });
 
       logger.info('3DS 2.0 authentication data stored', {
         paymentId,
         referenceId: threeDSecure.referenceId,
+        latencyMs: threeDSLatencyMs,
+        version: threeDSecure.version,
       });
 
       // Check payment status with ePayco to see if it's been approved after 3DS

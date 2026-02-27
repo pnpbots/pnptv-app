@@ -91,6 +91,7 @@ const handleTelegramAuth = async (req, res) => {
     logger.info(`Telegram auth attempt for user: ${telegramUser.id} (${telegramUser.username || 'no username'})`);
 
     // Check if user exists in our database
+    // Search by telegram column first, then fall back to id (for bot-created users where id = Telegram ID)
     let userQuery = await query(
       `SELECT id, telegram, username, email, subscription_status, tier, terms_accepted,
               first_name, language,
@@ -98,8 +99,10 @@ const handleTelegramAuth = async (req, res) => {
               COALESCE(role, 'user') as role,
               atproto_did, atproto_handle, atproto_pds_url
        FROM users
-       WHERE telegram = $1`,
-      [telegramUser.id]
+       WHERE telegram = $1 OR id = $1::text
+       ORDER BY CASE WHEN telegram = $1 THEN 0 ELSE 1 END
+       LIMIT 1`,
+      [String(telegramUser.id)]
     );
 
     if (userQuery.rows.length === 0) {
@@ -108,12 +111,14 @@ const handleTelegramAuth = async (req, res) => {
 
       try {
         // Create user with default 'free' status (will be auto-upgraded if they have active subscription)
+        const newUserId = crypto.randomUUID();
         await query(
-          `INSERT INTO users (telegram, username, first_name, language, subscription_status, tier, terms_accepted, age_verified, role)
-           VALUES ($1, $2, $3, $4, 'free', 'free', false, false, 'user')
+          `INSERT INTO users (id, telegram, username, first_name, language, subscription_status, tier, terms_accepted, age_verified, role)
+           VALUES ($1, $2, $3, $4, $5, 'free', 'free', false, false, 'user')
            ON CONFLICT (telegram) DO NOTHING`,
           [
-            telegramUser.id,
+            newUserId,
+            String(telegramUser.id),
             telegramUser.username || '',
             telegramUser.first_name || '',
             telegramUser.language_code || 'en'
@@ -127,8 +132,10 @@ const handleTelegramAuth = async (req, res) => {
                   COALESCE(age_verified, false) as age_verified,
                   COALESCE(role, 'user') as role
            FROM users
-           WHERE telegram = $1`,
-          [telegramUser.id]
+           WHERE telegram = $1 OR id = $1::text
+           ORDER BY CASE WHEN telegram = $1 THEN 0 ELSE 1 END
+           LIMIT 1`,
+          [String(telegramUser.id)]
         );
 
         if (userQuery.rows.length === 0) {
@@ -148,6 +155,17 @@ const handleTelegramAuth = async (req, res) => {
     }
 
     let user = userQuery.rows[0];
+
+    // Backfill telegram column if bot user was found by id (id = Telegram numeric ID, telegram = NULL)
+    if (!user.telegram && String(user.id) === String(telegramUser.id)) {
+      try {
+        await query('UPDATE users SET telegram = $1 WHERE id = $2 AND (telegram IS NULL OR telegram = \'\')', [String(telegramUser.id), user.id]);
+        user.telegram = String(telegramUser.id);
+        logger.info(`Backfilled telegram column for bot user ${user.id}`);
+      } catch (backfillErr) {
+        logger.warn('Telegram backfill failed (non-blocking):', backfillErr.message);
+      }
+    }
 
     // Check for subscription migration: if user has 'free' status but should have 'active' from bot usage
     // This happens when users first used the bot, then access the webapp
@@ -170,12 +188,13 @@ const handleTelegramAuth = async (req, res) => {
 
           // Only migrate if subscription is still active (not expired)
           if (!expiresAt || expiresAt > now) {
-            logger.info(`Migrating active subscription for user ${user.telegram}`);
+            logger.info(`Migrating active subscription for user ${user.telegram || user.id}`);
             await query(
-              `UPDATE users SET subscription_status = 'active' WHERE id = $1`,
+              `UPDATE users SET subscription_status = 'active', tier = 'prime' WHERE id = $1`,
               [user.id]
             );
-            user.subscription_status = 'active'; // Update local object
+            user.subscription_status = 'active';
+            user.tier = 'prime';
           }
         }
       } catch (migrationError) {
@@ -186,14 +205,14 @@ const handleTelegramAuth = async (req, res) => {
 
     // Determine role: DB role or env-based admin override
     let role = user.role;
-    if (role === 'user' && isAdminUser(user.telegram)) {
+    if (role === 'user' && isAdminUser(user.telegram || user.id)) {
       role = 'admin';
     }
 
     // Store user in session (hybrid model: preserves ATProto fields if linked)
     req.session.user = {
       id: user.id,
-      telegramId: user.telegram,
+      telegramId: user.telegram || user.id,
       username: user.username,
       firstName: user.first_name || telegramUser.first_name || '',
       displayName: user.first_name || telegramUser.first_name || user.username || '',
@@ -242,7 +261,9 @@ const handleTelegramAuth = async (req, res) => {
             pds_did: pdsResult.pds_did,
             status: pdsResult.status
           };
-          req.session.save();
+          req.session.save((saveErr) => {
+            if (saveErr) logger.warn('[Auth] PDS session save failed (non-blocking):', saveErr.message);
+          });
         }
       } catch (pdsError) {
         logger.warn(`[Auth] PDS provisioning failed (non-blocking):`, pdsError.message);

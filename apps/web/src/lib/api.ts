@@ -450,6 +450,25 @@ export function deleteSocialPost(postId: number): Promise<{ success: boolean }> 
   return request(`/api/webapp/social/posts/${postId}`, { method: "DELETE" });
 }
 
+export function getReplies(
+  postId: number,
+  cursor?: string
+): Promise<{ success: boolean; replies: SocialPostItem[] }> {
+  const params = new URLSearchParams();
+  if (cursor) params.set("cursor", cursor);
+  return request(`/api/webapp/social/posts/${postId}/replies?${params}`);
+}
+
+export function createReply(
+  postId: number,
+  content: string
+): Promise<{ success: boolean; post: SocialPostItem }> {
+  return request("/api/webapp/social/posts", {
+    method: "POST",
+    body: { content, replyToId: postId },
+  });
+}
+
 // Aliases used by Home.tsx internal feed
 export type InternalPost = SocialPostItem;
 

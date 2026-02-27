@@ -39,18 +39,19 @@ RUN groupadd -r pnptv && useradd -r -g pnptv -d /app -s /sbin/nologin pnptv
 
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/backend/node_modules ./apps/backend/node_modules
+COPY --from=deps --chown=pnptv:pnptv /app/node_modules ./node_modules
+COPY --from=deps --chown=pnptv:pnptv /app/apps/backend/node_modules ./apps/backend/node_modules
 
-COPY apps/backend/ ./apps/backend/
-COPY apps/public/ ./apps/public/
-COPY scripts/ ./scripts/
-COPY public/ ./public/
-COPY packages/ ./packages/
-COPY package.json ./
+COPY --chown=pnptv:pnptv apps/backend/ ./apps/backend/
+COPY --chown=pnptv:pnptv apps/public/ ./apps/public/
+COPY --chown=pnptv:pnptv scripts/ ./scripts/
+COPY --chown=pnptv:pnptv public/ ./public/
+COPY --chown=pnptv:pnptv packages/ ./packages/
+COPY --chown=pnptv:pnptv package.json ./
 
-RUN mkdir -p /app/logs /app/public/uploads/avatars /tmp \
-    && chown -R pnptv:pnptv /app /tmp
+RUN mkdir -p /app/logs /app/public/uploads/avatars \
+    && chown pnptv:pnptv /app/logs /app/public/uploads /app/public/uploads/avatars \
+    && chown pnptv:pnptv /tmp
 
 USER pnptv
 

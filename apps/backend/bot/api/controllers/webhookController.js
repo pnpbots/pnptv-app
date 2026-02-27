@@ -542,8 +542,12 @@ const handlePaymentResponse = async (req, res) => {
     // 1. Reads paymentId from sessionStorage (set by checkout before 3DS redirect)
     // 2. Redirects back to /checkout/<paymentId>?poll=1 so polling picks up
     // 3. Falls back to a friendly message with Telegram bot link
+    // Allow 3DS bank redirects to frame/load this page
     res.removeHeader('X-Frame-Options');
+    res.removeHeader('Cross-Origin-Embedder-Policy');
     res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
+    res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https:");
     res.send(`<!DOCTYPE html>
 <html lang="es">
 <head>

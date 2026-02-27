@@ -51,7 +51,7 @@ class PDSProvisioningService {
 
           // Update last verified timestamp
           await query(
-            'UPDATE user_pds_mapping SET last_verified_at = CURRENT_TIMESTAMP WHERE user_id = $1',
+            'UPDATE user_pds_mapping SET last_health_check = CURRENT_TIMESTAMP WHERE user_id = $1',
             [user.id]
           );
 
@@ -72,8 +72,8 @@ class PDSProvisioningService {
           logger.warn(`[PDS] Existing PDS inaccessible for user ${user.id}, marking error`);
 
           await query(
-            'UPDATE user_pds_mapping SET status = $1, verification_status = $2, error_message = $3 WHERE user_id = $4',
-            ['error', 'inaccessible', 'PDS endpoint unreachable', user.id]
+            'UPDATE user_pds_mapping SET health_status = $1, sync_error = $2 WHERE user_id = $3',
+            ['error', 'PDS endpoint unreachable', user.id]
           );
 
           // Queue for retry
@@ -188,9 +188,14 @@ class PDSProvisioningService {
     try {
       const result = await query(
         `SELECT
-          id, user_id, pnptv_uuid, pds_did, pds_handle, pds_endpoint,
-          pds_public_key, status, error_message, last_verified_at,
-          verification_status, created_at, updated_at
+          id, user_id, pds_did, pds_handle,
+          pds_instance_url AS pds_endpoint,
+          health_status AS status,
+          sync_error AS error_message,
+          last_health_check AS last_verified_at,
+          bluesky_handle, bluesky_did, bluesky_status,
+          bluesky_auto_sync, bluesky_synced_at, bluesky_created_at,
+          created_at, updated_at
          FROM user_pds_mapping
          WHERE user_id = $1`,
         [userId]
@@ -455,32 +460,32 @@ class PDSProvisioningService {
       // Get auth tag
       const authTag = cipher.getAuthTag();
 
-      // Store in database
+      // Build encrypted credentials blob (actual schema uses single encrypted_credentials column)
+      const encryptedBlob = JSON.stringify({
+        data: encrypted,
+        iv: iv.toString('hex'),
+        authTag: authTag.toString('hex')
+      });
+
+      // Store in database (matches actual user_pds_mapping schema)
       const result = await query(
         `INSERT INTO user_pds_mapping (
-          user_id, pnptv_uuid, pds_did, pds_handle, pds_endpoint,
-          pds_public_key, pds_private_key_encrypted, pds_private_key_iv,
-          pds_private_key_auth_tag, pds_access_token, status, verification_status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          user_id, pds_did, pds_handle, pds_instance_url,
+          encrypted_credentials, encryption_version, health_status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (user_id) DO UPDATE SET
-          pds_did = $3, pds_handle = $4, pds_endpoint = $5,
-          pds_public_key = $6, pds_private_key_encrypted = $7,
-          pds_private_key_iv = $8, pds_private_key_auth_tag = $9,
-          pds_access_token = $10, status = $11, updated_at = CURRENT_TIMESTAMP
+          pds_did = $2, pds_handle = $3, pds_instance_url = $4,
+          encrypted_credentials = $5, encryption_version = $6,
+          health_status = $7, updated_at = CURRENT_TIMESTAMP
         RETURNING *`,
         [
           userId,
-          pnptv_uuid,
           pds_did,
           pds_handle,
           pdsConfig.endpoint || process.env.PDS_LOCAL_ENDPOINT,
-          atProtoAccount.publicKey,
-          encrypted,
-          iv.toString('hex'),
-          authTag.toString('hex'),
-          pdsConfig.accessJwt || atProtoAccount.accessJwt,
-          'active',
-          'unknown'
+          encryptedBlob,
+          1,
+          'active'
         ]
       );
 
@@ -581,13 +586,13 @@ class PDSProvisioningService {
   /**
    * Log provisioning action
    */
-  static async logProvisioningAction(userId, pnptv_uuid, action, status, details = {}) {
+  static async logProvisioningAction(userId, pdsDid, action, status, details = {}) {
     try {
       await query(
         `INSERT INTO pds_provisioning_log (
-          user_id, pnptv_uuid, action, status, details, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [userId, pnptv_uuid, action, status, JSON.stringify(details), 'system']
+          user_id, event_type, status, pds_did, request_data
+        ) VALUES ($1, $2, $3, $4, $5)`,
+        [userId, action, status, pdsDid || null, JSON.stringify(details)]
       );
     } catch (error) {
       logger.error(`[PDS] Error logging provisioning action:`, error);
@@ -597,15 +602,13 @@ class PDSProvisioningService {
   /**
    * Log health check
    */
-  static async logHealthCheck(userId, pnptv_uuid, checkType, status, responseTime, details = {}) {
+  static async logHealthCheck(userId, pdsDid, checkType, status, responseTime, details = {}) {
     try {
-      const pdsMapping = await this.getUserPDSMapping(userId);
-
       await query(
         `INSERT INTO pds_health_checks (
-          user_id, pnptv_uuid, pds_endpoint, check_type, status, response_time_ms, details
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [userId, pnptv_uuid, pdsMapping?.pds_endpoint, checkType, status, responseTime, JSON.stringify(details)]
+          user_id, pds_did, status, response_time_ms, last_error
+        ) VALUES ($1, $2, $3, $4, $5)`,
+        [userId, pdsDid, status, responseTime, details.error || null]
       );
     } catch (error) {
       logger.warn(`[PDS] Error logging health check:`, error);
@@ -615,13 +618,13 @@ class PDSProvisioningService {
   /**
    * Queue provisioning action for async retry
    */
-  static async queueProvisioningAction(userId, pnptv_uuid, action, errorDetails = {}) {
+  static async queueProvisioningAction(userId, pdsDid, action, errorDetails = {}) {
     try {
       await query(
         `INSERT INTO pds_provisioning_queue (
-          user_id, pnptv_uuid, action, error_details, status, next_retry
-        ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP + INTERVAL '5 minutes')`,
-        [userId, pnptv_uuid, action, JSON.stringify(errorDetails), 'pending']
+          user_id, queue_type, status, metadata, scheduled_at
+        ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP + INTERVAL '5 minutes')`,
+        [userId, action, 'pending', JSON.stringify({ pds_did: pdsDid, ...errorDetails })]
       );
 
       logger.info(`[PDS] Queued ${action} retry for user ${userId}`);
@@ -731,19 +734,23 @@ class PDSProvisioningService {
       encrypted += cipher.final('hex');
       const authTag = cipher.getAuthTag();
 
-      // Update in database
+      // Update encrypted credentials in database
+      const encryptedBlob = JSON.stringify({
+        data: encrypted,
+        iv: iv.toString('hex'),
+        authTag: authTag.toString('hex'),
+        publicKey
+      });
+
       await query(
         `UPDATE user_pds_mapping
-         SET pds_public_key = $1, pds_private_key_encrypted = $2,
-             pds_private_key_iv = $3, pds_private_key_auth_tag = $4,
-             key_rotation_date = CURRENT_TIMESTAMP,
-             next_key_rotation = CURRENT_TIMESTAMP + INTERVAL '90 days'
-         WHERE user_id = $5`,
-        [publicKey, encrypted, iv.toString('hex'), authTag.toString('hex'), userId]
+         SET encrypted_credentials = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE user_id = $2`,
+        [encryptedBlob, userId]
       );
 
       // Log rotation
-      await this.logProvisioningAction(userId, pdsMapping.pnptv_uuid, 'key_rotated', 'success', {
+      await this.logProvisioningAction(userId, pdsMapping.pds_did, 'key_rotated', 'success', {
         publicKeyFingerprint: publicKey.substring(0, 20) + '...'
       });
 

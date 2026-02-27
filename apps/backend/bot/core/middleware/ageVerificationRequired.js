@@ -1,3 +1,4 @@
+const { Markup } = require('telegraf');
 const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
 const UserModel = require('../../../models/userModel');
@@ -19,7 +20,6 @@ const FEATURES_REQUIRING_AGE_VERIFICATION = [
   'show_subscription_plans',
   'show_jitsi',
   'show_video_rooms',
-  'show_members_area',
   'video_call_start',
   'join_video_room',
 ];
@@ -34,20 +34,31 @@ async function isAgeVerified(ctx) {
     const userId = ctx.from?.id;
     if (!userId) return false;
 
-    // Check session first (faster)
-    if (ctx.session?.ageVerified) {
-      return true;
-    }
-
-    // Check database
+    // Check database (includes expiry check)
     const user = await UserModel.getById(userId);
     if (!user) {
       return false;
     }
 
-    // Cache in session for this request
-    ctx.session.ageVerified = user.ageVerified === true;
-    return ctx.session.ageVerified;
+    // Check if verified AND not expired
+    if (user.ageVerified !== true) {
+      ctx.session.ageVerified = false;
+      return false;
+    }
+
+    // Check expiry if set (null expiry = never expires, for legacy users)
+    if (user.ageVerificationExpiresAt) {
+      const expiresAt = new Date(user.ageVerificationExpiresAt);
+      if (new Date() > expiresAt) {
+        logger.info('Age verification expired', { userId, expiresAt });
+        ctx.session.ageVerified = false;
+        return false;
+      }
+    }
+
+    // Cache in session
+    ctx.session.ageVerified = true;
+    return true;
   } catch (error) {
     logger.error('Error checking age verification status:', error);
     return false;
@@ -76,8 +87,6 @@ To access this feature, we need to verify that you are over 18 years old.
 This is a safety measure to protect our community.
 
 How would you like to verify your age?`;
-
-  const { Markup } = require('telegraf');
 
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback(
@@ -132,7 +141,7 @@ function setupAgeVerificationMiddleware(bot) {
  * @param {Object} ctx - Telegraf context
  * @param {boolean} verified - Verification status
  */
-async function updateAgeVerificationStatus(ctx, verified = true, method = 'ai_photo') {
+async function updateAgeVerificationStatus(ctx, verified = true, method = 'manual') {
   try {
     const userId = ctx.from?.id;
     if (!userId) return;
@@ -141,9 +150,10 @@ async function updateAgeVerificationStatus(ctx, verified = true, method = 'ai_ph
     ctx.session.ageVerified = verified;
     await ctx.saveSession();
 
-    // Update database via UserModel if method exists
-    if (UserModel.updateAgeVerification) {
-      await UserModel.updateAgeVerification(userId, { verified, method });
+    // Update database and invalidate Redis cache via UserModel
+    const persisted = await UserModel.updateAgeVerification(userId, { verified, method });
+    if (!persisted) {
+      logger.warn('Age verification DB update failed, session-only', { userId, method });
     }
 
     logger.info(`Age verification status updated for user ${userId}:`, { verified, method });

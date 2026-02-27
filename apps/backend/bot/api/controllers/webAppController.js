@@ -79,7 +79,9 @@ async function createWebUser({ id, firstName, lastName, username, email, passwor
         terms_accepted, is_active, created_at, updated_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'free','free','user',false,true,NOW(),NOW())
      RETURNING id, pnptv_id, first_name, last_name, username, email,
-               subscription_status, terms_accepted, photo_file_id, bio, language, telegram, twitter, x_id, role`,
+               subscription_status, tier, terms_accepted, photo_file_id, bio, language,
+               telegram, twitter, x_id, role,
+               atproto_did, atproto_handle, atproto_pds_url`,
     [userId, pnptvId, firstName || 'User', lastName || null, displayName || null,
      email || null, passwordHash || null, telegramId || null, twitterHandle || null, xId || null, photoFileId || null]
   );
@@ -104,13 +106,19 @@ async function createWebUser({ id, firstName, lastName, username, email, passwor
  */
 async function findOrLinkUser({ telegramId, twitterHandle, xId, email, firstName, lastName, username, photoFileId } = {}) {
   const RETURN_COLS = `id, pnptv_id, first_name, last_name, username, email,
-    subscription_status, tier, terms_accepted, photo_file_id, bio, language, telegram, twitter, x_id, role`;
+    subscription_status, tier, terms_accepted, photo_file_id, bio, language, telegram, twitter, x_id, role,
+    atproto_did, atproto_handle, atproto_pds_url`;
 
   let user = null;
 
   // 1. Lookup priority: telegramId > xId > twitterHandle > email
+  // Also search by id for bot-created users (where id = Telegram numeric ID, telegram may be NULL)
   if (telegramId) {
-    const { rows } = await query(`SELECT ${RETURN_COLS} FROM users WHERE telegram = $1`, [String(telegramId)]);
+    const { rows } = await query(
+      `SELECT ${RETURN_COLS} FROM users WHERE telegram = $1 OR id = $1::text
+       ORDER BY CASE WHEN telegram = $1 THEN 0 ELSE 1 END LIMIT 1`,
+      [String(telegramId)]
+    );
     if (rows.length > 0) user = rows[0];
   }
 
@@ -502,10 +510,17 @@ const telegramCallback = async (req, res) => {
     logger.info(`Web Telegram callback login: user ${user.id}`);
 
     // Redirect to the original app if redirect_to was stored in session (e.g. app.pnptv.app)
+    // Use an explicit allowlist of trusted hostnames to prevent open redirect.
+    const ALLOWED_REDIRECT_HOSTS = ['app.pnptv.app', 'pnptv.app', 'www.pnptv.app'];
     const redirectTo = req.session.authRedirectTo;
     delete req.session.authRedirectTo;
-    if (redirectTo && redirectTo.endsWith('.pnptv.app')) {
-      return res.redirect(`https://${redirectTo}`);
+    if (redirectTo) {
+      // Extract just the hostname portion (before any path or query string)
+      const redirectHost = redirectTo.split('/')[0].split('?')[0].split('#')[0];
+      if (ALLOWED_REDIRECT_HOSTS.includes(redirectHost)) {
+        return res.redirect(`https://${redirectTo}`);
+      }
+      logger.warn('[Auth] Blocked disallowed redirect_to host', { redirectHost, redirectTo });
     }
     return redirectToCanonicalApp(res);
   } catch (error) {

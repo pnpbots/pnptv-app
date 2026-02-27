@@ -406,8 +406,9 @@
         <div id="state-3ds" class="state">
             <div class="spinner-container">
                 <div class="spinner"></div>
-                <p style="color:#8E8E93; font-size:14px; text-align:center;">Redirecting to your bank for authentication...</p>
-                <p class="msg msg-info" style="margin-top:12px;">You will be redirected to your bank's secure page. After completing verification, you'll be brought back here automatically.</p>
+                <p style="color:#8E8E93; font-size:14px; text-align:center;">Redirecting to your bank for verification...</p>
+                <p class="msg msg-info" style="margin-top:12px;">Your bank requires additional verification (3D Secure). You'll be redirected to a secure page to confirm your identity. After completing, you'll return here automatically.</p>
+                <p style="font-size:11px; color:#666; margin-top:8px;">This is a standard security measure to protect your card.</p>
             </div>
         </div>
 
@@ -552,8 +553,14 @@
             input.value = value.replace(/(\d{4})(?=\d)/g, '$1 ');
         }
 
-        // ── Collect browser info for 3DS ───────────────────────────
+        // ── Collect browser info for 3DS 2.0 ────────────────────────
         function getBrowserInfo() {
+            // Challenge window size: 05 = full screen (best for mobile)
+            // 01=250x400, 02=390x400, 03=500x600, 04=600x400, 05=full
+            var challengeWindowSize = '05';
+            if (window.innerWidth < 500) challengeWindowSize = '01';
+            else if (window.innerWidth < 600) challengeWindowSize = '03';
+
             return {
                 language: navigator.language || 'es-CO',
                 colorDepth: screen.colorDepth || 24,
@@ -562,6 +569,8 @@
                 timezoneOffset: new Date().getTimezoneOffset(),
                 javaEnabled: false,
                 userAgent: navigator.userAgent,
+                acceptHeader: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                challengeWindowSize: challengeWindowSize,
             };
         }
 
@@ -857,11 +866,22 @@
                 return;
             }
 
-            // Rejected or failed
+            // Rejected or failed — provide actionable feedback
             showState('error');
-            document.getElementById('error-detail').textContent =
-                result.error || 'Your payment was declined. Please try a different card or payment method.';
+            var errorMsg = result.error || 'Your payment was declined.';
+            // Add 3DS-specific guidance if the error relates to authentication
+            if (errorMsg.includes('autenticación') || errorMsg.includes('3DS') || errorMsg.includes('BANK_URL_MISSING')) {
+                errorMsg += '\n\nTip: This may be a 3D Secure verification issue. Try using a different card, or contact your bank to enable online payments.';
+            }
+            document.getElementById('error-detail').textContent = errorMsg;
             document.getElementById('btn-pay').disabled = false;
+        }
+
+        // ── Retry: reset form and try again ─────────────────────────
+        function handleRetry() {
+            showState('form');
+            document.getElementById('btn-pay').disabled = false;
+            document.getElementById('form-error').style.display = 'none';
         }
 
         // ── 3DS 1.0: Full-page redirect to bank ─────────────────
@@ -888,25 +908,59 @@
                 var iframe = document.createElement('iframe');
                 iframe.style.display = 'none';
                 iframe.id = 'cardinal-ddc-iframe';
+                iframe.name = 'cardinal-ddc-iframe';
+                // Allow cross-origin for 3DS bank iframes
+                iframe.setAttribute('allow', 'payment');
                 document.body.appendChild(iframe);
 
-                // Post access token to Cardinal Commerce
-                iframe.onload = function() {
-                    // After DDC completes, notify backend
-                    setTimeout(function() {
-                        complete3DS2({
-                            version: threeDSecure.version || '2.0',
-                            provider: threeDSecure.provider || 'CardinalCommerce',
+                var ddcCompleted = false;
+                var ddcTimeout = null;
+
+                function onDDCComplete() {
+                    if (ddcCompleted) return;
+                    ddcCompleted = true;
+                    if (ddcTimeout) clearTimeout(ddcTimeout);
+                    complete3DS2({
+                        version: threeDSecure.version || '2.0',
+                        provider: threeDSecure.provider || 'CardinalCommerce',
+                        referenceId: data.referenceId,
+                        authenticated: true,
+                        challengeCompleted: true,
+                        validationData: {
+                            accessToken: data.accessToken,
                             referenceId: data.referenceId,
-                            authenticated: true,
-                            challengeCompleted: true,
-                            validationData: {
-                                accessToken: data.accessToken,
-                                referenceId: data.referenceId,
-                                token: data.token,
-                            },
-                        });
-                    }, 3000);
+                            token: data.token,
+                        },
+                    });
+                }
+
+                // Listen for Cardinal Commerce DDC completion message
+                window.addEventListener('message', function ddcListener(event) {
+                    // Cardinal sends a message when DDC is complete
+                    if (event.origin && (
+                        event.origin.includes('cardinalcommerce.com') ||
+                        event.origin.includes('epayco.co') ||
+                        event.origin.includes('payco.co')
+                    )) {
+                        window.removeEventListener('message', ddcListener);
+                        onDDCComplete();
+                    }
+                });
+
+                // Fallback timeout: if DDC doesn't complete within 10s, proceed anyway
+                ddcTimeout = setTimeout(function() {
+                    if (!ddcCompleted) {
+                        console.warn('3DS DDC timeout — proceeding without DDC confirmation');
+                        onDDCComplete();
+                    }
+                }, 10000);
+
+                // Also listen for iframe load as a secondary signal
+                iframe.onload = function() {
+                    // Wait a short period after load for any postMessage to arrive
+                    setTimeout(function() {
+                        if (!ddcCompleted) onDDCComplete();
+                    }, 2000);
                 };
 
                 // Build form to post to DDC URL
@@ -922,7 +976,6 @@
                 form.appendChild(input);
 
                 document.body.appendChild(form);
-                iframe.name = 'cardinal-ddc-iframe';
                 form.submit();
                 form.remove();
             } else {
