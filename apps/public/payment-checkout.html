@@ -717,24 +717,19 @@
             // Disable form
             document.getElementById('btn-pay').disabled = true;
             showState('processing');
-            document.getElementById('processing-msg').textContent = 'Tokenizing your card securely...';
+            document.getElementById('processing-msg').textContent = 'Processing your payment securely...';
 
             try {
-                // Step 1: Tokenize card with ePayco.js SDK
-                const tokenCard = await tokenizeCard(cardNumber, expYear, expMonth, cvc);
-                if (!tokenCard) {
-                    throw new Error('Card tokenization failed. Please check your card details.');
-                }
-
-                document.getElementById('processing-msg').textContent = 'Processing payment...';
-
-                // Step 2: Send tokenized charge to backend
+                // Send card data to backend for server-side tokenization + charge
                 const chargeRes = await fetch('/api/payment/tokenized-charge', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         paymentId: paymentId,
-                        tokenCard: tokenCard,
+                        cardNumber: cardNumber,
+                        expYear: expYear,
+                        expMonth: expMonth,
+                        cvc: cvc,
                         name: name,
                         lastName: lastName,
                         email: email,
@@ -759,7 +754,7 @@
         }
 
         // ── ePayco card tokenization ──────────────────────────────
-        async function tokenizeCard(number, year, month, cvc) {
+        async function tokenizeCard(number, year, month, cvc, cardName, cardEmail) {
             return new Promise(function(resolve, reject) {
                 // Check if ePayco SDK is loaded
                 if (typeof ePayco === 'undefined') {
@@ -775,6 +770,7 @@
                     }
 
                     // Build a hidden form with data-epayco attributes for the SDK
+                    // ePayco requires: card[number], card[exp_year], card[exp_month], card[cvc], card[name], card[email]
                     var form = document.createElement('form');
                     form.style.display = 'none';
 
@@ -783,12 +779,14 @@
                         'card[exp_year]': '20' + year,
                         'card[exp_month]': month,
                         'card[cvc]': cvc,
+                        'card[name]': cardName,
+                        'card[email]': cardEmail,
                     };
 
                     Object.keys(fields).forEach(function(name) {
                         var input = document.createElement('input');
                         input.setAttribute('data-epayco', name);
-                        input.value = fields[name];
+                        input.setAttribute('value', fields[name]);
                         form.appendChild(input);
                     });
 

@@ -599,30 +599,23 @@ class PaymentController {
       } = req.body;
 
       const hasToken = typeof tokenCard === 'string' && tokenCard.trim().length >= 8;
-      const hasRawCardData = Boolean(
-        req.body?.card
-        || req.body?.cardNumber
-        || req.body?.cvc
-        || req.body?.expMonth
-        || req.body?.expYear
-      );
-
-      // PCI-DSS hardening: backend must not receive PAN/CVC.
-      if (hasRawCardData) {
-        return res.status(400).json({
-          success: false,
-          error: 'Por seguridad PCI-DSS, este endpoint solo acepta token_card. No envíes PAN/CVC al backend.',
-        });
-      }
+      const {
+        cardNumber: rawCardNumber,
+        expYear: rawExpYear,
+        expMonth: rawExpMonth,
+        cvc: rawCvc,
+      } = req.body;
+      const hasRawCardData = Boolean(rawCardNumber && rawExpYear && rawExpMonth && rawCvc);
 
       // Sanitize and validate email before sending to ePayco
       const sanitizedEmail = (typeof email === 'string' ? email : '').trim().toLowerCase();
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-      if (!paymentId || !hasToken || !name || !sanitizedEmail || !docType || !docNumber) {
+      // Must have either a pre-tokenized card OR raw card data for server-side tokenization
+      if (!paymentId || (!hasToken && !hasRawCardData) || !name || !sanitizedEmail || !docType || !docNumber) {
         return res.status(400).json({
           success: false,
-          error: 'Faltan campos requeridos. Debes enviar paymentId, tokenCard y datos de titular.',
+          error: 'Faltan campos requeridos. Debes enviar paymentId, datos de tarjeta y datos de titular.',
         });
       }
 
@@ -718,6 +711,43 @@ class PaymentController {
         },
       }).catch(() => {});
 
+      // If no pre-tokenized card, tokenize server-side with ePayco Node SDK
+      let resolvedToken = hasToken ? tokenCard.trim() : null;
+      if (!resolvedToken && hasRawCardData) {
+        try {
+          const { getEpaycoClient } = require('../../../config/epayco');
+          const epaycoClient = getEpaycoClient();
+          const creditInfo = {
+            'card[number]': String(rawCardNumber).replace(/\s/g, ''),
+            'card[exp_year]': String(rawExpYear).length === 2 ? '20' + rawExpYear : String(rawExpYear),
+            'card[exp_month]': String(rawExpMonth),
+            'card[cvc]': String(rawCvc),
+            'hasCvv': true,
+          };
+          logger.info('Server-side card tokenization started', { paymentId });
+          const tokenResult = await epaycoClient.token.create(creditInfo);
+          if (tokenResult && tokenResult.status && tokenResult.id) {
+            resolvedToken = tokenResult.id;
+            logger.info('Server-side card tokenization succeeded', { paymentId, tokenId: resolvedToken.substring(0, 8) + '...' });
+          } else if (tokenResult && tokenResult.data && tokenResult.data.id) {
+            resolvedToken = tokenResult.data.id;
+            logger.info('Server-side card tokenization succeeded (data.id)', { paymentId });
+          } else {
+            logger.error('Server-side tokenization returned unexpected format', { paymentId, result: JSON.stringify(tokenResult).substring(0, 200) });
+            return res.status(400).json({
+              success: false,
+              error: 'No se pudo tokenizar la tarjeta. Verifica los datos e intenta de nuevo.',
+            });
+          }
+        } catch (tokenError) {
+          logger.error('Server-side card tokenization failed', { paymentId, error: tokenError.message });
+          return res.status(400).json({
+            success: false,
+            error: 'Error al tokenizar la tarjeta: ' + (tokenError.message || 'Verifica los datos de la tarjeta.'),
+          });
+        }
+      }
+
       const chargeParams = {
         paymentId,
         customer: {
@@ -736,7 +766,7 @@ class PaymentController {
         userAgent,
         acceptHeader,
         browserInfo: browserInfo && typeof browserInfo === 'object' ? browserInfo : null,
-        tokenCard: tokenCard.trim(),
+        tokenCard: resolvedToken,
       };
 
       const result = await PaymentService.processTokenizedCharge(chargeParams);

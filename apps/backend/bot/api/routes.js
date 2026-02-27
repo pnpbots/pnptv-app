@@ -336,7 +336,7 @@ app.use(morgan('combined', { stream: logger.stream }));
 // frame-ancestors allows ePayco/banks to embed our page in their 3DS challenge iframes.
 const CHECKOUT_CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://code.jquery.com https://multimedia.epayco.co https://songbird.cardinalcommerce.com https://centinelapi.cardinalcommerce.com https://checkout.epayco.co https://secure.payco.co https://secure.epayco.co https://api.secure.payco.co",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://code.jquery.com https://multimedia.epayco.co https://songbird.cardinalcommerce.com https://centinelapi.cardinalcommerce.com https://checkout.epayco.co https://secure.payco.co https://secure.epayco.co https://api.secure.payco.co",
   "style-src 'self' 'unsafe-inline' https: https://fonts.googleapis.com",
   "font-src 'self' https: https://fonts.gstatic.com data:",
   "img-src 'self' https: data:",
