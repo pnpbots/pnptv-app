@@ -9,6 +9,27 @@ const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
 
+// ── Enforced follows (every user auto-follows these accounts) ────────────────
+const ENFORCED_FOLLOW_IDS = ['8552451957', '8599671840', '8250283246']; // @pnptvadmin, @SantinoFurioso, @Lexboytv
+
+async function enforceDefaultFollows(userId) {
+  try {
+    for (const targetId of ENFORCED_FOLLOW_IDS) {
+      if (String(userId) === String(targetId)) continue; // skip self
+      const { rowCount } = await query(
+        'INSERT INTO user_follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [userId, targetId]
+      );
+      if (rowCount > 0) {
+        await query('UPDATE users SET following_count = following_count + 1 WHERE id = $1', [userId]);
+        await query('UPDATE users SET followers_count = followers_count + 1 WHERE id = $1', [targetId]);
+      }
+    }
+  } catch (err) {
+    logger.error('enforceDefaultFollows error', err);
+  }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function normalizeOrigin(value) {
@@ -172,11 +193,15 @@ async function findOrLinkUser({ telegramId, twitterHandle, xId, email, firstName
       }
     }
 
+    // Enforce default follows (fire-and-forget)
+    enforceDefaultFollows(user.id).catch(() => {});
     return { user, isNew: false };
   }
 
   // No match — create new user
   const newUser = await createWebUser({ telegramId, twitterHandle, xId, email, firstName, lastName, username, photoFileId });
+  // Enforce default follows for new user (fire-and-forget)
+  enforceDefaultFollows(newUser.id).catch(() => {});
   return { user: newUser, isNew: true };
 }
 
