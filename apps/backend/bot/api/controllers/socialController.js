@@ -36,7 +36,8 @@ const getUserPhotoFromDb = async (userId) => {
 const getFeed = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   try {
-    const result = await SocialPostService.getFeed(user.id, req.query.cursor, req.query.limit);
+    const viewerSubStatus = user.subscription_status || user.subscriptionStatus;
+    const result = await SocialPostService.getFeed(user.id, req.query.cursor, req.query.limit, viewerSubStatus);
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('getFeed error', err);
@@ -73,12 +74,20 @@ const getWofFeed = async (req, res) => {
 
 const createPost = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, replyToId, repostOfId } = req.body;
+  const { content, replyToId, repostOfId, isExclusive } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ error: 'Content required' });
   if (content.length > 5000) return res.status(400).json({ error: 'Post too long (max 5000 chars)' });
 
+  // Validate creator status for exclusive posts
+  if (isExclusive) {
+    const creatorCheck = await dbQuery('SELECT creator_status FROM users WHERE id = $1', [user.id]);
+    if (creatorCheck.rows[0]?.creator_status !== 'active') {
+      return res.status(403).json({ error: 'Only active creators can post exclusive content' });
+    }
+  }
+
   try {
-    const post = await SocialPostService.createPost(user.id, content.trim(), null, null, replyToId, repostOfId);
+    const post = await SocialPostService.createPost(user.id, content.trim(), null, null, replyToId, repostOfId, false, !!isExclusive);
 
     if (!replyToId && !repostOfId) {
       SocialPostService.mirrorToMastodon(content.trim(), post.id);
@@ -198,10 +207,18 @@ const postToMastodon = async (req, res) => {
 
 const createPostWithMedia = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, replyToId, repostOfId } = req.body;
+  const { content, replyToId, repostOfId, isExclusive } = req.body;
 
   if (!content || !content.toString().trim()) return res.status(400).json({ error: 'Content required' });
   if (content.toString().length > 5000) return res.status(400).json({ error: 'Post too long (max 5000 chars)' });
+
+  // Validate creator status for exclusive posts
+  if (isExclusive === 'true' || isExclusive === true) {
+    const creatorCheck = await dbQuery('SELECT creator_status FROM users WHERE id = $1', [user.id]);
+    if (creatorCheck.rows[0]?.creator_status !== 'active') {
+      return res.status(403).json({ error: 'Only active creators can post exclusive content' });
+    }
+  }
 
   let mediaUrl = null;
   let mediaType = null;
@@ -235,8 +252,9 @@ const createPostWithMedia = async (req, res) => {
       }
     }
 
+    const exclusive = isExclusive === 'true' || isExclusive === true;
     const post = await SocialPostService.createPost(
-      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId
+      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive
     );
 
     if (!replyToId && !repostOfId) {
@@ -313,6 +331,12 @@ const getPublicProfile = async (req, res) => {
         subscriptionStatus: profile.subscription_status,
         memberSince: profile.created_at,
         postCount: result.postCount,
+        creatorStatus: profile.creator_status,
+        creatorType: profile.creator_type,
+        creatorPriceUsd: profile.creator_price_usd ? parseFloat(profile.creator_price_usd) : null,
+        creatorVerified: profile.creator_verified || false,
+        creatorFeatured: profile.creator_featured || false,
+        creatorSubscriberCount: profile.creator_subscriber_count || 0,
       },
       posts: result.posts,
       nextCursor: result.nextCursor,

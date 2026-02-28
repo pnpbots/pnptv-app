@@ -324,7 +324,7 @@ const checkAuthStatus = async (req, res) => {
     // Refresh tier, role, and subscription from DB (prevents stale session data)
     try {
       const { rows } = await query(
-        'SELECT tier, role, subscription_status, photo_file_id FROM users WHERE id = $1',
+        'SELECT tier, role, subscription_status, photo_file_id, creator_status, creator_type FROM users WHERE id = $1',
         [user.id]
       );
       if (rows.length > 0) {
@@ -332,6 +332,8 @@ const checkAuthStatus = async (req, res) => {
         user.tier = fresh.tier || 'free';
         user.role = fresh.role || user.role || 'user';
         user.subscriptionStatus = fresh.subscription_status || user.subscriptionStatus || 'free';
+        user.creator_status = fresh.creator_status || 'none';
+        user.creator_type = fresh.creator_type || null;
         const isValidPhoto = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
         if (isValidPhoto(fresh.photo_file_id)) {
           user.photoUrl = fresh.photo_file_id;
@@ -369,6 +371,9 @@ const checkAuthStatus = async (req, res) => {
         atproto_handle: user.atproto_handle || null,
         // X / Twitter identity
         x_handle: user.xHandle || user.x_username || null,
+        // Creator status
+        creator_status: user.creator_status || 'none',
+        creator_type: user.creator_type || null,
         // Auth methods flags (used by Profile.tsx IdentityConnections)
         auth_methods: authMethods,
       }

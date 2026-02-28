@@ -200,6 +200,23 @@ function PostCard({
                 Wall of Fame
               </span>
             )}
+            {/* Exclusive badges */}
+            {post.is_exclusive && post.exclusive_status === "unlocked" && (
+              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>
+                Exclusive
+              </span>
+            )}
+            {post.is_exclusive && post.exclusive_status === "teaser" && (
+              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>
+                PRIME Preview
+              </span>
+            )}
+            {/* Verified creator badge */}
+            {post.author_creator_verified && (
+              <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="#5ED1C4" aria-label="Verified creator">
+                <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
+            )}
 
             {/* Delete (own posts or admin) */}
             {canDelete && (
@@ -217,31 +234,74 @@ function PostCard({
             )}
           </div>
 
-          <p className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed">
-            {post.content}
-          </p>
-
-          {/* Media */}
-          {post.media_url && (
-            <div className="mt-3">
-              {post.media_type === "video" ? (
-                <video
-                  src={post.media_url}
-                  controls
-                  className="w-full max-h-80 rounded-lg object-cover"
-                  preload="metadata"
-                  onError={(e) => { (e.target as HTMLVideoElement).parentElement!.style.display = "none"; }}
-                />
+          {/* Locked exclusive content overlay */}
+          {post.is_exclusive && post.exclusive_status === "locked" ? (
+            <div className="mt-2 rounded-lg p-6 text-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <svg className="w-8 h-8 mx-auto mb-2 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+              </svg>
+              {post.locked_reason === "not_prime" ? (
+                <>
+                  <p className="text-sm text-white/60 mb-2">Upgrade to PRIME to unlock creator content</p>
+                  <button
+                    onClick={() => onNavigate("/subscribe")}
+                    className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors"
+                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                  >
+                    Upgrade to PRIME
+                  </button>
+                </>
               ) : (
-                <img
-                  src={post.media_url}
-                  alt=""
-                  className="w-full max-h-80 rounded-lg object-cover"
-                  loading="lazy"
-                  onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = "none"; }}
-                />
+                <>
+                  <p className="text-sm text-white/60 mb-2">
+                    Subscribe ${post.author_creator_price || 15}/mo to unlock
+                  </p>
+                  <button
+                    onClick={() => onNavigate(`/profile/${post.author_id}`)}
+                    className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors"
+                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                  >
+                    Subscribe to {post.author_first_name || post.author_username}
+                  </button>
+                </>
               )}
             </div>
+          ) : (
+            <>
+              <p className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed">
+                {post.content}
+              </p>
+
+              {/* Media */}
+              {post.media_url && (
+                <div className="mt-3">
+                  {post.media_type === "video" ? (
+                    <video
+                      src={post.media_url}
+                      controls
+                      className="w-full max-h-80 rounded-lg object-cover"
+                      preload="metadata"
+                      onError={(e) => { (e.target as HTMLVideoElement).parentElement!.style.display = "none"; }}
+                    />
+                  ) : (
+                    <img
+                      src={post.media_url}
+                      alt=""
+                      className="w-full max-h-80 rounded-lg object-cover"
+                      loading="lazy"
+                      onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = "none"; }}
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* Teaser CTA */}
+              {post.is_exclusive && post.exclusive_status === "teaser" && (
+                <div className="mt-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(94,209,196,0.08)", color: "#5ED1C4" }}>
+                  Subscribe to see all exclusive content from this creator
+                </div>
+              )}
+            </>
           )}
 
           {/* Actions bar */}
@@ -392,6 +452,7 @@ export default function Social() {
         if (status.authenticated && status.user) {
           const methods = status.user.auth_methods as AuthMethods | undefined;
           setBlueskyLinked(!!methods?.atproto);
+          setIsActiveCreator(status.user.creator_status === "active");
         }
       })
       .catch(() => {
@@ -407,6 +468,8 @@ export default function Social() {
   const [postError, setPostError] = useState<string | null>(null);
   const [crossPostBluesky, setCrossPostBluesky] = useState(false);
   const [showBlueskyWarning, setShowBlueskyWarning] = useState(false);
+  const [isExclusive, setIsExclusive] = useState(false);
+  const [isActiveCreator, setIsActiveCreator] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load feed
@@ -551,7 +614,8 @@ export default function Social() {
       const res = await createSocialPost(
         text.trim(),
         mediaFile || undefined,
-        crossPostBluesky
+        crossPostBluesky,
+        isExclusive
       );
       if (res.success && res.post) {
         setPosts((prev) => [res.post, ...prev]);
@@ -559,12 +623,13 @@ export default function Social() {
       setText("");
       clearMedia();
       setCrossPostBluesky(false);
+      setIsExclusive(false);
     } catch (err: unknown) {
       setPostError(err instanceof Error ? err.message : "Failed to create post");
     } finally {
       setIsPosting(false);
     }
-  }, [text, mediaFile, isPosting, clearMedia, crossPostBluesky]);
+  }, [text, mediaFile, isPosting, clearMedia, crossPostBluesky, isExclusive]);
 
   const handlePost = useCallback(() => {
     if (!text.trim() || isPosting) return;
@@ -768,6 +833,41 @@ export default function Social() {
                     {isPosting ? "Posting..." : "Post"}
                   </button>
                 </div>
+
+                {/* Exclusive content toggle — only shown for active creators with media */}
+                {isActiveCreator && mediaFile && (
+                  <div className="flex items-center justify-between rounded-lg px-3 py-2.5" style={{ background: "rgba(212,0,122,0.06)", border: "1px solid rgba(212,0,122,0.2)" }}>
+                    <label
+                      htmlFor="exclusive-toggle"
+                      className="flex items-center gap-2 cursor-pointer select-none flex-1"
+                    >
+                      <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#D4007A" }}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                      </svg>
+                      <span className="text-xs font-medium" style={{ color: isExclusive ? "#D4007A" : "#8E8E93" }}>
+                        Exclusive content (subscribers only)
+                      </span>
+                    </label>
+                    <button
+                      id="exclusive-toggle"
+                      role="switch"
+                      aria-checked={isExclusive}
+                      aria-label="Mark as exclusive"
+                      onClick={() => setIsExclusive((v) => !v)}
+                      disabled={isPosting}
+                      className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                      style={{
+                        background: isExclusive ? "#D4007A" : "rgba(255,255,255,0.15)",
+                        outlineOffset: "2px",
+                      }}
+                    >
+                      <span
+                        className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform duration-200"
+                        style={{ transform: isExclusive ? "translateX(18px)" : "translateX(2px)" }}
+                      />
+                    </button>
+                  </div>
+                )}
 
                 {/* Bluesky cross-post toggle — only shown when Bluesky is linked */}
                 {blueskyLinked && (

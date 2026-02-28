@@ -16,6 +16,7 @@ const VisaCybersourceService = require(path.join(backendPath, 'bot/services/visa
 const logger = require(path.join(backendPath, 'utils/logger'));
 const PaymentRecoveryService = require(path.join(backendPath, 'bot/services/paymentRecoveryService'));
 const MediaCleanupService = require(path.join(backendPath, 'bot/services/mediaCleanupService'));
+const CreatorService = require(path.join(backendPath, 'bot/services/creatorService'));
 
 /**
  * Initialize and start cron jobs
@@ -168,6 +169,28 @@ const startCronJobs = async (bot = null) => {
         });
       } catch (error) {
         logger.error('Error in recurring payment retry cron:', error);
+      }
+    });
+
+    // Creator eligibility batch check - daily at 3 AM UTC
+    cron.schedule('0 3 * * *', async () => {
+      try {
+        logger.info('Running creator eligibility batch check...');
+        const results = await CreatorService.runBatchEligibilityCheck();
+        logger.info('Creator eligibility check completed', results);
+      } catch (error) {
+        logger.error('Error in creator eligibility cron:', error);
+      }
+    });
+
+    // Creator subscription expiry - every 6 hours
+    cron.schedule('0 */6 * * *', async () => {
+      try {
+        logger.info('Running creator subscription expiry check...');
+        const results = await CreatorService.expireCreatorSubscriptions();
+        logger.info('Creator subscription expiry completed', results);
+      } catch (error) {
+        logger.error('Error in creator subscription expiry cron:', error);
       }
     });
 

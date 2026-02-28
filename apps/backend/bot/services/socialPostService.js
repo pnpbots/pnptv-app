@@ -2,6 +2,7 @@ const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const axios = require('axios');
 const MediaCleanupService = require('./mediaCleanupService');
+const CreatorService = require('./creatorService');
 
 /**
  * Check if a photo_file_id is a valid web-servable URL (local path or http URL).
@@ -31,15 +32,17 @@ class SocialPostService {
    * Requires userId for the liked_by_me subquery.
    * Uses ID-based cursor pagination for consistent, index-friendly fetching.
    */
-  static async getFeed(userId, cursor, limit = 20) {
+  static async getFeed(userId, cursor, limit = 20, viewerSubscriptionStatus) {
     const lim = Math.min(Number(limit) || 20, 50);
     const cursorId = cursor ? parseInt(cursor, 10) : null;
     const params = cursorId ? [userId, lim, cursorId] : [userId, lim];
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
-              sp.likes_count, sp.reposts_count, sp.replies_count, sp.created_at,
+              sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.created_at,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
+              u.creator_status as author_creator_status, u.creator_type as author_creator_type,
+              u.creator_verified as author_creator_verified, u.creator_price_usd as author_creator_price,
               EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me,
               rp.content as repost_content, rp.created_at as repost_created_at,
               ru.username as repost_author_username, ru.first_name as repost_author_first_name
@@ -53,8 +56,12 @@ class SocialPostService {
        LIMIT $2`,
       params
     );
-    const nextCursor = rows.length === lim ? String(rows[rows.length - 1].id) : null;
-    return { posts: sanitizePostRows(rows), nextCursor };
+    let posts = sanitizePostRows(rows);
+    if (viewerSubscriptionStatus !== undefined) {
+      posts = await CreatorService.filterFeedExclusivePosts(posts, userId, viewerSubscriptionStatus);
+    }
+    const nextCursor = posts.length === lim ? String(posts[posts.length - 1].id) : null;
+    return { posts, nextCursor };
   }
 
   /**
@@ -77,7 +84,7 @@ class SocialPostService {
        JOIN users u ON sp.user_id = u.id
        LEFT JOIN social_posts rp ON sp.repost_of_id = rp.id
        LEFT JOIN users ru ON rp.user_id = ru.id
-       WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL
+       WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL AND sp.is_exclusive = false
        ORDER BY sp.id DESC
        LIMIT $1`,
       [lim]
@@ -103,7 +110,7 @@ class SocialPostService {
               EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me
        FROM social_posts sp
        JOIN users u ON sp.user_id = u.id
-       WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL AND sp.is_wof = true
+       WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL AND sp.is_wof = true AND sp.is_exclusive = false
          ${cursorId ? 'AND sp.id < $3' : ''}
        ORDER BY sp.id DESC
        LIMIT $2`,
@@ -148,13 +155,13 @@ class SocialPostService {
 
   // ── Create Post ───────────────────────────────────────────────────────────
 
-  static async createPost(userId, content, mediaUrl, mediaType, replyToId, repostOfId, isWof = false) {
+  static async createPost(userId, content, mediaUrl, mediaType, replyToId, repostOfId, isWof = false, isExclusive = false) {
     const { rows } = await query(
-      `INSERT INTO social_posts (user_id, content, media_url, media_type, reply_to_id, repost_of_id, is_wof)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO social_posts (user_id, content, media_url, media_type, reply_to_id, repost_of_id, is_wof, is_exclusive)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id, content, media_url, media_type, reply_to_id, repost_of_id,
-                 likes_count, reposts_count, replies_count, is_wof, created_at`,
-      [userId, content, mediaUrl, mediaType, replyToId || null, repostOfId || null, isWof]
+                 likes_count, reposts_count, replies_count, is_wof, is_exclusive, created_at`,
+      [userId, content, mediaUrl, mediaType, replyToId || null, repostOfId || null, isWof, isExclusive]
     );
     const post = rows[0];
 
@@ -241,7 +248,7 @@ class SocialPostService {
     const [postsRes, profileRes, postCountRes] = await Promise.all([
       query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
-                sp.likes_count, sp.reposts_count, sp.replies_count, sp.created_at,
+                sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.created_at,
                 u.id as author_id, u.username as author_username,
                 u.first_name as author_first_name, u.photo_file_id as author_photo
                 ${likedSubquery}
@@ -254,7 +261,8 @@ class SocialPostService {
       ),
       query(
         `SELECT id, username, first_name, last_name, bio, photo_file_id, pnptv_id,
-                subscription_status, created_at
+                subscription_status, created_at,
+                creator_status, creator_type, creator_price_usd, creator_verified, creator_featured, creator_subscriber_count
          FROM users WHERE id = $1`,
         [userId]
       ),

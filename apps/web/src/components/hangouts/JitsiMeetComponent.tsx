@@ -121,7 +121,7 @@ export function JitsiMeetComponent({
   // ─── Main render ──────────────────────────────────────────────────────
 
   const containerClass = fullScreen
-    ? "fixed inset-0 z-40 bg-pnp-background"
+    ? "fixed inset-0 z-[46] bg-pnp-background"
     : `relative w-full aspect-video rounded-xl overflow-hidden bg-pnp-surface ${className || ""}`;
 
   return (

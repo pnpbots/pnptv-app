@@ -146,6 +146,13 @@ const SECTIONS: Section[] = [
         external: false,
       },
       {
+        title: "Creator Applications",
+        description: "Review full-time creator applications",
+        url: "/admin/creators",
+        badge: "Creators",
+        external: false,
+      },
+      {
         title: "Cristina AI Support",
         description: "AI assistant & support chat",
         url: "/support",

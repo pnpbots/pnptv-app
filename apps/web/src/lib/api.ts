@@ -1274,8 +1274,9 @@ export interface CreatorDashboard {
   application: {
     id: string;
     status: string;
-    submitted_at: string;
-    cal_booking_url: string;
+    call_scheduled: boolean;
+    call_scheduled_at: string | null;
+    created_at: string;
   } | null;
 }
 
@@ -1304,14 +1305,18 @@ export interface CreatorApplication {
   username: string;
   first_name: string;
   photo_file_id: string | null;
-  status: string;
-  requested_price_usd: number;
-  application_text: string | null;
-  portfolio_urls: string[] | null;
-  cal_booking_url: string | null;
-  submitted_at: string;
+  application_type: "live" | "content_creator" | "both";
+  stage_name: string;
+  bio: string | null;
+  status: "pending" | "approved" | "rejected" | "withdrawn";
+  requested_price_usd: number | null;
+  call_scheduled: boolean;
+  call_scheduled_at: string | null;
+  admin_notes: string | null;
+  reviewed_by: string | null;
   reviewed_at: string | null;
-  review_notes: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export function getCreatorEligibility(): Promise<{
@@ -1328,17 +1333,7 @@ export function activateCreator(): Promise<{
   return request("/api/webapp/creator/activate", { method: "POST" });
 }
 
-export function applyFullTimeCreator(data: {
-  price: number;
-  text?: string;
-  portfolioUrls?: string[];
-}): Promise<{
-  success: boolean;
-  application: { id: string; status: string; submitted_at: string };
-  calBookingUrl: string;
-}> {
-  return request("/api/webapp/creator/apply", { method: "POST", body: data });
-}
+// Full-time applications use /api/apply (existing model_applications flow)
 
 export function getCreatorDashboard(): Promise<{
   success: boolean;

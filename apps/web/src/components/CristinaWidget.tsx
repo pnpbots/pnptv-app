@@ -120,12 +120,12 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   // FAB button (widget mode only)
   if (mode === "widget" && !isOpen) {
     return (
-      <div className="fixed bottom-20 right-3 z-50 flex flex-col items-end gap-2 sm:bottom-24 sm:right-4 safe-area-bottom">
+      <div className="fixed bottom-20 right-3 z-[38] flex flex-col items-end gap-2 sm:bottom-24 sm:right-4 safe-area-bottom">
         <button
           onClick={() => setIsOpen(true)}
           className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-full shadow-lg flex items-center justify-center text-xl sm:text-2xl transition-transform hover:scale-110 active:scale-95"
           style={{
-            background: "linear-gradient(135deg, #D4007A, #E69138)",
+            background: "linear-gradient(135deg, #5BC8F5, #00D4E8)",
           }}
           aria-label="Open Cristina AI Support"
         >
@@ -133,7 +133,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
           <span
             className="absolute inset-0 rounded-full animate-ping"
             style={{
-              background: "linear-gradient(135deg, #D4007A, #E69138)",
+              background: "linear-gradient(135deg, #5BC8F5, #00D4E8)",
               opacity: 0.3,
               animationDuration: "2.5s",
             }}
@@ -142,7 +142,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
           <span
             className="absolute -inset-1 rounded-full"
             style={{
-              background: "linear-gradient(135deg, #D4007A, #E69138)",
+              background: "linear-gradient(135deg, #5BC8F5, #00D4E8)",
               opacity: 0.25,
               filter: "blur(8px)",
             }}
@@ -158,7 +158,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
       className={
         mode === "page"
           ? "flex flex-col h-[calc(100vh-12rem)] max-h-[800px] glass-card-sm rounded-2xl overflow-hidden"
-          : "fixed z-50 flex flex-col overflow-hidden shadow-2xl " +
+          : "fixed z-[42] flex flex-col overflow-hidden shadow-2xl " +
             "inset-0 w-full h-full " +
             "sm:inset-auto sm:bottom-24 sm:right-4 sm:w-[400px] sm:h-[600px] sm:rounded-2xl"
       }
@@ -248,8 +248,8 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
                   onClick={() => sendMessage(s.label)}
                   className="px-3 py-1.5 rounded-full text-xs font-medium transition-all hover:scale-105 active:scale-95"
                   style={{
-                    background: "rgba(212, 0, 122, 0.15)",
-                    border: "1px solid rgba(212, 0, 122, 0.3)",
+                    background: "rgba(0, 212, 232, 0.15)",
+                    border: "1px solid rgba(0, 212, 232, 0.3)",
                     color: "rgba(255, 255, 255, 0.9)",
                   }}
                 >
@@ -271,7 +271,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
               }`}
               style={
                 msg.role === "user"
-                  ? { background: "linear-gradient(135deg, #D4007A, #E69138)" }
+                  ? { background: "linear-gradient(135deg, #5BC8F5, #00D4E8)" }
                   : { background: "rgba(255, 255, 255, 0.06)" }
               }
             >
@@ -310,14 +310,14 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
           placeholder={lang === "es" ? "Escribe tu mensaje..." : "Type your message..."}
           maxLength={1000}
           disabled={isLoading}
-          className="flex-1 bg-white/5 border border-pnp-border rounded-xl px-3 py-2 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-pink-500/50 disabled:opacity-50"
+          className="flex-1 bg-white/5 border border-pnp-border rounded-xl px-3 py-2 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-cyan-400/50 disabled:opacity-50"
         />
         <button
           type="submit"
           disabled={!input.trim() || isLoading}
           className="p-2 rounded-xl transition-all disabled:opacity-30"
           style={{
-            background: input.trim() && !isLoading ? "linear-gradient(135deg, #D4007A, #E69138)" : "rgba(255,255,255,0.05)",
+            background: input.trim() && !isLoading ? "linear-gradient(135deg, #5BC8F5, #00D4E8)" : "rgba(255,255,255,0.05)",
           }}
         >
           <svg
@@ -345,7 +345,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
       <>
         {/* Mobile backdrop */}
         <div
-          className="fixed inset-0 bg-black/50 z-40 sm:hidden"
+          className="fixed inset-0 bg-black/50 z-[41] sm:hidden"
           onClick={() => setIsOpen(false)}
         />
         {chatPanel}

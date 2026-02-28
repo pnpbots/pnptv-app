@@ -430,7 +430,7 @@ class PaymentService {
       }
       return success;
     }
-  static async createPayment({ userId, planId, provider, sku, chatId }) {
+  static async createPayment({ userId, planId, provider, sku, chatId, creatorId }) {
     try {
       const plan = await PlanModel.getById(planId);
       if (!plan || !plan.active) {
@@ -440,14 +440,27 @@ class PaymentService {
         throw new Error('El plan seleccionado no existe o está inactivo. | Plan not found');
       }
 
+      // For creator subscriptions, use the creator's dynamic price
+      let paymentAmount = plan.price;
+      if (planId === 'creator_monthly' && creatorId) {
+        const creatorRes = await query(
+          'SELECT creator_price_usd FROM users WHERE id = $1 AND creator_status = $2',
+          [creatorId, 'active']
+        );
+        if (creatorRes.rows[0]) {
+          paymentAmount = parseFloat(creatorRes.rows[0].creator_price_usd);
+        }
+      }
+
       const payment = await PaymentModel.create({
         userId,
         planId,
         provider,
         sku: sku || plan.sku,
-        amount: plan.price,
+        amount: paymentAmount,
         currency: plan.currency || 'USD',
         status: 'pending',
+        metadata: creatorId ? { creatorId } : undefined,
       });
 
       let paymentUrl;
@@ -1205,6 +1218,26 @@ class PaymentService {
               }
             }
 
+            // Creator subscription activation
+            if (planIdOrBookingId === 'creator_monthly' && payment?.metadata?.creatorId) {
+              try {
+                const CreatorService = require('./creatorService');
+                await CreatorService.subscribeToCreator(userId, payment.metadata.creatorId, payment.id);
+                logger.info('Creator subscription activated via webhook', {
+                  userId,
+                  creatorId: payment.metadata.creatorId,
+                  paymentId: payment.id,
+                  refPayco: x_ref_payco,
+                });
+              } catch (creatorError) {
+                logger.error('Creator subscription activation failed (non-critical):', {
+                  error: creatorError.message,
+                  userId,
+                  creatorId: payment.metadata.creatorId,
+                });
+              }
+            }
+
             // Send enhanced payment confirmation notification via bot (with PRIME channel link)
             const userLanguage = user?.language || 'es';
             try {
@@ -1625,6 +1658,25 @@ class PaymentService {
               expiryDate,
               txHash: source?.txHash,
             });
+
+            // Creator subscription activation
+            if (planId === 'creator_monthly' && payment?.metadata?.creatorId) {
+              try {
+                const CreatorService = require('./creatorService');
+                await CreatorService.subscribeToCreator(userId, payment.metadata.creatorId, paymentId);
+                logger.info('Creator subscription activated via Daimo webhook', {
+                  userId,
+                  creatorId: payment.metadata.creatorId,
+                  paymentId,
+                });
+              } catch (creatorError) {
+                logger.error('Creator subscription activation failed (non-critical):', {
+                  error: creatorError.message,
+                  userId,
+                  creatorId: payment.metadata.creatorId,
+                });
+              }
+            }
 
             // Record payment in history
             try {
