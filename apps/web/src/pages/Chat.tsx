@@ -7,15 +7,16 @@ import React, {
 } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useHangoutSocket } from "@/hooks/useHangoutSocket";
 import {
   getHangoutGroups,
   createHangoutGroup,
-  getGroupMessages,
-  sendGroupMessage,
   sendGroupMediaMessage,
   startGroupCall,
   leaveHangoutGroup,
   deleteHangoutGroup,
+  markGroupAsRead,
+  leaveGroupCall,
   type HangoutGroup,
   type GroupMessage,
 } from "@/lib/api";
@@ -44,6 +45,28 @@ function timeAgo(dateStr: string): string {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h`;
   return `${Math.floor(hrs / 24)}d`;
+}
+
+function formatDateSeparator(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const messageDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.floor((today.getTime() - messageDay.getTime()) / 86400000);
+
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+function isSameDay(a: string, b: string): boolean {
+  const dA = new Date(a);
+  const dB = new Date(b);
+  return (
+    dA.getFullYear() === dB.getFullYear() &&
+    dA.getMonth() === dB.getMonth() &&
+    dA.getDate() === dB.getDate()
+  );
 }
 
 type View = "list" | "chat";
@@ -147,6 +170,41 @@ const MessageBubble = memo(function MessageBubble({
   );
 });
 
+// ─── Typing Indicator ───────────────────────────────────────────────────────
+
+function TypingIndicator({ users }: { users: string[] }) {
+  if (users.length === 0) return null;
+  let text: string;
+  if (users.length === 1) text = `${users[0]} is typing`;
+  else if (users.length === 2) text = `${users[0]} and ${users[1]} are typing`;
+  else text = `${users[0]} and ${users.length - 1} others are typing`;
+
+  return (
+    <div className="flex items-center gap-1.5 px-4 py-1 text-xs text-pnp-textSecondary animate-fade-in-up">
+      <span className="flex gap-0.5">
+        <span className="w-1 h-1 rounded-full bg-pnp-textSecondary animate-bounce" style={{ animationDelay: "0ms" }} />
+        <span className="w-1 h-1 rounded-full bg-pnp-textSecondary animate-bounce" style={{ animationDelay: "150ms" }} />
+        <span className="w-1 h-1 rounded-full bg-pnp-textSecondary animate-bounce" style={{ animationDelay: "300ms" }} />
+      </span>
+      <span>{text}...</span>
+    </div>
+  );
+}
+
+// ─── Date Separator ─────────────────────────────────────────────────────────
+
+function DateSeparator({ date }: { date: string }) {
+  return (
+    <div className="flex items-center gap-3 py-2">
+      <div className="flex-1 h-px bg-white/10" />
+      <span className="text-[10px] font-medium text-pnp-textSecondary uppercase tracking-wider">
+        {formatDateSeparator(date)}
+      </span>
+      <div className="flex-1 h-px bg-white/10" />
+    </div>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export default function Chat() {
@@ -168,12 +226,26 @@ export default function Chat() {
   // Chat view state
   const [view, setView] = useState<View>("list");
   const [activeGroup, setActiveGroup] = useState<HangoutGroup | null>(null);
-  const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [msgInput, setMsgInput] = useState("");
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const isNearBottom = useRef(true);
+  const prevScrollHeight = useRef(0);
+
+  // Socket hook
+  const {
+    messages,
+    sendMessage,
+    emitTyping,
+    typingUsers,
+    callState,
+    isConnected,
+    loadOlderMessages,
+    hasMore,
+    isLoadingMore,
+  } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId);
 
   // Media upload state
   const [mediaFile, setMediaFile] = useState<File | null>(null);
@@ -247,24 +319,56 @@ export default function Chat() {
     setUploadError(message);
   }, []);
 
+  // ─── Smart auto-scroll ─────────────────────────────────────────────
+
+  const handleScroll = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isNearBottom.current = distFromBottom < 150;
+
+    // Infinite scroll: load older messages when near top
+    if (el.scrollTop < 100 && hasMore && !isLoadingMore) {
+      prevScrollHeight.current = el.scrollHeight;
+      loadOlderMessages();
+    }
+  }, [hasMore, isLoadingMore, loadOlderMessages]);
+
+  // Preserve scroll position after loading older messages
+  useEffect(() => {
+    if (!isLoadingMore && prevScrollHeight.current > 0) {
+      const el = messagesContainerRef.current;
+      if (el) {
+        const newScrollHeight = el.scrollHeight;
+        el.scrollTop = newScrollHeight - prevScrollHeight.current;
+      }
+      prevScrollHeight.current = 0;
+    }
+  }, [isLoadingMore, messages]);
+
+  // Auto-scroll on new messages (only when near bottom)
+  useEffect(() => {
+    if (isNearBottom.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages]);
+
   // ─── Chat view open/close ──────────────────────────────────────────
 
   const openChat = async (group: HangoutGroup) => {
     setActiveGroup(group);
     setView("chat");
-    setMessages([]);
     setCallUrl(null);
     setMessagesLoading(true);
     clearMedia();
+    isNearBottom.current = true;
 
-    try {
-      const data = await getGroupMessages(group.id);
-      setMessages(data.messages || []);
-    } catch {
-      // silent
-    } finally {
-      setMessagesLoading(false);
-    }
+    // Mark as read
+    markGroupAsRead(group.id).catch(() => {});
+
+    // Initial loading state (socket will deliver history)
+    // Give socket a moment to deliver history, then clear loading
+    setTimeout(() => setMessagesLoading(false), 1000);
 
     // If there's already an active call, fetch the URL
     if (group.hasActiveCall) {
@@ -275,58 +379,38 @@ export default function Chat() {
         /* silent */
       }
     }
-
-    // Start polling for new messages
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const data = await getGroupMessages(group.id);
-        setMessages(data.messages || []);
-      } catch {
-        // silent
-      }
-    }, 5000);
   };
 
   const closeChat = () => {
     setView("list");
     setActiveGroup(null);
-    setMessages([]);
     setCallUrl(null);
     clearMedia();
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
     loadGroups();
   };
 
-  // Clean up polling on unmount
+  // Clear messagesLoading once socket delivers messages
   useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, []);
-
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (messages.length > 0 && messagesLoading) {
+      setMessagesLoading(false);
+    }
+  }, [messages, messagesLoading]);
 
   // ─── Send logic ─────────────────────────────────────────────────────
 
   const handleSend = useCallback(async () => {
     if (sending || !activeGroup) return;
     const hasText = msgInput.trim().length > 0;
-    const hasMedia = mediaFile !== null;
-    if (!hasText && !hasMedia) return;
+    const hasMediaFile = mediaFile !== null;
+    if (!hasText && !hasMediaFile) return;
 
     setSending(true);
     const text = msgInput.trim();
     setMsgInput("");
 
     try {
-      if (hasMedia && mediaFile) {
+      if (hasMediaFile && mediaFile) {
+        // Media uploads still use HTTP
         setUploadProgress(30);
         const data = await sendGroupMediaMessage(
           activeGroup.id,
@@ -334,18 +418,15 @@ export default function Chat() {
           text || undefined
         );
         setUploadProgress(100);
-        if (data.success && data.message) {
-          setMessages((prev) => [...prev, data.message]);
-        }
+        // Message will arrive via socket broadcast, no need to manually append
+        if (!data.success) throw new Error("Upload failed");
         clearMedia();
       } else {
-        const data = await sendGroupMessage(activeGroup.id, text);
-        if (data.success && data.message) {
-          setMessages((prev) => [...prev, data.message]);
-        }
+        // Text messages go via socket for instant delivery
+        sendMessage(text);
       }
     } catch (err) {
-      if (!hasMedia) setMsgInput(text);
+      if (!hasMediaFile) setMsgInput(text);
       setUploadError(
         err instanceof Error ? err.message : "Failed to send message"
       );
@@ -353,7 +434,7 @@ export default function Chat() {
     } finally {
       setSending(false);
     }
-  }, [sending, activeGroup, msgInput, mediaFile, clearMedia]);
+  }, [sending, activeGroup, msgInput, mediaFile, clearMedia, sendMessage]);
 
   // ─── Video call ─────────────────────────────────────────────────────
 
@@ -365,7 +446,6 @@ export default function Chat() {
     try {
       const data = await startGroupCall(activeGroup.id);
       if (data.jitsiUrl) {
-        // Validate URL origin before loading in iframe with camera/mic permissions
         const isValidOrigin = ALLOWED_CALL_ORIGINS.some((prefix) =>
           data.jitsiUrl.startsWith(prefix)
         );
@@ -386,8 +466,11 @@ export default function Chat() {
   };
 
   const handleEndCall = useCallback(() => {
+    if (activeGroup && callState.callId) {
+      leaveGroupCall(activeGroup.id, callState.callId).catch(() => {});
+    }
     setCallUrl(null);
-  }, []);
+  }, [activeGroup, callState.callId]);
 
   // ─── Group management ──────────────────────────────────────────────
 
@@ -433,6 +516,7 @@ export default function Chat() {
 
   if (view === "chat" && activeGroup) {
     const canSend = !sending && (msgInput.trim().length > 0 || mediaFile !== null);
+    const showCallBanner = !callUrl && (callState.isActive || activeGroup.hasActiveCall);
 
     return (
       <div className="flex flex-col" style={{ height: "calc(100vh - 5rem)" }}>
@@ -462,14 +546,20 @@ export default function Chat() {
             <h2 className="text-sm font-bold text-pnp-textPrimary truncate">{activeGroup.name}</h2>
             <p className="text-xs text-pnp-textSecondary">
               {activeGroup.memberCount} members
+              {isConnected && (
+                <span className="ml-1.5 inline-flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                </span>
+              )}
             </p>
           </div>
 
           {/* Video call button */}
           <VideoCallButton
-            hasActiveCall={!!callUrl || activeGroup.hasActiveCall}
+            hasActiveCall={!!callUrl || callState.isActive || activeGroup.hasActiveCall}
             onStartCall={handleStartCall}
             isLoading={callLoading}
+            participantCount={callState.participantCount}
           />
 
           {/* Leave/delete button (hidden for main + Wall of Fame groups) */}
@@ -489,12 +579,13 @@ export default function Chat() {
           )}
         </div>
 
-        {/* Active call banner (when call URL is set but not embedded yet) */}
-        {!callUrl && activeGroup.hasActiveCall && (
+        {/* Active call banner */}
+        {showCallBanner && (
           <VideoCallBanner
             isActive={true}
             onJoin={handleStartCall}
             isJoining={callLoading}
+            participantCount={callState.participantCount}
           />
         )}
 
@@ -509,7 +600,21 @@ export default function Chat() {
         )}
 
         {/* Messages area */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
+        <div
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0"
+        >
+          {/* Loading more indicator */}
+          {isLoadingMore && (
+            <div className="flex justify-center py-2">
+              <svg className="w-5 h-5 text-pnp-textSecondary animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            </div>
+          )}
+
           {messagesLoading ? (
             <div className="space-y-3" aria-label="Loading messages" aria-busy="true">
               {Array.from({ length: 4 }).map((_, i) => (
@@ -533,18 +638,26 @@ export default function Chat() {
               </p>
             </div>
           ) : (
-            messages.map((msg) => (
-              <MessageBubble
-                key={msg.id}
-                msg={msg}
-                isMe={msg.user_id === user?.dbId}
-                onNavigate={handleNavigate}
-                onExpandImage={handleExpandImage}
-              />
+            messages.map((msg, idx) => (
+              <React.Fragment key={msg.id}>
+                {/* Date separator */}
+                {(idx === 0 || !isSameDay(messages[idx - 1].created_at, msg.created_at)) && (
+                  <DateSeparator date={msg.created_at} />
+                )}
+                <MessageBubble
+                  msg={msg}
+                  isMe={msg.user_id === user?.dbId}
+                  onNavigate={handleNavigate}
+                  onExpandImage={handleExpandImage}
+                />
+              </React.Fragment>
             ))
           )}
           <div ref={messagesEndRef} />
         </div>
+
+        {/* Typing indicator */}
+        <TypingIndicator users={typingUsers} />
 
         {/* Upload preview */}
         {mediaFile && mediaPreviewUrl && (
@@ -589,7 +702,10 @@ export default function Chat() {
             {/* Text input */}
             <input
               value={msgInput}
-              onChange={(e) => setMsgInput(e.target.value)}
+              onChange={(e) => {
+                setMsgInput(e.target.value);
+                emitTyping();
+              }}
               onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
               placeholder={mediaFile ? "Add a caption..." : "Type a message..."}
               className="flex-1 bg-white/5 rounded-full px-4 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 min-w-0 transition-colors"
@@ -766,6 +882,15 @@ export default function Chat() {
                     <span className="font-semibold text-pnp-textPrimary text-sm truncate">
                       {group.name}
                     </span>
+                    {/* Unread badge */}
+                    {(group.unreadCount ?? 0) > 0 && (
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded-full text-white font-bold flex-shrink-0 min-w-[18px] text-center"
+                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                      >
+                        {group.unreadCount! > 99 ? "99+" : group.unreadCount}
+                      </span>
+                    )}
                     {group.isMain && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary flex-shrink-0">
                         MAIN

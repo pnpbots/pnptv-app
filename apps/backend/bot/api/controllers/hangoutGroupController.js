@@ -68,7 +68,12 @@ const listGroups = async (req, res) => {
                 (SELECT hvc.id::text FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active' ORDER BY hvc.created_at DESC LIMIT 1),
                 (SELECT v.id::text FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true ORDER BY v.created_at DESC LIMIT 1)
               ) as active_call_id,
-              (SELECT cm.content FROM chat_messages cm WHERE cm.room = 'hangout:' || g.id::text ORDER BY cm.created_at DESC LIMIT 1) as last_message
+              (SELECT cm.content FROM chat_messages cm WHERE cm.room = 'hangout:' || g.id::text ORDER BY cm.created_at DESC LIMIT 1) as last_message,
+              (SELECT COUNT(*)::int FROM chat_messages cm
+               WHERE cm.room = 'hangout:' || g.id::text
+                 AND cm.is_deleted = false
+                 AND cm.created_at > COALESCE(gm.last_read_at, gm.joined_at)
+                 AND cm.user_id != $1::text) as unread_count
        FROM hangout_groups g
        JOIN hangout_group_members gm ON gm.group_id = g.id AND gm.user_id = $1
        ORDER BY g.is_main DESC, g.is_wall_of_fame DESC, g.created_at DESC`,
@@ -90,6 +95,7 @@ const listGroups = async (req, res) => {
       hasActiveCall: r.has_active_call,
       activeCallId: r.active_call_id,
       lastMessage: r.last_message,
+      unreadCount: r.unread_count || 0,
     }));
 
     return res.json({ success: true, groups });
@@ -470,6 +476,22 @@ const startCall = async (req, res) => {
   }
 };
 
+// POST /api/webapp/hangouts/groups/:id/read
+const markAsRead = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  try {
+    await query(
+      'UPDATE hangout_group_members SET last_read_at = NOW() WHERE group_id = $1 AND user_id = $2',
+      [groupId, user.id]
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('markAsRead error', err);
+    return res.status(500).json({ error: 'Failed to mark as read' });
+  }
+};
+
 module.exports = {
   listGroups,
   createGroup,
@@ -480,4 +502,5 @@ module.exports = {
   getMessages,
   sendMessage,
   startCall,
+  markAsRead,
 };

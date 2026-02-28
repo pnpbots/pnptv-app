@@ -307,6 +307,17 @@ function initSocketIO(io) {
       }
     });
 
+    // Hangout typing indicator (ephemeral, no DB writes)
+    socket.on('hangout:typing', ({ groupId } = {}) => {
+      if (!groupId) return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+      socket.to(`hangout:${gid}`).emit('hangout:typing', {
+        userId: user.id,
+        firstName: user.firstName || user.first_name || user.username || 'Someone',
+      });
+    });
+
     // ── Direct Messages ──────────────────────────────────────────────────────
 
     socket.on('dm:send', async ({ recipientId, content } = {}) => {
