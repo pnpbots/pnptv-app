@@ -73,9 +73,9 @@ const SECTIONS: Section[] = [
     title: "Communication",
     links: [
       {
-        title: "Synapse Admin",
-        description: "Matrix chat server management",
-        url: "https://matrix.pnptv.app/_synapse/admin",
+        title: "Matrix Synapse",
+        description: "Matrix chat server",
+        url: "https://matrix.pnptv.app",
         badge: "Matrix",
         external: true,
       },
@@ -89,7 +89,7 @@ const SECTIONS: Section[] = [
       {
         title: "Bluesky PDS",
         description: "AT Protocol personal data server",
-        url: "https://pds.pnptv.app",
+        url: "https://social.pnptv.app",
         badge: "ATProto",
         external: true,
       },
