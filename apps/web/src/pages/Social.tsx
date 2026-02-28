@@ -502,41 +502,62 @@ export default function Social() {
       {/* Featured Performers */}
       {featuredPerformers.length > 0 && (
         <div className="mb-6">
-          <h2 className="text-lg font-semibold text-white mb-3">Featured</h2>
+          <div className="flex items-center gap-2 mb-3">
+            <h2 className="text-lg font-semibold text-white">Featured</h2>
+            <span
+              className="text-xs px-2 py-0.5 rounded-full font-medium"
+              style={{ background: "rgba(94,209,196,0.12)", color: "#5ED1C4" }}
+            >
+              Live
+            </span>
+          </div>
           <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide">
             {featuredPerformers.map((p) => (
               <div
                 key={p.id}
                 className="glass-card-sm p-3 flex-shrink-0 w-28 text-center"
+                style={{ borderColor: "rgba(94,209,196,0.18)" }}
               >
-                {isValidPhotoUrl(p.photoUrl) ? (
-                  <img
-                    src={p.photoUrl}
-                    alt={p.displayName}
-                    className="w-14 h-14 rounded-full mx-auto mb-2 object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                      const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
-                      if (fallback) fallback.style.display = "flex";
+                <div className="relative mx-auto mb-2 w-14 h-14">
+                  {isValidPhotoUrl(p.photoUrl) ? (
+                    <img
+                      src={p.photoUrl}
+                      alt={p.displayName}
+                      className="w-14 h-14 rounded-full object-cover"
+                      style={{ border: "2px solid #5ED1C4" }}
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                        const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
+                        if (fallback) fallback.style.display = "flex";
+                      }}
+                    />
+                  ) : null}
+                  <div
+                    className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-bold"
+                    style={{
+                      background: "linear-gradient(135deg, #5ED1C4, #D4007A)",
+                      color: "#fff",
+                      border: "2px solid #5ED1C4",
+                      display: isValidPhotoUrl(p.photoUrl) ? "none" : undefined,
+                    }}
+                  >
+                    {p.displayName[0]}
+                  </div>
+                  {/* Availability dot */}
+                  <span
+                    className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2"
+                    style={{
+                      background: p.isAvailable ? "#30D158" : "#8E8E93",
+                      borderColor: "rgba(30,30,30,0.9)",
                     }}
                   />
-                ) : null}
-                <div
-                  className="w-14 h-14 rounded-full mx-auto mb-2 flex items-center justify-center text-lg font-bold"
-                  style={{
-                    background: "linear-gradient(135deg, #D4007A, #E69138)",
-                    color: "#fff",
-                    display: isValidPhotoUrl(p.photoUrl) ? "none" : undefined,
-                  }}
-                >
-                  {p.displayName[0]}
                 </div>
                 <p className="text-xs font-medium text-white truncate">{p.displayName}</p>
-                <span
-                  className="inline-block w-2 h-2 rounded-full mt-1"
-                  style={{ background: p.isAvailable ? "#30D158" : "#8E8E93" }}
-                  title={p.isAvailable ? "Available" : "Unavailable"}
-                />
+                {p.averageRating > 0 && (
+                  <p className="text-[10px] mt-0.5" style={{ color: "#5ED1C4" }}>
+                    {"★".repeat(Math.round(p.averageRating))} {p.averageRating.toFixed(1)}
+                  </p>
+                )}
               </div>
             ))}
           </div>
