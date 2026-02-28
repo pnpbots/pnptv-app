@@ -245,7 +245,7 @@ class SocialPostService {
       cursorClause = `AND sp.id < $${params.length}`;
     }
 
-    const [postsRes, profileRes, postCountRes] = await Promise.all([
+    const [postsRes, profileRes, postCountRes, performerRes] = await Promise.all([
       query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
                 sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.created_at,
@@ -270,6 +270,11 @@ class SocialPostService {
         'SELECT COUNT(*)::int as count FROM social_posts WHERE user_id = $1 AND is_deleted = false AND reply_to_id IS NULL',
         [userId]
       ),
+      query(
+        `SELECT id, is_available, base_price, total_calls, total_rating, rating_count, availability_message
+         FROM performers WHERE user_id = $1 AND status = 'active' LIMIT 1`,
+        [userId]
+      ),
     ]);
 
     const profile = profileRes.rows[0] || null;
@@ -280,8 +285,9 @@ class SocialPostService {
     }));
     const nextCursor = posts.length === lim ? String(posts[posts.length - 1].id) : null;
     const postCount = postCountRes.rows[0]?.count || 0;
+    const performerData = performerRes.rows[0] || null;
 
-    return { profile, posts, nextCursor, postCount };
+    return { profile, posts, nextCursor, postCount, performerData };
   }
 
   // ── Admin List Posts ──────────────────────────────────────────────────────

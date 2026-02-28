@@ -318,6 +318,7 @@ const getPublicProfile = async (req, res) => {
     if (!result.profile) return res.status(404).json({ error: 'User not found' });
 
     const profile = result.profile;
+    const pd = result.performerData;
     return res.json({
       success: true,
       profile: {
@@ -337,6 +338,16 @@ const getPublicProfile = async (req, res) => {
         creatorVerified: profile.creator_verified || false,
         creatorFeatured: profile.creator_featured || false,
         creatorSubscriberCount: profile.creator_subscriber_count || 0,
+        performerData: pd ? {
+          id: pd.id,
+          isAvailable: pd.is_available,
+          basePrice: parseFloat(pd.base_price),
+          averageRating: pd.rating_count > 0
+            ? parseFloat((pd.total_rating / pd.rating_count).toFixed(2))
+            : 0,
+          totalCalls: pd.total_calls,
+          availabilityMessage: pd.availability_message || null,
+        } : null,
       },
       posts: result.posts,
       nextCursor: result.nextCursor,

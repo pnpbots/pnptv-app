@@ -2765,6 +2765,7 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
     success: true,
     performers: performers.map(p => ({
       id: p.id,
+      userId: p.userId || null,
       displayName: p.displayName,
       bio: p.bio,
       photoUrl: p.photoUrl,

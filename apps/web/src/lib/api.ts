@@ -353,6 +353,15 @@ export interface UserProfile {
   creatorVerified?: boolean;
   creatorFeatured?: boolean;
   creatorSubscriberCount?: number;
+  // Performer fields (set when user has an active performers record)
+  performerData?: {
+    id: string;
+    isAvailable: boolean;
+    basePrice: number;
+    averageRating: number;
+    totalCalls: number;
+    availabilityMessage: string | null;
+  } | null;
 }
 
 export interface SocialPostItem {
@@ -1135,6 +1144,7 @@ export function clearSupportHistory(): Promise<{ success: boolean }> {
 // Featured Performers (PostgreSQL-backed)
 export interface FeaturedPerformer {
   id: string;
+  userId: string | null;
   displayName: string;
   bio: string | null;
   photoUrl: string | null;

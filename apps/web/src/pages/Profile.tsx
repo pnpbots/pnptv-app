@@ -1334,6 +1334,13 @@ export default function Profile() {
   const displayName = profile.firstName + (profile.lastName ? ` ${profile.lastName}` : "");
   const initial = displayName[0]?.toUpperCase() || "U";
   const isPrime = profile.tier === "PRIME";
+  const isPerformer = !!profile.performerData;
+  // Performer theme colors (teal/gold) vs default user theme (pink/orange)
+  const accentGradient = isPerformer
+    ? "linear-gradient(135deg, #5ED1C4, #00D4E8)"
+    : "linear-gradient(135deg, #D4007A, #E69138)";
+  const accentColor = isPerformer ? "#5ED1C4" : "#D4007A";
+  const accentBorder = isPerformer ? "rgba(94,209,196,0.35)" : "rgba(255,255,255,0.1)";
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
@@ -1352,7 +1359,10 @@ export default function Profile() {
       )}
 
       {/* ── Profile Header Card ── */}
-      <div className="glass-card-sm p-6 mb-4">
+      <div
+        className="glass-card-sm p-6 mb-4"
+        style={isPerformer ? { borderColor: "rgba(94,209,196,0.2)" } : undefined}
+      >
         <div className="flex items-start gap-4">
           {/* Avatar with upload overlay */}
           <div className="relative flex-shrink-0">
@@ -1361,15 +1371,15 @@ export default function Profile() {
                 src={photoUrl}
                 alt={displayName}
                 className="w-20 h-20 rounded-full object-cover border-2"
-                style={{ borderColor: isPrime ? "#FFB454" : "rgba(255,255,255,0.1)" }}
+                style={{ borderColor: isPrime ? "#FFB454" : accentBorder }}
               />
             ) : (
               <div
                 className="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold border-2"
                 style={{
-                  background: "linear-gradient(135deg, #D4007A, #E69138)",
+                  background: accentGradient,
                   color: "#fff",
-                  borderColor: isPrime ? "#FFB454" : "rgba(255,255,255,0.1)",
+                  borderColor: isPrime ? "#FFB454" : accentBorder,
                 }}
               >
                 {initial}
@@ -1389,7 +1399,7 @@ export default function Profile() {
                   onClick={() => fileInputRef.current?.click()}
                   disabled={avatarUploading}
                   className="absolute bottom-0 right-0 w-7 h-7 rounded-full flex items-center justify-center border-2 border-[#1C1C1E]"
-                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                  style={{ background: accentGradient }}
                   title="Change photo"
                 >
                   {avatarUploading ? (
@@ -1414,6 +1424,17 @@ export default function Profile() {
               <h1 className="text-lg font-bold text-white truncate">{displayName}</h1>
               {isPrime && (
                 <Badge variant="accent">PRIME</Badge>
+              )}
+              {isPerformer && (
+                <span
+                  className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
+                  style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.3)" }}
+                >
+                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                  </svg>
+                  Performer
+                </span>
               )}
               {profile.creatorVerified && (
                 <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="#5ED1C4" aria-label="Verified creator">
@@ -1459,6 +1480,21 @@ export default function Profile() {
                   <span className="ml-1" style={{ color: "#8E8E93" }}>Subscribers</span>
                 </span>
               )}
+              {isPerformer && profile.performerData!.averageRating > 0 && (
+                <span className="text-sm flex items-center gap-1" style={{ color: "#5ED1C4" }}>
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                  </svg>
+                  <strong className="text-white">{profile.performerData!.averageRating.toFixed(1)}</strong>
+                  <span style={{ color: "#8E8E93" }}>Rating</span>
+                </span>
+              )}
+              {isPerformer && (
+                <span className="text-sm">
+                  <strong className="text-white">{profile.performerData!.totalCalls}</strong>
+                  <span className="ml-1" style={{ color: "#8E8E93" }}>Calls</span>
+                </span>
+              )}
               {profile.locationText && (
                 <span className="text-xs flex items-center gap-1" style={{ color: "#8E8E93" }}>
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -1495,6 +1531,29 @@ export default function Profile() {
           </div>
         )}
 
+        {/* Performer availability strip */}
+        {isPerformer && (
+          <div
+            className="flex items-center justify-between mt-4 rounded-lg px-4 py-2.5"
+            style={{ background: "rgba(94,209,196,0.07)", border: "1px solid rgba(94,209,196,0.2)" }}
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                style={{ background: profile.performerData!.isAvailable ? "#30D158" : "#8E8E93" }}
+              />
+              <span className="text-xs font-medium" style={{ color: profile.performerData!.isAvailable ? "#30D158" : "#8E8E93" }}>
+                {profile.performerData!.isAvailable
+                  ? (profile.performerData!.availabilityMessage || "Available for calls")
+                  : "Currently unavailable"}
+              </span>
+            </div>
+            <span className="text-sm font-bold" style={{ color: "#5ED1C4" }}>
+              ${profile.performerData!.basePrice}/call
+            </span>
+          </div>
+        )}
+
         {/* Action buttons */}
         <div className="flex gap-3 mt-4">
           {isOwnProfile ? (
@@ -1527,7 +1586,7 @@ export default function Profile() {
                   className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
                   style={isFollowing
                     ? { background: "rgba(255,255,255,0.08)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)" }
-                    : { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }
+                    : { background: accentGradient, color: "#fff" }
                   }
                 >
                   {followLoading ? "..." : isFollowing ? "Following" : "Follow"}
@@ -1600,7 +1659,7 @@ export default function Profile() {
               ? "text-white border-b-2"
               : "text-white/50"
           }`}
-          style={activeTab === "posts" ? { borderImage: "linear-gradient(to right, #D4007A, #E69138) 1" } : undefined}
+          style={activeTab === "posts" ? { borderImage: `linear-gradient(to right, ${accentColor}, ${isPerformer ? "#00D4E8" : "#E69138"}) 1` } : undefined}
         >
           Posts
         </button>
@@ -1611,7 +1670,7 @@ export default function Profile() {
               ? "text-white border-b-2"
               : "text-white/50"
           }`}
-          style={activeTab === "likes" ? { borderImage: "linear-gradient(to right, #D4007A, #E69138) 1" } : undefined}
+          style={activeTab === "likes" ? { borderImage: `linear-gradient(to right, ${accentColor}, ${isPerformer ? "#00D4E8" : "#E69138"}) 1` } : undefined}
         >
           Likes
         </button>

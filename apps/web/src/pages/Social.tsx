@@ -676,7 +676,8 @@ export default function Social() {
             {featuredPerformers.map((p) => (
               <div
                 key={p.id}
-                className="glass-card-sm p-3 flex-shrink-0 w-28 text-center"
+                onClick={() => p.userId && navigate(`/profile/${p.userId}`)}
+                className={`glass-card-sm p-3 flex-shrink-0 w-28 text-center${p.userId ? " cursor-pointer hover:opacity-80 active:scale-95 transition-all" : ""}`}
                 style={{ borderColor: "rgba(94,209,196,0.18)" }}
               >
                 <div className="relative mx-auto mb-2 w-14 h-14">

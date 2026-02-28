@@ -110,10 +110,19 @@ class PerformerModel {
   static async getFeatured(limit = 6) {
     try {
       const result = await query(
-        `SELECT * FROM ${TABLE} WHERE status = 'active' AND is_featured = TRUE ORDER BY total_calls DESC, display_name ASC LIMIT $1`,
+        `SELECT p.*, COALESCE(NULLIF(p.photo_url, ''), u.photo_file_id) AS resolved_photo_url
+         FROM ${TABLE} p
+         LEFT JOIN users u ON p.user_id = u.id
+         WHERE p.status = 'active' AND p.is_featured = TRUE
+         ORDER BY p.total_calls DESC, p.display_name ASC
+         LIMIT $1`,
         [limit]
       );
-      return result.rows.map((row) => this.mapRowToPerformer(row));
+      return result.rows.map((row) => {
+        const performer = this.mapRowToPerformer(row);
+        performer.photoUrl = row.resolved_photo_url || null;
+        return performer;
+      });
     } catch (error) {
       logger.error('Error getting featured performers:', error);
       return [];

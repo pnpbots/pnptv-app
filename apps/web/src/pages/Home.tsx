@@ -4,8 +4,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { useDirectus } from "@/hooks/useDirectus";
 import {
   getHomeFeedPosts,
+  getFeaturedPerformers,
   togglePostLike,
   type SocialPostItem,
+  type FeaturedPerformer,
 } from "@/lib/api";
 
 interface Announcement {
@@ -17,14 +19,6 @@ interface Announcement {
   published_at: string;
 }
 
-interface Performer {
-  id: number;
-  name: string;
-  bio: string;
-  categories: string[];
-  is_featured: boolean;
-  image: string | null;
-}
 
 function timeAgo(dateStr: string): string {
   if (!dateStr) return "";
@@ -58,13 +52,7 @@ export default function Home() {
     },
   });
 
-  const { data: performers } = useDirectus<Performer>({
-    collection: "performers",
-    params: {
-      filter: { status: { _eq: "published" }, is_featured: { _eq: true } },
-      limit: 6,
-    },
-  });
+  const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
 
   useEffect(() => {
     getHomeFeedPosts(10)
@@ -73,6 +61,12 @@ export default function Home() {
       })
       .catch(() => {})
       .finally(() => setIsLoading(false));
+
+    getFeaturedPerformers()
+      .then((res) => {
+        if (res.success) setPerformers(res.performers);
+      })
+      .catch(() => {});
   }, []);
 
   const handleLike = async (postId: number) => {
@@ -153,41 +147,31 @@ export default function Home() {
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-white mb-3">Featured</h2>
           <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide">
-            {performers.map((p) => (
-              <div
-                key={p.id}
-                className="glass-card-sm p-3 flex-shrink-0 w-28 text-center"
-              >
-                {isValidPhotoUrl(p.image) ? (
+            {performers.map((p) => {
+              const profilePath = p.userId ? `/profile/${p.userId}` : "#";
+              return (
+                <div
+                  key={p.id}
+                  className="glass-card-sm p-3 flex-shrink-0 w-28 text-center cursor-pointer"
+                  onClick={() => p.userId && navigate(profilePath)}
+                >
                   <img
-                    src={p.image}
-                    alt={p.name}
+                    src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
+                    alt={p.displayName}
                     className="w-14 h-14 rounded-full mx-auto mb-2 object-cover"
                     onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                      const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
-                      if (fallback) fallback.style.display = "flex";
+                      (e.target as HTMLImageElement).src = "/default-performer.svg";
                     }}
                   />
-                ) : null}
-                <div
-                  className="w-14 h-14 rounded-full mx-auto mb-2 flex items-center justify-center text-lg font-bold"
-                  style={{
-                    background: "linear-gradient(135deg, #D4007A, #E69138)",
-                    color: "#fff",
-                    display: isValidPhotoUrl(p.image) ? "none" : undefined,
-                  }}
-                >
-                  {p.name[0]}
+                  <p className="text-xs font-medium text-white truncate">{p.displayName}</p>
+                  {p.isAvailable && (
+                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "#5ED1C4" }}>
+                      Available
+                    </p>
+                  )}
                 </div>
-                <p className="text-xs font-medium text-white truncate">{p.name}</p>
-                {p.categories?.[0] && (
-                  <p className="text-[10px] mt-0.5 truncate" style={{ color: "#8E8E93" }}>
-                    {p.categories[0]}
-                  </p>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
