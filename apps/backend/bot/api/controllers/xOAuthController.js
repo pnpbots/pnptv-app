@@ -2,6 +2,7 @@ const XOAuthService = require('../../services/xOAuthService');
 const logger = require('../../../utils/logger');
 const axios = require('axios');
 const { query } = require('../../../config/postgres');
+const { enforceDefaultFollows } = require('../../services/followService');
 
 const sanitizeBotUsername = (value) => String(value || '').replace(/^@/, '').trim();
 
@@ -174,6 +175,7 @@ const handleCallback = async (req, res) => {
         user = result.rows[0];
       }
 
+      enforceDefaultFollows(user.id).catch(() => {});
       req.session.user = {
         id: user.id,
         pnptvId: user.pnptv_id,

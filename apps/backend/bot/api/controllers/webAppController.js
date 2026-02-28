@@ -9,26 +9,8 @@ const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
 
-// ── Enforced follows (every user auto-follows these accounts) ────────────────
-const ENFORCED_FOLLOW_IDS = ['8552451957', '8599671840', '8250283246']; // @pnptvadmin, @SantinoFurioso, @Lexboytv
-
-async function enforceDefaultFollows(userId) {
-  try {
-    for (const targetId of ENFORCED_FOLLOW_IDS) {
-      if (String(userId) === String(targetId)) continue; // skip self
-      const { rowCount } = await query(
-        'INSERT INTO user_follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-        [userId, targetId]
-      );
-      if (rowCount > 0) {
-        await query('UPDATE users SET following_count = following_count + 1 WHERE id = $1', [userId]);
-        await query('UPDATE users SET followers_count = followers_count + 1 WHERE id = $1', [targetId]);
-      }
-    }
-  } catch (err) {
-    logger.error('enforceDefaultFollows error', err);
-  }
-}
+// ── Enforced follows (shared service) ────────────────────────────────────────
+const { enforceDefaultFollows } = require('../../services/followService');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -756,6 +738,7 @@ const emailLogin = async (req, res) => {
     }
 
     req.session.user = buildSession(user);
+    enforceDefaultFollows(user.id).catch(() => {});
     setSessionCookieDuration(
       req.session,
       rememberMe === true || rememberMe === 'true'
@@ -828,6 +811,7 @@ const verifyEmail = async (req, res) => {
       if (userResult.rows.length > 0) {
         const u = userResult.rows[0];
         req.session.user = buildSession(u);
+        enforceDefaultFollows(u.id).catch(() => {});
         await new Promise((resolve, reject) =>
           req.session.save(err => (err ? reject(err) : resolve()))
         );
@@ -882,6 +866,7 @@ const verifyEmail = async (req, res) => {
 
     // Create session
     req.session.user = buildSession(row);
+    enforceDefaultFollows(row.id).catch(() => {});
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );

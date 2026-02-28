@@ -4,6 +4,7 @@ const { query } = require('../../../config/postgres');
 const { cache } = require('../../../config/redis');
 const logger = require('../../../utils/logger');
 const SubscriptionService = require('../../services/subscriptionService');
+const { enforceDefaultFollows } = require('../../services/followService');
 
 /**
  * Authentication Controller
@@ -77,6 +78,7 @@ class AuthController {
         role: user.role,
         tier: user.tier || 'free',
       };
+      enforceDefaultFollows(user.id).catch(() => {});
 
       // Set cookie maxAge if remember me
       if (rememberMe) {
@@ -177,6 +179,7 @@ class AuthController {
         tier: user.tier || 'free',
         telegramId: user.telegram,
       };
+      enforceDefaultFollows(user.id).catch(() => {});
 
       logger.info('Model login successful', {
         userId: user.id,

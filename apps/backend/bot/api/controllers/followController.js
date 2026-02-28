@@ -4,8 +4,7 @@ const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const NotificationEmitter = require('../../services/notificationEmitter');
 
-// Accounts that every user must follow — cannot be unfollowed
-const ENFORCED_FOLLOW_IDS = ['8552451957', '8599671840', '8250283246']; // @pnptvadmin, @SantinoFurioso, @Lexboytv
+const { isEnforcedFollow } = require('../../services/followService');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -80,7 +79,7 @@ const unfollowUser = async (req, res) => {
   if (!targetId) return res.status(400).json({ error: 'userId required' });
 
   // Block unfollowing enforced accounts
-  if (ENFORCED_FOLLOW_IDS.includes(String(targetId))) {
+  if (isEnforcedFollow(targetId)) {
     return res.status(403).json({ error: 'This account cannot be unfollowed' });
   }
 

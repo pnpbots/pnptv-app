@@ -26,6 +26,7 @@ const { getRedis } = require('../../../config/redis');
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { v4: uuidv4 } = require('uuid');
+const { enforceDefaultFollows } = require('../../services/followService');
 
 const router = express.Router();
 
@@ -504,6 +505,7 @@ router.get('/callback', callbackLimiter, async (req, res) => {
   // ---------------------------------------------------------------------------
 
   req.session.user = buildXSession(user);
+  enforceDefaultFollows(user.id).catch(() => {});
 
   try {
     await new Promise((resolve, reject) => {

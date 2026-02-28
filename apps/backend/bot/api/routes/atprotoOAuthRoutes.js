@@ -6,6 +6,7 @@ const rateLimit = require('express-rate-limit');
 const { Agent } = require('@atproto/api');
 const logger = require('../../../utils/logger');
 const atproto = require('../../services/atprotoOAuthService');
+const { enforceDefaultFollows } = require('../../services/followService');
 
 const router = express.Router();
 
@@ -239,6 +240,7 @@ router.get('/oauth/callback', callbackLimiter, async (req, res) => {
 
     // Link ATProto identity to PNPtv user (hybrid session merge)
     const userId = await atproto.linkAtprotoToUser(did, handle, pdsUrl, req.session);
+    enforceDefaultFollows(userId).catch(() => {});
 
     // Build hybrid session
     const hybridSession = await atproto.buildHybridSession(userId, did, handle);

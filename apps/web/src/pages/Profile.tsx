@@ -21,6 +21,12 @@ import {
   getFollowStatus,
   getFollowersList,
   getFollowingList,
+  getCreatorSubscriptionStatus,
+  subscribeToCreator,
+  unsubscribeFromCreator,
+  getCreatorEligibility,
+  activateCreator,
+  type CreatorEligibility,
   type UserProfile,
   type SocialPostItem,
   type AuthMethods,
@@ -1087,6 +1093,381 @@ function FollowListModal({
   );
 }
 
+// ── Creator Terms & Conditions Modal ────────────────────────────────────────
+
+const CREATOR_TIERS = [
+  { id: "ice" as const, label: "Ice", price: 5, color: "#A8D8EA", gradient: "linear-gradient(135deg, #A8D8EA, #73B4D4)", emoji: "\u2744\uFE0F" },
+  { id: "crystal" as const, label: "Crystal", price: 10, color: "#C490E4", gradient: "linear-gradient(135deg, #C490E4, #9B59B6)", emoji: "\uD83D\uDD2E" },
+  { id: "diamond" as const, label: "Diamond", price: 15, color: "#5ED1C4", gradient: "linear-gradient(135deg, #5ED1C4, #00D4E8)", emoji: "\uD83D\uDC8E" },
+] as const;
+
+type TierId = typeof CREATOR_TIERS[number]["id"];
+
+function CreatorTermsModal({
+  open,
+  tier,
+  onAccept,
+  onClose,
+  accepting,
+}: {
+  open: boolean;
+  tier: TierId;
+  onAccept: () => void;
+  onClose: () => void;
+  accepting: boolean;
+}) {
+  const [scrolledToBottom, setScrolledToBottom] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const tierInfo = CREATOR_TIERS.find((t) => t.id === tier)!;
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) {
+      setScrolledToBottom(true);
+    }
+  };
+
+  useEffect(() => {
+    setScrolledToBottom(false);
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden"
+        style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+          <div>
+            <h2 className="text-lg font-bold text-white">Creator Terms & Conditions</h2>
+            <p className="text-xs mt-0.5" style={{ color: tierInfo.color }}>
+              {tierInfo.emoji} {tierInfo.label} Profile &middot; ${tierInfo.price}/mo
+            </p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 text-white/60">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Scrollable terms content */}
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto px-5 py-4 text-sm text-white/80 leading-relaxed space-y-4"
+          style={{ maxHeight: "60vh" }}
+        >
+          <p className="font-semibold text-white text-base">PNPtv! Creator Monetization Agreement</p>
+          <p className="text-xs" style={{ color: "#8E8E93" }}>Effective Date: February 28, 2026 &middot; Last Updated: February 28, 2026</p>
+
+          <div>
+            <p className="font-semibold text-white mb-1">1. Profile Tiers & Pricing</p>
+            <p>Creators may choose one of three monetization tiers. Subscribers pay monthly to access your exclusive content:</p>
+            <ul className="list-disc list-inside mt-1 space-y-0.5 text-xs">
+              <li><span style={{ color: "#A8D8EA" }}>Ice Profile</span> &mdash; $5.00 USD/month</li>
+              <li><span style={{ color: "#C490E4" }}>Crystal Profile</span> &mdash; $10.00 USD/month</li>
+              <li><span style={{ color: "#5ED1C4" }}>Diamond Profile</span> &mdash; $15.00 USD/month</li>
+            </ul>
+          </div>
+
+          <div>
+            <p className="font-semibold text-white mb-1">2. Revenue Split</p>
+            <p>All subscription revenue is split <strong className="text-white">70/30</strong>: you receive 70% of each subscription payment, and PNPtv! retains 30% as a platform fee. Payments are processed exclusively through <strong className="text-white">Daimo Pay</strong> (USDC on Optimism network).</p>
+          </div>
+
+          <div>
+            <p className="font-semibold text-white mb-1">3. Monthly Payouts</p>
+            <p>Creator earnings are paid out automatically on the <strong className="text-white">1st day of each month</strong> via Daimo Pay to your registered wallet address. Minimum payout threshold: $1.00 USD. Earnings below the threshold carry over to the next month.</p>
+          </div>
+
+          <div>
+            <p className="font-semibold text-white mb-1">4. Content Activity Requirements</p>
+            <p>To maintain your creator profile, you must continue meeting the activity criteria that qualified you for monetization. This includes maintaining regular media posts, engagement, and follower activity. Activity is evaluated on a rolling monthly basis.</p>
+          </div>
+
+          <div>
+            <p className="font-semibold text-white mb-1">5. Strike System</p>
+            <p>If you fail to maintain the required activity levels during a calendar month, you will receive a <strong className="text-white">strike</strong>. The strike policy is as follows:</p>
+            <ul className="list-disc list-inside mt-1 space-y-0.5 text-xs">
+              <li><strong className="text-white">Strike 1:</strong> Warning notification. You have 14 days to restore activity.</li>
+              <li><strong className="text-white">Strike 2:</strong> Final warning. Your profile will be flagged. You have 7 days to restore activity.</li>
+              <li><strong className="text-white">Strike 3:</strong> Your creator profile is <strong className="text-red-400">deactivated</strong>. You revert to a regular user profile.</li>
+            </ul>
+          </div>
+
+          <div>
+            <p className="font-semibold text-white mb-1">6. Deactivation & Subscriber Reimbursement</p>
+            <p>Upon deactivation due to 3 strikes:</p>
+            <ul className="list-disc list-inside mt-1 space-y-0.5 text-xs">
+              <li>Your exclusive content becomes inaccessible to subscribers.</li>
+              <li>All active subscribers receive a <strong className="text-white">50% refund</strong> of their most recent subscription payment, issued via Daimo Pay.</li>
+              <li>Your accumulated unpaid earnings are forfeited for the current period.</li>
+              <li>You may re-apply for creator status after 90 days by meeting eligibility criteria again.</li>
+            </ul>
+          </div>
+
+          <div>
+            <p className="font-semibold text-white mb-1">7. Voluntary Deactivation</p>
+            <p>You may voluntarily deactivate your creator profile at any time. Active subscribers will retain access until their current billing period expires. No refunds are issued for voluntary deactivation.</p>
+          </div>
+
+          <div>
+            <p className="font-semibold text-white mb-1">8. Content Guidelines</p>
+            <p>All content must comply with PNPtv! Community Guidelines. Exclusive content that violates platform rules may result in immediate deactivation without the standard strike process. PNPtv! reserves the right to remove any content at its discretion.</p>
+          </div>
+
+          <div>
+            <p className="font-semibold text-white mb-1">9. Tier Changes</p>
+            <p>You may upgrade or downgrade your tier at any time. Changes take effect at the start of the next billing cycle for existing subscribers. New subscribers are charged the updated tier price immediately.</p>
+          </div>
+
+          <div>
+            <p className="font-semibold text-white mb-1">10. Amendments</p>
+            <p>PNPtv! reserves the right to modify these terms with 30 days written notice. Continued use of the creator monetization features after the notice period constitutes acceptance of the updated terms.</p>
+          </div>
+
+          <div className="pt-2 border-t border-white/10">
+            <p className="text-xs" style={{ color: "#8E8E93" }}>
+              By tapping "Accept & Activate" below, you acknowledge that you have read, understood, and agree to be bound by these Creator Terms & Conditions.
+            </p>
+          </div>
+        </div>
+
+        {/* Footer with accept button */}
+        <div className="px-5 py-4 border-t border-white/10">
+          {!scrolledToBottom && (
+            <p className="text-xs text-center mb-2" style={{ color: "#FFB454" }}>
+              Scroll down to read the full terms before accepting
+            </p>
+          )}
+          <button
+            onClick={onAccept}
+            disabled={!scrolledToBottom || accepting}
+            className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ background: scrolledToBottom ? tierInfo.gradient : "rgba(255,255,255,0.05)" }}
+          >
+            {accepting ? "Activating..." : `Accept & Activate ${tierInfo.emoji} ${tierInfo.label} Profile`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Monetize Content Button ──────────────────────────────────────────────────
+
+function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: string; onActivated?: () => void }) {
+  const navigate = useNavigate();
+  const [eligibility, setEligibility] = useState<CreatorEligibility | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedTier, setSelectedTier] = useState<TierId>("ice");
+  const [showTerms, setShowTerms] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const [activateError, setActivateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getCreatorEligibility()
+      .then((res) => { if (res.success) setEligibility(res); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleMonetizeTap = () => {
+    setShowTerms(true);
+  };
+
+  const handleAcceptAndActivate = async () => {
+    setActivating(true);
+    setActivateError(null);
+    try {
+      await activateCreator(selectedTier, true);
+      setShowTerms(false);
+      onActivated?.();
+      navigate("/creator");
+    } catch (err) {
+      setActivateError(err instanceof Error ? err.message : "Failed to activate");
+    } finally {
+      setActivating(false);
+    }
+  };
+
+  // Don't show for active creators or pending review
+  if (creatorStatus === "active" || creatorStatus === "pending_review") return null;
+
+  if (loading) {
+    return (
+      <div className="glass-card-sm p-4 mt-4 animate-pulse">
+        <div className="h-5 bg-white/5 rounded w-40 mb-2" />
+        <div className="h-3 bg-white/5 rounded w-full" />
+      </div>
+    );
+  }
+
+  if (!eligibility) return null;
+
+  const isEligible = eligibility.eligible;
+  const criteria = eligibility.criteria;
+  const totalRequired = Object.values(criteria).length;
+  const totalMet = Object.values(criteria).filter((c) => c.met).length;
+  const overallPct = Math.round((totalMet / totalRequired) * 100);
+
+  return (
+    <>
+      <div
+        className="glass-card-sm p-4 mt-4"
+        style={{ borderColor: isEligible ? "rgba(94,209,196,0.3)" : "rgba(212,0,122,0.15)" }}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: isEligible ? "#5ED1C4" : "#D4007A" }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="text-sm font-semibold text-white">Monetize Content</p>
+          </div>
+          {!isEligible && (
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "rgba(212,0,122,0.12)", color: "#D4007A" }}>
+              {totalMet}/{totalRequired} met
+            </span>
+          )}
+        </div>
+
+        {isEligible ? (
+          <>
+            <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+              Choose your creator tier. Subscribers pay monthly for your exclusive content (70/30 revenue split, payouts via Daimo on the 1st).
+            </p>
+
+            {/* Tier selector */}
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              {CREATOR_TIERS.map((tier) => {
+                const isSelected = selectedTier === tier.id;
+                return (
+                  <button
+                    key={tier.id}
+                    onClick={() => setSelectedTier(tier.id)}
+                    className="relative rounded-xl p-3 text-center transition-all"
+                    style={{
+                      background: isSelected ? `${tier.gradient}` : "rgba(255,255,255,0.03)",
+                      border: isSelected ? `2px solid ${tier.color}` : "2px solid rgba(255,255,255,0.08)",
+                      opacity: isSelected ? 1 : 0.7,
+                    }}
+                  >
+                    <p className="text-lg mb-0.5">{tier.emoji}</p>
+                    <p className={`text-xs font-bold ${isSelected ? "text-white" : "text-white/70"}`}>{tier.label}</p>
+                    <p className={`text-sm font-bold mt-0.5 ${isSelected ? "text-white" : ""}`} style={!isSelected ? { color: tier.color } : undefined}>
+                      ${tier.price}<span className="text-xs font-normal">/mo</span>
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+
+            {activateError && (
+              <p className="text-xs text-red-400 mb-2">{activateError}</p>
+            )}
+
+            <button
+              onClick={handleMonetizeTap}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all"
+              style={{ background: CREATOR_TIERS.find((t) => t.id === selectedTier)!.gradient }}
+            >
+              {CREATOR_TIERS.find((t) => t.id === selectedTier)!.emoji} Activate {CREATOR_TIERS.find((t) => t.id === selectedTier)!.label} Profile
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+              Meet these requirements to unlock creator monetization:
+            </p>
+
+            {/* Overall progress bar */}
+            <div className="mb-3">
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                <div
+                  className="h-full rounded-full transition-all duration-700"
+                  style={{
+                    width: `${overallPct}%`,
+                    background: overallPct >= 75 ? "linear-gradient(to right, #5ED1C4, #00D4E8)" : "linear-gradient(to right, #D4007A, #E69138)",
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Criteria rows */}
+            <div className="space-y-2">
+              {([
+                { key: "mediaPosts", label: "Media Posts", icon: "M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25c0 .828.672 1.5 1.5 1.5z" },
+                { key: "totalLikes", label: "Total Likes", icon: "M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" },
+                { key: "followers", label: "Followers", icon: "M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" },
+                { key: "weeklyConsistency", label: "Weekly Posts (4 wks)", icon: "M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" },
+              ] as const).map(({ key, label, icon }) => {
+                const c = criteria[key];
+                const pct = Math.min((c.current / c.required) * 100, 100);
+                const remaining = Math.max(0, c.required - c.current);
+                return (
+                  <div key={key} className="flex items-center gap-2.5">
+                    <div className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                      {c.met ? (
+                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="#5ED1C4">
+                          <path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z" clipRule="evenodd" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="#8E8E93" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d={icon} />
+                        </svg>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="text-xs text-white/80 truncate">{label}</span>
+                        <span className="text-xs font-medium ml-2 flex-shrink-0" style={{ color: c.met ? "#5ED1C4" : "#8E8E93" }}>
+                          {c.met ? "Done" : `${remaining} more`}
+                        </span>
+                      </div>
+                      {!c.met && (
+                        <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                          <div
+                            className="h-full rounded-full transition-all duration-500"
+                            style={{ width: `${pct}%`, background: "linear-gradient(to right, #D4007A, #E69138)" }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Disabled button */}
+            <button
+              disabled
+              className="w-full mt-3 py-2.5 rounded-lg text-sm font-semibold text-white/40 cursor-not-allowed"
+              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
+            >
+              Complete requirements to monetize
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* T&C Modal */}
+      <CreatorTermsModal
+        open={showTerms}
+        tier={selectedTier}
+        onAccept={handleAcceptAndActivate}
+        onClose={() => setShowTerms(false)}
+        accepting={activating}
+      />
+    </>
+  );
+}
+
 // ── Main Profile Page ────────────────────────────────────────────────────────
 
 export default function Profile() {
@@ -1116,6 +1497,11 @@ export default function Profile() {
   const [followingCount, setFollowingCount] = useState(0);
   const [showFollowModal, setShowFollowModal] = useState<"followers" | "following" | null>(null);
 
+  // Creator subscription state
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [subscribeLoading, setSubscribeLoading] = useState(false);
+  const [subscribeError, setSubscribeError] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadProfile = useCallback(async (cursor?: string) => {
@@ -1144,7 +1530,7 @@ export default function Profile() {
         }
         setNextCursor(postsRes.nextCursor);
       } else {
-        // Other user's profile: single endpoint + follow status
+        // Other user's profile: single endpoint + follow status + subscription status
         const [res, followRes] = await Promise.all([
           getPublicProfile(targetUserId, cursor),
           !cursor && isAuthenticated ? getFollowStatus(targetUserId).catch(() => null) : Promise.resolve(null),
@@ -1156,6 +1542,12 @@ export default function Profile() {
             setIsFollowing(followRes.isFollowing);
             setFollowersCount(followRes.followerCount);
             setFollowingCount(followRes.followingCount);
+          }
+          // Load creator subscription status if the user is an active creator
+          if (isAuthenticated && res.profile.creatorStatus === "active") {
+            getCreatorSubscriptionStatus(targetUserId)
+              .then((subRes) => { if (subRes.success) setIsSubscribed(subRes.subscribed); })
+              .catch(() => {});
           }
         } else {
           setPosts((prev) => [...prev, ...res.posts]);
@@ -1236,9 +1628,12 @@ export default function Profile() {
     }
   };
 
+  const [followError, setFollowError] = useState<string | null>(null);
+
   const handleFollow = async () => {
     if (followLoading || !profile) return;
     setFollowLoading(true);
+    setFollowError(null);
     try {
       const res = isFollowing
         ? await unfollowUser(profile.id || paramUserId!)
@@ -1246,8 +1641,30 @@ export default function Profile() {
       setIsFollowing(res.isFollowing);
       setFollowersCount(res.followerCount);
       setFollowingCount(res.followingCount);
-    } catch { /* silent */ }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Action failed";
+      setFollowError(msg);
+      setTimeout(() => setFollowError(null), 3000);
+    }
     setFollowLoading(false);
+  };
+
+  const handleSubscribe = async () => {
+    if (subscribeLoading || !profile) return;
+    setSubscribeLoading(true);
+    setSubscribeError(null);
+    try {
+      if (isSubscribed) {
+        await unsubscribeFromCreator(profile.id || paramUserId!);
+        setIsSubscribed(false);
+      } else {
+        await subscribeToCreator(profile.id || paramUserId!);
+        setIsSubscribed(true);
+      }
+    } catch (err) {
+      setSubscribeError(err instanceof Error ? err.message : "Failed");
+    }
+    setSubscribeLoading(false);
   };
 
   const handleAuthorTap = (authorId: string) => {
@@ -1516,19 +1933,9 @@ export default function Profile() {
           </div>
         </div>
 
-        {/* Creator eligibility banner — own profile */}
-        {isOwnProfile && profile.creatorStatus === "eligible" && (
-          <div className="mt-4 rounded-lg px-4 py-3" style={{ background: "rgba(94,209,196,0.08)", border: "1px solid rgba(94,209,196,0.2)" }}>
-            <p className="text-sm font-medium text-white mb-1">You qualify as a creator!</p>
-            <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>Start earning by sharing exclusive content with your subscribers.</p>
-            <button
-              onClick={() => navigate("/creator")}
-              className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors"
-              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
-            >
-              Activate Creator Profile
-            </button>
-          </div>
+        {/* Monetize Content — own profile, not yet active */}
+        {isOwnProfile && profile.creatorStatus !== "active" && (
+          <MonetizeContentCard creatorStatus={profile.creatorStatus} onActivated={() => loadProfile()} />
         )}
 
         {/* Performer availability strip */}
@@ -1592,24 +1999,34 @@ export default function Profile() {
                   {followLoading ? "..." : isFollowing ? "Following" : "Follow"}
                 </button>
               )}
+              {followError && (
+                <p className="text-xs text-center w-full" style={{ color: "#FF453A" }}>{followError}</p>
+              )}
               <button
                 onClick={() => navigate(`/dm/${profile.id || paramUserId}`)}
                 className="flex-1 py-2 rounded-lg text-white text-sm font-semibold border border-white/20 hover:border-white/40 transition-colors"
               >
                 Message
               </button>
-              {profile.creatorStatus === "active" && (
+              {profile.creatorStatus === "active" && isAuthenticated && (
                 <button
-                  onClick={() => navigate(`/creator`)}
-                  className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors"
-                  style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.3)" }}
+                  onClick={handleSubscribe}
+                  disabled={subscribeLoading}
+                  className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                  style={isSubscribed
+                    ? { background: "rgba(94,209,196,0.15)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.3)" }
+                    : { background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.3)" }
+                  }
                 >
-                  Subscribe ${profile.creatorPriceUsd || 15}/mo
+                  {subscribeLoading ? "..." : isSubscribed ? "Subscribed" : `Subscribe $${profile.creatorPriceUsd || 15}/mo`}
                 </button>
               )}
             </>
           )}
         </div>
+        {subscribeError && (
+          <p className="text-xs text-red-400 mt-2 text-center">{subscribeError}</p>
+        )}
       </div>
 
       {/* ── Identity & Connections (own profile only) ── */}
