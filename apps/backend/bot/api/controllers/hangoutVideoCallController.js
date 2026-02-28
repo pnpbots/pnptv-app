@@ -42,9 +42,14 @@ const isMember = async (groupId, userId) => {
 };
 
 /**
- * Generate a deterministic, URL-safe room name for a hangout call.
+ * Generate a room name for a hangout call.
+ * Persistent (is_main) groups get a stable name so Jitsi state survives restarts.
+ * Ephemeral groups get a unique per-call name.
  */
-function generateRoomName(groupId) {
+function generateRoomName(groupId, isPersistent) {
+  if (isPersistent) {
+    return `hangout-${groupId}-main`;
+  }
   const ts = Date.now();
   const rand = Math.random().toString(36).substring(2, 8);
   return `hangout-${groupId}-${ts}-${rand}`;
@@ -53,14 +58,20 @@ function generateRoomName(groupId) {
 /**
  * Build a JaaS JWT and meeting URL for a given user/call, or return null if
  * JaaS is not configured (graceful degradation).
+ *
+ * For persistent (24/7) calls: everyone gets a moderator token (4h) so they
+ * can manage their own audio/video and tokens don't expire mid-session.
  */
-function buildJaasPayload(roomName, user, isModerator) {
+function buildJaasPayload(roomName, user, isModerator, isPersistent = false) {
   if (!jaasService.isConfigured()) {
     return null;
   }
 
   try {
-    const token = isModerator
+    // In persistent community rooms everyone gets moderator-level access
+    // so tokens last 4h and users can control their own media.
+    const useMod = isModerator || isPersistent;
+    const token = useMod
       ? jaasService.generateModeratorToken(
           roomName,
           String(user.id),
@@ -119,9 +130,16 @@ const startCall = async (req, res) => {
       return res.status(403).json({ error: 'Not a member of this group' });
     }
 
+    // Determine if this is a persistent (24/7) group
+    const { rows: groupRows } = await query(
+      'SELECT is_main FROM hangout_groups WHERE id = $1',
+      [groupId]
+    );
+    const isPersistent = groupRows[0]?.is_main === true;
+
     // Check for an already-active call
     const { rows: existing } = await query(
-      `SELECT id, room_name, creator_id, created_at
+      `SELECT id, room_name, creator_id, created_at, is_persistent
        FROM hangout_video_calls
        WHERE group_id = $1 AND status = 'active'
        LIMIT 1`,
@@ -132,7 +150,7 @@ const startCall = async (req, res) => {
       // Return the existing call instead of creating a duplicate
       const call = existing[0];
       const isModerator = String(call.creator_id) === String(user.id);
-      const jaas = buildJaasPayload(call.room_name, user, isModerator);
+      const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
 
       // Auto-join the caller as participant
       await query(
@@ -151,6 +169,7 @@ const startCall = async (req, res) => {
           roomName: call.room_name,
           creatorId: call.creator_id,
           createdAt: call.created_at,
+          isPersistent: call.is_persistent,
           isModerator,
         },
         jaas,
@@ -164,14 +183,14 @@ const startCall = async (req, res) => {
       });
     }
 
-    const roomName = generateRoomName(groupId);
+    const roomName = generateRoomName(groupId, isPersistent);
 
-    // Insert new call
+    // Insert new call — persistent groups use is_persistent=TRUE
     const { rows: callRows } = await query(
-      `INSERT INTO hangout_video_calls (group_id, creator_id, room_name)
-       VALUES ($1, $2, $3)
-       RETURNING id, group_id, creator_id, room_name, status, created_at`,
-      [groupId, user.id, roomName]
+      `INSERT INTO hangout_video_calls (group_id, creator_id, room_name, is_persistent)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, group_id, creator_id, room_name, status, is_persistent, created_at`,
+      [groupId, user.id, roomName, isPersistent]
     );
 
     const newCall = callRows[0];
@@ -183,7 +202,7 @@ const startCall = async (req, res) => {
       [newCall.id, user.id, user.firstName || user.username || 'User']
     );
 
-    const jaas = buildJaasPayload(roomName, user, true);
+    const jaas = buildJaasPayload(roomName, user, true, isPersistent);
 
     const callPayload = {
       id: newCall.id,
@@ -191,6 +210,7 @@ const startCall = async (req, res) => {
       roomName,
       creatorId: user.id,
       createdAt: newCall.created_at,
+      isPersistent,
       isModerator: true,
     };
 
@@ -274,8 +294,8 @@ const getActiveCall = async (req, res) => {
       return res.status(403).json({ error: 'Not a member of this group' });
     }
 
-    const { rows } = await query(
-      `SELECT hvc.id, hvc.room_name, hvc.creator_id, hvc.created_at,
+    let { rows } = await query(
+      `SELECT hvc.id, hvc.room_name, hvc.creator_id, hvc.created_at, hvc.is_persistent,
               (SELECT COUNT(*)::int
                FROM hangout_call_participants hcp
                WHERE hcp.call_id = hvc.id AND hcp.left_at IS NULL) AS participant_count
@@ -286,7 +306,48 @@ const getActiveCall = async (req, res) => {
     );
 
     if (rows.length === 0) {
-      return res.json({ success: true, call: null });
+      // For persistent groups: auto-resurrect the most recent ended call so the
+      // room is always available.  This handles the race between the last person
+      // leaving and the next person arriving.
+      const { rows: groupRows } = await query(
+        'SELECT is_main FROM hangout_groups WHERE id = $1',
+        [groupId]
+      );
+      const isPersistentGroup = groupRows[0]?.is_main === true;
+
+      if (isPersistentGroup && jaasService.isConfigured()) {
+        // Resurrect the most recent persistent call, or create a fresh one
+        const { rows: lastCall } = await query(
+          `SELECT id, room_name, creator_id FROM hangout_video_calls
+           WHERE group_id = $1 AND is_persistent = TRUE
+           ORDER BY created_at DESC LIMIT 1`,
+          [groupId]
+        );
+
+        if (lastCall.length > 0) {
+          await query(
+            `UPDATE hangout_video_calls
+             SET status = 'active', ended_at = NULL, ended_by = NULL
+             WHERE id = $1`,
+            [lastCall[0].id]
+          );
+          rows = lastCall.map(r => ({ ...r, is_persistent: true, participant_count: 0 }));
+          logger.info('Persistent hangout call resurrected', { groupId, callId: lastCall[0].id });
+        } else {
+          // First ever call for this persistent group — create it now
+          const roomName = generateRoomName(groupId, true);
+          const { rows: created } = await query(
+            `INSERT INTO hangout_video_calls (group_id, creator_id, room_name, is_persistent)
+             VALUES ($1, '0', $2, TRUE)
+             RETURNING id, room_name, creator_id, created_at`,
+            [groupId, roomName]
+          );
+          rows = created.map(r => ({ ...r, is_persistent: true, participant_count: 0 }));
+          logger.info('Persistent hangout call bootstrapped', { groupId, callId: created[0].id });
+        }
+      } else {
+        return res.json({ success: true, call: null });
+      }
     }
 
     const call = rows[0];
@@ -303,6 +364,7 @@ const getActiveCall = async (req, res) => {
     );
 
     const isModerator = String(call.creator_id) === String(user.id);
+    const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
 
     return res.json({
       success: true,
@@ -313,6 +375,7 @@ const getActiveCall = async (req, res) => {
         creatorId: call.creator_id,
         createdAt: call.created_at,
         participantCount: call.participant_count,
+        isPersistent: call.is_persistent,
         isModerator,
         participants: participants.map(p => ({
           userId: p.user_id,
@@ -324,6 +387,7 @@ const getActiveCall = async (req, res) => {
           joinedAt: p.joined_at,
         })),
       },
+      jaas,
     });
   } catch (err) {
     logger.error('getActiveCall error', err);
@@ -352,7 +416,7 @@ const joinCall = async (req, res) => {
 
     // Fetch the call (must belong to this group and be active)
     const { rows } = await query(
-      `SELECT id, room_name, creator_id, max_participants, created_at
+      `SELECT id, room_name, creator_id, max_participants, created_at, is_persistent
        FROM hangout_video_calls
        WHERE id = $1 AND group_id = $2 AND status = 'active'`,
       [callId, groupId]
@@ -387,7 +451,7 @@ const joinCall = async (req, res) => {
     );
 
     const isModerator = String(call.creator_id) === String(user.id);
-    const jaas = buildJaasPayload(call.room_name, user, isModerator);
+    const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
 
     // Notify other call participants
     emitToHangout(req, groupId, 'hangout:call:joined', {
@@ -445,7 +509,7 @@ const endCall = async (req, res) => {
 
     // Lock the call row
     const { rows } = await client.query(
-      `SELECT id, room_name, creator_id
+      `SELECT id, room_name, creator_id, is_persistent
        FROM hangout_video_calls
        WHERE id = $1 AND group_id = $2 AND status = 'active'
        FOR UPDATE`,
@@ -511,6 +575,22 @@ const endCall = async (req, res) => {
       endedBy: user.id,
     });
 
+    // Persistent calls self-resurrect immediately after being ended so the room
+    // is always available.  Re-activate with the same room name (no new row needed).
+    if (call.is_persistent) {
+      await query(
+        `UPDATE hangout_video_calls
+         SET status = 'active', ended_at = NULL, ended_by = NULL
+         WHERE id = $1`,
+        [callId]
+      );
+      emitToHangout(req, groupId, 'hangout:call:started', {
+        call: { id: callId, groupId, roomName: call.room_name, isPersistent: true },
+        startedBy: null,
+      });
+      logger.info('Persistent hangout call auto-resurrected after end', { callId, groupId });
+    }
+
     return res.json({ success: true });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -538,7 +618,7 @@ const leaveCall = async (req, res) => {
   try {
     // Verify the call belongs to this group and is active
     const { rows: callRows } = await query(
-      `SELECT id FROM hangout_video_calls
+      `SELECT id, is_persistent FROM hangout_video_calls
        WHERE id = $1 AND group_id = $2 AND status = 'active'`,
       [callId, groupId]
     );
@@ -546,6 +626,8 @@ const leaveCall = async (req, res) => {
     if (callRows.length === 0) {
       return res.status(404).json({ error: 'No active call found' });
     }
+
+    const callRecord = callRows[0];
 
     // Mark participant as left
     const { rowCount } = await query(
@@ -566,33 +648,36 @@ const leaveCall = async (req, res) => {
       });
     }
 
-    // Auto-end the call if no participants remain
-    const { rows: remaining } = await query(
-      `SELECT COUNT(*)::int AS cnt
-       FROM hangout_call_participants
-       WHERE call_id = $1 AND left_at IS NULL`,
-      [callId]
-    );
-
-    if (remaining[0].cnt === 0) {
-      await query(
-        `UPDATE hangout_video_calls
-         SET status = 'ended', ended_at = NOW(), ended_by = $1
-         WHERE id = $2 AND status = 'active'`,
-        [user.id, callId]
+    // Auto-end the call only for NON-persistent calls when everyone leaves.
+    // Persistent (24/7) community calls stay active even when empty.
+    if (!callRecord.is_persistent) {
+      const { rows: remaining } = await query(
+        `SELECT COUNT(*)::int AS cnt
+         FROM hangout_call_participants
+         WHERE call_id = $1 AND left_at IS NULL`,
+        [callId]
       );
 
-      emitToHangout(req, groupId, 'hangout:call:ended', {
-        callId,
-        endedBy: {
-          id: user.id,
-          username: user.username,
-          firstName: user.firstName || user.first_name,
-        },
-        reason: 'all_participants_left',
-      });
+      if (remaining[0].cnt === 0) {
+        await query(
+          `UPDATE hangout_video_calls
+           SET status = 'ended', ended_at = NOW(), ended_by = $1
+           WHERE id = $2 AND status = 'active'`,
+          [user.id, callId]
+        );
 
-      logger.info('Hangout call auto-ended (no participants)', { callId, groupId });
+        emitToHangout(req, groupId, 'hangout:call:ended', {
+          callId,
+          endedBy: {
+            id: user.id,
+            username: user.username,
+            firstName: user.firstName || user.first_name,
+          },
+          reason: 'all_participants_left',
+        });
+
+        logger.info('Hangout call auto-ended (no participants)', { callId, groupId });
+      }
     }
 
     return res.json({ success: true });
