@@ -198,7 +198,7 @@ export default function Home() {
           onClick={() => navigate("/subscribe")}
           className="btn-gradient w-full py-3 px-6 rounded-xl text-white font-semibold text-sm mb-6 font-display tracking-wider whitespace-nowrap"
         >
-          Subscribe to PNPTv! PRIME
+          {tier === "member" ? "Upgrade to PRIME" : "Subscribe to PNPTv!"}
         </button>
       )}
 

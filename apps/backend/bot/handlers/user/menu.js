@@ -3,7 +3,7 @@ const { t } = require('../../../utils/i18n');
 const logger = require('../../../utils/logger');
 const ChatCleanupService = require('../../services/chatCleanupService');
 const PermissionService = require('../../services/permissionService');
-const { isPrimeUser, hasFullAccess, safeReplyOrEdit } = require('../../utils/helpers');
+const { isPrimeUser, hasFullAccess, hasTierAccess, safeReplyOrEdit } = require('../../utils/helpers');
 const config = require('../../../config/config');
 const UserModel = require('../../../models/userModel');
 const PlanModel = require('../../../models/planModel');
@@ -45,11 +45,12 @@ const formatMembershipExpiry = (expiry, lang) => {
  * @returns {string} Membership status header
  */
 const buildMembershipHeader = (user, isPremium, lang) => {
-  const memberType = isPremium ? 'PRIME' : 'FREE';
-  const emoji = isPremium ? '💎' : '🆓';
+  const isMember = user?.tier === 'member';
+  const memberType = isPremium ? 'PRIME' : (isMember ? 'MEMBER' : 'FREE');
+  const emoji = isPremium ? '💎' : (isMember ? '🟢' : '🆓');
   const memberLabel = lang === 'es' ? 'Membresía' : 'Membership';
 
-  if (isPremium && user?.planExpiry) {
+  if ((isPremium || isMember) && user?.planExpiry) {
     const expiryDate = formatMembershipExpiry(user.planExpiry, lang);
     const validUntil = lang === 'es' ? 'Válido hasta' : 'Valid until';
     return `${emoji} *${memberLabel}: ${memberType}*\n📅 ${validUntil}: ${expiryDate}\n\n`;
@@ -58,7 +59,6 @@ const buildMembershipHeader = (user, isPremium, lang) => {
     const lifetime = lang === 'es' ? 'Lifetime' : 'Lifetime';
     return `${emoji} *${memberLabel}: ${memberType}* (${lifetime})\n\n`;
   } else {
-    // FREE user
     return `${emoji} *${memberLabel}: ${memberType}*\n\n`;
   }
 };
@@ -117,6 +117,31 @@ const buildPrimeMenuButtons = (lang) => ([
     Markup.button.callback(
       lang === 'es' ? 'PNP tv App | Área PRIME' : 'PNP tv App | PRIME area',
       'menu_pnp_tv_app'
+    ),
+  ],
+  [
+    Markup.button.callback(lang === 'es' ? '👤 Mi Perfil' : '👤 My Profile', 'show_profile'),
+    Markup.button.callback(lang === 'es' ? '🆘 Ayuda y Soporte' : '🆘 Help & Support', 'show_support'),
+  ],
+]);
+
+const buildMemberMenuButtons = (lang) => ([
+  [
+    Markup.button.callback(
+      lang === 'es' ? '📱 Feed Social' : '📱 Social Feed',
+      'menu_pnp_tv_app'
+    ),
+  ],
+  [
+    Markup.button.callback(
+      lang === 'es' ? '🔒 Hangouts Privados' : '🔒 Private Hangouts',
+      'menu_pnp_tv_app'
+    ),
+  ],
+  [
+    Markup.button.callback(
+      lang === 'es' ? '⬆️ Upgrade a PRIME' : '⬆️ Upgrade to PRIME',
+      'show_subscribe'
     ),
   ],
   [
@@ -490,11 +515,20 @@ const showMainMenu = async (ctx) => {
   // Build keyboard buttons array
   let buttons = [];
 
-  // Show PRIME menu only when user has premium access (isPremium handles admin preview mode)
+  // Determine menu variant: PRIME > member > free
+  const isMemberTier = !isPremium && hasTierAccess(user, 'member');
+
   if (isPremium) {
     // PRIME MEMBER VERSION - BENEFITS FOCUSED
     menuText = previewBanner + membershipHeader + t(lang === 'es' ? 'pnpLatinoPrimeMenu' : 'pnpLatinoPrimeMenu', lang);
     buttons = buildPrimeMenuButtons(lang);
+  } else if (isMemberTier) {
+    // MEMBER VERSION - Social + Hangouts + Upgrade CTA
+    const memberIntro = lang === 'es'
+      ? `🟢 *Hola ${username}!*\n\nTienes acceso a hangouts privados y el feed social.\nUpgrade a PRIME para contenido exclusivo.`
+      : `🟢 *Hey ${username}!*\n\nYou have access to private hangouts and social feed.\nUpgrade to PRIME for exclusive content.`;
+    menuText = previewBanner + membershipHeader + memberIntro;
+    buttons = buildMemberMenuButtons(lang);
   } else {
     // FREE MEMBER VERSION - SALES FOCUSED
     menuText = previewBanner + membershipHeader + t('mainMenuIntroFree', lang, { username });
@@ -599,11 +633,20 @@ const showMainMenuEdit = async (ctx) => {
   // Build membership status header
   const membershipHeader = buildMembershipHeader(user, isPremium, lang);
 
-  // Show PRIME menu only when user has premium access (isPremium handles admin preview mode)
+  // Determine menu variant: PRIME > member > free
+  const isMemberTierEdit = !isPremium && hasTierAccess(user, 'member');
+
   if (isPremium) {
     // PRIME MEMBER VERSION - BENEFITS FOCUSED
     menuText = previewBanner + membershipHeader + t(lang === 'es' ? 'pnpLatinoPrimeMenu' : 'pnpLatinoPrimeMenu', lang);
     buttons = buildPrimeMenuButtons(lang);
+  } else if (isMemberTierEdit) {
+    // MEMBER VERSION - Social + Hangouts + Upgrade CTA
+    const memberIntro = lang === 'es'
+      ? `🟢 *Hola ${username}!*\n\nTienes acceso a hangouts privados y el feed social.\nUpgrade a PRIME para contenido exclusivo.`
+      : `🟢 *Hey ${username}!*\n\nYou have access to private hangouts and social feed.\nUpgrade to PRIME for exclusive content.`;
+    menuText = previewBanner + membershipHeader + memberIntro;
+    buttons = buildMemberMenuButtons(lang);
   } else {
     // FREE MEMBER VERSION - SALES FOCUSED
     menuText = previewBanner + membershipHeader + t('mainMenuIntroFree', lang, { username });
