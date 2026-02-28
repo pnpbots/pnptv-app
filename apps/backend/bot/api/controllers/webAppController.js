@@ -1237,18 +1237,37 @@ const getProfile = async (req, res) => {
 
   try {
     const result = await query(
-      `SELECT id, pnptv_id, telegram, username, first_name, last_name, bio, photo_file_id,
-              email, subscription_status, tier, plan_id, plan_expiry,
-              language, interests, location_name, twitter,
-              instagram, tiktok, youtube,
-              terms_accepted, wof_photo_consent, created_at
-       FROM users WHERE id = $1`,
+      `SELECT u.id, u.pnptv_id, u.telegram, u.username, u.first_name, u.last_name, u.bio, u.photo_file_id,
+              u.email, u.subscription_status, u.tier, u.plan_id, u.plan_expiry,
+              u.language, u.interests, u.location_name, u.twitter,
+              u.instagram, u.tiktok, u.youtube,
+              u.terms_accepted, u.wof_photo_consent, u.created_at,
+              u.creator_status, u.creator_type, u.creator_price_usd,
+              u.creator_verified, u.creator_featured, u.creator_subscriber_count,
+              perf.id as perf_id, perf.is_available as perf_is_available,
+              perf.base_price as perf_base_price, perf.total_calls as perf_total_calls,
+              perf.total_rating as perf_total_rating, perf.rating_count as perf_rating_count,
+              perf.availability_message as perf_availability_message
+       FROM users u
+       LEFT JOIN performers perf ON perf.user_id = u.id AND perf.status = 'active'
+       WHERE u.id = $1`,
       [user.id]
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
 
     const p = result.rows[0];
+    const performerData = p.perf_id ? {
+      id: p.perf_id,
+      isAvailable: p.perf_is_available,
+      basePrice: parseFloat(p.perf_base_price),
+      averageRating: p.perf_rating_count > 0
+        ? parseFloat((p.perf_total_rating / p.perf_rating_count).toFixed(2))
+        : 0,
+      totalCalls: p.perf_total_calls,
+      availabilityMessage: p.perf_availability_message || null,
+    } : null;
+
     return res.json({
       success: true,
       profile: {
@@ -1273,6 +1292,13 @@ const getProfile = async (req, res) => {
         youtubeHandle: p.youtube,
         memberSince: p.created_at,
         wofPhotoConsent: p.wof_photo_consent || false,
+        creatorStatus: p.creator_status || 'none',
+        creatorType: p.creator_type || null,
+        creatorPriceUsd: p.creator_price_usd ? parseFloat(p.creator_price_usd) : null,
+        creatorVerified: p.creator_verified || false,
+        creatorFeatured: p.creator_featured || false,
+        creatorSubscriberCount: p.creator_subscriber_count || 0,
+        performerData,
       },
     });
   } catch (error) {
