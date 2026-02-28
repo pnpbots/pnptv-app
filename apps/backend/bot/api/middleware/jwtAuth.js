@@ -48,7 +48,9 @@ function verifyJWT(token, secret = AUTH_SECRET) {
       .update(`${headerB64}.${payloadB64}`)
       .digest('base64url');
 
-    if (signatureB64 !== expectedSignature) {
+    const sigBuf = Buffer.from(signatureB64, 'base64url');
+    const expBuf = Buffer.from(expectedSignature, 'base64url');
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
       return null;
     }
 

@@ -726,7 +726,7 @@ export interface UserLocation {
   updatedAt: string;
 }
 
-export interface NearbyUser {
+export interface NearbyUserBasic {
   id: string;
   username: string;
   firstName: string;
@@ -765,7 +765,7 @@ export function getNearbyUsers(
   limit?: number
 ): Promise<{
   success: boolean;
-  users: NearbyUser[];
+  users: NearbyUserBasic[];
   radius: number;
   count: number;
 }> {

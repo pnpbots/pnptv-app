@@ -44,7 +44,7 @@ const fetchUserRecord = async (userId) => {
 
 const hasMemberAccess = (user) => {
   if (!user) return false;
-  return user.tier === 'member' || user.tier === 'PRIME';
+  const t = (user.tier || '').toLowerCase(); return t === 'member' || t === 'prime';
 };
 
 const isAdminRecord = (user) => {

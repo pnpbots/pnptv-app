@@ -1142,7 +1142,7 @@ app.post('/api/payment/complete-3ds-2', asyncHandler(paymentController.complete3
 app.get('/api/confirm-payment/:token', asyncHandler(paymentController.confirmPaymentToken));
 // Payment recovery endpoints for stuck 3DS payments
 
-app.post('/api/payment/:paymentId/retry-webhook', asyncHandler(paymentController.retryPaymentWebhook));
+app.post('/api/payment/:paymentId/retry-webhook', verifyAdminJWT, asyncHandler(paymentController.retryPaymentWebhook));
 
 // PNP Live API routes (formerly Meet & Greet, now consolidated)
 const PNPLiveService = require('../services/pnpLiveService');
@@ -1357,7 +1357,7 @@ app.get('/api/subscription/stats', verifyAdminJWT, asyncHandler(subscriptionCont
 const audioStreamer = require('../../services/audioStreamer');
 
 // List all available audio files
-app.get('/api/audio/list', asyncHandler(async (req, res) => {
+app.get('/api/audio/list', verifyAdminJWT, asyncHandler(async (req, res) => {
   const files = audioStreamer.listAudioFiles();
   res.json({
     success: true,
@@ -1408,7 +1408,7 @@ app.post('/api/audio/stop', authenticateUser, asyncHandler(async (req, res) => {
 }));
 
 // Delete audio file
-app.delete('/api/audio/:filename', asyncHandler(async (req, res) => {
+app.delete('/api/audio/:filename', verifyAdminJWT, asyncHandler(async (req, res) => {
   const { filename } = req.params;
 
   try {
@@ -1933,7 +1933,7 @@ const supportChatLimiter = rateLimit({
 });
 app.post('/api/webapp/support/chat', supportChatLimiter, asyncHandler(supportController.chat));
 app.get('/api/webapp/support/suggestions', asyncHandler(supportController.suggestions));
-app.delete('/api/webapp/support/history', asyncHandler(supportController.clearHistory));
+app.delete('/api/webapp/support/history', authenticateUser, asyncHandler(supportController.clearHistory));
 
 // Web App Payments (session auth → PaymentService)
 app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {

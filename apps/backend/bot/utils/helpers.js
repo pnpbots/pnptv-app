@@ -47,7 +47,7 @@ const normalizeSubscriptionStatus = (status) => {
  */
 const isPrimeUser = (user) => {
   if (!user) return false;
-  return user.tier === 'PRIME';
+  return (user.tier || '').toLowerCase() === 'prime';
 };
 
 /**

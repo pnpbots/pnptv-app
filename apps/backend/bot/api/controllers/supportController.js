@@ -52,7 +52,7 @@ async function chat(req, res) {
       );
       if (result.rows.length > 0) {
         const u = result.rows[0];
-        const tierLabel = u.tier === 'PRIME' ? 'PRIME' : 'FREE';
+        const tierLabel = (u.tier || '').toLowerCase() === 'prime' ? 'PRIME' : 'FREE';
         const statusLabel = u.subscription_status || 'free';
         const expiry = u.plan_expiry ? new Date(u.plan_expiry).toLocaleDateString() : 'N/A';
         const memberSince = u.created_at ? new Date(u.created_at).toLocaleDateString() : 'N/A';

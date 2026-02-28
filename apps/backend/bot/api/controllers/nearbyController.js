@@ -73,8 +73,8 @@ class NearbyController {
       }
 
       // Handle validation errors
-      if (error.message.includes('Invalid')) {
-        return res.status(400).json({ error: error.message });
+      if (error.message && error.message.includes('Invalid')) {
+        return res.status(400).json({ error: 'Invalid location parameters' });
       }
 
       logger.error('❌ Update location error:', error);
@@ -132,8 +132,8 @@ class NearbyController {
       });
     } catch (error) {
       // Handle validation errors
-      if (error.message.includes('Invalid')) {
-        return res.status(400).json({ error: error.message });
+      if (error.message && error.message.includes('Invalid')) {
+        return res.status(400).json({ error: 'Invalid search parameters' });
       }
 
       logger.error('❌ Search nearby error:', error);
@@ -287,7 +287,7 @@ class NearbyController {
         } catch (error) {
           errors.push({
             user_id: update.user_id,
-            error: error.message
+            error: 'Update failed'
           });
         }
       }
@@ -303,8 +303,7 @@ class NearbyController {
     } catch (error) {
       logger.error('❌ Batch update error:', error);
       return res.status(500).json({
-        error: 'Batch update failed',
-        message: error.message
+        error: 'Batch update failed'
       });
     }
   }

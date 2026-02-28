@@ -50,8 +50,8 @@ class DaimoService {
   verifyWebhookSignature(payload, authHeader) {
     try {
       if (!this.webhookSecret) {
-        logger.warn('Daimo webhook secret not configured, skipping authorization verification');
-        return true; // Allow in development, but log warning
+        logger.error('Daimo webhook secret not configured — rejecting webhook');
+        return false;
       }
 
       if (!authHeader) {

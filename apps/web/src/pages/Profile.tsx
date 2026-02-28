@@ -1504,6 +1504,19 @@ export default function Profile() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Reset state when navigating between profiles
+  useEffect(() => {
+    setProfile(null);
+    setPosts([]);
+    setNextCursor(null);
+    setIsFollowing(false);
+    setFollowersCount(0);
+    setFollowingCount(0);
+    setIsSubscribed(false);
+    setError(null);
+    setLoading(true);
+  }, [targetUserId]);
+
   const loadProfile = useCallback(async (cursor?: string) => {
     if (!targetUserId) return;
     try {

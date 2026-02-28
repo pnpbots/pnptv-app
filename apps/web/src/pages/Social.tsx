@@ -106,6 +106,7 @@ function PostCard({
   const [replyText, setReplyText] = useState("");
   const [sendingReply, setSendingReply] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [localReplyCount, setLocalReplyCount] = useState(post.replies_count || 0);
   const [wofDeleting, setWofDeleting] = useState(false);
   const [wofDeleted, setWofDeleted] = useState(false);
   const isOwn = String(post.author_id) === currentUserId;
@@ -135,7 +136,7 @@ function PostCard({
       if (res.success) {
         setReplies((prev) => [...prev, res.post]);
         setReplyText("");
-        post.replies_count = (post.replies_count || 0) + 1;
+        setLocalReplyCount((c) => c + 1);
       }
     } catch { /* silent */ }
     setSendingReply(false);
@@ -158,10 +159,13 @@ function PostCard({
     setWofDeleting(true);
     try {
       const res = await requestWofDeletion(post.id);
-      if (res.success) setWofDeleted(true);
+      if (res.success) {
+        setWofDeleted(true);
+        onDelete(post.id);
+      }
     } catch { /* silent */ }
     setWofDeleting(false);
-  }, [post.id, wofDeleting, wofDeleted]);
+  }, [post.id, wofDeleting, wofDeleted, onDelete]);
 
   const authorPath = String(post.author_id) === currentUserId ? "/profile" : `/profile/${post.author_id}`;
 
@@ -235,7 +239,7 @@ function PostCard({
             {/* Delete (own posts or admin) */}
             {canDelete && (
               <button
-                onClick={() => { setDeleting(true); onDelete(post.id); }}
+                onClick={() => { setDeleting(true); onDelete(post.id); setTimeout(() => setDeleting(false), 5000); }}
                 disabled={deleting}
                 className="ml-auto text-xs hover:text-red-400 transition-colors"
                 style={{ color: "#8E8E93" }}
@@ -341,7 +345,7 @@ function PostCard({
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.273 5.48.432.447.74 1.04.586 1.641a4.483 4.483 0 01-.923 1.785A5.969 5.969 0 006 21c1.282 0 2.47-.402 3.445-1.087.81.22 1.668.337 2.555.337z" />
               </svg>
-              {post.replies_count > 0 && <span>{post.replies_count}</span>}
+              {localReplyCount > 0 && <span>{localReplyCount}</span>}
             </button>
 
             {/* Share — only shown when poster allows sharing */}

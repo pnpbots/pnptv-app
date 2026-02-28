@@ -136,7 +136,7 @@ const registerEnhancedProfileCards = (bot) => {
     if (user.badges && user.badges.length > 0) {
       // Show first badge
       text += ` ${user.badges[0]}`;
-    } else if (user.tier === 'PRIME') {
+    } else if ((user.tier || '').toLowerCase() === 'prime') {
       const tierInfo = getUserTierInfo(user);
       text += ` ${tierInfo.badge}`;
     }
