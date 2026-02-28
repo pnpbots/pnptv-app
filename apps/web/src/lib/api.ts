@@ -546,6 +546,7 @@ export interface HangoutGroup {
   avatarUrl: string | null;
   creatorId: string | null;
   isMain: boolean;
+  isWallOfFame?: boolean;
   isPublic: boolean;
   maxMembers: number;
   memberCount: number;

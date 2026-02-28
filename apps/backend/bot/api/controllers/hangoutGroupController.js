@@ -24,11 +24,17 @@ const isMember = async (groupId, userId) => {
   return rows.length > 0;
 };
 
-// Auto-join main group if not already a member
+// Auto-join main group and Wall of Fame group if not already a member
 const ensureMainGroupMembership = async (userId) => {
   await query(
     `INSERT INTO hangout_group_members (group_id, user_id, role)
      SELECT id, $1, 'member' FROM hangout_groups WHERE is_main = true
+     ON CONFLICT DO NOTHING`,
+    [userId]
+  );
+  await query(
+    `INSERT INTO hangout_group_members (group_id, user_id, role)
+     SELECT id, $1, 'member' FROM hangout_groups WHERE is_wall_of_fame = true
      ON CONFLICT DO NOTHING`,
     [userId]
   );
@@ -49,14 +55,22 @@ const listGroups = async (req, res) => {
 
     const { rows } = await query(
       `SELECT g.id, g.name, g.description, g.avatar_url, g.creator_id,
-              g.is_main, g.is_public, g.max_members, g.created_at,
+              g.is_main, g.is_wall_of_fame, g.is_public, g.max_members, g.created_at,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
-              (SELECT COUNT(*)::int FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true) > 0 as has_active_call,
-              (SELECT v.id FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true ORDER BY v.created_at DESC LIMIT 1) as active_call_id,
+              -- Check both legacy video_calls and new hangout_video_calls for active calls
+              (
+                (SELECT COUNT(*)::int FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true) > 0
+                OR
+                (SELECT COUNT(*)::int FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active') > 0
+              ) as has_active_call,
+              COALESCE(
+                (SELECT hvc.id::text FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active' ORDER BY hvc.created_at DESC LIMIT 1),
+                (SELECT v.id FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true ORDER BY v.created_at DESC LIMIT 1)
+              ) as active_call_id,
               (SELECT cm.content FROM chat_messages cm WHERE cm.room = 'hangout:' || g.id::text ORDER BY cm.created_at DESC LIMIT 1) as last_message
        FROM hangout_groups g
        JOIN hangout_group_members gm ON gm.group_id = g.id AND gm.user_id = $1
-       ORDER BY g.is_main DESC, g.created_at DESC`,
+       ORDER BY g.is_main DESC, g.is_wall_of_fame DESC, g.created_at DESC`,
       [user.id]
     );
 
@@ -67,6 +81,7 @@ const listGroups = async (req, res) => {
       avatarUrl: r.avatar_url,
       creatorId: r.creator_id,
       isMain: r.is_main,
+      isWallOfFame: r.is_wall_of_fame,
       isPublic: r.is_public,
       maxMembers: r.max_members,
       memberCount: r.member_count,
@@ -145,8 +160,15 @@ const getGroup = async (req, res) => {
     const { rows: groupRows } = await query(
       `SELECT g.*,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
-              (SELECT COUNT(*)::int FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true) > 0 as has_active_call,
-              (SELECT v.id FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true ORDER BY v.created_at DESC LIMIT 1) as active_call_id
+              (
+                (SELECT COUNT(*)::int FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true) > 0
+                OR
+                (SELECT COUNT(*)::int FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active') > 0
+              ) as has_active_call,
+              COALESCE(
+                (SELECT hvc.id::text FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active' ORDER BY hvc.created_at DESC LIMIT 1),
+                (SELECT v.id FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true ORDER BY v.created_at DESC LIMIT 1)
+              ) as active_call_id
        FROM hangout_groups g WHERE g.id = $1`,
       [groupId]
     );
@@ -229,10 +251,11 @@ const leaveGroup = async (req, res) => {
   const groupId = parseInt(req.params.id);
 
   try {
-    // Can't leave the main group
-    const { rows } = await query('SELECT is_main FROM hangout_groups WHERE id=$1', [groupId]);
+    // Can't leave the main group or Wall of Fame group
+    const { rows } = await query('SELECT is_main, is_wall_of_fame FROM hangout_groups WHERE id=$1', [groupId]);
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
     if (rows[0].is_main) return res.status(400).json({ error: 'Cannot leave the main community group' });
+    if (rows[0].is_wall_of_fame) return res.status(400).json({ error: 'Cannot leave the Wall of Fame group' });
 
     await query(
       'DELETE FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
@@ -255,6 +278,7 @@ const deleteGroup = async (req, res) => {
     const { rows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
     if (rows[0].is_main) return res.status(400).json({ error: 'Cannot delete the main group' });
+    if (rows[0].is_wall_of_fame) return res.status(400).json({ error: 'Cannot delete the Wall of Fame group' });
     if (rows[0].creator_id !== String(user.id)) {
       return res.status(403).json({ error: 'Only the creator can delete this group' });
     }
@@ -295,6 +319,7 @@ const getMessages = async (req, res) => {
               cm.content,
               cm.media_url, cm.media_type, cm.media_mime,
               cm.media_thumb_url, cm.media_width, cm.media_height,
+              cm.media_metadata,
               cm.created_at
        FROM chat_messages cm
        LEFT JOIN users u ON u.id = cm.user_id
@@ -338,7 +363,7 @@ const sendMessage = async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, room, user_id, username, first_name, photo_url, content,
                  media_url, media_type, media_mime, media_thumb_url,
-                 media_width, media_height, created_at`,
+                 media_width, media_height, media_metadata, created_at`,
       [room, user.id, user.username || null, user.firstName || user.first_name || null, photoUrl, text]
     );
 

@@ -1,12 +1,15 @@
 const { Markup } = require('telegraf');
+const axios = require('axios');
 const UserModel = require('../../../models/userModel');
 const WallOfFameModel = require('../../../models/wallOfFameModel');
 const CultEventModel = require('../../../models/cultEventModel');
 const CultEventService = require('../../services/cultEventService');
 const { cache } = require('../../../config/redis');
+const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
 const SubscriptionService = require('../../services/subscriptionService');
+const { processHangoutMedia } = require('../../services/hangoutMediaService');
 
 const BADGE_HIGH_LEGEND = 'High Legend of the Cult';
 const BADGE_TRIBUTE = 'Tribute of the Cult';
@@ -42,6 +45,108 @@ const GROUP_ID = process.env.GROUP_ID || '-1003291737499';
  * These are protected from /cleanupcommunity cleanup command
  */
 const wallOfFameMessageIds = new Map();
+
+// Cached Wall of Fame hangout group ID (resolved once from DB)
+let cachedWofGroupId = null;
+
+/**
+ * Resolve the Wall of Fame hangout group ID, caching in memory.
+ */
+async function getWofGroupId() {
+  if (cachedWofGroupId) return cachedWofGroupId;
+  const { rows } = await query(
+    'SELECT id FROM hangout_groups WHERE is_wall_of_fame = TRUE LIMIT 1'
+  );
+  if (rows.length > 0) {
+    cachedWofGroupId = rows[0].id;
+  }
+  return cachedWofGroupId;
+}
+
+/**
+ * Dual-post a Wall of Fame photo/video to the hangout group system.
+ * Fire-and-forget: errors are logged but never affect the Telegram flow.
+ *
+ * @param {Object} ctx      - Telegraf context (for telegram.getFileLink)
+ * @param {string} fileId   - Telegram file_id for the photo/video
+ * @param {'image'|'video'} mediaType - Type of media
+ * @param {Object} user     - User row from DB
+ * @param {string} mimetype - Original mime type hint (e.g. 'image/jpeg')
+ */
+async function postToHangoutGroup(ctx, fileId, mediaType, user, mimetype) {
+  try {
+    const groupId = await getWofGroupId();
+    if (!groupId) {
+      logger.debug('WoF hangout group not found, skipping dual-post');
+      return;
+    }
+
+    // Download the media from Telegram
+    const fileLink = await ctx.telegram.getFileLink(fileId);
+    const response = await axios.get(fileLink.href, { responseType: 'arraybuffer', timeout: 30000 });
+    const buffer = Buffer.from(response.data);
+
+    // Build a multer-like file object for processHangoutMedia
+    const file = {
+      buffer,
+      mimetype: mimetype || (mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
+    };
+
+    const mediaResult = await processHangoutMedia(file, groupId, user.id);
+    const room = `hangout:${groupId}`;
+
+    // Look up user photo for the chat message
+    const photoResult = await query('SELECT photo_file_id FROM users WHERE id = $1', [user.id]);
+    const rawPhoto = photoResult.rows[0]?.photo_file_id || null;
+    const isValidUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
+    const photoUrl = isValidUrl(rawPhoto) ? rawPhoto : null;
+
+    const { rows } = await query(
+      `INSERT INTO chat_messages
+         (room, user_id, username, first_name, photo_url, content,
+          media_url, media_type, media_mime, media_thumb_url,
+          media_width, media_height, media_metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       RETURNING id, room, user_id, username, first_name, photo_url, content,
+                 media_url, media_type, media_mime, media_thumb_url,
+                 media_width, media_height, media_metadata, created_at`,
+      [
+        room,
+        user.id,
+        user.username || null,
+        user.firstName || user.first_name || null,
+        photoUrl,
+        null, // no caption for WoF auto-posts
+        mediaResult.mediaUrl,
+        mediaResult.mediaType,
+        mediaResult.mediaMime,
+        mediaResult.thumbUrl || null,
+        mediaResult.width || null,
+        mediaResult.height || null,
+        mediaResult.metadata ? JSON.stringify(mediaResult.metadata) : null,
+      ]
+    );
+
+    // Emit via Socket.IO if available
+    try {
+      const apiApp = require('../../api/routes');
+      const io = apiApp.get('io');
+      if (io) {
+        const msg = {
+          ...rows[0],
+          photo_url: isValidUrl(rows[0].photo_url) ? rows[0].photo_url : null,
+        };
+        io.to(room).emit('chat:message', msg);
+      }
+    } catch (ioErr) {
+      logger.debug('WoF dual-post: Socket.IO emit skipped', { error: ioErr.message });
+    }
+
+    logger.info('WoF dual-posted to hangout group', { userId: user.id, groupId });
+  } catch (err) {
+    logger.warn('WoF dual-post failed (non-blocking)', { error: err.message });
+  }
+}
 
 const getDateKey = (date = new Date()) => date.toISOString().split('T')[0];
 const getMonthKey = (date = new Date()) => date.toISOString().slice(0, 7);
@@ -334,6 +439,9 @@ const registerWallOfFameHandlers = (bot) => {
             topicId: WALL_OF_FAME_TOPIC_ID,
             wallOfFameMessageId: sentMessage.message_id,
           });
+
+          // Dual-post to hangout group (fire-and-forget)
+          postToHangoutGroup(ctx, fileId, 'image', user, 'image/jpeg');
         } else if (isVideo) {
           const video = ctx.message.video;
           const fileId = video.file_id;
@@ -370,6 +478,9 @@ const registerWallOfFameHandlers = (bot) => {
             topicId: WALL_OF_FAME_TOPIC_ID,
             wallOfFameMessageId: sentMessage.message_id,
           });
+
+          // Dual-post to hangout group (fire-and-forget)
+          postToHangoutGroup(ctx, fileId, 'video', user, video.mime_type || 'video/mp4');
         }
 
         // Delete the original message from the group to avoid duplicates

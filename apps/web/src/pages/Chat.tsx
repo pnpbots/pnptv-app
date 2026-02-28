@@ -19,8 +19,17 @@ import {
   type HangoutGroup,
   type GroupMessage,
 } from "@/lib/api";
+import {
+  MediaUploadButton,
+  MediaPreview,
+  MediaMessage,
+  MediaLightbox,
+  VideoCallButton,
+  VideoCallBanner,
+  VideoCallOverlay,
+} from "@/components/hangouts";
 
-// ─── Utilities ────────────────────────────────────────────────────────────────
+// ─── Utilities ──────────────────────────────────────────────────────────────
 
 function timeAgo(dateStr: string): string {
   if (!dateStr) return "";
@@ -33,132 +42,9 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
-const ACCEPTED_TYPES = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm";
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
-
-function isVideo(file: File): boolean {
-  return file.type.startsWith("video/");
-}
-
 type View = "list" | "chat";
 
-// ─── Lightbox ────────────────────────────────────────────────────────────────
-
-interface LightboxProps {
-  src: string;
-  onClose: () => void;
-}
-
-function Lightbox({ src, onClose }: LightboxProps) {
-  // Close on Escape key
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Image fullscreen view"
-    >
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all"
-        aria-label="Close fullscreen image"
-      >
-        {/* X icon */}
-        <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-      <img
-        src={src}
-        alt="Full size"
-        className="max-w-full max-h-full object-contain rounded-lg"
-        onClick={(e) => e.stopPropagation()}
-      />
-    </div>
-  );
-}
-
-// ─── Media bubble ─────────────────────────────────────────────────────────────
-
-interface MediaBubbleProps {
-  mediaUrl: string;
-  mediaType: "image" | "video";
-  thumbUrl?: string | null;
-  onExpandImage: (src: string) => void;
-}
-
-const MediaBubble = memo(function MediaBubble({
-  mediaUrl,
-  mediaType,
-  thumbUrl,
-  onExpandImage,
-}: MediaBubbleProps) {
-  const [imgError, setImgError] = useState(false);
-  const [vidError, setVidError] = useState(false);
-  // Show thumbnail in bubble, open full image in lightbox
-  const displayUrl = (mediaType === "image" && thumbUrl) ? thumbUrl : mediaUrl;
-
-  if (mediaType === "image") {
-    if (imgError) {
-      return (
-        <div className="mt-2 flex items-center gap-2 text-xs" style={{ color: "#FF453A" }}>
-          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-          </svg>
-          Image failed to load
-        </div>
-      );
-    }
-    return (
-      <button
-        onClick={() => onExpandImage(mediaUrl)}
-        className="mt-2 block max-w-[240px] sm:max-w-[300px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 rounded-lg"
-        aria-label="View full image"
-      >
-        <img
-          src={displayUrl}
-          alt="Shared image"
-          loading="lazy"
-          className="max-h-60 rounded-lg object-cover w-full hover:opacity-90 active:opacity-75 transition-opacity"
-          onError={() => setImgError(true)}
-        />
-      </button>
-    );
-  }
-
-  if (vidError) {
-    return (
-      <div className="mt-2 flex items-center gap-2 text-xs" style={{ color: "#FF453A" }}>
-        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-        </svg>
-        Video failed to load
-      </div>
-    );
-  }
-
-  return (
-    <video
-      src={mediaUrl}
-      controls
-      preload="metadata"
-      className="mt-2 max-h-60 max-w-[240px] sm:max-w-[300px] w-full rounded-lg object-cover"
-      onError={() => setVidError(true)}
-      aria-label="Shared video"
-    />
-  );
-});
-
-// ─── Message bubble ───────────────────────────────────────────────────────────
+// ─── Message Bubble ─────────────────────────────────────────────────────────
 
 interface MessageBubbleProps {
   msg: GroupMessage;
@@ -182,7 +68,7 @@ const MessageBubble = memo(function MessageBubble({
       {/* Avatar */}
       <button
         onClick={() => onNavigate(profilePath)}
-        className="flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded-full"
+        className="flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent rounded-full"
         aria-label={`View ${msg.first_name || msg.username || "user"}'s profile`}
       >
         {msg.photo_url ? (
@@ -192,6 +78,8 @@ const MessageBubble = memo(function MessageBubble({
             alt=""
             onError={(e) => {
               (e.target as HTMLImageElement).style.display = "none";
+              const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
+              if (fallback) fallback.style.display = "flex";
             }}
           />
         ) : null}
@@ -213,19 +101,19 @@ const MessageBubble = memo(function MessageBubble({
         <div className={`flex items-center gap-1.5 mb-0.5 ${isMe ? "justify-end" : ""}`}>
           <button
             onClick={() => onNavigate(profilePath)}
-            className="text-xs font-medium text-white hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/40 rounded"
+            className="text-xs font-medium text-pnp-textPrimary hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pnp-accent rounded"
           >
             {msg.first_name || msg.username || "User"}
           </button>
-          <span className="text-[10px]" style={{ color: "#8E8E93" }}>
+          <span className="text-[10px] text-pnp-textSecondary">
             {timeAgo(msg.created_at)}
           </span>
         </div>
 
-        {/* Content container — only render bubble if there's text */}
+        {/* Text content */}
         {hasText && (
           <div
-            className="rounded-2xl px-3 py-2 text-sm text-white whitespace-pre-wrap break-words"
+            className="rounded-2xl px-3 py-2 text-sm text-pnp-textPrimary whitespace-pre-wrap break-words"
             style={{
               background: isMe
                 ? "linear-gradient(135deg, #D4007A, #E69138)"
@@ -236,14 +124,17 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         )}
 
-        {/* Media (renders outside the text bubble for visual clarity) */}
+        {/* Media attachment */}
         {hasMedia && (
           <div className={isMe ? "self-end" : "self-start"}>
-            <MediaBubble
+            <MediaMessage
               mediaUrl={msg.media_url!}
               mediaType={msg.media_type!}
               thumbUrl={msg.media_thumb_url}
+              width={msg.media_width}
+              height={msg.media_height}
               onExpandImage={onExpandImage}
+              isMe={isMe}
             />
           </div>
         )}
@@ -252,109 +143,12 @@ const MessageBubble = memo(function MessageBubble({
   );
 });
 
-// ─── Upload preview strip ─────────────────────────────────────────────────────
-
-interface UploadPreviewProps {
-  file: File;
-  previewUrl: string;
-  uploadProgress: number | null;
-  uploadError: string | null;
-  onCancel: () => void;
-}
-
-function UploadPreview({
-  file,
-  previewUrl,
-  uploadProgress,
-  uploadError,
-  onCancel,
-}: UploadPreviewProps) {
-  const isVid = isVideo(file);
-
-  return (
-    <div className="mx-4 mb-2 glass-card-sm p-2 flex items-start gap-2 animate-fade-in-up">
-      {/* Thumbnail */}
-      <div className="relative flex-shrink-0">
-        {isVid ? (
-          <video
-            src={previewUrl}
-            className="w-16 h-16 rounded-lg object-cover"
-            muted
-            playsInline
-            aria-label="Video preview"
-          />
-        ) : (
-          <img
-            src={previewUrl}
-            alt="Upload preview"
-            className="w-16 h-16 rounded-lg object-cover"
-          />
-        )}
-        {/* File type badge */}
-        <div
-          className="absolute bottom-1 left-1 text-[9px] font-bold px-1 rounded"
-          style={{ background: "rgba(0,0,0,0.7)", color: isVid ? "#E69138" : "#D4007A" }}
-        >
-          {isVid ? "VID" : "IMG"}
-        </div>
-      </div>
-
-      {/* Info + progress */}
-      <div className="flex-1 min-w-0">
-        <p className="text-xs text-white truncate">{file.name}</p>
-        <p className="text-[10px]" style={{ color: "#8E8E93" }}>
-          {(file.size / 1024 / 1024).toFixed(1)} MB
-        </p>
-
-        {uploadError ? (
-          <p className="text-[10px] mt-1" style={{ color: "#FF453A" }}>
-            {uploadError}
-          </p>
-        ) : uploadProgress !== null ? (
-          <div className="mt-1.5">
-            {/* Indeterminate progress bar (fetch doesn't give progress; this is a visual affordance) */}
-            <div className="h-1 rounded-full bg-white/10 overflow-hidden">
-              <div
-                className="h-full rounded-full animate-pulse"
-                style={{
-                  width: `${uploadProgress}%`,
-                  background: "linear-gradient(90deg, #D4007A, #E69138)",
-                }}
-              />
-            </div>
-            <p className="text-[10px] mt-0.5" style={{ color: "#8E8E93" }}>
-              Uploading…
-            </p>
-          </div>
-        ) : (
-          <p className="text-[10px] mt-1" style={{ color: "#8E8E93" }}>
-            Press send to share
-          </p>
-        )}
-      </div>
-
-      {/* Cancel */}
-      {uploadProgress === null && (
-        <button
-          onClick={onCancel}
-          className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-          aria-label="Remove selected media"
-        >
-          <svg className="w-4 h-4" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Main Component ─────────────────────────────────────────────────────────
 
 export default function Chat() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const isPrime = user?.tier?.toLowerCase() === "prime";
+  const isPrime = user?.tier === "PRIME";
 
   // Group list state
   const [groups, setGroups] = useState<HangoutGroup[]>([]);
@@ -379,16 +173,18 @@ export default function Chat() {
 
   // Media upload state
   const [mediaFile, setMediaFile] = useState<File | null>(null);
-  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Lightbox
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   // Video call
   const [callUrl, setCallUrl] = useState<string | null>(null);
+  const [callLoading, setCallLoading] = useState(false);
+
+  // ─── Group list loading ─────────────────────────────────────────────
 
   const loadGroups = useCallback(async () => {
     try {
@@ -404,6 +200,8 @@ export default function Chat() {
     setIsLoading(true);
     loadGroups().finally(() => setIsLoading(false));
   }, [loadGroups]);
+
+  // ─── Group creation ─────────────────────────────────────────────────
 
   const handleCreate = async () => {
     if (!newName.trim() || creating) return;
@@ -421,6 +219,32 @@ export default function Chat() {
     }
   };
 
+  // ─── Media handling ─────────────────────────────────────────────────
+
+  const clearMedia = useCallback(() => {
+    if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl);
+    setMediaFile(null);
+    setMediaPreviewUrl(null);
+    setUploadProgress(null);
+    setUploadError(null);
+  }, [mediaPreviewUrl]);
+
+  const handleFileSelect = useCallback(
+    (file: File, previewUrl: string) => {
+      clearMedia();
+      setMediaFile(file);
+      setMediaPreviewUrl(previewUrl);
+      setUploadError(null);
+    },
+    [clearMedia]
+  );
+
+  const handleFileError = useCallback((message: string) => {
+    setUploadError(message);
+  }, []);
+
+  // ─── Chat view open/close ──────────────────────────────────────────
+
   const openChat = async (group: HangoutGroup) => {
     setActiveGroup(group);
     setView("chat");
@@ -428,6 +252,7 @@ export default function Chat() {
     setCallUrl(null);
     setMessagesLoading(true);
     clearMedia();
+
     try {
       const data = await getGroupMessages(group.id);
       setMessages(data.messages || []);
@@ -437,13 +262,17 @@ export default function Chat() {
       setMessagesLoading(false);
     }
 
+    // If there's already an active call, fetch the URL
     if (group.hasActiveCall) {
       try {
         const callData = await startGroupCall(group.id);
         if (callData.jitsiUrl) setCallUrl(callData.jitsiUrl);
-      } catch { /* silent */ }
+      } catch {
+        /* silent */
+      }
     }
 
+    // Start polling for new messages
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
@@ -468,47 +297,19 @@ export default function Chat() {
     loadGroups();
   };
 
+  // Clean up polling on unmount
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, []);
 
+  // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // ─── Media handling ────────────────────────────────────────────────────────
-
-  const clearMedia = useCallback(() => {
-    setMediaFile(null);
-    if (mediaPreview) URL.revokeObjectURL(mediaPreview);
-    setMediaPreview(null);
-    setUploadProgress(null);
-    setUploadError(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }, [mediaPreview]);
-
-  const handleFileSelect = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      if (file.size > MAX_FILE_SIZE) {
-        setUploadError("File too large. Maximum size is 50 MB.");
-        if (fileInputRef.current) fileInputRef.current.value = "";
-        return;
-      }
-
-      clearMedia();
-      setMediaFile(file);
-      setMediaPreview(URL.createObjectURL(file));
-      setUploadError(null);
-    },
-    [clearMedia]
-  );
-
-  // ─── Send logic ────────────────────────────────────────────────────────────
+  // ─── Send logic ─────────────────────────────────────────────────────
 
   const handleSend = useCallback(async () => {
     if (sending || !activeGroup) return;
@@ -522,7 +323,6 @@ export default function Chat() {
 
     try {
       if (hasMedia && mediaFile) {
-        // Simulate progress (fetch XHR doesn't support upload progress easily)
         setUploadProgress(30);
         const data = await sendGroupMediaMessage(
           activeGroup.id,
@@ -541,7 +341,6 @@ export default function Chat() {
         }
       }
     } catch (err) {
-      // Restore text if text-only send failed
       if (!hasMedia) setMsgInput(text);
       setUploadError(
         err instanceof Error ? err.message : "Failed to send message"
@@ -549,39 +348,65 @@ export default function Chat() {
       setUploadProgress(null);
     } finally {
       setSending(false);
-      if (uploadProgress === 100) setUploadProgress(null);
     }
-  }, [sending, activeGroup, msgInput, mediaFile, clearMedia, uploadProgress]);
+  }, [sending, activeGroup, msgInput, mediaFile, clearMedia]);
+
+  // ─── Video call ─────────────────────────────────────────────────────
+
+  const ALLOWED_CALL_ORIGINS = ["https://8x8.vc/", "https://meet.jit.si/"];
 
   const handleStartCall = async () => {
-    if (!activeGroup) return;
+    if (!activeGroup || callLoading) return;
+    setCallLoading(true);
     try {
       const data = await startGroupCall(activeGroup.id);
       if (data.jitsiUrl) {
+        // Validate URL origin before loading in iframe with camera/mic permissions
+        const isValidOrigin = ALLOWED_CALL_ORIGINS.some((prefix) =>
+          data.jitsiUrl.startsWith(prefix)
+        );
+        if (!isValidOrigin) {
+          console.error("Rejected invalid call URL from API:", data.jitsiUrl);
+          setUploadError("Video call URL is invalid. Please contact support.");
+          return;
+        }
         setCallUrl(data.jitsiUrl);
       } else {
-        alert("Video calls are not available right now. Please try again later.");
+        setUploadError("Video calls are not available right now.");
       }
     } catch {
-      alert("Failed to start video call. Please try again later.");
+      setUploadError("Failed to start video call. Please try again.");
+    } finally {
+      setCallLoading(false);
     }
   };
+
+  const handleEndCall = useCallback(() => {
+    setCallUrl(null);
+  }, []);
+
+  // ─── Group management ──────────────────────────────────────────────
 
   const handleLeaveGroup = async (groupId: number) => {
     try {
       await leaveHangoutGroup(groupId);
       closeChat();
-    } catch { /* silent */ }
+    } catch {
+      /* silent */
+    }
   };
 
   const handleDeleteGroup = async (groupId: number) => {
     try {
       await deleteHangoutGroup(groupId);
       closeChat();
-    } catch { /* silent */ }
+    } catch {
+      /* silent */
+    }
   };
 
-  // ─── Navigate helper (memoised so MessageBubble doesn't re-render) ──────────
+  // ─── Memoized callbacks ────────────────────────────────────────────
+
   const handleNavigate = useCallback(
     (path: string) => navigate(path),
     [navigate]
@@ -591,7 +416,17 @@ export default function Chat() {
     setLightboxSrc(src);
   }, []);
 
-  // ─── Chat View ─────────────────────────────────────────────────────────────
+  // Build media list for lightbox navigation
+  const mediaUrls = messages
+    .filter((m) => m.media_url && m.media_type === "image")
+    .map((m) => m.media_url!);
+
+  const handleLightboxNavigate = useCallback((src: string) => {
+    setLightboxSrc(src);
+  }, []);
+
+  // ─── Chat View ────────────────────────────────────────────────────────
+
   if (view === "chat" && activeGroup) {
     const canSend = !sending && (msgInput.trim().length > 0 || mediaFile !== null);
 
@@ -599,39 +434,42 @@ export default function Chat() {
       <div className="flex flex-col" style={{ height: "calc(100vh - 5rem)" }}>
         {/* Lightbox */}
         {lightboxSrc && (
-          <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+          <MediaLightbox
+            src={lightboxSrc}
+            mediaType="image"
+            mediaList={mediaUrls}
+            onClose={() => setLightboxSrc(null)}
+            onNavigate={handleLightboxNavigate}
+          />
         )}
 
         {/* Chat header */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5 flex-shrink-0">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-pnp-border flex-shrink-0">
           <button
             onClick={closeChat}
-            className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+            className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             aria-label="Back to group list"
           >
-            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-5 h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
           <div className="flex-1 min-w-0">
-            <h2 className="text-sm font-bold text-white truncate">{activeGroup.name}</h2>
-            <p className="text-xs" style={{ color: "#8E8E93" }}>
+            <h2 className="text-sm font-bold text-pnp-textPrimary truncate">{activeGroup.name}</h2>
+            <p className="text-xs text-pnp-textSecondary">
               {activeGroup.memberCount} members
             </p>
           </div>
+
           {/* Video call button */}
-          <button
-            onClick={handleStartCall}
-            className="w-9 h-9 rounded-full flex items-center justify-center hover:opacity-80 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-            style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(230,145,56,0.15))" }}
-            aria-label="Start video call"
-          >
-            <svg className="w-5 h-5" style={{ color: "#E69138" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-          </button>
-          {/* Leave/delete button */}
-          {!activeGroup.isMain && (
+          <VideoCallButton
+            hasActiveCall={!!callUrl || activeGroup.hasActiveCall}
+            onStartCall={handleStartCall}
+            isLoading={callLoading}
+          />
+
+          {/* Leave/delete button (hidden for main + Wall of Fame groups) */}
+          {!activeGroup.isMain && !activeGroup.isWallOfFame && (
             <button
               onClick={() => {
                 if (activeGroup.creatorId === user?.dbId) {
@@ -640,62 +478,53 @@ export default function Chat() {
                   handleLeaveGroup(activeGroup.id);
                 }
               }}
-              className="text-xs px-2 py-1.5 rounded hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-              style={{ color: "#FF453A" }}
+              className="text-xs px-2 py-1.5 rounded text-pnp-error hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             >
               {activeGroup.creatorId === user?.dbId ? "Delete" : "Leave"}
             </button>
           )}
         </div>
 
-        {/* Active call banner */}
-        {callUrl && (
-          <div className="glass-card-sm mx-4 mt-2 p-3 flex-shrink-0">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full animate-pulse dot-gradient" />
-                <span className="text-xs font-medium text-white">Video Call Active</span>
-              </div>
-              <button
-                onClick={() => setCallUrl(null)}
-                className="text-xs hover:opacity-70 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30 rounded"
-                style={{ color: "#FF453A" }}
-              >
-                Close
-              </button>
-            </div>
-            <div className="aspect-video rounded-lg overflow-hidden">
-              <iframe
-                src={callUrl}
-                className="w-full h-full border-0"
-                allow="camera; microphone; display-capture; autoplay"
-                title="Video Call"
-              />
-            </div>
-          </div>
+        {/* Active call banner (when call URL is set but not embedded yet) */}
+        {!callUrl && activeGroup.hasActiveCall && (
+          <VideoCallBanner
+            isActive={true}
+            onJoin={handleStartCall}
+            isJoining={callLoading}
+          />
         )}
 
-        {/* Messages */}
+        {/* Embedded video call */}
+        {callUrl && (
+          <VideoCallOverlay
+            meetingUrl={callUrl}
+            groupName={activeGroup.name}
+            onClose={handleEndCall}
+            initialMode="embedded"
+          />
+        )}
+
+        {/* Messages area */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
           {messagesLoading ? (
             <div className="space-y-3" aria-label="Loading messages" aria-busy="true">
               {Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="animate-pulse flex gap-2">
-                  <div className="w-8 h-8 rounded-full bg-white/10 flex-shrink-0" />
+                  <div className="w-8 h-8 rounded-full bg-pnp-surface flex-shrink-0" />
                   <div className="flex-1 space-y-1.5">
-                    <div className="h-3 bg-white/10 rounded w-24" />
-                    <div className="h-8 bg-white/10 rounded-2xl w-48" />
+                    <div className="h-3 bg-pnp-surface rounded w-24" />
+                    <div className="h-8 bg-pnp-surface rounded-2xl w-48" />
                   </div>
                 </div>
               ))}
             </div>
           ) : messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center py-12">
-              <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <svg className="w-12 h-12 mx-auto mb-3 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
-              <p className="text-white font-medium text-sm">No messages yet</p>
-              <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>
+              <p className="text-pnp-textPrimary font-medium text-sm">No messages yet</p>
+              <p className="text-xs text-pnp-textSecondary mt-1">
                 Be the first to say something!
               </p>
             </div>
@@ -714,38 +543,43 @@ export default function Chat() {
         </div>
 
         {/* Upload preview */}
-        {mediaFile && mediaPreview && (
-          <UploadPreview
+        {mediaFile && mediaPreviewUrl && (
+          <MediaPreview
             file={mediaFile}
-            previewUrl={mediaPreview}
+            previewUrl={mediaPreviewUrl}
             uploadProgress={sending ? (uploadProgress ?? 10) : null}
             uploadError={uploadError}
             onCancel={clearMedia}
           />
         )}
 
-        {/* Input bar */}
-        <div className="px-4 py-3 border-t border-white/5 flex-shrink-0">
-          <div className="flex items-center gap-2">
-            {/* Media picker button */}
+        {/* Upload error (without a file selected) */}
+        {uploadError && !mediaFile && (
+          <div className="mx-4 mb-2 flex items-center gap-2 text-xs text-pnp-error animate-fade-in-up" role="alert">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
+            <span>{uploadError}</span>
             <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={sending}
-              className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/5 active:scale-95 transition-all disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-              aria-label="Attach photo or video"
+              onClick={() => setUploadError(null)}
+              className="ml-auto text-pnp-textSecondary hover:text-pnp-textPrimary"
+              aria-label="Dismiss error"
             >
-              {/* Image icon */}
-              <svg className="w-5 h-5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={ACCEPTED_TYPES}
-              className="hidden"
-              onChange={handleFileSelect}
-              aria-label="Select photo or video to send"
+          </div>
+        )}
+
+        {/* Input bar */}
+        <div className="px-4 py-3 border-t border-pnp-border flex-shrink-0">
+          <div className="flex items-center gap-2">
+            {/* Media upload button */}
+            <MediaUploadButton
+              onFileSelect={handleFileSelect}
+              onError={handleFileError}
+              disabled={sending}
             />
 
             {/* Text input */}
@@ -753,8 +587,8 @@ export default function Chat() {
               value={msgInput}
               onChange={(e) => setMsgInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-              placeholder={mediaFile ? "Add a caption…" : "Type a message…"}
-              className="flex-1 bg-white/5 rounded-full px-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-white/20 min-w-0"
+              placeholder={mediaFile ? "Add a caption..." : "Type a message..."}
+              className="flex-1 bg-white/5 rounded-full px-4 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 min-w-0 transition-colors"
               maxLength={2000}
               disabled={sending}
               aria-label="Message input"
@@ -764,7 +598,7 @@ export default function Chat() {
             <button
               onClick={handleSend}
               disabled={!canSend}
-              className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center active:scale-95 transition-all disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+              className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
               style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
               aria-label="Send message"
             >
@@ -785,21 +619,22 @@ export default function Chat() {
     );
   }
 
-  // ─── Group List View ───────────────────────────────────────────────────────
+  // ─── Group List View ──────────────────────────────────────────────────
+
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">Hangouts</h1>
-          <p className="text-sm mt-1" style={{ color: "#8E8E93" }}>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">Hangouts</h1>
+          <p className="text-sm mt-1 text-pnp-textSecondary">
             Group chats + video calls
           </p>
         </div>
         {isPrime && (
           <button
             onClick={() => setShowCreate(!showCreate)}
-            className="btn-gradient px-3 py-1.5 rounded-lg text-white text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+            className="btn-gradient px-3 py-1.5 rounded-lg text-white text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent active:scale-95 transition-transform"
           >
             + New Group
           </button>
@@ -809,37 +644,39 @@ export default function Chat() {
       {/* Create group form */}
       {showCreate && (
         <div className="glass-card-sm p-4 mb-4 animate-fade-in-up">
-          <h3 className="text-sm font-semibold text-white mb-3">Create Subgroup</h3>
+          <h3 className="text-sm font-semibold text-pnp-textPrimary mb-3">Create Subgroup</h3>
+          <label className="sr-only" htmlFor="new-group-name">Group name</label>
           <input
+            id="new-group-name"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            placeholder="Group name…"
-            className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none mb-2"
+            placeholder="Group name..."
+            className="w-full bg-white/5 rounded-lg px-3 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 mb-2 transition-colors"
             maxLength={100}
-            aria-label="New group name"
           />
+          <label className="sr-only" htmlFor="new-group-desc">Group description</label>
           <textarea
+            id="new-group-desc"
             value={newDesc}
             onChange={(e) => setNewDesc(e.target.value)}
-            placeholder="Description (optional)…"
-            className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none mb-3 resize-none"
+            placeholder="Description (optional)..."
+            className="w-full bg-white/5 rounded-lg px-3 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 mb-3 resize-none transition-colors"
             rows={2}
             maxLength={500}
-            aria-label="New group description"
           />
           <div className="flex gap-2">
             <button
               onClick={() => setShowCreate(false)}
-              className="flex-1 py-2.5 rounded-lg text-sm text-white/60 border border-white/10 hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+              className="flex-1 py-2.5 rounded-lg text-sm text-pnp-textSecondary border border-white/10 hover:bg-white/5 active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             >
               Cancel
             </button>
             <button
               onClick={handleCreate}
               disabled={!newName.trim() || creating}
-              className="flex-1 btn-gradient py-2.5 rounded-lg text-sm text-white font-semibold disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+              className="flex-1 btn-gradient py-2.5 rounded-lg text-sm text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             >
-              {creating ? "Creating…" : "Create"}
+              {creating ? "Creating..." : "Create"}
             </button>
           </div>
         </div>
@@ -848,58 +685,61 @@ export default function Chat() {
       {/* Error */}
       {error && (
         <div
-          className="glass-card-sm p-3 mb-4 border-l-4 flex items-start gap-2"
-          style={{ borderLeftColor: "#FF453A" }}
+          className="glass-card-sm p-3 mb-4 border-l-4 border-l-pnp-error flex items-start gap-2"
           role="alert"
         >
-          <svg className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#FF453A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-pnp-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
           </svg>
           <div className="flex-1 min-w-0">
-            <p className="text-sm text-white/80">{error}</p>
+            <p className="text-sm text-pnp-textPrimary/80">{error}</p>
           </div>
           <button
-            onClick={() => { setIsLoading(true); loadGroups().finally(() => setIsLoading(false)); }}
-            className="text-xs font-semibold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30 rounded"
-            style={{ color: "#D4007A" }}
+            onClick={() => {
+              setIsLoading(true);
+              loadGroups().finally(() => setIsLoading(false));
+            }}
+            className="text-xs font-semibold text-pnp-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pnp-accent rounded hover:opacity-80 transition-opacity"
           >
             Retry
           </button>
         </div>
       )}
 
-      {/* Loading */}
+      {/* Loading skeletons */}
       {isLoading ? (
         <div className="space-y-3" aria-label="Loading groups" aria-busy="true">
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="glass-card-sm p-4 animate-pulse">
               <div className="flex gap-3">
-                <div className="w-12 h-12 rounded-full bg-white/10 flex-shrink-0" />
+                <div className="w-12 h-12 rounded-full bg-pnp-surface flex-shrink-0" />
                 <div className="flex-1 space-y-2">
-                  <div className="h-4 bg-white/10 rounded w-32" />
-                  <div className="h-3 bg-white/10 rounded w-48" />
+                  <div className="h-4 bg-pnp-surface rounded w-32" />
+                  <div className="h-3 bg-pnp-surface rounded w-48" />
                 </div>
               </div>
             </div>
           ))}
         </div>
       ) : groups.length === 0 ? (
+        /* Empty state */
         <div className="glass-card-sm p-8 text-center">
-          <svg className="w-16 h-16 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <svg className="w-16 h-16 mx-auto mb-3 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          <p className="text-white font-medium mb-1">No groups yet</p>
-          <p className="text-sm" style={{ color: "#8E8E93" }}>
+          <p className="text-pnp-textPrimary font-medium mb-1">No groups yet</p>
+          <p className="text-sm text-pnp-textSecondary">
             Log in to join the community
           </p>
         </div>
       ) : (
+        /* Group list */
         <div className="space-y-2">
           {groups.map((group) => (
             <button
               key={group.id}
               onClick={() => openChat(group)}
-              className="w-full glass-card-sm p-4 text-left hover:border-white/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+              className="w-full glass-card-sm p-4 text-left hover:border-white/20 active:scale-[0.99] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             >
               <div className="flex gap-3 items-center">
                 {/* Group avatar */}
@@ -908,43 +748,53 @@ export default function Chat() {
                   style={{
                     background: group.isMain
                       ? "linear-gradient(135deg, #D4007A, #E69138)"
-                      : "rgba(212, 0, 122, 0.2)",
-                    color: group.isMain ? "#fff" : "#D4007A",
+                      : group.isWallOfFame
+                        ? "linear-gradient(135deg, #FFD700, #E69138)"
+                        : "rgba(212, 0, 122, 0.2)",
+                    color: group.isMain || group.isWallOfFame ? "#fff" : "#D4007A",
                   }}
                 >
-                  {group.isMain ? "P" : group.name[0]?.toUpperCase()}
+                  {group.isMain ? "P" : group.isWallOfFame ? "\u{1F3C6}" : group.name[0]?.toUpperCase()}
                 </div>
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-white text-sm truncate">
+                    <span className="font-semibold text-pnp-textPrimary text-sm truncate">
                       {group.name}
                     </span>
                     {group.isMain && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60 flex-shrink-0">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary flex-shrink-0">
                         MAIN
+                      </span>
+                    )}
+                    {group.isWallOfFame && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 text-yellow-300" style={{ background: "rgba(255,215,0,0.15)" }}>
+                        WALL OF FAME
                       </span>
                     )}
                     {group.hasActiveCall && (
                       <div className="flex items-center gap-1 flex-shrink-0">
-                        <div className="w-1.5 h-1.5 rounded-full animate-pulse dot-gradient" />
-                        <span className="text-[10px] text-gradient">LIVE</span>
+                        <span className="relative flex h-1.5 w-1.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pnp-accent opacity-75" />
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 dot-gradient" />
+                        </span>
+                        <span className="text-[10px] text-gradient font-semibold">LIVE</span>
                       </div>
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-xs flex-shrink-0" style={{ color: "#8E8E93" }}>
+                    <span className="text-xs flex-shrink-0 text-pnp-textSecondary">
                       {group.memberCount} members
                     </span>
                     {group.lastMessage && (
-                      <span className="text-xs truncate min-w-0" style={{ color: "#8E8E93" }}>
+                      <span className="text-xs truncate min-w-0 text-pnp-textSecondary">
                         &middot; {group.lastMessage}
                       </span>
                     )}
                   </div>
                 </div>
 
-                <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                 </svg>
               </div>
@@ -956,13 +806,13 @@ export default function Chat() {
       {/* PRIME upsell */}
       {!isPrime && (
         <div className="mt-6 glass-card-sm p-4 text-center">
-          <p className="text-sm text-white font-medium mb-1">Want to create your own group?</p>
-          <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+          <p className="text-sm text-pnp-textPrimary font-medium mb-1">Want to create your own group?</p>
+          <p className="text-xs text-pnp-textSecondary mb-3">
             Upgrade to PRIME to create subgroups with video calls
           </p>
           <button
             onClick={() => navigate("/subscribe")}
-            className="btn-gradient px-6 py-2 rounded-lg text-white text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+            className="btn-gradient px-6 py-2 rounded-lg text-white text-sm font-semibold active:scale-95 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
           >
             Upgrade to PRIME
           </button>
