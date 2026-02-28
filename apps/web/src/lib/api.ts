@@ -62,6 +62,8 @@ export interface AuthStatusResponse {
     atproto_handle?: string | null;
     x_handle?: string | null;
     auth_methods?: AuthMethods;
+    creator_status?: string;
+    creator_type?: string | null;
   };
 }
 
@@ -344,6 +346,13 @@ export interface UserProfile {
   memberSince: string;
   postCount?: number;
   wofPhotoConsent?: boolean;
+  // Creator fields
+  creatorStatus?: string;
+  creatorType?: string;
+  creatorPriceUsd?: number | null;
+  creatorVerified?: boolean;
+  creatorFeatured?: boolean;
+  creatorSubscriberCount?: number;
 }
 
 export interface SocialPostItem {
@@ -367,6 +376,15 @@ export interface SocialPostItem {
   repost_author_username?: string;
   repost_author_first_name?: string;
   is_wof?: boolean;
+  // Exclusive content fields
+  is_exclusive?: boolean;
+  exclusive_status?: "unlocked" | "teaser" | "locked";
+  locked_reason?: "not_prime" | "not_subscribed";
+  // Creator info on author
+  author_creator_status?: string;
+  author_creator_type?: string;
+  author_creator_verified?: boolean;
+  author_creator_price?: number;
   // Bluesky cross-post fields
   bluesky_uri?: string | null;
   bluesky_cid?: string | null;
@@ -487,7 +505,8 @@ export function getWofFeedPosts(
 export function createSocialPost(
   content: string,
   mediaFile?: File,
-  crossPostBluesky?: boolean
+  crossPostBluesky?: boolean,
+  isExclusive?: boolean
 ): Promise<{ success: boolean; post: SocialPostItem }> {
   if (mediaFile) {
     // Use FormData for media posts
@@ -495,6 +514,7 @@ export function createSocialPost(
     formData.append("content", content);
     formData.append("media", mediaFile);
     if (crossPostBluesky) formData.append("crossPostBluesky", "true");
+    if (isExclusive) formData.append("isExclusive", "true");
     return fetch(`${API_BASE}/api/webapp/social/posts/with-media`, {
       method: "POST",
       credentials: "include",
@@ -509,7 +529,7 @@ export function createSocialPost(
   }
   return request("/api/webapp/social/posts", {
     method: "POST",
-    body: { content, crossPostBluesky: crossPostBluesky ?? false },
+    body: { content, crossPostBluesky: crossPostBluesky ?? false, isExclusive: isExclusive ?? false },
   });
 }
 
@@ -1128,6 +1148,258 @@ export function getFeaturedPerformers(): Promise<{
   performers: FeaturedPerformer[];
 }> {
   return request("/api/performers/featured");
+}
+
+// ============================================================================
+// Model/Creator Application API
+// ============================================================================
+
+export interface ModelApplication {
+  id: string;
+  application_type: "live" | "content_creator" | "both";
+  stage_name: string;
+  status: "pending" | "approved" | "rejected" | "withdrawn";
+  call_scheduled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ModelApplicationPayload {
+  applicationType: "live" | "content_creator" | "both";
+  stageName: string;
+  bio?: string;
+  instagramHandle?: string;
+  twitterHandle?: string;
+  onlyfansUrl?: string;
+  profilePhotoUrl?: string;
+  legalFullName: string;
+  dateOfBirth: string;
+  country: string;
+  cityState: string;
+  idFrontUrl: string;
+  idBackUrl: string;
+  termsAgreed: boolean;
+}
+
+export function getApplicationStatus(): Promise<{
+  success: boolean;
+  hasApplication: boolean;
+  application?: ModelApplication;
+}> {
+  return request("/api/apply/status");
+}
+
+export async function uploadApplicationProfilePhoto(
+  file: File
+): Promise<{ success: boolean; photoUrl: string }> {
+  const formData = new FormData();
+  formData.append("photo", file);
+
+  const res = await fetch(`${API_BASE}/api/apply/profile-photo`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error || `API error ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export async function uploadApplicationIdDocuments(
+  front: File,
+  back: File
+): Promise<{ success: boolean; idFrontUrl: string; idBackUrl: string }> {
+  const formData = new FormData();
+  formData.append("front", front);
+  formData.append("back", back);
+
+  const res = await fetch(`${API_BASE}/api/apply/id-documents`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error || `API error ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export function submitModelApplication(
+  payload: ModelApplicationPayload
+): Promise<{ success: boolean; application: { id: string; status: string; created_at: string } }> {
+  return request("/api/apply/submit", { method: "POST", body: payload });
+}
+
+export function markCallScheduled(
+  applicationId?: string
+): Promise<{ success: boolean; applicationId: string }> {
+  return request("/api/apply/mark-scheduled", {
+    method: "POST",
+    body: { applicationId },
+  });
+}
+
+// ============================================================================
+// Creator Monetization API
+// ============================================================================
+
+export interface CreatorEligibility {
+  eligible: boolean;
+  criteria: {
+    mediaPosts: { current: number; required: number; met: boolean };
+    totalLikes: { current: number; required: number; met: boolean };
+    followers: { current: number; required: number; met: boolean };
+    weeklyConsistency: { current: number; required: number; met: boolean };
+  };
+  missing: string[];
+}
+
+export interface CreatorDashboard {
+  subscriberCount: number;
+  creatorStatus: string;
+  creatorType: string | null;
+  priceUsd: number;
+  verified: boolean;
+  featured: boolean;
+  totalEarnings: number;
+  monthlyEarnings: number;
+  exclusivePostCount: number;
+  application: {
+    id: string;
+    status: string;
+    submitted_at: string;
+    cal_booking_url: string;
+  } | null;
+}
+
+export interface CreatorSubscriptionStatus {
+  subscribed: boolean;
+  subscription: {
+    id: string;
+    status: string;
+    price_usd: number;
+    started_at: string;
+    expires_at: string;
+    auto_renew: boolean;
+  } | null;
+  creator: {
+    status: string;
+    type: string;
+    priceUsd: number;
+    verified: boolean;
+    subscriberCount: number;
+  };
+}
+
+export interface CreatorApplication {
+  id: string;
+  user_id: string;
+  username: string;
+  first_name: string;
+  photo_file_id: string | null;
+  status: string;
+  requested_price_usd: number;
+  application_text: string | null;
+  portfolio_urls: string[] | null;
+  cal_booking_url: string | null;
+  submitted_at: string;
+  reviewed_at: string | null;
+  review_notes: string | null;
+}
+
+export function getCreatorEligibility(): Promise<{
+  success: boolean;
+} & CreatorEligibility> {
+  return request("/api/webapp/creator/eligibility");
+}
+
+export function activateCreator(): Promise<{
+  success: boolean;
+  type: string;
+  price: number;
+}> {
+  return request("/api/webapp/creator/activate", { method: "POST" });
+}
+
+export function applyFullTimeCreator(data: {
+  price: number;
+  text?: string;
+  portfolioUrls?: string[];
+}): Promise<{
+  success: boolean;
+  application: { id: string; status: string; submitted_at: string };
+  calBookingUrl: string;
+}> {
+  return request("/api/webapp/creator/apply", { method: "POST", body: data });
+}
+
+export function getCreatorDashboard(): Promise<{
+  success: boolean;
+} & CreatorDashboard> {
+  return request("/api/webapp/creator/dashboard");
+}
+
+export function getCreatorSubscriptionStatus(
+  creatorId: string
+): Promise<{ success: boolean } & CreatorSubscriptionStatus> {
+  return request(`/api/webapp/creator/${creatorId}/subscription-status`);
+}
+
+export function subscribeToCreator(
+  creatorId: string,
+  paymentId?: string
+): Promise<{
+  success: boolean;
+  subscriptionId: string;
+  expiresAt: string;
+  price: number;
+}> {
+  return request(`/api/webapp/creator/${creatorId}/subscribe`, {
+    method: "POST",
+    body: { paymentId },
+  });
+}
+
+export function unsubscribeFromCreator(
+  creatorId: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/${creatorId}/unsubscribe`, {
+    method: "POST",
+  });
+}
+
+export function getCreatorApplications(
+  status?: string
+): Promise<{ success: boolean; applications: CreatorApplication[] }> {
+  const params = status ? `?status=${status}` : "";
+  return request(`/api/webapp/creator/applications${params}`);
+}
+
+export function approveCreatorApplication(
+  applicationId: string,
+  notes?: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/applications/${applicationId}/approve`, {
+    method: "POST",
+    body: { notes },
+  });
+}
+
+export function rejectCreatorApplication(
+  applicationId: string,
+  notes?: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/applications/${applicationId}/reject`, {
+    method: "POST",
+    body: { notes },
+  });
 }
 
 // Health check

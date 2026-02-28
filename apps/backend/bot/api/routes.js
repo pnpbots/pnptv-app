@@ -46,9 +46,11 @@ const { handleTelegramAuth, handleAcceptTerms, checkAuthStatus } = require('../.
 const authRoutes = require('./routes/authRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
 const modelRoutes = require('./routes/modelRoutes');
+const applyRoutes = require('./routes/applyRoutes');
 const pdsRoutes = require('./routes/pdsRoutes');
 const blueskyRoutes = require('./routes/blueskyRoutes');
 const elementRoutes = require('./routes/elementRoutes');
+const creatorRoutes = require('./routes/creatorRoutes');
 
 // ATProto / Bluesky OAuth routes (public endpoints served at the monorepo root)
 const atprotoOAuthRoutes = require('./routes/atprotoOAuthRoutes');
@@ -818,6 +820,57 @@ const uploadAgeVerificationPhoto = (req, res, next) => {
       error: 'INVALID_UPLOAD',
       message
     });
+  });
+};
+
+// Model application profile photo upload - 5MB max, images only
+const modelProfilePhotoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const isImage = /^image\/(jpeg|jpg|png|webp)$/i.test(file.mimetype || '');
+    if (isImage) return cb(null, true);
+    cb(new Error('Only image files (jpg/png/webp) are allowed'));
+  },
+});
+
+const uploadModelProfilePhoto = (req, res, next) => {
+  modelProfilePhotoUpload.single('photo')(req, res, (err) => {
+    if (!err) return next();
+    let message = 'Invalid photo. Please try a different image.';
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      message = 'Photo is too large. Maximum size is 5MB.';
+    } else if (err.message) {
+      message = err.message;
+    }
+    return res.status(400).json({ success: false, error: message });
+  });
+};
+
+// Model application ID document upload - 5MB max per file, images only, front+back
+const modelIdDocUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const isImage = /^image\/(jpeg|jpg|png|webp)$/i.test(file.mimetype || '');
+    if (isImage) return cb(null, true);
+    cb(new Error('Only image files (jpg/png/webp) are allowed'));
+  },
+});
+
+const uploadModelIdDocuments = (req, res, next) => {
+  modelIdDocUpload.fields([
+    { name: 'front', maxCount: 1 },
+    { name: 'back', maxCount: 1 },
+  ])(req, res, (err) => {
+    if (!err) return next();
+    let message = 'Invalid upload. Please try different images.';
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      message = 'File is too large. Maximum size is 5MB per image.';
+    } else if (err.message) {
+      message = err.message;
+    }
+    return res.status(400).json({ success: false, error: message });
   });
 };
 
@@ -1789,6 +1842,11 @@ app.get('/api/webapp/profile', asyncHandler(webAppController.getProfile));
 app.put('/api/webapp/profile', asyncHandler(webAppController.updateProfile));
 app.post('/api/webapp/profile/avatar', avatarUpload.single('avatar'), asyncHandler(webAppController.uploadAvatar));
 
+// Model Application File Uploads
+const applyController = require('./controllers/applyController');
+app.post('/api/apply/profile-photo', authenticateUser, uploadModelProfilePhoto, asyncHandler(applyController.uploadProfilePhoto));
+app.post('/api/apply/id-documents', authenticateUser, uploadModelIdDocuments, asyncHandler(applyController.uploadIdDocuments));
+
 // Web App User Location
 app.get('/api/webapp/profile/location', asyncHandler(userLocationController.getUserLocation));
 app.put('/api/webapp/profile/location', asyncHandler(userLocationController.updateUserLocation));
@@ -1861,7 +1919,7 @@ app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {
     return res.status(401).json({ success: false, error: 'Authentication required' });
   }
 
-  const { planId, provider } = req.body;
+  const { planId, provider, creatorId } = req.body;
   if (!planId) {
     return res.status(400).json({ success: false, error: 'planId is required' });
   }
@@ -1874,6 +1932,7 @@ app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {
     planId,
     provider: provider || 'epayco',
     chatId: user.telegramId || user.telegram_id || null,
+    creatorId: creatorId || null,
   });
 
   res.json(result);
@@ -2941,10 +3000,16 @@ app.use('/api/subscriptions', subscriptionRoutes);
 // Model routes
 app.use('/api/model', modelRoutes);
 
+// Model/Creator application routes
+app.use('/api/apply', applyRoutes);
+
 // PDS provisioning routes
 app.use('/api/pds', pdsRoutes);
 app.use('/api/bluesky', blueskyRoutes);
 app.use('/api/element', elementRoutes);
+
+// Creator monetization routes
+app.use('/api/webapp/creator', creatorRoutes);
 
 // ==========================================
 // ATProto / Bluesky OAuth Routes (PUBLIC — no session required)

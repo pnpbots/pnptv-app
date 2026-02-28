@@ -13,10 +13,13 @@ const Chat = lazy(() => import("@/pages/Chat"));
 const Social = lazy(() => import("@/pages/Social"));
 const Profile = lazy(() => import("@/pages/Profile"));
 const AdminDashboard = lazy(() => import("@/pages/admin/Dashboard"));
+const CreatorDashboard = lazy(() => import("@/pages/CreatorDashboard"));
+const CreatorApplications = lazy(() => import("@/pages/admin/CreatorApplications"));
 const Subscribe = lazy(() => import("@/pages/Subscribe"));
 const DirectMessages = lazy(() => import("@/pages/DirectMessages"));
 const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
 const Support = lazy(() => import("@/pages/Support"));
+const Apply = lazy(() => import("@/pages/Apply"));
 
 export const router = createBrowserRouter([
   {
@@ -140,6 +143,34 @@ export const router = createBrowserRouter([
             <VerificationGate>
               <Support />
             </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "apply",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <Apply />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "creator",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <CreatorDashboard />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "admin/creators",
+        element: (
+          <ModuleLoader>
+            <CreatorApplications />
           </ModuleLoader>
         ),
       },
