@@ -238,6 +238,7 @@ export interface NearbyUser {
   user_id: number;
   username?: string;
   name?: string;
+  photo_url?: string | null;
   latitude: number;
   longitude: number;
   distance_km?: number;

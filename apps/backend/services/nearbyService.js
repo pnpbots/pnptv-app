@@ -197,7 +197,7 @@ class NearbyService {
         const userIds = privacyFiltered.map(u => u.user_id);
         try {
           const profileResult = await query(
-            `SELECT id, username, first_name FROM users WHERE id = ANY($1)`,
+            `SELECT id, username, first_name, photo_file_id FROM users WHERE id = ANY($1)`,
             [userIds]
           );
           const profileMap = {};
@@ -207,6 +207,8 @@ class NearbyService {
             if (p) {
               u.username = p.username || null;
               u.name = p.first_name || null;
+              const photo = p.photo_file_id || null;
+              u.photo_url = (photo && (photo.startsWith('/') || photo.startsWith('http'))) ? photo : null;
             }
           });
         } catch (err) {
