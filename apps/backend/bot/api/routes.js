@@ -112,7 +112,7 @@ const requirePrimeTier = (req, res, next) => {
 // Rate limiter for page routes (landing pages, policies, etc.)
 const pageLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
-  max: 60,
+  max: 200, // 200 page requests per 15 min — generous for normal browsing
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests from this IP, please try again later.' },
@@ -700,12 +700,34 @@ app.use((req, res, next) => {
 });
 
 // Rate limiting for API
+// A single page navigation fires 5-10 API calls (auth-status, profile,
+// notifications, feed, performers, etc.).  100 req / 15 min was causing
+// 429s after just a few page switches.  Raised to 600 / 15 min (~40/min)
+// and key by session user-id so authenticated users each get their own
+// bucket instead of sharing a per-IP bucket behind proxies.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.',
+  max: 600, // ~40 requests per minute — handles rapid page navigation
+  message: 'Too many requests, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Prefer session user id so each logged-in user gets their own bucket.
+    // Fall back to IP for unauthenticated requests.
+    return req.session?.user?.id
+      ? `user:${req.session.user.id}`
+      : req.ip;
+  },
+  skip: (req) => {
+    // Skip rate-limiting for lightweight, high-frequency read endpoints
+    // that fire on every single page navigation.  These are cheap DB
+    // lookups or session reads and should never block normal usage.
+    const skipPaths = [
+      '/api/auth-status',
+      '/api/webapp/notifications/counts',
+    ];
+    return skipPaths.includes(req.path);
+  },
 });
 app.use('/api/', limiter);
 
@@ -887,7 +909,7 @@ const webhookLimiter = rateLimit({
 // Rate limiting for authentication endpoints (prevent brute force attacks)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // Limit each IP to 10 failed attempts per 15 minutes
+  max: 30, // 30 failed auth attempts per 15 min (only failures count)
   message: 'Too many authentication attempts, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,

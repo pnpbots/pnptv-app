@@ -797,47 +797,13 @@ const startBot = async () => {
         'edited_message',
       ];
 
-      // Try to set webhook with retry logic and fallback
-      let webhookSet = false;
-      const maxRetries = 3;
-      for (let i = 0; i < maxRetries; i++) {
-        try {
-          const webhookOpts = {
-            allowed_updates: allowedUpdates,
-            drop_pending_updates: false
-          };
-          if (process.env.WEBHOOK_SECRET_TOKEN) {
-            webhookOpts.secret_token = process.env.WEBHOOK_SECRET_TOKEN;
-          }
-          await bot.telegram.setWebhook(webhookUrl, webhookOpts);
-          logger.info(`✓ Webhook set to: ${webhookUrl}`);
-          webhookSet = true;
-          break;
-        } catch (webhookError) {
-          logger.warn(`Webhook setup attempt ${i + 1}/${maxRetries} failed:`, webhookError.message);
-          if (i < maxRetries - 1) {
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
-          }
-        }
-      }
+      // IMPORTANT: Register the webhook route handler and start the API server
+      // BEFORE telling Telegram to send updates. This prevents a race condition
+      // where Telegram delivers updates before the server is ready, causing
+      // "invalid secret token" rejections on restart.
+      const webhookSecretToken = process.env.WEBHOOK_SECRET_TOKEN;
 
-      if (!webhookSet) {
-        logger.error('Failed to set webhook after multiple attempts');
-        logger.warn('Webhook setup failed. Falling back to polling mode for bot functionality.');
-        try {
-          await bot.telegram.deleteWebhook();
-          await bot.launch();
-          botInstance = bot;
-          botStarted = true;
-          logger.info('✓ Bot started in polling mode (webhook fallback)');
-          return; // Exit webhook setup, polling is now active
-        } catch (pollingError) {
-          logger.error('Failed to enable polling fallback:', pollingError.message);
-          logger.warn('Bot will continue in degraded mode. Manual webhook setup required.');
-          logger.warn('You can set webhook later using: curl -X POST https://api.telegram.org/bot<TOKEN>/setWebhook?url=' + webhookUrl);
-        }
-      }
-      // Register webhook callback
+      // Register webhook callback FIRST (before setWebhook)
       apiApp.post(webhookPath, async (req, res) => {
         req.setTimeout(0);
         res.setTimeout(0);
@@ -845,11 +811,18 @@ const startBot = async () => {
         res.setHeader('Content-Type', 'application/json');
 
         // Validate webhook secret token
-        if (process.env.WEBHOOK_SECRET_TOKEN) {
+        if (webhookSecretToken) {
           const token = req.headers['x-telegram-bot-api-secret-token'];
-          if (token !== process.env.WEBHOOK_SECRET_TOKEN) {
-            logger.warn('Webhook rejected: invalid secret token');
-            return res.status(401).json({ ok: false, error: 'Unauthorized' });
+          if (token !== webhookSecretToken) {
+            logger.warn('Webhook rejected: invalid secret token', {
+              hasHeader: token !== undefined,
+              headerLength: token ? token.length : 0,
+              expectedLength: webhookSecretToken.length,
+              ip: req.headers['x-real-ip'] || req.ip,
+            });
+            // Return 200 to prevent Telegram from disabling the webhook
+            // after too many non-2xx responses. The update is silently dropped.
+            return res.status(200).json({ ok: true });
           }
         }
 
@@ -917,6 +890,61 @@ const startBot = async () => {
         });
       });
       logger.info(`✓ Webhook test endpoint registered at: ${webhookPath} (GET)`);
+
+      // Add 404 and error handlers before starting the server
+      const {
+        errorHandler: expressErrorHandler,
+        notFoundHandler: expressNotFoundHandler
+      } = require('../api/middleware/errorHandler');
+      apiApp.use(expressNotFoundHandler);
+      apiApp.use(expressErrorHandler);
+      logger.info('✓ Error handlers registered');
+
+      // Start API server BEFORE setWebhook so we can receive updates immediately
+      startApiServer();
+      logger.info('✓ API server started, ready to receive webhook updates');
+
+      // NOW tell Telegram to send updates — the server is already listening
+      let webhookSet = false;
+      const maxRetries = 3;
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          const webhookOpts = {
+            allowed_updates: allowedUpdates,
+            drop_pending_updates: false
+          };
+          if (webhookSecretToken) {
+            webhookOpts.secret_token = webhookSecretToken;
+          }
+          await bot.telegram.setWebhook(webhookUrl, webhookOpts);
+          logger.info(`✓ Webhook set to: ${webhookUrl} (secret_token: ${webhookSecretToken ? 'configured' : 'none'})`);
+          webhookSet = true;
+          break;
+        } catch (webhookError) {
+          logger.warn(`Webhook setup attempt ${i + 1}/${maxRetries} failed:`, webhookError.message);
+          if (i < maxRetries - 1) {
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
+          }
+        }
+      }
+
+      if (!webhookSet) {
+        logger.error('Failed to set webhook after multiple attempts');
+        logger.warn('Webhook setup failed. Falling back to polling mode for bot functionality.');
+        try {
+          await bot.telegram.deleteWebhook();
+          await bot.launch();
+          botInstance = bot;
+          botStarted = true;
+          logger.info('✓ Bot started in polling mode (webhook fallback)');
+          return; // Exit webhook setup, polling is now active
+        } catch (pollingError) {
+          logger.error('Failed to enable polling fallback:', pollingError.message);
+          logger.warn('Bot will continue in degraded mode. Manual webhook setup required.');
+          logger.warn('You can set webhook later using: curl -X POST https://api.telegram.org/bot<TOKEN>/setWebhook?url=' + webhookUrl);
+        }
+      }
+
       botInstance = bot; // Asignar la instancia del bot
       botStarted = true; // Actualizar el estado
       isWebhookMode = true; // Marcar que estamos en modo webhook
@@ -928,18 +956,20 @@ const startBot = async () => {
       botInstance = bot; // Asignar la instancia del bot
       botStarted = true; // Actualizar el estado
       logger.info('✓ Bot started in polling mode');
+
+      // Add 404 and error handlers
+      const {
+        errorHandler: expressErrorHandler,
+        notFoundHandler: expressNotFoundHandler
+      } = require('../api/middleware/errorHandler');
+      apiApp.use(expressNotFoundHandler);
+      apiApp.use(expressErrorHandler);
+      logger.info('✓ Error handlers registered');
+
+      // Start API server
+      startApiServer();
     }
-    // Add 404 and error handlers
-    const {
-      errorHandler: expressErrorHandler,
-      notFoundHandler: expressNotFoundHandler
-    } = require('../api/middleware/errorHandler');
-    apiApp.use(expressNotFoundHandler);
-    apiApp.use(expressErrorHandler);
-    logger.info('✓ Error handlers registered');
-    // Start API server
-    startApiServer();
-    logger.info('🚀 PNPtv Telegram Bot is running!');
+    logger.info('PNPtv Telegram Bot is running!');
     performanceMonitor.end('bot_startup', { mode: isWebhookMode ? 'webhook' : 'polling' });
     performanceMonitor.logSummary();
 
