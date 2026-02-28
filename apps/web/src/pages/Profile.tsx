@@ -894,6 +894,8 @@ export default function Profile() {
   const [editOpen, setEditOpen] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [activeTab, setActiveTab] = useState<"posts" | "likes">("posts");
+  const [wofConsent, setWofConsent] = useState(false);
+  const [wofConsentSaving, setWofConsentSaving] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -911,6 +913,7 @@ export default function Profile() {
         ]);
         if (!cursor) {
           setProfile(profileRes.profile);
+          setWofConsent(profileRes.profile.wofPhotoConsent ?? false);
           setPosts(postsRes.posts);
         } else {
           setPosts((prev) => [...prev, ...postsRes.posts]);
@@ -956,6 +959,19 @@ export default function Profile() {
     } finally {
       setAvatarUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleWofConsentToggle = async () => {
+    const newValue = !wofConsent;
+    setWofConsentSaving(true);
+    try {
+      await updateProfile({ wofPhotoConsent: newValue });
+      setWofConsent(newValue);
+    } catch {
+      // Revert on failure
+    } finally {
+      setWofConsentSaving(false);
     }
   };
 
@@ -1216,6 +1232,39 @@ export default function Profile() {
       {/* ── Identity & Connections (own profile only) ── */}
       {isOwnProfile && (
         <IdentityConnections telegramUsername={profile.username} />
+      )}
+
+      {/* ── Privacy Preferences (own profile only) ── */}
+      {isOwnProfile && (
+        <div className="glass-card-sm p-5 mt-4">
+          <h2 className="text-sm font-semibold text-white mb-4 tracking-wide uppercase opacity-60">
+            Privacy Preferences
+          </h2>
+          <div className="flex items-center justify-between rounded-lg px-3 py-3" style={{ background: "rgba(255,180,84,0.06)", border: "1px solid rgba(255,180,84,0.15)" }}>
+            <div className="flex-1 min-w-0 mr-3">
+              <p className="text-sm font-medium text-white">Wall of Fame Photo Consent</p>
+              <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                Allow your Wall of Fame photos to appear in the Social Feed on the web app
+              </p>
+            </div>
+            <button
+              role="switch"
+              aria-checked={wofConsent}
+              aria-label="Wall of Fame photo consent"
+              onClick={handleWofConsentToggle}
+              disabled={wofConsentSaving}
+              className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+              style={{
+                background: wofConsent ? "#FFB454" : "rgba(255,255,255,0.15)",
+              }}
+            >
+              <span
+                className="inline-block h-4 w-4 rounded-full bg-white shadow transition-transform duration-200"
+                style={{ transform: wofConsent ? "translateX(22px)" : "translateX(3px)" }}
+              />
+            </button>
+          </div>
+        </div>
       )}
 
       {/* ── Tabs ── */}

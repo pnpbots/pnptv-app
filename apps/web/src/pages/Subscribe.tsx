@@ -9,7 +9,10 @@ import {
 
 type Provider = "epayco" | "daimo";
 
+const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
+
 const PLAN_FEATURES: Record<string, string[]> = {
+  member_monthly: ["Private hangout rooms", "Social feed access", "Nearby users discovery", "Just $4.99/month"],
   week_pass: ["7 days of PRIME access", "Exclusive video content", "Cancel anytime"],
   three_months: ["90 days of PRIME access", "Exclusive video content", "Hangout groups", "Save 25%"],
   crystal: ["Premium 90-day plan", "All PRIME features", "Priority support", "Nearby discovery"],
@@ -138,7 +141,57 @@ export default function Subscribe() {
 
       {/* Plan cards */}
       <div className="space-y-3 mb-6">
-        {plans.map((plan) => {
+        {/* Member tier plans */}
+        {plans.some((p) => MEMBER_PLAN_IDS.has(p.id)) && (
+          <div className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary mb-1">
+            Member
+          </div>
+        )}
+        {plans.filter((p) => MEMBER_PLAN_IDS.has(p.id)).map((plan) => {
+          const isSelected = selectedPlan === plan.id;
+          const features = PLAN_FEATURES[plan.id] || ["Member access"];
+          const displayPrice = showCOP ? formatPrice(plan.priceCOP, "COP") : formatPrice(plan.priceUSD, "USD");
+
+          return (
+            <button
+              key={plan.id}
+              onClick={() => setSelectedPlan(plan.id)}
+              className={`w-full text-left rounded-xl p-4 border-2 transition-all duration-200 ${
+                isSelected
+                  ? "border-[#D4007A] bg-[#D4007A]/10"
+                  : "border-white/10 bg-white/5 hover:border-white/20"
+              }`}
+            >
+              <div className="flex items-start justify-between mb-2">
+                <div>
+                  <span className="font-semibold text-pnp-textPrimary">
+                    {plan.display_name || plan.name}
+                  </span>
+                  <div className="text-xs text-pnp-textSecondary">Monthly</div>
+                </div>
+                <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
+              </div>
+              <ul className="space-y-1">
+                {features.map((f) => (
+                  <li key={f} className="flex items-center gap-2 text-xs text-pnp-textSecondary">
+                    <svg className="w-3 h-3 text-[#D4007A] flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                    {f}
+                  </li>
+                ))}
+              </ul>
+            </button>
+          );
+        })}
+
+        {/* PRIME tier plans */}
+        {plans.some((p) => !MEMBER_PLAN_IDS.has(p.id)) && (
+          <div className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary mt-4 mb-1">
+            PRIME
+          </div>
+        )}
+        {plans.filter((p) => !MEMBER_PLAN_IDS.has(p.id)).map((plan) => {
           const isSelected = selectedPlan === plan.id;
           const isRecommended = plan.id === RECOMMENDED_PLAN || plan.sku === RECOMMENDED_PLAN;
           const features = PLAN_FEATURES[plan.sku] || PLAN_FEATURES[plan.id] || ["PRIME access", "Exclusive content"];

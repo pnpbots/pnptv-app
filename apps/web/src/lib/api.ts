@@ -332,6 +332,7 @@ export interface UserProfile {
   youtubeHandle?: string;
   memberSince: string;
   postCount?: number;
+  wofPhotoConsent?: boolean;
 }
 
 export interface SocialPostItem {
@@ -354,6 +355,7 @@ export interface SocialPostItem {
   repost_created_at?: string;
   repost_author_username?: string;
   repost_author_first_name?: string;
+  is_wof?: boolean;
   // Bluesky cross-post fields
   bluesky_uri?: string | null;
   bluesky_cid?: string | null;
@@ -414,6 +416,7 @@ export function updateProfile(
     instagramHandle: string;
     tiktokHandle: string;
     youtubeHandle: string;
+    wofPhotoConsent: boolean;
   }>
 ): Promise<{ success: boolean }> {
   return request("/api/webapp/profile", { method: "PUT", body: fields });
@@ -459,6 +462,15 @@ export function getSocialFeedPosts(
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
   return request(`/api/webapp/social/feed?${params}`);
+}
+
+export function getWofFeedPosts(
+  cursor?: string,
+  limit = 20
+): Promise<{ success: boolean; posts: SocialPostItem[]; nextCursor: string | null }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  return request(`/api/webapp/social/wof-feed?${params}`);
 }
 
 export function createSocialPost(
@@ -884,11 +896,17 @@ export function markThreadAsRead(otherUserId: string): Promise<{
 
 export interface Notification {
   id: string;
-  type: "like" | "message" | "group_message" | "comment" | "follow";
+  type: string;
+  category?: string;
+  priority?: string;
   actorId: string;
   actorUsername: string;
   actorFirstName: string;
   actorPhotoUrl: string | null;
+  entityType?: string;
+  entityId?: string;
+  metadata?: Record<string, unknown>;
+  isRead?: boolean;
   postId?: number;
   groupId?: number;
   groupName?: string;
@@ -898,8 +916,11 @@ export interface Notification {
 }
 
 export interface NotificationCounts {
-  messages: number;
-  likes: number;
+  social?: number;
+  messaging?: number;
+  hangouts?: number;
+  commerce?: number;
+  system?: number;
   total: number;
 }
 
@@ -953,6 +974,7 @@ export interface SubscriptionPlan {
   priceCOP: number;
   exchangeRate?: number;
   active: boolean;
+  tier?: string;
 }
 
 export function getSubscriptionPlans(): Promise<{

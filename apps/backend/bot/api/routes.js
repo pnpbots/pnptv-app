@@ -2153,6 +2153,8 @@ app.post('/api/webapp/dm/send/:recipientId', asyncHandler(dmController.sendMessa
 app.get('/api/webapp/social/home-feed', asyncHandler(socialController.getHomeFeed));
 // Authenticated feed — full paginated feed with liked_by_me per viewer
 app.get('/api/webapp/social/feed', asyncHandler(socialController.getFeed));
+// Wall of Fame sub-feed — WoF-only posts
+app.get('/api/webapp/social/wof-feed', asyncHandler(socialController.getWofFeed));
 app.get('/api/webapp/social/wall/:userId', asyncHandler(socialController.getWall));
 app.get('/api/webapp/social/profile/:userId', asyncHandler(socialController.getPublicProfile));
 app.post('/api/webapp/social/posts', asyncHandler(socialController.createPost));

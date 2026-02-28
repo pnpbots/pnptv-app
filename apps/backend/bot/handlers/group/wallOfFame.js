@@ -10,6 +10,8 @@ const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
 const SubscriptionService = require('../../services/subscriptionService');
 const { processHangoutMedia } = require('../../services/hangoutMediaService');
+const SocialPostService = require('../../services/socialPostService');
+const NotificationEmitter = require('../../services/notificationEmitter');
 
 const BADGE_HIGH_LEGEND = 'High Legend of the Cult';
 const BADGE_TRIBUTE = 'Tribute of the Cult';
@@ -64,8 +66,10 @@ async function getWofGroupId() {
 }
 
 /**
- * Dual-post a Wall of Fame photo/video to the hangout group system.
+ * Dual-post a Wall of Fame photo/video to the Social Feed as a WoF post.
  * Fire-and-forget: errors are logged but never affect the Telegram flow.
+ * Checks wof_photo_consent before posting — if the user hasn't consented,
+ * the social post is silently skipped.
  *
  * @param {Object} ctx      - Telegraf context (for telegram.getFileLink)
  * @param {string} fileId   - Telegram file_id for the photo/video
@@ -73,11 +77,12 @@ async function getWofGroupId() {
  * @param {Object} user     - User row from DB
  * @param {string} mimetype - Original mime type hint (e.g. 'image/jpeg')
  */
-async function postToHangoutGroup(ctx, fileId, mediaType, user, mimetype) {
+async function postToSocialFeed(ctx, fileId, mediaType, user, mimetype) {
   try {
-    const groupId = await getWofGroupId();
-    if (!groupId) {
-      logger.debug('WoF hangout group not found, skipping dual-post');
+    // Check photo consent before posting to social feed
+    const consentResult = await query('SELECT wof_photo_consent FROM users WHERE id = $1', [user.id]);
+    if (!consentResult.rows[0]?.wof_photo_consent) {
+      logger.debug('WoF social post skipped: user has not consented', { userId: user.id });
       return;
     }
 
@@ -86,45 +91,40 @@ async function postToHangoutGroup(ctx, fileId, mediaType, user, mimetype) {
     const response = await axios.get(fileLink.href, { responseType: 'arraybuffer', timeout: 30000 });
     const buffer = Buffer.from(response.data);
 
-    // Build a multer-like file object for processHangoutMedia
-    const file = {
-      buffer,
-      mimetype: mimetype || (mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
-    };
+    // Process media into /public/uploads/posts/
+    const sharp = require('sharp');
+    const path = require('path');
+    const fs = require('fs').promises;
+    const uploadDir = path.join(__dirname, '../../../../public/uploads/posts');
+    await fs.mkdir(uploadDir, { recursive: true });
 
-    const mediaResult = await processHangoutMedia(file, groupId, user.id);
-    const room = `hangout:${groupId}`;
+    let mediaUrl = null;
 
-    // Look up user photo for the chat message
-    const photoResult = await query('SELECT photo_file_id FROM users WHERE id = $1', [user.id]);
-    const rawPhoto = photoResult.rows[0]?.photo_file_id || null;
-    const isValidUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
-    const photoUrl = isValidUrl(rawPhoto) ? rawPhoto : null;
+    if (mediaType === 'image') {
+      const filename = `wof-${user.id}-${Date.now()}.webp`;
+      const filePath = path.join(uploadDir, filename);
+      await sharp(buffer)
+        .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 70, progressive: true })
+        .toFile(filePath);
+      mediaUrl = `/uploads/posts/${filename}`;
+    } else {
+      const ext = (mimetype || '').includes('webm') ? 'webm' : 'mp4';
+      const filename = `wof-${user.id}-${Date.now()}.${ext}`;
+      const filePath = path.join(uploadDir, filename);
+      await fs.writeFile(filePath, buffer);
+      mediaUrl = `/uploads/posts/${filename}`;
+    }
 
-    const { rows } = await query(
-      `INSERT INTO chat_messages
-         (room, user_id, username, first_name, photo_url, content,
-          media_url, media_type, media_mime, media_thumb_url,
-          media_width, media_height, media_metadata)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-       RETURNING id, room, user_id, username, first_name, photo_url, content,
-                 media_url, media_type, media_mime, media_thumb_url,
-                 media_width, media_height, media_metadata, created_at`,
-      [
-        room,
-        user.id,
-        user.username || null,
-        user.firstName || user.first_name || null,
-        photoUrl,
-        null, // no caption for WoF auto-posts
-        mediaResult.mediaUrl,
-        mediaResult.mediaType,
-        mediaResult.mediaMime,
-        mediaResult.thumbUrl || null,
-        mediaResult.width || null,
-        mediaResult.height || null,
-        mediaResult.metadata ? JSON.stringify(mediaResult.metadata) : null,
-      ]
+    // Create a WoF social post
+    const post = await SocialPostService.createPost(
+      user.id,
+      '', // WoF auto-posts have no text content
+      mediaUrl,
+      mediaType,
+      null, // replyToId
+      null, // repostOfId
+      true  // isWof
     );
 
     // Emit via Socket.IO if available
@@ -132,19 +132,23 @@ async function postToHangoutGroup(ctx, fileId, mediaType, user, mimetype) {
       const apiApp = require('../../api/routes');
       const io = apiApp.get('io');
       if (io) {
-        const msg = {
-          ...rows[0],
-          photo_url: isValidUrl(rows[0].photo_url) ? rows[0].photo_url : null,
-        };
-        io.to(room).emit('chat:message', msg);
+        io.emit('feed:new_post', {
+          ...post,
+          is_wof: true,
+          author_id: user.id,
+          author_username: user.username || null,
+          author_first_name: user.firstName || user.first_name || null,
+          author_photo: null,
+          liked_by_me: false,
+        });
       }
     } catch (ioErr) {
-      logger.debug('WoF dual-post: Socket.IO emit skipped', { error: ioErr.message });
+      logger.debug('WoF social post: Socket.IO emit skipped', { error: ioErr.message });
     }
 
-    logger.info('WoF dual-posted to hangout group', { userId: user.id, groupId });
+    logger.info('WoF posted to social feed', { userId: user.id, postId: post.id });
   } catch (err) {
-    logger.warn('WoF dual-post failed (non-blocking)', { error: err.message });
+    logger.warn('WoF social post failed (non-blocking)', { error: err.message });
   }
 }
 
@@ -222,6 +226,12 @@ async function notifyLegendWinner(telegram, userId, dateKey) {
   if (!userId) return;
 
   try {
+    NotificationEmitter.emit({
+      type: 'wof_winner', category: 'social', priority: 'high',
+      targetUserId: String(userId), entityType: 'user', entityId: String(userId),
+      message: `You won the ${BADGE_HIGH_LEGEND} title! Check your Telegram DMs for details.`,
+      metadata: { badge: BADGE_HIGH_LEGEND, dateKey },
+    });
     await UserModel.addBadge(userId, BADGE_HIGH_LEGEND);
     await sendWinnerMessage(telegram, userId, BADGE_HIGH_LEGEND, dateKey, {
       es: 'Has ganado 3 días PRIME por ser quien recibió más interacciones.',
@@ -240,6 +250,12 @@ async function notifyNewMemberWinner(telegram, userId, dateKey) {
   if (!userId) return;
 
   try {
+    NotificationEmitter.emit({
+      type: 'wof_winner', category: 'social', priority: 'high',
+      targetUserId: String(userId), entityType: 'user', entityId: String(userId),
+      message: `You won the ${BADGE_TRIBUTE} title! Check your Telegram DMs for details.`,
+      metadata: { badge: BADGE_TRIBUTE, dateKey },
+    });
     await UserModel.addBadge(userId, BADGE_TRIBUTE);
     await sendWinnerMessage(telegram, userId, BADGE_TRIBUTE, dateKey, {
       es: 'Fuiste el Nuevo Miembro Destacado. Estás invitado al próximo hangout privado con Santino.',
@@ -258,6 +274,12 @@ async function notifyActiveWinner(telegram, userId, dateKey) {
   if (!userId) return;
 
   try {
+    NotificationEmitter.emit({
+      type: 'wof_winner', category: 'social', priority: 'high',
+      targetUserId: String(userId), entityType: 'user', entityId: String(userId),
+      message: `You won the ${BADGE_LOYAL} title! Check your Telegram DMs for details.`,
+      metadata: { badge: BADGE_LOYAL, dateKey },
+    });
     await UserModel.addBadge(userId, BADGE_LOYAL);
     await sendWinnerMessage(telegram, userId, BADGE_LOYAL, dateKey, {
       es: 'Fuiste el Miembro Activo Destacado. Estás invitado al próximo hangout privado con Lex.',
@@ -440,8 +462,8 @@ const registerWallOfFameHandlers = (bot) => {
             wallOfFameMessageId: sentMessage.message_id,
           });
 
-          // Dual-post to hangout group (fire-and-forget)
-          postToHangoutGroup(ctx, fileId, 'image', user, 'image/jpeg');
+          // Dual-post to social feed (fire-and-forget)
+          postToSocialFeed(ctx, fileId, 'image', user, 'image/jpeg');
         } else if (isVideo) {
           const video = ctx.message.video;
           const fileId = video.file_id;
@@ -479,8 +501,8 @@ const registerWallOfFameHandlers = (bot) => {
             wallOfFameMessageId: sentMessage.message_id,
           });
 
-          // Dual-post to hangout group (fire-and-forget)
-          postToHangoutGroup(ctx, fileId, 'video', user, video.mime_type || 'video/mp4');
+          // Dual-post to social feed (fire-and-forget)
+          postToSocialFeed(ctx, fileId, 'video', user, video.mime_type || 'video/mp4');
         }
 
         // Delete the original message from the group to avoid duplicates

@@ -7,6 +7,9 @@
  */
 
 const EPAYCO_SUBSCRIPTION_PLANS = {
+  // PNP MEMBER - PNPMEMBER030 - $4.99 USD (monthly)
+  member_monthly: 'PNPMEMBER030',
+
   // WEEK PASS - 007PASS - $14.99 USD
   week_pass: '007PASS',
 

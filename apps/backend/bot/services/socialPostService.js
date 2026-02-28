@@ -85,6 +85,34 @@ class SocialPostService {
     return { posts: sanitizePostRows(rows) };
   }
 
+  // ── Wall of Fame Feed ───────────────────────────────────────────────────────
+
+  /**
+   * Paginated WoF sub-feed for the Social page (/api/webapp/social/wof-feed).
+   * Same pattern as getFeed but filters WHERE is_wof = true.
+   */
+  static async getWofFeed(userId, cursor, limit = 20) {
+    const lim = Math.min(Number(limit) || 20, 50);
+    const cursorId = cursor ? parseInt(cursor, 10) : null;
+    const params = cursorId ? [userId, lim, cursorId] : [userId, lim];
+    const { rows } = await query(
+      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
+              sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_wof, sp.created_at,
+              u.id as author_id, u.username as author_username,
+              u.first_name as author_first_name, u.photo_file_id as author_photo,
+              EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me
+       FROM social_posts sp
+       JOIN users u ON sp.user_id = u.id
+       WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL AND sp.is_wof = true
+         ${cursorId ? 'AND sp.id < $3' : ''}
+       ORDER BY sp.id DESC
+       LIMIT $2`,
+      params
+    );
+    const nextCursor = rows.length === lim ? String(rows[rows.length - 1].id) : null;
+    return { posts: sanitizePostRows(rows), nextCursor };
+  }
+
   // ── Wall ──────────────────────────────────────────────────────────────────
 
   static async getWall(userId, viewerId, cursor, limit = 20) {
@@ -120,13 +148,13 @@ class SocialPostService {
 
   // ── Create Post ───────────────────────────────────────────────────────────
 
-  static async createPost(userId, content, mediaUrl, mediaType, replyToId, repostOfId) {
+  static async createPost(userId, content, mediaUrl, mediaType, replyToId, repostOfId, isWof = false) {
     const { rows } = await query(
-      `INSERT INTO social_posts (user_id, content, media_url, media_type, reply_to_id, repost_of_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO social_posts (user_id, content, media_url, media_type, reply_to_id, repost_of_id, is_wof)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, content, media_url, media_type, reply_to_id, repost_of_id,
-                 likes_count, reposts_count, replies_count, created_at`,
-      [userId, content, mediaUrl, mediaType, replyToId || null, repostOfId || null]
+                 likes_count, reposts_count, replies_count, is_wof, created_at`,
+      [userId, content, mediaUrl, mediaType, replyToId || null, repostOfId || null, isWof]
     );
     const post = rows[0];
 

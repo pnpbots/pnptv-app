@@ -448,16 +448,16 @@ const registerOnboardingHandlers = (bot) => {
   bot.action('share_location_yes', async (ctx) => {
     try {
       const lang = getLanguage(ctx);
-      
+
       // Set location sharing preference
       if (ctx.from?.id) {
         await UserService.updateProfile(ctx.from.id, {
           locationSharingEnabled: true
         });
       }
-      
+
       await ctx.editMessageText(t('locationSharingEnabled', lang));
-      await completeOnboarding(ctx);
+      await showWofPhotoConsentPrompt(ctx);
     } catch (error) {
       logger.error('Error enabling location sharing:', error);
     }
@@ -466,18 +466,51 @@ const registerOnboardingHandlers = (bot) => {
   bot.action('share_location_no', async (ctx) => {
     try {
       const lang = getLanguage(ctx);
-      
+
       // Set location sharing preference
       if (ctx.from?.id) {
         await UserService.updateProfile(ctx.from.id, {
           locationSharingEnabled: false
         });
       }
-      
+
       await ctx.editMessageText(t('locationSharingDisabled', lang));
-      await completeOnboarding(ctx);
+      await showWofPhotoConsentPrompt(ctx);
     } catch (error) {
       logger.error('Error disabling location sharing:', error);
+    }
+  });
+
+  // WoF photo consent actions
+  bot.action('wof_consent_yes', async (ctx) => {
+    try {
+      const lang = getLanguage(ctx);
+      if (ctx.from?.id) {
+        await UserService.updateProfile(ctx.from.id, { wofPhotoConsent: true });
+      }
+      const msg = lang === 'es'
+        ? 'Tu consentimiento ha sido registrado. Tus fotos del Wall of Fame se compartirán en el feed social.'
+        : 'Your consent has been recorded. Your Wall of Fame photos will be shared on the social feed.';
+      await ctx.editMessageText(msg);
+      await completeOnboarding(ctx);
+    } catch (error) {
+      logger.error('Error setting WoF consent yes:', error);
+    }
+  });
+
+  bot.action('wof_consent_no', async (ctx) => {
+    try {
+      const lang = getLanguage(ctx);
+      if (ctx.from?.id) {
+        await UserService.updateProfile(ctx.from.id, { wofPhotoConsent: false });
+      }
+      const msg = lang === 'es'
+        ? 'Entendido. Tus fotos del Wall of Fame no se compartirán en el feed social. Puedes cambiar esto en tu perfil.'
+        : 'Got it. Your Wall of Fame photos will not be shared on the social feed. You can change this in your profile.';
+      await ctx.editMessageText(msg);
+      await completeOnboarding(ctx);
+    } catch (error) {
+      logger.error('Error setting WoF consent no:', error);
     }
   });
 
@@ -937,6 +970,45 @@ Want other members to find you on the *Who is Nearby?* map?
       ...Markup.inlineKeyboard([
         [Markup.button.callback('📍 Yes, Share My Location', 'share_location_yes')],
         [Markup.button.callback('🚫 No Thanks', 'share_location_no')],
+      ]),
+    }
+  );
+};
+
+/**
+ * Show Wall of Fame photo consent prompt
+ * @param {Context} ctx - Telegraf context
+ */
+const showWofPhotoConsentPrompt = async (ctx) => {
+  const lang = getLanguage(ctx);
+
+  const consentText = lang === 'es'
+    ? `📸 *Consentimiento de Fotos — Wall of Fame*
+
+Cuando publicas fotos o videos en el grupo, estos se muestran en el *Wall of Fame* del Telegram.
+
+¿También quieres que aparezcan en el *Feed Social* de la web app?
+
+💡 *Esto es completamente opcional* y puedes cambiarlo en cualquier momento desde tu perfil.
+
+🔒 *Tu privacidad importa*: Solo las fotos del Wall of Fame se compartirán, nunca contenido privado.`
+    : `📸 *Photo Consent — Wall of Fame*
+
+When you post photos or videos in the group, they appear on the *Wall of Fame* in Telegram.
+
+Would you also like them to appear in the *Social Feed* on the web app?
+
+💡 *This is completely optional* and you can change it anytime in your profile.
+
+🔒 *Your privacy matters*: Only Wall of Fame photos will be shared, never private content.`;
+
+  await ctx.reply(
+    consentText,
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback(lang === 'es' ? '✅ Sí, compartir mis fotos' : '✅ Yes, share my photos', 'wof_consent_yes')],
+        [Markup.button.callback(lang === 'es' ? '🚫 No, gracias' : '🚫 No thanks', 'wof_consent_no')],
       ]),
     }
   );

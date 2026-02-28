@@ -42,9 +42,9 @@ const fetchUserRecord = async (userId) => {
   return result.rows[0] || null;
 };
 
-const isPrimeUserRecord = (user) => {
+const hasMemberAccess = (user) => {
   if (!user) return false;
-  return user.tier === 'PRIME';
+  return user.tier === 'member' || user.tier === 'PRIME';
 };
 
 const isAdminRecord = (user) => {
@@ -158,11 +158,11 @@ class HangoutsController {
         });
       }
 
-      const hasPrimeAccess = isPrimeUserRecord(user) || isAdminRecord(user);
-      if (!isPublic && !hasPrimeAccess) {
+      const hasPaidAccess = hasMemberAccess(user) || isAdminRecord(user);
+      if (!isPublic && !hasPaidAccess) {
         return res.status(403).json({
           success: false,
-          error: 'Prime membership required for private rooms',
+          error: 'Membership required for private rooms',
         });
       }
 

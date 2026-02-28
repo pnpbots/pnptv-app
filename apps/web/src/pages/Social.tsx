@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Modal } from "@pnptv/ui-kit";
 import {
   getSocialFeedPosts,
+  getWofFeedPosts,
   createSocialPost,
   togglePostLike,
   deleteSocialPost,
@@ -192,6 +193,12 @@ function PostCard({
             {post.source === "bluesky" && !post.bluesky_uri && (
               <BlueskyBadge label="From Bluesky" />
             )}
+            {/* Wall of Fame badge */}
+            {post.is_wof && (
+              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,180,84,0.15)", color: "#FFB454" }}>
+                Wall of Fame
+              </span>
+            )}
 
             {/* Delete (own posts or admin) */}
             {canDelete && (
@@ -340,11 +347,22 @@ export default function Social() {
   const navigate = useNavigate();
   const currentUserId = String(user?.id || "");
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState<"all" | "wof">("all");
+
   const [posts, setPosts] = useState<SocialPostItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  // WoF tab state
+  const [wofPosts, setWofPosts] = useState<SocialPostItem[]>([]);
+  const [wofLoading, setWofLoading] = useState(false);
+  const [wofError, setWofError] = useState<string | null>(null);
+  const [wofNextCursor, setWofNextCursor] = useState<string | null>(null);
+  const [wofLoadingMore, setWofLoadingMore] = useState(false);
+  const [wofLoaded, setWofLoaded] = useState(false);
 
   // Featured performers
   const [featuredPerformers, setFeaturedPerformers] = useState<FeaturedPerformer[]>([]);
@@ -410,25 +428,62 @@ export default function Social() {
     loadFeed(nextCursor);
   }, [nextCursor, loadingMore, loadFeed]);
 
-  // Like
+  // WoF feed loading (lazy — only when tab is first selected)
+  const loadWofFeed = useCallback(async (cursor?: string) => {
+    try {
+      const res = await getWofFeedPosts(cursor, 20);
+      if (res.success) {
+        if (cursor) {
+          setWofPosts((prev) => [...prev, ...res.posts]);
+        } else {
+          setWofPosts(res.posts);
+        }
+        setWofNextCursor(res.nextCursor);
+      }
+    } catch (err) {
+      setWofError(err instanceof Error ? err.message : "Failed to load Wall of Fame feed");
+    } finally {
+      setWofLoading(false);
+      setWofLoadingMore(false);
+    }
+  }, []);
+
+  const handleTabChange = useCallback((tab: "all" | "wof") => {
+    setActiveTab(tab);
+    if (tab === "wof" && !wofLoaded) {
+      setWofLoading(true);
+      setWofLoaded(true);
+      loadWofFeed();
+    }
+  }, [wofLoaded, loadWofFeed]);
+
+  const handleWofLoadMore = useCallback(() => {
+    if (!wofNextCursor || wofLoadingMore) return;
+    setWofLoadingMore(true);
+    loadWofFeed(wofNextCursor);
+  }, [wofNextCursor, wofLoadingMore, loadWofFeed]);
+
+  // Like — update both feed arrays so switching tabs stays consistent
   const handleLike = useCallback(async (postId: number) => {
     try {
       const res = await togglePostLike(postId);
-      setPosts((prev) =>
+      const updater = (prev: SocialPostItem[]) =>
         prev.map((p) =>
           p.id === postId
             ? { ...p, liked_by_me: res.liked, likes_count: p.likes_count + (res.liked ? 1 : -1) }
             : p
-        )
-      );
+        );
+      setPosts(updater);
+      setWofPosts(updater);
     } catch { /* silent */ }
   }, []);
 
-  // Delete
+  // Delete — remove from both arrays
   const handleDelete = useCallback(async (postId: number) => {
     try {
       await deleteSocialPost(postId);
       setPosts((prev) => prev.filter((p) => p.id !== postId));
+      setWofPosts((prev) => prev.filter((p) => p.id !== postId));
     } catch { /* silent */ }
   }, []);
 
@@ -564,8 +619,8 @@ export default function Social() {
         </div>
       )}
 
-      {/* Post Composer */}
-      {isAuthenticated && (
+      {/* Post Composer (hidden on WoF tab) */}
+      {isAuthenticated && activeTab === "all" && (
         <div className="glass-card-sm p-4 mb-6">
           <div className="flex gap-3">
             {/* Composer avatar — show user photo */}
@@ -715,8 +770,30 @@ export default function Social() {
         </div>
       )}
 
-      {/* Feed */}
-      {isLoading ? (
+      {/* ── Tab Bar ── */}
+      <div className="flex border-b border-white/10 mb-4">
+        <button
+          onClick={() => handleTabChange("all")}
+          className={`flex-1 py-3 text-sm font-semibold text-center transition-colors ${
+            activeTab === "all" ? "text-white border-b-2" : "text-white/50"
+          }`}
+          style={activeTab === "all" ? { borderImage: "linear-gradient(to right, #D4007A, #E69138) 1" } : undefined}
+        >
+          All Posts
+        </button>
+        <button
+          onClick={() => handleTabChange("wof")}
+          className={`flex-1 py-3 text-sm font-semibold text-center transition-colors ${
+            activeTab === "wof" ? "text-white border-b-2" : "text-white/50"
+          }`}
+          style={activeTab === "wof" ? { borderImage: "linear-gradient(to right, #FFB454, #E69138) 1" } : undefined}
+        >
+          Wall of Fame
+        </button>
+      </div>
+
+      {/* ── All Posts Feed ── */}
+      {activeTab === "all" && (isLoading ? (
         <div className="space-y-3">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="glass-card-sm p-4 animate-pulse">
@@ -778,7 +855,71 @@ export default function Social() {
             </div>
           )}
         </div>
-      )}
+      ))}
+
+      {/* ── Wall of Fame Feed ── */}
+      {activeTab === "wof" && (wofLoading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="glass-card-sm p-4 animate-pulse">
+              <div className="flex gap-3">
+                <div className="w-10 h-10 rounded-full bg-white/10 flex-shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 bg-white/10 rounded w-32" />
+                  <div className="h-3 bg-white/10 rounded w-full" />
+                  <div className="h-3 bg-white/10 rounded w-3/4" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : wofError ? (
+        <div className="glass-card-sm p-8 text-center">
+          <p className="text-white font-medium mb-1">Feed Unavailable</p>
+          <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>{wofError}</p>
+          <button onClick={() => { setWofError(null); setWofLoading(true); loadWofFeed(); }} className="btn-gradient px-4 py-1.5 rounded-lg text-white text-sm font-semibold">
+            Retry
+          </button>
+        </div>
+      ) : wofPosts.length === 0 ? (
+        <div className="glass-card-sm p-8 text-center">
+          <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#FFB454" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-3.375c0-.621-.503-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.007 0H9.497m5.007 0a7.454 7.454 0 01-.982-3.172M9.497 14.25a7.454 7.454 0 00.981-3.172M5.25 4.236c-.982.143-1.954.317-2.916.52A6.003 6.003 0 007.73 9.728M5.25 4.236V4.5c0 2.108.966 3.99 2.48 5.228M5.25 4.236V2.721C7.456 2.41 9.71 2.25 12 2.25c2.291 0 4.545.16 6.75.47v1.516M18.75 4.236c.982.143 1.954.317 2.916.52A6.003 6.003 0 0016.27 9.728M18.75 4.236V4.5c0 2.108-.966 3.99-2.48 5.228m0 0a6.023 6.023 0 01-2.77.93m0 0a6.022 6.022 0 01-2.77-.93" />
+          </svg>
+          <p className="text-white font-medium mb-1">No Wall of Fame Posts Yet</p>
+          <p className="text-sm" style={{ color: "#8E8E93" }}>
+            Post photos in the Telegram group to appear here!
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {wofPosts.map((post) => (
+            <PostCard
+              key={post.id}
+              post={post}
+              currentUserId={currentUserId}
+              isAdmin={isAdmin}
+              onLike={handleLike}
+              onDelete={handleDelete}
+              onNavigate={navigate}
+            />
+          ))}
+
+          {/* Load more */}
+          {wofNextCursor && (
+            <div className="text-center pt-2 pb-4">
+              <button
+                onClick={handleWofLoadMore}
+                disabled={wofLoadingMore}
+                className="text-sm font-medium px-6 py-2 rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
+                style={{ color: "#FFB454" }}
+              >
+                {wofLoadingMore ? "Loading..." : "Load More"}
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
 
       {/* Bluesky cross-post confirmation modal */}
       <Modal

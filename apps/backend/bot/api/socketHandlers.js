@@ -4,6 +4,7 @@ const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const { getRedis } = require('../../config/redis');
 const { processChatMedia } = require('../services/chatMediaService');
+const NotificationEmitter = require('../services/notificationEmitter');
 
 // ── Session resolution ────────────────────────────────────────────────────────
 
@@ -352,6 +353,14 @@ function initSocketIO(io) {
         };
         socket.emit('dm:sent', payload);
         io.to(`user:${recipientId}`).emit('dm:received', payload);
+
+        // Notify recipient of new DM
+        NotificationEmitter.emit({
+          type: 'dm', category: 'messaging', priority: 'high',
+          actorId: user.id, targetUserId: recipientId,
+          entityType: 'message', entityId: String(msg.id),
+          message: `${user.firstName || user.username} sent you a message`,
+        });
       } catch (err) {
         logger.error('dm:send error', err);
       }

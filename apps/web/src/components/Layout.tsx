@@ -5,6 +5,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTelegram } from "@/hooks/useTelegram";
 import { LoginPage } from "@/pages/LoginPage";
 import { CristinaWidget } from "@/components/CristinaWidget";
+import { NotificationBell } from "@/components/NotificationBell";
+import { Toast } from "@/components/Toast";
 
 const sidebarLinks = [
   { to: "/", label: "Home", end: true },
@@ -27,8 +29,9 @@ export function Layout() {
     <div className="min-h-screen bg-pnp-background">
       {/* Desktop sidebar */}
       <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-60 lg:flex-col border-r border-pnp-border glass-nav">
-        <div className="flex items-center gap-2 px-6 h-16 border-b border-pnp-border">
+        <div className="flex items-center justify-between px-6 h-16 border-b border-pnp-border">
           <img src="/Logo2-50.png" alt="PNPTV" className="h-8 w-auto" />
+          <NotificationBell />
         </div>
 
         <nav className="flex-1 py-4 px-3 space-y-1">
@@ -74,6 +77,7 @@ export function Layout() {
         </div>
 
         <div className="flex items-center gap-2">
+          <NotificationBell />
           <button
             onClick={() => navigate("/profile")}
             className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
@@ -96,6 +100,9 @@ export function Layout() {
 
       {/* Cristina AI Support Widget */}
       {isAuthenticated && <CristinaWidget />}
+
+      {/* Toast notifications */}
+      {isAuthenticated && <Toast />}
     </div>
   );
 }

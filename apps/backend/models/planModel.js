@@ -284,6 +284,29 @@ class Plan {
   static getDefaultPlans() {
     return [
       {
+        id: 'member_monthly',
+        sku: 'EASYBOTS-PNP-M30',
+        display_name: 'PNP MEMBER',
+        name: 'PNP Member',
+        nameEs: 'PNP Miembro',
+        price: 4.99,
+        currency: 'USD',
+        duration: 30,
+        description: 'PNP MEMBER - EASYBOTS-PNP-M30 - $4.99 USD',
+        descriptionEs: 'PNP MIEMBRO - EASYBOTS-PNP-M30 - $4.99 USD',
+        features: [
+          '🔒 Private hangout rooms',
+          '📱 Social feed access',
+          '📍 Nearby users discovery',
+        ],
+        featuresEs: [
+          '🔒 Salas de hangout privadas',
+          '📱 Acceso al feed social',
+          '📍 Descubrimiento de usuarios cercanos',
+        ],
+        active: true,
+      },
+      {
         id: 'week_pass',
         sku: '007PASS',
         display_name: 'WEEK PASS',

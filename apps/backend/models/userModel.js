@@ -125,6 +125,7 @@ class UserModel {
       nextBillingDate: row.next_billing_date || null,
       billingFailures: row.billing_failures || 0,
       lastBillingAttempt: row.last_billing_attempt || null,
+      wofPhotoConsent: row.wof_photo_consent || false,
     };
   }
 
@@ -397,6 +398,7 @@ class UserModel {
         privacyAccepted: 'privacy_accepted',
         lastActive: 'last_active',
         language: 'language',
+        wofPhotoConsent: 'wof_photo_consent',
       };
 
       for (const [key, col] of Object.entries(fieldMap)) {
@@ -467,6 +469,9 @@ class UserModel {
     }
   }
 
+  /** Plan IDs that grant the member tier (not PRIME) */
+  static MEMBER_PLAN_IDS = new Set(['member_monthly']);
+
   /**
    * Update user subscription
    * Unified logic: prime/active = membership active, churned/expired/free = membership not active
@@ -482,9 +487,12 @@ class UserModel {
 
       const status = (subscription.status || '').toLowerCase();
 
-      // Determine tier based on status
+      // Determine tier based on status and plan
       const isActive = status === 'active' || status === 'prime';
-      const tier = isActive ? TIER.PRIME : TIER.FREE;
+      const isMemberPlan = this.MEMBER_PLAN_IDS.has(subscription.planId);
+      const tier = isActive
+        ? (isMemberPlan ? TIER.MEMBER : TIER.PRIME)
+        : TIER.FREE;
 
       // Normalize status for lifecycle tracking
       const normalizedStatus = isActive

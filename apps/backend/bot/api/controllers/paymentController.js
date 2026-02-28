@@ -6,6 +6,7 @@ const PaymentService = require('../../services/paymentService');
 const PaymentSecurityService = require('../../services/paymentSecurityService');
 const logger = require('../../../utils/logger');
 const { query } = require('../../../config/postgres');
+const NotificationEmitter = require('../../services/notificationEmitter');
 
 /**
  * Payment Controller - Handles payment-related API endpoints
@@ -1146,6 +1147,14 @@ class PaymentController {
             planId,
             expiryDate,
             paymentId,
+          });
+
+          NotificationEmitter.emit({
+            type: 'payment', category: 'commerce', priority: 'high',
+            targetUserId: userId,
+            entityType: 'payment', entityId: paymentId,
+            message: `Your ${plan.name || 'PRIME'} subscription is now active!`,
+            metadata: { planId, expiryDate: expiryDate.toISOString() },
           });
         }
 

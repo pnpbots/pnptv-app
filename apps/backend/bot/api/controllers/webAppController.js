@@ -1241,7 +1241,7 @@ const getProfile = async (req, res) => {
               email, subscription_status, tier, plan_id, plan_expiry,
               language, interests, location_name, twitter,
               instagram, tiktok, youtube,
-              terms_accepted, created_at
+              terms_accepted, wof_photo_consent, created_at
        FROM users WHERE id = $1`,
       [user.id]
     );
@@ -1272,6 +1272,7 @@ const getProfile = async (req, res) => {
         tiktokHandle: p.tiktok,
         youtubeHandle: p.youtube,
         memberSince: p.created_at,
+        wofPhotoConsent: p.wof_photo_consent || false,
       },
     });
   } catch (error) {
@@ -1379,11 +1380,12 @@ const updateProfile = async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
 
   try {
-    const allowed = ['firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle'];
+    const allowed = ['firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle', 'wofPhotoConsent'];
     const colMap  = {
       firstName: 'first_name', lastName: 'last_name', bio: 'bio',
       locationText: 'location_name', interests: 'interests',
       xHandle: 'twitter', instagramHandle: 'instagram', tiktokHandle: 'tiktok', youtubeHandle: 'youtube',
+      wofPhotoConsent: 'wof_photo_consent',
     };
 
     const sets = [];

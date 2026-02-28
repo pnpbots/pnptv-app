@@ -76,6 +76,18 @@ const checkTermsAccepted = (req, res, next) => {
   });
 };
 
+const requireMember = (req, res, next) => {
+  const tier = req.user?.tier;
+  if (tier === 'member' || tier === 'PRIME') {
+    return next();
+  }
+
+  res.status(403).json({
+    error: 'Membership required',
+    redirect: '/subscribe'
+  });
+};
+
 const requirePrime = (req, res, next) => {
   if (req.user?.tier === 'PRIME') {
     return next();
@@ -90,5 +102,6 @@ const requirePrime = (req, res, next) => {
 module.exports = {
   telegramAuth,
   checkTermsAccepted,
+  requireMember,
   requirePrime
 };

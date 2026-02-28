@@ -6,6 +6,7 @@ const SocialPostService = require('../../services/socialPostService');
 const axios = require('axios');
 
 const { query: dbQuery } = require('../../../config/postgres');
+const NotificationEmitter = require('../../services/notificationEmitter');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -55,6 +56,19 @@ const getWall = async (req, res) => {
   }
 };
 
+// ── Wall of Fame Feed ────────────────────────────────────────────────────────
+
+const getWofFeed = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  try {
+    const result = await SocialPostService.getWofFeed(user.id, req.query.cursor, req.query.limit);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    logger.error('getWofFeed error', err);
+    return res.status(500).json({ error: 'Failed to load Wall of Fame feed' });
+  }
+};
+
 // ── Create Post ───────────────────────────────────────────────────────────────
 
 const createPost = async (req, res) => {
@@ -68,6 +82,20 @@ const createPost = async (req, res) => {
 
     if (!replyToId && !repostOfId) {
       SocialPostService.mirrorToMastodon(content.trim(), post.id);
+    }
+
+    // Notify parent post author on reply
+    if (replyToId) {
+      const parentRow = await dbQuery('SELECT user_id FROM social_posts WHERE id = $1', [replyToId]);
+      const parentAuthorId = parentRow.rows[0]?.user_id;
+      if (parentAuthorId) {
+        NotificationEmitter.emit({
+          type: 'reply', category: 'social', priority: 'normal',
+          actorId: user.id, targetUserId: parentAuthorId,
+          entityType: 'post', entityId: String(replyToId),
+          message: `${user.firstName || user.first_name || user.username} replied to your post`,
+        });
+      }
     }
 
     const authorPhoto = await getUserPhotoFromDb(user.id) || user.photoUrl || null;
@@ -96,6 +124,21 @@ const toggleLike = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   try {
     const result = await SocialPostService.toggleLike(req.params.postId, user.id);
+
+    // Notify post author on like
+    if (result.liked) {
+      const postRow = await dbQuery('SELECT user_id FROM social_posts WHERE id = $1', [req.params.postId]);
+      const postAuthorId = postRow.rows[0]?.user_id;
+      if (postAuthorId) {
+        NotificationEmitter.emit({
+          type: 'like', category: 'social', priority: 'normal',
+          actorId: user.id, targetUserId: postAuthorId,
+          entityType: 'post', entityId: String(req.params.postId),
+          message: `${user.firstName || user.first_name || user.username} liked your post`,
+        });
+      }
+    }
+
     return res.json(result);
   } catch (err) {
     logger.error('toggleLike error', err);
@@ -200,6 +243,20 @@ const createPostWithMedia = async (req, res) => {
       SocialPostService.mirrorToMastodon(content.toString().trim(), post.id);
     }
 
+    // Notify parent post author on reply
+    if (replyToId) {
+      const parentRow = await dbQuery('SELECT user_id FROM social_posts WHERE id = $1', [replyToId]);
+      const parentAuthorId = parentRow.rows[0]?.user_id;
+      if (parentAuthorId) {
+        NotificationEmitter.emit({
+          type: 'reply', category: 'social', priority: 'normal',
+          actorId: user.id, targetUserId: parentAuthorId,
+          entityType: 'post', entityId: String(replyToId),
+          message: `${user.firstName || user.first_name || user.username} replied to your post`,
+        });
+      }
+    }
+
     const authorPhoto = await getUserPhotoFromDb(user.id) || user.photoUrl || null;
     const fullPost = {
       ...post,
@@ -266,4 +323,4 @@ const getPublicProfile = async (req, res) => {
   }
 };
 
-module.exports = { getFeed, getHomeFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, getPublicProfile };
+module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, getPublicProfile };

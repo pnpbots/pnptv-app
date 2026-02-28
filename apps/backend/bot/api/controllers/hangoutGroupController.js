@@ -6,6 +6,7 @@ const userService = require('../../../services/userService');
 const VideoCallModel = require('../../../models/videoCallModel');
 const { buildJitsiHangoutsUrl } = require('../../utils/jitsiHangoutsWebApp');
 const jaasService = require('../../services/jaasService');
+const NotificationEmitter = require('../../services/notificationEmitter');
 // Check if a photo path is a valid web URL (not a Telegram file ID)
 const isValidPhotoUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
 
@@ -65,7 +66,7 @@ const listGroups = async (req, res) => {
               ) as has_active_call,
               COALESCE(
                 (SELECT hvc.id::text FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active' ORDER BY hvc.created_at DESC LIMIT 1),
-                (SELECT v.id FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true ORDER BY v.created_at DESC LIMIT 1)
+                (SELECT v.id::text FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true ORDER BY v.created_at DESC LIMIT 1)
               ) as active_call_id,
               (SELECT cm.content FROM chat_messages cm WHERE cm.room = 'hangout:' || g.id::text ORDER BY cm.created_at DESC LIMIT 1) as last_message
        FROM hangout_groups g
@@ -167,7 +168,7 @@ const getGroup = async (req, res) => {
               ) as has_active_call,
               COALESCE(
                 (SELECT hvc.id::text FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active' ORDER BY hvc.created_at DESC LIMIT 1),
-                (SELECT v.id FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true ORDER BY v.created_at DESC LIMIT 1)
+                (SELECT v.id::text FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true ORDER BY v.created_at DESC LIMIT 1)
               ) as active_call_id
        FROM hangout_groups g WHERE g.id = $1`,
       [groupId]
@@ -237,6 +238,18 @@ const joinGroup = async (req, res) => {
        ON CONFLICT DO NOTHING`,
       [groupId, user.id]
     );
+
+    // Notify group creator about new member
+    const group = rows[0];
+    if (group.creator_id && String(group.creator_id) !== String(user.id)) {
+      NotificationEmitter.emit({
+        type: 'group_join', category: 'hangouts', priority: 'normal',
+        actorId: user.id, targetUserId: group.creator_id,
+        entityType: 'group', entityId: String(groupId),
+        message: `${user.firstName || user.first_name || user.username} joined ${group.name}`,
+        metadata: { groupName: group.name },
+      });
+    }
 
     return res.json({ success: true });
   } catch (err) {
