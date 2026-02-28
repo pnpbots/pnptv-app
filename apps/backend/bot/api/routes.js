@@ -2183,6 +2183,8 @@ app.post(
   uploadHangoutMedia,
   asyncHandler(hangoutMediaController.uploadHangoutMedia)
 );
+// Mark group messages as read
+app.post('/api/webapp/hangouts/groups/:id/read', asyncHandler(hangoutGroupController.markAsRead));
 // Legacy single-call endpoint (kept for backward compatibility)
 app.post('/api/webapp/hangouts/groups/:id/call', asyncHandler(hangoutGroupController.startCall));
 
@@ -2756,26 +2758,32 @@ app.get('/api/proxy/hangouts/my-rooms', asyncHandler(async (req, res) => {
   }
 }));
 
-// --- Featured Performers (PostgreSQL-backed) ---
+// --- Performers (PostgreSQL-backed) ---
 const PerformerModel = require('../../models/performerModel');
+
+const mapPerformerResponse = (p) => ({
+  id: p.id,
+  userId: p.userId || null,
+  displayName: p.displayName,
+  bio: p.bio,
+  photoUrl: p.photoUrl,
+  isFeatured: p.isFeatured || false,
+  isAvailable: p.isAvailable,
+  basePrice: p.basePrice,
+  totalCalls: p.totalCalls,
+  averageRating: p.ratingCount > 0
+    ? parseFloat((p.totalRating / p.ratingCount).toFixed(2))
+    : 0,
+});
 
 app.get('/api/performers/featured', asyncHandler(async (req, res) => {
   const performers = await PerformerModel.getFeatured();
-  res.json({
-    success: true,
-    performers: performers.map(p => ({
-      id: p.id,
-      userId: p.userId || null,
-      displayName: p.displayName,
-      bio: p.bio,
-      photoUrl: p.photoUrl,
-      isAvailable: p.isAvailable,
-      totalCalls: p.totalCalls,
-      averageRating: p.ratingCount > 0
-        ? parseFloat((p.totalRating / p.ratingCount).toFixed(2))
-        : 0,
-    })),
-  });
+  res.json({ success: true, performers: performers.map(mapPerformerResponse) });
+}));
+
+app.get('/api/performers', asyncHandler(async (req, res) => {
+  const performers = await PerformerModel.getAll({ status: 'active' });
+  res.json({ success: true, performers: performers.map(mapPerformerResponse) });
 }));
 
 // --- Live Tips Proxy (PNP Live tipping system) ---
@@ -2828,12 +2836,21 @@ app.post('/api/proxy/live/tips', asyncHandler(async (req, res) => {
 
   try {
     const userId = String(user.telegram_id || user.id);
+
+    // Look up performer name for payment description
+    let performerName = performerId;
+    try {
+      const performer = await PerformerModel.getById(performerId);
+      if (performer) performerName = performer.displayName;
+    } catch { /* ignore */ }
+
     const tip = await PNPLiveTipsService.createTip(
       userId,
-      parseInt(performerId, 10),
-      null,
+      null,       // model_id (legacy, no longer used)
+      null,       // booking_id
       numAmount,
-      (message || '').slice(0, 200)
+      (message || '').slice(0, 200),
+      String(performerId)  // performer_id (UUID from performers table)
     );
 
     if (!tip) {
@@ -2849,7 +2866,7 @@ app.post('/api/proxy/live/tips', asyncHandler(async (req, res) => {
         userId,
         planId: `tip-${tip.id}`,
         paymentId: `TIP-${tip.id}`,
-        description: `Tip for performer #${performerId}`,
+        description: `Tip for ${performerName}`,
       });
       if (daimoResult.success) {
         paymentUrl = daimoResult.paymentUrl;

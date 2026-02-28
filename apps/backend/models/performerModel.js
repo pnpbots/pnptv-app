@@ -168,31 +168,38 @@ class PerformerModel {
    */
   static async getAll(filters = {}) {
     try {
-      let sql = `SELECT * FROM ${TABLE} WHERE 1=1`;
+      let sql = `SELECT p.*, COALESCE(NULLIF(p.photo_url, ''), u.photo_file_id) AS resolved_photo_url
+         FROM ${TABLE} p
+         LEFT JOIN users u ON p.user_id = u.id
+         WHERE 1=1`;
       const params = [];
       let paramIndex = 1;
 
       // Apply filters
       if (filters.status) {
-        sql += ` AND status = $${paramIndex++}`;
+        sql += ` AND p.status = $${paramIndex++}`;
         params.push(filters.status);
       }
 
       if (filters.isAvailable !== undefined) {
-        sql += ` AND is_available = $${paramIndex++}`;
+        sql += ` AND p.is_available = $${paramIndex++}`;
         params.push(filters.isAvailable);
       }
 
       if (filters.search) {
-        sql += ` AND (display_name ILIKE $${paramIndex} OR bio ILIKE $${paramIndex})`;
+        sql += ` AND (p.display_name ILIKE $${paramIndex} OR p.bio ILIKE $${paramIndex})`;
         params.push(`%${filters.search}%`);
         paramIndex++;
       }
 
-      sql += ` ORDER BY display_name ASC`;
+      sql += ` ORDER BY p.is_featured DESC, p.total_calls DESC, p.display_name ASC`;
 
       const result = await query(sql, params);
-      return result.rows.map((row) => this.mapRowToPerformer(row));
+      return result.rows.map((row) => {
+        const performer = this.mapRowToPerformer(row);
+        performer.photoUrl = row.resolved_photo_url || null;
+        return performer;
+      });
     } catch (error) {
       logger.error('Error getting all performers:', error);
       return [];

@@ -4,12 +4,12 @@ import { Card, Badge, Skeleton, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import {
   getLiveStreams,
-  getPerformers,
+  getAllPerformers,
   getRecentTips,
   sendTip,
   TIP_AMOUNTS,
   type LiveStream,
-  type Performer,
+  type FeaturedPerformer,
   type RecentTip,
 } from "@/lib/api";
 
@@ -28,12 +28,12 @@ export default function Live() {
   const [error, setError] = useState<string | null>(null);
 
   // Performers
-  const [performers, setPerformers] = useState<Performer[]>([]);
+  const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
   const [performersLoading, setPerformersLoading] = useState(true);
 
   // Tips
   const [recentTips, setRecentTips] = useState<RecentTip[]>([]);
-  const [selectedPerformer, setSelectedPerformer] = useState<Performer | null>(null);
+  const [selectedPerformer, setSelectedPerformer] = useState<FeaturedPerformer | null>(null);
   const [tipMessage, setTipMessage] = useState("");
   const [showTipMessage, setShowTipMessage] = useState(false);
   const [tipping, setTipping] = useState(false);
@@ -62,7 +62,7 @@ export default function Live() {
   // Load performers
   useEffect(() => {
     setPerformersLoading(true);
-    getPerformers()
+    getAllPerformers()
       .then((data) => {
         const p = data.performers || [];
         setPerformers(p);
@@ -193,7 +193,7 @@ export default function Live() {
           <h3 className="text-sm font-medium text-pnp-textPrimary">Send a Tip</h3>
           {selectedPerformer && (
             <span className="text-xs text-gradient">
-              to {selectedPerformer.name}
+              to {selectedPerformer.displayName}
             </span>
           )}
         </div>
@@ -211,9 +211,9 @@ export default function Live() {
                     : "bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/40"
                 }`}
               >
-                {isValidPhotoUrl(p.photo) ? (
+                {isValidPhotoUrl(p.photoUrl) ? (
                   <img
-                    src={p.photo}
+                    src={p.photoUrl}
                     alt=""
                     className="w-4 h-4 rounded-full object-cover"
                     onError={(e) => {
@@ -223,10 +223,10 @@ export default function Live() {
                     }}
                   />
                 ) : null}
-                <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: isValidPhotoUrl(p.photo) ? "none" : undefined }}>
-                  {p.name.charAt(0)}
+                <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: isValidPhotoUrl(p.photoUrl) ? "none" : undefined }}>
+                  {p.displayName.charAt(0)}
                 </span>
-                {p.name}
+                {p.displayName}
               </button>
             ))}
           </div>
@@ -349,27 +349,23 @@ export default function Live() {
                 className={selectedPerformer?.id === p.id ? "border-pnp-accent" : ""}
               >
                 <div className="text-center">
-                  {isValidPhotoUrl(p.photo) ? (
-                    <img
-                      src={p.photo}
-                      alt={p.name}
-                      className="w-14 h-14 rounded-full object-cover mx-auto mb-2"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                        const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
-                        if (fallback) fallback.style.display = "flex";
-                      }}
-                    />
-                  ) : null}
-                  <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-2" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))", display: isValidPhotoUrl(p.photo) ? "none" : undefined }}>
-                    <span className="text-lg text-gradient font-bold">
-                      {p.name.charAt(0)}
-                    </span>
-                  </div>
-                  <p className="text-sm font-medium text-pnp-textPrimary truncate">{p.name}</p>
-                  {p.categories.length > 0 && (
-                    <p className="text-[10px] text-pnp-textSecondary truncate mt-0.5">
-                      {Array.isArray(p.categories) ? p.categories.join(", ") : p.categories}
+                  <img
+                    src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
+                    alt={p.displayName}
+                    className="w-14 h-14 rounded-full object-cover mx-auto mb-2"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = "/default-performer.svg";
+                    }}
+                  />
+                  <p className="text-sm font-medium text-pnp-textPrimary truncate">{p.displayName}</p>
+                  {p.isFeatured && (
+                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "#5ED1C4" }}>
+                      Featured
+                    </p>
+                  )}
+                  {p.isAvailable && !p.isFeatured && (
+                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "#5ED1C4" }}>
+                      Available
                     </p>
                   )}
                 </div>

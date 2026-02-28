@@ -19,16 +19,16 @@ class PNPLiveTipsService {
    * @param {string} message - Optional message
    * @returns {Promise<Object>} Created tip
    */
-  static async createTip(userId, modelId, bookingId, amount, message = '') {
+  static async createTip(userId, modelId, bookingId, amount, message = '', performerId = null) {
     try {
       const result = await query(
-        `INSERT INTO pnp_tips 
-         (user_id, model_id, booking_id, amount, message, payment_status, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        `INSERT INTO pnp_tips
+         (user_id, model_id, performer_id, booking_id, amount, message, payment_status, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
          RETURNING *`,
-        [userId, modelId, bookingId, amount, message, 'pending']
+        [userId, modelId || null, performerId, bookingId, amount, message, 'pending']
       );
-      
+
       return result.rows && result.rows[0] ? result.rows[0] : null;
     } catch (error) {
       logger.error('Error creating tip:', error);
@@ -136,18 +136,21 @@ class PNPLiveTipsService {
     try {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - days);
-      
+
       const result = await query(
-        `SELECT t.*, m.name as model_name, u.username as user_username
+        `SELECT t.*,
+                COALESCE(p.display_name, m.name, 'Performer') as model_name,
+                u.username as user_username
          FROM pnp_tips t
-         JOIN pnp_models m ON t.model_id = m.id
+         LEFT JOIN performers p ON t.performer_id = p.id
+         LEFT JOIN pnp_models m ON t.model_id = m.id
          LEFT JOIN users u ON t.user_id = u.id
          WHERE t.created_at >= $1
          ORDER BY t.created_at DESC
          LIMIT $2`,
         [startDate, limit]
       );
-      
+
       return result.rows || [];
     } catch (error) {
       logger.error('Error getting recent tips:', error);
@@ -164,15 +167,16 @@ class PNPLiveTipsService {
   static async getTipsByUser(userId, limit = 10) {
     try {
       const result = await query(
-        `SELECT t.*, m.name as model_name
+        `SELECT t.*, COALESCE(p.display_name, m.name, 'Performer') as model_name
          FROM pnp_tips t
-         JOIN pnp_models m ON t.model_id = m.id
+         LEFT JOIN performers p ON t.performer_id = p.id
+         LEFT JOIN pnp_models m ON t.model_id = m.id
          WHERE t.user_id = $1
          ORDER BY t.created_at DESC
          LIMIT $2`,
         [userId, limit]
       );
-      
+
       return result.rows || [];
     } catch (error) {
       logger.error('Error getting tips by user:', error);
@@ -188,14 +192,15 @@ class PNPLiveTipsService {
   static async getTipById(tipId) {
     try {
       const result = await query(
-        `SELECT t.*, m.name as model_name, u.username as user_username
+        `SELECT t.*, COALESCE(p.display_name, m.name, 'Performer') as model_name, u.username as user_username
          FROM pnp_tips t
-         JOIN pnp_models m ON t.model_id = m.id
+         LEFT JOIN performers p ON t.performer_id = p.id
+         LEFT JOIN pnp_models m ON t.model_id = m.id
          LEFT JOIN users u ON t.user_id = u.id
          WHERE t.id = $1`,
         [tipId]
       );
-      
+
       return result.rows && result.rows[0] ? result.rows[0] : null;
     } catch (error) {
       logger.error('Error getting tip by ID:', error);
