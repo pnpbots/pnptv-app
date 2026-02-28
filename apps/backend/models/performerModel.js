@@ -80,7 +80,9 @@ class PerformerModel {
       bio: row.bio,
       photoUrl: row.photo_url,
       isFeatured: row.is_featured,
-      availabilitySchedule: row.availability_schedule ? JSON.parse(row.availability_schedule) : [],
+      availabilitySchedule: row.availability_schedule
+        ? (typeof row.availability_schedule === 'string' ? JSON.parse(row.availability_schedule) : row.availability_schedule)
+        : [],
       timezone: row.timezone,
       allowedCallTypes: row.allowed_call_types,
       maxCallDuration: row.max_call_duration,
