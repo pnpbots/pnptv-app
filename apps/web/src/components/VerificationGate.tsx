@@ -9,7 +9,7 @@ interface VerificationGateProps {
 
 export function VerificationGate({ children }: VerificationGateProps) {
   const { user, isAuthenticated, isLoading, refreshUser } = useAuth();
-  const [step, setStep] = useState<"age" | "terms">("age");
+  const [step, setStep] = useState<"age" | "terms" | "guidelines">("age");
   const [ageChecked, setAgeChecked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +32,18 @@ export function VerificationGate({ children }: VerificationGateProps) {
   // Determine which step to show
   const needsAge = !user.ageVerified;
   const needsTerms = !user.termsAccepted;
-  const currentStep = needsAge && step === "age" ? "age" : "terms";
+
+  let currentStep: "age" | "terms" | "guidelines";
+  if (needsAge && step === "age") {
+    currentStep = "age";
+  } else if (step === "guidelines") {
+    currentStep = "guidelines";
+  } else {
+    currentStep = "terms";
+  }
+
+  const totalSteps = needsAge ? 3 : 2;
+  const currentStepNumber = currentStep === "age" ? 1 : currentStep === "terms" ? (needsAge ? 2 : 1) : (needsAge ? 3 : 2);
 
   const handleAgeConfirm = async () => {
     if (!ageChecked) return;
@@ -51,7 +62,11 @@ export function VerificationGate({ children }: VerificationGateProps) {
     }
   };
 
-  const handleTermsAccept = async () => {
+  const handleTermsAccept = () => {
+    setStep("guidelines");
+  };
+
+  const handleGuidelinesAccept = async () => {
     setSubmitting(true);
     setError(null);
     try {
@@ -67,7 +82,7 @@ export function VerificationGate({ children }: VerificationGateProps) {
   return (
     <div className="page-container flex items-center justify-center min-h-[60vh]">
       <Card className="max-w-md w-full p-6">
-        {currentStep === "age" && needsAge ? (
+        {currentStep === "age" ? (
           <>
             <div className="text-center mb-6">
               <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))" }}>
@@ -105,7 +120,7 @@ export function VerificationGate({ children }: VerificationGateProps) {
               {submitting ? "Verifying..." : "Confirm Age"}
             </Button>
           </>
-        ) : (
+        ) : currentStep === "terms" ? (
           <>
             <div className="text-center mb-6">
               <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))" }}>
@@ -149,20 +164,76 @@ export function VerificationGate({ children }: VerificationGateProps) {
 
             <Button
               onClick={handleTermsAccept}
+              className="w-full"
+            >
+              Accept & Continue
+            </Button>
+          </>
+        ) : (
+          <>
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))" }}>
+                <svg className="w-8 h-8" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                </svg>
+              </div>
+              <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Community Guidelines</h2>
+              <p className="text-sm text-pnp-textSecondary">
+                PNPtv is committed to maintaining a safe, lawful, and responsible environment for all members.
+              </p>
+            </div>
+
+            <div className="max-h-56 overflow-y-auto p-3 rounded-lg bg-pnp-surface border border-pnp-border text-xs text-pnp-textSecondary space-y-3 mb-4">
+              <p className="font-medium text-pnp-textPrimary">Prohibited Activities</p>
+              <p>
+                The use, promotion, distribution, sale, solicitation, or discussion of illegal drugs,
+                controlled substances, or any unlawful materials is <span className="text-pnp-textPrimary font-medium">strictly prohibited</span> on this platform.
+              </p>
+              <p>This includes, but is not limited to:</p>
+              <ul className="list-disc pl-4 space-y-1">
+                <li>The sale, purchase, or exchange of illegal substances</li>
+                <li>Requests for drugs or controlled substances</li>
+                <li>Instructions, advice, or facilitation regarding the acquisition, preparation, or use of illegal substances</li>
+                <li>Content depicting illegal drug use in a manner that promotes, encourages, or glorifies such behavior</li>
+                <li>Coordination of in-person or virtual activities involving unlawful substances</li>
+                <li>Advertising, selling, or distributing drug-related paraphernalia or materials intended for unlawful purposes</li>
+              </ul>
+              <p className="font-medium text-pnp-textPrimary mt-2">Enforcement</p>
+              <p>
+                PNPtv does not condone or facilitate illegal activity of any kind. Any user found engaging in
+                activities that violate local, national, or international laws may have their account
+                <span className="text-pnp-textPrimary font-medium"> suspended or permanently terminated without prior notice</span>.
+              </p>
+              <p>
+                All members are solely responsible for their actions and for complying with the laws applicable in their jurisdiction.
+              </p>
+              <p>
+                PNPtv reserves the right to report illegal activity to the appropriate authorities when required by law.
+              </p>
+            </div>
+
+            <div className="p-3 rounded-lg bg-pnp-accent/10 border border-pnp-accent/20 mb-4">
+              <p className="text-xs text-pnp-textPrimary">
+                You have a <span className="font-semibold text-pnp-accent">24-hour free PRIME trial</span> to explore all features. After that, subscribe to keep your access.
+              </p>
+            </div>
+
+            {error && (
+              <p className="text-sm text-pnp-error mt-3">{error}</p>
+            )}
+
+            <Button
+              onClick={handleGuidelinesAccept}
               disabled={submitting}
               className="w-full"
             >
-              {submitting ? "Accepting..." : "Accept Terms & Continue"}
+              {submitting ? "Setting up..." : "I Understand & Agree"}
             </Button>
           </>
         )}
 
         <p className="text-xs text-pnp-textSecondary text-center mt-4">
-          {currentStep === "age" && needsTerms
-            ? "Step 1 of 2"
-            : needsAge
-            ? "Step 2 of 2"
-            : ""}
+          Step {currentStepNumber} of {totalSteps}
         </p>
       </Card>
     </div>

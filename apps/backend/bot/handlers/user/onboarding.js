@@ -1066,9 +1066,9 @@ const completeOnboarding = async (ctx) => {
     // Log onboarding completion
     logger.info('User completed onboarding', { userId, language: lang });
 
-    // Grant 7-day free trial to new users
+    // Grant free trial to new users (default: 1 day / 24 hours)
     const monetizationConfig = require('../../../config/monetizationConfig');
-    const trialDays = monetizationConfig.subscription.freeTrialDays || 7;
+    const trialDays = monetizationConfig.subscription.freeTrialDays || 1;
     const trialResult = await SubscriptionService.addFreeTrial(userId, trialDays, 'new_user_activation');
     if (trialResult.success) {
       logger.info('Free trial granted on activation', { userId, days: trialDays, expiry: trialResult.newExpiry });

@@ -397,6 +397,39 @@ Your FREE access includes:
 🤖 Cristina AI — 24/7 Support
 
 💎 Want more? Upgrade to PRIME for exclusive content.`,
+    pnpLatinoPrimeOnboardingComplete: `🎉 Welcome to PNP LATINO PRIME!
+
+🔥 Your 24-hour PRIME trial is now active.
+
+💎 Enjoy:
+• Exclusive uncensored content
+• PNP Nearby - Connect with the community
+• PNP Hangouts - Private video rooms
+• PNP Television Live - Live events
+• PNP Videorama - Full playlists
+
+📱 Use /menu to explore all features.
+
+🤖 Need help? Cristina AI is available 24/7.
+
+Welcome to the PRIME experience! 🔥`,
+    pnpLatinoFreeOnboardingComplete: `🎉 Welcome to PNP LATINO!
+
+🔥 You're now part of the PNP community.
+
+⏰ Your 24-hour PRIME trial is active — explore everything!
+
+💎 After your trial, subscribe to keep access to:
+• Full uncensored videos
+• PNP Television Live events
+• Private video rooms
+• All premium features
+
+📱 Use /subscribe to upgrade.
+
+🤖 Questions? Cristina AI is here to help.
+
+Enjoy PNP LATINO! 🔥`,
   },
   es: {
         groupRedirect: ({ username, command, botUsername }) =>
@@ -781,7 +814,7 @@ Tu acceso FREE incluye:
 💎 ¿Quieres más? Sube a PRIME para contenido exclusivo.`,
     pnpLatinoPrimeOnboardingComplete: `🎉 ¡Bienvenido a PNP LATINO PRIME!
 
-🔥 Tu membresía PRIME está activa y lista para usar.
+🔥 Tu prueba PRIME de 24 horas está activa.
 
 💎 Disfruta de:
 • Contenido exclusivo sin censura
@@ -795,22 +828,19 @@ Tu acceso FREE incluye:
 🤖 ¿Necesitas ayuda? Cristina IA está disponible 24/7.
 
 ¡Bienvenido a la experiencia PRIME! 🔥`,
-    pnpLatinoFreeOnboardingComplete: `🎉 ¡Bienvenido a PNP LATINO FREE!
+    pnpLatinoFreeOnboardingComplete: `🎉 ¡Bienvenido a PNP LATINO!
 
-🔥 Ahora eres parte de la comunidad PNP más grande.
+🔥 Ahora eres parte de la comunidad PNP.
 
-🆓 Tu acceso FREE incluye:
-• PNP Nearby básico - Conecta con la comunidad
-• PNP Hangouts - Salas de video públicas
-• PNP Videorama - Selección de playlists
+⏰ Tu prueba PRIME de 24 horas está activa — ¡explora todo!
 
-💎 ¿Quieres contenido exclusivo?
+💎 Después de tu prueba, suscríbete para mantener acceso a:
 • Videos completos sin censura
 • Eventos en vivo PNP Television Live
 • Salas de video privadas
 • Todas las funciones premium
 
-📱 Usa /subscribe para actualizar a PRIME.
+📱 Usa /subscribe para actualizar.
 
 🤖 ¿Preguntas? Cristina IA está aquí para ayudarte.
 

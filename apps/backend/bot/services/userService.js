@@ -80,9 +80,9 @@ class UserService {
           return user;
         }
 
-        // No legacy match, create new user with 7-day PRIME trial
+        // No legacy match, create new user with 24-hour PRIME trial
         const trialExpiry = new Date();
-        trialExpiry.setDate(trialExpiry.getDate() + 7);
+        trialExpiry.setDate(trialExpiry.getDate() + 1);
 
         const createData = {
           userId: userId,
@@ -92,12 +92,12 @@ class UserService {
           language: userData.language || 'en',
           subscriptionStatus: 'active',
           tier: TIER.PRIME,
-          planId: 'trial_7day',
+          planId: 'trial_24h',
           planExpiry: trialExpiry,
         };
 
         user = await UserModel.createOrUpdate(createData);
-        logger.info('New user created with 7-day PRIME trial', { userId, trialExpiry });
+        logger.info('New user created with 24-hour PRIME trial', { userId, trialExpiry });
       }
 
       return user;
@@ -167,9 +167,9 @@ class UserService {
           return user;
         }
 
-        // No legacy match, create new user with 7-day PRIME trial
+        // No legacy match, create new user with 24-hour PRIME trial
         const trialExpiry = new Date();
-        trialExpiry.setDate(trialExpiry.getDate() + 7);
+        trialExpiry.setDate(trialExpiry.getDate() + 1);
 
         const userData = {
           userId: from.id,
@@ -179,12 +179,12 @@ class UserService {
           language: from.language_code || 'en',
           subscriptionStatus: 'active',
           tier: TIER.PRIME,
-          planId: 'trial_7day',
+          planId: 'trial_24h',
           planExpiry: trialExpiry,
         };
 
         user = await UserModel.createOrUpdate(userData);
-        logger.info('New user created with 7-day PRIME trial', { userId: from.id, trialExpiry });
+        logger.info('New user created with 24-hour PRIME trial', { userId: from.id, trialExpiry });
       }
 
       return user;

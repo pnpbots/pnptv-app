@@ -25,7 +25,7 @@ module.exports = {
     },
 
     // Free trial (if enabled)
-    freeTrialDays: parseInt(process.env.FREE_TRIAL_DAYS || '7'),
+    freeTrialDays: parseInt(process.env.FREE_TRIAL_DAYS || '1'),
 
     // Features by plan
     features: {
