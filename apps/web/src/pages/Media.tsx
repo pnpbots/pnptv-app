@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { Card, Skeleton, Badge } from "@pnptv/ui-kit";
 import { useDirectus } from "@/hooks/useDirectus";
+import { useTutorial } from "@/hooks/useTutorial";
+import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { type Content, type Performer, getAssetUrl } from "@/lib/directus";
 
 function formatDuration(seconds: number | null): string {
@@ -31,9 +33,11 @@ export default function Media() {
   });
 
   const [activeVideo, setActiveVideo] = useState<Content | null>(null);
+  const { showTutorial, dismissTutorial } = useTutorial("prime");
 
   return (
     <div className="page-container">
+      {showTutorial && <TutorialOverlay section="prime" onDismiss={dismissTutorial} />}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-lg font-bold text-pnp-textPrimary">PRIME</h1>

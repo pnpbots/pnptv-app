@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { useTutorial } from "@/hooks/useTutorial";
+import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useNavigate } from "react-router-dom";
 import { Modal } from "@pnptv/ui-kit";
 import {
@@ -446,6 +448,7 @@ export default function Social() {
   const { user, isAuthenticated, isAdmin } = useAuth();
   const navigate = useNavigate();
   const currentUserId = String(user?.id || "");
+  const { showTutorial, dismissTutorial } = useTutorial("social");
 
   // Tab state
   const [activeTab, setActiveTab] = useState<"all" | "wof" | "following">("all");
@@ -689,6 +692,7 @@ export default function Social() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
+      {showTutorial && <TutorialOverlay section="social" onDismiss={dismissTutorial} />}
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>

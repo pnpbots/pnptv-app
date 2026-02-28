@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useTutorial } from "@/hooks/useTutorial";
+import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useDirectus } from "@/hooks/useDirectus";
 import {
   getHomeFeedPosts,
@@ -89,9 +91,11 @@ export default function Home() {
 
   const username = user?.username || user?.displayName || "user";
   const tier = user?.tier || "free";
+  const { showTutorial, dismissTutorial } = useTutorial("home");
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
+      {showTutorial && <TutorialOverlay section="home" onDismiss={dismissTutorial} />}
       {/* User greeting */}
       <div className="glass-card p-6 mb-6 animate-fade-in-up">
         <h1 className="text-xl font-bold text-white">

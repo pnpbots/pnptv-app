@@ -7,6 +7,8 @@ import React, {
 } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useTutorial } from "@/hooks/useTutorial";
+import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useHangoutSocket } from "@/hooks/useHangoutSocket";
 import {
   getHangoutGroups,
@@ -212,6 +214,7 @@ export default function Chat() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const isPrime = user?.tier?.toLowerCase() === "prime";
+  const { showTutorial, dismissTutorial } = useTutorial("hangouts");
 
   // Group list state
   const [groups, setGroups] = useState<HangoutGroup[]>([]);
@@ -767,6 +770,7 @@ export default function Chat() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
+      {showTutorial && <TutorialOverlay section="hangouts" onDismiss={dismissTutorial} />}
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>

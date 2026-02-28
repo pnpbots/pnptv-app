@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { useTutorial, resetAllTutorials } from "@/hooks/useTutorial";
+import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button, Badge, Modal, Input, Skeleton } from "@pnptv/ui-kit";
 import {
@@ -1477,6 +1479,7 @@ export default function Profile() {
 
   const isOwnProfile = !paramUserId || paramUserId === String(user?.id);
   const targetUserId = paramUserId || String(user?.id || "");
+  const { showTutorial, dismissTutorial } = useTutorial("profile");
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [posts, setPosts] = useState<SocialPostItem[]>([]);
@@ -1774,6 +1777,7 @@ export default function Profile() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
+      {isOwnProfile && showTutorial && <TutorialOverlay section="profile" onDismiss={dismissTutorial} />}
       {/* ── Back button for public profiles ── */}
       {paramUserId && (
         <button
@@ -1993,6 +1997,13 @@ export default function Profile() {
                   Creator Dashboard
                 </button>
               )}
+              <button
+                onClick={() => { resetAllTutorials(); window.location.reload(); }}
+                className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/90 transition-colors"
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+              >
+                Reset Tutorials
+              </button>
               <Button variant="danger" className="px-4" onClick={logout}>
                 Sign Out
               </Button>

@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { LivePlayer } from "@/components/LivePlayer";
 import { Card, Badge, Skeleton, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
+import { useTutorial } from "@/hooks/useTutorial";
+import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import {
   getLiveStreams,
   getAllPerformers,
@@ -21,6 +23,7 @@ function isValidPhotoUrl(photo: string | null | undefined): photo is string {
 
 export default function Live() {
   const { isAuthenticated, login } = useAuth();
+  const { showTutorial, dismissTutorial } = useTutorial("live");
 
   const [streams, setStreams] = useState<LiveStream[]>([]);
   const [activeStream, setActiveStream] = useState<LiveStream | null>(null);
@@ -137,6 +140,7 @@ export default function Live() {
 
   return (
     <div className="page-container">
+      {showTutorial && <TutorialOverlay section="live" onDismiss={dismissTutorial} />}
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>

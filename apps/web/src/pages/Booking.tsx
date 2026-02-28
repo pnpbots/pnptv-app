@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Badge, Button } from "@pnptv/ui-kit";
+import { useTutorial } from "@/hooks/useTutorial";
+import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import {
   updateNearbyLocation,
   searchNearby,
@@ -285,6 +287,7 @@ type PageState = "loading" | "denied" | "ready";
 
 export default function Booking() {
   const navigate = useNavigate();
+  const { showTutorial, dismissTutorial } = useTutorial("nearby");
   const [pageState, setPageState] = useState<PageState>("loading");
   const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null);
   const [nearbyUsers, setNearbyUsers] = useState<NearbyUser[]>([]);
@@ -457,6 +460,7 @@ export default function Booking() {
   // ─── Map ready state ────────────────────────────────────────────
   return (
     <div className="page-container !p-0 relative" style={{ height: "calc(100vh - 8rem)" }}>
+      {showTutorial && <TutorialOverlay section="nearby" onDismiss={dismissTutorial} />}
       {/* Map */}
       {myPos && (
         <div className="absolute inset-0">

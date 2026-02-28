@@ -7,6 +7,8 @@ import React, {
 } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useTutorial } from "@/hooks/useTutorial";
+import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import {
   getMessageThreads,
   getMessages,
@@ -345,6 +347,7 @@ export default function DirectMessages() {
   const { userId } = useParams<{ userId: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { showTutorial, dismissTutorial } = useTutorial("dm");
 
   if (userId) {
     return (
@@ -355,7 +358,12 @@ export default function DirectMessages() {
       />
     );
   }
-  return <ThreadList currentUser={user} navigate={navigate} />;
+  return (
+    <>
+      {showTutorial && <TutorialOverlay section="dm" onDismiss={dismissTutorial} />}
+      <ThreadList currentUser={user} navigate={navigate} />
+    </>
+  );
 }
 
 // ─── Thread List ──────────────────────────────────────────────────────────────
