@@ -1954,6 +1954,12 @@ app.delete('/api/webapp/admin/posts/:id', adminGuard, asyncHandler(webappAdminCo
 app.get('/api/webapp/admin/hangouts', adminGuard, asyncHandler(webappAdminController.listHangouts));
 app.delete('/api/webapp/admin/hangouts/:id', adminGuard, asyncHandler(webappAdminController.endHangout));
 
+// PRIME Channel Mirror Admin Routes
+const PrimeMirrorController = require('./controllers/primeMirrorController');
+app.get('/api/webapp/admin/prime-mirror/status', adminGuard, asyncHandler(PrimeMirrorController.getStatus));
+app.post('/api/webapp/admin/prime-mirror/toggle', adminGuard, asyncHandler(PrimeMirrorController.toggleMirror));
+app.get('/api/webapp/admin/prime-mirror/log', adminGuard, asyncHandler(PrimeMirrorController.getMigrationLog));
+
 app.get('/api/prime/latest', asyncHandler(primeController.getLatestPrimeVideo));
 app.get('/api/videorama/latest', asyncHandler(primeController.getLatestVideoramaVideo));
 app.get('/api/hangouts/most-active', asyncHandler(hangoutsController.getMostActiveHangout));

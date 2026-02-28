@@ -415,6 +415,10 @@ const startBot = async () => {
     registerGroupSecurityHandlers(bot);
     logger.info('✓ Group security handlers registered');
 
+    // PRIME channel → social feed mirror (real-time auto-sync)
+    const { registerPrimeChannelMirrorHandler } = require('../handlers/channel/primeChannelMirrorHandler');
+    registerPrimeChannelMirrorHandler(bot);
+
     // Register handlers
 
     // Generic message handler for private chats to route to support

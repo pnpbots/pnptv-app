@@ -431,21 +431,14 @@ const startCall = async (req, res) => {
     if (existing.length > 0) {
       // Join existing call
       const call = existing[0];
-      let jitsiUrl = null;
-      if (jaasService.isConfigured()) {
-        try {
-          jitsiUrl = buildJitsiHangoutsUrl({
-            roomName: call.channel_name,
-            userId: user.id,
-            userName: user.firstName || user.username || 'User',
-            isModerator: false,
-            callId: call.id,
-            type: 'public',
-          });
-        } catch (e) {
-          logger.warn('Failed to generate Jitsi URL:', e.message);
-        }
-      }
+      const jitsiUrl = buildJitsiHangoutsUrl({
+        roomName: call.channel_name,
+        userId: user.id,
+        userName: user.firstName || user.username || 'User',
+        isModerator: false,
+        callId: call.id,
+        type: 'public',
+      });
       return res.json({ success: true, jitsiUrl, callId: call.id, isNew: false });
     }
 
@@ -464,21 +457,14 @@ const startCall = async (req, res) => {
     // Link to group
     await query('UPDATE video_calls SET group_id=$1 WHERE id=$2', [groupId, call.id]);
 
-    let jitsiUrl = null;
-    if (jaasService.isConfigured()) {
-      try {
-        jitsiUrl = buildJitsiHangoutsUrl({
-          roomName: call.channelName,
-          userId: user.id,
-          userName: creatorName,
-          isModerator: true,
-          callId: call.id,
-          type: 'public',
-        });
-      } catch (e) {
-        logger.warn('Failed to generate Jitsi URL:', e.message);
-      }
-    }
+    const jitsiUrl = buildJitsiHangoutsUrl({
+      roomName: call.channelName,
+      userId: user.id,
+      userName: creatorName,
+      isModerator: true,
+      callId: call.id,
+      type: 'public',
+    });
 
     return res.json({ success: true, jitsiUrl, callId: call.id, isNew: true });
   } catch (err) {
