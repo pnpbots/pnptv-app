@@ -360,4 +360,18 @@ const getPublicProfile = async (req, res) => {
   }
 };
 
-module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, getPublicProfile };
+// ── Request WoF Deletion ─────────────────────────────────────────────────────
+
+const requestWofDeletion = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  try {
+    const deleted = await SocialPostService.deleteWofPost(req.params.postId, user.id);
+    if (!deleted) return res.status(404).json({ error: 'WoF post not found or not yours' });
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('requestWofDeletion error', err);
+    return res.status(500).json({ error: 'Failed to delete WoF post' });
+  }
+};
+
+module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, getPublicProfile, requestWofDeletion };

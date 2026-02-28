@@ -2234,6 +2234,7 @@ app.post('/api/webapp/social/posts/:postId/like', asyncHandler(socialController.
 app.delete('/api/webapp/social/posts/:postId', asyncHandler(socialController.deletePost));
 app.get('/api/webapp/social/posts/:postId/replies', asyncHandler(socialController.getReplies));
 app.post('/api/webapp/social/posts/:postId/mastodon', asyncHandler(socialController.postToMastodon));
+app.post('/api/webapp/social/posts/:postId/request-deletion', asyncHandler(socialController.requestWofDeletion));
 
 // Users search
 app.get('/api/webapp/users/search', asyncHandler(usersController.searchUsers));

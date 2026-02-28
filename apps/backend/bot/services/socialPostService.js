@@ -175,6 +175,24 @@ class SocialPostService {
     return post;
   }
 
+  /**
+   * Insert a post migrated/mirrored from a Telegram channel.
+   * Accepts a custom created_at and telegram_message_id for deduplication.
+   * Returns the new row, or null if it already existed (ON CONFLICT).
+   */
+  static async createMigratedPost(userId, content, mediaUrl, mediaType, telegramMessageId, sourceChannel, originalDate) {
+    const { rows } = await query(
+      `INSERT INTO social_posts
+         (user_id, content, media_url, media_type, telegram_message_id, source_channel,
+          is_wof, is_exclusive, is_shareable, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, false, false, true, $7, $7)
+       ON CONFLICT (telegram_message_id) WHERE telegram_message_id IS NOT NULL DO NOTHING
+       RETURNING id, content, media_url, media_type, telegram_message_id, source_channel, created_at`,
+      [userId, content || '', mediaUrl || null, mediaType || null, telegramMessageId, sourceChannel, originalDate]
+    );
+    return rows[0] || null;
+  }
+
   // ── Toggle Like ───────────────────────────────────────────────────────────
 
   static async toggleLike(postId, userId) {
@@ -203,6 +221,17 @@ class SocialPostService {
     }
     const { rowCount } = await query(
       'UPDATE social_posts SET is_deleted=true WHERE id=$1 AND user_id=$2',
+      [postId, userId]
+    );
+    return rowCount > 0;
+  }
+
+  // ── Delete WoF Post (user requesting removal of their own WoF content) ────
+
+  static async deleteWofPost(postId, userId) {
+    await MediaCleanupService.deletePostMedia(postId);
+    const { rowCount } = await query(
+      'UPDATE social_posts SET is_deleted=true, updated_at=NOW() WHERE id=$1 AND user_id=$2 AND is_wof=true',
       [postId, userId]
     );
     return rowCount > 0;

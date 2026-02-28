@@ -523,6 +523,10 @@ export function deleteSocialPost(postId: number): Promise<{ success: boolean }> 
   return request(`/api/webapp/social/posts/${postId}`, { method: "DELETE" });
 }
 
+export function requestWofDeletion(postId: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/social/posts/${postId}/request-deletion`, { method: "POST" });
+}
+
 export function getReplies(
   postId: number,
   cursor?: string
@@ -687,7 +691,7 @@ export async function sendGroupMediaMessage(
 export function startGroupCall(
   id: number
 ): Promise<{ success: boolean; jitsiUrl: string; callId: string; isNew: boolean }> {
-  return request(`/api/webapp/hangouts/groups/${id}/call`, { method: "POST" });
+  return request(`/api/webapp/hangouts/groups/${id}/calls`, { method: "POST" });
 }
 
 export function markGroupAsRead(groupId: number): Promise<{ success: boolean }> {

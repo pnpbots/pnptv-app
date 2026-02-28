@@ -68,8 +68,7 @@ async function getWofGroupId() {
 /**
  * Dual-post a Wall of Fame photo/video to the Social Feed as a WoF post.
  * Fire-and-forget: errors are logged but never affect the Telegram flow.
- * Checks wof_photo_consent before posting — if the user hasn't consented,
- * the social post is silently skipped.
+ * Posts are auto-published; users can request deletion from the social feed.
  *
  * @param {Object} ctx      - Telegraf context (for telegram.getFileLink)
  * @param {string} fileId   - Telegram file_id for the photo/video
@@ -79,13 +78,6 @@ async function getWofGroupId() {
  */
 async function postToSocialFeed(ctx, fileId, mediaType, user, mimetype) {
   try {
-    // Check photo consent before posting to social feed
-    const consentResult = await query('SELECT wof_photo_consent FROM users WHERE id = $1', [user.id]);
-    if (!consentResult.rows[0]?.wof_photo_consent) {
-      logger.debug('WoF social post skipped: user has not consented', { userId: user.id });
-      return;
-    }
-
     // Download the media from Telegram
     const fileLink = await ctx.telegram.getFileLink(fileId);
     const response = await axios.get(fileLink.href, { responseType: 'arraybuffer', timeout: 30000 });
