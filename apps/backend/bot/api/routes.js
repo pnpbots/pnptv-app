@@ -2642,7 +2642,7 @@ const mapDirectusPerformer = (p) => ({
   userId: p.pnptv_id || null,
   displayName: p.name,
   bio: p.bio || null,
-  photoUrl: p.photo ? `${DIRECTUS_INTERNAL_URL}/assets/${p.photo}` : null,
+  photoUrl: p.photo ? `https://cms.pnptv.app/assets/${p.photo}` : null,
   isFeatured: p.is_featured || false,
   isAvailable: p.is_available !== false,
   basePrice: p.base_price_cents ? p.base_price_cents / 100 : 100,
@@ -2709,7 +2709,7 @@ app.get('/api/proxy/live/performers', asyncHandler(async (req, res) => {
       name: p.name,
       slug: p.slug,
       bio: p.bio || '',
-      photo: p.photo ? `${DIRECTUS_INTERNAL_URL}/assets/${p.photo}` : null,
+      photo: p.photo ? `https://cms.pnptv.app/assets/${p.photo}` : null,
       categories: p.categories || [],
     }));
     res.json({ success: true, performers });
