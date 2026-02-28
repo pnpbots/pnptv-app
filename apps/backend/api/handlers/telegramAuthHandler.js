@@ -345,7 +345,7 @@ const checkAuthStatus = async (req, res) => {
     const authMethods = user.auth_methods || {
       telegram: !!(user.telegramId || user.telegram),
       atproto: !!user.atproto_did,
-      x: !!(user.x_user_id),
+      x: !!(user.x_user_id || user.xHandle),
     };
 
     res.json({
@@ -368,7 +368,7 @@ const checkAuthStatus = async (req, res) => {
         atproto_did: user.atproto_did || null,
         atproto_handle: user.atproto_handle || null,
         // X / Twitter identity
-        x_handle: user.x_username || null,
+        x_handle: user.xHandle || user.x_username || null,
         // Auth methods flags (used by Profile.tsx IdentityConnections)
         auth_methods: authMethods,
       }

@@ -1778,6 +1778,7 @@ app.get('/api/webapp/auth/verify-email', asyncHandler(webAppController.verifyEma
 app.post('/api/webapp/auth/resend-verification', authLimiter, asyncHandler(webAppController.resendVerification));
 app.get('/api/webapp/auth/x/start', asyncHandler(webAppController.xLoginStart));
 app.get('/api/webapp/auth/x/callback', asyncHandler(webAppController.xLoginCallback));
+app.post('/api/webapp/auth/x/unlink', asyncHandler(webAppController.unlinkX));
 app.get('/api/me', asyncHandler(webAppController.authStatus));
 app.post('/api/webapp/auth/logout', asyncHandler(webAppController.logout));
 app.post('/api/webapp/auth/forgot-password', asyncHandler(webAppController.forgotPassword));
@@ -1799,6 +1800,15 @@ app.post('/api/webapp/users/block', asyncHandler(blockedUsersController.blockUse
 app.delete('/api/webapp/users/unblock/:blockedUserId', asyncHandler(blockedUsersController.unblockUser));
 app.get('/api/webapp/users/blocked', asyncHandler(blockedUsersController.getBlockedUsers));
 app.get('/api/webapp/users/is-blocked/:userId', asyncHandler(blockedUsersController.isUserBlocked));
+
+// Web App Follow System
+const followController = require('./controllers/followController');
+app.post('/api/webapp/users/follow',                   asyncHandler(followController.followUser));
+app.post('/api/webapp/users/unfollow',                 asyncHandler(followController.unfollowUser));
+app.get('/api/webapp/users/follow-status/:userId',     asyncHandler(followController.getFollowStatus));
+app.get('/api/webapp/users/:userId/followers',         asyncHandler(followController.getFollowers));
+app.get('/api/webapp/users/:userId/following',         asyncHandler(followController.getFollowing));
+app.get('/api/webapp/social/feed/following',           asyncHandler(followController.getFollowingFeed));
 
 // Web App Direct Messages
 app.get('/api/webapp/messages/threads', asyncHandler(directMessagesController.getThreads));

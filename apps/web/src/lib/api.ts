@@ -52,6 +52,7 @@ export interface TelegramAuthResponse {
 export interface AuthMethods {
   telegram: boolean;
   atproto: boolean;
+  x: boolean;
 }
 
 export interface AuthStatusResponse {
@@ -59,6 +60,7 @@ export interface AuthStatusResponse {
   user?: TelegramAuthResponse["user"] & {
     atproto_did?: string | null;
     atproto_handle?: string | null;
+    x_handle?: string | null;
     auth_methods?: AuthMethods;
   };
 }
@@ -84,6 +86,15 @@ export function apiLogout(): Promise<{ success: boolean }> {
 
 export function unlinkAtproto(): Promise<{ success: boolean; message: string }> {
   return request("/api/webapp/auth/atproto/unlink", { method: "POST" });
+}
+
+export function unlinkX(): Promise<{ success: boolean; message: string }> {
+  return request("/api/webapp/auth/x/unlink", { method: "POST" });
+}
+
+export function getXLoginUrl(): string {
+  const base = import.meta.env.VITE_API_URL || "https://pnptv.app";
+  return `${base}/api/webapp/auth/x/start?redirect=true`;
 }
 
 /**
@@ -736,6 +747,72 @@ export function getNearbyUsers(
   if (radius) params.append("radius", radius.toString());
   if (limit) params.append("limit", limit.toString());
   return request(`/api/webapp/users/nearby?${params.toString()}`);
+}
+
+// ============================================================================
+// Follow System API
+// ============================================================================
+
+export interface FollowListUser {
+  id: string;
+  username: string;
+  firstName: string;
+  lastName: string | null;
+  photoUrl: string | null;
+  followedAt: string;
+}
+
+export function followUser(userId: string): Promise<{
+  success: boolean;
+  isFollowing: boolean;
+  followerCount: number;
+  followingCount: number;
+}> {
+  return request("/api/webapp/users/follow", { method: "POST", body: { userId } });
+}
+
+export function unfollowUser(userId: string): Promise<{
+  success: boolean;
+  isFollowing: boolean;
+  followerCount: number;
+  followingCount: number;
+}> {
+  return request("/api/webapp/users/unfollow", { method: "POST", body: { userId } });
+}
+
+export function getFollowStatus(userId: string): Promise<{
+  success: boolean;
+  isFollowing: boolean;
+  followerCount: number;
+  followingCount: number;
+}> {
+  return request(`/api/webapp/users/follow-status/${userId}`);
+}
+
+export function getFollowersList(
+  userId: string,
+  cursor?: string
+): Promise<{ success: boolean; users: FollowListUser[]; nextCursor: string | null }> {
+  const params = new URLSearchParams();
+  if (cursor) params.set("cursor", cursor);
+  return request(`/api/webapp/users/${userId}/followers?${params}`);
+}
+
+export function getFollowingList(
+  userId: string,
+  cursor?: string
+): Promise<{ success: boolean; users: FollowListUser[]; nextCursor: string | null }> {
+  const params = new URLSearchParams();
+  if (cursor) params.set("cursor", cursor);
+  return request(`/api/webapp/users/${userId}/following?${params}`);
+}
+
+export function getFollowingFeed(
+  cursor?: string
+): Promise<{ success: boolean; posts: SocialPostItem[]; nextCursor: string | null }> {
+  const params = new URLSearchParams();
+  if (cursor) params.set("cursor", cursor);
+  return request(`/api/webapp/social/feed/following?${params}`);
 }
 
 // ============================================================================

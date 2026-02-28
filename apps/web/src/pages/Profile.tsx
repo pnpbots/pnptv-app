@@ -12,12 +12,20 @@ import {
   createSocialPost,
   checkAuthStatus,
   unlinkAtproto,
+  unlinkX,
   getAtprotoLoginUrl,
+  getXLoginUrl,
   getAtprotoProfile,
+  followUser,
+  unfollowUser,
+  getFollowStatus,
+  getFollowersList,
+  getFollowingList,
   type UserProfile,
   type SocialPostItem,
   type AuthMethods,
   type AtprotoProfile,
+  type FollowListUser,
 } from "@/lib/api";
 
 function resolvePhotoUrl(url: string | null | undefined): string | null {
@@ -725,30 +733,44 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
     did: null,
     loading: true,
   });
+  const [xLinked, setXLinked] = useState(false);
+  const [xHandle, setXHandle] = useState<string | null>(null);
+  const [xLoading, setXLoading] = useState(true);
   const [unlinking, setUnlinking] = useState(false);
   const [unlinkError, setUnlinkError] = useState<string | null>(null);
+  const [xUnlinking, setXUnlinking] = useState(false);
+  const [xUnlinkError, setXUnlinkError] = useState<string | null>(null);
   const [unlinkVersion, setUnlinkVersion] = useState(0);
 
-  // Load current ATProto identity from auth-status
+  // Load current ATProto + X identity from auth-status
   useEffect(() => {
     let cancelled = false;
     checkAuthStatus()
       .then((status) => {
         if (cancelled) return;
         if (status.authenticated && status.user) {
+          const methods = status.user.auth_methods as AuthMethods | undefined;
           setAtproto({
-            linked: !!(status.user.auth_methods as AuthMethods | undefined)?.atproto,
+            linked: !!methods?.atproto,
             handle: status.user.atproto_handle ?? null,
             did: status.user.atproto_did ?? null,
             loading: false,
           });
+          setXLinked(!!methods?.x);
+          setXHandle(status.user.x_handle ?? null);
         } else {
           setAtproto({ linked: false, handle: null, did: null, loading: false });
+          setXLinked(false);
+          setXHandle(null);
         }
+        setXLoading(false);
       })
       .catch(() => {
         if (!cancelled) {
           setAtproto({ linked: false, handle: null, did: null, loading: false });
+          setXLinked(false);
+          setXHandle(null);
+          setXLoading(false);
         }
       });
     return () => {
@@ -767,6 +789,21 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
       setUnlinkError(err instanceof Error ? err.message : "Failed to unlink account");
     } finally {
       setUnlinking(false);
+    }
+  };
+
+  const handleUnlinkX = async () => {
+    setXUnlinking(true);
+    setXUnlinkError(null);
+    try {
+      await unlinkX();
+      setXLinked(false);
+      setXHandle(null);
+      setUnlinkVersion((v) => v + 1);
+    } catch (err: unknown) {
+      setXUnlinkError(err instanceof Error ? err.message : "Failed to unlink X account");
+    } finally {
+      setXUnlinking(false);
     }
   };
 
@@ -870,8 +907,183 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
             </div>
           )}
         </div>
+
+        {/* X / Twitter section */}
+        <div className="py-2 border-t border-white/5">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{ background: "rgba(255, 255, 255, 0.1)" }}
+              aria-hidden="true"
+            >
+              <svg className="w-4.5 h-4.5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-white">X (Twitter)</p>
+              {xLoading ? (
+                <div className="h-3 w-24 bg-white/10 rounded animate-pulse mt-0.5" />
+              ) : xLinked && xHandle ? (
+                <p className="text-xs truncate" style={{ color: "#8E8E93" }}>@{xHandle}</p>
+              ) : (
+                <p className="text-xs" style={{ color: "#8E8E93" }}>Not connected</p>
+              )}
+            </div>
+            {!xLoading && (
+              xLinked ? (
+                <span
+                  className="text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0"
+                  style={{ background: "rgba(52, 199, 89, 0.15)", color: "#34C759" }}
+                >
+                  Connected
+                </span>
+              ) : (
+                <button
+                  onClick={() => { window.location.href = getXLoginUrl(); }}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-full flex-shrink-0 transition-colors hover:opacity-80"
+                  style={{ background: "rgba(255, 255, 255, 0.1)", color: "#FFFFFF" }}
+                >
+                  Connect
+                </button>
+              )
+            )}
+          </div>
+
+          {/* Unlink option when connected */}
+          {!xLoading && xLinked && (
+            <div className="mt-2 flex items-center gap-2 pl-12">
+              <button
+                onClick={handleUnlinkX}
+                disabled={xUnlinking}
+                className="text-xs font-medium hover:underline disabled:opacity-50"
+                style={{ color: "#FF453A" }}
+              >
+                {xUnlinking ? "Unlinking..." : "Unlink X account"}
+              </button>
+              {xUnlinkError && (
+                <span className="text-xs text-red-400">{xUnlinkError}</span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+// ── Follow List Modal ─────────────────────────────────────────────────────────
+
+function FollowListModal({
+  open,
+  mode,
+  targetUserId,
+  onClose,
+  onNavigate,
+}: {
+  open: boolean;
+  mode: "followers" | "following";
+  targetUserId: string;
+  onClose: () => void;
+  onNavigate: (userId: string) => void;
+}) {
+  const [users, setUsers] = useState<FollowListUser[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const load = useCallback(async (cursor?: string) => {
+    try {
+      const res = mode === "followers"
+        ? await getFollowersList(targetUserId, cursor)
+        : await getFollowingList(targetUserId, cursor);
+      if (res.success) {
+        setUsers((prev) => cursor ? [...prev, ...res.users] : res.users);
+        setNextCursor(res.nextCursor);
+      }
+    } catch { /* silent */ }
+    setLoading(false);
+    setLoadingMore(false);
+  }, [mode, targetUserId]);
+
+  useEffect(() => {
+    if (!open) return;
+    setUsers([]);
+    setNextCursor(null);
+    setLoading(true);
+    load();
+  }, [open, load]);
+
+  const handleLoadMore = () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    load(nextCursor);
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title={mode === "followers" ? "Followers" : "Following"}>
+      {loading ? (
+        <div className="space-y-3 py-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 animate-pulse">
+              <div className="w-10 h-10 rounded-full bg-white/10 flex-shrink-0" />
+              <div className="flex-1 space-y-1.5">
+                <div className="h-3 bg-white/10 rounded w-32" />
+                <div className="h-2.5 bg-white/10 rounded w-20" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : users.length === 0 ? (
+        <div className="py-8 text-center">
+          <p className="text-white font-medium mb-1">No {mode === "followers" ? "Followers" : "Following"}</p>
+          <p className="text-sm" style={{ color: "#8E8E93" }}>
+            {mode === "followers" ? "No one is following yet." : "Not following anyone yet."}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-1 py-2">
+          {users.map((u) => (
+            <button
+              key={u.id}
+              onClick={() => { onClose(); onNavigate(u.id); }}
+              className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors text-left"
+            >
+              {u.photoUrl && (u.photoUrl.startsWith("/") || u.photoUrl.startsWith("http")) ? (
+                <img src={u.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+              ) : (
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                >
+                  {(u.firstName || u.username || "?")[0].toUpperCase()}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-white truncate">
+                  {u.firstName}{u.lastName ? ` ${u.lastName}` : ""}
+                </p>
+                {u.username && (
+                  <p className="text-xs truncate" style={{ color: "#8E8E93" }}>@{u.username}</p>
+                )}
+              </div>
+            </button>
+          ))}
+          {nextCursor && (
+            <div className="pt-2 text-center">
+              <button
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="text-sm font-medium px-4 py-1.5 rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
+                style={{ color: "#D4007A" }}
+              >
+                {loadingMore ? "Loading..." : "Load More"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -897,6 +1109,13 @@ export default function Profile() {
   const [wofConsent, setWofConsent] = useState(false);
   const [wofConsentSaving, setWofConsentSaving] = useState(false);
 
+  // Follow state
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
+  const [followersCount, setFollowersCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
+  const [showFollowModal, setShowFollowModal] = useState<"followers" | "following" | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadProfile = useCallback(async (cursor?: string) => {
@@ -915,16 +1134,29 @@ export default function Profile() {
           setProfile(profileRes.profile);
           setWofConsent(profileRes.profile.wofPhotoConsent ?? false);
           setPosts(postsRes.posts);
+          // Load own follow counts
+          getFollowStatus(targetUserId).then((s) => {
+            setFollowersCount(s.followerCount);
+            setFollowingCount(s.followingCount);
+          }).catch(() => {});
         } else {
           setPosts((prev) => [...prev, ...postsRes.posts]);
         }
         setNextCursor(postsRes.nextCursor);
       } else {
-        // Other user's profile: single endpoint
-        const res = await getPublicProfile(targetUserId, cursor);
+        // Other user's profile: single endpoint + follow status
+        const [res, followRes] = await Promise.all([
+          getPublicProfile(targetUserId, cursor),
+          !cursor && isAuthenticated ? getFollowStatus(targetUserId).catch(() => null) : Promise.resolve(null),
+        ]);
         if (!cursor) {
           setProfile(res.profile);
           setPosts(res.posts);
+          if (followRes) {
+            setIsFollowing(followRes.isFollowing);
+            setFollowersCount(followRes.followerCount);
+            setFollowingCount(followRes.followingCount);
+          }
         } else {
           setPosts((prev) => [...prev, ...res.posts]);
         }
@@ -1002,6 +1234,20 @@ export default function Profile() {
     } catch {
       // Silent fail
     }
+  };
+
+  const handleFollow = async () => {
+    if (followLoading || !profile) return;
+    setFollowLoading(true);
+    try {
+      const res = isFollowing
+        ? await unfollowUser(profile.id || paramUserId!)
+        : await followUser(profile.id || paramUserId!);
+      setIsFollowing(res.isFollowing);
+      setFollowersCount(res.followerCount);
+      setFollowingCount(res.followingCount);
+    } catch { /* silent */ }
+    setFollowLoading(false);
   };
 
   const handleAuthorTap = (authorId: string) => {
@@ -1178,11 +1424,25 @@ export default function Profile() {
             )}
 
             {/* Stats row */}
-            <div className="flex items-center gap-4 mt-3">
+            <div className="flex items-center gap-4 mt-3 flex-wrap">
               <span className="text-sm">
                 <strong className="text-white">{profile.postCount ?? posts.length}</strong>
                 <span className="ml-1" style={{ color: "#8E8E93" }}>Posts</span>
               </span>
+              <button
+                onClick={() => setShowFollowModal("followers")}
+                className="text-sm hover:underline text-left"
+              >
+                <strong className="text-white">{followersCount}</strong>
+                <span className="ml-1" style={{ color: "#8E8E93" }}>Followers</span>
+              </button>
+              <button
+                onClick={() => setShowFollowModal("following")}
+                className="text-sm hover:underline text-left"
+              >
+                <strong className="text-white">{followingCount}</strong>
+                <span className="ml-1" style={{ color: "#8E8E93" }}>Following</span>
+              </button>
               {profile.locationText && (
                 <span className="text-xs flex items-center gap-1" style={{ color: "#8E8E93" }}>
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -1219,12 +1479,27 @@ export default function Profile() {
               </Button>
             </>
           ) : (
-            <button
-              onClick={() => navigate(`/dm/${profile.id || paramUserId}`)}
-              className="flex-1 btn-gradient py-2 rounded-lg text-white text-sm font-semibold"
-            >
-              Message
-            </button>
+            <>
+              {isAuthenticated && (
+                <button
+                  onClick={handleFollow}
+                  disabled={followLoading}
+                  className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                  style={isFollowing
+                    ? { background: "rgba(255,255,255,0.08)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)" }
+                    : { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }
+                  }
+                >
+                  {followLoading ? "..." : isFollowing ? "Following" : "Follow"}
+                </button>
+              )}
+              <button
+                onClick={() => navigate(`/dm/${profile.id || paramUserId}`)}
+                className="flex-1 py-2 rounded-lg text-white text-sm font-semibold border border-white/20 hover:border-white/40 transition-colors"
+              >
+                Message
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -1370,6 +1645,20 @@ export default function Profile() {
           onClose={() => setEditOpen(false)}
           profile={profile}
           onSaved={() => loadProfile()}
+        />
+      )}
+
+      {/* ── Follow List Modal ── */}
+      {showFollowModal && (
+        <FollowListModal
+          open={!!showFollowModal}
+          mode={showFollowModal}
+          targetUserId={targetUserId}
+          onClose={() => setShowFollowModal(null)}
+          onNavigate={(userId) => {
+            if (userId === String(user?.id)) navigate("/profile");
+            else navigate(`/profile/${userId}`);
+          }}
         />
       )}
     </div>

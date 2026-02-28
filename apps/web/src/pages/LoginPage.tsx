@@ -1,11 +1,17 @@
 import React, { useState, useEffect, useRef } from "react";
+import { getXLoginUrl, getAtprotoLoginUrl } from "@/lib/api";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
 export function LoginPage() {
-  const [showTooltip, setShowTooltip] = useState(false);
   const [status, setStatus] = useState<"idle" | "waiting" | "error">("idle");
+  const [xRedirecting, setXRedirecting] = useState(false);
+  const [showBlueskyForm, setShowBlueskyForm] = useState(false);
+  const [bskyHandle, setBskyHandle] = useState("");
+  const [bskyError, setBskyError] = useState<string | null>(null);
+  const [bskyRedirecting, setBskyRedirecting] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const bskyInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     return () => {
@@ -63,8 +69,25 @@ export function LoginPage() {
   };
 
   const handleXClick = () => {
-    setShowTooltip(true);
-    setTimeout(() => setShowTooltip(false), 2000);
+    setXRedirecting(true);
+    window.location.href = getXLoginUrl();
+  };
+
+  const handleBlueskySubmit = () => {
+    const raw = bskyHandle.trim().replace(/^@/, "");
+    if (!raw || raw.length < 3) {
+      setBskyError("Enter a valid Bluesky handle, e.g. yourname.bsky.social");
+      bskyInputRef.current?.focus();
+      return;
+    }
+    if (!raw.includes(".") || raw.length < 5) {
+      setBskyError("Handle must include a domain, e.g. yourname.bsky.social");
+      bskyInputRef.current?.focus();
+      return;
+    }
+    setBskyRedirecting(true);
+    setBskyError(null);
+    window.location.href = getAtprotoLoginUrl(raw);
   };
 
   return (
@@ -129,10 +152,42 @@ export function LoginPage() {
             </p>
           )}
 
-          {/* Register with X */}
-          <div className="relative">
+          {/* Login with X */}
+          <button
+            onClick={handleXClick}
+            disabled={xRedirecting}
+            className="w-full py-3.5 px-6 rounded-xl font-semibold text-base flex items-center justify-center gap-3 transition-all duration-200 hover:bg-white/10 disabled:opacity-60"
+            style={{
+              background: "rgba(255, 255, 255, 0.05)",
+              border: "1px solid rgba(255, 255, 255, 0.15)",
+              color: "#FFFFFF",
+            }}
+          >
+            {xRedirecting ? (
+              <>
+                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Redirecting to X...
+              </>
+            ) : (
+              <>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                </svg>
+                Login with X
+              </>
+            )}
+          </button>
+
+          {/* Login with Bluesky */}
+          {!showBlueskyForm ? (
             <button
-              onClick={handleXClick}
+              onClick={() => {
+                setShowBlueskyForm(true);
+                setTimeout(() => bskyInputRef.current?.focus(), 100);
+              }}
               className="w-full py-3.5 px-6 rounded-xl font-semibold text-base flex items-center justify-center gap-3 transition-all duration-200 hover:bg-white/10"
               style={{
                 background: "rgba(255, 255, 255, 0.05)",
@@ -140,22 +195,87 @@ export function LoginPage() {
                 color: "#FFFFFF",
               }}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+              <svg width="20" height="18" viewBox="0 0 360 320" fill="currentColor">
+                <path d="M180 142c-16.3-31.7-60.7-90.8-102-120C38.5-2.9 27.2 1 18.8 1 8.3 1 0 7.8 0 25.4 0 39 6.6 116.7 10.3 132.9 23 187.7 74.3 207 122.7 202c-71 10.5-133.3 41-67.3 147.9 51.7 81.4 103.3 27.8 127.2 0 24-27.9 53.7-87.3 53.7-87.3s29.7 59.4 53.7 87.3c23.9 27.8 75.5 81.4 127.2 0 66-106.9 3.7-137.4-67.3-147.9 48.4 5 99.7-14.3 112.4-69.1 3.7-16.2 10.3-93.9 10.3-107.5C360 7.8 351.7 1 341.2 1c-8.4 0-19.7-3.9-59.2 21C240.7 51.2 196.3 110.3 180 142z" />
               </svg>
-              Register with X
+              Login with Bluesky
             </button>
-
-            {/* Coming Soon tooltip */}
-            {showTooltip && (
-              <div
-                className="absolute -top-10 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-lg text-sm font-medium text-white whitespace-nowrap animate-fade-in-up"
-                style={{ background: "rgba(30, 30, 30, 0.9)", border: "1px solid rgba(212, 0, 122, 0.4)" }}
-              >
-                Coming Soon
+          ) : (
+            <div
+              className="rounded-xl p-4 space-y-3 animate-fade-in-up"
+              style={{
+                background: "rgba(0, 133, 255, 0.06)",
+                border: "1px solid rgba(0, 133, 255, 0.2)",
+              }}
+            >
+              <div className="flex gap-2">
+                <div className="flex-1 relative">
+                  <span
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-sm select-none pointer-events-none font-medium"
+                    style={{ color: "#8E8E93" }}
+                  >
+                    @
+                  </span>
+                  <input
+                    ref={bskyInputRef}
+                    type="text"
+                    inputMode="url"
+                    value={bskyHandle}
+                    onChange={(e) => {
+                      setBskyHandle(e.target.value);
+                      setBskyError(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleBlueskySubmit();
+                    }}
+                    placeholder="yourname.bsky.social"
+                    className="w-full pl-7 pr-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors"
+                    style={{
+                      borderColor: bskyError ? "#FF453A" : "rgba(255,255,255,0.15)",
+                    }}
+                    spellCheck={false}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    disabled={bskyRedirecting}
+                  />
+                </div>
+                <button
+                  onClick={handleBlueskySubmit}
+                  disabled={bskyRedirecting || !bskyHandle.trim()}
+                  className="px-4 py-2.5 rounded-lg text-white text-sm font-semibold whitespace-nowrap flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{ background: "linear-gradient(135deg, #0085FF, #00BAFF)" }}
+                >
+                  {bskyRedirecting ? (
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  ) : (
+                    "Go"
+                  )}
+                </button>
               </div>
-            )}
-          </div>
+              {bskyError && (
+                <p className="text-xs text-red-400">{bskyError}</p>
+              )}
+              <div className="flex items-center justify-between">
+                <p className="text-xs" style={{ color: "#8E8E93" }}>
+                  Enter your Bluesky handle to log in
+                </p>
+                <button
+                  onClick={() => {
+                    setShowBlueskyForm(false);
+                    setBskyHandle("");
+                    setBskyError(null);
+                  }}
+                  className="text-xs font-medium hover:underline"
+                  style={{ color: "#8E8E93" }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Divider */}

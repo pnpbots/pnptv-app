@@ -5,6 +5,7 @@ import { Modal } from "@pnptv/ui-kit";
 import {
   getSocialFeedPosts,
   getWofFeedPosts,
+  getFollowingFeed,
   createSocialPost,
   togglePostLike,
   deleteSocialPost,
@@ -348,7 +349,7 @@ export default function Social() {
   const currentUserId = String(user?.id || "");
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<"all" | "wof">("all");
+  const [activeTab, setActiveTab] = useState<"all" | "wof" | "following">("all");
 
   const [posts, setPosts] = useState<SocialPostItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -363,6 +364,14 @@ export default function Social() {
   const [wofNextCursor, setWofNextCursor] = useState<string | null>(null);
   const [wofLoadingMore, setWofLoadingMore] = useState(false);
   const [wofLoaded, setWofLoaded] = useState(false);
+
+  // Following tab state
+  const [followingPosts, setFollowingPosts] = useState<SocialPostItem[]>([]);
+  const [followingLoading, setFollowingLoading] = useState(false);
+  const [followingError, setFollowingError] = useState<string | null>(null);
+  const [followingNextCursor, setFollowingNextCursor] = useState<string | null>(null);
+  const [followingLoadingMore, setFollowingLoadingMore] = useState(false);
+  const [followingLoaded, setFollowingLoaded] = useState(false);
 
   // Featured performers
   const [featuredPerformers, setFeaturedPerformers] = useState<FeaturedPerformer[]>([]);
@@ -448,14 +457,38 @@ export default function Social() {
     }
   }, []);
 
-  const handleTabChange = useCallback((tab: "all" | "wof") => {
+  const loadFollowingFeed = useCallback(async (cursor?: string) => {
+    try {
+      const res = await getFollowingFeed(cursor);
+      if (res.success) {
+        if (cursor) {
+          setFollowingPosts((prev) => [...prev, ...res.posts]);
+        } else {
+          setFollowingPosts(res.posts);
+        }
+        setFollowingNextCursor(res.nextCursor);
+      }
+    } catch (err) {
+      setFollowingError(err instanceof Error ? err.message : "Failed to load following feed");
+    } finally {
+      setFollowingLoading(false);
+      setFollowingLoadingMore(false);
+    }
+  }, []);
+
+  const handleTabChange = useCallback((tab: "all" | "wof" | "following") => {
     setActiveTab(tab);
     if (tab === "wof" && !wofLoaded) {
       setWofLoading(true);
       setWofLoaded(true);
       loadWofFeed();
     }
-  }, [wofLoaded, loadWofFeed]);
+    if (tab === "following" && !followingLoaded) {
+      setFollowingLoading(true);
+      setFollowingLoaded(true);
+      loadFollowingFeed();
+    }
+  }, [wofLoaded, followingLoaded, loadWofFeed, loadFollowingFeed]);
 
   const handleWofLoadMore = useCallback(() => {
     if (!wofNextCursor || wofLoadingMore) return;
@@ -463,7 +496,13 @@ export default function Social() {
     loadWofFeed(wofNextCursor);
   }, [wofNextCursor, wofLoadingMore, loadWofFeed]);
 
-  // Like — update both feed arrays so switching tabs stays consistent
+  const handleFollowingLoadMore = useCallback(() => {
+    if (!followingNextCursor || followingLoadingMore) return;
+    setFollowingLoadingMore(true);
+    loadFollowingFeed(followingNextCursor);
+  }, [followingNextCursor, followingLoadingMore, loadFollowingFeed]);
+
+  // Like — update all feed arrays so switching tabs stays consistent
   const handleLike = useCallback(async (postId: number) => {
     try {
       const res = await togglePostLike(postId);
@@ -475,15 +514,17 @@ export default function Social() {
         );
       setPosts(updater);
       setWofPosts(updater);
+      setFollowingPosts(updater);
     } catch { /* silent */ }
   }, []);
 
-  // Delete — remove from both arrays
+  // Delete — remove from all arrays
   const handleDelete = useCallback(async (postId: number) => {
     try {
       await deleteSocialPost(postId);
       setPosts((prev) => prev.filter((p) => p.id !== postId));
       setWofPosts((prev) => prev.filter((p) => p.id !== postId));
+      setFollowingPosts((prev) => prev.filter((p) => p.id !== postId));
     } catch { /* silent */ }
   }, []);
 
@@ -790,6 +831,17 @@ export default function Social() {
         >
           Wall of Fame
         </button>
+        {isAuthenticated && (
+          <button
+            onClick={() => handleTabChange("following")}
+            className={`flex-1 py-3 text-sm font-semibold text-center transition-colors ${
+              activeTab === "following" ? "text-white border-b-2" : "text-white/50"
+            }`}
+            style={activeTab === "following" ? { borderImage: "linear-gradient(to right, #D4007A, #E69138) 1" } : undefined}
+          >
+            Following
+          </button>
+        )}
       </div>
 
       {/* ── All Posts Feed ── */}
@@ -915,6 +967,71 @@ export default function Social() {
                 style={{ color: "#FFB454" }}
               >
                 {wofLoadingMore ? "Loading..." : "Load More"}
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* ── Following Feed ── */}
+      {activeTab === "following" && (followingLoading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="glass-card-sm p-4 animate-pulse">
+              <div className="flex gap-3">
+                <div className="w-10 h-10 rounded-full bg-white/10 flex-shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 bg-white/10 rounded w-32" />
+                  <div className="h-3 bg-white/10 rounded w-full" />
+                  <div className="h-3 bg-white/10 rounded w-3/4" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : followingError ? (
+        <div className="glass-card-sm p-8 text-center">
+          <p className="text-white font-medium mb-1">Feed Unavailable</p>
+          <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>{followingError}</p>
+          <button
+            onClick={() => { setFollowingError(null); setFollowingLoading(true); loadFollowingFeed(); }}
+            className="btn-gradient px-4 py-1.5 rounded-lg text-white text-sm font-semibold"
+          >
+            Retry
+          </button>
+        </div>
+      ) : followingPosts.length === 0 ? (
+        <div className="glass-card-sm p-8 text-center">
+          <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+          </svg>
+          <p className="text-white font-medium mb-1">No Posts Yet</p>
+          <p className="text-sm" style={{ color: "#8E8E93" }}>
+            Follow some users to see their posts here.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {followingPosts.map((post) => (
+            <PostCard
+              key={post.id}
+              post={post}
+              currentUserId={currentUserId}
+              isAdmin={isAdmin}
+              onLike={handleLike}
+              onDelete={handleDelete}
+              onNavigate={navigate}
+            />
+          ))}
+          {followingNextCursor && (
+            <div className="text-center pt-2 pb-4">
+              <button
+                onClick={handleFollowingLoadMore}
+                disabled={followingLoadingMore}
+                className="text-sm font-medium px-6 py-2 rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
+                style={{ color: "#D4007A" }}
+              >
+                {followingLoadingMore ? "Loading..." : "Load More"}
               </button>
             </div>
           )}

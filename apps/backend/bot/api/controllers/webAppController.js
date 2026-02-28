@@ -1535,6 +1535,58 @@ const uploadAvatar = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/webapp/auth/x/unlink
+ * Unlinks X/Twitter identity from the current session user.
+ */
+const unlinkX = async (req, res) => {
+  const sessionUser = req.session?.user;
+  if (!sessionUser?.id) {
+    return res.status(401).json({ success: false, error: 'Not authenticated' });
+  }
+
+  try {
+    await query(
+      `UPDATE users SET twitter = NULL, x_id = NULL, x_user_id = NULL, x_username = NULL,
+              x_access_token_encrypted = NULL, x_refresh_token_encrypted = NULL,
+              x_token_expires_at = NULL, updated_at = NOW()
+       WHERE id = $1`,
+      [sessionUser.id],
+      { cache: false }
+    );
+
+    logger.info(`[X] Unlinked X account for user ${sessionUser.id}`);
+
+    // Update session
+    const hasTelegram = !!req.session.user?.auth_methods?.telegram;
+    const hasAtproto = !!req.session.user?.auth_methods?.atproto;
+
+    if (!hasTelegram && !hasAtproto) {
+      // X was the only auth method — destroy session
+      return req.session.destroy((err) => {
+        if (err) logger.error('[X] Session destroy error during unlink:', err);
+        res.clearCookie('__pnptv_sid');
+        return res.json({ success: true, message: 'X account unlinked. You have been logged out.' });
+      });
+    }
+
+    // Other auth methods remain — update session in place
+    req.session.user.xHandle = null;
+    req.session.user.auth_methods = {
+      ...req.session.user.auth_methods,
+      x: false,
+    };
+    await new Promise((resolve, reject) =>
+      req.session.save(err => (err ? reject(err) : resolve()))
+    );
+
+    return res.json({ success: true, message: 'X account unlinked successfully' });
+  } catch (err) {
+    logger.error('[X] unlinkX error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to unlink X account' });
+  }
+};
+
 module.exports = {
   telegramStart,
   telegramCallback,
@@ -1548,6 +1600,7 @@ module.exports = {
   resendVerification,
   xLoginStart,
   xLoginCallback,
+  unlinkX,
   authStatus,
   logout,
   getProfile,

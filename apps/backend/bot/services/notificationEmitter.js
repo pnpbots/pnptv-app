@@ -14,6 +14,7 @@ const TYPE_TO_PREF = {
   payment: 'payments',
   announcement: 'announcements',
   system: 'announcements',
+  follow: 'follows',
 };
 
 let _io = null;
