@@ -1,57 +1,60 @@
 /**
  * BlueskyService.js
- * PDS Bluesky integration with privacy-first architecture
+ * Public Bluesky/ATProto read-only integration with Redis caching.
  *
  * PRIVACY RULES:
- * - Read-only access to external Bluesky data
- * - NO outbound sharing of pnptv data to Bluesky network
- * - All external data cached with 24h TTL
+ * - Read-only access to external Bluesky data (unauthenticated public XRPC)
+ * - NO outbound sharing of PNPtv user data to Bluesky network
+ * - All external data cached with TTL via Redis
  * - Access logged to audit trail
- * - NO inbound requests allowed to Bluesky federation relay
+ * - For authenticated user actions (like, follow, cross-post) use atprotoController
+ *   which operates via the user's own OAuth session.
  */
 
+'use strict';
+
 const axios = require('axios');
-const crypto = require('crypto');
-const { Pool } = require('pg');
-const logger = require('../utils/logger');
+const { getRedis } = require('../../config/redis');
+const logger = require('../../utils/logger');
 
-// Bluesky PDS endpoints (read-only access only)
-const BLUESKY_ENDPOINTS = {
-  pds: 'https://bsky.social', // Main Bluesky PDS
-  atproto: 'https://api.bsky.app/xrpc', // AT Protocol API
-};
+// Public Bluesky AppView endpoints — no auth required
+const BSKY_APPVIEW = 'https://public.api.bsky.app/xrpc';
 
-// AT Protocol XRPC methods (read-only only)
-const ALLOWED_XRPC_METHODS = [
+// Whitelisted read-only XRPC methods for unauthenticated access
+const ALLOWED_XRPC_METHODS = new Set([
   'com.atproto.repo.describeRepo',
   'com.atproto.identity.resolveHandle',
   'app.bsky.actor.getProfile',
+  'app.bsky.actor.getProfiles',
   'app.bsky.feed.getAuthorFeed',
   'app.bsky.feed.getTimeline',
   'app.bsky.feed.getPostThread',
   'app.bsky.feed.searchPosts',
   'app.bsky.graph.getFollows',
   'app.bsky.graph.getFollowers',
-];
+]);
 
 class BlueskyService {
   constructor(pool) {
+    // pool is kept for backward compatibility with ExternalProfileController.
+    // Direct DB writes now go through the query() helper, not pool.query().
     this.pool = pool;
     this.httpClient = axios.create({
+      baseURL: BSKY_APPVIEW,
       timeout: 10000,
       headers: {
-        'User-Agent': 'pnptv-bot/1.0 (read-only access)',
+        'User-Agent': 'pnptv-app/2.0 (https://pnptv.app; read-only)',
+        Accept: 'application/json',
       },
     });
   }
 
   /**
-   * CRITICAL: Validate that only read-only XRPC methods are called
-   * Prevents accidental outbound federation
+   * Validate that only read-only XRPC methods are called (prevent federation leak).
    */
   validateXrpcMethod(methodName) {
-    if (!ALLOWED_XRPC_METHODS.includes(methodName)) {
-      const error = new Error(`XRPC method "${methodName}" not allowed (not in read-only whitelist)`);
+    if (!ALLOWED_XRPC_METHODS.has(methodName)) {
+      const error = new Error(`XRPC method "${methodName}" not in read-only whitelist`);
       error.code = 'FEDERATED_METHOD_BLOCKED';
       throw error;
     }
@@ -59,25 +62,21 @@ class BlueskyService {
   }
 
   /**
-   * Call AT Protocol XRPC method (read-only only)
-   * All calls logged to federated_access_log for audit
+   * Call a public (unauthenticated) AT Protocol XRPC method.
+   * All calls are read-only; mutation methods are blocked by the whitelist.
    */
   async callXrpc(methodName, params = {}, userContext = {}) {
     this.validateXrpcMethod(methodName);
 
     try {
-      const url = `${ALLOWED_XRPC_METHODS[methodName]}`;
-      logger.info('[BlueskyService] Calling XRPC method', {
-        methodName,
-        params: { ...params, accessToken: '***' }, // Never log tokens
-      });
+      const url = `/${methodName}`;
+      logger.debug('[BlueskyService] Calling XRPC method', { methodName, params });
 
       const response = await this.httpClient.get(url, {
         params,
         timeout: 10000,
       });
 
-      // Log successful access
       await this.logFederatedAccess({
         userId: userContext.userId,
         service: 'bluesky',
@@ -90,12 +89,8 @@ class BlueskyService {
 
       return response.data;
     } catch (error) {
-      logger.error('[BlueskyService] XRPC call failed', {
-        methodName,
-        error: error.message,
-      });
+      logger.error('[BlueskyService] XRPC call failed', { methodName, error: error.message });
 
-      // Log failed access
       await this.logFederatedAccess({
         userId: userContext.userId,
         service: 'bluesky',
@@ -112,19 +107,14 @@ class BlueskyService {
   }
 
   /**
-   * Resolve Bluesky handle to DID
-   * Example: alice.bsky.social -> did:plc:...
+   * Resolve Bluesky handle to DID using the public AppView.
    */
   async resolveHandle(handle, userContext = {}) {
     try {
-      const response = await this.httpClient.get(
-        `${BLUESKY_ENDPOINTS.atproto}/com.atproto.identity.resolveHandle`,
-        {
-          params: { handle },
-          timeout: 5000,
-        }
-      );
-
+      const response = await this.httpClient.get('/com.atproto.identity.resolveHandle', {
+        params: { handle },
+        timeout: 5000,
+      });
       return response.data;
     } catch (error) {
       logger.error('[BlueskyService] Failed to resolve handle', { handle, error: error.message });
@@ -133,28 +123,22 @@ class BlueskyService {
   }
 
   /**
-   * Fetch Bluesky profile by handle
-   * Caches result for 1 hour
+   * Fetch Bluesky profile by handle or DID.
+   * Cached in Redis for 1 hour to avoid hammering the AppView.
    */
   async getProfile(handleOrDid, userContext = {}) {
-    // Check cache first
-    const cacheKey = `bluesky_profile:${handleOrDid}`;
-    const cached = await this.getCachedProfile(cacheKey);
+    const cacheKey = `bsky:profile:${handleOrDid}`;
+    const cached = await this.getCachedJson(cacheKey);
     if (cached) return cached;
 
     try {
-      const response = await this.httpClient.get(
-        `${BLUESKY_ENDPOINTS.atproto}/app.bsky.actor.getProfile`,
-        {
-          params: { actor: handleOrDid },
-          timeout: 5000,
-        }
-      );
+      const response = await this.httpClient.get('/app.bsky.actor.getProfile', {
+        params: { actor: handleOrDid },
+        timeout: 5000,
+      });
 
-      // Cache for 1 hour
-      await this.cacheProfile(cacheKey, response.data, 3600);
+      await this.setCachedJson(cacheKey, response.data, 3600); // 1-hour TTL
 
-      // Log access
       await this.logFederatedAccess({
         userId: userContext.userId,
         service: 'bluesky',
@@ -173,35 +157,31 @@ class BlueskyService {
   }
 
   /**
-   * Fetch posts from Bluesky user's feed
-   * Caches posts with 24h TTL to prevent stale data
+   * Fetch posts from a Bluesky user's public author feed.
+   * Results are cached in Redis for 15 minutes.
    */
   async getAuthorFeed(actor, limit = 10, cursor = null, userContext = {}) {
+    const cacheKey = `bsky:feed:${actor}:${limit}:${cursor || ''}`;
+    const cached = await this.getCachedJson(cacheKey);
+    if (cached) return cached;
+
     try {
       const params = { actor, limit: Math.min(limit, 100) };
       if (cursor) params.cursor = cursor;
 
-      const response = await this.httpClient.get(
-        `${BLUESKY_ENDPOINTS.atproto}/app.bsky.feed.getAuthorFeed`,
-        { params, timeout: 10000 }
-      );
+      const response = await this.httpClient.get('/app.bsky.feed.getAuthorFeed', {
+        params,
+        timeout: 10000,
+      });
 
-      // Cache posts
-      if (response.data.feed) {
-        await this.cachePosts(
-          response.data.feed.map((item) => item.post),
-          userContext.userId,
-          'followed_user'
-        );
-      }
+      await this.setCachedJson(cacheKey, response.data, 900); // 15-minute TTL
 
-      // Log access
       await this.logFederatedAccess({
         userId: userContext.userId,
         service: 'bluesky',
         resourceType: 'feed',
         resourceId: actor,
-        action: 'cache',
+        action: 'view',
         success: true,
         userIp: userContext.ip,
       });
@@ -214,103 +194,102 @@ class BlueskyService {
   }
 
   /**
-   * Search Bluesky posts (read-only)
-   * Returns cached results with 24h TTL
+   * Search Bluesky posts (read-only, unauthenticated AppView).
+   * Results are cached in Redis for 5 minutes.
    */
-  async searchPosts(query, limit = 20, cursor = null, userContext = {}) {
+  async searchPosts(q, limit = 20, cursor = null, userContext = {}) {
+    const cacheKey = `bsky:search:${q}:${limit}:${cursor || ''}`;
+    const cached = await this.getCachedJson(cacheKey);
+    if (cached) return cached;
+
     try {
-      const params = {
-        q: query,
-        limit: Math.min(limit, 100),
-        sort: 'top',
-      };
+      const params = { q, limit: Math.min(limit, 100), sort: 'top' };
       if (cursor) params.cursor = cursor;
 
-      const response = await this.httpClient.get(
-        `${BLUESKY_ENDPOINTS.atproto}/app.bsky.feed.searchPosts`,
-        { params, timeout: 10000 }
-      );
+      const response = await this.httpClient.get('/app.bsky.feed.searchPosts', {
+        params,
+        timeout: 10000,
+      });
 
-      // Cache posts
-      if (response.data.posts) {
-        await this.cachePosts(
-          response.data.posts,
-          userContext.userId,
-          'search_result'
-        );
-      }
+      await this.setCachedJson(cacheKey, response.data, 300); // 5-minute TTL
 
-      // Log access
       await this.logFederatedAccess({
         userId: userContext.userId,
         service: 'bluesky',
         resourceType: 'search',
-        resourceId: query,
-        action: 'cache',
+        resourceId: q,
+        action: 'view',
         success: true,
         userIp: userContext.ip,
       });
 
       return response.data;
     } catch (error) {
-      logger.error('[BlueskyService] Failed to search posts', { query, error: error.message });
+      logger.error('[BlueskyService] Failed to search posts', { q, error: error.message });
       throw new Error(`Cannot search Bluesky: ${error.message}`);
     }
   }
 
   /**
-   * Cache posts from Bluesky (internal use only)
-   * Posts expire after 24 hours to prevent stale data
+   * Cache posts from Bluesky into the pds_posts table.
+   * Posts expire after 24 hours to prevent stale data.
    */
   async cachePosts(posts, userId, reason = 'timeline') {
-    try {
-      const query = `
-        INSERT INTO pds_posts (
-          bluesky_uri, bluesky_cid, author_external_user_id,
-          author_external_username, post_text, post_facets,
-          embedded_images, cached_by_user_id, reason_cached,
-          likes_count, replies_count, reposts_count, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-        ON CONFLICT (bluesky_uri) DO UPDATE
-        SET updated_at = NOW(), likes_count = EXCLUDED.likes_count,
-            replies_count = EXCLUDED.replies_count, reposts_count = EXCLUDED.reposts_count
-      `;
+    if (!Array.isArray(posts) || posts.length === 0) return 0;
 
-      for (const post of posts) {
-        await this.pool.query(query, [
-          post.uri,
-          post.cid,
-          post.author.did,
-          post.author.handle,
-          post.record.text || '',
-          JSON.stringify(post.record.facets || []),
-          JSON.stringify(this.extractImages(post)),
-          userId,
-          reason,
-          post.likeCount || 0,
-          post.replyCount || 0,
-          post.repostCount || 0,
-          new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h TTL
-        ]);
+    const { query: dbQuery } = require('../../config/postgres');
+
+    let cached = 0;
+    for (const post of posts) {
+      try {
+        await dbQuery(
+          `INSERT INTO pds_posts (
+             bluesky_uri, bluesky_cid, author_external_user_id,
+             author_external_username, post_text, post_facets,
+             embedded_images, cached_by_user_id, reason_cached,
+             likes_count, replies_count, reposts_count, expires_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+           ON CONFLICT (bluesky_uri) DO UPDATE
+           SET updated_at = NOW(),
+               likes_count = EXCLUDED.likes_count,
+               replies_count = EXCLUDED.replies_count,
+               reposts_count = EXCLUDED.reposts_count,
+               expires_at = EXCLUDED.expires_at`,
+          [
+            post.uri,
+            post.cid,
+            post.author.did,
+            post.author.handle,
+            post.record?.text || '',
+            JSON.stringify(post.record?.facets || []),
+            JSON.stringify(this.extractImages(post)),
+            userId,
+            reason,
+            post.likeCount || 0,
+            post.replyCount || 0,
+            post.repostCount || 0,
+            new Date(Date.now() + 24 * 60 * 60 * 1000),
+          ],
+          { cache: false }
+        );
+        cached++;
+      } catch (err) {
+        logger.warn('[BlueskyService] Failed to cache post', { uri: post.uri, err: err.message });
       }
-
-      logger.info('[BlueskyService] Cached posts', { count: posts.length });
-      return posts.length;
-    } catch (error) {
-      logger.error('[BlueskyService] Failed to cache posts', { error: error.message });
-      throw error;
     }
+
+    logger.info('[BlueskyService] Cached posts to pds_posts', { cached, total: posts.length });
+    return cached;
   }
 
   /**
-   * Extract profile data from Bluesky
-   * Used for linking external profiles
+   * Extract profile data from a raw Bluesky profile response.
    */
   async extractProfileData(blueskyProfile) {
     return {
       externalUserId: blueskyProfile.did,
       externalUsername: blueskyProfile.handle,
-      externalEmail: blueskyProfile.email, // May not be available
+      externalEmail: null, // Not exposed by Bluesky AppView
       profileName: blueskyProfile.displayName || blueskyProfile.handle,
       profileBio: blueskyProfile.description || '',
       profileAvatarUrl: blueskyProfile.avatar || null,
@@ -326,85 +305,75 @@ class BlueskyService {
   }
 
   /**
-   * Verify external profile ownership (proof challenge)
-   * User must sign a challenge with their Bluesky private key
+   * Initiate profile ownership verification challenge.
+   * The user must add the challenge token to their Bluesky profile description.
    */
   async initiateProfileVerification(externalProfile) {
-    try {
-      // Generate random challenge
-      const challenge = crypto.randomBytes(32).toString('hex');
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min expiry
+    const { query: dbQuery } = require('../../config/postgres');
+    const crypto = require('crypto');
 
-      // Store challenge in DB
-      const query = `
-        INSERT INTO external_profile_verification (
-          external_profile_id, verification_method, challenge_data, challenge_expires_at
-        ) VALUES ($1, $2, $3, $4)
-        RETURNING id, challenge_data
-      `;
+    const challenge = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15-minute expiry
 
-      const result = await this.pool.query(query, [
+    const result = await dbQuery(
+      `INSERT INTO external_profile_verification (
+         external_profile_id, verification_method, challenge_data, challenge_expires_at
+       ) VALUES ($1, $2, $3, $4)
+       RETURNING id, challenge_data`,
+      [
         externalProfile.id,
-        'proof_of_ownership',
+        'description_token',
         JSON.stringify({ challenge }),
         expiresAt,
-      ]);
+      ],
+      { cache: false }
+    );
 
-      return {
-        verificationId: result.rows[0].id,
-        challenge: result.rows[0].challenge_data.challenge,
-        expiresAt,
-      };
-    } catch (error) {
-      logger.error('[BlueskyService] Failed to initiate verification', { error: error.message });
-      throw error;
-    }
+    return {
+      verificationId: result.rows[0].id,
+      challenge: result.rows[0].challenge_data.challenge,
+      expiresAt,
+      instructions: `Add this token to your Bluesky profile description: pnptv-verify:${challenge}`,
+    };
   }
 
   /**
-   * Verify proof of ownership
-   * User signs challenge with Bluesky private key, we verify signature
+   * Verify profile ownership by checking for the challenge token in the
+   * user's live Bluesky profile description.
    */
   async verifyProfileOwnership(externalProfile, signedChallenge) {
-    try {
-      // Fetch external profile to get DID
-      const profile = await this.getProfile(externalProfile.external_username);
+    const { query: dbQuery } = require('../../config/postgres');
 
-      // In real implementation, verify cryptographic signature
-      // For now, accept API token as proof
-      // TODO: Implement AT Protocol signature verification
+    // Fetch the live profile from Bluesky
+    const liveProfile = await this.getProfile(externalProfile.external_username);
 
-      const query = `
-        UPDATE external_profile_verification
-        SET proof_verified_at = NOW()
-        WHERE external_profile_id = $1 AND challenge_expires_at > NOW()
-      `;
-
-      await this.pool.query(query, [externalProfile.id]);
-
-      // Update external profile verification status
-      const updateQuery = `
-        UPDATE external_profiles
-        SET is_verified = TRUE, verified_at = NOW()
-        WHERE id = $1
-      `;
-
-      await this.pool.query(updateQuery, [externalProfile.id]);
-
-      logger.info('[BlueskyService] Profile ownership verified', {
-        profileId: externalProfile.id,
-      });
-
-      return true;
-    } catch (error) {
-      logger.error('[BlueskyService] Failed to verify ownership', { error: error.message });
-      throw error;
+    // Check if the description contains the expected token
+    const description = liveProfile.description || '';
+    if (!description.includes(`pnptv-verify:${signedChallenge}`)) {
+      throw new Error('Verification token not found in Bluesky profile description');
     }
+
+    // Mark the verification record as verified
+    await dbQuery(
+      `UPDATE external_profile_verification
+       SET proof_verified_at = NOW()
+       WHERE external_profile_id = $1 AND challenge_expires_at > NOW()`,
+      [externalProfile.id],
+      { cache: false }
+    );
+
+    await dbQuery(
+      `UPDATE external_profiles SET is_verified = TRUE, verified_at = NOW() WHERE id = $1`,
+      [externalProfile.id],
+      { cache: false }
+    );
+
+    logger.info('[BlueskyService] Profile ownership verified', { profileId: externalProfile.id });
+    return true;
   }
 
   /**
-   * Log all external data access for audit trail
-   * Privacy enforcement: track what data leaves our system
+   * Log all external data access for the audit trail.
    */
   async logFederatedAccess({
     userId,
@@ -417,68 +386,95 @@ class BlueskyService {
     userIp = null,
   }) {
     try {
-      const query = `
-        INSERT INTO federated_access_log (
-          pnptv_user_id, service_type, external_resource_type, external_resource_id,
-          action, success, error_message, ip_address
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      `;
-
-      await this.pool.query(query, [
-        userId,
-        service,
-        resourceType,
-        resourceId,
-        action,
-        success,
-        errorMessage,
-        userIp,
-      ]);
+      const { query: dbQuery } = require('../../config/postgres');
+      await dbQuery(
+        `INSERT INTO federated_access_log (
+           pnptv_user_id, service_type, external_resource_type, external_resource_id,
+           action, success, error_message, ip_address
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [userId, service, resourceType, resourceId, action, success, errorMessage, userIp],
+        { cache: false }
+      );
     } catch (error) {
-      logger.error('[BlueskyService] Failed to log access', { error: error.message });
+      // Non-blocking — log failure doesn't break the request
+      logger.error('[BlueskyService] Failed to write audit log', { error: error.message });
     }
   }
 
   /**
-   * Helper: Extract images from Bluesky post
+   * Extract image attachments from a Bluesky post embed.
    */
   extractImages(post) {
-    if (!post.embed || post.embed.type !== 'app.bsky.embed.images') {
-      return [];
+    const embed = post.embed;
+    if (!embed) return [];
+
+    // Images embedded directly
+    if (embed.$type === 'app.bsky.embed.images#view' && Array.isArray(embed.images)) {
+      return embed.images.map((img) => ({
+        url: img.thumb || img.fullsize || '',
+        alt: img.alt || '',
+        aspectRatio: img.aspectRatio || null,
+      }));
     }
 
-    return (post.embed.images || []).map((img) => ({
-      url: img.image.uri,
-      alt: img.alt || '',
-      mimeType: img.image.mimeType,
-      size: img.image.size,
-    }));
+    // Images embedded inside a record-with-media
+    if (
+      embed.$type === 'app.bsky.embed.recordWithMedia#view' &&
+      embed.media?.$type === 'app.bsky.embed.images#view'
+    ) {
+      return (embed.media.images || []).map((img) => ({
+        url: img.thumb || img.fullsize || '',
+        alt: img.alt || '',
+        aspectRatio: img.aspectRatio || null,
+      }));
+    }
+
+    return [];
   }
 
   /**
-   * Helper: Extract resource type from XRPC method name
+   * Derive a generic resource type label from an XRPC method name.
    */
   extractResourceType(methodName) {
     if (methodName.includes('feed')) return 'feed';
     if (methodName.includes('profile') || methodName.includes('actor')) return 'profile';
     if (methodName.includes('thread')) return 'post';
     if (methodName.includes('graph')) return 'graph';
+    if (methodName.includes('identity')) return 'identity';
     return 'generic';
   }
 
+  // ---------------------------------------------------------------------------
+  // Redis Caching Helpers
+  // ---------------------------------------------------------------------------
+
   /**
-   * Helper: Get cached profile from Redis or DB
+   * Get a cached JSON value from Redis.
+   * Returns null on miss or any error (fail-open).
    */
-  async getCachedProfile(cacheKey) {
-    // TODO: Implement Redis caching
-    return null;
+  async getCachedJson(key) {
+    try {
+      const redis = getRedis();
+      const raw = await redis.get(`bluesky:cache:${key}`);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (err) {
+      logger.debug('[BlueskyService] Redis cache get failed (non-fatal)', { key, err: err.message });
+      return null;
+    }
   }
 
   /**
-   * Helper: Cache profile for expiry period
+   * Store a value in Redis with a TTL (seconds).
+   * Fails silently so cache errors never break the request.
    */
-  async cacheProfile(cacheKey, profileData, ttlSeconds) {
-    // TODO: Implement Redis caching
+  async setCachedJson(key, value, ttlSeconds) {
+    try {
+      const redis = getRedis();
+      await redis.set(`bluesky:cache:${key}`, JSON.stringify(value), 'EX', ttlSeconds);
+    } catch (err) {
+      logger.debug('[BlueskyService] Redis cache set failed (non-fatal)', { key, err: err.message });
+    }
   }
 }
 

@@ -354,6 +354,49 @@ export interface SocialPostItem {
   repost_created_at?: string;
   repost_author_username?: string;
   repost_author_first_name?: string;
+  // Bluesky cross-post fields
+  bluesky_uri?: string | null;
+  bluesky_cid?: string | null;
+  source?: "local" | "bluesky";
+  bsky_author_handle?: string | null;
+  bsky_author_avatar?: string | null;
+  bsky_author_display_name?: string | null;
+}
+
+// ============================================================================
+// ATProto / Bluesky Profile API
+// ============================================================================
+
+export interface AtprotoProfile {
+  did: string;
+  handle: string;
+  displayName?: string;
+  description?: string;
+  avatar?: string;
+  followersCount?: number;
+  followsCount?: number;
+  postsCount?: number;
+  profileUrl: string;
+}
+
+export function getAtprotoProfile(): Promise<{
+  success: boolean;
+  linked: boolean;
+  profile: AtprotoProfile | null;
+  error?: string;
+}> {
+  return request("/api/atproto/profile");
+}
+
+export function crossPostToBluesky(postId: number): Promise<{
+  success: boolean;
+  uri?: string;
+  cid?: string;
+  error?: string;
+}> {
+  return request(`/api/webapp/social/posts/${postId}/crosspost-bluesky`, {
+    method: "POST",
+  });
 }
 
 export function getProfile(): Promise<{ success: boolean; profile: UserProfile }> {
@@ -420,13 +463,15 @@ export function getSocialFeedPosts(
 
 export function createSocialPost(
   content: string,
-  mediaFile?: File
+  mediaFile?: File,
+  crossPostBluesky?: boolean
 ): Promise<{ success: boolean; post: SocialPostItem }> {
   if (mediaFile) {
     // Use FormData for media posts
     const formData = new FormData();
     formData.append("content", content);
     formData.append("media", mediaFile);
+    if (crossPostBluesky) formData.append("crossPostBluesky", "true");
     return fetch(`${API_BASE}/api/webapp/social/posts/with-media`, {
       method: "POST",
       credentials: "include",
@@ -439,7 +484,10 @@ export function createSocialPost(
       return res.json();
     });
   }
-  return request("/api/webapp/social/posts", { method: "POST", body: { content } });
+  return request("/api/webapp/social/posts", {
+    method: "POST",
+    body: { content, crossPostBluesky: crossPostBluesky ?? false },
+  });
 }
 
 export function togglePostLike(postId: number): Promise<{ liked: boolean }> {

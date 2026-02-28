@@ -1,1 +1,1 @@
-{"name":"pnptvapp","version":"1.0.0","private":true,"workspaces":["packages/*","apps/web"],"scripts":{"build":"npm run build --workspace=apps/web"},"dependencies":{"dotenv":"^17.3.1","form-data":"^4.0.5","multer":"^2.0.2","node-cron":"^4.2.1"}}
+{"name":"pnptvapp","version":"1.0.0","private":true,"workspaces":["packages/*","apps/web"],"scripts":{"build":"npm run build --workspace=apps/web"},"dependencies":{"dotenv":"^17.3.1","form-data":"^4.0.5","multer":"^2.0.2","node-cron":"^4.2.1","sharp":"^0.34.5"}}

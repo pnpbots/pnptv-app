@@ -310,32 +310,46 @@ const handleAcceptTerms = async (req, res) => {
 const checkAuthStatus = (req, res) => {
   try {
     const user = req.session?.user;
-    
+
     if (!user) {
       return res.json({
         authenticated: false,
         redirect: '/auth/telegram-login'
       });
     }
-    
+
+    // Build auth_methods from session data (hybrid session: Telegram + ATProto + X may all coexist)
+    const authMethods = user.auth_methods || {
+      telegram: !!(user.telegramId || user.telegram),
+      atproto: !!user.atproto_did,
+      x: !!(user.x_user_id),
+    };
+
     res.json({
       authenticated: true,
       user: {
         id: user.id,
-        telegram_id: user.telegramId || user.id,
+        telegram_id: user.telegramId || user.telegram || user.id,
         username: user.username || '',
-        first_name: user.firstName || user.username || '',
-        display_name: user.displayName || user.username || '',
+        first_name: user.firstName || user.first_name || user.username || '',
+        display_name: user.displayName || user.firstName || user.first_name || user.username || '',
         language: user.language || 'en',
-        terms_accepted: Boolean(user.acceptedTerms),
-        age_verified: Boolean(user.ageVerified),
+        terms_accepted: Boolean(user.acceptedTerms || user.terms_accepted),
+        age_verified: Boolean(user.ageVerified || user.age_verified),
         onboarding_complete: Boolean(user.onboardingComplete),
-        subscription_type: user.subscriptionStatus || 'free',
+        subscription_type: user.subscriptionStatus || user.subscription_status || 'free',
         role: user.role || 'user',
         photo_url: user.photoUrl || null,
+        // ATProto / Bluesky identity
+        atproto_did: user.atproto_did || null,
+        atproto_handle: user.atproto_handle || null,
+        // X / Twitter identity
+        x_handle: user.x_username || null,
+        // Auth methods flags (used by Profile.tsx IdentityConnections)
+        auth_methods: authMethods,
       }
     });
-    
+
   } catch (error) {
     logger.error('Auth status check error:', error);
     res.status(500).json({ error: 'Failed to check auth status' });

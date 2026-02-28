@@ -368,27 +368,30 @@ async function linkAtprotoToUser(did, handle, pdsUrl, expressSession) {
       { cache: false }
     );
   } else if (expressSession?.user?.id) {
-    // User is already logged in via Telegram — link ATProto DID to their account
+    // User is already logged in via Telegram/X — link ATProto DID to their account
     userId = expressSession.user.id;
     await query(
       `UPDATE users SET atproto_did = $1, atproto_handle = $2, atproto_pds_url = $3, updated_at = NOW() WHERE id = $4`,
       [did, handle, pdsUrl, userId],
       { cache: false }
     );
-    logger.info('[ATProto] Linked DID to existing Telegram user', { userId, did });
+    logger.info('[ATProto] Linked DID to existing user', { userId, did });
   } else {
-    // No existing user — create a new "atproto-only" user record
+    // No existing user — create a new "atproto-only" user record.
+    // Use the handle (sanitized) as both username and id prefix.
+    // id is VARCHAR(255) so a UUID is valid.
+    const newId = crypto.randomUUID();
+    const safeUsername = handle.replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 50) || `bsky_${newId.slice(0, 8)}`;
     const result = await query(
-      `INSERT INTO users (id, username, atproto_did, atproto_handle, atproto_pds_url, subscription_status, tier, status, role, created_at, updated_at)
+      `INSERT INTO users (id, username, atproto_did, atproto_handle, atproto_pds_url,
+                          subscription_status, tier, status, role, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, 'free', 'free', 'active', 'user', NOW(), NOW())
+       ON CONFLICT (atproto_did) DO UPDATE
+         SET atproto_handle = EXCLUDED.atproto_handle,
+             atproto_pds_url = EXCLUDED.atproto_pds_url,
+             updated_at = NOW()
        RETURNING id`,
-      [
-        crypto.randomUUID(),
-        handle, // Use ATProto handle as initial username
-        did,
-        handle,
-        pdsUrl,
-      ],
+      [newId, safeUsername, did, handle, pdsUrl],
       { cache: false }
     );
     userId = result.rows[0].id;
@@ -400,13 +403,16 @@ async function linkAtprotoToUser(did, handle, pdsUrl, expressSession) {
 
 /**
  * Build a hybrid session object for req.session.user
- * Merges Telegram data (if present) with ATProto data.
+ * Merges all auth-method data (Telegram, ATProto, X).
  */
 async function buildHybridSession(userId, did, handle) {
   const result = await query(
     `SELECT id, telegram, username, email, subscription_status, tier, terms_accepted,
-            first_name, language, COALESCE(age_verified, false) as age_verified,
-            COALESCE(role, 'user') as role, atproto_did, atproto_handle, atproto_pds_url
+            first_name, language, photo_file_id,
+            COALESCE(age_verified, false) as age_verified,
+            COALESCE(role, 'user') as role,
+            atproto_did, atproto_handle, atproto_pds_url,
+            x_user_id, x_username
      FROM users WHERE id = $1`,
     [userId],
     { cache: false }
@@ -416,26 +422,40 @@ async function buildHybridSession(userId, did, handle) {
 
   const user = result.rows[0];
 
+  // Determine valid photo URL (not Telegram file IDs)
+  const isValidPhotoUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
+  const photoUrl = isValidPhotoUrl(user.photo_file_id) ? user.photo_file_id : null;
+
   return {
     id: user.id,
     telegramId: user.telegram || null,
     username: user.username,
     email: user.email,
     first_name: user.first_name,
+    firstName: user.first_name,
+    displayName: user.first_name || user.username,
     language: user.language,
+    photoUrl,
     subscription_status: user.subscription_status,
+    subscriptionStatus: user.subscription_status,
     tier: user.tier,
     terms_accepted: user.terms_accepted,
+    acceptedTerms: user.terms_accepted,
     age_verified: user.age_verified,
+    ageVerified: user.age_verified,
     role: user.role,
     // ATProto fields
     atproto_did: user.atproto_did || did,
     atproto_handle: user.atproto_handle || handle,
     atproto_pds_url: user.atproto_pds_url,
+    // X / Twitter fields
+    x_user_id: user.x_user_id || null,
+    x_username: user.x_username || null,
     // Auth method flags
     auth_methods: {
       telegram: !!user.telegram,
-      atproto: !!did,
+      atproto: !!(user.atproto_did || did),
+      x: !!user.x_user_id,
     },
   };
 }
@@ -446,8 +466,6 @@ async function buildHybridSession(userId, did, handle) {
  */
 async function handleSessionDeletion(did) {
   logger.info('[ATProto] Cleaning up revoked session', { did });
-  // The sessionStore.del() already handles DB cleanup
-  // Optionally update user status
   await query(
     `UPDATE users SET updated_at = NOW() WHERE atproto_did = $1`,
     [did],

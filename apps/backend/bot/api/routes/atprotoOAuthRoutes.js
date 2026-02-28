@@ -3,6 +3,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
+const { Agent } = require('@atproto/api');
 const logger = require('../../../utils/logger');
 const atproto = require('../../services/atprotoOAuthService');
 
@@ -14,7 +15,7 @@ const router = express.Router();
 
 const oauthLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // 20 OAuth attempts per 15 min
+  max: 20,
   message: { error: 'Too many OAuth requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -23,7 +24,7 @@ const oauthLimiter = rateLimit({
 
 const callbackLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30, // More generous since legit redirects are server-initiated
+  max: 30,
   message: { error: 'Too many callback attempts, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -40,12 +41,13 @@ const SAFE_OAUTH_ERROR_CODES = new Set([
   'unauthorized_client',
 ]);
 
+// The web app root URL — where users are sent after login
+const APP_URL = process.env.ATPROTO_APP_REDIRECT_URL
+  || process.env.APP_PUBLIC_URL
+  || 'https://app.pnptv.app';
+
 // ---------------------------------------------------------------------------
 // GET /oauth/client-metadata.json  — ATProto Client Identity Document (PUBLIC)
-//
-// The authorization server fetches this URL to learn about our app.
-// The URL itself IS our client_id — it must be served at exactly the path
-// that matches the client_id field inside the JSON.
 // ---------------------------------------------------------------------------
 
 router.get('/oauth/client-metadata.json', async (req, res) => {
@@ -53,7 +55,7 @@ router.get('/oauth/client-metadata.json', async (req, res) => {
     const client = await atproto.getClient();
     const metadata = client.clientMetadata;
 
-    // Security: verify the request URL matches the client_id (hard error in production)
+    // Security: verify the request URL matches the client_id in production
     if (process.env.NODE_ENV === 'production') {
       const servedAt = `https://${req.get('host')}${req.originalUrl.split('?')[0]}`;
       if (metadata.client_id !== servedAt) {
@@ -68,8 +70,8 @@ router.get('/oauth/client-metadata.json', async (req, res) => {
     }
 
     res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Cache-Control', 'public, max-age=3600'); // 1 hour cache
-    res.setHeader('Access-Control-Allow-Origin', '*'); // Must be publicly accessible
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.json(metadata);
   } catch (err) {
     logger.error('[ATProto] Error serving client metadata:', err);
@@ -86,7 +88,6 @@ router.get('/oauth/jwks.json', async (req, res) => {
     const client = await atproto.getClient();
 
     if (!client.jwks) {
-      // Public client — no JWKS
       return res.status(404).json({ error: 'JWKS not available (public client mode)' });
     }
 
@@ -102,9 +103,6 @@ router.get('/oauth/jwks.json', async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // GET /.well-known/oauth-protected-resource  — Resource Discovery (PUBLIC)
-//
-// ATProto spec requires this for resource servers. Since PNPtv acts as both
-// a client and hosts user content, we serve a minimal resource descriptor.
 // ---------------------------------------------------------------------------
 
 router.get('/.well-known/oauth-protected-resource', (req, res) => {
@@ -124,9 +122,6 @@ router.get('/.well-known/oauth-protected-resource', (req, res) => {
 
 // ---------------------------------------------------------------------------
 // GET /oauth/resolve  — Handle Resolution API
-//
-// Pre-flight check: resolves a Bluesky handle to a DID before initiating OAuth.
-// Used by the frontend to validate the handle and show the user's profile pic.
 // ---------------------------------------------------------------------------
 
 router.get('/oauth/resolve', oauthLimiter, async (req, res) => {
@@ -150,9 +145,6 @@ router.get('/oauth/resolve', oauthLimiter, async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // GET /oauth/login  — Initiate ATProto OAuth Flow
-//
-// Accepts ?handle=alice.bsky.social (or a DID).
-// Generates PKCE + state, sends PAR, redirects to authorization server.
 // ---------------------------------------------------------------------------
 
 router.get('/oauth/login', oauthLimiter, async (req, res) => {
@@ -183,21 +175,18 @@ router.get('/oauth/login', oauthLimiter, async (req, res) => {
   } catch (err) {
     logger.error('[ATProto] OAuth login initiation failed:', err);
 
-    if (err.message?.includes('resolve')) {
-      return res.status(400).json({
-        error: 'Could not resolve handle. Please check the handle and try again.',
-      });
+    if (err.message?.includes('resolve') || err.message?.includes('not found')) {
+      return res.redirect(
+        `${APP_URL}?atproto_error=handle_not_found`
+      );
     }
 
-    res.status(500).json({ error: 'OAuth login failed. Please try again.' });
+    res.redirect(`${APP_URL}?atproto_error=login_failed`);
   }
 });
 
 // ---------------------------------------------------------------------------
 // GET /oauth/callback  — OAuth 2.1 Callback (Authorization Code Exchange)
-//
-// The authorization server redirects here with ?code=...&state=...&iss=...
-// We exchange the code for tokens (with DPoP + PKCE verification).
 // ---------------------------------------------------------------------------
 
 router.get('/oauth/callback', callbackLimiter, async (req, res) => {
@@ -207,36 +196,36 @@ router.get('/oauth/callback', callbackLimiter, async (req, res) => {
     // Parse callback parameters
     const params = new URLSearchParams(req.url.split('?')[1] || '');
 
-    // Validate required params
-    const code = params.get('code');
-    const state = params.get('state');
-    const iss = params.get('iss');
     const error = params.get('error');
 
     // Security: never reflect error_description from auth server to browser.
-    // Map to a safe whitelisted code.
     if (error) {
       logger.warn('[ATProto] OAuth callback error from authorization server', {
         error,
         errorDesc: params.get('error_description'), // logged internally only
       });
       const safeErrorCode = SAFE_OAUTH_ERROR_CODES.has(error) ? error : 'login_failed';
-      return res.redirect(`/?atproto_error=${safeErrorCode}`);
+      return res.redirect(`${APP_URL}?atproto_error=${safeErrorCode}`);
     }
 
     // ATProto spec mandates code, state, and iss in the callback
+    const code = params.get('code');
+    const state = params.get('state');
+    const iss = params.get('iss');
+
     if (!code || !state || !iss) {
-      return res.status(400).json({ error: 'Missing required callback parameters (code, state, iss)' });
+      logger.warn('[ATProto] OAuth callback missing required params', { code: !!code, state: !!state, iss: !!iss });
+      return res.redirect(`${APP_URL}?atproto_error=invalid_callback`);
     }
 
     // Exchange code for tokens (PKCE verification, DPoP proof, state validation)
-    const { session: oauthSession, state: returnedState } = await client.callback(params);
+    const { session: oauthSession } = await client.callback(params);
 
     const did = oauthSession.did;
     logger.info('[ATProto] OAuth callback successful', { did, state: state.slice(0, 8) + '...' });
 
     // Resolve handle and PDS from the session
-    const agent = new (require('@atproto/api').Agent)(oauthSession);
+    const agent = new Agent(oauthSession);
     let handle = did;
     let pdsUrl = '';
 
@@ -256,7 +245,7 @@ router.get('/oauth/callback', callbackLimiter, async (req, res) => {
 
     if (!hybridSession) {
       logger.error('[ATProto] Failed to build hybrid session for user:', userId);
-      return res.redirect('/?atproto_error=session_failed');
+      return res.redirect(`${APP_URL}?atproto_error=session_failed`);
     }
 
     // Store in express session (same session cookie as Telegram auth)
@@ -277,17 +266,17 @@ router.get('/oauth/callback', callbackLimiter, async (req, res) => {
       authMethods: hybridSession.auth_methods,
     });
 
-    // Redirect to the app
-    res.redirect('https://app.pnptv.app');
+    // Redirect to the profile page so the user can see their linked account
+    res.redirect(`${APP_URL}/profile?atproto_linked=1`);
   } catch (err) {
     logger.error('[ATProto] OAuth callback failed:', err);
 
-    // Provide helpful error feedback
     let errorMsg = 'login_failed';
     if (err.message?.includes('state')) errorMsg = 'state_mismatch';
     if (err.message?.includes('token')) errorMsg = 'token_exchange_failed';
+    if (err.message?.includes('expired')) errorMsg = 'session_expired';
 
-    res.redirect(`/?atproto_error=${errorMsg}`);
+    res.redirect(`${APP_URL}?atproto_error=${errorMsg}`);
   }
 });
 
@@ -304,11 +293,11 @@ router.post('/oauth/logout', async (req, res) => {
 
   try {
     const client = await atproto.getClient();
-    // Attempt to revoke the session (calls the revocation endpoint)
+    // Attempt to revoke the session at the PDS
     try {
-      const session = await client.restore(did);
-      if (session && typeof session.signOut === 'function') {
-        await session.signOut();
+      const oauthSession = await client.restore(did);
+      if (oauthSession && typeof oauthSession.signOut === 'function') {
+        await oauthSession.signOut();
       }
     } catch (revokeErr) {
       // Session may already be expired — that's fine
@@ -324,8 +313,10 @@ router.post('/oauth/logout', async (req, res) => {
         req.session.user.auth_methods.atproto = false;
       }
 
-      // If no Telegram session either, destroy entirely
-      if (!req.session.user.auth_methods?.telegram) {
+      // If no other auth method, destroy session entirely
+      const hasTelegram = req.session.user.auth_methods?.telegram;
+      const hasX = req.session.user.auth_methods?.x;
+      if (!hasTelegram && !hasX) {
         req.session.destroy((err) => {
           if (err) logger.error('[ATProto] Session destroy error:', err);
         });
@@ -334,7 +325,11 @@ router.post('/oauth/logout', async (req, res) => {
       }
     }
 
-    res.json({ success: true, message: 'ATProto session revoked, Telegram session retained' });
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => (err ? reject(err) : resolve()));
+    });
+
+    res.json({ success: true, message: 'Bluesky session revoked, other session retained' });
   } catch (err) {
     logger.error('[ATProto] Logout error:', err);
     res.status(500).json({ error: 'Failed to revoke ATProto session' });
@@ -345,7 +340,7 @@ router.post('/oauth/logout', async (req, res) => {
 // GET /oauth/session  — Get current ATProto session status
 // ---------------------------------------------------------------------------
 
-router.get('/oauth/session', oauthLimiter, async (req, res) => {
+router.get('/oauth/session', async (req, res) => {
   const user = req.session?.user;
 
   if (!user?.atproto_did) {

@@ -8,7 +8,9 @@ import {
   deleteSocialPost,
   getReplies,
   createReply,
+  checkAuthStatus,
   type SocialPostItem,
+  type AuthMethods,
 } from "@/lib/api";
 
 function timeAgo(dateStr: string): string {
@@ -27,6 +29,52 @@ function timeAgo(dateStr: string): string {
 /** Check if a photo value is a valid web URL (not a Telegram file ID) */
 function isValidPhotoUrl(photo: string | null | undefined): photo is string {
   return !!photo && (photo.startsWith("/") || photo.startsWith("http"));
+}
+
+// ── Bluesky SVG Icon ─────────────────────────────────────────────────────────
+
+function BlueskySvg({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 360 320" fill="currentColor" aria-hidden="true">
+      <path d="M180 142c-16.3-31.7-60.7-90.8-102-120C38.5-2.9 27.2 1 18.8 1 8.3 1 0 7.8 0 25.4 0 39 6.6 116.7 10.3 132.9 23 187.7 74.3 207 122.7 202c-71 10.5-133.3 41-67.3 147.9 51.7 81.4 103.3 27.8 127.2 0 24-27.9 53.7-87.3 53.7-87.3s29.7 59.4 53.7 87.3c23.9 27.8 75.5 81.4 127.2 0 66-106.9 3.7-137.4-67.3-147.9 48.4 5 99.7-14.3 112.4-69.1 3.7-16.2 10.3-93.9 10.3-107.5C360 7.8 351.7 1 341.2 1c-8.4 0-19.7-3.9-59.2 21C240.7 51.2 196.3 110.3 180 142z" />
+    </svg>
+  );
+}
+
+/** Small inline Bluesky badge shown on cross-posted/sourced posts */
+function BlueskyBadge({
+  uri,
+  label = "Bluesky",
+}: {
+  uri?: string | null;
+  label?: string;
+}) {
+  const href = uri
+    ? `https://bsky.app/profile/${uri.split("/")[2]}/post/${uri.split("/").pop()}`
+    : undefined;
+
+  const inner = (
+    <span className="badge-bluesky inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full">
+      <BlueskySvg className="w-2.5 h-2.5 flex-shrink-0" />
+      {label}
+    </span>
+  );
+
+  if (href) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="View on Bluesky"
+        className="hover:opacity-80 transition-opacity"
+      >
+        {inner}
+      </a>
+    );
+  }
+
+  return inner;
 }
 
 // ── Post Card ────────────────────────────────────────────────────────────────
@@ -133,6 +181,15 @@ function PostCard({
             )}
             <span className="text-xs" style={{ color: "#8E8E93" }}>&middot; {timeAgo(post.created_at)}</span>
 
+            {/* Bluesky cross-posted badge */}
+            {post.bluesky_uri && (
+              <BlueskyBadge uri={post.bluesky_uri} label="Bluesky" />
+            )}
+            {/* Bluesky-sourced post badge (imported from BSky) */}
+            {post.source === "bluesky" && !post.bluesky_uri && (
+              <BlueskyBadge label="From Bluesky" />
+            )}
+
             {/* Delete (own posts or admin) */}
             {canDelete && (
               <button
@@ -140,7 +197,7 @@ function PostCard({
                 disabled={deleting}
                 className="ml-auto text-xs hover:text-red-400 transition-colors"
                 style={{ color: "#8E8E93" }}
-                title={isAdmin && !isOwn ? "Delete post (admin)" : "Delete post"}
+                aria-label={isAdmin && !isOwn ? "Delete post (admin)" : "Delete post"}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
@@ -286,12 +343,30 @@ export default function Social() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
+  // Bluesky linked state — checked once when component mounts
+  const [blueskyLinked, setBlueskyLinked] = useState(false);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    checkAuthStatus()
+      .then((status) => {
+        if (status.authenticated && status.user) {
+          const methods = status.user.auth_methods as AuthMethods | undefined;
+          setBlueskyLinked(!!methods?.atproto);
+        }
+      })
+      .catch(() => {
+        // Non-critical — silently ignore
+      });
+  }, [isAuthenticated]);
+
   // Composer state
   const [text, setText] = useState("");
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [isPosting, setIsPosting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
+  const [crossPostBluesky, setCrossPostBluesky] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load feed
@@ -364,7 +439,11 @@ export default function Social() {
     setIsPosting(true);
     setPostError(null);
     try {
-      const res = await createSocialPost(text.trim(), mediaFile || undefined);
+      const res = await createSocialPost(
+        text.trim(),
+        mediaFile || undefined,
+        crossPostBluesky
+      );
       if (res.success && res.post) {
         setPosts((prev) => [res.post, ...prev]);
       }
@@ -375,7 +454,7 @@ export default function Social() {
     } finally {
       setIsPosting(false);
     }
-  }, [text, mediaFile, isPosting, clearMedia]);
+  }, [text, mediaFile, isPosting, clearMedia, crossPostBluesky]);
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
@@ -444,57 +523,99 @@ export default function Social() {
               {postError && <p className="text-xs text-red-400 mb-2">{postError}</p>}
 
               {/* Actions */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"
-                    className="hidden"
-                    onChange={handleFileSelect}
-                  />
+              <div className="flex flex-col gap-3">
+                {/* Media buttons row */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"
+                      className="hidden"
+                      onChange={handleFileSelect}
+                    />
+                    <button
+                      onClick={() => {
+                        if (fileInputRef.current) {
+                          fileInputRef.current.accept = "image/jpeg,image/png,image/webp,image/gif";
+                          fileInputRef.current.click();
+                          fileInputRef.current.accept = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm";
+                        }
+                      }}
+                      disabled={isPosting}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 hover:bg-white/5 hover:border-white/20 transition-colors disabled:opacity-40"
+                      style={{ color: "#D4007A" }}
+                      aria-label="Attach photo"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
+                      </svg>
+                      Photo
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (fileInputRef.current) {
+                          fileInputRef.current.accept = "video/mp4,video/webm";
+                          fileInputRef.current.click();
+                          fileInputRef.current.accept = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm";
+                        }
+                      }}
+                      disabled={isPosting}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 hover:bg-white/5 hover:border-white/20 transition-colors disabled:opacity-40"
+                      style={{ color: "#E69138" }}
+                      aria-label="Attach video"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+                      </svg>
+                      Video
+                    </button>
+                  </div>
                   <button
-                    onClick={() => {
-                      if (fileInputRef.current) {
-                        fileInputRef.current.accept = "image/jpeg,image/png,image/webp,image/gif";
-                        fileInputRef.current.click();
-                        fileInputRef.current.accept = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm";
-                      }
-                    }}
-                    disabled={isPosting}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 hover:bg-white/5 hover:border-white/20 transition-colors"
-                    style={{ color: "#D4007A" }}
+                    onClick={handlePost}
+                    disabled={!text.trim() || isPosting}
+                    className="btn-gradient px-4 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-40 min-h-[36px]"
                   >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
-                    </svg>
-                    Photo
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (fileInputRef.current) {
-                        fileInputRef.current.accept = "video/mp4,video/webm";
-                        fileInputRef.current.click();
-                        fileInputRef.current.accept = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm";
-                      }
-                    }}
-                    disabled={isPosting}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 hover:bg-white/5 hover:border-white/20 transition-colors"
-                    style={{ color: "#E69138" }}
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
-                    </svg>
-                    Video
+                    {isPosting ? "Posting..." : "Post"}
                   </button>
                 </div>
-                <button
-                  onClick={handlePost}
-                  disabled={!text.trim() || isPosting}
-                  className="btn-gradient px-4 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-40"
-                >
-                  {isPosting ? "Posting..." : "Post"}
-                </button>
+
+                {/* Bluesky cross-post toggle — only shown when Bluesky is linked */}
+                {blueskyLinked && (
+                  <div className="flex items-center justify-between rounded-lg px-3 py-2.5" style={{ background: "rgba(0,133,255,0.06)", border: "1px solid rgba(0,133,255,0.2)" }}>
+                    <label
+                      htmlFor="crosspost-bluesky-toggle"
+                      className="flex items-center gap-2 cursor-pointer select-none flex-1"
+                    >
+                      <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 360 320" fill="currentColor" aria-hidden="true" style={{ color: "#0085FF" }}>
+                        <path d="M180 142c-16.3-31.7-60.7-90.8-102-120C38.5-2.9 27.2 1 18.8 1 8.3 1 0 7.8 0 25.4 0 39 6.6 116.7 10.3 132.9 23 187.7 74.3 207 122.7 202c-71 10.5-133.3 41-67.3 147.9 51.7 81.4 103.3 27.8 127.2 0 24-27.9 53.7-87.3 53.7-87.3s29.7 59.4 53.7 87.3c23.9 27.8 75.5 81.4 127.2 0 66-106.9 3.7-137.4-67.3-147.9 48.4 5 99.7-14.3 112.4-69.1 3.7-16.2 10.3-93.9 10.3-107.5C360 7.8 351.7 1 341.2 1c-8.4 0-19.7-3.9-59.2 21C240.7 51.2 196.3 110.3 180 142z" />
+                      </svg>
+                      <span className="text-xs font-medium" style={{ color: crossPostBluesky ? "#0085FF" : "#8E8E93" }}>
+                        Also post to Bluesky
+                      </span>
+                    </label>
+                    {/* Toggle switch */}
+                    <button
+                      id="crosspost-bluesky-toggle"
+                      role="switch"
+                      aria-checked={crossPostBluesky}
+                      aria-label="Cross-post to Bluesky"
+                      onClick={() => setCrossPostBluesky((v) => !v)}
+                      disabled={isPosting}
+                      className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                      style={{
+                        background: crossPostBluesky ? "#0085FF" : "rgba(255,255,255,0.15)",
+                        // ring-offset-color matches the card bg
+                        outlineOffset: "2px",
+                      }}
+                    >
+                      <span
+                        className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform duration-200"
+                        style={{ transform: crossPostBluesky ? "translateX(18px)" : "translateX(2px)" }}
+                      />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

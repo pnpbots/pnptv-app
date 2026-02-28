@@ -13,9 +13,11 @@ import {
   checkAuthStatus,
   unlinkAtproto,
   getAtprotoLoginUrl,
+  getAtprotoProfile,
   type UserProfile,
   type SocialPostItem,
   type AuthMethods,
+  type AtprotoProfile,
 } from "@/lib/api";
 
 function resolvePhotoUrl(url: string | null | undefined): string | null {
@@ -403,6 +405,310 @@ function ComposePost({
   );
 }
 
+// ── Bluesky SVG Icon ─────────────────────────────────────────────────────────
+
+function BlueskySvg({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 360 320" fill="currentColor" aria-hidden="true">
+      <path d="M180 142c-16.3-31.7-60.7-90.8-102-120C38.5-2.9 27.2 1 18.8 1 8.3 1 0 7.8 0 25.4 0 39 6.6 116.7 10.3 132.9 23 187.7 74.3 207 122.7 202c-71 10.5-133.3 41-67.3 147.9 51.7 81.4 103.3 27.8 127.2 0 24-27.9 53.7-87.3 53.7-87.3s29.7 59.4 53.7 87.3c23.9 27.8 75.5 81.4 127.2 0 66-106.9 3.7-137.4-67.3-147.9 48.4 5 99.7-14.3 112.4-69.1 3.7-16.2 10.3-93.9 10.3-107.5C360 7.8 351.7 1 341.2 1c-8.4 0-19.7-3.9-59.2 21C240.7 51.2 196.3 110.3 180 142z" />
+    </svg>
+  );
+}
+
+// ── Bluesky Profile Panel ─────────────────────────────────────────────────────
+
+function BlueskyProfilePanel({
+  handle,
+  onUnlink,
+  unlinking,
+  unlinkError,
+}: {
+  handle: string;
+  onUnlink: () => void;
+  unlinking: boolean;
+  unlinkError: string | null;
+}) {
+  const [profile, setProfile] = useState<AtprotoProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
+
+  const loadProfile = useCallback(async () => {
+    setProfileLoading(true);
+    setProfileError(null);
+    try {
+      const res = await getAtprotoProfile();
+      if (res.success && res.profile) {
+        setProfile(res.profile);
+      } else {
+        // Backend may not have /api/atproto/profile yet — degrade gracefully
+        setProfile(null);
+      }
+    } catch {
+      setProfileError(null); // Silently degrade — profile counts are non-critical
+    } finally {
+      setProfileLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
+
+  return (
+    <div className="mt-3 rounded-xl overflow-hidden" style={{ background: "rgba(0,133,255,0.06)", border: "1px solid rgba(0,133,255,0.2)" }}>
+      {/* Profile header */}
+      <div className="flex items-center gap-3 p-4">
+        {/* Avatar */}
+        <div className="flex-shrink-0">
+          {profileLoading ? (
+            <div className="w-12 h-12 rounded-full bg-white/10 animate-pulse" />
+          ) : profile?.avatar ? (
+            <img
+              src={profile.avatar}
+              alt={profile.displayName || handle}
+              className="w-12 h-12 rounded-full object-cover border-2"
+              style={{ borderColor: "rgba(0,133,255,0.4)" }}
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          ) : (
+            <div
+              className="w-12 h-12 rounded-full flex items-center justify-center"
+              style={{ background: "linear-gradient(135deg, #0085FF, #00BAFF)" }}
+            >
+              <BlueskySvg className="w-6 h-6 text-white" />
+            </div>
+          )}
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          {profileLoading ? (
+            <div className="space-y-1.5">
+              <div className="h-4 bg-white/10 rounded animate-pulse w-32" />
+              <div className="h-3 bg-white/10 rounded animate-pulse w-24" />
+            </div>
+          ) : (
+            <>
+              <p className="text-sm font-semibold text-white truncate">
+                {profile?.displayName || handle}
+              </p>
+              <a
+                href={profile?.profileUrl || `https://bsky.app/profile/${handle}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs flex items-center gap-1 hover:underline"
+                style={{ color: "#0085FF" }}
+                aria-label={`View @${handle} on Bluesky`}
+              >
+                @{handle}
+                <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+            </>
+          )}
+        </div>
+
+        {/* Connected badge */}
+        <span
+          className="text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0"
+          style={{ background: "rgba(52, 199, 89, 0.15)", color: "#34C759" }}
+        >
+          Connected
+        </span>
+      </div>
+
+      {/* Stats row */}
+      {!profileLoading && profile && (
+        <div className="flex items-center border-t px-4 py-3 gap-6" style={{ borderColor: "rgba(0,133,255,0.15)" }}>
+          <div className="text-center">
+            <p className="text-sm font-bold text-white">{profile.postsCount?.toLocaleString() ?? "—"}</p>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>Posts</p>
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-bold text-white">{profile.followersCount?.toLocaleString() ?? "—"}</p>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>Followers</p>
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-bold text-white">{profile.followsCount?.toLocaleString() ?? "—"}</p>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>Following</p>
+          </div>
+          <div className="ml-auto">
+            <a
+              href={profile.profileUrl || `https://bsky.app/profile/${handle}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg text-white btn-bluesky inline-flex items-center gap-1.5"
+              aria-label="Open Bluesky profile in new tab"
+            >
+              <BlueskySvg className="w-3.5 h-3.5" />
+              Open
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* Description / bio */}
+      {!profileLoading && profile?.description && (
+        <div className="px-4 pb-3">
+          <p className="text-xs text-white/70 leading-relaxed line-clamp-2">{profile.description}</p>
+        </div>
+      )}
+
+      {/* Error state for profile loading */}
+      {profileError && (
+        <div className="px-4 pb-3">
+          <p className="text-xs" style={{ color: "#8E8E93" }}>Could not load Bluesky profile details.</p>
+        </div>
+      )}
+
+      {/* Unlink row */}
+      <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: "rgba(0,133,255,0.15)" }}>
+        <p className="text-xs" style={{ color: "#8E8E93" }}>
+          Posts can be cross-posted to Bluesky when composing.
+        </p>
+        <button
+          onClick={onUnlink}
+          disabled={unlinking}
+          className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40 flex-shrink-0 ml-3"
+          aria-label="Unlink Bluesky account"
+        >
+          {unlinking ? "Unlinking..." : "Unlink"}
+        </button>
+      </div>
+
+      {/* Unlink error */}
+      {unlinkError && (
+        <div className="px-4 pb-3">
+          <p className="text-xs text-red-400">{unlinkError}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Bluesky Connect Form ──────────────────────────────────────────────────────
+
+function BlueskyConnectForm() {
+  const [handleInput, setHandleInput] = useState("");
+  const [handleError, setHandleError] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleConnect = async () => {
+    const raw = handleInput.trim().replace(/^@/, "");
+    if (!raw || raw.length < 3) {
+      setHandleError("Enter a valid Bluesky handle, e.g. yourname.bsky.social");
+      inputRef.current?.focus();
+      return;
+    }
+
+    // Basic handle format validation before redirect
+    if (!raw.includes(".") || raw.length < 5) {
+      setHandleError("Handle must include a domain, e.g. yourname.bsky.social");
+      inputRef.current?.focus();
+      return;
+    }
+
+    setResolving(true);
+    setHandleError(null);
+
+    // Redirect to the backend OAuth initiation URL.
+    // The backend resolves the handle, generates PKCE + state, sends PAR,
+    // and redirects to the Bluesky authorization server.
+    window.location.href = getAtprotoLoginUrl(raw);
+  };
+
+  return (
+    <div className="mt-3 space-y-3">
+      {/* Explainer */}
+      <div className="rounded-xl p-4" style={{ background: "rgba(0,133,255,0.06)", border: "1px solid rgba(0,133,255,0.2)" }}>
+        <div className="flex gap-3 items-start">
+          <div
+            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+            style={{ background: "linear-gradient(135deg, #0085FF, #00BAFF)" }}
+          >
+            <BlueskySvg className="w-4.5 h-4.5 text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-white mb-1">Connect your Bluesky account</p>
+            <p className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+              Link your AT Protocol identity to cross-post to Bluesky and bring your social graph to PNPtv.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Handle input + Connect button */}
+      <div className="flex gap-2">
+        <div className="flex-1 relative">
+          <span
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-sm select-none pointer-events-none font-medium"
+            style={{ color: "#8E8E93" }}
+            aria-hidden="true"
+          >
+            @
+          </span>
+          <input
+            ref={inputRef}
+            id="bsky-handle-input"
+            type="text"
+            inputMode="url"
+            value={handleInput}
+            onChange={(e) => {
+              setHandleInput(e.target.value);
+              setHandleError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleConnect();
+            }}
+            placeholder="yourname.bsky.social"
+            className="w-full pl-7 pr-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors"
+            style={{
+              borderColor: handleError ? "#FF453A" : "rgba(255,255,255,0.15)",
+            }}
+            spellCheck={false}
+            autoCapitalize="none"
+            autoCorrect="off"
+            disabled={resolving}
+            aria-label="Bluesky handle"
+            aria-describedby={handleError ? "bsky-handle-error" : "bsky-handle-hint"}
+            aria-invalid={!!handleError}
+          />
+        </div>
+        <button
+          onClick={handleConnect}
+          disabled={resolving || !handleInput.trim()}
+          className="btn-bluesky px-4 py-2.5 rounded-lg text-white text-sm font-semibold whitespace-nowrap flex items-center gap-2 min-w-[44px] disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-label="Connect Bluesky account"
+        >
+          {resolving ? (
+            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          ) : (
+            <>
+              <BlueskySvg className="w-4 h-4" />
+              Connect
+            </>
+          )}
+        </button>
+      </div>
+
+      {handleError ? (
+        <p id="bsky-handle-error" className="text-xs text-red-400" role="alert">{handleError}</p>
+      ) : (
+        <p id="bsky-handle-hint" className="text-xs" style={{ color: "#8E8E93" }}>
+          You will be redirected to Bluesky to authorize the connection securely.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Identity & Connections Section ───────────────────────────────────────────
 
 interface AtprotoState {
@@ -419,12 +725,9 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
     did: null,
     loading: true,
   });
-  const [handleInput, setHandleInput] = useState("");
-  const [showHandleInput, setShowHandleInput] = useState(false);
-  const [handleError, setHandleError] = useState<string | null>(null);
   const [unlinking, setUnlinking] = useState(false);
   const [unlinkError, setUnlinkError] = useState<string | null>(null);
-  const [unlinkSuccess, setUnlinkSuccess] = useState(false);
+  const [unlinkVersion, setUnlinkVersion] = useState(0);
 
   // Load current ATProto identity from auth-status
   useEffect(() => {
@@ -451,18 +754,7 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
     return () => {
       cancelled = true;
     };
-  }, [unlinkSuccess]);
-
-  const handleLink = () => {
-    const raw = handleInput.trim().replace(/^@/, "");
-    if (!raw || raw.length < 3) {
-      setHandleError("Enter a valid Bluesky handle, e.g. yourname.bsky.social");
-      return;
-    }
-    // Redirect to the backend OAuth initiation — the backend will resolve the handle,
-    // send PAR, and redirect the user to the Bluesky authorization server.
-    window.location.href = getAtprotoLoginUrl(raw);
-  };
+  }, [unlinkVersion]);
 
   const handleUnlink = async () => {
     setUnlinking(true);
@@ -470,7 +762,7 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
     try {
       await unlinkAtproto();
       setAtproto({ linked: false, handle: null, did: null, loading: false });
-      setUnlinkSuccess((prev) => !prev); // Toggle to re-trigger useEffect
+      setUnlinkVersion((v) => v + 1);
     } catch (err: unknown) {
       setUnlinkError(err instanceof Error ? err.message : "Failed to unlink account");
     } finally {
@@ -493,7 +785,7 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
               className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
               style={{ background: "linear-gradient(135deg, #2AABEE, #229ED9)" }}
             >
-              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
               </svg>
             </div>
@@ -514,101 +806,68 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
           </span>
         </div>
 
-        {/* ATProto / Bluesky row */}
+        {/* Bluesky / ATProto section */}
         <div className="py-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {/* Bluesky butterfly logo */}
-              <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-                style={{ background: "linear-gradient(135deg, #0085FF, #00BAFF)" }}
-              >
-                <svg className="w-5 h-5 text-white" viewBox="0 0 360 320" fill="currentColor">
-                  <path d="M180 142c-16.3-31.7-60.7-90.8-102-120C38.5-2.9 27.2 1 18.8 1 8.3 1 0 7.8 0 25.4 0 39 6.6 116.7 10.3 132.9 23 187.7 74.3 207 122.7 202c-71 10.5-133.3 41-67.3 147.9 51.7 81.4 103.3 27.8 127.2 0 24-27.9 53.7-87.3 53.7-87.3s29.7 59.4 53.7 87.3c23.9 27.8 75.5 81.4 127.2 0 66-106.9 3.7-137.4-67.3-147.9 48.4 5 99.7-14.3 112.4-69.1 3.7-16.2 10.3-93.9 10.3-107.5C360 7.8 351.7 1 341.2 1c-8.4 0-19.7-3.9-59.2 21C240.7 51.2 196.3 110.3 180 142z" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-white">Bluesky</p>
-                {atproto.loading ? (
-                  <p className="text-xs" style={{ color: "#8E8E93" }}>Loading...</p>
-                ) : atproto.linked && atproto.handle ? (
-                  <p className="text-xs" style={{ color: "#8E8E93" }}>@{atproto.handle}</p>
-                ) : (
-                  <p className="text-xs" style={{ color: "#8E8E93" }}>Not linked</p>
-                )}
-              </div>
+          <div className="flex items-center gap-3">
+            {/* Bluesky icon */}
+            <div
+              className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{ background: "linear-gradient(135deg, #0085FF, #00BAFF)" }}
+              aria-hidden="true"
+            >
+              <BlueskySvg className="w-5 h-5 text-white" />
             </div>
-
-            {atproto.loading ? null : atproto.linked ? (
-              <button
-                onClick={handleUnlink}
-                disabled={unlinking}
-                className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-white">Bluesky</p>
+              {atproto.loading ? (
+                <div className="h-3 w-24 bg-white/10 rounded animate-pulse mt-0.5" />
+              ) : atproto.linked && atproto.handle ? (
+                <p className="text-xs truncate" style={{ color: "#8E8E93" }}>@{atproto.handle}</p>
+              ) : (
+                <p className="text-xs" style={{ color: "#8E8E93" }}>Not connected</p>
+              )}
+            </div>
+            {/* Connection status badge */}
+            {!atproto.loading && (
+              <span
+                className="text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0"
+                style={
+                  atproto.linked
+                    ? { background: "rgba(0,133,255,0.15)", color: "#0085FF" }
+                    : { background: "rgba(142,142,147,0.15)", color: "#8E8E93" }
+                }
               >
-                {unlinking ? "Unlinking..." : "Unlink"}
-              </button>
-            ) : (
-              <button
-                onClick={() => {
-                  setShowHandleInput((v) => !v);
-                  setHandleError(null);
-                }}
-                className="text-xs font-semibold px-3 py-1.5 rounded-lg btn-gradient text-white"
-              >
-                Link Account
-              </button>
+                {atproto.linked ? "Linked" : "Unlinked"}
+              </span>
             )}
           </div>
 
-          {/* Handle input (shown when user clicks "Link Account") */}
-          {!atproto.linked && showHandleInput && (
-            <div className="mt-3">
-              <div className="flex gap-2">
-                <div className="flex-1 relative">
-                  <span
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-sm select-none pointer-events-none"
-                    style={{ color: "#8E8E93" }}
-                  >
-                    @
-                  </span>
-                  <input
-                    type="text"
-                    value={handleInput}
-                    onChange={(e) => {
-                      setHandleInput(e.target.value);
-                      setHandleError(null);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleLink();
-                    }}
-                    placeholder="yourname.bsky.social"
-                    autoFocus
-                    className="w-full pl-7 pr-3 py-2 rounded-lg border text-sm bg-transparent text-white outline-none focus:border-pnp-accent transition-colors"
-                    style={{ borderColor: handleError ? "#FF453A" : "rgba(255,255,255,0.15)" }}
-                    spellCheck={false}
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                  />
-                </div>
-                <button
-                  onClick={handleLink}
-                  className="btn-gradient px-4 py-2 rounded-lg text-white text-sm font-semibold whitespace-nowrap"
-                >
-                  Connect
-                </button>
-              </div>
-              {handleError && (
-                <p className="text-xs text-red-400 mt-1.5">{handleError}</p>
-              )}
-              <p className="text-xs mt-1.5" style={{ color: "#8E8E93" }}>
-                You will be redirected to Bluesky to authorize the connection.
-              </p>
-            </div>
+          {/* Connected: show full Bluesky profile panel */}
+          {!atproto.loading && atproto.linked && atproto.handle && (
+            <BlueskyProfilePanel
+              handle={atproto.handle}
+              onUnlink={handleUnlink}
+              unlinking={unlinking}
+              unlinkError={unlinkError}
+            />
           )}
 
-          {/* Unlink error */}
-          {unlinkError && (
-            <p className="text-xs text-red-400 mt-2">{unlinkError}</p>
+          {/* Not connected: show connect form */}
+          {!atproto.loading && !atproto.linked && (
+            <BlueskyConnectForm />
+          )}
+
+          {/* Loading skeleton for Bluesky section body */}
+          {atproto.loading && (
+            <div className="mt-3 rounded-xl p-4 animate-pulse" style={{ background: "rgba(0,133,255,0.06)", border: "1px solid rgba(0,133,255,0.15)" }}>
+              <div className="flex gap-3">
+                <div className="w-12 h-12 rounded-full bg-white/10" />
+                <div className="flex-1 space-y-2 pt-1">
+                  <div className="h-4 bg-white/10 rounded w-28" />
+                  <div className="h-3 bg-white/10 rounded w-20" />
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

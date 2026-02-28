@@ -129,6 +129,31 @@
   .dot-gradient {
     background: linear-gradient(135deg, #D4007A, #E69138);
   }
+
+  /* Bluesky brand button */
+  .btn-bluesky {
+    background: #0085FF;
+    transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .btn-bluesky:hover {
+    background: #0070D9;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(0, 133, 255, 0.35);
+  }
+
+  .btn-bluesky:active {
+    background: #005FBF;
+    transform: translateY(0);
+    box-shadow: none;
+  }
+
+  /* Bluesky badge on posts */
+  .badge-bluesky {
+    background: rgba(0, 133, 255, 0.12);
+    border: 1px solid rgba(0, 133, 255, 0.3);
+    color: #0085FF;
+  }
 }
 
 @keyframes fadeInUp {
