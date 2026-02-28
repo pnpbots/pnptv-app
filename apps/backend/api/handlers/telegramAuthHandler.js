@@ -308,8 +308,9 @@ const handleAcceptTerms = async (req, res) => {
 
 /**
  * Check authentication status
+ * Refreshes tier/role/subscription from DB on every call so session stays current.
  */
-const checkAuthStatus = (req, res) => {
+const checkAuthStatus = async (req, res) => {
   try {
     const user = req.session?.user;
 
@@ -318,6 +319,26 @@ const checkAuthStatus = (req, res) => {
         authenticated: false,
         redirect: '/auth/telegram-login'
       });
+    }
+
+    // Refresh tier, role, and subscription from DB (prevents stale session data)
+    try {
+      const { rows } = await query(
+        'SELECT tier, role, subscription_status, photo_file_id FROM users WHERE id = $1',
+        [user.id]
+      );
+      if (rows.length > 0) {
+        const fresh = rows[0];
+        user.tier = fresh.tier || 'free';
+        user.role = fresh.role || user.role || 'user';
+        user.subscriptionStatus = fresh.subscription_status || user.subscriptionStatus || 'free';
+        const isValidPhoto = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
+        if (isValidPhoto(fresh.photo_file_id)) {
+          user.photoUrl = fresh.photo_file_id;
+        }
+      }
+    } catch (dbErr) {
+      logger.warn('checkAuthStatus: DB refresh failed, using session values', dbErr.message);
     }
 
     // Build auth_methods from session data (hybrid session: Telegram + ATProto + X may all coexist)
