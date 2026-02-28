@@ -121,16 +121,6 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   if (mode === "widget" && !isOpen) {
     return (
       <div className="fixed bottom-24 right-4 z-50 flex flex-col items-end gap-2">
-        {/* Label pill */}
-        <span
-          className="px-3 py-1 rounded-full text-[11px] font-semibold text-white shadow-lg animate-fade-in-up whitespace-nowrap pointer-events-none select-none"
-          style={{
-            background: "linear-gradient(135deg, #D4007A, #E69138)",
-            marginRight: 4,
-          }}
-        >
-          {lang === "es" ? "Pregunta a Cristina" : "Ask Cristina"}
-        </span>
         <button
           onClick={() => setIsOpen(true)}
           className="relative w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-2xl transition-transform hover:scale-110 active:scale-95"
