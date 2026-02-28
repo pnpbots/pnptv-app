@@ -739,11 +739,20 @@ class PaymentController {
             const isEpaycoDown = resultStr.includes('Wrong number of segments')
               || resultStr.includes('Bad Gateway')
               || (tokenResult?.status === false && resultStr.includes('invalido o expirado'));
-            return res.status(isEpaycoDown ? 503 : 400).json({
+            const isFranchiseReject = resultStr.includes('políticas de la franquicia')
+              || resultStr.includes('Rechazada');
+            const statusCode = isEpaycoDown ? 503 : 400;
+            let userError;
+            if (isEpaycoDown) {
+              userError = 'El procesador de pagos (ePayco) no está disponible en este momento. Por favor, intenta de nuevo en unos minutos.';
+            } else if (isFranchiseReject) {
+              userError = 'Tu banco o red de tarjeta no autorizó esta transacción. Por favor, intenta con otra tarjeta o contacta a tu banco para habilitar compras en línea.';
+            } else {
+              userError = 'No pudimos procesar tu tarjeta en este momento. Verifica los datos e intenta de nuevo, o prueba con otra tarjeta.';
+            }
+            return res.status(statusCode).json({
               success: false,
-              error: isEpaycoDown
-                ? 'El procesador de pagos (ePayco) no está disponible en este momento. Por favor, intenta de nuevo en unos minutos.'
-                : 'No se pudo tokenizar la tarjeta. Verifica los datos e intenta de nuevo.',
+              error: userError,
               retryable: isEpaycoDown,
             });
           }
@@ -757,7 +766,7 @@ class PaymentController {
             success: false,
             error: isEpaycoDown
               ? 'El procesador de pagos (ePayco) no está disponible en este momento. Por favor, intenta de nuevo en unos minutos.'
-              : 'Error al tokenizar la tarjeta: ' + (tokenError.message || 'Verifica los datos de la tarjeta.'),
+              : 'No pudimos procesar tu tarjeta en este momento. Por favor, verifica los datos o intenta con otra tarjeta.',
             retryable: isEpaycoDown,
           });
         }
