@@ -32,7 +32,13 @@ export function useHangoutSocket(
   // Refs for debouncing and cleanup
   const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastTypingEmit = useRef(0);
-  const prevGroupId = useRef<number | null>(null);
+  const messagesRef = useRef<GroupMessage[]>([]);
+  const isLoadingMoreRef = useRef(false);
+
+  // Keep messagesRef in sync
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   // Deduplicate messages by id
   const dedupeMessages = useCallback((msgs: GroupMessage[]): GroupMessage[] => {
@@ -53,13 +59,22 @@ export function useHangoutSocket(
       return;
     }
 
+    // Reset state before attaching to new group (prevents stale messages flash)
+    setMessages([]);
+    setTypingUsers([]);
+    setCallState(EMPTY_CALL);
+    setHasMore(true);
+
     const socket = connectSocket();
 
-    const onConnect = () => setIsConnected(true);
-    const onDisconnect = () => setIsConnected(false);
+    // --- Define all handlers FIRST, register listeners BEFORE emitting join ---
 
-    // Join hangout room
-    socket.emit("hangout:join", { groupId });
+    const onConnect = () => {
+      setIsConnected(true);
+      // (Re)join hangout room on connect/reconnect
+      socket.emit("hangout:join", { groupId });
+    };
+    const onDisconnect = () => setIsConnected(false);
 
     const onHistory = (history: GroupMessage[]) => {
       setMessages(dedupeMessages(history));
@@ -67,8 +82,8 @@ export function useHangoutSocket(
     };
 
     const onMessage = (msg: GroupMessage) => {
-      // Only accept messages for this hangout room
-      if (msg.room !== `hangout:${groupId}`) return;
+      // Accept messages for this room; also accept if room field is absent (server-side routing)
+      if (msg.room && msg.room !== `hangout:${groupId}`) return;
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) return prev;
         return [...prev, msg];
@@ -107,17 +122,27 @@ export function useHangoutSocket(
       });
     };
 
-    const onCallStarted = (data: { callId: string; roomName: string }) => {
-      setCallState((prev) => ({
-        ...prev,
+    // Server sends { call: { id, roomName, ... }, startedBy: { ... } }
+    const onCallStarted = (data: {
+      call?: { id: string; roomName: string };
+      callId?: string;
+      roomName?: string;
+    }) => {
+      setCallState({
         isActive: true,
-        callId: data.callId,
-        roomName: data.roomName || prev.roomName,
-      }));
+        participantCount: 0,
+        participants: [],
+        callId: data.call?.id ?? data.callId ?? null,
+        roomName: data.call?.roomName ?? data.roomName ?? null,
+      });
     };
 
-    const onCallEnded = () => {
-      setCallState(EMPTY_CALL);
+    const onCallEnded = (data?: { callId?: string }) => {
+      setCallState((prev) => {
+        // Only reset if this matches our known call (or no callId provided)
+        if (data?.callId && prev.callId && prev.callId !== data.callId) return prev;
+        return EMPTY_CALL;
+      });
     };
 
     const onCallJoined = (data: { participantCount?: number }) => {
@@ -134,6 +159,7 @@ export function useHangoutSocket(
       }));
     };
 
+    // Register ALL listeners BEFORE emitting join
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("hangout:history", onHistory);
@@ -145,9 +171,11 @@ export function useHangoutSocket(
     socket.on("hangout:call:joined", onCallJoined);
     socket.on("hangout:call:participant:left", onParticipantLeft);
 
-    if (socket.connected) setIsConnected(true);
-
-    prevGroupId.current = groupId;
+    // Now emit join — if already connected, emit directly; otherwise onConnect handles it
+    if (socket.connected) {
+      setIsConnected(true);
+      socket.emit("hangout:join", { groupId });
+    }
 
     return () => {
       socket.emit("hangout:leave", { groupId });
@@ -190,11 +218,13 @@ export function useHangoutSocket(
   }, [groupId]);
 
   // Load older messages via HTTP (for infinite scroll)
+  // Uses refs to avoid stale closures and prevent multiple concurrent calls
   const loadOlderMessages = useCallback(async () => {
-    if (!groupId || isLoadingMore || !hasMore) return;
+    if (!groupId || isLoadingMoreRef.current || !hasMore) return;
+    isLoadingMoreRef.current = true;
     setIsLoadingMore(true);
     try {
-      const oldest = messages[0];
+      const oldest = messagesRef.current[0];
       const cursor = oldest?.created_at;
       const data = await getGroupMessages(groupId, cursor);
       const older = data.messages || [];
@@ -205,9 +235,10 @@ export function useHangoutSocket(
     } catch {
       // silent
     } finally {
+      isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
     }
-  }, [groupId, isLoadingMore, hasMore, messages, dedupeMessages]);
+  }, [groupId, hasMore, dedupeMessages]);
 
   return {
     messages,

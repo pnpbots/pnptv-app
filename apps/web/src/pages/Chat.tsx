@@ -13,6 +13,7 @@ import {
   createHangoutGroup,
   sendGroupMediaMessage,
   startGroupCall,
+  getActiveGroupCall,
   leaveHangoutGroup,
   deleteHangoutGroup,
   markGroupAsRead,
@@ -210,7 +211,7 @@ function DateSeparator({ date }: { date: string }) {
 export default function Chat() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const isPrime = user?.tier === "PRIME";
+  const isPrime = user?.tier?.toLowerCase() === "prime";
 
   // Group list state
   const [groups, setGroups] = useState<HangoutGroup[]>([]);
@@ -258,7 +259,12 @@ export default function Chat() {
 
   // Video call
   const [callUrl, setCallUrl] = useState<string | null>(null);
+  const [callId, setCallId] = useState<string | null>(null);
   const [callLoading, setCallLoading] = useState(false);
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Create group error
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // ─── Group list loading ─────────────────────────────────────────────
 
@@ -282,14 +288,15 @@ export default function Chat() {
   const handleCreate = async () => {
     if (!newName.trim() || creating) return;
     setCreating(true);
+    setCreateError(null);
     try {
       await createHangoutGroup(newName.trim(), newDesc.trim());
       setNewName("");
       setNewDesc("");
       setShowCreate(false);
       loadGroups();
-    } catch {
-      // silent
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Failed to create group");
     } finally {
       setCreating(false);
     }
@@ -334,17 +341,23 @@ export default function Chat() {
     }
   }, [hasMore, isLoadingMore, loadOlderMessages]);
 
+  // Cleanup loading timer on unmount
+  useEffect(() => {
+    return () => {
+      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
+    };
+  }, []);
+
   // Preserve scroll position after loading older messages
   useEffect(() => {
     if (!isLoadingMore && prevScrollHeight.current > 0) {
       const el = messagesContainerRef.current;
       if (el) {
-        const newScrollHeight = el.scrollHeight;
-        el.scrollTop = newScrollHeight - prevScrollHeight.current;
+        el.scrollTop = el.scrollHeight - prevScrollHeight.current;
       }
       prevScrollHeight.current = 0;
     }
-  }, [isLoadingMore, messages]);
+  }, [isLoadingMore]);
 
   // Auto-scroll on new messages (only when near bottom)
   useEffect(() => {
@@ -359,6 +372,7 @@ export default function Chat() {
     setActiveGroup(group);
     setView("chat");
     setCallUrl(null);
+    setCallId(null);
     setMessagesLoading(true);
     clearMedia();
     isNearBottom.current = true;
@@ -366,15 +380,17 @@ export default function Chat() {
     // Mark as read
     markGroupAsRead(group.id).catch(() => {});
 
-    // Initial loading state (socket will deliver history)
     // Give socket a moment to deliver history, then clear loading
-    setTimeout(() => setMessagesLoading(false), 1000);
+    if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
+    loadingTimerRef.current = setTimeout(() => setMessagesLoading(false), 1000);
 
-    // If there's already an active call, fetch the URL
+    // If there's already an active call, fetch (not create) the URL
     if (group.hasActiveCall) {
       try {
-        const callData = await startGroupCall(group.id);
-        if (callData.jitsiUrl) setCallUrl(callData.jitsiUrl);
+        const callData = await getActiveGroupCall(group.id);
+        if (callData.call) {
+          setCallId(callData.call.id);
+        }
       } catch {
         /* silent */
       }
@@ -382,19 +398,21 @@ export default function Chat() {
   };
 
   const closeChat = () => {
+    if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
     setView("list");
     setActiveGroup(null);
     setCallUrl(null);
+    setCallId(null);
     clearMedia();
     loadGroups();
   };
 
   // Clear messagesLoading once socket delivers messages
   useEffect(() => {
-    if (messages.length > 0 && messagesLoading) {
+    if (messages.length > 0) {
       setMessagesLoading(false);
     }
-  }, [messages, messagesLoading]);
+  }, [messages]);
 
   // ─── Send logic ─────────────────────────────────────────────────────
 
@@ -455,6 +473,7 @@ export default function Chat() {
           return;
         }
         setCallUrl(data.jitsiUrl);
+        setCallId(data.callId);
       } else {
         setUploadError("Video calls are not available right now.");
       }
@@ -466,26 +485,30 @@ export default function Chat() {
   };
 
   const handleEndCall = useCallback(() => {
-    if (activeGroup && callState.callId) {
-      leaveGroupCall(activeGroup.id, callState.callId).catch(() => {});
+    const resolvedCallId = callId ?? callState.callId;
+    if (activeGroup && resolvedCallId) {
+      leaveGroupCall(activeGroup.id, resolvedCallId).catch(() => {});
     }
     setCallUrl(null);
-  }, [activeGroup, callState.callId]);
+    setCallId(null);
+  }, [activeGroup, callId, callState.callId]);
 
   // ─── Group management ──────────────────────────────────────────────
 
-  const handleLeaveGroup = async (groupId: number) => {
+  const handleLeaveGroup = async (gid: number) => {
+    if (!window.confirm("Leave this group?")) return;
     try {
-      await leaveHangoutGroup(groupId);
+      await leaveHangoutGroup(gid);
       closeChat();
     } catch {
       /* silent */
     }
   };
 
-  const handleDeleteGroup = async (groupId: number) => {
+  const handleDeleteGroup = async (gid: number) => {
+    if (!window.confirm("Permanently delete this group and all its messages?")) return;
     try {
-      await deleteHangoutGroup(groupId);
+      await deleteHangoutGroup(gid);
       closeChat();
     } catch {
       /* silent */
@@ -504,9 +527,10 @@ export default function Chat() {
   }, []);
 
   // Build media list for lightbox navigation
-  const mediaUrls = messages
-    .filter((m) => m.media_url && m.media_type === "image")
-    .map((m) => m.media_url!);
+  const mediaUrls = React.useMemo(
+    () => messages.filter((m) => m.media_url && m.media_type === "image").map((m) => m.media_url!),
+    [messages]
+  );
 
   const handleLightboxNavigate = useCallback((src: string) => {
     setLightboxSrc(src);
@@ -516,7 +540,7 @@ export default function Chat() {
 
   if (view === "chat" && activeGroup) {
     const canSend = !sending && (msgInput.trim().length > 0 || mediaFile !== null);
-    const showCallBanner = !callUrl && (callState.isActive || activeGroup.hasActiveCall);
+    const showCallBanner = !callUrl && callState.isActive;
 
     return (
       <div className="flex flex-col" style={{ height: "calc(100vh - 5rem)" }}>
@@ -556,7 +580,7 @@ export default function Chat() {
 
           {/* Video call button */}
           <VideoCallButton
-            hasActiveCall={!!callUrl || callState.isActive || activeGroup.hasActiveCall}
+            hasActiveCall={!!callUrl || callState.isActive}
             onStartCall={handleStartCall}
             isLoading={callLoading}
             participantCount={callState.participantCount}
@@ -784,9 +808,12 @@ export default function Chat() {
             rows={2}
             maxLength={500}
           />
+          {createError && (
+            <p className="text-xs text-pnp-error mb-2">{createError}</p>
+          )}
           <div className="flex gap-2">
             <button
-              onClick={() => setShowCreate(false)}
+              onClick={() => { setShowCreate(false); setCreateError(null); }}
               className="flex-1 py-2.5 rounded-lg text-sm text-pnp-textSecondary border border-white/10 hover:bg-white/5 active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             >
               Cancel

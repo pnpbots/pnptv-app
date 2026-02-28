@@ -39,6 +39,14 @@ function rateLimit(key, maxCount, windowMs) {
   return entry.count <= maxCount;
 }
 
+// Periodically purge expired rate-limit entries to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of rateLimitCounters) {
+    if (now > entry.reset) rateLimitCounters.delete(key);
+  }
+}, 5 * 60 * 1000);
+
 // ── Message SELECT columns helper ─────────────────────────────────────────────
 
 // All the columns we return for every chat message — text or media.
@@ -312,6 +320,8 @@ function initSocketIO(io) {
       if (!groupId) return;
       const gid = parseInt(groupId, 10);
       if (!Number.isFinite(gid)) return;
+      // Rate limit: max 1 typing event per 2s per user per group
+      if (!rateLimit(`typing:${user.id}:${gid}`, 1, 2000)) return;
       socket.to(`hangout:${gid}`).emit('hangout:typing', {
         userId: user.id,
         firstName: user.firstName || user.first_name || user.username || 'Someone',

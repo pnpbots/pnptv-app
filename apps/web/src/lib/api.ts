@@ -181,58 +181,6 @@ export interface SocialPost {
   replyCount?: number;
 }
 
-export function getSocialFeed(
-  limit = 20
-): Promise<{ success: boolean; posts: SocialPost[]; message?: string }> {
-  return request(`/api/proxy/social/feed?limit=${limit}`);
-}
-
-// Local social posts (Directus-backed)
-export interface LocalPost {
-  id: number;
-  text: string;
-  media: { id: string; type: string; width?: number; height?: number; filename_download?: string } | null;
-  author_name: string;
-  author_id: string;
-  author_source: string;
-  date_created: string;
-}
-
-export function getLocalPosts(
-  limit = 50,
-  offset = 0
-): Promise<{ success: boolean; posts: LocalPost[] }> {
-  return request(`/api/proxy/social/posts?limit=${limit}&offset=${offset}`);
-}
-
-export async function createPost(
-  text: string,
-  mediaFile?: File
-): Promise<{ success: boolean; post: LocalPost }> {
-  const formData = new FormData();
-  formData.append("text", text);
-  if (mediaFile) {
-    formData.append("media", mediaFile);
-  }
-
-  const res = await fetch(`${API_BASE}/api/proxy/social/posts`, {
-    method: "POST",
-    credentials: "include",
-    body: formData,
-  });
-
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(error.error || `API error ${res.status}`);
-  }
-
-  return res.json();
-}
-
-export function deletePost(id: number): Promise<{ success: boolean }> {
-  return request(`/api/proxy/social/posts/${id}`, { method: "DELETE" });
-}
-
 // Nearby geolocation
 export interface NearbyUser {
   user_id: number;
@@ -692,7 +640,7 @@ export function getGroupMessages(
   id: number,
   cursor?: string
 ): Promise<{ success: boolean; messages: GroupMessage[] }> {
-  const params = cursor ? `?cursor=${cursor}` : "";
+  const params = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
   return request(`/api/webapp/hangouts/groups/${id}/messages${params}`);
 }
 
@@ -1182,7 +1130,7 @@ export function clearSupportHistory(): Promise<{ success: boolean }> {
   return request("/api/webapp/support/history", { method: "DELETE" });
 }
 
-// Performers (PostgreSQL-backed)
+// Performers (Directus CMS-backed)
 export interface FeaturedPerformer {
   id: string;
   userId: string | null;
@@ -1385,12 +1333,18 @@ export function getCreatorEligibility(): Promise<{
   return request("/api/webapp/creator/eligibility");
 }
 
-export function activateCreator(): Promise<{
+export function activateCreator(
+  tier: "ice" | "crystal" | "diamond",
+  termsAccepted: boolean
+): Promise<{
   success: boolean;
   type: string;
   price: number;
 }> {
-  return request("/api/webapp/creator/activate", { method: "POST" });
+  return request("/api/webapp/creator/activate", {
+    method: "POST",
+    body: { tier, termsAccepted },
+  });
 }
 
 // Full-time applications use /api/apply (existing model_applications flow)
@@ -1455,6 +1409,85 @@ export function rejectCreatorApplication(
     method: "POST",
     body: { notes },
   });
+}
+
+// ============================================================================
+// Model Dashboard API (role-protected: model/admin)
+// ============================================================================
+
+export interface ModelDashboardStats {
+  totalEarnings: number;
+  monthlyEarnings: number;
+  totalContent: number;
+  activeSubscribers: number;
+  pendingWithdrawals: number;
+}
+
+export interface ModelEarnings {
+  summary: {
+    total_gross: number;
+    total_creator: number;
+    total_platform: number;
+    pending_amount: number;
+  };
+  byType: Record<string, number>;
+  trends: Array<{ month: string; amount: number }>;
+}
+
+export interface ModelWithdrawal {
+  id: string;
+  amountUsd: number;
+  method: string;
+  status: string;
+  requestedAt: string;
+  processedAt: string | null;
+}
+
+export function getModelDashboard(): Promise<{
+  success: boolean;
+  data: { stats: ModelDashboardStats };
+}> {
+  return request("/api/model/dashboard");
+}
+
+export function getModelEarnings(): Promise<{
+  success: boolean;
+  data: ModelEarnings;
+}> {
+  return request("/api/model/earnings");
+}
+
+export function getWithdrawableAmount(): Promise<{
+  success: boolean;
+  data: { withdrawable: { amount: number; currency: string } };
+}> {
+  return request("/api/model/withdrawal/available");
+}
+
+export function requestWithdrawal(
+  method = "bank_transfer"
+): Promise<{
+  success: boolean;
+  data: { withdrawal: ModelWithdrawal; earningsCount: number };
+}> {
+  return request("/api/model/withdrawal/request", {
+    method: "POST",
+    body: { method },
+  });
+}
+
+export function getWithdrawalHistory(
+  status?: string
+): Promise<{
+  success: boolean;
+  data: {
+    withdrawals: ModelWithdrawal[];
+    stats: { totalWithdrawn: number; pendingAmount: number };
+    count: number;
+  };
+}> {
+  const params = status ? `?status=${status}` : "";
+  return request(`/api/model/withdrawal/history${params}`);
 }
 
 // Health check

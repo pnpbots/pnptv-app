@@ -183,6 +183,12 @@ const getGroup = async (req, res) => {
     if (groupRows.length === 0) return res.status(404).json({ error: 'Group not found' });
 
     const g = groupRows[0];
+    const member = await isMember(groupId, user.id);
+
+    // Non-members cannot view private groups
+    if (!g.is_public && !member) {
+      return res.status(403).json({ error: 'This group is invite-only' });
+    }
 
     const { rows: members } = await query(
       `SELECT gm.user_id, gm.role, gm.joined_at,
@@ -324,6 +330,11 @@ const getMessages = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
   const { cursor } = req.query;
+
+  // Validate cursor format if provided
+  if (cursor !== undefined && isNaN(Date.parse(cursor))) {
+    return res.status(400).json({ error: 'Invalid cursor format' });
+  }
 
   try {
     // Check membership
@@ -480,7 +491,11 @@ const startCall = async (req, res) => {
 const markAsRead = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
   try {
+    if (!(await isMember(groupId, user.id))) {
+      return res.status(403).json({ error: 'Not a member of this group' });
+    }
     await query(
       'UPDATE hangout_group_members SET last_read_at = NOW() WHERE group_id = $1 AND user_id = $2',
       [groupId, user.id]
