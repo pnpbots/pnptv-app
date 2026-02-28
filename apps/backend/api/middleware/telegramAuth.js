@@ -77,8 +77,8 @@ const checkTermsAccepted = (req, res, next) => {
 };
 
 const requireMember = (req, res, next) => {
-  const tier = req.user?.tier;
-  if (tier === 'member' || tier === 'PRIME') {
+  const tier = (req.user?.tier || '').toLowerCase();
+  if (tier === 'member' || tier === 'prime') {
     return next();
   }
 
@@ -89,7 +89,7 @@ const requireMember = (req, res, next) => {
 };
 
 const requirePrime = (req, res, next) => {
-  if (req.user?.tier === 'PRIME') {
+  if ((req.user?.tier || '').toLowerCase() === 'prime') {
     return next();
   }
 

@@ -1750,7 +1750,7 @@ export default function Profile() {
   const photoUrl = resolvePhotoUrl(profile.photoUrl);
   const displayName = profile.firstName + (profile.lastName ? ` ${profile.lastName}` : "");
   const initial = displayName[0]?.toUpperCase() || "U";
-  const isPrime = profile.tier === "PRIME";
+  const isPrime = profile.tier?.toLowerCase() === "prime";
   const isPerformer = !!profile.performerData;
   // Performer theme colors (teal/gold) vs default user theme (pink/orange)
   const accentGradient = isPerformer

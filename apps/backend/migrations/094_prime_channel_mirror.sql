@@ -17,10 +17,11 @@ CREATE INDEX IF NOT EXISTS idx_social_posts_source_channel
   WHERE source_channel IS NOT NULL;
 
 -- 2. Migration tracking log
+-- post_id stores either a social_posts ID or a Directus content item ID (no FK)
 CREATE TABLE IF NOT EXISTS prime_channel_migration_log (
   message_id   BIGINT       PRIMARY KEY,
   status       VARCHAR(20)  NOT NULL CHECK (status IN ('success','skipped','failed','deleted')),
-  post_id      BIGINT       REFERENCES social_posts(id) ON DELETE SET NULL,
+  post_id      BIGINT,
   media_type   VARCHAR(20),
   error_msg    TEXT,
   attempted_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()

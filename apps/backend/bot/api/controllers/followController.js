@@ -241,7 +241,7 @@ const getFollowingFeed = async (req, res) => {
               u.id AS author_id, u.username AS author_username,
               u.first_name AS author_first_name, u.photo_file_id AS author_photo,
               EXISTS(
-                SELECT 1 FROM post_likes pl
+                SELECT 1 FROM social_post_likes pl
                 WHERE pl.post_id = sp.id AND pl.user_id = $1
               ) AS liked_by_me
        FROM social_posts sp
@@ -251,7 +251,7 @@ const getFollowingFeed = async (req, res) => {
          AND sp.is_deleted = FALSE
          AND sp.reply_to_id IS NULL
          AND ($2::bigint IS NULL OR sp.id < $2::bigint)
-       ORDER BY sp.created_at DESC
+       ORDER BY sp.id DESC
        LIMIT $3`,
       [actor.id, cursor !== null ? String(cursor) : null, limit + 1]
     );

@@ -79,8 +79,7 @@ class NearbyController {
 
       logger.error('❌ Update location error:', error);
       return res.status(500).json({
-        error: 'Failed to update location',
-        message: error.message
+        error: 'Failed to update location'
       });
     }
   }
@@ -110,7 +109,7 @@ class NearbyController {
       // Validate types
       const lat = parseFloat(latitude);
       const lon = parseFloat(longitude);
-      const rad = parseFloat(radius);
+      const rad = Math.min(parseFloat(radius) || 25, 50);
 
       if (isNaN(lat) || isNaN(lon) || isNaN(rad)) {
         return res.status(400).json({
@@ -124,7 +123,7 @@ class NearbyController {
         lat,
         lon,
         rad,
-        { limit: parseInt(limit) || 50 }
+        { limit: Math.min(parseInt(limit) || 50, 200) }
       );
 
       return res.status(200).json({
@@ -139,8 +138,7 @@ class NearbyController {
 
       logger.error('❌ Search nearby error:', error);
       return res.status(500).json({
-        error: 'Failed to search nearby users',
-        message: error.message
+        error: 'Failed to search nearby users'
       });
     }
   }
@@ -188,8 +186,7 @@ class NearbyController {
     } catch (error) {
       logger.error('❌ Search nearby places error:', error);
       return res.status(500).json({
-        error: 'Failed to search nearby places',
-        message: error.message
+        error: 'Failed to search nearby places'
       });
     }
   }
@@ -216,8 +213,7 @@ class NearbyController {
     } catch (error) {
       logger.error('❌ Get stats error:', error);
       return res.status(500).json({
-        error: 'Failed to get statistics',
-        message: error.message
+        error: 'Failed to get statistics'
       });
     }
   }
@@ -244,8 +240,7 @@ class NearbyController {
     } catch (error) {
       logger.error('❌ Clear location error:', error);
       return res.status(500).json({
-        error: 'Failed to clear location',
-        message: error.message
+        error: 'Failed to clear location'
       });
     }
   }

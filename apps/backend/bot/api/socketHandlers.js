@@ -123,6 +123,15 @@ function initSocketIO(io) {
     socket.on('chat:message', async ({ room = 'general', content } = {}) => {
       if (!content || !content.trim()) return;
       if (content.length > 2000) return;
+
+      // Hangout rooms require membership
+      const hangoutMatch = String(room).match(/^hangout:(\d+)$/);
+      if (hangoutMatch) {
+        const gid = parseInt(hangoutMatch[1], 10);
+        const { rows } = await query('SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2', [gid, user.id]);
+        if (rows.length === 0) return;
+      }
+
       if (!rateLimit(`chat:${user.id}`, 30, 60000)) {
         socket.emit('chat:error', { message: 'Too many messages. Slow down.' });
         return;
@@ -316,10 +325,15 @@ function initSocketIO(io) {
     });
 
     // Hangout typing indicator (ephemeral, no DB writes)
-    socket.on('hangout:typing', ({ groupId } = {}) => {
+    socket.on('hangout:typing', async ({ groupId } = {}) => {
       if (!groupId) return;
       const gid = parseInt(groupId, 10);
       if (!Number.isFinite(gid)) return;
+
+      // Verify membership before broadcasting typing indicator
+      const { rows } = await query('SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2', [gid, user.id]);
+      if (rows.length === 0) return;
+
       // Rate limit: max 1 typing event per 2s per user per group
       if (!rateLimit(`typing:${user.id}:${gid}`, 1, 2000)) return;
       socket.to(`hangout:${gid}`).emit('hangout:typing', {

@@ -217,6 +217,7 @@ const startApiServer = (modeLabel) => {
     path: '/socket.io',
   });
   apiApp.set('io', io);
+  require('../services/socketSingleton').set(io);
   require('../services/notificationEmitter').setIO(io);
   initSocketIO(io);
 

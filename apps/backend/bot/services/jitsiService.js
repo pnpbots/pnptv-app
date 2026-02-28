@@ -134,7 +134,7 @@ class JitsiService {
             return 'Premium';
         }
         
-        if (user.tier !== 'PRIME') {
+        if ((user.tier || '').toLowerCase() !== 'prime') {
             return null;
         }
 
@@ -293,7 +293,7 @@ class JitsiService {
         const user = await User.getById(userId);
         if (!user) return false;
 
-        return user.tier === 'PRIME';
+        return (user.tier || '').toLowerCase() === 'prime';
     }
 
     /**

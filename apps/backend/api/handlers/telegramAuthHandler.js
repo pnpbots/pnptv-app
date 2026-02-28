@@ -195,7 +195,15 @@ const handleTelegramAuth = async (req, res) => {
     const isValidPhoto = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
     const photoUrl = isValidPhoto(user.photo_file_id) ? user.photo_file_id : null;
 
-    // Store user in session
+    // Regenerate session to prevent session fixation attacks
+    await new Promise((resolve, reject) => {
+      req.session.regenerate((err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+
+    // Store user in session (after regeneration so old session ID is invalidated)
     req.session.user = {
       id: user.id,
       telegramId: user.telegram,

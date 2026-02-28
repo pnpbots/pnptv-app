@@ -162,6 +162,7 @@ const createGroup = async (req, res) => {
 const getGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     const { rows: groupRows } = await query(
@@ -229,6 +230,7 @@ const getGroup = async (req, res) => {
 const joinGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     const { rows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
@@ -274,6 +276,7 @@ const joinGroup = async (req, res) => {
 const leaveGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     // Can't leave the main group or Wall of Fame group
@@ -298,6 +301,7 @@ const leaveGroup = async (req, res) => {
 const deleteGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     const { rows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);

@@ -54,7 +54,7 @@ class PrivateCallBookingService {
       }
 
       // Check membership (require prime for private calls)
-      const hasPrime = user.membership_tier === 'PRIME' || user.membership_tier === 'admin';
+      const hasPrime = (user.membership_tier || '').toLowerCase() === 'prime' || (user.membership_tier || '').toLowerCase() === 'admin';
       const membershipExpired = user.membership_expires_at && new Date(user.membership_expires_at) < new Date();
 
       if (!hasPrime) {

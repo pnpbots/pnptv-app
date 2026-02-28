@@ -98,8 +98,8 @@ const softAuth = (req, res, next) => {
  * Tier gate — requires active or prime subscription
  */
 const requirePrimeTier = (req, res, next) => {
-  const status = req.session?.user?.subscription_status || 'free';
-  if (!['active', 'prime'].includes(status)) {
+  const tier = (req.session?.user?.tier || 'free').toLowerCase();
+  if (tier !== 'prime') {
     return res.status(403).json({
       success: false,
       error: 'Prime subscription required',
@@ -1241,6 +1241,7 @@ app.delete('/api/playlists/:playlistId', authenticateUser, asyncHandler(playlist
 // Podcasts uploads (local storage under /public/uploads/podcasts)
 app.post(
   '/api/podcasts/upload',
+  authenticateUser,
   podcastController.upload.single('audio'),
   asyncHandler(podcastController.uploadAudio)
 );

@@ -78,15 +78,15 @@ const createPost = async (req, res) => {
   if (!content || !content.trim()) return res.status(400).json({ error: 'Content required' });
   if (content.length > 5000) return res.status(400).json({ error: 'Post too long (max 5000 chars)' });
 
-  // Validate creator status for exclusive posts
-  if (isExclusive) {
-    const creatorCheck = await dbQuery('SELECT creator_status FROM users WHERE id = $1', [user.id]);
-    if (creatorCheck.rows[0]?.creator_status !== 'active') {
-      return res.status(403).json({ error: 'Only active creators can post exclusive content' });
-    }
-  }
-
   try {
+    // Validate creator status for exclusive posts
+    if (isExclusive) {
+      const creatorCheck = await dbQuery('SELECT creator_status FROM users WHERE id = $1', [user.id]);
+      if (creatorCheck.rows[0]?.creator_status !== 'active') {
+        return res.status(403).json({ error: 'Only active creators can post exclusive content' });
+      }
+    }
+
     const shareable = isShareable !== false;
     const post = await SocialPostService.createPost(user.id, content.trim(), null, null, replyToId, repostOfId, false, !!isExclusive, shareable);
 
@@ -213,18 +213,18 @@ const createPostWithMedia = async (req, res) => {
   if (!content || !content.toString().trim()) return res.status(400).json({ error: 'Content required' });
   if (content.toString().length > 5000) return res.status(400).json({ error: 'Post too long (max 5000 chars)' });
 
-  // Validate creator status for exclusive posts
-  if (isExclusive === 'true' || isExclusive === true) {
-    const creatorCheck = await dbQuery('SELECT creator_status FROM users WHERE id = $1', [user.id]);
-    if (creatorCheck.rows[0]?.creator_status !== 'active') {
-      return res.status(403).json({ error: 'Only active creators can post exclusive content' });
-    }
-  }
-
   let mediaUrl = null;
   let mediaType = null;
 
   try {
+    // Validate creator status for exclusive posts
+    if (isExclusive === 'true' || isExclusive === true) {
+      const creatorCheck = await dbQuery('SELECT creator_status FROM users WHERE id = $1', [user.id]);
+      if (creatorCheck.rows[0]?.creator_status !== 'active') {
+        return res.status(403).json({ error: 'Only active creators can post exclusive content' });
+      }
+    }
+
     if (req.file) {
       const { mimetype, buffer } = req.file;
       // __dirname = /app/apps/backend/bot/api/controllers

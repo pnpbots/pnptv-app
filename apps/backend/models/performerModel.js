@@ -589,7 +589,8 @@ class PerformerModel {
       }
 
       if (filters.startDate && filters.endDate) {
-        sql += ` AND date BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+        sql += ` AND date BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+        paramIndex += 2;
         params.push(filters.startDate, filters.endDate);
       }
 
@@ -635,7 +636,8 @@ class PerformerModel {
       }
 
       if (filters.startDate && filters.endDate) {
-        sql += ` AND date BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+        sql += ` AND date BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+        paramIndex += 2;
         params.push(filters.startDate, filters.endDate);
       }
 
@@ -659,18 +661,18 @@ class PerformerModel {
     try {
       const sql = `
         UPDATE ${AVAILABILITY_SLOTS_TABLE}
-        SET 
+        SET
           is_booked = true,
           booking_id = $1,
           updated_at = NOW()
-        WHERE id = $2
+        WHERE id = $2 AND is_booked = false
         RETURNING *
       `;
 
       const result = await query(sql, [bookingId, slotId]);
-      
+
       if (result.rows.length === 0) {
-        throw new Error('Slot not found');
+        throw new Error('Slot not found or already booked');
       }
 
       logger.info('Slot booked', {
@@ -738,7 +740,8 @@ class PerformerModel {
       }
 
       if (filters.startDate && filters.endDate) {
-        sql += ` AND date BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+        sql += ` AND date BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+        paramIndex += 2;
         params.push(filters.startDate, filters.endDate);
       }
 
@@ -773,11 +776,7 @@ class PerformerModel {
         AND date = $2
         AND is_available = true
         AND is_booked = false
-        AND (
-          (start_time <= $3 AND end_time >= $4) OR
-          (start_time <= $4 AND end_time >= $3) OR
-          (start_time >= $3 AND end_time <= $4)
-        )
+        AND start_time < $4 AND end_time > $3
       `;
 
       const result = await query(sql, [performerId, date, startTime, endTime]);

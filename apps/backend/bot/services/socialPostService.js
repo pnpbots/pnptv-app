@@ -34,8 +34,9 @@ class SocialPostService {
    */
   static async getFeed(userId, cursor, limit = 20, viewerSubscriptionStatus) {
     const lim = Math.min(Number(limit) || 20, 50);
+    const fetchLimit = lim + 10;
     const cursorId = cursor ? parseInt(cursor, 10) : null;
-    const params = cursorId ? [userId, lim, cursorId] : [userId, lim];
+    const params = cursorId ? [userId, fetchLimit, cursorId] : [userId, fetchLimit];
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
@@ -60,8 +61,9 @@ class SocialPostService {
     if (viewerSubscriptionStatus !== undefined) {
       posts = await CreatorService.filterFeedExclusivePosts(posts, userId, viewerSubscriptionStatus);
     }
-    const nextCursor = posts.length === lim ? String(posts[posts.length - 1].id) : null;
-    return { posts, nextCursor };
+    const page = posts.slice(0, lim);
+    const nextCursor = posts.length > lim ? String(page[page.length - 1].id) : null;
+    return { posts: page, nextCursor };
   }
 
   /**
@@ -104,7 +106,7 @@ class SocialPostService {
     const params = cursorId ? [userId, lim, cursorId] : [userId, lim];
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
-              sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_wof, sp.created_at,
+              sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_shareable, sp.is_wof, sp.created_at,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
               EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me
@@ -129,7 +131,7 @@ class SocialPostService {
     const [postsRes, profileRes] = await Promise.all([
       query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
-                sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_wof, sp.created_at,
+                sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_shareable, sp.is_wof, sp.created_at,
                 u.id as author_id, u.username as author_username,
                 u.first_name as author_first_name, u.photo_file_id as author_photo,
                 EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me
@@ -196,44 +198,51 @@ class SocialPostService {
   // ── Toggle Like ───────────────────────────────────────────────────────────
 
   static async toggleLike(postId, userId) {
-    const existing = await query('SELECT 1 FROM social_post_likes WHERE post_id=$1 AND user_id=$2', [postId, userId]);
-    if (existing.rows.length > 0) {
-      await query('DELETE FROM social_post_likes WHERE post_id=$1 AND user_id=$2', [postId, userId]);
-      await query('UPDATE social_posts SET likes_count = GREATEST(0, likes_count - 1) WHERE id=$1', [postId]);
-      return { liked: false };
-    }
-    await query('INSERT INTO social_post_likes (post_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [postId, userId]);
-    await query('UPDATE social_posts SET likes_count = likes_count + 1 WHERE id=$1', [postId]);
-    return { liked: true };
+    const { rows } = await query(
+      `WITH del AS (
+        DELETE FROM social_post_likes WHERE post_id=$1 AND user_id=$2 RETURNING post_id
+      ),
+      ins AS (
+        INSERT INTO social_post_likes (post_id, user_id) SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM del) ON CONFLICT DO NOTHING RETURNING post_id
+      )
+      UPDATE social_posts SET likes_count = CASE
+        WHEN (SELECT COUNT(*) FROM ins) > 0 THEN likes_count + 1
+        WHEN (SELECT COUNT(*) FROM del) > 0 THEN GREATEST(0, likes_count - 1)
+        ELSE likes_count
+      END WHERE id = $1
+      RETURNING (SELECT COUNT(*) FROM ins) > 0 AS liked`,
+      [postId, userId]
+    );
+    return { liked: rows[0]?.liked ?? false };
   }
 
   // ── Delete Post ───────────────────────────────────────────────────────────
 
   static async deletePost(postId, userId, isAdmin = false) {
-    await MediaCleanupService.deletePostMedia(postId);
-
     if (isAdmin) {
       const { rowCount } = await query(
         'UPDATE social_posts SET is_deleted=true, updated_at=NOW() WHERE id=$1',
         [postId]
       );
+      if (rowCount > 0) await MediaCleanupService.deletePostMedia(postId);
       return rowCount > 0;
     }
     const { rowCount } = await query(
       'UPDATE social_posts SET is_deleted=true WHERE id=$1 AND user_id=$2',
       [postId, userId]
     );
+    if (rowCount > 0) await MediaCleanupService.deletePostMedia(postId);
     return rowCount > 0;
   }
 
   // ── Delete WoF Post (user requesting removal of their own WoF content) ────
 
   static async deleteWofPost(postId, userId) {
-    await MediaCleanupService.deletePostMedia(postId);
     const { rowCount } = await query(
       'UPDATE social_posts SET is_deleted=true, updated_at=NOW() WHERE id=$1 AND user_id=$2 AND is_wof=true',
       [postId, userId]
     );
+    if (rowCount > 0) await MediaCleanupService.deletePostMedia(postId);
     return rowCount > 0;
   }
 

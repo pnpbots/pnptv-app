@@ -120,22 +120,18 @@ async function postToSocialFeed(ctx, fileId, mediaType, user, mimetype) {
     );
 
     // Emit via Socket.IO if available
-    try {
-      const apiApp = require('../../api/routes');
-      const io = apiApp.get('io');
-      if (io) {
-        io.emit('feed:new_post', {
-          ...post,
-          is_wof: true,
-          author_id: user.id,
-          author_username: user.username || null,
-          author_first_name: user.firstName || user.first_name || null,
-          author_photo: null,
-          liked_by_me: false,
-        });
-      }
-    } catch (ioErr) {
-      logger.debug('WoF social post: Socket.IO emit skipped', { error: ioErr.message });
+    const { get: getIo } = require('../../services/socketSingleton');
+    const io = getIo();
+    if (io) {
+      io.emit('feed:new_post', {
+        ...post,
+        is_wof: true,
+        author_id: user.id,
+        author_username: user.username || null,
+        author_first_name: user.firstName || user.first_name || null,
+        author_photo: null,
+        liked_by_me: false,
+      });
     }
 
     logger.info('WoF posted to social feed', { userId: user.id, postId: post.id });

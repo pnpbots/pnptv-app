@@ -7,6 +7,19 @@ const logger = require('../../../utils/logger');
 const PaymentService = require('../../services/paymentService');
 
 /**
+ * Escape HTML special characters to prevent XSS
+ */
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
  * Subscription Controller - Handles ePayco subscription operations
  */
 class SubscriptionController {
@@ -444,7 +457,7 @@ class SubscriptionController {
       <h1>Payment Failed</h1>
       <p>We couldn't process your payment. Please try again or contact support.</p>
     `}
-    ${ref_payco ? `<div class="ref">Reference: ${ref_payco}</div>` : ''}
+    ${ref_payco ? `<div class="ref">Reference: ${escapeHtml(ref_payco)}</div>` : ''}
     <a href="/" class="button">Return to PNPtv</a>
   </div>
   <script>

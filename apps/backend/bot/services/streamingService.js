@@ -353,7 +353,7 @@ class StreamingService {
             }
 
             // Check tier for prime access
-            if (viewer.tier !== 'PRIME') {
+            if ((viewer.tier || '').toLowerCase() !== 'prime') {
                 return {
                     allowed: false,
                     reason: 'You need a Prime membership to view this stream'

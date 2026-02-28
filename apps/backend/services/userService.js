@@ -103,7 +103,7 @@ class UserService {
       }
       
       const user = await UserModel.getById(userId);
-      return user && user.tier === 'PRIME';
+      return user && (user.tier || '').toLowerCase() === 'prime';
     } catch (error) {
       logger.error('Error checking premium status:', error);
       return false;

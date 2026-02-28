@@ -140,7 +140,7 @@ class PromoModel {
              WHERE user_id = $1 AND status = 'completed'`,
             [userId.toString()]
           );
-          if (parseInt(payments.rows[0].count) > 0 && user.tier !== 'PRIME') {
+          if (parseInt(payments.rows[0].count) > 0 && (user.tier || '').toLowerCase() !== 'prime') {
             return { eligible: true };
           }
           return { eligible: false, reason: 'not_churned' };

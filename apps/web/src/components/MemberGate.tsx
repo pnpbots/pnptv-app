@@ -11,11 +11,17 @@ export function MemberGate({ children }: MemberGateProps) {
   const { user, isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
 
-  if (isLoading || !isAuthenticated || !user) {
+  // Still loading: show spinner (don't leak children)
+  if (isLoading) {
+    return <div className="flex items-center justify-center min-h-screen"><div className="animate-spin w-8 h-8 border-2 border-white/20 border-t-white rounded-full" /></div>;
+  }
+
+  // Not authenticated: show children (Layout handles login)
+  if (!isAuthenticated || !user) {
     return <>{children}</>;
   }
 
-  const hasMemberAccess = user.tier === "member" || user.tier === "PRIME";
+  const hasMemberAccess = user.tier?.toLowerCase() === "member" || user.tier?.toLowerCase() === "prime";
 
   if (hasMemberAccess) {
     return <>{children}</>;
