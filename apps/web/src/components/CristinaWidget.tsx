@@ -120,10 +120,10 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   // FAB button (widget mode only)
   if (mode === "widget" && !isOpen) {
     return (
-      <div className="fixed bottom-24 right-4 z-50 flex flex-col items-end gap-2">
+      <div className="fixed bottom-20 right-3 z-50 flex flex-col items-end gap-2 sm:bottom-24 sm:right-4 safe-area-bottom">
         <button
           onClick={() => setIsOpen(true)}
-          className="relative w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-2xl transition-transform hover:scale-110 active:scale-95"
+          className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-full shadow-lg flex items-center justify-center text-xl sm:text-2xl transition-transform hover:scale-110 active:scale-95"
           style={{
             background: "linear-gradient(135deg, #D4007A, #E69138)",
           }}
@@ -159,10 +159,13 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
         mode === "page"
           ? "flex flex-col h-[calc(100vh-12rem)] max-h-[800px] glass-card-sm rounded-2xl overflow-hidden"
           : "fixed z-50 flex flex-col overflow-hidden shadow-2xl " +
-            "bottom-0 right-0 w-full h-[85vh] rounded-t-2xl " +
-            "sm:bottom-24 sm:right-4 sm:w-[400px] sm:h-[600px] sm:rounded-2xl"
+            "inset-0 w-full h-full " +
+            "sm:inset-auto sm:bottom-24 sm:right-4 sm:w-[400px] sm:h-[600px] sm:rounded-2xl"
       }
-      style={{ background: "rgba(20, 20, 30, 0.98)", border: "1px solid rgba(255,255,255,0.08)" }}
+      style={{
+        background: "rgba(20, 20, 30, 0.98)",
+        ...(mode === "page" ? { border: "1px solid rgba(255,255,255,0.08)" } : {}),
+      }}
     >
       {/* Header */}
       <div
@@ -296,8 +299,8 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
       {/* Input area */}
       <form
         onSubmit={handleSubmit}
-        className="flex items-center gap-2 p-3 border-t border-pnp-border flex-shrink-0"
-        style={{ background: "rgba(30, 30, 45, 0.95)" }}
+        className="flex items-center gap-2 p-3 pb-safe border-t border-pnp-border flex-shrink-0"
+        style={{ background: "rgba(30, 30, 45, 0.95)", paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
       >
         <input
           ref={inputRef}
