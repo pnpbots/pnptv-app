@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
+import { Modal } from "@pnptv/ui-kit";
 import {
   getSocialFeedPosts,
   createSocialPost,
@@ -367,6 +368,7 @@ export default function Social() {
   const [isPosting, setIsPosting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
   const [crossPostBluesky, setCrossPostBluesky] = useState(false);
+  const [showBlueskyWarning, setShowBlueskyWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load feed
@@ -434,7 +436,7 @@ export default function Social() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [mediaPreview]);
 
-  const handlePost = useCallback(async () => {
+  const submitPost = useCallback(async () => {
     if (!text.trim() || isPosting) return;
     setIsPosting(true);
     setPostError(null);
@@ -449,12 +451,27 @@ export default function Social() {
       }
       setText("");
       clearMedia();
+      setCrossPostBluesky(false);
     } catch (err: unknown) {
       setPostError(err instanceof Error ? err.message : "Failed to create post");
     } finally {
       setIsPosting(false);
     }
   }, [text, mediaFile, isPosting, clearMedia, crossPostBluesky]);
+
+  const handlePost = useCallback(() => {
+    if (!text.trim() || isPosting) return;
+    if (crossPostBluesky) {
+      setShowBlueskyWarning(true);
+      return;
+    }
+    submitPost();
+  }, [text, isPosting, crossPostBluesky, submitPost]);
+
+  const confirmCrossPost = useCallback(() => {
+    setShowBlueskyWarning(false);
+    submitPost();
+  }, [submitPost]);
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
@@ -686,6 +703,44 @@ export default function Social() {
           )}
         </div>
       )}
+
+      {/* Bluesky cross-post confirmation modal */}
+      <Modal
+        open={showBlueskyWarning}
+        onClose={() => setShowBlueskyWarning(false)}
+      >
+        <div className="flex flex-col items-center text-center">
+          <div
+            className="w-12 h-12 rounded-full flex items-center justify-center mb-4"
+            style={{ background: "rgba(0,133,255,0.12)", color: "#0085FF" }}
+          >
+            <BlueskySvg className="w-6 h-6" />
+          </div>
+          <h3 className="text-lg font-semibold text-white mb-2">
+            Post to Bluesky?
+          </h3>
+          <p className="text-sm mb-6" style={{ color: "#8E8E93" }}>
+            This post will be publicly visible on the Bluesky network, not just
+            on PNPtv. Anyone on Bluesky will be able to see it.
+          </p>
+          <div className="flex gap-3 w-full">
+            <button
+              onClick={() => setShowBlueskyWarning(false)}
+              className="flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold border border-white/10 hover:bg-white/5 transition-colors"
+              style={{ color: "#8E8E93" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={confirmCrossPost}
+              className="flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold text-white transition-colors"
+              style={{ background: "#0085FF" }}
+            >
+              Post to Both
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
