@@ -734,5 +734,6 @@ setInterval(cleanupOldConversations, 30 * 60 * 1000);
 
 module.exports = {
   handleCristinaCommand,
-  handleCristinaCallback
+  handleCristinaCallback,
+  buildCristinaSystemPrompt
 };

@@ -16,6 +16,7 @@ const AdminDashboard = lazy(() => import("@/pages/admin/Dashboard"));
 const Subscribe = lazy(() => import("@/pages/Subscribe"));
 const DirectMessages = lazy(() => import("@/pages/DirectMessages"));
 const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
+const Support = lazy(() => import("@/pages/Support"));
 
 export const router = createBrowserRouter([
   {
@@ -128,6 +129,16 @@ export const router = createBrowserRouter([
           <ModuleLoader>
             <VerificationGate>
               <Subscribe />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "support",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <Support />
             </VerificationGate>
           </ModuleLoader>
         ),

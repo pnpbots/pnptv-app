@@ -976,6 +976,42 @@ export function createPayment(
   });
 }
 
+// ============================================================================
+// Cristina AI Support
+// ============================================================================
+
+export interface SupportSuggestion {
+  id: string;
+  label: string;
+  icon: string;
+}
+
+export interface SupportChatResponse {
+  success: boolean;
+  response: string;
+  historyLength: number;
+}
+
+export function getSupportSuggestions(
+  lang = "en"
+): Promise<{ success: boolean; suggestions: SupportSuggestion[] }> {
+  return request(`/api/webapp/support/suggestions?lang=${lang}`);
+}
+
+export function sendSupportMessage(
+  message: string,
+  lang = "en"
+): Promise<SupportChatResponse> {
+  return request("/api/webapp/support/chat", {
+    method: "POST",
+    body: { message, lang },
+  });
+}
+
+export function clearSupportHistory(): Promise<{ success: boolean }> {
+  return request("/api/webapp/support/history", { method: "DELETE" });
+}
+
 // Health check
 export function healthCheck(): Promise<{ status: string }> {
   return request("/health");

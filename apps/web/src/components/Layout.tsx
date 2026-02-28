@@ -4,6 +4,7 @@ import { BottomNav } from "./BottomNav";
 import { useAuth } from "@/hooks/useAuth";
 import { useTelegram } from "@/hooks/useTelegram";
 import { LoginPage } from "@/pages/LoginPage";
+import { CristinaWidget } from "@/components/CristinaWidget";
 
 const sidebarLinks = [
   { to: "/", label: "Home", end: true },
@@ -92,6 +93,9 @@ export function Layout() {
       <div className="lg:hidden">
         <BottomNav />
       </div>
+
+      {/* Cristina AI Support Widget */}
+      {isAuthenticated && <CristinaWidget />}
     </div>
   );
 }

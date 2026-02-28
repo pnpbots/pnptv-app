@@ -293,6 +293,7 @@ app.use(conditionalMiddleware(helmet({
         "https://3ds-green.epayco.com",
         "https://oauth.telegram.org",
         "https://telegram.org",
+        "https://8x8.vc",
       ],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
@@ -761,6 +762,32 @@ const uploadChatMedia = (req, res, next) => {
     let message = 'Invalid file. Please try a different image or video.';
     if (err.code === 'LIMIT_FILE_SIZE') {
       message = 'File is too large. Images must be under 20 MB and videos under 100 MB.';
+    } else if (err.message) {
+      message = err.message;
+    }
+    return res.status(400).json({ error: message });
+  });
+};
+
+// Hangout media upload:
+//   Images up to 10 MB — processed by sharp (WebP + thumbnail, per-hangout dirs)
+//   Videos up to 50 MB — stored as-is, poster frame via ffmpeg
+const hangoutMediaUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const isAllowed = /^(image\/(jpeg|jpg|png|webp|gif)|video\/(mp4|webm))$/i.test(file.mimetype || '');
+    if (isAllowed) return cb(null, true);
+    cb(new Error('Only image (jpg/png/webp/gif) and video (mp4/webm) files are allowed'));
+  },
+});
+
+const uploadHangoutMedia = (req, res, next) => {
+  hangoutMediaUpload.single('media')(req, res, (err) => {
+    if (!err) return next();
+    let message = 'Invalid file. Please try a different image or video.';
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      message = 'File is too large. Images must be under 10 MB and videos under 50 MB.';
     } else if (err.message) {
       message = err.message;
     }
@@ -1804,6 +1831,19 @@ app.get('/api/webapp/live/streams/:streamId/join', asyncHandler(webappLiveContro
 app.post('/api/webapp/live/streams/:streamId/end', asyncHandler(webappLiveController.endStream));
 app.post('/api/webapp/live/streams/:streamId/leave', asyncHandler(webappLiveController.leaveStream));
 
+// Web App Support Chat (Cristina AI)
+const supportController = require('./controllers/supportController');
+const supportChatLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10,
+  message: { success: false, error: 'Too many messages. Please wait a moment.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.post('/api/webapp/support/chat', supportChatLimiter, asyncHandler(supportController.chat));
+app.get('/api/webapp/support/suggestions', asyncHandler(supportController.suggestions));
+app.delete('/api/webapp/support/history', asyncHandler(supportController.clearHistory));
+
 // Web App Payments (session auth → PaymentService)
 app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {
   const user = req.session?.user;
@@ -2041,6 +2081,8 @@ app.get('/api/admin/audit-logs/resource', adminGuard, asyncHandler((req, res) =>
 const chatController = require('./controllers/chatController');
 const chatMediaController = require('./controllers/chatMediaController');
 const hangoutGroupController = require('./controllers/hangoutGroupController');
+const hangoutMediaController = require('./controllers/hangoutMediaController');
+const hangoutVideoCallRoutes = require('./routes/hangoutVideoCallRoutes');
 const dmController = require('./controllers/dmController');
 const socialController = require('./controllers/socialController');
 const usersController = require('./controllers/usersController');
@@ -2066,14 +2108,17 @@ app.delete('/api/webapp/hangouts/groups/:id', asyncHandler(hangoutGroupControlle
 // ── Hangout Group Chat ───────────────────────────────────────────────────────
 app.get('/api/webapp/hangouts/groups/:id/messages', asyncHandler(hangoutGroupController.getMessages));
 app.post('/api/webapp/hangouts/groups/:id/messages', asyncHandler(hangoutGroupController.sendMessage));
-// Media upload for a specific hangout group's chat (images 20 MB / videos 100 MB)
+// Media upload for hangout group chat (images 10 MB / videos 50 MB, per-hangout dirs)
 app.post(
   '/api/webapp/hangouts/groups/:id/media',
-  uploadChatMedia,
-  asyncHandler(chatMediaController.sendGroupMediaMessage)
+  uploadHangoutMedia,
+  asyncHandler(hangoutMediaController.uploadHangoutMedia)
 );
-// Video call within a group
+// Legacy single-call endpoint (kept for backward compatibility)
 app.post('/api/webapp/hangouts/groups/:id/call', asyncHandler(hangoutGroupController.startCall));
+
+// ── Hangout Video Calls (JaaS) ──────────────────────────────────────────────
+app.use('/api/webapp/hangouts/groups', hangoutVideoCallRoutes);
 
 // ── DM Media ────────────────────────────────────────────────────────────────
 // Send an image or video as a direct message
