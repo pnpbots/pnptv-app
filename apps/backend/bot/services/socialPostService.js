@@ -38,7 +38,7 @@ class SocialPostService {
     const params = cursorId ? [userId, lim, cursorId] : [userId, lim];
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
-              sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_wof, sp.created_at,
+              sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
               u.creator_status as author_creator_status, u.creator_type as author_creator_type,
@@ -248,7 +248,7 @@ class SocialPostService {
     const [postsRes, profileRes, postCountRes, performerRes] = await Promise.all([
       query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
-                sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_wof, sp.created_at,
+                sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
                 u.id as author_id, u.username as author_username,
                 u.first_name as author_first_name, u.photo_file_id as author_photo
                 ${likedSubquery}

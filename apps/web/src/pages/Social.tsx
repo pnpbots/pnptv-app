@@ -900,7 +900,6 @@ export default function Social() {
                       className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
                       style={{
                         background: crossPostBluesky ? "#0085FF" : "rgba(255,255,255,0.15)",
-                        // ring-offset-color matches the card bg
                         outlineOffset: "2px",
                       }}
                     >
@@ -911,6 +910,39 @@ export default function Social() {
                     </button>
                   </div>
                 )}
+
+                {/* Allow sharing toggle */}
+                <div className="flex items-center justify-between rounded-lg px-3 py-2.5" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  <label
+                    htmlFor="shareable-toggle"
+                    className="flex items-center gap-2 cursor-pointer select-none flex-1"
+                  >
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: isShareable ? "#34D399" : "#8E8E93" }}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0-12.814a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0 12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
+                    </svg>
+                    <span className="text-xs font-medium" style={{ color: isShareable ? "#34D399" : "#8E8E93" }}>
+                      Allow sharing
+                    </span>
+                  </label>
+                  <button
+                    id="shareable-toggle"
+                    role="switch"
+                    aria-checked={isShareable}
+                    aria-label="Allow sharing this post"
+                    onClick={() => setIsShareable((v) => !v)}
+                    disabled={isPosting}
+                    className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                    style={{
+                      background: isShareable ? "#34D399" : "rgba(255,255,255,0.15)",
+                      outlineOffset: "2px",
+                    }}
+                  >
+                    <span
+                      className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform duration-200"
+                      style={{ transform: isShareable ? "translateX(18px)" : "translateX(2px)" }}
+                    />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
