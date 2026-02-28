@@ -688,9 +688,39 @@ export async function sendGroupMediaMessage(
   return res.json();
 }
 
-export function startGroupCall(
-  id: number
-): Promise<{ success: boolean; jitsiUrl: string; callId: string; isNew: boolean }> {
+export interface JaasCallInfo {
+  token: string;
+  meetingUrl: string;
+  domain: string;
+  appId: string;
+}
+
+export interface ActiveCallInfo {
+  id: string;
+  groupId: number;
+  roomName: string;
+  creatorId: string;
+  createdAt: string;
+  isPersistent?: boolean;
+  isModerator?: boolean;
+  participantCount?: number;
+  participants?: Array<{
+    userId: string;
+    displayName: string;
+    username: string;
+    photoUrl: string | null;
+    joinedAt: string;
+  }>;
+}
+
+export interface StartCallResponse {
+  success: boolean;
+  isNew: boolean;
+  call: ActiveCallInfo;
+  jaas: JaasCallInfo | null;
+}
+
+export function startGroupCall(id: number): Promise<StartCallResponse> {
   return request(`/api/webapp/hangouts/groups/${id}/calls`, { method: "POST" });
 }
 
@@ -698,9 +728,13 @@ export function markGroupAsRead(groupId: number): Promise<{ success: boolean }> 
   return request(`/api/webapp/hangouts/groups/${groupId}/read`, { method: "POST" });
 }
 
-export function getActiveGroupCall(
-  groupId: number
-): Promise<{ success: boolean; call: { id: string; participantCount: number } | null }> {
+export interface GetActiveCallResponse {
+  success: boolean;
+  call: ActiveCallInfo | null;
+  jaas: JaasCallInfo | null;
+}
+
+export function getActiveGroupCall(groupId: number): Promise<GetActiveCallResponse> {
   return request(`/api/webapp/hangouts/groups/${groupId}/calls/active`);
 }
 

@@ -22,6 +22,8 @@ import {
   leaveGroupCall,
   type HangoutGroup,
   type GroupMessage,
+  type StartCallResponse,
+  type GetActiveCallResponse,
 } from "@/lib/api";
 import {
   MediaUploadButton,
@@ -372,6 +374,9 @@ export default function Chat() {
   // ─── Chat view open/close ──────────────────────────────────────────
 
   const openChat = async (group: HangoutGroup) => {
+    // Dismiss the tutorial immediately when entering a chat so the overlay
+    // can never surface while the user is in the chat input view.
+    if (showTutorial) dismissTutorial();
     setActiveGroup(group);
     setView("chat");
     setCallUrl(null);
@@ -387,12 +392,16 @@ export default function Chat() {
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
     loadingTimerRef.current = setTimeout(() => setMessagesLoading(false), 1000);
 
-    // If there's already an active call, fetch (not create) the URL
+    // If there's already an active call, fetch the URL so the banner/overlay appears.
+    // We only auto-open the overlay when the user explicitly clicks Join (not on entering
+    // the chat), but we do set callId so the banner renders with an accurate callId.
     if (group.hasActiveCall) {
       try {
         const callData = await getActiveGroupCall(group.id);
         if (callData.call) {
           setCallId(callData.call.id);
+          // Do NOT auto-open the overlay — let the user choose to join via the banner
+          // (keeps the chat readable without forcing the call on them).
         }
       } catch {
         /* silent */
@@ -461,27 +470,48 @@ export default function Chat() {
 
   const ALLOWED_CALL_ORIGINS = ["https://8x8.vc/", "https://meet.jit.si/"];
 
+  /**
+   * Extract a usable meeting URL and call ID from either a startGroupCall or
+   * getActiveGroupCall response.  The backend nests the URL inside `jaas.meetingUrl`
+   * and the call ID inside `call.id`.
+   */
+  const resolveCallData = (
+    data: StartCallResponse | GetActiveCallResponse
+  ): { url: string; callId: string } | null => {
+    const meetingUrl = data.jaas?.meetingUrl ?? null;
+    const callId = data.call?.id ?? null;
+
+    if (!meetingUrl || !callId) return null;
+
+    const isValidOrigin = ALLOWED_CALL_ORIGINS.some((prefix) =>
+      meetingUrl.startsWith(prefix)
+    );
+    if (!isValidOrigin) {
+      console.error("Rejected invalid call URL from API:", meetingUrl);
+      return null;
+    }
+
+    return { url: meetingUrl, callId };
+  };
+
   const handleStartCall = async () => {
     if (!activeGroup || callLoading) return;
     setCallLoading(true);
     try {
       const data = await startGroupCall(activeGroup.id);
-      if (data.jitsiUrl) {
-        const isValidOrigin = ALLOWED_CALL_ORIGINS.some((prefix) =>
-          data.jitsiUrl.startsWith(prefix)
-        );
-        if (!isValidOrigin) {
-          console.error("Rejected invalid call URL from API:", data.jitsiUrl);
-          setUploadError("Video call URL is invalid. Please contact support.");
-          return;
-        }
-        setCallUrl(data.jitsiUrl);
-        setCallId(data.callId);
+      const resolved = resolveCallData(data);
+      if (resolved) {
+        setCallUrl(resolved.url);
+        setCallId(resolved.callId);
+      } else if (data.jaas === null) {
+        // JaaS not configured on the server
+        setUploadError("Video calls are not available right now. Please contact support.");
       } else {
-        setUploadError("Video calls are not available right now.");
+        setUploadError("Video call URL is invalid. Please contact support.");
       }
-    } catch {
-      setUploadError("Failed to start video call. Please try again.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to start video call";
+      setUploadError(msg);
     } finally {
       setCallLoading(false);
     }
@@ -716,8 +746,10 @@ export default function Chat() {
           </div>
         )}
 
-        {/* Input bar */}
-        <div className="px-4 py-3 border-t border-pnp-border flex-shrink-0">
+        {/* Input bar — relative + z-50 ensures it stacks above any fixed
+            floating widgets (e.g. CristinaWidget FAB) that share the same
+            bottom region of the viewport on mobile. */}
+        <div className="relative z-50 px-4 py-3 border-t border-pnp-border flex-shrink-0 bg-pnp-background">
           <div className="flex items-center gap-2">
             {/* Media upload button */}
             <MediaUploadButton

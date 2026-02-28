@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { getSupportSuggestions, sendSupportMessage, clearSupportHistory } from "@/lib/api";
 
@@ -21,6 +22,7 @@ interface CristinaWidgetProps {
 
 export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   const { user } = useAuth();
+  const location = useLocation();
   const [isOpen, setIsOpen] = useState(mode === "page");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -29,13 +31,23 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Don't render widget if user hasn't completed onboarding
-  if (!user?.ageVerified || !user?.termsAccepted) return null;
+  // Compute derived values before hooks that depend on them.
+  const isOnboarded = !!(user?.ageVerified && user?.termsAccepted);
+  const lang = user?.language === "es" ? "es" : "en";
 
-  const lang = user.language === "es" ? "es" : "en";
+  // In widget mode, suppress the FAB and panel on routes that have their own
+  // fixed bottom input bars (Hangouts chat, Direct Messages conversation) to
+  // prevent the widget from overlapping the send button.
+  const SUPPRESSED_PATHS = ["/chat", "/messages"];
+  const isSuppressedRoute =
+    mode === "widget" &&
+    SUPPRESSED_PATHS.some((p) => location.pathname.startsWith(p));
+
+  // All hooks are declared unconditionally before any early returns (Rules of Hooks).
 
   // Load suggestions on first open
   useEffect(() => {
+    if (!isOnboarded || isSuppressedRoute) return;
     if (isOpen && suggestions.length === 0) {
       getSupportSuggestions(lang)
         .then((res) => {
@@ -43,7 +55,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
         })
         .catch(() => {});
     }
-  }, [isOpen, lang]);
+  }, [isOpen, lang, isOnboarded, isSuppressedRoute]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -111,6 +123,10 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
     } catch {}
     setMessages([]);
   }, []);
+
+  // Early exits — after ALL hooks have been declared.
+  if (!isOnboarded) return null;
+  if (isSuppressedRoute) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

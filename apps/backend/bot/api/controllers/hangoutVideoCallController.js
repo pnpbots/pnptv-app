@@ -42,6 +42,36 @@ const isMember = async (groupId, userId) => {
 };
 
 /**
+ * Ensure the user is a member of the group before they interact with its calls.
+ * For is_main and is_wall_of_fame groups, auto-join instead of blocking.
+ * Returns true if the user is (now) a member, false if they should be blocked.
+ */
+const ensureMembership = async (groupId, userId) => {
+  if (await isMember(groupId, userId)) return true;
+
+  const { rows: groupRows } = await query(
+    'SELECT is_main, is_wall_of_fame, is_public FROM hangout_groups WHERE id = $1',
+    [groupId]
+  );
+  if (groupRows.length === 0) return false;
+
+  const { is_main, is_wall_of_fame, is_public } = groupRows[0];
+
+  // Auto-join main community groups and public groups
+  if (is_main || is_wall_of_fame || is_public) {
+    await query(
+      `INSERT INTO hangout_group_members (group_id, user_id, role)
+       VALUES ($1, $2, 'member')
+       ON CONFLICT DO NOTHING`,
+      [groupId, userId]
+    );
+    return true;
+  }
+
+  return false;
+};
+
+/**
  * Generate a room name for a hangout call.
  * Persistent (is_main) groups get a stable name so Jitsi state survives restarts.
  * Ephemeral groups get a unique per-call name.
@@ -125,8 +155,8 @@ const startCall = async (req, res) => {
   }
 
   try {
-    // Verify membership
-    if (!(await isMember(groupId, user.id))) {
+    // Verify / auto-join membership (main + public groups auto-enroll callers)
+    if (!(await ensureMembership(groupId, user.id))) {
       return res.status(403).json({ error: 'Not a member of this group' });
     }
 
@@ -290,7 +320,8 @@ const getActiveCall = async (req, res) => {
   }
 
   try {
-    if (!(await isMember(groupId, user.id))) {
+    // Auto-join main/public groups so membership never blocks the call fetch
+    if (!(await ensureMembership(groupId, user.id))) {
       return res.status(403).json({ error: 'Not a member of this group' });
     }
 
@@ -410,7 +441,8 @@ const joinCall = async (req, res) => {
   }
 
   try {
-    if (!(await isMember(groupId, user.id))) {
+    // Auto-join main/public groups so membership never blocks joining a call
+    if (!(await ensureMembership(groupId, user.id))) {
       return res.status(403).json({ error: 'Not a member of this group' });
     }
 

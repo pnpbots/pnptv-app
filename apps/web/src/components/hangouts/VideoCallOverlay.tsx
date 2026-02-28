@@ -108,8 +108,10 @@ export function VideoCallOverlay({
         <iframe
           src={meetingUrl}
           className="w-full h-full border-0"
-          allow="camera; microphone; display-capture; autoplay"
+          allow="camera; microphone; display-capture; autoplay; clipboard-write; speaker-selection; fullscreen"
+          allowFullScreen
           title="Video call (mini)"
+          sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads allow-modals allow-presentation allow-popups-to-escape-sandbox"
         />
       </div>
     );

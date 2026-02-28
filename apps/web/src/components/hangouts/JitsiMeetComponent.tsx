@@ -146,12 +146,12 @@ export function JitsiMeetComponent({
         ref={iframeRef}
         src={meetingUrl}
         className="w-full h-full border-0"
-        allow="camera; microphone; display-capture; autoplay; clipboard-write; speaker-selection"
+        allow="camera; microphone; display-capture; autoplay; clipboard-write; speaker-selection; fullscreen"
         allowFullScreen
         title={roomName ? `Video call: ${roomName}` : "Video call"}
         onLoad={handleIframeLoad}
         onError={handleIframeError}
-        sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads"
+        sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads allow-modals allow-presentation allow-popups-to-escape-sandbox"
       />
 
       {/* Full-screen close button (only in full-screen mode) */}

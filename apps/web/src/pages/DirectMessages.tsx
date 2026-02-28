@@ -803,8 +803,10 @@ function Conversation({
         />
       )}
 
-      {/* Input bar */}
-      <div className="px-4 py-3 border-t border-white/5 flex-shrink-0">
+      {/* Input bar — relative + z-50 ensures it stacks above any fixed
+          floating widgets (e.g. CristinaWidget FAB) that share the same
+          bottom region of the viewport on mobile. */}
+      <div className="relative z-50 px-4 py-3 border-t border-white/5 flex-shrink-0 bg-pnp-background">
         <div className="flex items-center gap-2">
           {/* Media picker button */}
           <button
