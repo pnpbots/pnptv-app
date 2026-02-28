@@ -1784,12 +1784,41 @@ export default function Profile() {
   const initial = displayName[0]?.toUpperCase() || "U";
   const isPrime = profile.tier?.toLowerCase() === "prime";
   const isPerformer = !!profile.performerData;
-  // Performer theme colors (teal/gold) vs default user theme (pink/orange)
-  const accentGradient = isPerformer
+
+  // Per-user profile themes & masked roles
+  const profileThemes: Record<string, { gradient: string; color: string; border: string; borderColor?: string; roleBadge?: string; roleStyle?: React.CSSProperties }> = {
+    "8599671840": { // SantinoFurioso — golden crystal yellow
+      gradient: "linear-gradient(135deg, #FFD700, #FFA500)",
+      color: "#FFD700",
+      border: "rgba(255,215,0,0.4)",
+      borderColor: "rgba(255,215,0,0.25)",
+      roleBadge: "The Meth Daddy",
+      roleStyle: { background: "rgba(255,215,0,0.15)", color: "#FFD700", border: "1px solid rgba(255,215,0,0.3)" },
+    },
+    "8250283246": { // Lexboytv — light silver
+      gradient: "linear-gradient(135deg, #C0C0C0, #E8E8E8)",
+      color: "#D0D0D0",
+      border: "rgba(192,192,192,0.4)",
+      borderColor: "rgba(192,192,192,0.25)",
+      roleBadge: "The PNP Latino Boy",
+      roleStyle: { background: "rgba(192,192,192,0.15)", color: "#D0D0D0", border: "1px solid rgba(192,192,192,0.3)" },
+    },
+    "8552451957": { // pnptvadmin — light silver
+      gradient: "linear-gradient(135deg, #C0C0C0, #E8E8E8)",
+      color: "#D0D0D0",
+      border: "rgba(192,192,192,0.4)",
+      borderColor: "rgba(192,192,192,0.25)",
+      roleBadge: "Official Account",
+      roleStyle: { background: "rgba(192,192,192,0.15)", color: "#D0D0D0", border: "1px solid rgba(192,192,192,0.3)" },
+    },
+  };
+
+  const customTheme = profileThemes[profile.id];
+  const accentGradient = customTheme?.gradient ?? (isPerformer
     ? "linear-gradient(135deg, #5ED1C4, #00D4E8)"
-    : "linear-gradient(135deg, #D4007A, #E69138)";
-  const accentColor = isPerformer ? "#5ED1C4" : "#D4007A";
-  const accentBorder = isPerformer ? "rgba(94,209,196,0.35)" : "rgba(255,255,255,0.1)";
+    : "linear-gradient(135deg, #D4007A, #E69138)");
+  const accentColor = customTheme?.color ?? (isPerformer ? "#5ED1C4" : "#D4007A");
+  const accentBorder = customTheme?.border ?? (isPerformer ? "rgba(94,209,196,0.35)" : "rgba(255,255,255,0.1)");
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
@@ -1811,7 +1840,7 @@ export default function Profile() {
       {/* ── Profile Header Card ── */}
       <div
         className="glass-card-sm p-6 mb-4"
-        style={isPerformer ? { borderColor: "rgba(94,209,196,0.2)" } : undefined}
+        style={customTheme?.borderColor ? { borderColor: customTheme.borderColor } : isPerformer ? { borderColor: "rgba(94,209,196,0.2)" } : undefined}
       >
         <div className="flex items-start gap-4">
           {/* Avatar with upload overlay */}
@@ -1875,26 +1904,40 @@ export default function Profile() {
               {isPrime && (
                 <Badge variant="accent">PRIME</Badge>
               )}
-              {isPerformer && (
+              {customTheme?.roleBadge ? (
                 <span
                   className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
-                  style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.3)" }}
+                  style={customTheme.roleStyle}
                 >
                   <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                   </svg>
-                  Performer
+                  {customTheme.roleBadge}
                 </span>
+              ) : (
+                <>
+                  {isPerformer && (
+                    <span
+                      className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
+                      style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.3)" }}
+                    >
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                      </svg>
+                      Performer
+                    </span>
+                  )}
+                  {profile.creatorStatus === "active" && (
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>
+                      Creator
+                    </span>
+                  )}
+                </>
               )}
               {profile.creatorVerified && (
-                <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="#5ED1C4" aria-label="Verified creator">
+                <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill={accentColor} aria-label="Verified creator">
                   <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                 </svg>
-              )}
-              {profile.creatorStatus === "active" && (
-                <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>
-                  Creator
-                </span>
               )}
             </div>
             {profile.username && (
