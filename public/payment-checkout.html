@@ -854,95 +854,66 @@
             setTimeout(function() { startPolling(); }, 5000);
         }
 
-        // ── 3DS 2.0: Cardinal Commerce device data collection ─────
+        // ── 3DS 2.0: ePayco validate3ds() ─────────────────────────
+        var threeDSTimeout = null;
+
         function handle3DS2(threeDSecure) {
             showState('processing');
             document.getElementById('processing-msg').textContent = 'Completing 3D Secure verification...';
 
-            var data = threeDSecure.data || {};
+            var environment = (paymentData && paymentData.testMode) ? 'test' : 'prod';
+            var txData = threeDSecure.transactionData || {};
 
-            if (data.deviceDataCollectionUrl && data.accessToken) {
-                // Create hidden iframe for device data collection
-                var iframe = document.createElement('iframe');
-                iframe.style.display = 'none';
-                iframe.id = 'cardinal-ddc-iframe';
-                document.body.appendChild(iframe);
+            // Listen for validate3ds() result via postMessage
+            window.addEventListener('message', on3DSMessage);
 
-                // Post access token to Cardinal Commerce
-                iframe.onload = function() {
-                    // After DDC completes, notify backend
-                    setTimeout(function() {
-                        complete3DS2({
-                            version: threeDSecure.version || '2.0',
-                            provider: threeDSecure.provider || 'CardinalCommerce',
-                            referenceId: data.referenceId,
-                            authenticated: true,
-                            challengeCompleted: true,
-                            validationData: {
-                                accessToken: data.accessToken,
-                                referenceId: data.referenceId,
-                                token: data.token,
-                            },
-                        });
-                    }, 3000);
-                };
+            // Safety timeout: 8 minutes — if validate3ds() never responds, fall back to polling
+            threeDSTimeout = setTimeout(function() {
+                window.removeEventListener('message', on3DSMessage);
+                console.warn('3DS validation timed out after 8 minutes, falling back to polling');
+                startPolling();
+            }, 8 * 60 * 1000);
 
-                // Build form to post to DDC URL
-                var form = document.createElement('form');
-                form.method = 'POST';
-                form.action = data.deviceDataCollectionUrl;
-                form.target = 'cardinal-ddc-iframe';
-
-                var input = document.createElement('input');
-                input.type = 'hidden';
-                input.name = 'JWT';
-                input.value = data.accessToken;
-                form.appendChild(input);
-
-                document.body.appendChild(form);
-                iframe.name = 'cardinal-ddc-iframe';
-                form.submit();
-                form.remove();
+            // Call ePayco's official validate3ds() which handles DDC + frictionless + challenge
+            if (typeof validate3ds === 'function') {
+                try {
+                    validate3ds(txData, environment);
+                } catch (err) {
+                    console.error('validate3ds() threw an error:', err);
+                    clearTimeout(threeDSTimeout);
+                    window.removeEventListener('message', on3DSMessage);
+                    startPolling();
+                }
             } else {
-                // No DDC URL — just mark as authenticated and poll
-                complete3DS2({
-                    version: threeDSecure.version || '2.0',
-                    provider: threeDSecure.provider || 'CardinalCommerce',
-                    referenceId: data.referenceId,
-                    authenticated: true,
-                    challengeCompleted: true,
-                    validationData: data,
-                });
+                console.error('validate3ds function not available, falling back to polling');
+                clearTimeout(threeDSTimeout);
+                window.removeEventListener('message', on3DSMessage);
+                startPolling();
             }
         }
 
-        async function complete3DS2(threeDSecureData) {
-            try {
-                var res = await fetch('/api/payment/complete-3ds-2', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        paymentId: paymentId,
-                        threeDSecure: threeDSecureData,
-                    }),
-                });
+        function on3DSMessage(event) {
+            // validate3ds() posts { success: true/false, ref_payco: "..." }
+            var data = event.data;
+            if (!data || typeof data !== 'object') return;
+            if (!('success' in data) && !('ref_payco' in data)) return;
 
-                var result = await res.json();
+            // This is a validate3ds() result
+            window.removeEventListener('message', on3DSMessage);
+            if (threeDSTimeout) {
+                clearTimeout(threeDSTimeout);
+                threeDSTimeout = null;
+            }
 
-                if (result.status === 'authenticated' || result.status === 'completed') {
-                    showState('success');
-                    document.getElementById('success-detail').textContent =
-                        result.message || 'Payment authenticated and approved.';
-                } else if (result.status === 'failed' || result.status === 'refunded') {
-                    showState('error');
-                    document.getElementById('error-detail').textContent =
-                        result.message || 'Payment was not approved after 3DS verification.';
-                } else {
-                    // Still pending — poll
-                    startPolling();
-                }
-            } catch (err) {
+            if (data.success) {
+                // 3DS passed (frictionless or challenge completed) — poll for final status
                 startPolling();
+            } else {
+                // 3DS failed or was cancelled
+                showState('error');
+                document.getElementById('error-detail').textContent =
+                    'La verificación 3D Secure no fue completada. Intenta de nuevo o usa otro método de pago.';
+                document.getElementById('btn-pay').disabled = false;
             }
         }
 

@@ -2403,6 +2403,14 @@ class PaymentService {
                 referenceId: rawThreeDS.data?.referenceId || rawThreeDS.referenceId,
                 token: rawThreeDS.data?.token || rawThreeDS.token,
               };
+            } else if (fullResponse.cc_network_response?.code === '187') {
+              // 3DS 2.0 without explicit DDC URL — validate3ds() handles the full flow
+              is3ds2 = true;
+              threeDSData = {
+                version: '2.0',
+                provider: 'CardinalCommerce',
+                data: rawThreeDS.data || rawThreeDS,
+              };
             } else if (rawThreeDS.url) {
               redirectUrl = rawThreeDS.url;
             } else if (rawThreeDS.urlbanco) {
