@@ -38,7 +38,7 @@ class SocialPostService {
     const params = cursorId ? [userId, lim, cursorId] : [userId, lim];
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
-              sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.created_at,
+              sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_wof, sp.created_at,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
               u.creator_status as author_creator_status, u.creator_type as author_creator_type,
@@ -74,7 +74,7 @@ class SocialPostService {
     const lim = Math.min(Number(limit) || 10, 20);
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
-              sp.likes_count, sp.reposts_count, sp.replies_count, sp.created_at,
+              sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_wof, sp.created_at,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
               false as liked_by_me,
@@ -129,7 +129,7 @@ class SocialPostService {
     const [postsRes, profileRes] = await Promise.all([
       query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
-                sp.likes_count, sp.reposts_count, sp.replies_count, sp.created_at,
+                sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_wof, sp.created_at,
                 u.id as author_id, u.username as author_username,
                 u.first_name as author_first_name, u.photo_file_id as author_photo,
                 EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me
@@ -248,7 +248,7 @@ class SocialPostService {
     const [postsRes, profileRes, postCountRes, performerRes] = await Promise.all([
       query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
-                sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.created_at,
+                sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_wof, sp.created_at,
                 u.id as author_id, u.username as author_username,
                 u.first_name as author_first_name, u.photo_file_id as author_photo
                 ${likedSubquery}
