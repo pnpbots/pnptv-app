@@ -50,6 +50,12 @@ const pdsRoutes = require('./routes/pdsRoutes');
 const blueskyRoutes = require('./routes/blueskyRoutes');
 const elementRoutes = require('./routes/elementRoutes');
 
+// ATProto / Bluesky OAuth routes (public endpoints served at the monorepo root)
+const atprotoOAuthRoutes = require('./routes/atprotoOAuthRoutes');
+
+// ATProto controller for profile fetching, unlinking, and cross-posting
+const atprotoController = require('./controllers/atprotoController');
+
 /**
  * Page-level authentication middleware
  * Redirects to login page if user is not authenticated
@@ -228,12 +234,14 @@ app.use(conditionalMiddleware(helmet({
         "'self'",
         "'unsafe-inline'",
         "https://code.jquery.com",
+        "https://cdn.epayco.co",
         "https://multimedia.epayco.co",
+        "https://checkout.epayco.co",
+        "https://secure.epayco.co",
+        "https://secure.payco.co",
+        "https://api.secure.payco.co",
         "https://songbird.cardinalcommerce.com",
         "https://centinelapi.cardinalcommerce.com",
-        "https://checkout.epayco.co",
-        "https://secure.payco.co",
-        "https://secure.epayco.co",
         "https://telegram.org",
       ],
       styleSrc: ["'self'", "'unsafe-inline'", "https:", "https://fonts.googleapis.com"],
@@ -266,7 +274,7 @@ app.use(conditionalMiddleware(helmet({
       ],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
-      formAction: ["'self'", "https://checkout.epayco.co", "https://secure.epayco.co", "https://secure.payco.co", "https://centinelapi.cardinalcommerce.com"],
+      formAction: ["'self'", "https://checkout.epayco.co", "https://secure.epayco.co", "https://secure.payco.co", "https://api.secure.payco.co", "https://centinelapi.cardinalcommerce.com"],
       scriptSrcAttr: ["'unsafe-inline'"],
       upgradeInsecureRequests: [],
     },
@@ -301,7 +309,7 @@ app.use(morgan('combined', { stream: logger.stream }));
 // and form-action allow any HTTPS origin. script-src stays locked to known payment SDKs.
 const CHECKOUT_CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://code.jquery.com https://multimedia.epayco.co https://songbird.cardinalcommerce.com https://centinelapi.cardinalcommerce.com https://checkout.epayco.co https://secure.payco.co https://secure.epayco.co",
+  "script-src 'self' 'unsafe-inline' https://code.jquery.com https://cdn.epayco.co https://multimedia.epayco.co https://checkout.epayco.co https://secure.epayco.co https://secure.payco.co https://api.secure.payco.co https://songbird.cardinalcommerce.com https://centinelapi.cardinalcommerce.com",
   "style-src 'self' 'unsafe-inline' https: https://fonts.googleapis.com",
   "font-src 'self' https: https://fonts.gstatic.com data:",
   "img-src 'self' https: data:",
@@ -615,22 +623,22 @@ app.get('/age-verification', pageLimiter, (req, res) => {
 
 
 
-// Meet & Greet Checkout pages
+// Meet & Greet Checkout pages (all use unified payment-checkout.html)
 app.get('/pnp/meet-greet/checkout/:bookingId', pageLimiter, (req, res) => {
-  res.redirect(302, '/meet-greet-checkout.html');
+  sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
 app.get('/pnp/meet-greet/daimo-checkout/:bookingId', pageLimiter, (req, res) => {
-  res.redirect(302, '/meet-greet-daimo-checkout.html');
+  sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
-// PNP Live Checkout pages
+// PNP Live Checkout pages (all use unified payment-checkout.html)
 app.get('/pnp/live/checkout/:bookingId', pageLimiter, (req, res) => {
-  res.redirect(302, '/pnp-live-checkout.html');
+  sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
 app.get('/pnp/live/daimo-checkout/:bookingId', pageLimiter, (req, res) => {
-  res.redirect(302, '/pnp-live-daimo-checkout.html');
+  sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
 // (Security middleware moved to top of middleware chain, before route registration)
@@ -2837,6 +2845,41 @@ app.use('/api/model', modelRoutes);
 app.use('/api/pds', pdsRoutes);
 app.use('/api/bluesky', blueskyRoutes);
 app.use('/api/element', elementRoutes);
+
+// ==========================================
+// ATProto / Bluesky OAuth Routes (PUBLIC — no session required)
+// These must be mounted at app root so the client_id URL and redirect_uri
+// match exactly what is served (e.g. https://pnptv.app/oauth/client-metadata.json)
+// ==========================================
+app.use('/', atprotoOAuthRoutes);
+
+// ==========================================
+// ATProto / Bluesky Profile & Social API Routes (session auth required)
+// ==========================================
+
+// GET  /api/atproto/profile       — fetch linked Bluesky profile (live from PDS)
+app.get('/api/atproto/profile', asyncHandler(atprotoController.getAtprotoProfile));
+
+// GET  /api/atproto/feed          — fetch user's Bluesky home timeline
+app.get('/api/atproto/feed', asyncHandler(atprotoController.getAtprotoFeed));
+
+// POST /api/atproto/like          — like a Bluesky post { uri, cid }
+app.post('/api/atproto/like', asyncHandler(atprotoController.likeBlueskyPost));
+
+// POST /api/atproto/repost        — repost a Bluesky post { uri, cid }
+app.post('/api/atproto/repost', asyncHandler(atprotoController.repostBlueskyPost));
+
+// POST /api/atproto/follow        — follow a Bluesky user { targetDid }
+app.post('/api/atproto/follow', asyncHandler(atprotoController.followBlueskyUser));
+
+// POST /api/webapp/auth/atproto/unlink — unlink Bluesky account (clears DID from user + revokes)
+app.post('/api/webapp/auth/atproto/unlink', asyncHandler(atprotoController.unlinkAtproto));
+
+// POST /api/webapp/social/posts/:postId/crosspost-bluesky — cross-post a PNPtv post to Bluesky
+app.post(
+  '/api/webapp/social/posts/:postId/crosspost-bluesky',
+  asyncHandler(atprotoController.crossPostToBluesky)
+);
 
 // ==========================================
 // N8N AUTOMATION ENDPOINTS
