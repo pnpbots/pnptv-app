@@ -31,6 +31,10 @@ import {
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
+function isValidPhotoUrl(photo: string | null | undefined): photo is string {
+  return !!photo && (photo.startsWith("/") || photo.startsWith("http"));
+}
+
 function timeAgo(dateStr: string): string {
   if (!dateStr) return "";
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -71,7 +75,7 @@ const MessageBubble = memo(function MessageBubble({
         className="flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent rounded-full"
         aria-label={`View ${msg.first_name || msg.username || "user"}'s profile`}
       >
-        {msg.photo_url ? (
+        {isValidPhotoUrl(msg.photo_url) ? (
           <img
             src={msg.photo_url}
             className="w-8 h-8 rounded-full object-cover"
@@ -88,7 +92,7 @@ const MessageBubble = memo(function MessageBubble({
           style={{
             background: isMe ? "rgba(230, 145, 56, 0.2)" : "rgba(212, 0, 122, 0.2)",
             color: isMe ? "#E69138" : "#D4007A",
-            display: msg.photo_url ? "none" : undefined,
+            display: isValidPhotoUrl(msg.photo_url) ? "none" : undefined,
           }}
         >
           {(msg.first_name || msg.username || "?")[0].toUpperCase()}

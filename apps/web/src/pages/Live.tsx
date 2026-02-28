@@ -15,6 +15,10 @@ import {
 
 const CALCOM_URL = import.meta.env.VITE_CALCOM_URL || "https://booking.pnptv.app";
 
+function isValidPhotoUrl(photo: string | null | undefined): photo is string {
+  return !!photo && (photo.startsWith("/") || photo.startsWith("http"));
+}
+
 export default function Live() {
   const { isAuthenticated, login } = useAuth();
 
@@ -207,17 +211,21 @@ export default function Live() {
                     : "bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/40"
                 }`}
               >
-                {p.photo ? (
+                {isValidPhotoUrl(p.photo) ? (
                   <img
                     src={p.photo}
                     alt=""
                     className="w-4 h-4 rounded-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                      const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
+                      if (fallback) fallback.style.display = "inline-flex";
+                    }}
                   />
-                ) : (
-                  <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
-                    {p.name.charAt(0)}
-                  </span>
-                )}
+                ) : null}
+                <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: isValidPhotoUrl(p.photo) ? "none" : undefined }}>
+                  {p.name.charAt(0)}
+                </span>
                 {p.name}
               </button>
             ))}
@@ -341,19 +349,23 @@ export default function Live() {
                 className={selectedPerformer?.id === p.id ? "border-pnp-accent" : ""}
               >
                 <div className="text-center">
-                  {p.photo ? (
+                  {isValidPhotoUrl(p.photo) ? (
                     <img
                       src={p.photo}
                       alt={p.name}
                       className="w-14 h-14 rounded-full object-cover mx-auto mb-2"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                        const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
+                        if (fallback) fallback.style.display = "flex";
+                      }}
                     />
-                  ) : (
-                    <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-2" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))" }}>
-                      <span className="text-lg text-gradient font-bold">
-                        {p.name.charAt(0)}
-                      </span>
-                    </div>
-                  )}
+                  ) : null}
+                  <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-2" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))", display: isValidPhotoUrl(p.photo) ? "none" : undefined }}>
+                    <span className="text-lg text-gradient font-bold">
+                      {p.name.charAt(0)}
+                    </span>
+                  </div>
                   <p className="text-sm font-medium text-pnp-textPrimary truncate">{p.name}</p>
                   {p.categories.length > 0 && (
                     <p className="text-[10px] text-pnp-textSecondary truncate mt-0.5">

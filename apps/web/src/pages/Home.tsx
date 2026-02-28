@@ -158,11 +158,24 @@ export default function Home() {
                 key={p.id}
                 className="glass-card-sm p-3 flex-shrink-0 w-28 text-center"
               >
+                {isValidPhotoUrl(p.image) ? (
+                  <img
+                    src={p.image}
+                    alt={p.name}
+                    className="w-14 h-14 rounded-full mx-auto mb-2 object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                      const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
+                      if (fallback) fallback.style.display = "flex";
+                    }}
+                  />
+                ) : null}
                 <div
                   className="w-14 h-14 rounded-full mx-auto mb-2 flex items-center justify-center text-lg font-bold"
                   style={{
                     background: "linear-gradient(135deg, #D4007A, #E69138)",
                     color: "#fff",
+                    display: isValidPhotoUrl(p.image) ? "none" : undefined,
                   }}
                 >
                   {p.name[0]}
@@ -180,7 +193,7 @@ export default function Home() {
       )}
 
       {/* Subscribe CTA */}
-      {tier?.toLowerCase() !== "prime" && (
+      {tier !== "PRIME" && (
         <button
           onClick={() => navigate("/subscribe")}
           className="btn-gradient w-full py-3 px-6 rounded-xl text-white font-semibold text-sm mb-6 font-display tracking-wider whitespace-nowrap"
