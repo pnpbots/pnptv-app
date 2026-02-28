@@ -92,7 +92,7 @@ const handleTelegramAuth = async (req, res) => {
 
     // Check if user exists in our database
     let userQuery = await query(
-      `SELECT id, telegram, username, email, subscription_status, terms_accepted,
+      `SELECT id, telegram, username, email, subscription_status, tier, terms_accepted,
               first_name, language, photo_file_id,
               COALESCE(age_verified, false) as age_verified,
               COALESCE(onboarding_complete, false) as onboarding_complete,
@@ -206,6 +206,7 @@ const handleTelegramAuth = async (req, res) => {
       email: user.email,
       photoUrl,
       subscriptionStatus: user.subscription_status,
+      tier: user.tier || 'free',
       acceptedTerms: user.terms_accepted,
       ageVerified: user.age_verified,
       onboardingComplete: user.onboarding_complete,
@@ -254,6 +255,7 @@ const handleTelegramAuth = async (req, res) => {
         age_verified: Boolean(user.age_verified),
         onboarding_complete: Boolean(user.onboarding_complete),
         subscription_type: user.subscription_status || 'free',
+        tier: user.tier || 'free',
         role,
         photo_url: photoUrl,
       },
@@ -338,6 +340,7 @@ const checkAuthStatus = (req, res) => {
         age_verified: Boolean(user.ageVerified || user.age_verified),
         onboarding_complete: Boolean(user.onboardingComplete),
         subscription_type: user.subscriptionStatus || user.subscription_status || 'free',
+        tier: user.tier || 'free',
         role: user.role || 'user',
         photo_url: user.photoUrl || null,
         // ATProto / Bluesky identity

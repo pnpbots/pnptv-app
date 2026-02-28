@@ -2685,6 +2685,27 @@ app.get('/api/proxy/hangouts/my-rooms', asyncHandler(async (req, res) => {
   }
 }));
 
+// --- Featured Performers (PostgreSQL-backed) ---
+const PerformerModel = require('../../models/performerModel');
+
+app.get('/api/performers/featured', asyncHandler(async (req, res) => {
+  const performers = await PerformerModel.getFeatured();
+  res.json({
+    success: true,
+    performers: performers.map(p => ({
+      id: p.id,
+      displayName: p.displayName,
+      bio: p.bio,
+      photoUrl: p.photoUrl,
+      isAvailable: p.isAvailable,
+      totalCalls: p.totalCalls,
+      averageRating: p.ratingCount > 0
+        ? parseFloat((p.totalRating / p.ratingCount).toFixed(2))
+        : 0,
+    })),
+  });
+}));
+
 // --- Live Tips Proxy (PNP Live tipping system) ---
 const PNPLiveTipsService = require('../services/pnpLiveTipsService');
 

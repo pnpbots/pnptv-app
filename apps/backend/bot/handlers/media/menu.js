@@ -883,35 +883,8 @@ Click the button below to connect!`;
   });
 
   /**
-   * /menu command - Main entry point
-   * Can be used in groups and private chats
-   * In private chats, uses the same menu as /start (from user/menu.js)
-   * In groups, uses the group-specific menu
+   * /menu command removed - use /start instead
    */
-  bot.command('menu', async (ctx) => {
-    logger.info('/menu command received', { chatType: ctx.chat?.type, userId: ctx.from?.id });
-    try {
-      const isGroup = ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup';
-
-      if (isGroup) {
-        // Use group menu
-        await showMainMenu(ctx);
-      } else {
-        // Use the same sales-focused menu as /start for private chats
-        await showUserMainMenu(ctx);
-      }
-    } catch (error) {
-      logger.error('Error in /menu command:', error);
-      const lang = getLanguage(ctx);
-      await ctx.reply(
-        lang === 'es' ? '❌ Error al mostrar el menú. Por favor intenta de nuevo.' : '❌ Error displaying menu. Please try again.',
-        Markup.inlineKeyboard([
-          [Markup.button.callback(lang === 'es' ? '🔄 Reintentar' : '🔄 Retry', 'menu_main')],
-        ])
-      );
-    }
-  });
-  logger.info('DEBUG: /menu command handler registered successfully');
 };
 
 registerMenuHandlers.buildGroupMenuPayload = buildGroupMenuPayload;

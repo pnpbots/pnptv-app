@@ -791,7 +791,7 @@ const showProfile = async (ctx, targetUserId, edit = true, isOwnProfile = false)
     if (locationStr) cardLines.push(`📍 ${locationStr}`);
 
     // Subscription
-    if ((targetUser.tier || '').toLowerCase() === 'prime') {
+    if (targetUser.tier === 'PRIME') {
       cardLines.push(`💎 PRIME`);
     }
 

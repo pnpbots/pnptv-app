@@ -6,10 +6,27 @@ const performanceMonitor = require('../utils/performanceMonitor');
 const TABLE = 'users';
 
 /**
- * Check if user has prime tier access
- * tier = 'prime' means paid membership, 'free' means no paid membership
+ * Canonical tier values — single source of truth
  */
-const isPrimeTier = (tier) => String(tier || '').toLowerCase() === 'prime';
+const TIER = Object.freeze({
+  FREE: 'free',
+  MEMBER: 'member',
+  PRIME: 'PRIME',
+  BANNED: 'banned',
+});
+
+/** Tier hierarchy for access checks */
+const TIER_LEVEL = Object.freeze({
+  [TIER.BANNED]: -1,
+  [TIER.FREE]: 0,
+  [TIER.MEMBER]: 1,
+  [TIER.PRIME]: 2,
+});
+
+const isPrimeTier = (tier) => tier === TIER.PRIME;
+const isBannedTier = (tier) => tier === TIER.BANNED;
+const hasMinimumTier = (userTier, requiredTier) =>
+  (TIER_LEVEL[userTier] ?? -1) >= (TIER_LEVEL[requiredTier] ?? 0);
 
 /**
  * User Model - Handles all user data operations with PostgreSQL
@@ -55,7 +72,6 @@ class UserModel {
       },
       isPremium: isPrimeTier(row.tier),
       role: row.role,
-      status: row.status,
       assignedBy: row.assigned_by,
       roleAssignedAt: row.role_assigned_at,
       privacy: typeof row.privacy === 'string' ? JSON.parse(row.privacy) : (row.privacy || { showLocation: true, showInterests: true, showBio: true, allowMessages: true, showOnline: true }),
@@ -135,25 +151,24 @@ class UserModel {
         INSERT INTO ${TABLE} (
           id, username, first_name, last_name, email, bio, photo_file_id,
           interests, location_lat, location_lng, location_name, location_geohash,
-          subscription_status, plan_id, plan_expiry, tier, role, status, privacy,
+          subscription_status, plan_id, plan_expiry, tier, role, privacy,
           profile_views, favorites, blocked, badges, onboarding_complete,
           age_verified, terms_accepted, privacy_accepted, language, is_active,
           x_id, telegram, created_at, updated_at
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-          $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, NOW(), NOW()
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+          $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, NOW(), NOW()
         )
       ON CONFLICT (id) DO UPDATE SET
         username = COALESCE(EXCLUDED.username, ${TABLE}.username),
         first_name = COALESCE(EXCLUDED.first_name, ${TABLE}.first_name),
         last_name = COALESCE(EXCLUDED.last_name, ${TABLE}.last_name),
-        status = COALESCE(EXCLUDED.status, ${TABLE}.status),
         x_id = COALESCE(EXCLUDED.x_id, ${TABLE}.x_id),
         telegram = COALESCE(EXCLUDED.telegram, ${TABLE}.telegram),
-        onboarding_complete = CASE WHEN $32 THEN EXCLUDED.onboarding_complete ELSE ${TABLE}.onboarding_complete END,
-        age_verified = CASE WHEN $33 THEN EXCLUDED.age_verified ELSE ${TABLE}.age_verified END,
-        terms_accepted = CASE WHEN $34 THEN EXCLUDED.terms_accepted ELSE ${TABLE}.terms_accepted END,
-        privacy_accepted = CASE WHEN $35 THEN EXCLUDED.privacy_accepted ELSE ${TABLE}.privacy_accepted END,
+        onboarding_complete = CASE WHEN $31 THEN EXCLUDED.onboarding_complete ELSE ${TABLE}.onboarding_complete END,
+        age_verified = CASE WHEN $32 THEN EXCLUDED.age_verified ELSE ${TABLE}.age_verified END,
+        terms_accepted = CASE WHEN $33 THEN EXCLUDED.terms_accepted ELSE ${TABLE}.terms_accepted END,
+        privacy_accepted = CASE WHEN $34 THEN EXCLUDED.privacy_accepted ELSE ${TABLE}.privacy_accepted END,
         language = COALESCE(EXCLUDED.language, ${TABLE}.language),
         updated_at = NOW()
       RETURNING *
@@ -178,9 +193,8 @@ class UserModel {
         userData.subscriptionStatus || 'free',
         userData.planId || null,
         userData.planExpiry || null,
-        userData.tier || 'free',
+        userData.tier || TIER.FREE,
         userData.role || 'user',
-        userData.status || 'offline',
         JSON.stringify(privacy),
         userData.profileViews || 0,
         userData.favorites || [],
@@ -459,16 +473,20 @@ class UserModel {
    */
   static async updateSubscription(userId, subscription) {
     try {
+      // Protect banned users — subscription changes must not override a ban
+      const existing = await this.getById(userId);
+      if (existing && existing.tier === TIER.BANNED) {
+        logger.warn('Skipping subscription update for banned user', { userId });
+        return false;
+      }
+
       const status = (subscription.status || '').toLowerCase();
 
       // Determine tier based on status
-      // prime/active = prime tier (membership active)
-      // churned/expired/free/empty = free tier (membership not active)
       const isActive = status === 'active' || status === 'prime';
-      const tier = isActive ? 'prime' : 'free';
+      const tier = isActive ? TIER.PRIME : TIER.FREE;
 
-      // Normalize status: churned/expired should remain as 'churned' for tracking,
-      // but tier will be 'Free' for access control
+      // Normalize status for lifecycle tracking
       const normalizedStatus = isActive
         ? 'active'
         : (status === 'churned' || status === 'expired' ? 'churned' : 'free');
@@ -1244,3 +1262,8 @@ class UserModel {
 }
 
 module.exports = UserModel;
+module.exports.TIER = TIER;
+module.exports.TIER_LEVEL = TIER_LEVEL;
+module.exports.isPrimeTier = isPrimeTier;
+module.exports.isBannedTier = isBannedTier;
+module.exports.hasMinimumTier = hasMinimumTier;

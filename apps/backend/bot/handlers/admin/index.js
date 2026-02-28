@@ -5273,8 +5273,11 @@ let registerAdminHandlers = (bot) => {
         return;
       }
 
-      // Ban user globally
+      // Ban user globally (moderation table + tier column)
       await ModerationModel.banUser(userId, 'global', 'Banned by admin', ctx.from.id);
+      const { query: banQuery } = require('../../../config/postgres');
+      await banQuery('UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2', ['banned', userId]);
+      await require('../../../config/redis').cache.del(`user:${userId}`);
 
       // Log the action
       await ModerationModel.addLog({
@@ -5325,8 +5328,11 @@ let registerAdminHandlers = (bot) => {
         return;
       }
 
-      // Unban user globally
+      // Unban user globally (moderation table + tier column)
       await ModerationModel.unbanUser(userId, 'global');
+      const { query: unbanQuery } = require('../../../config/postgres');
+      await unbanQuery('UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2', ['free', userId]);
+      await require('../../../config/redis').cache.del(`user:${userId}`);
 
       // Log the action
       await ModerationModel.addLog({

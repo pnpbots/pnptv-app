@@ -77,7 +77,7 @@ const checkTermsAccepted = (req, res, next) => {
 };
 
 const requirePrime = (req, res, next) => {
-  if (req.user?.tier === 'prime') {
+  if (req.user?.tier === 'PRIME') {
     return next();
   }
 

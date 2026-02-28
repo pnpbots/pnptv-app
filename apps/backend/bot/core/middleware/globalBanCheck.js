@@ -1,9 +1,11 @@
 const ModerationModel = require('../../../models/moderationModel');
+const UserModel = require('../../../models/userModel');
 const logger = require('../../../utils/logger');
 
 /**
  * Global ban check middleware
  * Blocks banned users from using the bot entirely
+ * Checks both the banned_users table AND the users.tier='banned' column
  * @returns {Function} Middleware function
  */
 const globalBanCheck = () => async (ctx, next) => {
@@ -15,8 +17,12 @@ const globalBanCheck = () => async (ctx, next) => {
       return next();
     }
 
-    // Check if user is globally banned
-    const isBanned = await ModerationModel.isUserBanned(userId, 'global');
+    // Check tier-based ban first (fast, single row lookup from cache)
+    const user = await UserModel.getById(userId);
+    const tierBanned = user && user.tier === 'banned';
+
+    // Also check the banned_users table (legacy/moderation bans)
+    const isBanned = tierBanned || await ModerationModel.isUserBanned(userId, 'global');
 
     if (isBanned) {
       logger.info('Blocked banned user from using bot', { userId });

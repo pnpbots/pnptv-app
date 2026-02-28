@@ -28,19 +28,11 @@ class UserService {
       let user = await UserModel.getById(userId);
       if (!user) {
         logger.info('User not found, creating new user', { userId });
-        // Ensure onboardingComplete is false for new users
         user = await UserModel.createOrUpdate({
           id: userId,
           ...userData,
           onboardingComplete: false,
-          status: 'online', // Default status for new users
         });
-      } else {
-        // Optionally update existing user's basic info if needed, e.g., username change
-        // For simplicity, we'll only update status if it's not already online or active
-        if (user.status === 'offline') {
-          user = await UserModel.createOrUpdate({ id: userId, status: 'online' });
-        }
       }
       return user;
     } catch (error) {
@@ -111,7 +103,7 @@ class UserService {
       }
       
       const user = await UserModel.getById(userId);
-      return user && (user.tier || '').toLowerCase() === 'prime';
+      return user && user.tier === 'PRIME';
     } catch (error) {
       logger.error('Error checking premium status:', error);
       return false;

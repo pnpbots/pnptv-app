@@ -1013,6 +1013,24 @@ export function clearSupportHistory(): Promise<{ success: boolean }> {
   return request("/api/webapp/support/history", { method: "DELETE" });
 }
 
+// Featured Performers (PostgreSQL-backed)
+export interface FeaturedPerformer {
+  id: string;
+  displayName: string;
+  bio: string | null;
+  photoUrl: string | null;
+  isAvailable: boolean;
+  totalCalls: number;
+  averageRating: number;
+}
+
+export function getFeaturedPerformers(): Promise<{
+  success: boolean;
+  performers: FeaturedPerformer[];
+}> {
+  return request("/api/performers/featured");
+}
+
 // Health check
 export function healthCheck(): Promise<{ status: string }> {
   return request("/health");

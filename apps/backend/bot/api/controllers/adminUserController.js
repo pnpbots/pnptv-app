@@ -74,9 +74,9 @@ class AdminUserController {
         logger.info('Admin updated user subscription', { adminId, userId, subscriptionStatus });
       }
 
-      // Update tier (Prime/Free)
+      // Update tier (PRIME/free)
       if (isPrime !== undefined || tier !== undefined) {
-        const newTier = isPrime ? 'Prime' : 'Free';
+        const newTier = isPrime ? 'PRIME' : 'free';
         await query(
           'UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2',
           [newTier, userId.toString()]
@@ -114,12 +114,12 @@ class AdminUserController {
         return res.status(404).json({ success: false, error: 'User not found' });
       }
 
-      // Update ban status
-      const banStatus = ban === true ? 'banned' : ban === false ? 'active' : null;
-      if (banStatus) {
+      // Update ban via tier column
+      const newTier = ban === true ? 'banned' : ban === false ? 'free' : null;
+      if (newTier) {
         await query(
-          'UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2',
-          [banStatus, userId.toString()]
+          'UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2',
+          [newTier, userId.toString()]
         );
         await require('../../../config/redis').cache.del(`user:${userId}`);
 
@@ -220,7 +220,7 @@ class AdminUserController {
 
       const searchTerm = `%${searchQuery}%`;
       const result = await query(
-        `SELECT id, username, first_name, last_name, email, tier, subscription_status, status, created_at
+        `SELECT id, username, first_name, last_name, email, tier, subscription_status, created_at
          FROM users
          WHERE username ILIKE $1 OR email ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1
          LIMIT 20`,

@@ -15,6 +15,7 @@ const fs = require('fs').promises;
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const sharp = require('sharp');
+const FileType = require('file-type');
 const logger = require('../../utils/logger');
 
 const execFileAsync = promisify(execFile);
@@ -85,9 +86,10 @@ async function processImage(buffer, userId) {
   const origWidth = meta.width || 0;
   const origHeight = meta.height || 0;
 
-  // Process main image
+  // Process main image — strip ALL metadata including EXIF/GPS for privacy
   const mainSharp = sharp(buffer)
-    .rotate() // auto-orient from EXIF
+    .rotate() // auto-orient from EXIF before stripping
+    .withMetadata(false) // STRIP ALL METADATA (EXIF, GPS, ICC profiles)
     .resize(IMAGE_MAX_DIMENSION, IMAGE_MAX_DIMENSION, {
       fit: 'inside',
       withoutEnlargement: true,
@@ -96,9 +98,10 @@ async function processImage(buffer, userId) {
 
   const mainInfo = await mainSharp.toFile(mainPath);
 
-  // Process thumbnail
+  // Process thumbnail — also strip metadata
   await sharp(buffer)
     .rotate()
+    .withMetadata(false)
     .resize(IMAGE_THUMB_DIMENSION, IMAGE_THUMB_DIMENSION, {
       fit: 'inside',
       withoutEnlargement: true,
@@ -182,6 +185,16 @@ async function processVideo(buffer, userId, mimetype) {
  * }>}
  * @throws {Error} with a human-readable `.userMessage` property on validation failure
  */
+// Magic byte → media type mapping for server-side file validation
+const MAGIC_TO_MEDIA_TYPE = {
+  'image/jpeg': 'image',
+  'image/png':  'image',
+  'image/webp': 'image',
+  'image/gif':  'image',
+  'video/mp4':  'video',
+  'video/webm': 'video',
+};
+
 async function processChatMedia(file, userId) {
   if (!file || !file.buffer || !file.mimetype) {
     const err = new Error('No file uploaded');
@@ -190,12 +203,32 @@ async function processChatMedia(file, userId) {
     throw err;
   }
 
-  const mediaType = resolveMediaType(file.mimetype);
+  // --- MAGIC BYTE VALIDATION ---
+  // Never trust client-supplied Content-Type; inspect actual file bytes
+  const detected = await FileType.fromBuffer(file.buffer);
+  const detectedMime = detected?.mime;
+  const mediaType = MAGIC_TO_MEDIA_TYPE[detectedMime];
+
   if (!mediaType) {
-    const err = new Error(`Disallowed mime type: ${file.mimetype}`);
+    logger.warn('chatMediaService: rejected file — magic bytes do not match allowed types', {
+      userId,
+      claimedMime: file.mimetype,
+      detectedMime: detectedMime || 'unknown',
+    });
+    const err = new Error(`File content rejected: detected ${detectedMime || 'unknown'}`);
     err.userMessage = 'Only images (jpg, png, webp, gif) and videos (mp4, webm) are allowed.';
     err.statusCode = 400;
     throw err;
+  }
+
+  // Log mismatches between claimed and detected MIME for monitoring
+  const claimedType = resolveMediaType(file.mimetype);
+  if (claimedType !== mediaType) {
+    logger.warn('chatMediaService: MIME type mismatch — using detected type', {
+      userId,
+      claimedMime: file.mimetype,
+      detectedMime,
+    });
   }
 
   try {
@@ -203,17 +236,17 @@ async function processChatMedia(file, userId) {
       const { mediaUrl, thumbUrl, width, height } = await processImage(file.buffer, userId);
       return {
         mediaType: 'image',
-        mediaMime: file.mimetype.toLowerCase(),
+        mediaMime: detectedMime,
         mediaUrl,
         thumbUrl,
         width,
         height,
       };
     } else {
-      const { mediaUrl, thumbUrl } = await processVideo(file.buffer, userId, file.mimetype.toLowerCase());
+      const { mediaUrl, thumbUrl } = await processVideo(file.buffer, userId, detectedMime);
       return {
         mediaType: 'video',
-        mediaMime: file.mimetype.toLowerCase(),
+        mediaMime: detectedMime,
         mediaUrl,
         thumbUrl,
         width: null,

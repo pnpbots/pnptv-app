@@ -198,7 +198,7 @@ async function handleBotJoin(ctx, member) {
  */
 async function sendWelcomeMessage(ctx, username, user, lang) {
   try {
-    const subscriptionStatus = (user.tier || '').toLowerCase() === 'prime' ? 'PRIME Member' : 'Free Member';
+    const subscriptionStatus = user.tier === 'PRIME' ? 'PRIME Member' : 'Free Member';
 
     const message = lang === 'es'
       ? `👋 Ey ${username}, bienvenidx a PNPtv!

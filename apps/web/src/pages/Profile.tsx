@@ -1071,7 +1071,7 @@ export default function Profile() {
   const photoUrl = resolvePhotoUrl(profile.photoUrl);
   const displayName = profile.firstName + (profile.lastName ? ` ${profile.lastName}` : "");
   const initial = displayName[0]?.toUpperCase() || "U";
-  const isPrime = profile.tier?.toLowerCase() === "prime";
+  const isPrime = profile.tier === "PRIME";
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">

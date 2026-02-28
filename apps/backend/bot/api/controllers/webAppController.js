@@ -1206,6 +1206,7 @@ const authStatus = (req, res) => {
       lastName: user.lastName,
       photoUrl: user.photoUrl,
       subscriptionStatus: user.subscriptionStatus,
+      tier: user.tier || 'free',
       acceptedTerms: user.acceptedTerms,
       language: user.language,
       role: user.role || 'user',
@@ -1237,7 +1238,7 @@ const getProfile = async (req, res) => {
   try {
     const result = await query(
       `SELECT id, pnptv_id, telegram, username, first_name, last_name, bio, photo_file_id,
-              email, subscription_status, plan_id, plan_expiry,
+              email, subscription_status, tier, plan_id, plan_expiry,
               language, interests, location_name, twitter,
               instagram, tiktok, youtube,
               terms_accepted, created_at
@@ -1260,6 +1261,7 @@ const getProfile = async (req, res) => {
         bio: p.bio,
         photoUrl: p.photo_file_id,
         subscriptionStatus: p.subscription_status,
+        tier: p.tier || 'free',
         subscriptionPlan: p.plan_id,
         subscriptionExpires: p.plan_expiry,
         language: p.language,

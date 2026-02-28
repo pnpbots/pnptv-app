@@ -96,7 +96,7 @@ class MembershipCleanupService {
       // Get all active Prime users from the database
       const primeUsers = await query(`
         SELECT id, username FROM users
-        WHERE subscription_status = 'active' AND tier = 'prime'
+        WHERE subscription_status = 'active' AND tier = 'PRIME'
       `);
 
       logger.info(`Found ${primeUsers.rows.length} active Prime users to check for PRIME channel access`);
@@ -345,11 +345,11 @@ Type /subscribe to view membership plans and reactivate your access!`;
       const activateResult = await query(`
         UPDATE users
         SET subscription_status = 'active',
-            tier = 'prime',
+            tier = 'PRIME',
             updated_at = NOW()
         WHERE plan_expiry IS NOT NULL
           AND plan_expiry > NOW()
-          AND (subscription_status != 'active' OR tier != 'prime')
+          AND (subscription_status != 'active' OR tier != 'PRIME')
         RETURNING id, username
       `);
       results.toActive += activateResult.rowCount;
@@ -361,10 +361,10 @@ Type /subscribe to view membership plans and reactivate your access!`;
       const lifetimeResult = await query(`
         UPDATE users
         SET subscription_status = 'active',
-            tier = 'prime',
+            tier = 'PRIME',
             updated_at = NOW()
         WHERE (plan_id ILIKE '%lifetime%' OR plan_id ILIKE '%life-time%')
-          AND (subscription_status != 'active' OR tier != 'prime')
+          AND (subscription_status != 'active' OR tier != 'PRIME')
         RETURNING id, username
       `);
       results.toActive += lifetimeResult.rowCount;

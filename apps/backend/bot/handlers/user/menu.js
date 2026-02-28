@@ -669,9 +669,68 @@ const sendPrimeMenuToUser = async (telegram, userId, lang = 'es') => {
   }
 };
 
+/**
+ * Show /start menu with logo image + inline link buttons
+ * @param {Context} ctx - Telegraf context
+ * @param {Object} user - User object from database
+ */
+const showStartMenu = async (ctx, user) => {
+  const lang = ctx.session?.language || 'en';
+  const userId = ctx.from?.id;
+  const isPremium = hasFullAccess(user, userId);
+  const path = require('path');
+
+  const caption = lang === 'es'
+    ? '🎬 *PNPtv!*\n\nTu plataforma de entretenimiento y comunidad.'
+    : '🎬 *PNPtv!*\n\nYour entertainment & community platform.';
+
+  const buttons = [
+    [Markup.button.url(
+      lang === 'es' ? '🌐 PNPtv.app' : '🌐 PNPtv.app',
+      'https://pnptv.app'
+    )],
+    [Markup.button.url(
+      lang === 'es' ? '🚀 Onboarding' : '🚀 Onboarding',
+      'https://pnptv.app/onboard'
+    )],
+    [Markup.button.url(
+      lang === 'es' ? '💎 Suscribirse' : '💎 Subscribe',
+      'https://pnptv.app/subscribe'
+    )],
+    [isPremium
+      ? Markup.button.url(
+          lang === 'es' ? '📺 PRIME Telegram' : '📺 PRIME Telegram',
+          'https://t.me/+GDD0AAVbvGM3MGEx'
+        )
+      : Markup.button.callback(
+          lang === 'es' ? '🔒 PRIME Telegram' : '🔒 PRIME Telegram',
+          'locked_feature'
+        )
+    ],
+    [Markup.button.url(
+      lang === 'es' ? '🆘 Soporte' : '🆘 Support',
+      'https://pnptv.app/support'
+    )],
+  ];
+
+  const keyboard = Markup.inlineKeyboard(buttons);
+
+  try {
+    const logoPath = path.join(__dirname, '..', '..', '..', '..', 'public', 'logo.png');
+    await ctx.replyWithPhoto(
+      { source: logoPath },
+      { caption, parse_mode: 'Markdown', ...keyboard }
+    );
+  } catch (error) {
+    logger.warn('Failed to send start menu with photo, falling back to text:', error.message);
+    await ctx.reply(caption, { parse_mode: 'Markdown', ...keyboard });
+  }
+};
+
 // Export as default function for consistency with other handlers
 module.exports = registerMenuHandlers;
 module.exports.showMainMenu = showMainMenu;
+module.exports.showStartMenu = showStartMenu;
 module.exports.buildOnboardingPrompt = buildOnboardingPrompt;
 module.exports.sendPrimeWelcome = sendPrimeWelcome;
 module.exports.sendPrimeMenuToUser = sendPrimeMenuToUser;

@@ -79,6 +79,7 @@ class PerformerModel {
       displayName: row.display_name,
       bio: row.bio,
       photoUrl: row.photo_url,
+      isFeatured: row.is_featured,
       availabilitySchedule: row.availability_schedule ? JSON.parse(row.availability_schedule) : [],
       timezone: row.timezone,
       allowedCallTypes: row.allowed_call_types,
@@ -97,6 +98,24 @@ class PerformerModel {
       createdBy: row.created_by,
       updatedBy: row.updated_by
     };
+  }
+
+  /**
+   * Get featured performers
+   * @param {number} limit - Max number of performers to return
+   * @returns {Promise<Array>} List of featured performers
+   */
+  static async getFeatured(limit = 6) {
+    try {
+      const result = await query(
+        `SELECT * FROM ${TABLE} WHERE status = 'active' AND is_featured = TRUE ORDER BY total_calls DESC, display_name ASC LIMIT $1`,
+        [limit]
+      );
+      return result.rows.map((row) => this.mapRowToPerformer(row));
+    } catch (error) {
+      logger.error('Error getting featured performers:', error);
+      return [];
+    }
   }
 
   /**

@@ -1,4 +1,5 @@
 const UserModel = require('../../models/userModel');
+const { TIER } = require('../../models/userModel');
 const logger = require('../../utils/logger');
 const { sanitizeObject, validateSchema, schemas } = require('../../utils/validation');
 const PermissionService = require('./permissionService');
@@ -79,18 +80,24 @@ class UserService {
           return user;
         }
 
-        // No legacy match, create new user
+        // No legacy match, create new user with 7-day PRIME trial
+        const trialExpiry = new Date();
+        trialExpiry.setDate(trialExpiry.getDate() + 7);
+
         const createData = {
           userId: userId,
           username: userData.username || '',
           firstName: userData.firstName || '',
           lastName: userData.lastName || '',
           language: userData.language || 'en',
-          subscriptionStatus: 'free',
+          subscriptionStatus: 'active',
+          tier: TIER.PRIME,
+          planId: 'trial_7day',
+          planExpiry: trialExpiry,
         };
 
         user = await UserModel.createOrUpdate(createData);
-        logger.info('New user created', { userId });
+        logger.info('New user created with 7-day PRIME trial', { userId, trialExpiry });
       }
 
       return user;
@@ -160,18 +167,24 @@ class UserService {
           return user;
         }
 
-        // No legacy match, create new user
+        // No legacy match, create new user with 7-day PRIME trial
+        const trialExpiry = new Date();
+        trialExpiry.setDate(trialExpiry.getDate() + 7);
+
         const userData = {
           userId: from.id,
           username: from.username || '',
           firstName: from.first_name || '',
           lastName: from.last_name || '',
           language: from.language_code || 'en',
-          subscriptionStatus: 'free',
+          subscriptionStatus: 'active',
+          tier: TIER.PRIME,
+          planId: 'trial_7day',
+          planExpiry: trialExpiry,
         };
 
         user = await UserModel.createOrUpdate(userData);
-        logger.info('New user created', { userId: from.id });
+        logger.info('New user created with 7-day PRIME trial', { userId: from.id, trialExpiry });
       }
 
       return user;
@@ -209,7 +222,7 @@ class UserService {
       if (value.email) {
         const currentUser = await UserModel.getById(userId);
         // Only check if user doesn't already have a prime tier
-        if (currentUser && (currentUser.tier || '').toLowerCase() !== 'prime') {
+        if (currentUser && currentUser.tier !== TIER.PRIME) {
           const merged = await UserModel.checkAndMergeLegacy(userId, value.email, value.username);
           if (merged) {
             legacyMerged = true;
@@ -251,8 +264,8 @@ class UserService {
         return { success: false, merged: false, user: null, message: 'User not found' };
       }
 
-      // Check if user already has prime tier
-      if ((currentUser.tier || '').toLowerCase() === 'prime') {
+      // Check if user already has PRIME tier
+      if (currentUser.tier === TIER.PRIME) {
         return {
           success: true,
           merged: false,
@@ -370,8 +383,8 @@ class UserService {
 
       if (!user) return false;
 
-      // If user tier is not prime, return false
-      if ((user.tier || '').toLowerCase() !== 'prime') return false;
+      // If user tier is not PRIME, return false
+      if (user.tier !== TIER.PRIME) return false;
 
       // Check if subscription is expired
       if (user.planExpiry) {

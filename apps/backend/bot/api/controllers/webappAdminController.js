@@ -41,7 +41,7 @@ const listUsers = async (req, res) => {
     const offset = (page - 1) * limit;
 
     let countQuery = 'SELECT COUNT(*) as count FROM users WHERE is_active = true';
-    let dataQuery = `SELECT id, username, email, role, status, subscription_status, created_at
+    let dataQuery = `SELECT id, username, email, role, tier, subscription_status, created_at
                      FROM users WHERE is_active = true`;
     const params = [];
 
@@ -85,7 +85,7 @@ const getUser = async (req, res) => {
   try {
     const { id: userId } = req.params;
     const result = await query(
-      `SELECT id, username, email, first_name, last_name, bio, role, status,
+      `SELECT id, username, email, first_name, last_name, bio, role, tier,
               subscription_status, subscription_plan, plan_expiry, created_at,
               last_payment_date, phone_number FROM users WHERE id = $1`,
       [userId]
@@ -173,8 +173,8 @@ const banUser = async (req, res) => {
     const { id: userId } = req.params;
     const { ban, reason = '' } = req.body;
 
-    const newStatus = ban ? 'banned' : 'active';
-    await query('UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2', [newStatus, userId]);
+    const newTier = ban ? 'banned' : 'free';
+    await query('UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2', [newTier, userId]);
 
     logger.info(`Admin ${ban ? 'banned' : 'unbanned'} user`, {
       adminId: user.id,
@@ -182,7 +182,7 @@ const banUser = async (req, res) => {
       reason,
     });
 
-    const result = await query('SELECT id, username, email, status FROM users WHERE id = $1', [userId]);
+    const result = await query('SELECT id, username, email, tier FROM users WHERE id = $1', [userId]);
 
     return res.json({ success: true, user: result.rows[0], action: ban ? 'banned' : 'unbanned' });
   } catch (error) {

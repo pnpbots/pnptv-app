@@ -340,20 +340,6 @@ const startBot = async () => {
       return next();
     });
 
-    // FIX: Register /menu command early to avoid middleware conflicts
-    const { showMainMenu: showPrivateMenu } = require('../handlers/user/menu');
-    bot.command('menu', async (ctx) => {
-      logger.info('/menu command handler reached', { userId: ctx.from?.id, chatType: ctx.chat?.type });
-      try {
-        logger.info('Calling showPrivateMenu...');
-        const result = await showPrivateMenu(ctx);
-        logger.info('showPrivateMenu completed', { result });
-      } catch (error) {
-        logger.error('Error in /menu handler:', error.message, error.stack);
-        await ctx.reply('Error loading menu. Please try again.');
-      }
-    });
-
     // FIX: Register /admin command early using admin handler directly  
     bot.command('admin', async (ctx) => {
       logger.info('[ADMIN-EARLY] /admin command received');
@@ -777,7 +763,6 @@ const startBot = async () => {
     try {
       const commands = [
         { command: 'start', description: 'Start the bot and select your language' },
-        { command: 'menu', description: 'Show main menu with all features' },
         { command: 'admin', description: 'Open admin panel (admin only)' },
         { command: 'stats', description: 'View real-time statistics (admin only)' },
         { command: 'viewas', description: 'Preview as different user type (admin only)' },

@@ -10,13 +10,39 @@ const authGuard = (req, res) => {
   return user;
 };
 
+// Allowed community chat rooms — prevent arbitrary room creation/access
+const ALLOWED_COMMUNITY_ROOMS = new Set(['general', 'prime']);
+
+/**
+ * Validate room access: community rooms via allowlist, hangout rooms via membership check.
+ * @returns {string|null} validated room name or null if unauthorized
+ */
+const validateRoomAccess = async (roomParam, userId) => {
+  const room = String(roomParam || 'general');
+
+  // Hangout rooms require group membership
+  const hangoutMatch = room.match(/^hangout:(\d+)$/);
+  if (hangoutMatch) {
+    const groupId = parseInt(hangoutMatch[1], 10);
+    const { rows } = await query(
+      'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+      [groupId, userId]
+    );
+    return rows.length > 0 ? room : null;
+  }
+
+  // Community rooms via allowlist
+  return ALLOWED_COMMUNITY_ROOMS.has(room) ? room : null;
+};
+
 // ── Get chat history (REST fallback) ─────────────────────────────────────────
 // Returns the 50 most recent messages for a room, optionally paginated via
 // cursor (ISO timestamp). Media columns are included so clients can render
 // photo/video attachments without a separate fetch.
 const getChatHistory = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const room = req.params.room || 'general';
+  const room = await validateRoomAccess(req.params.room, user.id);
+  if (!room) return res.status(403).json({ error: 'Access denied to this room' });
   const { cursor } = req.query;
   try {
     const { rows } = await query(
@@ -39,7 +65,8 @@ const getChatHistory = async (req, res) => {
 // ── Send a text message via REST (fallback when Socket.IO is unavailable) ────
 const sendMessage = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const room = req.params.room || 'general';
+  const room = await validateRoomAccess(req.params.room, user.id);
+  if (!room) return res.status(403).json({ error: 'Access denied to this room' });
   const { content } = req.body;
   if (!content?.trim()) return res.status(400).json({ error: 'Content required' });
   try {
@@ -76,7 +103,8 @@ const sendMessage = async (req, res) => {
 // Additional validation (mime type, processing) happens inside chatMediaService.
 const sendMediaMessage = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const room = req.params.room || 'general';
+  const room = await validateRoomAccess(req.params.room, user.id);
+  if (!room) return res.status(403).json({ error: 'Access denied to this room' });
   const caption = (req.body?.content || '').trim().slice(0, 500);
 
   try {

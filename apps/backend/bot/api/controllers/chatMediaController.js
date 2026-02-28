@@ -174,6 +174,18 @@ const sendDmMediaMessage = async (req, res) => {
       return res.status(404).json({ error: 'Recipient not found' });
     }
 
+    // Check if sender is blocked by recipient or vice versa
+    const { rows: blockRows } = await query(
+      `SELECT 1 FROM blocked_users
+       WHERE (blocker_id = $1 AND blocked_id = $2)
+          OR (blocker_id = $2 AND blocked_id = $1)
+       LIMIT 1`,
+      [recipientId, user.id]
+    );
+    if (blockRows.length > 0) {
+      return res.status(403).json({ error: 'Cannot send message to this user' });
+    }
+
     const mediaResult = await processChatMedia(req.file, user.id);
     const caption = (req.body?.content || '').trim().slice(0, 500) || null;
 

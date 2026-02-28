@@ -44,7 +44,7 @@ const fetchUserRecord = async (userId) => {
 
 const isPrimeUserRecord = (user) => {
   if (!user) return false;
-  return (user.tier || '').toLowerCase() === 'prime';
+  return user.tier === 'PRIME';
 };
 
 const isAdminRecord = (user) => {

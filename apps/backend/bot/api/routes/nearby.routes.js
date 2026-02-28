@@ -38,8 +38,8 @@ router.use(authenticateUser);
 
 // Tier gate — only prime users can access Nearby
 const requirePrimeTier = (req, res, next) => {
-  const tier = (req.user?.tier || 'free').toLowerCase();
-  if (tier !== 'prime') {
+  const tier = req.user?.tier || 'free';
+  if (tier !== 'PRIME') {
     return res.status(403).json({
       error: 'Prime subscription required',
       code: 'PRIME_REQUIRED'

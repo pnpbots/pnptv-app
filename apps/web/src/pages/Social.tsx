@@ -10,8 +10,10 @@ import {
   getReplies,
   createReply,
   checkAuthStatus,
+  getFeaturedPerformers,
   type SocialPostItem,
   type AuthMethods,
+  type FeaturedPerformer,
 } from "@/lib/api";
 
 function timeAgo(dateStr: string): string {
@@ -344,6 +346,15 @@ export default function Social() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
+  // Featured performers
+  const [featuredPerformers, setFeaturedPerformers] = useState<FeaturedPerformer[]>([]);
+
+  useEffect(() => {
+    getFeaturedPerformers()
+      .then((res) => { if (res.success) setFeaturedPerformers(res.performers); })
+      .catch(() => { /* non-critical */ });
+  }, []);
+
   // Bluesky linked state — checked once when component mounts
   const [blueskyLinked, setBlueskyLinked] = useState(false);
 
@@ -487,6 +498,50 @@ export default function Social() {
           Community
         </span>
       </div>
+
+      {/* Featured Performers */}
+      {featuredPerformers.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold text-white mb-3">Featured</h2>
+          <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide">
+            {featuredPerformers.map((p) => (
+              <div
+                key={p.id}
+                className="glass-card-sm p-3 flex-shrink-0 w-28 text-center"
+              >
+                {isValidPhotoUrl(p.photoUrl) ? (
+                  <img
+                    src={p.photoUrl}
+                    alt={p.displayName}
+                    className="w-14 h-14 rounded-full mx-auto mb-2 object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                      const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
+                      if (fallback) fallback.style.display = "flex";
+                    }}
+                  />
+                ) : null}
+                <div
+                  className="w-14 h-14 rounded-full mx-auto mb-2 flex items-center justify-center text-lg font-bold"
+                  style={{
+                    background: "linear-gradient(135deg, #D4007A, #E69138)",
+                    color: "#fff",
+                    display: isValidPhotoUrl(p.photoUrl) ? "none" : undefined,
+                  }}
+                >
+                  {p.displayName[0]}
+                </div>
+                <p className="text-xs font-medium text-white truncate">{p.displayName}</p>
+                <span
+                  className="inline-block w-2 h-2 rounded-full mt-1"
+                  style={{ background: p.isAvailable ? "#30D158" : "#8E8E93" }}
+                  title={p.isAvailable ? "Available" : "Unavailable"}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Post Composer */}
       {isAuthenticated && (

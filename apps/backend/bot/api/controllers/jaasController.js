@@ -9,13 +9,20 @@ const logger = require('../../../utils/logger');
  */
 const generateToken = async (req, res) => {
   try {
-    const { roomName, userId, displayName, email } = req.body;
+    const { roomName, displayName, email } = req.body;
+
+    // SECURITY: Always use the authenticated session identity — never trust req.body.userId
+    const sessionUser = req.session?.user || req.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const userId = String(sessionUser.id);
 
     // Validate required fields
-    if (!roomName || !userId || !displayName) {
+    if (!roomName || !displayName) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: roomName, userId, displayName'
+        error: 'Missing required fields: roomName, displayName'
       });
     }
 
@@ -29,7 +36,7 @@ const generateToken = async (req, res) => {
     }
 
     // Verify user has active subscription
-    const hasAccess = await UserService.hasActiveSubscription(parseInt(userId));
+    const hasAccess = await UserService.hasActiveSubscription(userId);
     if (!hasAccess) {
       logger.warn('Unauthorized video room access attempt', { userId });
       return res.status(403).json({
@@ -75,13 +82,20 @@ const generateToken = async (req, res) => {
  */
 const generateModeratorToken = async (req, res) => {
   try {
-    const { roomName, userId, displayName, email } = req.body;
+    const { roomName, displayName, email } = req.body;
+
+    // SECURITY: Always use the authenticated session identity — never trust req.body.userId
+    const sessionUser = req.session?.user || req.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const userId = String(sessionUser.id);
 
     // Validate required fields
-    if (!roomName || !userId || !displayName) {
+    if (!roomName || !displayName) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: roomName, userId, displayName'
+        error: 'Missing required fields: roomName, displayName'
       });
     }
 
@@ -95,7 +109,7 @@ const generateModeratorToken = async (req, res) => {
     }
 
     // Check if user is admin or has special privileges
-    const user = await UserService.getById(parseInt(userId));
+    const user = await UserService.getById(userId);
     if (!user || (user.role !== 'admin' && user.role !== 'superadmin')) {
       logger.warn('Unauthorized moderator token request', { userId });
       return res.status(403).json({

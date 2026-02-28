@@ -41,14 +41,39 @@ const normalizeSubscriptionStatus = (status) => {
 };
 
 /**
- * Check if user has PRIME/active membership
- * Unified logic: active = PRIME access, everything else is inactive.
- * @param {Object} user - User object with subscriptionStatus
- * @returns {boolean} True if user has active PRIME membership
+ * Check if user has PRIME membership
+ * @param {Object} user - User object
+ * @returns {boolean} True if user has PRIME tier
  */
 const isPrimeUser = (user) => {
   if (!user) return false;
-  return (user.tier || user.subscription?.tier || '').toLowerCase() === 'prime';
+  return user.tier === 'PRIME';
+};
+
+/**
+ * Check if user is banned
+ * @param {Object} user - User object
+ * @returns {boolean} True if user has banned tier
+ */
+const isBannedUser = (user) => {
+  if (!user) return false;
+  return user.tier === 'banned';
+};
+
+/**
+ * Tier hierarchy for access control
+ */
+const TIER_HIERARCHY = { free: 0, member: 1, PRIME: 2 };
+
+/**
+ * Check if user's tier meets the minimum required tier
+ * @param {Object} user - User object
+ * @param {string} requiredTier - Minimum tier needed ('free', 'member', 'PRIME')
+ * @returns {boolean} True if user tier >= required tier
+ */
+const hasTierAccess = (user, requiredTier) => {
+  if (!user || user.tier === 'banned') return false;
+  return (TIER_HIERARCHY[user.tier] ?? -1) >= (TIER_HIERARCHY[requiredTier] ?? 0);
 };
 
 /**
@@ -284,6 +309,8 @@ module.exports = {
   getLanguage,
   normalizeSubscriptionStatus,
   isPrimeUser,
+  isBannedUser,
+  hasTierAccess,
   isAdminUser,
   hasFullAccess,
   safeHandler,

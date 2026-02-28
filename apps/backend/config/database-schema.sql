@@ -42,13 +42,12 @@ CREATE TABLE IF NOT EXISTS users (
   location_sharing_enabled BOOLEAN DEFAULT TRUE,
 
   -- Subscription & Membership
-  -- status: account state ('active'/'inactive'/'banned') — set by onboarding completion
-  -- tier: access level ('free'/'prime') — determines feature gates
+  -- tier: unified access level + ban state ('free'/'member'/'PRIME'/'banned')
   -- subscription_status: lifecycle segment ('free'/'active'/'churned') — used for comms targeting
   subscription_status VARCHAR(50) DEFAULT 'free',
   plan_id VARCHAR(100),
   plan_expiry TIMESTAMP,
-  tier VARCHAR(50) DEFAULT 'free',
+  tier VARCHAR(50) DEFAULT 'free' CHECK (tier IN ('free', 'member', 'PRIME', 'banned')),
 
   -- Role & Permissions
   role VARCHAR(255) DEFAULT 'user',

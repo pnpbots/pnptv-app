@@ -5,7 +5,7 @@ const { t } = require('../../../utils/i18n');
 const { isValidEmail } = require('../../../utils/validation');
 const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
-const { showMainMenu } = require('./menu');
+const { showMainMenu, showStartMenu } = require('./menu');
 const { showEditProfileOverview } = require('./profile');
 const paymentHandlers = require('../payments');
 const { showNearbyMenu } = require('./nearbyUnified');
@@ -301,9 +301,8 @@ const registerOnboardingHandlers = (bot) => {
       }
 
       if (user.onboardingComplete) {
-        // User already onboarded, show main menu (same as /menu command)
-        // This ensures consistent experience across /start, /menu, and after onboarding
-        await showMainMenu(ctx);
+        // User already onboarded, show start menu with logo + inline links
+        await showStartMenu(ctx, user);
         return;
       }
 

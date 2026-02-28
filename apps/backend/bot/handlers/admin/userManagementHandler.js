@@ -18,7 +18,7 @@ Username: @${user.username || 'N/A'}
 Email: ${user.email || 'N/A'}
 Tier: ${user.tier || 'Free'}
 Estado: ${user.subscriptionStatus || user.subscription_status || 'free'}
-Baneado: ${user.status === 'banned' ? 'Sí ⛔' : 'No ✅'}
+Baneado: ${user.tier === 'banned' ? 'Sí ⛔' : 'No ✅'}
   `.trim();
 
   const buttons = [
@@ -27,7 +27,7 @@ Baneado: ${user.status === 'banned' ? 'Sí ⛔' : 'No ✅'}
     [Markup.button.callback('💎 Cambiar Tier', `manage_user_${user.id}_tier`)],
     [Markup.button.callback('📊 Suscripción', `manage_user_${user.id}_subscription`)],
     [
-      user.status === 'banned'
+      user.tier === 'banned'
         ? Markup.button.callback('✅ Desbanear', `manage_user_${user.id}_unban`)
         : Markup.button.callback('⛔ Banear', `manage_user_${user.id}_ban`),
     ],
@@ -340,7 +340,7 @@ Username: @${user.username || 'N/A'}
 Email: ${user.email || 'N/A'}
 Tier: ${user.tier || 'Free'}
 Estado: ${user.subscriptionStatus || user.subscription_status || 'free'}
-Baneado: ${user.status === 'banned' ? 'Sí ⛔' : 'No ✅'}
+Baneado: ${user.tier === 'banned' ? 'Sí ⛔' : 'No ✅'}
         `.trim();
 
         const buttons = [
@@ -349,7 +349,7 @@ Baneado: ${user.status === 'banned' ? 'Sí ⛔' : 'No ✅'}
           [Markup.button.callback('💎 Cambiar Tier', `manage_user_${user.id}_tier`)],
           [Markup.button.callback('📊 Suscripción', `manage_user_${user.id}_subscription`)],
           [
-            user.status === 'banned'
+            user.tier === 'banned'
               ? Markup.button.callback('✅ Desbanear', `manage_user_${user.id}_unban`)
               : Markup.button.callback('⛔ Banear', `manage_user_${user.id}_ban`),
           ],
@@ -412,7 +412,7 @@ Baneado: ${user.status === 'banned' ? 'Sí ⛔' : 'No ✅'}
       const isAdmin = await PermissionService.isAdmin(adminId);
       if (!isAdmin) return;
 
-      const newTier = tier === 'prime' ? 'prime' : 'free';
+      const newTier = tier === 'prime' ? 'PRIME' : 'free';
       await query('UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2', [newTier, userId]);
       await require('../../../config/redis').cache.del(`user:${userId}`);
 
@@ -467,8 +467,8 @@ Baneado: ${user.status === 'banned' ? 'Sí ⛔' : 'No ✅'}
       const isAdmin = await PermissionService.isAdmin(adminId);
       if (!isAdmin) return;
 
-      const status = isBanning ? 'banned' : 'active';
-      await query('UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2', [status, userId]);
+      const newTier = isBanning ? 'banned' : 'free';
+      await query('UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2', [newTier, userId]);
       await require('../../../config/redis').cache.del(`user:${userId}`);
 
       const action = isBanning ? 'banned' : 'unbanned';

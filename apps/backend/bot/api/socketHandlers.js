@@ -11,7 +11,7 @@ const { processChatMedia } = require('../services/chatMediaService');
 async function getUserFromSocket(socket) {
   try {
     const cookieHeader = socket.handshake.headers.cookie || '';
-    const match = cookieHeader.match(/connect\.sid=([^;]+)/);
+    const match = cookieHeader.match(/(?:^|;\s*)__pnptv_sid=([^;]+)/);
     if (!match) return null;
     const raw = decodeURIComponent(match[1]);
     const sid = raw.startsWith('s:') ? raw.slice(2).split('.')[0] : raw.split('.')[0];
@@ -41,11 +41,11 @@ function rateLimit(key, maxCount, windowMs) {
 // ── Message SELECT columns helper ─────────────────────────────────────────────
 
 // All the columns we return for every chat message — text or media.
-// Keep in sync with the migration 072_chat_media_attachments.sql columns.
+// Keep in sync with migrations 072_chat_media_attachments.sql + 076_hangout_video_calls.sql.
 const MSG_RETURNING_COLS = `
   id, room, user_id, username, first_name, photo_url, content,
   media_url, media_type, media_mime, media_thumb_url,
-  media_width, media_height, created_at
+  media_width, media_height, media_metadata, created_at
 `;
 
 // ── Socket.IO initialisation ──────────────────────────────────────────────────
@@ -68,7 +68,33 @@ function initSocketIO(io) {
 
     // ── Group Chat ───────────────────────────────────────────────────────────
 
+    // Allowed community chat rooms (non-hangout)
+    const ALLOWED_COMMUNITY_ROOMS = new Set(['general', 'prime']);
+
     socket.on('chat:join', async ({ room = 'general' } = {}) => {
+      // Authorization: hangout rooms require membership
+      const hangoutMatch = String(room).match(/^hangout:(\d+)$/);
+      if (hangoutMatch) {
+        const groupId = parseInt(hangoutMatch[1], 10);
+        try {
+          const { rows: memberRows } = await query(
+            'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+            [groupId, user.id]
+          );
+          if (memberRows.length === 0) {
+            socket.emit('chat:error', { message: 'Not a member of this group' });
+            return;
+          }
+        } catch (err) {
+          logger.error('chat:join membership check error', err);
+          socket.emit('chat:error', { message: 'Failed to verify membership' });
+          return;
+        }
+      } else if (!ALLOWED_COMMUNITY_ROOMS.has(room)) {
+        socket.emit('chat:error', { message: 'Invalid room' });
+        return;
+      }
+
       socket.join(`chat:${room}`);
       try {
         const { rows } = await query(
@@ -173,6 +199,110 @@ function initSocketIO(io) {
         logger.error('chat:media error', err);
         const userMsg = err.userMessage || 'Failed to process media. Please try again.';
         socket.emit('chat:error', { message: userMsg });
+      }
+    });
+
+    // ── Hangout Group Rooms ─────────────────────────────────────────────────
+    // Clients join hangout rooms to receive chat messages AND call events.
+
+    socket.on('hangout:join', async ({ groupId } = {}) => {
+      if (!groupId) return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+
+      try {
+        // Verify membership before joining the Socket.IO room
+        const { rows } = await query(
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+          [gid, user.id]
+        );
+        if (rows.length === 0) {
+          socket.emit('hangout:error', { message: 'Not a member of this group' });
+          return;
+        }
+
+        const room = `hangout:${gid}`;
+        socket.join(room);
+
+        // Send recent message history
+        const { rows: history } = await query(
+          `SELECT ${MSG_RETURNING_COLS}
+           FROM chat_messages
+           WHERE room = $1 AND is_deleted = false
+           ORDER BY created_at DESC LIMIT 50`,
+          [room]
+        );
+        socket.emit('hangout:history', history.reverse());
+
+        // Send active call info if any
+        const { rows: activeCall } = await query(
+          `SELECT hvc.id, hvc.room_name, hvc.creator_id, hvc.created_at,
+                  (SELECT COUNT(*)::int
+                   FROM hangout_call_participants hcp
+                   WHERE hcp.call_id = hvc.id AND hcp.left_at IS NULL) AS participant_count
+           FROM hangout_video_calls hvc
+           WHERE hvc.group_id = $1 AND hvc.status = 'active'
+           LIMIT 1`,
+          [gid]
+        );
+        if (activeCall.length > 0) {
+          socket.emit('hangout:call:active', {
+            callId: activeCall[0].id,
+            roomName: activeCall[0].room_name,
+            creatorId: activeCall[0].creator_id,
+            createdAt: activeCall[0].created_at,
+            participantCount: activeCall[0].participant_count,
+          });
+        }
+      } catch (err) {
+        logger.error('hangout:join error', err);
+      }
+    });
+
+    socket.on('hangout:leave', ({ groupId } = {}) => {
+      if (!groupId) return;
+      socket.leave(`hangout:${groupId}`);
+    });
+
+    // Hangout text message via Socket.IO (alternative to REST POST)
+    socket.on('hangout:message', async ({ groupId, content } = {}) => {
+      if (!groupId || !content || !content.trim()) return;
+      if (content.length > 2000) return;
+
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+
+      if (!rateLimit(`hangout:${user.id}`, 30, 60000)) {
+        socket.emit('hangout:error', { message: 'Too many messages. Slow down.' });
+        return;
+      }
+
+      try {
+        // Verify membership
+        const { rows: memberRows } = await query(
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+          [gid, user.id]
+        );
+        if (memberRows.length === 0) {
+          socket.emit('hangout:error', { message: 'Not a member of this group' });
+          return;
+        }
+
+        const room = `hangout:${gid}`;
+        const firstName = user.firstName || user.first_name || null;
+        const photoUrl = user.photoUrl || user.photo_url || null;
+
+        const { rows } = await query(
+          `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING ${MSG_RETURNING_COLS}`,
+          [room, user.id, user.username || null, firstName, photoUrl, content.trim()]
+        );
+
+        io.to(room).emit('chat:message', rows[0]);
+      } catch (err) {
+        logger.error('hangout:message error', err);
+        socket.emit('hangout:error', { message: 'Failed to send message' });
       }
     });
 
