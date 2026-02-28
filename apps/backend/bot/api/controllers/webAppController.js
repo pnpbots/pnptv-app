@@ -1251,7 +1251,7 @@ const getProfile = async (req, res) => {
               u.email, u.subscription_status, u.tier, u.plan_id, u.plan_expiry,
               u.language, u.interests, u.location_name, u.twitter,
               u.instagram, u.tiktok, u.youtube,
-              u.terms_accepted, u.wof_photo_consent, u.created_at,
+              u.terms_accepted, u.wof_photo_consent, u.content_disclaimer, u.created_at,
               u.creator_status, u.creator_type, u.creator_price_usd,
               u.creator_verified, u.creator_featured, u.creator_subscriber_count,
               perf.id as perf_id, perf.is_available as perf_is_available,
@@ -1302,6 +1302,7 @@ const getProfile = async (req, res) => {
         youtubeHandle: p.youtube,
         memberSince: p.created_at,
         wofPhotoConsent: p.wof_photo_consent || false,
+        contentDisclaimer: p.content_disclaimer || false,
         creatorStatus: p.creator_status || 'none',
         creatorType: p.creator_type || null,
         creatorPriceUsd: p.creator_price_usd ? parseFloat(p.creator_price_usd) : null,
@@ -1416,12 +1417,13 @@ const updateProfile = async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
 
   try {
-    const allowed = ['firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle', 'wofPhotoConsent'];
+    const allowed = ['firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle', 'wofPhotoConsent', 'contentDisclaimer'];
     const colMap  = {
       firstName: 'first_name', lastName: 'last_name', bio: 'bio',
       locationText: 'location_name', interests: 'interests',
       xHandle: 'twitter', instagramHandle: 'instagram', tiktokHandle: 'tiktok', youtubeHandle: 'youtube',
       wofPhotoConsent: 'wof_photo_consent',
+      contentDisclaimer: 'content_disclaimer',
     };
 
     const sets = [];

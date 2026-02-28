@@ -126,6 +126,7 @@ class UserModel {
       billingFailures: row.billing_failures || 0,
       lastBillingAttempt: row.last_billing_attempt || null,
       wofPhotoConsent: row.wof_photo_consent || false,
+      contentDisclaimer: row.content_disclaimer || false,
     };
   }
 
@@ -399,6 +400,7 @@ class UserModel {
         lastActive: 'last_active',
         language: 'language',
         wofPhotoConsent: 'wof_photo_consent',
+        contentDisclaimer: 'content_disclaimer',
       };
 
       for (const [key, col] of Object.entries(fieldMap)) {

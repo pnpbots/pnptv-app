@@ -1492,6 +1492,8 @@ export default function Profile() {
   const [activeTab, setActiveTab] = useState<"posts" | "likes">("posts");
   const [wofConsent, setWofConsent] = useState(false);
   const [wofConsentSaving, setWofConsentSaving] = useState(false);
+  const [contentDisclaimer, setContentDisclaimer] = useState(false);
+  const [contentDisclaimerSaving, setContentDisclaimerSaving] = useState(false);
 
   // Follow state
   const [isFollowing, setIsFollowing] = useState(false);
@@ -1535,6 +1537,7 @@ export default function Profile() {
         if (!cursor) {
           setProfile(profileRes.profile);
           setWofConsent(profileRes.profile.wofPhotoConsent ?? false);
+          setContentDisclaimer(profileRes.profile.contentDisclaimer ?? false);
           setPosts(postsRes.posts);
           // Load own follow counts
           getFollowStatus(targetUserId).then((s) => {
@@ -1612,6 +1615,19 @@ export default function Profile() {
       // Revert on failure
     } finally {
       setWofConsentSaving(false);
+    }
+  };
+
+  const handleContentDisclaimerToggle = async () => {
+    const newValue = !contentDisclaimer;
+    setContentDisclaimerSaving(true);
+    try {
+      await updateProfile({ contentDisclaimer: newValue });
+      setContentDisclaimer(newValue);
+    } catch {
+      // Revert on failure
+    } finally {
+      setContentDisclaimerSaving(false);
     }
   };
 
@@ -2085,6 +2101,31 @@ export default function Profile() {
               <span
                 className="inline-block h-4 w-4 rounded-full bg-white shadow transition-transform duration-200"
                 style={{ transform: wofConsent ? "translateX(22px)" : "translateX(3px)" }}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg px-3 py-3 mt-3" style={{ background: "rgba(212,0,122,0.06)", border: "1px solid rgba(212,0,122,0.15)" }}>
+            <div className="flex-1 min-w-0 mr-3">
+              <p className="text-sm font-medium text-white">Content Disclaimer</p>
+              <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                I confirm that all items, substances, or materials depicted in my videos are props, simulated, or used solely for entertainment purposes
+              </p>
+            </div>
+            <button
+              role="switch"
+              aria-checked={contentDisclaimer}
+              aria-label="Content disclaimer acknowledgment"
+              onClick={handleContentDisclaimerToggle}
+              disabled={contentDisclaimerSaving}
+              className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+              style={{
+                background: contentDisclaimer ? "#D4007A" : "rgba(255,255,255,0.15)",
+              }}
+            >
+              <span
+                className="inline-block h-4 w-4 rounded-full bg-white shadow transition-transform duration-200"
+                style={{ transform: contentDisclaimer ? "translateX(22px)" : "translateX(3px)" }}
               />
             </button>
           </div>

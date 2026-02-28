@@ -426,6 +426,7 @@ export function updateProfile(
     tiktokHandle: string;
     youtubeHandle: string;
     wofPhotoConsent: boolean;
+    contentDisclaimer: boolean;
   }>
 ): Promise<{ success: boolean }> {
   return request("/api/webapp/profile", { method: "PUT", body: fields });
