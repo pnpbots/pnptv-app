@@ -277,16 +277,43 @@ export function searchNearby(
   );
 }
 
-// Live tips proxy
-export interface Performer {
+export interface NearbyPlace {
   id: number;
   name: string;
-  slug: string;
-  bio: string;
-  photo: string | null;
-  categories: string[];
+  description?: string;
+  address?: string;
+  city?: string;
+  placeType?: string;
+  categoryName?: string;
+  categoryEmoji?: string;
+  categorySlug?: string;
+  location: { lat: number; lng: number };
+  distance: number;
+  website?: string;
+  phone?: string;
+  instagram?: string;
+  telegramUsername?: string;
+  photoUrl?: string;
 }
 
+export interface NearbyPlacesResponse {
+  success: boolean;
+  total: number;
+  radius_km: number;
+  places: NearbyPlace[];
+}
+
+export function searchNearbyPlaces(
+  latitude: number,
+  longitude: number,
+  radius = 10
+): Promise<NearbyPlacesResponse> {
+  return request(
+    `/api/webapp/nearby/places?latitude=${latitude}&longitude=${longitude}&radius=${radius}`
+  );
+}
+
+// Live tips
 export interface RecentTip {
   id: number;
   amount: number;
@@ -298,15 +325,8 @@ export interface RecentTip {
 
 export const TIP_AMOUNTS = [5, 10, 20, 50, 100] as const;
 
-export function getPerformers(): Promise<{
-  success: boolean;
-  performers: Performer[];
-}> {
-  return request("/api/proxy/live/performers");
-}
-
 export function sendTip(
-  performerId: number,
+  performerId: string,
   amount: number,
   message?: string
 ): Promise<{ success: boolean; tipId: number; paymentUrl: string | null; amount: number }> {
@@ -606,6 +626,7 @@ export interface HangoutGroup {
   hasActiveCall: boolean;
   activeCallId: string | null;
   lastMessage: string | null;
+  unreadCount?: number;
 }
 
 export interface GroupMessage {
@@ -714,6 +735,25 @@ export function startGroupCall(
   id: number
 ): Promise<{ success: boolean; jitsiUrl: string; callId: string; isNew: boolean }> {
   return request(`/api/webapp/hangouts/groups/${id}/call`, { method: "POST" });
+}
+
+export function markGroupAsRead(groupId: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/read`, { method: "POST" });
+}
+
+export function getActiveGroupCall(
+  groupId: number
+): Promise<{ success: boolean; call: { id: string; participantCount: number } | null }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/calls/active`);
+}
+
+export function leaveGroupCall(
+  groupId: number,
+  callId: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/calls/${callId}/leave`, {
+    method: "POST",
+  });
 }
 
 // ============================================================================
@@ -1141,14 +1181,16 @@ export function clearSupportHistory(): Promise<{ success: boolean }> {
   return request("/api/webapp/support/history", { method: "DELETE" });
 }
 
-// Featured Performers (PostgreSQL-backed)
+// Performers (PostgreSQL-backed)
 export interface FeaturedPerformer {
   id: string;
   userId: string | null;
   displayName: string;
   bio: string | null;
   photoUrl: string | null;
+  isFeatured: boolean;
   isAvailable: boolean;
+  basePrice: number;
   totalCalls: number;
   averageRating: number;
 }
@@ -1158,6 +1200,13 @@ export function getFeaturedPerformers(): Promise<{
   performers: FeaturedPerformer[];
 }> {
   return request("/api/performers/featured");
+}
+
+export function getAllPerformers(): Promise<{
+  success: boolean;
+  performers: FeaturedPerformer[];
+}> {
+  return request("/api/performers");
 }
 
 // ============================================================================

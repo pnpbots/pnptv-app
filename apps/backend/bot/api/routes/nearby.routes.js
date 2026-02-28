@@ -59,6 +59,11 @@ router.get('/search', (req, res) => {
   NearbyController.searchNearby(req, res);
 });
 
+// Search nearby places / businesses / sites
+router.get('/places', (req, res) => {
+  NearbyController.searchNearbyPlaces(req, res);
+});
+
 // Get statistics
 router.get('/stats', (req, res) => {
   NearbyController.getStats(req, res);

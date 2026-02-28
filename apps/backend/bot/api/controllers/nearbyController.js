@@ -5,11 +5,13 @@
  * Endpoints:
  * - POST /api/nearby/update-location - Update user location
  * - GET /api/nearby/search - Search nearby users
+ * - GET /api/nearby/places - Search nearby places/businesses
  * - GET /api/nearby/stats - Get geolocation stats
  * - POST /api/nearby/clear - Clear user location
  */
 
 const nearbyService = require('../../../services/nearbyService');
+const NearbyPlaceModel = require('../../../models/nearbyPlaceModel');
 const { validateToken } = require('../middleware/auth');
 const logger = require('../../../utils/logger');
 
@@ -138,6 +140,55 @@ class NearbyController {
       logger.error('❌ Search nearby error:', error);
       return res.status(500).json({
         error: 'Failed to search nearby users',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * GET /api/nearby/places
+   * Search for nearby places / businesses / sites
+   */
+  static async searchNearbyPlaces(req, res) {
+    try {
+      const userId = req.userId || req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+
+      const { latitude, longitude, radius = 10 } = req.query;
+
+      if (!latitude || !longitude) {
+        return res.status(400).json({
+          error: 'Missing required parameters: latitude, longitude'
+        });
+      }
+
+      const lat = parseFloat(latitude);
+      const lng = parseFloat(longitude);
+      const rad = parseFloat(radius);
+
+      if (isNaN(lat) || isNaN(lng) || isNaN(rad)) {
+        return res.status(400).json({
+          error: 'Invalid parameter values: latitude, longitude, radius must be numbers'
+        });
+      }
+
+      const places = await NearbyPlaceModel.getNearby(
+        { lat, lng },
+        Math.min(rad, 50)
+      );
+
+      return res.status(200).json({
+        success: true,
+        total: places.length,
+        radius_km: rad,
+        places,
+      });
+    } catch (error) {
+      logger.error('❌ Search nearby places error:', error);
+      return res.status(500).json({
+        error: 'Failed to search nearby places',
         message: error.message
       });
     }

@@ -3,7 +3,9 @@ import { Card, Badge, Button } from "@pnptv/ui-kit";
 import {
   updateNearbyLocation,
   searchNearby,
+  searchNearbyPlaces,
   type NearbyUser,
+  type NearbyPlace,
 } from "@/lib/api";
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from "react-leaflet";
 import L from "leaflet";
@@ -35,6 +37,21 @@ function createMyIcon() {
   });
 }
 
+function createPlaceIcon() {
+  return L.divIcon({
+    className: "",
+    iconSize: [30, 30],
+    iconAnchor: [15, 30],
+    popupAnchor: [0, -30],
+    html: `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="#34C85A" stroke="#1C1C1E" stroke-width="1.5">
+      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+      <rect x="9" y="8" width="6" height="5" rx="0.5" fill="#1C1C1E" stroke="none"/>
+      <line x1="11" y1="13" x2="11" y2="8" stroke="#34C85A" stroke-width="1"/>
+      <line x1="13" y1="13" x2="13" y2="8" stroke="#34C85A" stroke-width="1"/>
+    </svg>`,
+  });
+}
+
 // Component that moves map to new center when position changes
 function MapRecenter({ lat, lng }: { lat: number; lng: number }) {
   const map = useMap();
@@ -50,6 +67,7 @@ export default function Booking() {
   const [pageState, setPageState] = useState<PageState>("loading");
   const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null);
   const [nearbyUsers, setNearbyUsers] = useState<NearbyUser[]>([]);
+  const [nearbyPlaces, setNearbyPlaces] = useState<NearbyPlace[]>([]);
   const [radius, setRadius] = useState(5);
   const [incognito, setIncognito] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -58,14 +76,23 @@ export default function Booking() {
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const userIconRef = useRef(createUserIcon());
   const myIconRef = useRef(createMyIcon());
+  const placeIconRef = useRef(createPlaceIcon());
 
-  // Fetch nearby users
+  // Fetch nearby users and places
   const fetchNearby = useCallback(
     async (lat: number, lng: number, rad: number) => {
       try {
         setIsSearching(true);
-        const data = await searchNearby(lat, lng, rad, 50);
-        setNearbyUsers(data.users || []);
+        const [usersData, placesData] = await Promise.allSettled([
+          searchNearby(lat, lng, rad, 50),
+          searchNearbyPlaces(lat, lng, rad),
+        ]);
+        if (usersData.status === "fulfilled") {
+          setNearbyUsers(usersData.value.users || []);
+        }
+        if (placesData.status === "fulfilled") {
+          setNearbyPlaces(placesData.value.places || []);
+        }
         setError(null);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Search failed";
@@ -271,6 +298,49 @@ export default function Booking() {
                 </Popup>
               </Marker>
             ))}
+
+            {/* Nearby places / businesses / sites */}
+            {nearbyPlaces.map((p) => (
+              <Marker
+                key={`place-${p.id}`}
+                position={[p.location.lat, p.location.lng]}
+                icon={placeIconRef.current}
+              >
+                <Popup className="nearby-popup">
+                  <div className="p-1 min-w-[160px]">
+                    <p className="font-medium text-sm" style={{ color: "#34C85A" }}>
+                      {p.categoryEmoji ? `${p.categoryEmoji} ` : ""}{p.name}
+                    </p>
+                    {p.categoryName && (
+                      <p className="text-xs mt-0.5" style={{ color: "#ffffffaa" }}>
+                        {p.categoryName}
+                      </p>
+                    )}
+                    <p className="text-xs mt-0.5" style={{ color: "#ffffff80" }}>
+                      {p.distance < 1
+                        ? `${Math.round(p.distance * 1000)}m away`
+                        : `${p.distance.toFixed(1)}km away`}
+                    </p>
+                    {p.address && (
+                      <p className="text-xs mt-1" style={{ color: "#ffffff60" }}>
+                        {p.address}{p.city ? `, ${p.city}` : ""}
+                      </p>
+                    )}
+                    {p.website && (
+                      <a
+                        href={p.website}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs mt-1 block"
+                        style={{ color: "#34C85A" }}
+                      >
+                        Visit website
+                      </a>
+                    )}
+                  </div>
+                </Popup>
+              </Marker>
+            ))}
           </MapContainer>
         </div>
       )}
@@ -288,6 +358,11 @@ export default function Booking() {
             <Badge variant="accent">
               {nearbyUsers.length} {nearbyUsers.length === 1 ? "user" : "users"}
             </Badge>
+            {nearbyPlaces.length > 0 && (
+              <Badge variant="default">
+                {nearbyPlaces.length} {nearbyPlaces.length === 1 ? "place" : "places"}
+              </Badge>
+            )}
           </div>
         </div>
       </div>
