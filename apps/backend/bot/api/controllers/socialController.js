@@ -74,7 +74,7 @@ const getWofFeed = async (req, res) => {
 
 const createPost = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, replyToId, repostOfId, isExclusive } = req.body;
+  const { content, replyToId, repostOfId, isExclusive, isShareable } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ error: 'Content required' });
   if (content.length > 5000) return res.status(400).json({ error: 'Post too long (max 5000 chars)' });
 
@@ -87,7 +87,8 @@ const createPost = async (req, res) => {
   }
 
   try {
-    const post = await SocialPostService.createPost(user.id, content.trim(), null, null, replyToId, repostOfId, false, !!isExclusive);
+    const shareable = isShareable !== false;
+    const post = await SocialPostService.createPost(user.id, content.trim(), null, null, replyToId, repostOfId, false, !!isExclusive, shareable);
 
     if (!replyToId && !repostOfId) {
       SocialPostService.mirrorToMastodon(content.trim(), post.id);
@@ -207,7 +208,7 @@ const postToMastodon = async (req, res) => {
 
 const createPostWithMedia = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, replyToId, repostOfId, isExclusive } = req.body;
+  const { content, replyToId, repostOfId, isExclusive, isShareable } = req.body;
 
   if (!content || !content.toString().trim()) return res.status(400).json({ error: 'Content required' });
   if (content.toString().length > 5000) return res.status(400).json({ error: 'Post too long (max 5000 chars)' });
@@ -253,8 +254,9 @@ const createPostWithMedia = async (req, res) => {
     }
 
     const exclusive = isExclusive === 'true' || isExclusive === true;
+    const shareable = isShareable !== 'false' && isShareable !== false;
     const post = await SocialPostService.createPost(
-      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive
+      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable
     );
 
     if (!replyToId && !repostOfId) {

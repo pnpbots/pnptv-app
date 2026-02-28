@@ -92,9 +92,20 @@ class CreatorService {
     return { checked: rows.length, promoted };
   }
 
-  // ── Activate (Occasional) ──────────────────────────────────────────────────
+  // ── Tier Config ──────────────────────────────────────────────────────────────
 
-  static async activateCreator(userId) {
+  static TIERS = {
+    ice:     { price: 5.00,  label: 'Ice Profile' },
+    crystal: { price: 10.00, label: 'Crystal Profile' },
+    diamond: { price: 15.00, label: 'Diamond Profile' },
+  };
+
+  // ── Activate (Tiered) ─────────────────────────────────────────────────────
+
+  static async activateCreator(userId, tier = 'ice', termsAccepted = false) {
+    if (!this.TIERS[tier]) throw new Error('Invalid tier. Choose ice, crystal, or diamond.');
+    if (!termsAccepted) throw new Error('You must accept the Creator Terms & Conditions to activate.');
+
     const userRes = await query('SELECT creator_status FROM users WHERE id = $1', [userId]);
     const user = userRes.rows[0];
     if (!user) throw new Error('User not found');
@@ -102,17 +113,22 @@ class CreatorService {
       throw new Error('User is not eligible to activate as a creator');
     }
 
+    const { price } = this.TIERS[tier];
+
     await query(
       `UPDATE users SET
          creator_status = 'active',
-         creator_type = 'occasional',
-         creator_price_usd = 15.00,
-         creator_enabled_at = NOW()
+         creator_type = $2,
+         creator_price_usd = $3,
+         creator_enabled_at = NOW(),
+         creator_terms_accepted_at = NOW(),
+         creator_strikes = 0,
+         role = CASE WHEN role = 'user' THEN 'model' ELSE role END
        WHERE id = $1`,
-      [userId]
+      [userId, tier, price]
     );
 
-    return { success: true, type: 'occasional', price: 15.00 };
+    return { success: true, type: tier, price };
   }
 
   // ── Full-Time Application ──────────────────────────────────────────────────
@@ -145,7 +161,8 @@ class CreatorService {
          creator_price_usd = $2,
          creator_verified = true,
          creator_featured = true,
-         creator_enabled_at = NOW()
+         creator_enabled_at = NOW(),
+         role = CASE WHEN role IN ('user', 'model') THEN 'model' ELSE role END
        WHERE id = $1`,
       [app.user_id, priceUsd]
     );

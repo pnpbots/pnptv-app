@@ -363,6 +363,8 @@ export interface SocialPostItem {
   author_creator_type?: string;
   author_creator_verified?: boolean;
   author_creator_price?: number;
+  // Sharing control
+  is_shareable?: boolean;
   // Bluesky cross-post fields
   bluesky_uri?: string | null;
   bluesky_cid?: string | null;
@@ -484,7 +486,8 @@ export function createSocialPost(
   content: string,
   mediaFile?: File,
   crossPostBluesky?: boolean,
-  isExclusive?: boolean
+  isExclusive?: boolean,
+  isShareable?: boolean
 ): Promise<{ success: boolean; post: SocialPostItem }> {
   if (mediaFile) {
     // Use FormData for media posts
@@ -493,6 +496,7 @@ export function createSocialPost(
     formData.append("media", mediaFile);
     if (crossPostBluesky) formData.append("crossPostBluesky", "true");
     if (isExclusive) formData.append("isExclusive", "true");
+    if (isShareable === false) formData.append("isShareable", "false");
     return fetch(`${API_BASE}/api/webapp/social/posts/with-media`, {
       method: "POST",
       credentials: "include",
@@ -507,7 +511,7 @@ export function createSocialPost(
   }
   return request("/api/webapp/social/posts", {
     method: "POST",
-    body: { content, crossPostBluesky: crossPostBluesky ?? false, isExclusive: isExclusive ?? false },
+    body: { content, crossPostBluesky: crossPostBluesky ?? false, isExclusive: isExclusive ?? false, isShareable: isShareable ?? true },
   });
 }
 

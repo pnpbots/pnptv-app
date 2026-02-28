@@ -33,7 +33,12 @@ const getEligibility = async (req, res) => {
 const activateCreator = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   try {
-    const result = await CreatorService.activateCreator(user.id);
+    const { tier, termsAccepted } = req.body || {};
+    const result = await CreatorService.activateCreator(user.id, tier, termsAccepted);
+    // Update session role so model routes work immediately
+    if (req.session?.user) {
+      req.session.user.role = 'model';
+    }
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('activateCreator error', err);

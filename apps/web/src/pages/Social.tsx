@@ -330,15 +330,17 @@ function PostCard({
               {post.replies_count > 0 && <span>{post.replies_count}</span>}
             </button>
 
-            {/* Share */}
-            <button
-              onClick={handleShare}
-              className="flex items-center gap-1.5 text-xs hover:text-green-400 transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0-12.814a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0 12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
-              </svg>
-            </button>
+            {/* Share — only shown when poster allows sharing */}
+            {post.is_shareable !== false && (
+              <button
+                onClick={handleShare}
+                className="flex items-center gap-1.5 text-xs hover:text-green-400 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0-12.814a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0 12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
+                </svg>
+              </button>
+            )}
           </div>
 
           {/* Replies section */}
@@ -469,6 +471,7 @@ export default function Social() {
   const [crossPostBluesky, setCrossPostBluesky] = useState(false);
   const [showBlueskyWarning, setShowBlueskyWarning] = useState(false);
   const [isExclusive, setIsExclusive] = useState(false);
+  const [isShareable, setIsShareable] = useState(true);
   const [isActiveCreator, setIsActiveCreator] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -615,7 +618,8 @@ export default function Social() {
         text.trim(),
         mediaFile || undefined,
         crossPostBluesky,
-        isExclusive
+        isExclusive,
+        isShareable
       );
       if (res.success && res.post) {
         setPosts((prev) => [res.post, ...prev]);
@@ -624,12 +628,13 @@ export default function Social() {
       clearMedia();
       setCrossPostBluesky(false);
       setIsExclusive(false);
+      setIsShareable(true);
     } catch (err: unknown) {
       setPostError(err instanceof Error ? err.message : "Failed to create post");
     } finally {
       setIsPosting(false);
     }
-  }, [text, mediaFile, isPosting, clearMedia, crossPostBluesky, isExclusive]);
+  }, [text, mediaFile, isPosting, clearMedia, crossPostBluesky, isExclusive, isShareable]);
 
   const handlePost = useCallback(() => {
     if (!text.trim() || isPosting) return;
