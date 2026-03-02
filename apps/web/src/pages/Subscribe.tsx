@@ -4,8 +4,10 @@ import { Card, Skeleton } from "@pnptv/ui-kit";
 import {
   getSubscriptionPlans,
   createPayment,
+  activateMeruCode,
   type SubscriptionPlan,
 } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 
 type Provider = "epayco" | "daimo";
 
@@ -38,6 +40,7 @@ function durationLabel(days: number): string {
 
 export default function Subscribe() {
   const navigate = useNavigate();
+  const { refreshUser } = useAuth();
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +48,15 @@ export default function Subscribe() {
   const [provider, setProvider] = useState<Provider>("epayco");
   const [submitting, setSubmitting] = useState(false);
   const [showCOP, setShowCOP] = useState(false);
+
+  // Email for credentials
+  const [email, setEmail] = useState("");
+  const [emailError, setEmailError] = useState<string | null>(null);
+
+  // Meru code activation
+  const [meruCode, setMeruCode] = useState("");
+  const [meruSubmitting, setMeruSubmitting] = useState(false);
+  const [meruError, setMeruError] = useState<string | null>(null);
 
   useEffect(() => {
     getSubscriptionPlans()
@@ -61,14 +73,25 @@ export default function Subscribe() {
       .finally(() => setLoading(false));
   }, []);
 
+  function validateEmail(): boolean {
+    const trimmed = email.trim();
+    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) || trimmed.length > 254) {
+      setEmailError("Please enter a valid email address");
+      return false;
+    }
+    setEmailError(null);
+    return true;
+  }
+
   async function handleSubscribe() {
     if (!selectedPlan || submitting) return;
+    if (!validateEmail()) return;
 
     setSubmitting(true);
     setError(null);
 
     try {
-      const result = await createPayment(selectedPlan, provider);
+      const result = await createPayment(selectedPlan, provider, email.trim());
 
       if (result.success && result.paymentUrl) {
         window.open(result.paymentUrl, "_blank", "noopener,noreferrer");
@@ -80,6 +103,30 @@ export default function Subscribe() {
       setError(message);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleMeruActivate() {
+    if (!meruCode.trim() || meruSubmitting) return;
+    if (!validateEmail()) return;
+
+    setMeruSubmitting(true);
+    setMeruError(null);
+
+    try {
+      const result = await activateMeruCode(meruCode.trim(), email.trim());
+
+      if (result.success) {
+        await refreshUser();
+        navigate("/welcome");
+      } else {
+        setMeruError(result.error || "Activation failed");
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Activation error";
+      setMeruError(message);
+    } finally {
+      setMeruSubmitting(false);
     }
   }
 
@@ -250,6 +297,27 @@ export default function Subscribe() {
         })}
       </div>
 
+      {/* Email address */}
+      <div className="mb-6">
+        <label htmlFor="subscribe-email" className="text-sm font-medium text-pnp-textPrimary mb-1 block">
+          Email address
+        </label>
+        <p className="text-xs text-pnp-textSecondary mb-2">
+          We'll send your login credentials and membership info
+        </p>
+        <input
+          id="subscribe-email"
+          type="email"
+          value={email}
+          onChange={(e) => { setEmail(e.target.value); setEmailError(null); }}
+          placeholder="you@example.com"
+          className="w-full rounded-xl px-4 py-2.5 bg-white/5 border border-white/10 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-[#D4007A] transition-colors"
+        />
+        {emailError && (
+          <p className="mt-1.5 text-xs text-red-400">{emailError}</p>
+        )}
+      </div>
+
       {/* Payment method */}
       <div className="mb-6">
         <h3 className="text-sm font-medium text-pnp-textPrimary mb-3">Payment Method</h3>
@@ -279,6 +347,43 @@ export default function Subscribe() {
             <div className="text-[10px] text-pnp-textSecondary">CashApp, Venmo, Zelle</div>
           </button>
         </div>
+      </div>
+
+      {/* Meru code section */}
+      <div className="mb-6">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="flex-1 h-px bg-white/10" />
+          <span className="text-xs text-pnp-textSecondary">or</span>
+          <div className="flex-1 h-px bg-white/10" />
+        </div>
+        <label className="text-sm font-medium text-pnp-textPrimary mb-2 block">
+          Have a Meru code?
+        </label>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={meruCode}
+            onChange={(e) => { setMeruCode(e.target.value); setMeruError(null); }}
+            placeholder="Enter your Meru code"
+            disabled={meruSubmitting}
+            className="flex-1 rounded-xl px-4 py-2.5 bg-white/5 border border-white/10 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-[#D4007A] transition-colors disabled:opacity-50"
+          />
+          <button
+            onClick={handleMeruActivate}
+            disabled={!meruCode.trim() || meruSubmitting}
+            className="btn-gradient px-5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+          >
+            {meruSubmitting ? "Verifying..." : "Activate"}
+          </button>
+        </div>
+        {meruSubmitting && (
+          <p className="mt-2 text-xs text-pnp-textSecondary">
+            Verifying payment... this may take a few seconds
+          </p>
+        )}
+        {meruError && (
+          <p className="mt-2 text-xs text-red-400">{meruError}</p>
+        )}
       </div>
 
       {/* Error banner */}

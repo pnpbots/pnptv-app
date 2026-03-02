@@ -167,6 +167,7 @@ class MessageTemplates {
     const providers = {
       daimo: { en: 'Daimo Pay', es: 'Daimo Pay' },
       epayco: { en: 'ePayco', es: 'ePayco' },
+      meru: { en: 'Meru', es: 'Meru' },
     };
 
     return providers[provider]?.[language] || provider.toUpperCase();

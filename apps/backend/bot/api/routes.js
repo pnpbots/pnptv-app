@@ -2025,18 +2025,319 @@ app.get('/api/webapp/support/ticket/messages', asyncHandler(supportController.ge
 app.post('/api/webapp/support/ticket/message', supportChatLimiter, asyncHandler(supportController.addTicketMessage));
 
 // Web App Payments (session auth → PaymentService)
+
+// Helper: HTML-escape for safe email template interpolation
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Helper: ensure user has email + password credentials (for all payment flows)
+async function ensureEmailCredentials(userId, email, language) {
+  const crypto = require('crypto');
+  const { query } = require('../../config/postgres');
+  const emailSvc = require('../../services/emailService');
+
+  // 1. Check if another user already has this email (UNIQUE constraint)
+  const { rows: emailConflict } = await query(
+    'SELECT id FROM users WHERE email = $1 AND id != $2', [email, String(userId)]
+  );
+  if (emailConflict.length > 0) {
+    throw new Error('This email is already associated with another account');
+  }
+
+  // 2. Check if user already has credentials — if so, just update email if different
+  const { rows: existing } = await query('SELECT email, password_hash FROM users WHERE id = $1', [String(userId)]);
+  if (!existing.length) {
+    logger.warn('ensureEmailCredentials: user not found', { userId });
+    return { created: false };
+  }
+
+  if (existing[0].password_hash) {
+    // Already has password — update email if different, skip credential generation
+    if (existing[0].email !== email) {
+      await query('UPDATE users SET email = $1 WHERE id = $2', [email, String(userId)]);
+    }
+    return { created: false };
+  }
+
+  // 3. Generate 12-char random password (9 bytes → 12 base64url chars, 72 bits entropy)
+  const plainPassword = crypto.randomBytes(9).toString('base64url');
+
+  // 4. Hash with crypto.scrypt (same salt:hash pattern as webAppController.js)
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = await new Promise((resolve, reject) =>
+    crypto.scrypt(plainPassword, salt, 64, (err, key) => (err ? reject(err) : resolve(key.toString('hex'))))
+  );
+  const passwordHash = `${salt}:${hash}`;
+
+  // 5. Atomic conditional update — only sets credentials if password_hash is still NULL
+  //    Prevents race condition where two concurrent requests both generate passwords
+  const { rowCount } = await query(
+    `UPDATE users SET email = $1, password_hash = $2, email_verified = true
+     WHERE id = $3 AND (password_hash IS NULL OR password_hash = '')
+     RETURNING id`,
+    [email, passwordHash, String(userId)]
+  );
+
+  // If another request already wrote credentials, skip email
+  if (rowCount === 0) {
+    return { created: false };
+  }
+
+  // 6. Send credentials email (only after DB write confirmed)
+  const isEs = (language || 'es').startsWith('es');
+  const safeEmail = escapeHtml(email);
+  try {
+    await emailSvc.send({
+      to: email,
+      subject: isEs ? 'Tus credenciales de acceso PNPtv' : 'Your PNPtv Login Credentials',
+      html: isEs
+        ? `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#1C1C1E;color:#F5F5F7;border-radius:12px;">
+            <h2 style="color:#D4007A;margin-top:0;">Bienvenido a PNPtv!</h2>
+            <p>Ahora puedes iniciar sesi&oacute;n en la web con estas credenciales:</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+              <tr><td style="padding:8px 0;color:#A1A1A6;">Email:</td><td style="padding:8px 0;font-weight:bold;">${safeEmail}</td></tr>
+              <tr><td style="padding:8px 0;color:#A1A1A6;">Contrase&ntilde;a:</td><td style="padding:8px 0;font-weight:bold;font-family:monospace;font-size:16px;">${plainPassword}</td></tr>
+            </table>
+            <p style="font-size:13px;color:#A1A1A6;">Puedes cambiar tu contrase&ntilde;a en cualquier momento desde tu perfil.</p>
+            <a href="https://app.pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Iniciar sesi&oacute;n</a>
+          </div>`
+        : `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#1C1C1E;color:#F5F5F7;border-radius:12px;">
+            <h2 style="color:#D4007A;margin-top:0;">Welcome to PNPtv!</h2>
+            <p>You can now log in to the web app with these credentials:</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+              <tr><td style="padding:8px 0;color:#A1A1A6;">Email:</td><td style="padding:8px 0;font-weight:bold;">${safeEmail}</td></tr>
+              <tr><td style="padding:8px 0;color:#A1A1A6;">Password:</td><td style="padding:8px 0;font-weight:bold;font-family:monospace;font-size:16px;">${plainPassword}</td></tr>
+            </table>
+            <p style="font-size:13px;color:#A1A1A6;">You can change your password anytime from your profile settings.</p>
+            <a href="https://app.pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Log In</a>
+          </div>`,
+    });
+  } catch (emailErr) {
+    logger.warn('Failed to send credentials email (non-critical)', { to: email, error: emailErr.message });
+  }
+
+  return { created: true };
+}
+
+// Meru Lifetime Pass activation (webapp)
+app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user?.id) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+
+  const { code, email } = req.body;
+  if (!code || typeof code !== 'string' || !code.trim()) {
+    return res.status(400).json({ success: false, error: 'Meru code is required' });
+  }
+  if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254) {
+    return res.status(400).json({ success: false, error: 'A valid email address is required' });
+  }
+
+  const meruCode = code.trim();
+  if (meruCode.length > 100 || !/^[A-Za-z0-9_\-]+$/.test(meruCode)) {
+    return res.status(400).json({ success: false, error: 'Invalid Meru code format' });
+  }
+  const userId = String(user.telegramId || user.telegram_id || user.id);
+  const username = user.username || user.first_name || null;
+  const language = user.language || 'es';
+
+  // Ensure user has email + password credentials before processing payment
+  try {
+    await ensureEmailCredentials(userId, email.trim(), language);
+    req.session.user = { ...req.session.user, email: email.trim() };
+  } catch (credErr) {
+    if (credErr.message.includes('already associated')) {
+      return res.status(409).json({ success: false, error: credErr.message });
+    }
+    logger.warn('ensureEmailCredentials failed (non-critical)', { userId, error: credErr.message });
+  }
+
+  // 1. Check code exists and is available
+  const meruLinkService = require('../../../services/meruLinkService');
+  const availableLinks = await meruLinkService.getAvailableLinks();
+  const matchingLink = availableLinks.find((link) => link.code === meruCode);
+
+  if (!matchingLink) {
+    return res.status(404).json({ success: false, error: 'Code not found or already used' });
+  }
+
+  // 2. Puppeteer verification — confirm payment was made on Meru
+  const meruPaymentService = require('../../../services/meruPaymentService');
+  const verification = await meruPaymentService.verifyPayment(meruCode, language);
+
+  if (!verification.isPaid) {
+    return res.status(402).json({ success: false, error: 'Payment not yet completed on Meru. Please complete payment first.' });
+  }
+
+  // 3. Activate membership — set PRIME lifetime
+  const UserModel = require('../../../models/userModel');
+  await UserModel.updateSubscription(userId, {
+    status: 'active',
+    planId: 'lifetime_pass',
+    expiry: null,
+  });
+
+  // 4. Invalidate the Meru link + mark activation code used (non-critical)
+  try {
+    await meruLinkService.invalidateLinkAfterActivation(meruCode, userId, username);
+  } catch (e) {
+    logger.warn('Failed to invalidate Meru link (non-critical)', { code: meruCode, error: e.message });
+  }
+  try {
+    const { markCodeUsed } = require('../../handlers/payments/activation');
+    await markCodeUsed(meruCode, userId, username);
+  } catch (e) {
+    logger.warn('Failed to mark activation code used (non-critical)', { code: meruCode, error: e.message });
+  }
+
+  // 5. Record payment history
+  const PaymentHistoryService = require('../../../services/paymentHistoryService');
+  try {
+    await PaymentHistoryService.recordPayment({
+      userId,
+      paymentMethod: 'meru',
+      amount: 50,
+      currency: 'USD',
+      planId: 'lifetime_pass',
+      planName: 'Lifetime Pass',
+      product: 'lifetime-pass',
+      paymentReference: meruCode,
+      metadata: { activated_via: 'webapp' },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+  } catch (e) {
+    logger.warn('Failed to record payment history (non-critical)', { code: meruCode, error: e.message });
+  }
+
+  // 6. Audit log + business notification (non-critical)
+  try {
+    const { logActivation } = require('../../handlers/payments/activation');
+    await logActivation({ userId, username, code: meruCode, product: 'lifetime-pass', success: true });
+  } catch (e) {
+    logger.warn('Failed to log activation (non-critical)', { error: e.message });
+  }
+  try {
+    const BusinessNotificationService = require('../../services/businessNotificationService');
+    await BusinessNotificationService.notifyCodeActivation({ userId, username, code: meruCode, product: 'lifetime-pass' });
+  } catch (e) {
+    logger.warn('Failed to send business notification (non-critical)', { error: e.message });
+  }
+
+  // 7. Telegram DM with PRIME invite link (async fire-and-forget)
+  PaymentService.sendPaymentConfirmationNotification({
+    userId,
+    plan: { id: 'lifetime_pass', name: 'Lifetime Pass', display_name: 'Lifetime Pass' },
+    transactionId: meruCode,
+    amount: 50,
+    expiryDate: null,
+    language,
+    provider: 'meru',
+  }).catch((e) => logger.warn('Failed to send Telegram DM (non-critical)', { error: e.message }));
+
+  // 8. Invoice + welcome emails (email is now always available)
+  const customerEmail = email ? email.trim() : user.email;
+  if (customerEmail) {
+    const InvoiceService = require('../../services/invoiceservice');
+    const EmailService = require('../../services/emailservice');
+
+    // Invoice email
+    (async () => {
+      try {
+        const { buffer: invoicePdf } = await InvoiceService.generateInvoice({
+          invoiceNumber: `MERU-${meruCode}`,
+          customerName: user.first_name || username || 'Valued Customer',
+          planName: 'Lifetime Pass',
+          amount: 50,
+          currency: 'USD',
+          provider: 'meru',
+          transactionId: meruCode,
+          purchaseDate: new Date(),
+          expiryDate: null,
+          language,
+        });
+
+        await EmailService.sendInvoiceEmail({
+          to: customerEmail,
+          customerName: user.first_name || username || 'Valued Customer',
+          invoiceNumber: `MERU-${meruCode}`,
+          amount: 50,
+          planName: 'Lifetime Pass',
+          invoicePdf,
+        });
+        logger.info('Meru invoice email sent', { to: customerEmail, code: meruCode });
+      } catch (emailError) {
+        logger.warn('Failed to send invoice email (non-critical)', { error: emailError.message });
+      }
+    })();
+
+    // Welcome email with onboarding guide
+    (async () => {
+      try {
+        const { buffer: guidePdf } = await InvoiceService.generateOnboardingGuide({
+          customerName: user.first_name || username || 'Valued Customer',
+          planName: 'Lifetime Pass',
+          language,
+        });
+
+        await EmailService.sendWelcomeEmail({
+          to: customerEmail,
+          customerName: user.first_name || username || 'Valued Customer',
+          planName: 'Lifetime Pass',
+          duration: 'Lifetime',
+          expiryDate: null,
+          language,
+          onboardingGuidePdf: guidePdf,
+        });
+        logger.info('Meru welcome email sent', { to: customerEmail, code: meruCode });
+      } catch (emailError) {
+        logger.warn('Failed to send welcome email (non-critical)', { error: emailError.message });
+      }
+    })();
+  }
+
+  // 9. Update session so frontend reflects PRIME immediately
+  req.session.user = {
+    ...req.session.user,
+    tier: 'prime',
+    subscription_status: 'active',
+    plan_id: 'lifetime_pass',
+  };
+
+  logger.info('Meru lifetime pass activated via webapp', { userId, code: meruCode });
+  res.json({ success: true });
+}));
+
 app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user?.id) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
   }
 
-  const { planId, provider, creatorId } = req.body;
+  const { planId, provider, creatorId, email } = req.body;
   if (!planId) {
     return res.status(400).json({ success: false, error: 'planId is required' });
   }
   if (provider && !['epayco', 'daimo'].includes(provider)) {
     return res.status(400).json({ success: false, error: 'Invalid provider. Must be epayco or daimo' });
+  }
+  if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254) {
+    return res.status(400).json({ success: false, error: 'A valid email address is required' });
+  }
+
+  // Ensure user has email + password credentials before processing payment
+  const userId = String(user.telegramId || user.telegram_id || user.id);
+  const language = user.language || 'es';
+  try {
+    await ensureEmailCredentials(userId, email.trim(), language);
+    req.session.user = { ...req.session.user, email: email.trim() };
+  } catch (credErr) {
+    if (credErr.message.includes('already associated')) {
+      return res.status(409).json({ success: false, error: credErr.message });
+    }
+    logger.warn('ensureEmailCredentials failed (non-critical)', { userId, error: credErr.message });
   }
 
   const result = await PaymentService.createPayment({

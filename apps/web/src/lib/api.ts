@@ -1187,7 +1187,8 @@ export function getSubscriptionPlans(): Promise<{
 
 export function createPayment(
   planId: string,
-  provider: "epayco" | "daimo"
+  provider: "epayco" | "daimo",
+  email: string
 ): Promise<{
   success: boolean;
   paymentUrl: string;
@@ -1196,7 +1197,21 @@ export function createPayment(
 }> {
   return request("/api/webapp/payments/create", {
     method: "POST",
-    body: { planId, provider },
+    body: { planId, provider, email },
+  });
+}
+
+export function activateMeruCode(
+  code: string,
+  email: string
+): Promise<{
+  success: boolean;
+  message?: string;
+  error?: string;
+}> {
+  return request("/api/webapp/activate/meru", {
+    method: "POST",
+    body: { code, email },
   });
 }
 
