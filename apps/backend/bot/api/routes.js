@@ -51,6 +51,7 @@ const pdsRoutes = require('./routes/pdsRoutes');
 const blueskyRoutes = require('./routes/blueskyRoutes');
 const elementRoutes = require('./routes/elementRoutes');
 const creatorRoutes = require('./routes/creatorRoutes');
+const canvaRoutes = require('./routes/canvaRoutes');
 
 // ATProto / Bluesky OAuth routes (public endpoints served at the monorepo root)
 const atprotoOAuthRoutes = require('./routes/atprotoOAuthRoutes');
@@ -3003,6 +3004,9 @@ app.use('/api/element', elementRoutes);
 
 // Creator monetization routes
 app.use('/api/webapp/creator', creatorRoutes);
+
+// Canva Connect API routes
+app.use('/api/canva', canvaRoutes);
 
 // ==========================================
 // ATProto / Bluesky OAuth Routes (PUBLIC — no session required)

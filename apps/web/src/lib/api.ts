@@ -1600,3 +1600,68 @@ export function getWithdrawalHistory(
 export function healthCheck(): Promise<{ status: string }> {
   return request("/health");
 }
+
+// ---------------------------------------------------------------------------
+// Canva Connect API
+// ---------------------------------------------------------------------------
+
+export interface CanvaDesign {
+  id: string;
+  title: string;
+  thumbnail?: { url: string; width: number; height: number };
+  created_at: string;
+  updated_at: string;
+  urls?: { edit_url?: string; view_url?: string };
+}
+
+export interface CanvaExportJob {
+  id: string;
+  canva_design_id: string;
+  design_title: string;
+  export_format: string;
+  export_quality: string;
+  status: "pending" | "exporting" | "downloading" | "uploading" | "completed" | "failed";
+  directus_file_id?: string;
+  directus_content_id?: string;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getCanvaLoginUrl(): string {
+  const base = import.meta.env.VITE_API_URL || "https://pnptv.app";
+  return `${base}/api/canva/auth/login?redirect=true`;
+}
+
+export function getCanvaStatus(): Promise<{ success: boolean; connected: boolean; displayName?: string }> {
+  return request("/api/canva/status");
+}
+
+export function unlinkCanva(): Promise<{ success: boolean; message: string }> {
+  return request("/api/canva/auth/unlink", { method: "POST" });
+}
+
+export function listCanvaDesigns(): Promise<{ success: boolean; designs: CanvaDesign[] }> {
+  return request("/api/canva/designs");
+}
+
+export function startCanvaExport(
+  designId: string,
+  title: string,
+  quality?: string
+): Promise<{ success: boolean; jobId: string; status: string }> {
+  return request("/api/canva/export", {
+    method: "POST",
+    body: { designId, title, quality: quality || "1080p" },
+  });
+}
+
+export function listCanvaExports(): Promise<{ success: boolean; jobs: CanvaExportJob[] }> {
+  return request("/api/canva/exports");
+}
+
+export function getCanvaExportStatus(
+  jobId: string
+): Promise<{ success: boolean; job: CanvaExportJob }> {
+  return request(`/api/canva/exports/${jobId}`);
+}

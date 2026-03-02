@@ -110,6 +110,7 @@ const MessageRateLimiter = require('../services/messageRateLimiter');
 
 const CommunityPostScheduler = require('./schedulers/communityPostScheduler');
 const XPostScheduler = require('./schedulers/xPostScheduler');
+const CanvaExportScheduler = require('./schedulers/canvaExportScheduler');
 const { initializeWorker: initializePrivateCallsWorker } = require('../../workers/privateCallsWorker');
 const PNPLiveWorker = require('../../workers/pnpLiveWorker');
 const { startCronJobs } = require('../../../../scripts/cron');
@@ -740,6 +741,16 @@ const startBot = async () => {
       logger.info('✓ X post scheduler initialized and started (with admin notifications)');
     } catch (error) {
       logger.warn('X post scheduler initialization failed, continuing without X posts:', error.message);
+    }
+
+    // Initialize Canva export scheduler
+    try {
+      const canvaExportScheduler = new CanvaExportScheduler();
+      canvaExportScheduler.start();
+      global.canvaExportScheduler = canvaExportScheduler;
+      logger.info('✓ Canva export scheduler initialized and started');
+    } catch (error) {
+      logger.warn('Canva export scheduler initialization failed, continuing without Canva exports:', error.message);
     }
 
     // Initialize proactive reminder service

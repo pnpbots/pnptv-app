@@ -369,7 +369,11 @@ function ComposePost({
 
           {mediaPreview && (
             <div className="relative mb-2 inline-block">
-              <img src={mediaPreview} alt="Preview" className="max-h-40 rounded-lg object-cover" />
+              {mediaFile?.type.startsWith("video/") ? (
+                <video src={mediaPreview} className="max-h-40 rounded-lg" muted playsInline />
+              ) : (
+                <img src={mediaPreview} alt="Preview" className="max-h-40 rounded-lg object-cover" />
+              )}
               <button
                 onClick={clearMedia}
                 className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center text-white text-xs"
@@ -387,11 +391,15 @@ function ComposePost({
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif"
+                accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) {
+                    if (file.size > 50 * 1024 * 1024) {
+                      setError("File too large (max 50MB)");
+                      return;
+                    }
                     setMediaFile(file);
                     setMediaPreview(URL.createObjectURL(file));
                   }
@@ -401,9 +409,20 @@ function ComposePost({
                 onClick={() => fileRef.current?.click()}
                 disabled={posting}
                 className="hover:text-pnp-accent transition-colors"
+                title="Photo or Video"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25c0 .828.672 1.5 1.5 1.5z" />
+                </svg>
+              </button>
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={posting}
+                className="hover:text-pnp-accent transition-colors"
+                title="Upload Video"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
                 </svg>
               </button>
             </div>

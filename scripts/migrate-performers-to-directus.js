@@ -108,7 +108,7 @@ async function importPerformers() {
   console.log('\n[2/2] Importing performers from pnptv PostgreSQL → Directus...');
 
   const { rows } = await pool.query(`
-    SELECT id, display_name, bio, bio_short, photo_url, is_featured, status,
+    SELECT id, user_id, display_name, bio, bio_short, photo_url, is_featured, status,
            is_available, availability_message, base_price_cents, currency,
            timezone, durations_minutes
     FROM performers
@@ -118,9 +118,12 @@ async function importPerformers() {
   console.log(`  Found ${rows.length} performer(s) in pnptv PostgreSQL`);
 
   for (const p of rows) {
+    // pnptv_id stores the user_id so Home page can link to /profile/:userId
+    const pnptvId = p.user_id || p.id;
+
     // Check if already exists in Directus by pnptv_id
     const existing = await api.get('/items/performers', {
-      params: { 'filter[pnptv_id][_eq]': p.id, limit: 1 },
+      params: { 'filter[pnptv_id][_eq]': pnptvId, limit: 1 },
     }).then(r => r.data?.data?.[0]).catch(() => null);
 
     const slug = p.display_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
@@ -140,7 +143,7 @@ async function importPerformers() {
       currency: p.currency || 'USD',
       timezone: p.timezone || 'America/Bogota',
       durations_minutes: durationsArr,
-      pnptv_id: p.id,
+      pnptv_id: pnptvId,
       // photo_url is a path — link as external URL via social_links if no Directus upload exists
       social_links: p.photo_url ? JSON.stringify({ photo_url: p.photo_url }) : null,
     };

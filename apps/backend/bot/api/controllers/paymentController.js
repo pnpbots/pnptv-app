@@ -445,13 +445,32 @@ class PaymentController {
         refPayco,
       });
 
-      // If payment is not pending, return current status
+      // If payment is not pending, return current status with plan details
       if (payment.status !== 'pending') {
-        return res.json({
+        const response = {
           success: true,
           status: payment.status,
           message: `Payment is ${payment.status}`,
-        });
+        };
+
+        // Include plan details for completed payments (used by confirmation page)
+        if (payment.status === 'completed' && payment.planId) {
+          try {
+            const plan = await PlanModel.getById(payment.planId);
+            if (plan) {
+              const durationDays = plan.duration_days || plan.duration || 30;
+              response.planName = plan.display_name || plan.name;
+              response.amount = payment.amount;
+              response.currency = payment.currency || 'USD';
+              response.durationDays = durationDays;
+              response.transactionId = payment.reference || payment.transactionId;
+            }
+          } catch (planErr) {
+            logger.warn('Could not fetch plan details for payment status', { error: planErr.message });
+          }
+        }
+
+        return res.json(response);
       }
 
       // Payment is pending - check if it's stuck or waiting for webhook

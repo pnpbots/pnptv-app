@@ -236,7 +236,7 @@ class PDSProvisioningService {
   static generatePDSHandle(user) {
     const domain = process.env.PDS_DOMAIN || 'pnptv.app';
     const handle = (user.username || `user${user.id}`).toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    return `@${handle}.${domain}`;
+    return `${handle}.${domain}`;
   }
 
   /**
@@ -268,29 +268,38 @@ class PDSProvisioningService {
    */
   static async provisionLocalPDS(pnptv_uuid, user, pds_did, pds_handle) {
     try {
-      const adminDid = process.env.PDS_ADMIN_DID;
       const adminPassword = process.env.PDS_ADMIN_PASSWORD;
       const localEndpoint = process.env.PDS_LOCAL_ENDPOINT || process.env.BLUESKY_PDS_URL || 'http://bluesky-pds:3000';
+      const adminAuth = `Basic ${Buffer.from(`admin:${adminPassword}`).toString('base64')}`;
 
-      if (!adminDid || !adminPassword) {
-        throw new Error('PDS_ADMIN_DID or PDS_ADMIN_PASSWORD not configured');
+      if (!adminPassword) {
+        throw new Error('PDS_ADMIN_PASSWORD not configured');
       }
 
-      // Call local PDS API to create account (PDS uses Basic auth for admin endpoints)
-      const response = await axios.post(`${localEndpoint}/xrpc/com.atproto.server.createAccount`, {
-        handle: pds_handle,
-        password: this.generateSecurePassword(),
-        did: pds_did,
-        email: user.email || `${user.id}@pnptv.app`
+      // Step 1: Create an invite code via admin API
+      const inviteResponse = await axios.post(`${localEndpoint}/xrpc/com.atproto.server.createInviteCode`, {
+        useCount: 1
       }, {
-        headers: {
-          'Authorization': `Basic ${Buffer.from(`admin:${adminPassword}`).toString('base64')}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Authorization': adminAuth, 'Content-Type': 'application/json' },
         timeout: 10000
       });
 
-      logger.info(`[PDS] Local PDS account created: ${pds_handle}`);
+      const inviteCode = inviteResponse.data.code;
+      logger.info(`[PDS] Created invite code for ${pds_handle}`);
+
+      // Step 2: Create account using invite code (PDS generates the DID)
+      const password = this.generateSecurePassword();
+      const response = await axios.post(`${localEndpoint}/xrpc/com.atproto.server.createAccount`, {
+        handle: pds_handle,
+        password,
+        email: user.email || `${user.id}@pnptv.app`,
+        inviteCode
+      }, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 10000
+      });
+
+      logger.info(`[PDS] Local PDS account created: ${pds_handle} (DID: ${response.data.did})`);
 
       return {
         endpoint: localEndpoint,

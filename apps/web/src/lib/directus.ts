@@ -48,6 +48,9 @@ export interface Content {
   duration_seconds: number | null;
   is_premium: boolean;
   tags: string[];
+  series: string | null;
+  episode_number: number | null;
+  date_created: string;
 }
 
 export interface Announcement {
