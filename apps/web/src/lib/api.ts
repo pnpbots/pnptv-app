@@ -1236,6 +1236,71 @@ export function clearSupportHistory(): Promise<{ success: boolean }> {
   return request("/api/webapp/support/history", { method: "DELETE" });
 }
 
+// Support Ticket Types
+export interface SupportTicket {
+  user_id: string;
+  thread_id: number;
+  thread_name: string;
+  status: string;
+  priority: string;
+  category: string;
+  language: string;
+  created_at: string;
+  last_message_at: string;
+  first_response_at: string | null;
+  message_count: number;
+}
+
+export interface TicketMessage {
+  id: number;
+  sender_type: "user" | "agent";
+  sender_name: string;
+  content: string;
+  created_at: string;
+}
+
+export type TicketCategory =
+  | "payment"
+  | "account"
+  | "bug"
+  | "feature"
+  | "technical"
+  | "general";
+
+export function createSupportTicket(
+  category: TicketCategory,
+  description: string
+): Promise<{ success: boolean; ticket: SupportTicket }> {
+  return request("/api/webapp/support/ticket", {
+    method: "POST",
+    body: { category, description },
+  });
+}
+
+export function getSupportTicket(): Promise<{
+  success: boolean;
+  ticket: SupportTicket | null;
+}> {
+  return request("/api/webapp/support/ticket");
+}
+
+export function getTicketMessages(since?: string): Promise<{
+  success: boolean;
+  messages: TicketMessage[];
+}> {
+  const params = since ? `?since=${encodeURIComponent(since)}` : "";
+  return request(`/api/webapp/support/ticket/messages${params}`);
+}
+
+export function addTicketMessage(
+  message: string
+): Promise<{ success: boolean }> {
+  return request("/api/webapp/support/ticket/message", {
+    method: "POST",
+    body: { message },
+  });
+}
+
 // Performers (Directus CMS-backed)
 export interface FeaturedPerformer {
   id: string;

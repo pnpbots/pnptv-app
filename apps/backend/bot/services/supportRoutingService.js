@@ -444,6 +444,21 @@ _Responde en este topic para enviar mensajes al usuario._`;
 
       await this.addDeliveryReaction(ctx);
       logger.info('Admin reply sent to user', { userId, threadId, adminId: ctx.from.id });
+
+      // Persist agent reply for web widget visibility
+      try {
+        const SupportTicketMessageModel = require('../../models/supportTicketMessageModel');
+        const replyContent = message.text || message.caption || '[Media attachment]';
+        await SupportTicketMessageModel.create({
+          userId,
+          senderType: 'agent',
+          senderName: adminName,
+          content: replyContent,
+        });
+      } catch (persistErr) {
+        logger.warn('Failed to persist agent reply for web widget', { error: persistErr.message });
+      }
+
       return true;
 
     } catch (error) {
@@ -454,6 +469,21 @@ _Responde en este topic para enviar mensajes al usuario._`;
           error.description?.includes('user is deactivated') ||
           error.description?.includes('chat not found')) {
         logger.warn('User has blocked the bot or is deactivated');
+
+        // Still persist for web widget even if Telegram DM failed
+        try {
+          const SupportTicketMessageModel = require('../../models/supportTicketMessageModel');
+          const replyContent = ctx.message?.text || ctx.message?.caption || '[Media attachment]';
+          await SupportTicketMessageModel.create({
+            userId,
+            senderType: 'agent',
+            senderName: adminName,
+            content: replyContent,
+          });
+        } catch (persistErr) {
+          logger.warn('Failed to persist agent reply for web widget', { error: persistErr.message });
+        }
+
         // Notify in the topic that the user can't receive messages
         try {
           await this.telegram.sendMessage(

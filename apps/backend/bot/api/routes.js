@@ -99,15 +99,21 @@ const softAuth = (req, res, next) => {
  * Tier gate — requires active or prime subscription
  */
 const requirePrimeTier = (req, res, next) => {
-  const tier = (req.session?.user?.tier || 'free').toLowerCase();
-  if (tier !== 'prime') {
-    return res.status(403).json({
-      success: false,
-      error: 'Prime subscription required',
-      code: 'PRIME_REQUIRED'
-    });
+  const user = req.session?.user;
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Authentication required', code: 'AUTH_REQUIRED' });
   }
-  next();
+  const tier = (user.tier || 'free').toLowerCase();
+  const role = user.role || '';
+  if (tier === 'prime' || role === 'admin' || role === 'superadmin') {
+    return next();
+  }
+  return res.status(403).json({
+    success: false,
+    error: 'Prime subscription required',
+    code: 'PRIME_REQUIRED',
+    upgradeUrl: '/subscribe',
+  });
 };
 
 /**
@@ -149,7 +155,6 @@ const requireFreeTierDmLimit = async (req, res, next) => {
     const redis = getRedis();
     const today = new Date().toISOString().slice(0, 10);
     const key = `pnptv:dm_limit:${user.id}:${today}`;
-    const count = parseInt(await redis.get(key) || '0', 10);
     // Determine limit based on account age
     const createdAt = user.created_at || user.createdAt;
     let limit = 3;
@@ -157,18 +162,30 @@ const requireFreeTierDmLimit = async (req, res, next) => {
       const daysSince = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
       if (daysSince > 14) limit = 1;
     }
-    if (count >= limit) {
+    // Atomic increment — prevents race conditions with parallel requests
+    const newCount = await redis.incr(key);
+    if (newCount === 1) {
+      const now = new Date();
+      const midnight = new Date(now);
+      midnight.setUTCDate(midnight.getUTCDate() + 1);
+      midnight.setUTCHours(0, 0, 0, 0);
+      const ttl = Math.ceil((midnight - now) / 1000);
+      await redis.expire(key, ttl);
+    }
+    if (newCount > limit) {
+      // Already incremented past limit — decrement back
+      await redis.decr(key);
       return res.status(429).json({
         success: false,
         error: 'Daily message limit reached',
         code: 'DM_LIMIT_REACHED',
         limit,
-        used: count,
+        used: limit,
         remaining: 0,
         upgradeUrl: '/subscribe',
       });
     }
-    req.dmLimit = { limit, used: count, remaining: limit - count };
+    req.dmLimit = { limit, used: newCount, remaining: limit - newCount };
     return next();
   } catch (err) {
     logger.error('DM limit check error', { error: err.message });
@@ -2001,6 +2018,11 @@ const supportChatLimiter = rateLimit({
 app.post('/api/webapp/support/chat', supportChatLimiter, asyncHandler(supportController.chat));
 app.get('/api/webapp/support/suggestions', asyncHandler(supportController.suggestions));
 app.delete('/api/webapp/support/history', authenticateUser, asyncHandler(supportController.clearHistory));
+// Support Tickets (web → Telegram support group)
+app.post('/api/webapp/support/ticket', supportChatLimiter, asyncHandler(supportController.createTicket));
+app.get('/api/webapp/support/ticket', asyncHandler(supportController.getTicket));
+app.get('/api/webapp/support/ticket/messages', asyncHandler(supportController.getTicketMessages));
+app.post('/api/webapp/support/ticket/message', supportChatLimiter, asyncHandler(supportController.addTicketMessage));
 
 // Web App Payments (session auth → PaymentService)
 app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {

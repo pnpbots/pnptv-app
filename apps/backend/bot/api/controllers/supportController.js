@@ -3,6 +3,9 @@ const { getRedis } = require('../../../config/redis');
 const { getPool } = require('../../../config/postgres');
 const { chatWithCristina, isCristinaAIAvailable } = require('../../services/cristinaAIService');
 const { buildCristinaSystemPrompt } = require('../../handlers/support/cristinaAI');
+const supportRoutingService = require('../../services/supportRoutingService');
+const SupportTopicModel = require('../../../models/supportTopicModel');
+const SupportTicketMessageModel = require('../../../models/supportTicketMessageModel');
 
 const REDIS_PREFIX = 'support:chat:';
 const REDIS_TTL = 7200; // 2 hours
@@ -176,8 +179,141 @@ async function clearHistory(req, res) {
   }
 }
 
+/**
+ * POST /api/webapp/support/ticket
+ * Create a new web support ticket — forwards to Telegram support group
+ */
+async function createTicket(req, res) {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  const { category, description } = req.body;
+  const validCategories = ['payment', 'account', 'bug', 'feature', 'technical', 'general'];
+  if (!validCategories.includes(category)) {
+    return res.status(400).json({ success: false, error: 'Invalid category' });
+  }
+  if (!description || description.trim().length < 10 || description.trim().length > 2000) {
+    return res.status(400).json({ success: false, error: 'Description must be 10-2000 characters' });
+  }
+
+  const categoryEmojis = { payment: '💳', account: '👤', bug: '🐛', feature: '🚀', technical: '🛠', general: '📋' };
+  const categoryLabels = { payment: 'Payment Issue', account: 'Account Problem', bug: 'Bug Report', feature: 'Feature Request', technical: 'Technical Issue', general: 'General' };
+
+  const userObj = {
+    id: user.id,
+    first_name: user.firstName || user.first_name || user.displayName || 'User',
+    username: user.username || '',
+  };
+
+  const message = `🌐 *[WEB TICKET]*\n📂 *Category:* ${categoryEmojis[category]} ${categoryLabels[category]}\n\n${description.trim()}`;
+
+  try {
+    const topic = await supportRoutingService.sendToSupportGroup(message, 'support', userObj, 'text', null);
+
+    // Update category on the topic
+    await SupportTopicModel.updateCategory(String(user.id), category);
+
+    // Persist user's message for web display
+    await SupportTicketMessageModel.create({
+      userId: String(user.id),
+      senderType: 'user',
+      senderName: userObj.first_name,
+      content: description.trim(),
+    });
+
+    const ticket = await SupportTopicModel.getByUserId(String(user.id));
+    return res.json({ success: true, ticket });
+  } catch (error) {
+    logger.error('Failed to create support ticket', { error: error.message, userId: user.id });
+    return res.status(500).json({ success: false, error: 'Failed to create ticket' });
+  }
+}
+
+/**
+ * GET /api/webapp/support/ticket
+ * Fetch the current user's open support ticket metadata
+ */
+async function getTicket(req, res) {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  try {
+    const ticket = await SupportTopicModel.getByUserId(String(user.id));
+    return res.json({ success: true, ticket: ticket || null });
+  } catch (error) {
+    logger.error('Failed to get ticket', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to get ticket' });
+  }
+}
+
+/**
+ * GET /api/webapp/support/ticket/messages
+ * Fetch persisted ticket messages for the web widget
+ */
+async function getTicketMessages(req, res) {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  try {
+    const since = req.query.since || null;
+    const messages = await SupportTicketMessageModel.getByUserId(String(user.id), since);
+    return res.json({ success: true, messages });
+  } catch (error) {
+    logger.error('Failed to get ticket messages', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to get messages' });
+  }
+}
+
+/**
+ * POST /api/webapp/support/ticket/message
+ * Append a follow-up message to an existing open ticket
+ */
+async function addTicketMessage(req, res) {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  const { message } = req.body;
+  if (!message || message.trim().length < 1 || message.trim().length > 2000) {
+    return res.status(400).json({ success: false, error: 'Message must be 1-2000 characters' });
+  }
+
+  try {
+    const ticket = await SupportTopicModel.getByUserId(String(user.id));
+    if (!ticket || ticket.status === 'closed') {
+      return res.status(404).json({ success: false, error: 'No open ticket found' });
+    }
+
+    const userObj = {
+      id: user.id,
+      first_name: user.firstName || user.first_name || user.displayName || 'User',
+      username: user.username || '',
+    };
+
+    await supportRoutingService.sendToSupportGroup(
+      `🌐 *[WEB REPLY]*\n\n${message.trim()}`,
+      'support', userObj, 'text', null
+    );
+
+    await SupportTicketMessageModel.create({
+      userId: String(user.id),
+      senderType: 'user',
+      senderName: userObj.first_name,
+      content: message.trim(),
+    });
+
+    return res.json({ success: true });
+  } catch (error) {
+    logger.error('Failed to add ticket message', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to send message' });
+  }
+}
+
 module.exports = {
   chat,
   suggestions,
   clearHistory,
+  createTicket,
+  getTicket,
+  getTicketMessages,
+  addTicketMessage,
 };
