@@ -222,7 +222,9 @@ function DateSeparator({ date }: { date: string }) {
 export default function Chat() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const isPrime = user?.tier?.toLowerCase() === "prime";
+  const userRole = user?.role?.toLowerCase();
+  const isAdmin = userRole === "admin" || userRole === "superadmin";
+  const isPrime = user?.tier?.toLowerCase() === "prime" || isAdmin;
   const isMember = user?.tier?.toLowerCase() === "member" || isPrime;
   const isFree = !isMember;
   const { showTutorial, dismissTutorial } = useTutorial("hangouts");

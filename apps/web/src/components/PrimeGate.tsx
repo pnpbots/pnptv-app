@@ -16,12 +16,13 @@ export function PrimeGate({ children }: PrimeGateProps) {
     return <div className="flex items-center justify-center min-h-screen"><div className="animate-spin w-8 h-8 border-2 border-white/20 border-t-white rounded-full" /></div>;
   }
 
-  // Not authenticated: show children (Layout handles login)
+  // Not authenticated: show spinner (Layout will redirect to login)
   if (!isAuthenticated || !user) {
-    return <>{children}</>;
+    return <div className="flex items-center justify-center min-h-screen"><div className="animate-spin w-8 h-8 border-2 border-white/20 border-t-white rounded-full" /></div>;
   }
 
-  if (user.tier?.toLowerCase() === "prime") {
+  const role = user.role?.toLowerCase();
+  if (user.tier?.toLowerCase() === "prime" || role === "admin" || role === "superadmin") {
     return <>{children}</>;
   }
 

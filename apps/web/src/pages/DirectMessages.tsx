@@ -356,6 +356,7 @@ export default function DirectMessages() {
         currentUser={user}
         navigate={navigate}
         userTier={user?.tier ?? null}
+        userRole={user?.role ?? null}
       />
     );
   }
@@ -535,11 +536,13 @@ function Conversation({
   currentUser,
   navigate,
   userTier,
+  userRole,
 }: {
   userId: string;
   currentUser: { photoUrl?: string | null; firstName?: string; username?: string; dbId?: string } | null;
   navigate: (path: string) => void;
   userTier: string | null | undefined;
+  userRole: string | null | undefined;
 }) {
   const [messages, setMessages] = useState<DirectMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -554,7 +557,8 @@ function Conversation({
   // Free-tier DM quota tracking
   const [dmRemaining, setDmRemaining] = useState<number | null>(null);
   const [dmLimit, setDmLimit] = useState(3);
-  const isFree = userTier?.toLowerCase() === "free" || !userTier;
+  const isAdmin = userRole?.toLowerCase() === "admin" || userRole?.toLowerCase() === "superadmin";
+  const isFree = (userTier?.toLowerCase() === "free" || !userTier) && !isAdmin;
 
   // Media upload state
   const [mediaFile, setMediaFile] = useState<File | null>(null);

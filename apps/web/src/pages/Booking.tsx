@@ -428,8 +428,10 @@ export default function Booking() {
   const { showTutorial, dismissTutorial } = useTutorial("nearby");
 
   const userTier = user?.tier?.toLowerCase() ?? "free";
-  const isFree = userTier === "free" || !user?.tier;
-  const isPrime = userTier === "prime" || userTier === "admin";
+  const userRole = user?.role?.toLowerCase();
+  const isAdmin = userRole === "admin" || userRole === "superadmin";
+  const isFree = (userTier === "free" || !user?.tier) && !isAdmin;
+  const isPrime = userTier === "prime" || isAdmin;
 
   const [pageState, setPageState] = useState<PageState>("loading");
   const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null);

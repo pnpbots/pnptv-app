@@ -63,7 +63,7 @@ const isBannedUser = (user) => {
 /**
  * Tier hierarchy for access control
  */
-const TIER_HIERARCHY = { free: 0, member: 1, PRIME: 2 };
+const TIER_HIERARCHY = { free: 0, member: 1, prime: 2, PRIME: 2 };
 
 /**
  * Check if user's tier meets the minimum required tier

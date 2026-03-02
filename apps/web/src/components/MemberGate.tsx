@@ -16,12 +16,14 @@ export function MemberGate({ children }: MemberGateProps) {
     return <div className="flex items-center justify-center min-h-screen"><div className="animate-spin w-8 h-8 border-2 border-white/20 border-t-white rounded-full" /></div>;
   }
 
-  // Not authenticated: show children (Layout handles login)
+  // Not authenticated: show spinner (Layout will redirect to login)
   if (!isAuthenticated || !user) {
-    return <>{children}</>;
+    return <div className="flex items-center justify-center min-h-screen"><div className="animate-spin w-8 h-8 border-2 border-white/20 border-t-white rounded-full" /></div>;
   }
 
-  const hasMemberAccess = user.tier?.toLowerCase() === "member" || user.tier?.toLowerCase() === "prime";
+  const tier = user.tier?.toLowerCase();
+  const role = user.role?.toLowerCase();
+  const hasMemberAccess = tier === "member" || tier === "prime" || role === "admin" || role === "superadmin";
 
   if (hasMemberAccess) {
     return <>{children}</>;
