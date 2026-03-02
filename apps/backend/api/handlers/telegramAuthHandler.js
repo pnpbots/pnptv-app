@@ -154,14 +154,14 @@ const handleTelegramAuth = async (req, res) => {
     // This happens when users first used the bot, then access the webapp
     if (user.subscription_status === 'free') {
       try {
-        // Check if user has an active subscription in subscription_history
+        // Check if user has an active subscription in subscriptions (bot-originated)
         const subQuery = await query(
           `SELECT status, expires_at
-           FROM subscription_history
+           FROM subscriptions
            WHERE user_id = $1 AND status = 'active'
            ORDER BY created_at DESC
            LIMIT 1`,
-          [user.id]
+          [user.telegram]
         );
 
         if (subQuery.rows.length > 0) {

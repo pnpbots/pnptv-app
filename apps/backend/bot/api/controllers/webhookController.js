@@ -538,10 +538,7 @@ const handlePaymentResponse = async (req, res) => {
       || status === 'success'
       || status === 'approved';
 
-    // Serve a bridge page that:
-    // 1. Reads paymentId from sessionStorage (set by checkout before 3DS redirect)
-    // 2. Redirects back to /checkout/<paymentId>?poll=1 so polling picks up
-    // 3. Falls back to a friendly message with Telegram bot link
+    // Serve a confirmation page that polls payment status and shows results on-screen
     // Allow 3DS bank redirects to frame/load this page
     res.removeHeader('X-Frame-Options');
     res.removeHeader('Cross-Origin-Embedder-Policy');
@@ -553,54 +550,167 @@ const handlePaymentResponse = async (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PNPtv! - ${isSuccess ? 'Payment Processing' : 'Payment Result'}</title>
+  <title>PNPtv! - Payment Confirmation</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #121212; color: #fff; font-family: 'Segoe UI', Arial, sans-serif;
+    body { background: #0D0D0F; color: #fff; font-family: 'Segoe UI', system-ui, Arial, sans-serif;
            display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
-    .card { background: rgba(30,30,30,0.9); border: 1px solid rgba(212,0,122,0.3);
-            border-radius: 16px; padding: 32px; max-width: 420px; width: 100%; text-align: center; }
-    h2 { margin-bottom: 12px; }
-    p { color: #aaa; margin-bottom: 20px; font-size: 14px; }
-    .spinner { width: 40px; height: 40px; border: 3px solid rgba(212,0,122,0.2);
-               border-top-color: #D4007A; border-radius: 50%; margin: 0 auto 16px;
+    .card { background: #1C1C1E; border: 1px solid rgba(212,0,122,0.3);
+            border-radius: 20px; padding: 40px 32px; max-width: 440px; width: 100%; text-align: center;
+            box-shadow: 0 8px 32px rgba(212,0,122,0.1); }
+    .logo { font-size: 32px; font-weight: 800; margin-bottom: 4px; }
+    .logo span { color: #D4007A; }
+    .subtitle { color: #888; font-size: 12px; margin-bottom: 24px; text-transform: uppercase; letter-spacing: 1px; }
+    .spinner { width: 48px; height: 48px; border: 3px solid rgba(212,0,122,0.15);
+               border-top-color: #D4007A; border-radius: 50%; margin: 0 auto 20px;
                animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .btn { display: inline-block; padding: 12px 24px; background: #D4007A; color: #fff;
-           text-decoration: none; border-radius: 8px; font-weight: 600; margin-top: 12px; }
-    .muted { color: #666; font-size: 12px; margin-top: 16px; }
+    .check { width: 64px; height: 64px; margin: 0 auto 20px; display: none; }
+    .check svg { width: 100%; height: 100%; }
+    .error-icon { width: 64px; height: 64px; margin: 0 auto 20px; display: none; }
+    h2 { margin-bottom: 8px; font-size: 22px; font-weight: 700; }
+    .msg { color: #aaa; margin-bottom: 24px; font-size: 14px; line-height: 1.5; }
+    .details { background: rgba(255,255,255,0.04); border-radius: 12px; padding: 20px;
+               margin-bottom: 24px; text-align: left; display: none; }
+    .detail-row { display: flex; justify-content: space-between; padding: 8px 0;
+                  border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-label { color: #888; }
+    .detail-value { color: #fff; font-weight: 600; text-align: right; }
+    .detail-value.accent { color: #D4007A; }
+    .email-note { background: rgba(212,0,122,0.08); border: 1px solid rgba(212,0,122,0.2);
+                  border-radius: 10px; padding: 14px 16px; margin-bottom: 20px; display: none;
+                  font-size: 13px; color: #ccc; line-height: 1.4; }
+    .email-note strong { color: #D4007A; }
+    .btn { display: inline-block; padding: 14px 28px; background: #D4007A; color: #fff;
+           text-decoration: none; border-radius: 10px; font-weight: 600; font-size: 15px;
+           transition: background 0.2s; }
+    .btn:hover { background: #B30066; }
+    .btn-secondary { background: transparent; border: 1px solid rgba(255,255,255,0.15);
+                     color: #aaa; margin-left: 8px; }
+    .btn-secondary:hover { background: rgba(255,255,255,0.05); }
+    .actions { display: none; margin-top: 8px; }
+    .muted { color: #555; font-size: 11px; margin-top: 20px; }
   </style>
 </head>
 <body>
   <div class="card">
+    <div class="logo">PNPtv<span>!</span></div>
+    <div class="subtitle" id="subtitle">Processing payment</div>
+
     <div class="spinner" id="spinner"></div>
-    <h2 id="title">${isSuccess ? 'Verifying payment...' : 'Returning to checkout...'}</h2>
-    <p id="msg">Please wait while we confirm your bank authentication.</p>
-    <div id="fallback" style="display:none;">
-      <a class="btn" href="${botLink}">Open Telegram Bot</a>
-      <p class="muted">If you completed bank verification, your subscription will activate automatically.</p>
+
+    <div class="check" id="checkIcon">
+      <svg viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="30" stroke="#D4007A" stroke-width="3" fill="rgba(212,0,122,0.1)"/>
+      <path d="M20 33l8 8 16-16" stroke="#D4007A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
+
+    <div class="error-icon" id="errorIcon">
+      <svg viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="30" stroke="#FF4444" stroke-width="3" fill="rgba(255,68,68,0.1)"/>
+      <path d="M24 24l16 16M40 24l-16 16" stroke="#FF4444" stroke-width="3" stroke-linecap="round"/></svg>
+    </div>
+
+    <h2 id="title">Verifying payment...</h2>
+    <p class="msg" id="msg">Please wait while we confirm your transaction.</p>
+
+    <div class="details" id="details">
+      <div class="detail-row"><span class="detail-label">Plan</span><span class="detail-value" id="dPlan">-</span></div>
+      <div class="detail-row"><span class="detail-label">Amount</span><span class="detail-value accent" id="dAmount">-</span></div>
+      <div class="detail-row"><span class="detail-label">Transaction</span><span class="detail-value" id="dTxn">-</span></div>
+      <div class="detail-row"><span class="detail-label">Status</span><span class="detail-value" id="dStatus">-</span></div>
+    </div>
+
+    <div class="email-note" id="emailNote">
+      <strong>Emails sent!</strong> Check your inbox for your invoice and a guide on how to use every feature of PNPtv.
+    </div>
+
+    <div class="actions" id="actions">
+      <a class="btn" href="https://pnptv.app/welcome" id="mainBtn">Go to PNPtv</a>
+      <a class="btn btn-secondary" href="${botLink}" id="secondaryBtn" style="margin-top:10px;">Open Telegram Bot</a>
+    </div>
+
+    <p class="muted" id="footer"></p>
   </div>
   <script>
     (function() {
-      // Try to recover paymentId
       var pid = ${paymentIdFromQuery ? `'${paymentIdFromQuery.replace(/'/g, '')}'` : 'null'};
-      try {
-        if (!pid) pid = sessionStorage.getItem('pnptv_3ds_payment_id');
-      } catch(e) {}
+      try { if (!pid) pid = sessionStorage.getItem('pnptv_3ds_payment_id'); } catch(e) {}
 
-      if (pid) {
-        // Redirect back to checkout page — it will start polling automatically
-        window.location.replace('/checkout/' + encodeURIComponent(pid) + '?poll=1');
-      } else {
-        // No paymentId — show fallback with bot link
+      var isSuccess = ${isSuccess ? 'true' : 'false'};
+      var attempts = 0;
+      var maxAttempts = 40;
+      var pollInterval = 3000;
+
+      function showConfirmation(data) {
         document.getElementById('spinner').style.display = 'none';
-        document.getElementById('title').textContent = '${isSuccess ? 'Payment received!' : 'Bank verification complete'}';
-        document.getElementById('msg').textContent = '${isSuccess
-    ? 'Your PRIME subscription is being activated. Return to Telegram to enjoy premium features!'
-    : 'Your payment is being processed. You can close this page and return to the bot.'}';
-        document.getElementById('fallback').style.display = 'block';
+        document.getElementById('checkIcon').style.display = 'block';
+        document.getElementById('subtitle').textContent = 'Payment received';
+        document.getElementById('title').textContent = 'We received your payment!';
+        document.getElementById('msg').textContent = 'Your PRIME subscription is now active. Check your Telegram for your PRIME channel invite link.';
+
+        if (data && data.planName) {
+          document.getElementById('dPlan').textContent = data.planName;
+          document.getElementById('dAmount').textContent = '$' + (parseFloat(data.amount) || 0).toFixed(2) + ' ' + (data.currency || 'USD');
+          document.getElementById('dTxn').textContent = (data.transactionId || '-').substring(0, 20);
+          document.getElementById('dStatus').innerHTML = '<span style="color:#4CAF50">Completed</span>';
+          document.getElementById('details').style.display = 'block';
+        }
+
+        document.getElementById('emailNote').style.display = 'block';
+        document.getElementById('actions').style.display = 'block';
+        document.getElementById('footer').textContent = 'You can close this page safely.';
       }
+
+      function showError(msg) {
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('errorIcon').style.display = 'block';
+        document.getElementById('subtitle').textContent = 'Payment issue';
+        document.getElementById('title').textContent = 'Payment Not Completed';
+        document.getElementById('msg').textContent = msg || 'There was an issue with your payment. Please try again or contact support.';
+        document.getElementById('actions').style.display = 'block';
+        document.getElementById('mainBtn').textContent = 'Return to PNPtv!';
+      }
+
+      function showProcessing() {
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('checkIcon').style.display = 'block';
+        document.getElementById('subtitle').textContent = 'Payment received';
+        document.getElementById('title').textContent = 'We received your payment!';
+        document.getElementById('msg').textContent = 'Your payment was received and is being processed. Your subscription will activate shortly. Check your Telegram for updates.';
+        document.getElementById('emailNote').style.display = 'block';
+        document.getElementById('actions').style.display = 'block';
+        document.getElementById('footer').textContent = 'You can close this page. Check your email for the invoice and guide.';
+      }
+
+      function poll() {
+        if (!pid) {
+          if (isSuccess) { showProcessing(); } else { showError('Could not track your payment. If you completed the payment, your subscription will activate automatically.'); }
+          return;
+        }
+        attempts++;
+        fetch('/api/payment/' + encodeURIComponent(pid) + '/status')
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data.status === 'completed') {
+              showConfirmation(data);
+            } else if (data.status === 'failed' || data.status === 'refunded') {
+              showError(data.message || 'Your payment was not successful. Please try again.');
+            } else if (attempts >= maxAttempts) {
+              if (isSuccess) { showProcessing(); } else { showError('Payment verification timed out. If you completed the payment, it will be processed shortly.'); }
+            } else {
+              setTimeout(poll, pollInterval);
+            }
+          })
+          .catch(function() {
+            if (attempts >= maxAttempts) {
+              if (isSuccess) { showProcessing(); } else { showError('Could not verify payment status.'); }
+            } else {
+              setTimeout(poll, pollInterval);
+            }
+          });
+      }
+
+      poll();
     })();
   </script>
 </body>

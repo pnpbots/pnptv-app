@@ -18,6 +18,7 @@ const MessageTemplates = require('./messageTemplates');
 const sanitize = require('../../utils/sanitizer');
 const BusinessNotificationService = require('./businessNotificationService');
 const PaymentNotificationService = require('./paymentNotificationService');
+const NotificationEmitter = require('./notificationEmitter');
 const BookingAvailabilityIntegration = require('./bookingAvailabilityIntegration');
 const PaymentSecurityService = require('./paymentSecurityService');
 const { getEpaycoSubscriptionUrl, isSubscriptionPlan } = require('../../config/epaycoSubscriptionPlans');
@@ -1238,20 +1239,28 @@ class PaymentService {
               }
             }
 
-            // Send enhanced payment confirmation notification via bot (with PRIME channel link)
+            // Emit real-time payment confirmation via Socket.IO (replaces bot DM)
             const userLanguage = user?.language || 'es';
             try {
-              await this.sendPaymentConfirmationNotification({
-                userId,
-                plan,
-                transactionId: x_ref_payco,
-                amount: parseFloat(x_amount),
-                expiryDate,
-                language: userLanguage,
-                provider: 'epayco',
+              await NotificationEmitter.emit({
+                targetUserId: userId,
+                type: 'payment',
+                entityType: 'payment',
+                entityId: payment?.id || null,
+                message: userLanguage === 'es'
+                  ? `Pago confirmado: ${plan.display_name || plan.name}`
+                  : `Payment confirmed: ${plan.display_name || plan.name}`,
+                metadata: {
+                  planName: plan.display_name || plan.name,
+                  amount: parseFloat(x_amount),
+                  currency: 'USD',
+                  expiryDate: expiryDate?.toISOString(),
+                  transactionId: x_ref_payco,
+                  provider: 'epayco',
+                },
               });
             } catch (notifError) {
-              logger.error('Error sending payment confirmation notification (non-critical):', {
+              logger.error('Error emitting payment notification (non-critical):', {
                 error: notifError.message,
                 userId,
               });
@@ -1275,6 +1284,25 @@ class PaymentService {
                   redemptionId: payment.metadata.redemptionId,
                 });
               }
+            }
+
+            // Send Telegram DM with membership info + PRIME channel invite link
+            try {
+              await PaymentService.sendPaymentConfirmationNotification({
+                userId,
+                plan,
+                transactionId: x_ref_payco,
+                amount: parseFloat(x_amount),
+                expiryDate,
+                language: userLanguage,
+                provider: 'epayco',
+              });
+            } catch (confirmError) {
+              logger.error('Error sending payment confirmation DM (non-critical):', {
+                error: confirmError.message,
+                userId,
+                refPayco: x_ref_payco,
+              });
             }
           }
         }
@@ -1348,19 +1376,32 @@ class PaymentService {
             const durationDays = plan.duration_days || plan.duration || 30;
             expiryDate.setDate(expiryDate.getDate() + durationDays);
 
-            // 1. Send invoice email from pnptv.app
+            // 1. Generate PDF invoice and send invoice email from pnptv.app
             try {
+              const { buffer: invoicePdf } = await InvoiceService.generateInvoice({
+                invoiceNumber: x_ref_payco,
+                customerName: x_customer_name || user?.first_name || 'Valued Customer',
+                planName: plan.display_name || plan.name,
+                amount: parseFloat(x_amount),
+                currency: 'USD',
+                provider: 'epayco',
+                transactionId: x_ref_payco,
+                purchaseDate: new Date(),
+                expiryDate,
+                language: userLanguage,
+              });
+
               const invoiceEmailResult = await EmailService.sendInvoiceEmail({
                 to: customerEmail,
                 customerName: x_customer_name || user?.first_name || 'Valued Customer',
                 invoiceNumber: x_ref_payco,
                 amount: parseFloat(x_amount),
                 planName: plan.display_name || plan.name,
-                invoicePdf: null, // PDF generation can be added later if needed
+                invoicePdf,
               });
 
               if (invoiceEmailResult.success) {
-                logger.info('Invoice email sent successfully', {
+                logger.info('Invoice email sent with PDF', {
                   to: customerEmail,
                   refPayco: x_ref_payco,
                 });
@@ -1372,8 +1413,14 @@ class PaymentService {
               });
             }
 
-            // 2. Send welcome email from pnptv.app
+            // 2. Generate onboarding guide PDF and send instructions email from noreply@pnptv.app
             try {
+              const { buffer: guidePdf } = await InvoiceService.generateOnboardingGuide({
+                customerName: x_customer_name || user?.first_name || 'Valued Customer',
+                planName: plan.display_name || plan.name,
+                language: userLanguage,
+              });
+
               const welcomeEmailResult = await EmailService.sendWelcomeEmail({
                 to: customerEmail,
                 customerName: x_customer_name || user?.first_name || 'Valued Customer',
@@ -1381,17 +1428,18 @@ class PaymentService {
                 duration: plan.duration,
                 expiryDate,
                 language: userLanguage,
+                onboardingGuidePdf: guidePdf,
               });
 
               if (welcomeEmailResult.success) {
-                logger.info('Welcome email sent successfully', {
+                logger.info('Instructions email sent with onboarding guide PDF', {
                   to: customerEmail,
                   planId: planIdOrBookingId,
                   language: userLanguage,
                 });
               }
             } catch (emailError) {
-              logger.error('Error sending welcome email (non-critical):', {
+              logger.error('Error sending instructions email (non-critical):', {
                 error: emailError.message,
                 refPayco: x_ref_payco,
               });
@@ -1710,21 +1758,29 @@ class PaymentService {
               });
             }
 
-            // Send enhanced payment confirmation notification via bot (with PRIME channel link)
+            // Emit real-time payment confirmation via Socket.IO (replaces bot DM)
             const userLanguage = user?.language || 'es';
             const amountUSD = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
             try {
-              await this.sendPaymentConfirmationNotification({
-                userId,
-                plan,
-                transactionId: source?.txHash || id,
-                amount: amountUSD,
-                expiryDate,
-                language: userLanguage,
-                provider: 'daimo',
+              await NotificationEmitter.emit({
+                targetUserId: userId,
+                type: 'payment',
+                entityType: 'payment',
+                entityId: payment?.id || null,
+                message: userLanguage === 'es'
+                  ? `Pago confirmado: ${plan.display_name || plan.name}`
+                  : `Payment confirmed: ${plan.display_name || plan.name}`,
+                metadata: {
+                  planName: plan.display_name || plan.name,
+                  amount: amountUSD,
+                  currency: 'USD',
+                  expiryDate: expiryDate?.toISOString(),
+                  transactionId: source?.txHash || id,
+                  provider: 'daimo',
+                },
               });
             } catch (notifError) {
-              logger.error('Error sending payment confirmation notification (non-critical):', {
+              logger.error('Error emitting payment notification (non-critical):', {
                 error: notifError.message,
                 userId,
               });
@@ -1748,6 +1804,26 @@ class PaymentService {
                   redemptionId: payment.metadata.redemptionId,
                 });
               }
+            }
+
+            // Send Telegram DM with membership info + PRIME channel invite link
+            try {
+              const daimoAmountForDM = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
+              await PaymentService.sendPaymentConfirmationNotification({
+                userId,
+                plan,
+                transactionId: source?.txHash || id,
+                amount: daimoAmountForDM,
+                expiryDate,
+                language: userLanguage,
+                provider: 'daimo',
+              });
+            } catch (confirmError) {
+              logger.error('Error sending payment confirmation DM (non-critical):', {
+                error: confirmError.message,
+                userId,
+                eventId: id,
+              });
             }
 
             // Get customer email from user record or subscriber record
@@ -1810,19 +1886,32 @@ class PaymentService {
               const userLanguage = user?.language || 'es';
               const amountUSD = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
 
-              // 1. Send invoice email from pnptv.app
+              // 1. Generate PDF invoice and send invoice email from pnptv.app
               try {
+                const { buffer: invoicePdf } = await InvoiceService.generateInvoice({
+                  invoiceNumber: source?.txHash || id,
+                  customerName: user?.first_name || user?.username || 'Valued Customer',
+                  planName: plan.display_name || plan.name,
+                  amount: amountUSD,
+                  currency: 'USD',
+                  provider: 'daimo',
+                  transactionId: source?.txHash || id,
+                  purchaseDate: new Date(),
+                  expiryDate,
+                  language: userLanguage,
+                });
+
                 const invoiceEmailResult = await EmailService.sendInvoiceEmail({
                   to: customerEmail,
                   customerName: user?.first_name || user?.username || 'Valued Customer',
                   invoiceNumber: source?.txHash || id,
                   amount: amountUSD,
                   planName: plan.display_name || plan.name,
-                  invoicePdf: null,
+                  invoicePdf,
                 });
 
                 if (invoiceEmailResult.success) {
-                  logger.info('Invoice email sent successfully (Daimo)', {
+                  logger.info('Invoice email sent with PDF (Daimo)', {
                     to: customerEmail,
                     txHash: source?.txHash,
                   });
@@ -1834,8 +1923,14 @@ class PaymentService {
                 });
               }
 
-              // 2. Send welcome email from pnptv.app
+              // 2. Generate onboarding guide PDF and send instructions email from noreply@pnptv.app
               try {
+                const { buffer: guidePdf } = await InvoiceService.generateOnboardingGuide({
+                  customerName: user?.first_name || user?.username || 'Valued Customer',
+                  planName: plan.display_name || plan.name,
+                  language: userLanguage,
+                });
+
                 const welcomeEmailResult = await EmailService.sendWelcomeEmail({
                   to: customerEmail,
                   customerName: user?.first_name || user?.username || 'Valued Customer',
@@ -1843,17 +1938,18 @@ class PaymentService {
                   duration: plan.duration,
                   expiryDate,
                   language: userLanguage,
+                  onboardingGuidePdf: guidePdf,
                 });
 
                 if (welcomeEmailResult.success) {
-                  logger.info('Welcome email sent successfully (Daimo)', {
+                  logger.info('Instructions email sent with onboarding guide PDF (Daimo)', {
                     to: customerEmail,
                     planId,
                     language: userLanguage,
                   });
                 }
               } catch (emailError) {
-                logger.error('Error sending welcome email (non-critical):', {
+                logger.error('Error sending instructions email (non-critical):', {
                   error: emailError.message,
                   eventId: id,
                 });

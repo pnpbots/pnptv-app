@@ -78,7 +78,7 @@ class EmailService {
       }
 
       const mailOptions = {
-        from: `"PNPtv Billing" <${process.env.PNPTV_FROM_EMAIL || 'billing@pnptv.app'}>`,
+        from: `"PNPtv Billing" <${process.env.EASYBOTS_SMTP_USER || 'hello@easybots.store'}>`,
         to,
         subject: subject || `Invoice #${invoiceNumber} - PNPtv`,
         html: this.generateInvoiceEmailHtml({
@@ -124,7 +124,7 @@ class EmailService {
    * @param {string} options.language - Email language (en/es)
    * @returns {Promise<Object>} Send result
    */
-  async sendWelcomeEmail({ to, customerName, planName, duration, expiryDate, language = 'es' }) {
+  async sendWelcomeEmail({ to, customerName, planName, duration, expiryDate, language = 'es', onboardingGuidePdf = null }) {
     try {
       if (!this.transporters.pnptv) {
         logger.warn('PNPtv transporter not configured, skipping welcome email');
@@ -133,11 +133,20 @@ class EmailService {
 
       const isSpanish = language === 'es';
       const subject = isSpanish
-        ? '¡Bienvenido a PNPtv! 🎬 Tu acceso está listo'
-        : 'Welcome to PNPtv! 🎬 Your access is ready';
+        ? 'Tu Guía de Membresía PNPtv 🎬'
+        : 'Your PNPtv Membership Guide 🎬';
+
+      const attachments = [];
+      if (onboardingGuidePdf) {
+        attachments.push({
+          filename: isSpanish ? 'Como-Usar-PNPtv.pdf' : 'How-to-Use-PNPtv.pdf',
+          content: onboardingGuidePdf,
+          contentType: 'application/pdf',
+        });
+      }
 
       const mailOptions = {
-        from: `"PNPtv" <${process.env.PNPTV_FROM_EMAIL || 'welcome@pnptv.app'}>`,
+        from: '"PNPtv" <noreply@pnptv.app>',
         to,
         subject,
         html: this.generateWelcomeEmailHtml({
@@ -147,6 +156,7 @@ class EmailService {
           expiryDate,
           language,
         }),
+        attachments,
       };
 
       const result = await this.transporters.pnptv.sendMail(mailOptions);
@@ -285,23 +295,28 @@ class EmailService {
       <div class="instructions">
         <h3>🚀 Cómo acceder a PNPtv:</h3>
         <ol>
+          <li><strong>Visita</strong> <a href="https://pnptv.app/welcome" class="highlight">pnptv.app/welcome</a> para comenzar</li>
           <li><strong>Abre Telegram</strong> y busca nuestro bot: <span class="highlight">@PNPtvBot</span></li>
-          <li><strong>Inicia el bot</strong> con el comando <code>/start</code></li>
           <li><strong>Tu suscripción ya está activa</strong> - ¡Comienza a disfrutar del contenido!</li>
-          <li>Usa el comando <code>/help</code> para ver todas las funciones disponibles</li>
         </ol>
       </div>
 
-      <p style="margin-top: 30px;"><strong>¿Qué puedes hacer con PNPtv?</strong></p>
-      <ul>
-        <li>📺 Ver contenido exclusivo en streaming</li>
+      <div style="background: #fff3e0; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #E69138;">
+        <p style="margin: 0;"><strong>📎 Guía adjunta:</strong> Hemos adjuntado un PDF con instrucciones detalladas sobre cómo usar cada función de PNPtv. ¡Guárdalo para referencia!</p>
+      </div>
 
-        <li>💬 Participar en la comunidad</li>
-        <li>📱 Acceso 24/7 desde cualquier dispositivo</li>
+      <p style="margin-top: 20px;"><strong>¿Qué puedes hacer con PNPtv?</strong></p>
+      <ul>
+        <li>📺 Videorama — Videos, música y podcasts exclusivos</li>
+        <li>📹 Hangouts — Salas de videollamadas comunitarias</li>
+        <li>🔴 PNP Live — Transmisiones en vivo</li>
+        <li>💬 Social Feed — Publica, comenta y conecta</li>
+        <li>📍 Nearby — Descubre miembros cercanos</li>
+        <li>⭐ Canal PRIME — Contenido premium en Telegram</li>
       </ul>
 
       <div style="text-align: center; margin: 30px 0;">
-        <a href="https://t.me/PNPtvBot" class="button">🚀 Ir al Bot de Telegram</a>
+        <a href="https://pnptv.app/welcome" class="button">🚀 Comenzar en PNPtv</a>
       </div>
 
       <p><strong>¿Necesitas ayuda?</strong><br>
@@ -312,7 +327,7 @@ class EmailService {
     </div>
 
     <div class="footer">
-      <p>PNPtv | welcome@pnptv.app</p>
+      <p>PNPtv | noreply@pnptv.app</p>
       <p>Este es un correo automático, por favor no respondas directamente a este mensaje.</p>
     </div>
   </div>
@@ -370,23 +385,28 @@ class EmailService {
       <div class="instructions">
         <h3>🚀 How to access PNPtv:</h3>
         <ol>
+          <li><strong>Visit</strong> <a href="https://pnptv.app/welcome" class="highlight">pnptv.app/welcome</a> to get started</li>
           <li><strong>Open Telegram</strong> and search for our bot: <span class="highlight">@PNPtvBot</span></li>
-          <li><strong>Start the bot</strong> with the <code>/start</code> command</li>
           <li><strong>Your subscription is active</strong> - Start enjoying the content!</li>
-          <li>Use the <code>/help</code> command to see all available features</li>
         </ol>
       </div>
 
-      <p style="margin-top: 30px;"><strong>What can you do with PNPtv?</strong></p>
-      <ul>
-        <li>📺 Watch exclusive streaming content</li>
+      <div style="background: #fff3e0; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #E69138;">
+        <p style="margin: 0;"><strong>📎 Guide attached:</strong> We've attached a PDF with detailed instructions on how to use every feature of PNPtv. Save it for reference!</p>
+      </div>
 
-        <li>💬 Join the community</li>
-        <li>📱 24/7 access from any device</li>
+      <p style="margin-top: 20px;"><strong>What can you do with PNPtv?</strong></p>
+      <ul>
+        <li>📺 Videorama — Exclusive videos, music, and podcasts</li>
+        <li>📹 Hangouts — Community video call rooms</li>
+        <li>🔴 PNP Live — Live streams</li>
+        <li>💬 Social Feed — Post, comment, and connect</li>
+        <li>📍 Nearby — Discover nearby members</li>
+        <li>⭐ PRIME Channel — Premium Telegram content</li>
       </ul>
 
       <div style="text-align: center; margin: 30px 0;">
-        <a href="https://t.me/PNPtvBot" class="button">🚀 Go to Telegram Bot</a>
+        <a href="https://pnptv.app/welcome" class="button">🚀 Get Started on PNPtv</a>
       </div>
 
       <p><strong>Need help?</strong><br>
@@ -397,7 +417,7 @@ class EmailService {
     </div>
 
     <div class="footer">
-      <p>PNPtv | welcome@pnptv.app</p>
+      <p>PNPtv | noreply@pnptv.app</p>
       <p>This is an automated email, please do not reply directly to this message.</p>
     </div>
   </div>

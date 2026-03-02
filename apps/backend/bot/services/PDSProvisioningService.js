@@ -270,13 +270,13 @@ class PDSProvisioningService {
     try {
       const adminDid = process.env.PDS_ADMIN_DID;
       const adminPassword = process.env.PDS_ADMIN_PASSWORD;
-      const localEndpoint = process.env.PDS_LOCAL_ENDPOINT || 'http://127.0.0.1:3000';
+      const localEndpoint = process.env.PDS_LOCAL_ENDPOINT || process.env.BLUESKY_PDS_URL || 'http://bluesky-pds:3000';
 
       if (!adminDid || !adminPassword) {
         throw new Error('PDS_ADMIN_DID or PDS_ADMIN_PASSWORD not configured');
       }
 
-      // Call local PDS API to create account
+      // Call local PDS API to create account (PDS uses Basic auth for admin endpoints)
       const response = await axios.post(`${localEndpoint}/xrpc/com.atproto.server.createAccount`, {
         handle: pds_handle,
         password: this.generateSecurePassword(),
@@ -284,7 +284,7 @@ class PDSProvisioningService {
         email: user.email || `${user.id}@pnptv.app`
       }, {
         headers: {
-          'Authorization': `Bearer ${adminDid}:${adminPassword}`,
+          'Authorization': `Basic ${Buffer.from(`admin:${adminPassword}`).toString('base64')}`,
           'Content-Type': 'application/json'
         },
         timeout: 10000
@@ -623,7 +623,12 @@ class PDSProvisioningService {
       await query(
         `INSERT INTO pds_provisioning_queue (
           user_id, queue_type, status, metadata, scheduled_at
-        ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP + INTERVAL '5 minutes')`,
+        ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP + INTERVAL '5 minutes')
+        ON CONFLICT (user_id) DO UPDATE SET
+          queue_type = EXCLUDED.queue_type,
+          status = EXCLUDED.status,
+          metadata = EXCLUDED.metadata,
+          scheduled_at = EXCLUDED.scheduled_at`,
         [userId, action, 'pending', JSON.stringify({ pds_did: pdsDid, ...errorDetails })]
       );
 

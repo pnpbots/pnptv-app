@@ -20,6 +20,7 @@ const DirectMessages = lazy(() => import("@/pages/DirectMessages"));
 const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
 const Support = lazy(() => import("@/pages/Support"));
 const Apply = lazy(() => import("@/pages/Apply"));
+const Welcome = lazy(() => import("@/pages/Welcome"));
 
 export const router = createBrowserRouter([
   {
@@ -123,6 +124,14 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <Profile />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "welcome",
+        element: (
+          <ModuleLoader>
+            <Welcome />
           </ModuleLoader>
         ),
       },

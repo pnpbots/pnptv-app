@@ -142,7 +142,7 @@ class PNPLiveTipsService {
                 COALESCE(p.display_name, m.name, 'Performer') as model_name,
                 u.username as user_username
          FROM pnp_tips t
-         LEFT JOIN performers p ON t.performer_id = p.id
+         LEFT JOIN performers p ON p.id::text = t.performer_id
          LEFT JOIN pnp_models m ON t.model_id = m.id
          LEFT JOIN users u ON t.user_id = u.id
          WHERE t.created_at >= $1
@@ -169,7 +169,7 @@ class PNPLiveTipsService {
       const result = await query(
         `SELECT t.*, COALESCE(p.display_name, m.name, 'Performer') as model_name
          FROM pnp_tips t
-         LEFT JOIN performers p ON t.performer_id = p.id
+         LEFT JOIN performers p ON p.id::text = t.performer_id
          LEFT JOIN pnp_models m ON t.model_id = m.id
          WHERE t.user_id = $1
          ORDER BY t.created_at DESC
@@ -194,7 +194,7 @@ class PNPLiveTipsService {
       const result = await query(
         `SELECT t.*, COALESCE(p.display_name, m.name, 'Performer') as model_name, u.username as user_username
          FROM pnp_tips t
-         LEFT JOIN performers p ON t.performer_id = p.id
+         LEFT JOIN performers p ON p.id::text = t.performer_id
          LEFT JOIN pnp_models m ON t.model_id = m.id
          LEFT JOIN users u ON t.user_id = u.id
          WHERE t.id = $1`,
