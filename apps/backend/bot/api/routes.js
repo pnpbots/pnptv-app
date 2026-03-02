@@ -2035,7 +2035,7 @@ function escapeHtml(s) {
 async function ensureEmailCredentials(userId, email, language) {
   const crypto = require('crypto');
   const { query } = require('../../config/postgres');
-  const emailSvc = require('../../services/emailService');
+  const EmailService = require('../services/emailservice');
 
   // 1. Check if another user already has this email (UNIQUE constraint)
   const { rows: emailConflict } = await query(
@@ -2088,7 +2088,12 @@ async function ensureEmailCredentials(userId, email, language) {
   const isEs = (language || 'es').startsWith('es');
   const safeEmail = escapeHtml(email);
   try {
-    await emailSvc.send({
+    const transporter = EmailService.transporters?.pnptv;
+    if (!transporter) {
+      logger.warn('PNPtv SMTP transporter not available, credentials email not sent', { to: email });
+    } else {
+    await transporter.sendMail({
+      from: process.env.PNPTV_SMTP_USER || 'support@pnptv.app',
       to: email,
       subject: isEs ? 'Tus credenciales de acceso PNPtv' : 'Your PNPtv Login Credentials',
       html: isEs
@@ -2113,6 +2118,7 @@ async function ensureEmailCredentials(userId, email, language) {
             <a href="https://app.pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Log In</a>
           </div>`,
     });
+    }
   } catch (emailErr) {
     logger.warn('Failed to send credentials email (non-critical)', { to: email, error: emailErr.message });
   }
