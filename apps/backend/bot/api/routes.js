@@ -2093,7 +2093,7 @@ async function ensureEmailCredentials(userId, email, language) {
       logger.warn('PNPtv SMTP transporter not available, credentials email not sent', { to: email });
     } else {
     await transporter.sendMail({
-      from: process.env.PNPTV_SMTP_USER || 'support@pnptv.app',
+      from: process.env.PNPTV_FROM_EMAIL || 'noreply@pnptv.app',
       to: email,
       subject: isEs ? 'Tus credenciales de acceso PNPtv' : 'Your PNPtv Login Credentials',
       html: isEs
