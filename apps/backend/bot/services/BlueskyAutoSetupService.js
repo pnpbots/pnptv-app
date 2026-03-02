@@ -108,7 +108,8 @@ class BlueskyAutoSetupService {
       if (user?.id) {
         try {
           await this.logBlueskyAction(user.id, 'auto_setup', 'failed', {
-            error: error.message
+            error: error.message,
+            isPermanent: !!error.isPermanentFailure
           });
         } catch (logError) {
           logger.error(`[Bluesky] Failed to log auto-setup error:`, logError);
@@ -117,7 +118,8 @@ class BlueskyAutoSetupService {
 
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        isPermanent: !!error.isPermanentFailure
       };
     }
   }
@@ -221,10 +223,16 @@ class BlueskyAutoSetupService {
 
       try {
         await this.logBlueskyAction(userId, 'manual_setup', 'failed', {
-          error: error.message
+          error: error.message,
+          isPermanent: !!error.isPermanentFailure
         });
       } catch (logError) {
         logger.warn(`[Bluesky] Failed to log setup error:`, logError);
+      }
+
+      // If it's a 400 (permanent failure), provide a more helpful error message
+      if (error.isPermanentFailure) {
+        throw new Error(`Account already exists. If you believe this is an error, please contact support.`);
       }
 
       throw error;
@@ -337,6 +345,17 @@ class BlueskyAutoSetupService {
       };
 
     } catch (error) {
+      // Handle 400 errors: account likely already exists, treat as permanent failure
+      if (error.response?.status === 400) {
+        logger.info(`[Bluesky] Account creation returned 400 (likely already exists) for ${handle}. Marking as permanent failure to prevent retries.`);
+
+        // Throw a special error to indicate this should NOT be retried
+        const permanentError = new Error(`Bluesky account already exists for ${handle} (400 error)`);
+        permanentError.isPermanentFailure = true;
+        permanentError.status = 400;
+        throw permanentError;
+      }
+
       logger.error(`[Bluesky] Error creating account:`, error.message);
       throw error;
     }

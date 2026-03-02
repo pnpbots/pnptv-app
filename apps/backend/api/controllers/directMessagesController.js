@@ -411,7 +411,7 @@ async function markThreadAsRead(req, res) {
 async function upsertThread(userId, otherUserId, lastMessage) {
   // Ensure user_a < user_b (alphabetically)
   const [userA, userB] = userId < otherUserId ? [userId, otherUserId] : [otherUserId, userId];
-  const incrementForA = userId === userA ? 'unread_for_b = unread_for_b + 1' : 'unread_for_a = unread_for_a + 1';
+  const incrementForA = userId === userA ? 'unread_for_b = dm_threads.unread_for_b + 1' : 'unread_for_a = dm_threads.unread_for_a + 1';
 
   const truncatedMessage = lastMessage.substring(0, 100);
 

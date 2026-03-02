@@ -65,7 +65,8 @@ class NearbyController {
     } catch (error) {
       // Handle rate limiting
       if (error.code === 'RATE_LIMITED') {
-        logger.warn(`⚠️ Rate limit exceeded for user ${req.userId}`);
+        const uid = req.userId || req.user?.id || 'unknown';
+        logger.warn(`⚠️ Rate limit exceeded for user ${uid}`);
         return res.status(429).json({
           error: 'Too many location updates',
           retry_after: error.waitSeconds,

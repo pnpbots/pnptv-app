@@ -160,14 +160,19 @@ class PDSProvisioningService {
           const pnptv_uuid = uuidv4();
           await this.logProvisioningAction(user.id, pnptv_uuid, 'error', 'failed', {
             error: error.message,
-            stack: error.stack
+            stack: error.stack,
+            isPermanent: !!error.isPermanentFailure
           });
 
-          // Queue for retry
-          await this.queueProvisioningAction(user.id, pnptv_uuid, 'retry', {
-            reason: 'initial_provisioning_failed',
-            error: error.message
-          });
+          // Only queue for retry if it's NOT a permanent failure (e.g., not 400 errors)
+          if (!error.isPermanentFailure) {
+            await this.queueProvisioningAction(user.id, pnptv_uuid, 'retry', {
+              reason: 'initial_provisioning_failed',
+              error: error.message
+            });
+          } else {
+            logger.info(`[PDS] Permanent failure detected (${error.status}) for user ${user.id}, NOT queuing for retry`);
+          }
         } catch (logError) {
           logger.error(`[PDS] Failed to log provisioning error:`, logError);
         }
@@ -176,7 +181,7 @@ class PDSProvisioningService {
       return {
         success: false,
         error: error.message,
-        retry_queued: true
+        retry_queued: !error.isPermanentFailure
       };
     }
   }
@@ -310,6 +315,17 @@ class PDSProvisioningService {
       };
 
     } catch (error) {
+      // Handle 400 errors: account likely already exists, treat as permanent failure
+      if (error.response?.status === 400) {
+        logger.info(`[PDS] Account creation returned 400 (likely already exists) for ${pds_handle}. Marking as permanent failure to prevent retries.`);
+
+        // Throw a special error to indicate this should NOT be retried
+        const permanentError = new Error(`PDS account already exists for ${pds_handle} (400 error)`);
+        permanentError.isPermanentFailure = true;
+        permanentError.status = 400;
+        throw permanentError;
+      }
+
       logger.error(`[PDS] Local PDS provisioning error:`, error);
       throw error;
     }
@@ -343,6 +359,17 @@ class PDSProvisioningService {
       };
 
     } catch (error) {
+      // Handle 400 errors: account likely already exists, treat as permanent failure
+      if (error.response?.status === 400) {
+        logger.info(`[PDS] Remote account creation returned 400 (likely already exists) for ${pds_handle}. Marking as permanent failure to prevent retries.`);
+
+        // Throw a special error to indicate this should NOT be retried
+        const permanentError = new Error(`PDS account already exists for ${pds_handle} (400 error)`);
+        permanentError.isPermanentFailure = true;
+        permanentError.status = 400;
+        throw permanentError;
+      }
+
       logger.error(`[PDS] Remote PDS provisioning error:`, error);
       throw error;
     }
