@@ -31,39 +31,35 @@ module.exports = {
     features: {
       user: {
         free: {
-          streams: 'limited',
-          content: 'public_only',
-          adFree: false,
-          priorityChat: false,
+          socialFeed: 'free_only',
+          nearby: 'count_only',
+          dms: 'limited',
+          hangouts: 'browse_only',
+          live: 'preview_only',
+          profileBrowsing: 'interacted_only',
+        },
+        member: {
+          socialFeed: 'free_and_member',
+          nearby: 'blurred_profiles',
+          dms: 'unlimited',
+          hangouts: 'join',
+          live: 'watch',
+          profileBrowsing: 'all_blurred_prime',
         },
         prime: {
-          streams: 'unlimited',
-          content: 'exclusive',
-          adFree: true,
-          priorityChat: true,
+          socialFeed: 'all',
+          nearby: 'full',
+          dms: 'unlimited',
+          hangouts: 'join_and_create',
+          live: 'watch_and_stream',
+          profileBrowsing: 'full',
         },
       },
-      model: {
-        starter: {
-          maxStreamsPerWeek: 1,
-          maxContentUploads: 10,
-          prioritySupport: false,
-          analytics: 'basic',
-        },
-        pro: {
-          maxStreamsPerWeek: null,
-          maxContentUploads: 100,
-          prioritySupport: false,
-          analytics: 'advanced',
-        },
-        elite: {
-          maxStreamsPerWeek: null,
-          maxContentUploads: null,
-          prioritySupport: true,
-          analytics: 'advanced',
-          featuredPlacement: true,
-        },
-      },
+    },
+
+    freeTier: {
+      dmLimits: { default: 3, afterDay14: 1 },
+      decay: { deprioritizeAfterDays: 30 },
     },
   },
 
@@ -119,11 +115,6 @@ module.exports = {
   monetization: {
     // Revenue split percentages (model gets %)
     revenueSplit: {
-      subscription: {
-        starter: 75,
-        pro: 80,
-        elite: 85,
-      },
       contentSale: {
         standard: 80,
       },

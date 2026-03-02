@@ -5,7 +5,7 @@ import React, {
   useCallback,
   memo,
 } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
@@ -355,6 +355,7 @@ export default function DirectMessages() {
         userId={userId}
         currentUser={user}
         navigate={navigate}
+        userTier={user?.tier ?? null}
       />
     );
   }
@@ -533,10 +534,12 @@ function Conversation({
   userId,
   currentUser,
   navigate,
+  userTier,
 }: {
   userId: string;
   currentUser: { photoUrl?: string | null; firstName?: string; username?: string; dbId?: string } | null;
   navigate: (path: string) => void;
+  userTier: string | null | undefined;
 }) {
   const [messages, setMessages] = useState<DirectMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -547,6 +550,11 @@ function Conversation({
   const [partnerName, setPartnerName] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Free-tier DM quota tracking
+  const [dmRemaining, setDmRemaining] = useState<number | null>(null);
+  const [dmLimit, setDmLimit] = useState(3);
+  const isFree = userTier?.toLowerCase() === "free" || !userTier;
 
   // Media upload state
   const [mediaFile, setMediaFile] = useState<File | null>(null);
@@ -628,6 +636,8 @@ function Conversation({
     const hasText = msgInput.trim().length > 0;
     const hasMedia = mediaFile !== null;
     if (!hasText && !hasMedia) return;
+    // Block send for free-tier users who have exhausted their daily limit
+    if (isFree && dmRemaining !== null && dmRemaining <= 0) return;
 
     setSending(true);
     setSendError(null);
@@ -640,18 +650,31 @@ function Conversation({
         if (data.success && data.message) {
           setMessages((prev) => [...prev, data.message]);
         }
+        if (data.remaining !== undefined) {
+          setDmRemaining(data.remaining);
+          if (data.limit !== undefined) setDmLimit(data.limit);
+        }
         clearMedia();
       } else {
         const data = await sendMessage(userId, text);
         if (data.success && data.message) {
           setMessages((prev) => [...prev, data.message]);
         }
+        if (data.remaining !== undefined) {
+          setDmRemaining(data.remaining);
+          if (data.limit !== undefined) setDmLimit(data.limit);
+        }
       }
     } catch (err) {
       if (!hasMedia) setMsgInput(text);
-      setSendError(
-        err instanceof Error ? err.message : "Failed to send message. Try again."
-      );
+      // 429 DM_LIMIT_REACHED — set remaining to 0 so UI blocks further sends
+      const errMsg = err instanceof Error ? err.message : "";
+      if (errMsg.includes("DM_LIMIT_REACHED") || errMsg.includes("limit")) {
+        setDmRemaining(0);
+        setSendError("Daily message limit reached. Upgrade for unlimited messaging.");
+      } else {
+        setSendError(errMsg || "Failed to send message. Try again.");
+      }
       setUploadError(
         hasMedia
           ? err instanceof Error
@@ -662,7 +685,7 @@ function Conversation({
     } finally {
       setSending(false);
     }
-  }, [sending, msgInput, mediaFile, userId, clearMedia]);
+  }, [sending, msgInput, mediaFile, userId, clearMedia, isFree, dmRemaining]);
 
   const handleNavigate = useCallback(
     (path: string) => navigate(path),
@@ -673,7 +696,8 @@ function Conversation({
     setLightboxSrc(src);
   }, []);
 
-  const canSend = !sending && (msgInput.trim().length > 0 || mediaFile !== null);
+  const limitReached = isFree && dmRemaining !== null && dmRemaining <= 0;
+  const canSend = !sending && !limitReached && (msgInput.trim().length > 0 || mediaFile !== null);
 
   // Derive initials for current user + partner
   const myInitial = (
@@ -801,6 +825,24 @@ function Conversation({
           uploadError={uploadError}
           onCancel={clearMedia}
         />
+      )}
+
+      {/* Free-tier DM limit banner */}
+      {isFree && dmRemaining !== null && (
+        <div className="mx-4 mb-2 rounded-lg border border-purple-500/30 bg-purple-900/30 p-3 text-center">
+          <p className="text-sm text-purple-200">
+            {dmRemaining > 0
+              ? `${dmRemaining} of ${dmLimit} messages left today`
+              : "Daily message limit reached"}
+            {" — "}
+            <Link
+              to="/subscribe"
+              className="font-semibold text-purple-400 hover:text-purple-300"
+            >
+              Go unlimited
+            </Link>
+          </p>
+        </div>
       )}
 
       {/* Input bar — relative + z-50 ensures it stacks above any fixed

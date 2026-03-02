@@ -109,6 +109,72 @@ const requirePrimeTier = (req, res, next) => {
   next();
 };
 
+/**
+ * Tier gate — requires member or prime subscription
+ */
+const requireMemberTier = (req, res, next) => {
+  const user = req.session?.user;
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Authentication required', code: 'AUTH_REQUIRED' });
+  }
+  const tier = (user.tier || 'free').toLowerCase();
+  const role = user.role || '';
+  if (tier === 'member' || tier === 'prime' || role === 'admin' || role === 'superadmin') {
+    return next();
+  }
+  return res.status(403).json({
+    success: false,
+    error: 'Member subscription required',
+    code: 'MEMBER_REQUIRED',
+    upgradeUrl: '/subscribe',
+  });
+};
+
+/**
+ * DM rate limit for free tier users — uses Redis daily counter
+ */
+const requireFreeTierDmLimit = async (req, res, next) => {
+  const user = req.session?.user;
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Authentication required', code: 'AUTH_REQUIRED' });
+  }
+  const tier = (user.tier || 'free').toLowerCase();
+  const role = user.role || '';
+  // Member, prime, and admin bypass
+  if (tier === 'member' || tier === 'prime' || role === 'admin' || role === 'superadmin') {
+    return next();
+  }
+  try {
+    const redis = getRedis();
+    const today = new Date().toISOString().slice(0, 10);
+    const key = `pnptv:dm_limit:${user.id}:${today}`;
+    const count = parseInt(await redis.get(key) || '0', 10);
+    // Determine limit based on account age
+    const createdAt = user.created_at || user.createdAt;
+    let limit = 3;
+    if (createdAt) {
+      const daysSince = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSince > 14) limit = 1;
+    }
+    if (count >= limit) {
+      return res.status(429).json({
+        success: false,
+        error: 'Daily message limit reached',
+        code: 'DM_LIMIT_REACHED',
+        limit,
+        used: count,
+        remaining: 0,
+        upgradeUrl: '/subscribe',
+      });
+    }
+    req.dmLimit = { limit, used: count, remaining: limit - count };
+    return next();
+  } catch (err) {
+    logger.error('DM limit check error', { error: err.message });
+    return next(); // fail open
+  }
+};
+
 // Rate limiter for page routes (landing pages, policies, etc.)
 const pageLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
@@ -1894,7 +1960,7 @@ app.get('/api/webapp/social/feed/following',           asyncHandler(followContro
 // Web App Direct Messages
 app.get('/api/webapp/messages/threads', asyncHandler(directMessagesController.getThreads));
 app.get('/api/webapp/messages/thread/:otherUserId', asyncHandler(directMessagesController.getMessages));
-app.post('/api/webapp/messages/send', asyncHandler(directMessagesController.sendMessage));
+app.post('/api/webapp/messages/send', requireFreeTierDmLimit, asyncHandler(directMessagesController.sendMessage));
 app.delete('/api/webapp/messages/:messageId', asyncHandler(directMessagesController.deleteMessage));
 app.put('/api/webapp/messages/thread/:otherUserId/read', asyncHandler(directMessagesController.markThreadAsRead));
 
@@ -2198,14 +2264,20 @@ app.post(
 // ── Hangout Groups ───────────────────────────────────────────────────────────
 app.get('/api/webapp/hangouts/groups', asyncHandler(hangoutGroupController.listGroups));
 app.post('/api/webapp/hangouts/groups', asyncHandler(hangoutGroupController.createGroup));
+// Discover must be before /:id to avoid route collision
+app.get('/api/webapp/hangouts/groups/discover', asyncHandler(hangoutGroupController.discoverGroups));
 app.get('/api/webapp/hangouts/groups/:id', asyncHandler(hangoutGroupController.getGroup));
-app.post('/api/webapp/hangouts/groups/:id/join', asyncHandler(hangoutGroupController.joinGroup));
+app.post('/api/webapp/hangouts/groups/:id/join', requireMemberTier, asyncHandler(hangoutGroupController.joinGroup));
 app.post('/api/webapp/hangouts/groups/:id/leave', asyncHandler(hangoutGroupController.leaveGroup));
 app.delete('/api/webapp/hangouts/groups/:id', asyncHandler(hangoutGroupController.deleteGroup));
+// Join requests for private groups
+app.post('/api/webapp/hangouts/groups/:id/request-join', asyncHandler(hangoutGroupController.requestJoinGroup));
+app.get('/api/webapp/hangouts/groups/:id/requests', asyncHandler(hangoutGroupController.getJoinRequests));
+app.post('/api/webapp/hangouts/groups/:id/requests/:requestId/:action', asyncHandler(hangoutGroupController.handleJoinRequest));
 
 // ── Hangout Group Chat ───────────────────────────────────────────────────────
-app.get('/api/webapp/hangouts/groups/:id/messages', asyncHandler(hangoutGroupController.getMessages));
-app.post('/api/webapp/hangouts/groups/:id/messages', asyncHandler(hangoutGroupController.sendMessage));
+app.get('/api/webapp/hangouts/groups/:id/messages', requireMemberTier, asyncHandler(hangoutGroupController.getMessages));
+app.post('/api/webapp/hangouts/groups/:id/messages', requireMemberTier, asyncHandler(hangoutGroupController.sendMessage));
 // Media upload for hangout group chat (images 10 MB / videos 50 MB, per-hangout dirs)
 app.post(
   '/api/webapp/hangouts/groups/:id/media',
@@ -2246,7 +2318,7 @@ app.get('/api/webapp/nearby/search', asyncHandler(async (req, res) => {
 app.get('/api/webapp/dm/threads', asyncHandler(dmController.getThreads));
 app.get('/api/webapp/dm/conversation/:partnerId', asyncHandler(dmController.getConversation));
 app.get('/api/webapp/dm/user/:partnerId', asyncHandler(dmController.getPartnerInfo));
-app.post('/api/webapp/dm/send/:recipientId', asyncHandler(dmController.sendMessage));
+app.post('/api/webapp/dm/send/:recipientId', requireFreeTierDmLimit, asyncHandler(dmController.sendMessage));
 
 // Social feed, wall, posts
 // Public home-feed — no auth required, returns latest posts for the home page preview

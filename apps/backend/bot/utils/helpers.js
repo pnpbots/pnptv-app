@@ -305,6 +305,17 @@ const safeAnswerCbQuery = async (ctx, text = '', showAlert = false) => {
   }
 };
 
+/**
+ * Check if user has member tier or above (member or PRIME)
+ * @param {Object} user - User object
+ * @returns {boolean} True if user has member or PRIME tier
+ */
+const isMemberUser = (user) => {
+  if (!user) return false;
+  const tier = (user.tier || '').toLowerCase();
+  return tier === 'member' || tier === 'prime';
+};
+
 module.exports = {
   getLanguage,
   normalizeSubscriptionStatus,
@@ -313,6 +324,7 @@ module.exports = {
   hasTierAccess,
   isAdminUser,
   hasFullAccess,
+  isMemberUser,
   safeHandler,
   validateUserInput,
   isSessionExpired,

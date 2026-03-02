@@ -20,10 +20,17 @@ import {
   deleteHangoutGroup,
   markGroupAsRead,
   leaveGroupCall,
+  joinHangoutGroup,
+  discoverHangoutGroups,
+  requestJoinGroup,
+  getJoinRequests,
+  handleJoinRequest,
   type HangoutGroup,
   type GroupMessage,
   type StartCallResponse,
   type GetActiveCallResponse,
+  type DiscoverGroup,
+  type JoinRequest,
 } from "@/lib/api";
 import {
   MediaUploadButton,
@@ -216,6 +223,8 @@ export default function Chat() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const isPrime = user?.tier?.toLowerCase() === "prime";
+  const isMember = user?.tier?.toLowerCase() === "member" || isPrime;
+  const isFree = !isMember;
   const { showTutorial, dismissTutorial } = useTutorial("hangouts");
 
   // Group list state
@@ -227,7 +236,17 @@ export default function Chat() {
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
+  const [newIsPublic, setNewIsPublic] = useState(true);
   const [creating, setCreating] = useState(false);
+
+  // Discover groups
+  const [discoverList, setDiscoverList] = useState<DiscoverGroup[]>([]);
+  const [showDiscover, setShowDiscover] = useState(false);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+
+  // Join requests management (for creators)
+  const [joinRequests, setJoinRequests] = useState<Record<number, JoinRequest[]>>({});
+  const [showRequests, setShowRequests] = useState<number | null>(null);
 
   // Chat view state
   const [view, setView] = useState<View>("list");
@@ -295,15 +314,66 @@ export default function Chat() {
     setCreating(true);
     setCreateError(null);
     try {
-      await createHangoutGroup(newName.trim(), newDesc.trim());
+      await createHangoutGroup(newName.trim(), newDesc.trim(), newIsPublic);
       setNewName("");
       setNewDesc("");
+      setNewIsPublic(true);
       setShowCreate(false);
       loadGroups();
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create group");
     } finally {
       setCreating(false);
+    }
+  };
+
+  // ─── Discover groups ──────────────────────────────────────────────────
+
+  const loadDiscover = useCallback(async () => {
+    setDiscoverLoading(true);
+    try {
+      const data = await discoverHangoutGroups();
+      setDiscoverList(data.groups || []);
+    } catch {
+      // silent fail
+    } finally {
+      setDiscoverLoading(false);
+    }
+  }, []);
+
+  const handleDiscoverJoin = async (group: DiscoverGroup) => {
+    try {
+      if (group.isPublic) {
+        await joinHangoutGroup(group.id);
+        loadGroups();
+        loadDiscover();
+      } else {
+        await requestJoinGroup(group.id);
+        loadDiscover();
+      }
+    } catch {
+      // silent fail
+    }
+  };
+
+  // ─── Join request management ──────────────────────────────────────────
+
+  const loadJoinRequests = async (groupId: number) => {
+    try {
+      const data = await getJoinRequests(groupId);
+      setJoinRequests((prev) => ({ ...prev, [groupId]: data.requests || [] }));
+    } catch {
+      // silent fail
+    }
+  };
+
+  const handleRequest = async (groupId: number, requestId: number, action: "accept" | "reject") => {
+    try {
+      await handleJoinRequest(groupId, requestId, action);
+      loadJoinRequests(groupId);
+      if (action === "accept") loadGroups();
+    } catch {
+      // silent fail
     }
   };
 
@@ -374,6 +444,12 @@ export default function Chat() {
   // ─── Chat view open/close ──────────────────────────────────────────
 
   const openChat = async (group: HangoutGroup) => {
+    // Free-tier users cannot enter hangout rooms — redirect to subscribe
+    if (isFree) {
+      navigate("/subscribe");
+      return;
+    }
+
     // Dismiss the tutorial immediately when entering a chat so the overlay
     // can never surface while the user is in the chat input view.
     if (showTutorial) dismissTutorial();
@@ -844,6 +920,28 @@ export default function Chat() {
             rows={2}
             maxLength={500}
           />
+          {/* Public/Private toggle */}
+          <button
+            type="button"
+            onClick={() => setNewIsPublic(!newIsPublic)}
+            className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-white/5 mb-3 transition-colors hover:bg-white/10"
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                {newIsPublic ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5a17.92 17.92 0 01-8.716-2.247m0 0A9.015 9.015 0 003 12c0-1.605.42-3.113 1.157-4.418" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                )}
+              </svg>
+              <span className="text-sm text-pnp-textPrimary">
+                {newIsPublic ? "Anyone can join" : "Approval required to join"}
+              </span>
+            </div>
+            <div className={`w-9 h-5 rounded-full transition-colors relative ${newIsPublic ? "bg-pnp-accent" : "bg-white/20"}`}>
+              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${newIsPublic ? "left-[18px]" : "left-0.5"}`} />
+            </div>
+          </button>
           {createError && (
             <p className="text-xs text-pnp-error mb-2">{createError}</p>
           )}
@@ -918,6 +1016,20 @@ export default function Chat() {
       ) : (
         /* Group list */
         <div className="space-y-2">
+          {/* Free-tier upgrade prompt */}
+          {isFree && (
+            <div className="glass-card-sm p-4 mb-2 text-center border border-purple-500/30 bg-purple-900/20">
+              <p className="text-sm text-purple-200 mb-2">
+                Become a Member to join hangout rooms
+              </p>
+              <button
+                onClick={() => navigate("/subscribe")}
+                className="px-4 py-2 rounded-full text-sm font-semibold bg-gradient-to-r from-purple-500 to-pink-500 text-white active:scale-95 transition-transform"
+              >
+                Become a Member
+              </button>
+            </div>
+          )}
           {groups.map((group) => (
             <button
               key={group.id}
@@ -964,6 +1076,11 @@ export default function Chat() {
                         WALL OF FAME
                       </span>
                     )}
+                    {!group.isPublic && !group.isMain && !group.isWallOfFame && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary flex-shrink-0">
+                        PRIVATE
+                      </span>
+                    )}
                     {group.hasActiveCall && (
                       <div className="flex items-center gap-1 flex-shrink-0">
                         <span className="relative flex h-1.5 w-1.5">
@@ -992,6 +1109,161 @@ export default function Chat() {
               </div>
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Discover Groups */}
+      <div className="mt-6">
+        <button
+          onClick={() => {
+            const next = !showDiscover;
+            setShowDiscover(next);
+            if (next && discoverList.length === 0) loadDiscover();
+          }}
+          className="flex items-center gap-2 mb-3 group"
+        >
+          <h2 className="text-sm font-semibold text-pnp-textSecondary group-hover:text-pnp-textPrimary transition-colors">
+            Discover Groups
+          </h2>
+          <svg
+            className={`w-3.5 h-3.5 text-pnp-textSecondary transition-transform ${showDiscover ? "rotate-180" : ""}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {showDiscover && (
+          <div className="space-y-2 animate-fade-in-up">
+            {discoverLoading ? (
+              <div className="glass-card-sm p-4 animate-pulse">
+                <div className="h-4 bg-pnp-surface rounded w-40" />
+              </div>
+            ) : discoverList.length === 0 ? (
+              <p className="text-xs text-pnp-textSecondary px-1">No groups to discover right now.</p>
+            ) : (
+              discoverList.map((group) => (
+                <div key={group.id} className="glass-card-sm p-4">
+                  <div className="flex gap-3 items-center">
+                    <div
+                      className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                      style={{ background: "rgba(212, 0, 122, 0.2)", color: "#D4007A" }}
+                    >
+                      {group.name[0]?.toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-pnp-textPrimary text-sm truncate">{group.name}</span>
+                        {!group.isPublic && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary flex-shrink-0">
+                            PRIVATE
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-pnp-textSecondary truncate">
+                        {group.memberCount} members{group.description ? ` \u00b7 ${group.description}` : ""}
+                      </p>
+                    </div>
+                    {isFree ? (
+                      <button
+                        onClick={() => navigate("/subscribe")}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 border border-purple-500/50 text-purple-300 hover:bg-purple-500/10 active:scale-95 transition-all"
+                      >
+                        Upgrade to Join
+                      </button>
+                    ) : group.isPublic ? (
+                      <button
+                        onClick={() => handleDiscoverJoin(group)}
+                        className="btn-gradient px-3 py-1.5 rounded-lg text-white text-xs font-semibold flex-shrink-0 active:scale-95 transition-transform"
+                      >
+                        Join
+                      </button>
+                    ) : group.myRequestStatus === "pending" ? (
+                      <span className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-pnp-textSecondary flex-shrink-0">
+                        Requested
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleDiscoverJoin(group)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 border border-pnp-accent text-pnp-accent hover:bg-pnp-accent/10 active:scale-95 transition-all"
+                      >
+                        Request
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Join Request Management (for group creators) */}
+      {groups.filter((g) => !g.isPublic && !g.isMain && !g.isWallOfFame && String(g.creatorId) === String(user?.dbId)).length > 0 && (
+        <div className="mt-6">
+          <h2 className="text-sm font-semibold text-pnp-textSecondary mb-3">Pending Requests</h2>
+          <div className="space-y-2">
+            {groups
+              .filter((g) => !g.isPublic && !g.isMain && !g.isWallOfFame && String(g.creatorId) === String(user?.dbId))
+              .map((group) => (
+                <div key={`req-${group.id}`} className="glass-card-sm p-3">
+                  <button
+                    onClick={() => {
+                      const next = showRequests === group.id ? null : group.id;
+                      setShowRequests(next);
+                      if (next) loadJoinRequests(group.id);
+                    }}
+                    className="w-full flex items-center justify-between text-left"
+                  >
+                    <span className="text-sm font-medium text-pnp-textPrimary truncate">{group.name}</span>
+                    <svg
+                      className={`w-3.5 h-3.5 text-pnp-textSecondary transition-transform flex-shrink-0 ${showRequests === group.id ? "rotate-180" : ""}`}
+                      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {showRequests === group.id && (
+                    <div className="mt-2 space-y-2 animate-fade-in-up">
+                      {(joinRequests[group.id] || []).length === 0 ? (
+                        <p className="text-xs text-pnp-textSecondary">No pending requests.</p>
+                      ) : (
+                        (joinRequests[group.id] || []).map((req) => (
+                          <div key={req.id} className="flex items-center gap-2 p-2 rounded-lg bg-white/5">
+                            <div className="w-8 h-8 rounded-full bg-pnp-surface flex items-center justify-center text-xs font-bold text-pnp-textPrimary flex-shrink-0">
+                              {req.photo_url ? (
+                                <img src={req.photo_url} alt="" className="w-8 h-8 rounded-full object-cover" />
+                              ) : (
+                                (req.first_name || req.username || "?")[0].toUpperCase()
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-pnp-textPrimary truncate">
+                                {req.first_name || req.username}
+                              </p>
+                            </div>
+                            <div className="flex gap-1 flex-shrink-0">
+                              <button
+                                onClick={() => handleRequest(group.id, req.id, "accept")}
+                                className="px-2.5 py-1 rounded text-xs font-semibold text-white bg-green-600 hover:bg-green-500 active:scale-95 transition-all"
+                              >
+                                Accept
+                              </button>
+                              <button
+                                onClick={() => handleRequest(group.id, req.id, "reject")}
+                                className="px-2.5 py-1 rounded text-xs font-semibold text-pnp-textSecondary bg-white/10 hover:bg-white/20 active:scale-95 transition-all"
+                              >
+                                Deny
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
         </div>
       )}
 

@@ -37,7 +37,8 @@ const getFeed = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   try {
     const viewerSubStatus = user.subscription_status || user.subscriptionStatus;
-    const result = await SocialPostService.getFeed(user.id, req.query.cursor, req.query.limit, viewerSubStatus);
+    const viewerTier = req.session?.user?.tier || 'free';
+    const result = await SocialPostService.getFeed(user.id, req.query.cursor, req.query.limit, viewerSubStatus, viewerTier);
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('getFeed error', err);
@@ -314,8 +315,41 @@ const getHomeFeed = async (req, res) => {
 const getPublicProfile = async (req, res) => {
   const { userId } = req.params;
   const viewerId = req.session?.user?.id || null;
+  const viewerTier = (req.session?.user?.tier || 'free').toLowerCase();
+  const viewerRole = req.session?.user?.role || '';
+  const isAdmin = viewerRole === 'admin' || viewerRole === 'superadmin';
 
   try {
+    // Free-tier profile browsing restriction:
+    // Free users may only view profiles of users they have an existing connection with.
+    // Connections: any DM thread between viewer and target, OR target liked viewer's post.
+    // Admins, members, and prime users have unrestricted profile browsing.
+    if (viewerId && !isAdmin && viewerTier === 'free' && String(viewerId) !== String(userId)) {
+      const [dmCheck, likeCheck] = await Promise.all([
+        dbQuery(
+          `SELECT 1 FROM dm_threads
+           WHERE (user_a = $1 AND user_b = $2) OR (user_a = $2 AND user_b = $1)
+           LIMIT 1`,
+          [viewerId, userId]
+        ),
+        dbQuery(
+          `SELECT 1 FROM social_post_likes spl
+           JOIN social_posts sp ON sp.id = spl.post_id
+           WHERE spl.user_id = $2 AND sp.user_id = $1
+           LIMIT 1`,
+          [viewerId, userId]
+        ),
+      ]);
+      const hasConnection = dmCheck.rows.length > 0 || likeCheck.rows.length > 0;
+      if (!hasConnection) {
+        return res.status(403).json({
+          success: false,
+          error: 'Upgrade to Member to browse member profiles',
+          code: 'PROFILE_RESTRICTED',
+        });
+      }
+    }
+
     const result = await SocialPostService.getPublicProfile(userId, viewerId, req.query.cursor, req.query.limit);
     if (!result.profile) return res.status(404).json({ error: 'User not found' });
 

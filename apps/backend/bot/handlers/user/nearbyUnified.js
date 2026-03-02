@@ -3,30 +3,73 @@ const UserService = require('../../services/userService');
 const NearbyPlaceService = require('../../services/nearbyPlaceService');
 const { t } = require('../../../utils/i18n');
 const logger = require('../../../utils/logger');
-const { getLanguage, isPrimeUser } = require('../../utils/helpers');
+const { getLanguage, isPrimeUser, isMemberUser, isAdminUser } = require('../../utils/helpers');
 const FeatureUrlService = require('../../services/featureUrlService');
 
 /**
- * Tier gate for bot actions — only Prime users can access Nearby
- * Returns true if user should be blocked (not Prime)
+ * Resolve the calling user's Nearby access tier.
+ * Returns 'admin' | 'prime' | 'member' | 'free'.
+ * Fails open to 'free' on error to avoid breaking existing users.
+ */
+const getNearbyTier = async (ctx) => {
+  try {
+    const telegramId = ctx.from?.id;
+    if (telegramId && isAdminUser(telegramId)) return 'admin';
+    const user = await UserService.getOrCreateFromContext(ctx);
+    if (isPrimeUser(user)) return 'prime';
+    if (isMemberUser(user)) return 'member';
+    return 'free';
+  } catch (error) {
+    logger.error('Error resolving nearby tier:', error);
+    return 'free';
+  }
+};
+
+/**
+ * Gate used by deep action handlers (nearby_all, nearby_users, etc.).
+ * These require at least PRIME. For free/member callers we show the
+ * appropriate tiered upsell and return true (blocked).
  */
 const checkNearbyAccess = async (ctx) => {
-  try {
-    const user = await UserService.getOrCreateFromContext(ctx);
-    if (isPrimeUser(user)) return false; // access granted
-    const lang = getLanguage(ctx);
-    const msg = lang === 'es'
-      ? '🔒 *Nearby* es una función exclusiva de PRIME.\n\nSuscríbete para desbloquear.'
-      : '🔒 *Nearby* is a PRIME-only feature.\n\nSubscribe to unlock.';
+  const tier = await getNearbyTier(ctx);
+  if (tier === 'admin' || tier === 'prime') return false; // access granted
+
+  const lang = getLanguage(ctx);
+
+  if (tier === 'member') {
     if (ctx.callbackQuery) {
-      await ctx.answerCbQuery(lang === 'es' ? '🔒 Solo para PRIME' : '🔒 PRIME only', { show_alert: true });
+      await ctx.answerCbQuery(lang === 'es' ? '👑 Solo para PRIME' : '👑 PRIME required', { show_alert: true });
     }
-    await ctx.reply(msg, { parse_mode: 'Markdown' });
+    await ctx.reply(
+      lang === 'es'
+        ? '👑 Esta función es exclusiva de PRIME.\n\nActualiza a PRIME para ver perfiles completos con fotos y distancia exacta.'
+        : '👑 This feature requires PRIME.\n\nUpgrade to PRIME for full profiles with photos & exact distance!',
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.url('👑 Upgrade to PRIME', 'https://app.pnptv.app/subscribe')],
+        ]),
+      }
+    );
     return true; // blocked
-  } catch (error) {
-    logger.error('Error checking nearby access:', error);
-    return false; // fail open to avoid breaking existing users
   }
+
+  // free tier
+  if (ctx.callbackQuery) {
+    await ctx.answerCbQuery(lang === 'es' ? '🔒 Solo para Miembros' : '🔒 Members only', { show_alert: true });
+  }
+  await ctx.reply(
+    lang === 'es'
+      ? '🔒 *Nearby* es una función exclusiva para Miembros.\n\nSuscríbete para desbloquear.'
+      : '🔒 *Nearby* is a Members-only feature.\n\nSubscribe to unlock.',
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.url('⭐ Upgrade to Member', 'https://app.pnptv.app/subscribe')],
+      ]),
+    }
+  );
+  return true; // blocked
 };
 
 // Helper function to safely edit message or send new if editing fails
@@ -60,10 +103,75 @@ const showNearbyMenu = async (ctx, options = {}) => {
   const { isNewMessage = false } = options;
 
   try {
-    // Tier gate: only Prime users can access Nearby
-    if (await checkNearbyAccess(ctx)) return;
-
     const lang = getLanguage(ctx);
+    const tier = await getNearbyTier(ctx);
+
+    // --- FREE tier: count only + upsell ---
+    if (tier === 'free') {
+      const userId = ctx.from?.id?.toString();
+      let count = 0;
+      try {
+        if (userId) {
+          const nearbyUsers = await UserService.getNearbyUsers(userId, 50);
+          count = nearbyUsers.length;
+        }
+      } catch (_) { /* location not set — count stays 0 */ }
+
+      const msg = lang === 'es'
+        ? `🔍 *¡${count} personas están cerca de ti ahora mismo!*\n\nActualiza a Miembro ($4.99/mes) para ver quiénes son.`
+        : `🔍 *${count} people are near you right now!*\n\nUpgrade to Member ($4.99/mo) to see who they are.`;
+
+      const keyboard = Markup.inlineKeyboard([
+        [Markup.button.url('⭐ Upgrade to Member', 'https://app.pnptv.app/subscribe')],
+      ]);
+
+      if (isNewMessage || !ctx.callbackQuery) {
+        await ctx.reply(msg, { parse_mode: 'Markdown', ...keyboard });
+      } else {
+        await safeEditOrReply(ctx, msg, { parse_mode: 'Markdown', ...keyboard });
+      }
+      return;
+    }
+
+    // --- MEMBER tier: name-only list + PRIME upsell ---
+    if (tier === 'member') {
+      const userId = ctx.from?.id?.toString();
+      let nearbyUsers = [];
+      try {
+        if (userId) {
+          nearbyUsers = await UserService.getNearbyUsers(userId, 10);
+        }
+      } catch (_) { /* location not set — list stays empty */ }
+
+      let msg;
+      if (nearbyUsers.length === 0) {
+        msg = lang === 'es'
+          ? '📍 *Personas cerca de ti:*\n\nNo se encontraron miembros cerca ahora mismo.\n\n👑 Actualiza a PRIME para perfiles completos con fotos y distancia exacta!'
+          : '📍 *People near you:*\n\nNo members found nearby right now.\n\n👑 Upgrade to PRIME for full profiles with photos & exact distance!';
+      } else {
+        const nameList = nearbyUsers
+          .slice(0, 10)
+          .map((u, i) => `${i + 1}. ${u.firstName || 'Anonymous'}`)
+          .join('\n');
+        msg = lang === 'es'
+          ? `📍 *Personas cerca de ti:*\n\n${nameList}\n\n👑 Actualiza a PRIME para perfiles completos con fotos y distancia exacta!`
+          : `📍 *People near you:*\n\n${nameList}\n\nUpgrade to PRIME for full profiles with photos & exact distance!`;
+      }
+
+      const keyboard = Markup.inlineKeyboard([
+        [Markup.button.url('👑 Upgrade to PRIME', 'https://app.pnptv.app/subscribe')],
+        [Markup.button.callback('🔙 Back', 'back_to_main')],
+      ]);
+
+      if (isNewMessage || !ctx.callbackQuery) {
+        await ctx.reply(msg, { parse_mode: 'Markdown', ...keyboard });
+      } else {
+        await safeEditOrReply(ctx, msg, { parse_mode: 'Markdown', ...keyboard });
+      }
+      return;
+    }
+
+    // --- PRIME / ADMIN tier: full menu (unchanged) ---
     const user = await UserService.getOrCreateFromContext(ctx);
     const locationStatus = user.locationSharingEnabled ? '🟢 ON' : '🔴 OFF';
 
@@ -776,7 +884,6 @@ const registerNearbyUnifiedHandlers = (bot) => {
   // Unified nearby command
   bot.command('nearby', async (ctx) => {
     try {
-      if (await checkNearbyAccess(ctx)) return;
       const lang = getLanguage(ctx);
       const userId = ctx.from?.id;
 
@@ -785,7 +892,15 @@ const registerNearbyUnifiedHandlers = (bot) => {
         return;
       }
 
-      // Try to get the nearby web app URL from API
+      const tier = await getNearbyTier(ctx);
+
+      // Free and member tiers go straight to the tiered menu (showNearbyMenu handles their experience)
+      if (tier === 'free' || tier === 'member') {
+        await showNearbyMenu(ctx, { isNewMessage: true });
+        return;
+      }
+
+      // Prime and admin: try to open the web app, fall back to classic menu
       try {
         const webAppUrl = await FeatureUrlService.getNearbyUrl(userId);
 
@@ -802,9 +917,7 @@ const registerNearbyUnifiedHandlers = (bot) => {
         });
       } catch (error) {
         logger.error('Error getting Nearby URL, falling back to menu:', error);
-        // Fallback to classic menu if API fails
-        ctx.callbackQuery = { data: 'show_nearby_unified' };
-        await bot.handleUpdate(ctx.update);
+        await showNearbyMenu(ctx, { isNewMessage: true });
       }
     } catch (error) {
       logger.error('Error handling /nearby command:', error);

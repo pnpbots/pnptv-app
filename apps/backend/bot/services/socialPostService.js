@@ -32,7 +32,7 @@ class SocialPostService {
    * Requires userId for the liked_by_me subquery.
    * Uses ID-based cursor pagination for consistent, index-friendly fetching.
    */
-  static async getFeed(userId, cursor, limit = 20, viewerSubscriptionStatus) {
+  static async getFeed(userId, cursor, limit = 20, viewerSubscriptionStatus, viewerTier) {
     const lim = Math.min(Number(limit) || 20, 50);
     const fetchLimit = lim + 10;
     const cursorId = cursor ? parseInt(cursor, 10) : null;
@@ -40,6 +40,7 @@ class SocialPostService {
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
+              COALESCE(sp.content_tier, 'free') as content_tier,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
               u.creator_status as author_creator_status, u.creator_type as author_creator_type,
@@ -61,9 +62,60 @@ class SocialPostService {
     if (viewerSubscriptionStatus !== undefined) {
       posts = await CreatorService.filterFeedExclusivePosts(posts, userId, viewerSubscriptionStatus);
     }
+    // Apply content_tier blurring based on viewer tier
+    if (viewerTier !== undefined) {
+      posts = SocialPostService._applyContentTierBlur(posts, viewerTier);
+    }
     const page = posts.slice(0, lim);
     const nextCursor = posts.length > lim ? String(page[page.length - 1].id) : null;
     return { posts: page, nextCursor };
+  }
+
+  /**
+   * Blur posts whose content_tier exceeds the viewer's tier.
+   * Blurred posts retain metadata but have content and media_url set to null.
+   * Tier hierarchy: free < member < PRIME
+   */
+  static _applyContentTierBlur(posts, viewerTier) {
+    const normalizedViewer = (viewerTier || 'free').toLowerCase();
+    // Determine which content tiers the viewer can see in full
+    const allowedTiers = new Set(['free']);
+    if (normalizedViewer === 'member') {
+      allowedTiers.add('member');
+    } else if (normalizedViewer === 'prime' || normalizedViewer === 'admin') {
+      allowedTiers.add('member');
+      allowedTiers.add('prime');
+      allowedTiers.add('PRIME');
+    }
+
+    return posts.map(post => {
+      const postTier = (post.content_tier || 'free').toLowerCase();
+      const isAllowed = allowedTiers.has(post.content_tier) || allowedTiers.has(postTier);
+      if (isAllowed) {
+        return post;
+      }
+      // Blur: keep metadata, null out content and media
+      return {
+        id: post.id,
+        author_id: post.author_id,
+        author_username: post.author_username,
+        author_first_name: post.author_first_name,
+        author_photo: post.author_photo,
+        created_at: post.created_at,
+        likes_count: post.likes_count,
+        reposts_count: post.reposts_count,
+        replies_count: post.replies_count,
+        content_tier: post.content_tier,
+        reply_to_id: post.reply_to_id,
+        repost_of_id: post.repost_of_id,
+        is_wof: post.is_wof,
+        liked_by_me: post.liked_by_me,
+        blurred: true,
+        content: null,
+        media_url: null,
+        media_type: null,
+      };
+    });
   }
 
   /**

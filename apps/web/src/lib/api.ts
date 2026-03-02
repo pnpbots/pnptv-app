@@ -202,6 +202,17 @@ export interface NearbySearchResponse {
   users: NearbyUser[];
   center: { latitude: number; longitude: number };
   privacy_level: string;
+  /** Present only on free-tier responses — identifies the response shape */
+  tier?: string;
+  /** Present only on free-tier responses — count of nearby users without exposing locations */
+  count?: number;
+}
+
+/** Free-tier nearby response — only returns a count, no user data */
+export interface NearbyFreeTierResponse {
+  success: boolean;
+  tier: "free";
+  count: number;
 }
 
 export function updateNearbyLocation(
@@ -372,6 +383,9 @@ export interface SocialPostItem {
   bsky_author_handle?: string | null;
   bsky_author_avatar?: string | null;
   bsky_author_display_name?: string | null;
+  // Tier-gating fields (free-tier users see blurred posts)
+  blurred?: boolean;
+  content_tier?: string;
 }
 
 // ============================================================================
@@ -619,11 +633,56 @@ export function getHangoutGroups(): Promise<{ success: boolean; groups: HangoutG
 
 export function createHangoutGroup(
   name: string,
-  description?: string
+  description?: string,
+  isPublic?: boolean
 ): Promise<{ success: boolean; group: HangoutGroup }> {
   return request("/api/webapp/hangouts/groups", {
     method: "POST",
-    body: { name, description },
+    body: { name, description, isPublic },
+  });
+}
+
+export interface DiscoverGroup {
+  id: number;
+  name: string;
+  description: string;
+  avatarUrl: string | null;
+  creatorId: string | null;
+  isPublic: boolean;
+  memberCount: number;
+  createdAt: string;
+  myRequestStatus: "pending" | "accepted" | "rejected" | null;
+}
+
+export function discoverHangoutGroups(): Promise<{ success: boolean; groups: DiscoverGroup[] }> {
+  return request("/api/webapp/hangouts/groups/discover");
+}
+
+export function requestJoinGroup(id: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${id}/request-join`, { method: "POST" });
+}
+
+export interface JoinRequest {
+  id: number;
+  user_id: string;
+  status: string;
+  created_at: string;
+  username: string;
+  first_name: string;
+  photo_url: string | null;
+}
+
+export function getJoinRequests(id: number): Promise<{ success: boolean; requests: JoinRequest[] }> {
+  return request(`/api/webapp/hangouts/groups/${id}/requests`);
+}
+
+export function handleJoinRequest(
+  groupId: number,
+  requestId: number,
+  action: "accept" | "reject"
+): Promise<{ success: boolean; status: string }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/requests/${requestId}/${action}`, {
+    method: "POST",
   });
 }
 
@@ -977,6 +1036,10 @@ export function getMessages(
 export function sendMessage(recipientId: string, content: string): Promise<{
   success: boolean;
   message: DirectMessage;
+  /** Remaining DM sends for today (free-tier users only) */
+  remaining?: number;
+  /** Daily DM limit (free-tier users only) */
+  limit?: number;
 }> {
   return request("/api/webapp/messages/send", {
     method: "POST",
@@ -988,7 +1051,7 @@ export async function sendDmMediaMessage(
   recipientId: string,
   mediaFile: File,
   caption?: string
-): Promise<{ success: boolean; message: DirectMessage }> {
+): Promise<{ success: boolean; message: DirectMessage; remaining?: number; limit?: number }> {
   const formData = new FormData();
   formData.append("media", mediaFile);
   if (caption?.trim()) formData.append("content", caption.trim());

@@ -14,6 +14,7 @@ const nearbyService = require('../../../services/nearbyService');
 const NearbyPlaceModel = require('../../../models/nearbyPlaceModel');
 const { validateToken } = require('../middleware/auth');
 const logger = require('../../../utils/logger');
+const { query: dbQuery } = require('../../../config/postgres');
 
 class NearbyController {
   /**
@@ -86,7 +87,7 @@ class NearbyController {
 
   /**
    * GET /api/nearby/search
-   * Search for nearby users
+   * Search for nearby users — tier-gated response
    */
   static async searchNearby(req, res) {
     try {
@@ -95,6 +96,12 @@ class NearbyController {
       if (!userId) {
         return res.status(401).json({ error: 'Unauthorized' });
       }
+
+      // Determine tier and admin bypass
+      const tier = (req.session?.user?.tier || 'free').toLowerCase();
+      const role = req.session?.user?.role || '';
+      const isAdmin = role === 'admin' || role === 'superadmin';
+      const effectiveTier = isAdmin ? 'prime' : tier;
 
       // Get query parameters
       const { latitude, longitude, radius = 5, limit = 50 } = req.query;
@@ -117,7 +124,18 @@ class NearbyController {
         });
       }
 
-      // Search nearby users
+      // Free tier: count-only response
+      if (effectiveTier === 'free') {
+        const countResult = await NearbyController._countNearby(userId, lat, lon, rad);
+        return res.status(200).json({
+          success: true,
+          tier: 'free',
+          count: countResult,
+          upgradeMessage: 'Upgrade to Member to see who is nearby',
+        });
+      }
+
+      // Run full search
       const result = await nearbyService.searchNearby(
         userId,
         lat,
@@ -126,9 +144,27 @@ class NearbyController {
         { limit: Math.min(parseInt(limit) || 50, 200) }
       );
 
+      // Member tier: strip sensitive fields (distance, photo URL, lastName)
+      if (effectiveTier === 'member') {
+        const blurredUsers = (result.users || []).map(u => ({
+          id: u.user_id,
+          firstName: u.name || null,
+          blurredPhoto: true,
+        }));
+        return res.status(200).json({
+          success: true,
+          tier: 'member',
+          total: blurredUsers.length,
+          radius_km: rad,
+          users: blurredUsers,
+        });
+      }
+
+      // Prime / admin: full response
       return res.status(200).json({
         success: true,
-        ...result
+        tier: effectiveTier,
+        ...result,
       });
     } catch (error) {
       // Handle validation errors
@@ -140,6 +176,33 @@ class NearbyController {
       return res.status(500).json({
         error: 'Failed to search nearby users'
       });
+    }
+  }
+
+  /**
+   * Count nearby users in the DB using the user_locations table.
+   * Uses PostGIS ST_DWithin for accuracy. Returns an integer count.
+   * Excludes the requesting user. Used for free-tier gated response.
+   */
+  static async _countNearby(userId, lat, lon, radiusKm) {
+    try {
+      const radiusMeters = radiusKm * 1000;
+      const { rows } = await dbQuery(
+        `SELECT COUNT(*)::int as count
+         FROM user_locations ul
+         WHERE ul.user_id != $1
+           AND ul.updated_at > NOW() - INTERVAL '30 minutes'
+           AND ST_DWithin(
+             ul.location::geography,
+             ST_MakePoint($3, $2)::geography,
+             $4
+           )`,
+        [userId, lat, lon, radiusMeters]
+      );
+      return rows[0]?.count || 0;
+    } catch (err) {
+      logger.error('❌ _countNearby error:', err);
+      return 0;
     }
   }
 

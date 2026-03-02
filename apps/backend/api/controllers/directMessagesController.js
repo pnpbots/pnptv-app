@@ -1,5 +1,6 @@
 const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
+const { getRedis } = require('../../config/redis');
 
 // Check if a photo path is a valid web URL (not a Telegram file ID)
 const isValidPhotoUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
@@ -258,6 +259,35 @@ async function sendMessage(req, res) {
       isMine: true
     };
 
+    // Increment free-tier DM counter
+    const tier = (req.session?.user?.tier || 'free').toLowerCase();
+    const role = req.session?.user?.role || '';
+    if (tier === 'free' && role !== 'admin' && role !== 'superadmin') {
+      try {
+        const redis = getRedis();
+        const today = new Date().toISOString().slice(0, 10);
+        const key = `pnptv:dm_limit:${req.session.user.id}:${today}`;
+        const newCount = await redis.incr(key);
+        if (newCount === 1) {
+          const now = new Date();
+          const midnight = new Date(now);
+          midnight.setUTCDate(midnight.getUTCDate() + 1);
+          midnight.setUTCHours(0, 0, 0, 0);
+          const ttl = Math.ceil((midnight - now) / 1000);
+          await redis.expire(key, ttl);
+        }
+        const createdAt = req.session.user.created_at || req.session.user.createdAt;
+        let limit = 3;
+        if (createdAt) {
+          const daysSince = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
+          if (daysSince > 14) limit = 1;
+        }
+        req._dmRemaining = Math.max(0, limit - newCount);
+      } catch (err) {
+        // Non-critical — don't block the message send
+      }
+    }
+
     // Emit real-time Socket.IO event to recipient
     const io = req.app.get('io');
     if (io) {
@@ -271,7 +301,8 @@ async function sendMessage(req, res) {
 
     res.json({
       success: true,
-      message: responseMessage
+      message: responseMessage,
+      remaining: req._dmRemaining ?? null
     });
 
   } catch (error) {

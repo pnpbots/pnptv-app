@@ -62,9 +62,7 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <VerificationGate>
-              <PrimeGate>
-                <Booking />
-              </PrimeGate>
+              <Booking />
             </VerificationGate>
           </ModuleLoader>
         ),

@@ -108,7 +108,7 @@ const listGroups = async (req, res) => {
 // POST /api/webapp/hangouts/groups
 const createGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { name, description = '' } = req.body;
+  const { name, description = '', isPublic = true } = req.body;
 
   if (!name?.trim()) return res.status(400).json({ error: 'Group name is required' });
 
@@ -121,9 +121,9 @@ const createGroup = async (req, res) => {
 
     const { rows } = await query(
       `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members)
-       VALUES ($1, $2, $3, false, true, 200)
+       VALUES ($1, $2, $3, false, $4, 200)
        RETURNING *`,
-      [name.trim().slice(0, 100), description.trim().slice(0, 500), user.id]
+      [name.trim().slice(0, 100), description.trim().slice(0, 500), user.id, isPublic !== false]
     );
 
     const group = rows[0];
@@ -231,6 +231,18 @@ const joinGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
   if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  // Tier check: member subscription required to join subgroups
+  const joinTier = (user.tier || req.session?.user?.tier || 'free').toLowerCase();
+  const joinRole = user.role || req.session?.user?.role || '';
+  const joinIsAdmin = joinRole === 'admin' || joinRole === 'superadmin';
+  if (!joinIsAdmin && joinTier === 'free') {
+    return res.status(403).json({
+      success: false,
+      error: 'Member subscription required',
+      code: 'MEMBER_REQUIRED',
+    });
+  }
 
   try {
     const { rows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
@@ -379,6 +391,18 @@ const sendMessage = async (req, res) => {
 
   if (!content?.trim()) return res.status(400).json({ error: 'Content required' });
 
+  // Tier check: member subscription required to send messages in subgroups
+  const msgTier = (user.tier || req.session?.user?.tier || 'free').toLowerCase();
+  const msgRole = user.role || req.session?.user?.role || '';
+  const msgIsAdmin = msgRole === 'admin' || msgRole === 'superadmin';
+  if (!msgIsAdmin && msgTier === 'free') {
+    return res.status(403).json({
+      success: false,
+      error: 'Member subscription required',
+      code: 'MEMBER_REQUIRED',
+    });
+  }
+
   try {
     if (!(await isMember(groupId, user.id))) {
       return res.status(403).json({ error: 'Not a member of this group' });
@@ -497,6 +521,195 @@ const markAsRead = async (req, res) => {
   }
 };
 
+// GET /api/webapp/hangouts/groups/discover
+const discoverGroups = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  try {
+    const { rows } = await query(
+      `SELECT g.id, g.name, g.description, g.avatar_url, g.creator_id,
+              g.is_public, g.created_at,
+              (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
+              (SELECT jr.status FROM hangout_join_requests jr
+               WHERE jr.group_id = g.id AND jr.user_id = $1
+               ORDER BY jr.created_at DESC LIMIT 1) as my_request_status
+       FROM hangout_groups g
+       WHERE g.is_main = false
+         AND g.is_wall_of_fame = false
+         AND NOT EXISTS (
+           SELECT 1 FROM hangout_group_members gm WHERE gm.group_id = g.id AND gm.user_id = $1
+         )
+       ORDER BY g.created_at DESC
+       LIMIT 50`,
+      [user.id]
+    );
+
+    const groups = rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      avatarUrl: r.avatar_url,
+      creatorId: r.creator_id,
+      isPublic: r.is_public,
+      memberCount: r.member_count,
+      createdAt: r.created_at,
+      myRequestStatus: r.my_request_status || null,
+    }));
+
+    return res.json({ success: true, groups });
+  } catch (err) {
+    logger.error('discoverGroups error', err);
+    return res.status(500).json({ error: 'Failed to discover groups' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/request-join
+const requestJoinGroup = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    const { rows: groupRows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
+    if (groupRows.length === 0) return res.status(404).json({ error: 'Group not found' });
+    const group = groupRows[0];
+
+    if (group.is_public) return res.status(400).json({ error: 'This group is public, use join instead' });
+    if (await isMember(groupId, user.id)) return res.status(409).json({ error: 'Already a member' });
+
+    // Upsert: reset rejected requests to pending
+    const { rows } = await query(
+      `INSERT INTO hangout_join_requests (group_id, user_id, status)
+       VALUES ($1, $2, 'pending')
+       ON CONFLICT (group_id, user_id) DO UPDATE
+         SET status = 'pending', created_at = NOW(), resolved_at = NULL, resolved_by = NULL
+         WHERE hangout_join_requests.status = 'rejected'
+       RETURNING *`,
+      [groupId, user.id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(409).json({ error: 'Request already pending' });
+    }
+
+    // Notify group creator
+    if (group.creator_id && String(group.creator_id) !== String(user.id)) {
+      NotificationEmitter.emit({
+        type: 'group_join_request', category: 'hangouts', priority: 'normal',
+        actorId: user.id, targetUserId: group.creator_id,
+        entityType: 'group', entityId: String(groupId),
+        message: `${user.firstName || user.first_name || user.username} requested to join ${group.name}`,
+        metadata: { groupName: group.name },
+      });
+    }
+
+    return res.json({ success: true, request: rows[0] });
+  } catch (err) {
+    logger.error('requestJoinGroup error', err);
+    return res.status(500).json({ error: 'Failed to submit join request' });
+  }
+};
+
+// GET /api/webapp/hangouts/groups/:id/requests
+const getJoinRequests = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    // Only creator can view requests
+    const { rows: groupRows } = await query('SELECT creator_id FROM hangout_groups WHERE id=$1', [groupId]);
+    if (groupRows.length === 0) return res.status(404).json({ error: 'Group not found' });
+    if (String(groupRows[0].creator_id) !== String(user.id)) {
+      return res.status(403).json({ error: 'Only the group creator can view requests' });
+    }
+
+    const { rows } = await query(
+      `SELECT jr.id, jr.user_id, jr.status, jr.created_at,
+              u.username, u.first_name, u.photo_file_id as photo_url
+       FROM hangout_join_requests jr
+       JOIN users u ON u.id = jr.user_id
+       WHERE jr.group_id = $1 AND jr.status = 'pending'
+       ORDER BY jr.created_at ASC`,
+      [groupId]
+    );
+
+    return res.json({
+      success: true,
+      requests: rows.map(r => ({
+        ...r,
+        photo_url: isValidPhotoUrl(r.photo_url) ? r.photo_url : null,
+      })),
+    });
+  } catch (err) {
+    logger.error('getJoinRequests error', err);
+    return res.status(500).json({ error: 'Failed to load requests' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/requests/:requestId/:action
+const handleJoinRequest = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const requestId = parseInt(req.params.requestId);
+  const action = req.params.action;
+
+  if (!Number.isFinite(groupId) || !Number.isFinite(requestId)) {
+    return res.status(400).json({ error: 'Invalid ID' });
+  }
+  if (action !== 'accept' && action !== 'reject') {
+    return res.status(400).json({ error: 'Action must be accept or reject' });
+  }
+
+  try {
+    // Only creator can handle requests
+    const { rows: groupRows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
+    if (groupRows.length === 0) return res.status(404).json({ error: 'Group not found' });
+    if (String(groupRows[0].creator_id) !== String(user.id)) {
+      return res.status(403).json({ error: 'Only the group creator can manage requests' });
+    }
+
+    // Update request
+    const newStatus = action === 'accept' ? 'accepted' : 'rejected';
+    const { rows } = await query(
+      `UPDATE hangout_join_requests
+       SET status = $1, resolved_at = NOW(), resolved_by = $2
+       WHERE id = $3 AND group_id = $4 AND status = 'pending'
+       RETURNING *`,
+      [newStatus, user.id, requestId, groupId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Request not found or already handled' });
+    }
+
+    const joinRequest = rows[0];
+
+    // On accept, add as member
+    if (action === 'accept') {
+      await query(
+        `INSERT INTO hangout_group_members (group_id, user_id, role)
+         VALUES ($1, $2, 'member')
+         ON CONFLICT DO NOTHING`,
+        [groupId, joinRequest.user_id]
+      );
+
+      // Notify the requester
+      NotificationEmitter.emit({
+        type: 'group_request_accepted', category: 'hangouts', priority: 'normal',
+        actorId: user.id, targetUserId: joinRequest.user_id,
+        entityType: 'group', entityId: String(groupId),
+        message: `Your request to join ${groupRows[0].name} was accepted`,
+        metadata: { groupName: groupRows[0].name },
+      });
+    }
+
+    return res.json({ success: true, status: newStatus });
+  } catch (err) {
+    logger.error('handleJoinRequest error', err);
+    return res.status(500).json({ error: 'Failed to handle request' });
+  }
+};
+
 module.exports = {
   listGroups,
   createGroup,
@@ -508,4 +721,8 @@ module.exports = {
   sendMessage,
   startCall,
   markAsRead,
+  discoverGroups,
+  requestJoinGroup,
+  getJoinRequests,
+  handleJoinRequest,
 };

@@ -1,5 +1,6 @@
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
+const { getRedis } = require('../../../config/redis');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -115,6 +116,35 @@ const sendMessage = async (req, res) => {
          ${unreadField} = dm_threads.${unreadField} + 1`,
       [a, b, text.slice(0, 100)]
     );
+    // Increment free-tier DM counter
+    const tier = (req.session?.user?.tier || 'free').toLowerCase();
+    const role = req.session?.user?.role || '';
+    if (tier === 'free' && role !== 'admin' && role !== 'superadmin') {
+      try {
+        const redis = getRedis();
+        const today = new Date().toISOString().slice(0, 10);
+        const key = `pnptv:dm_limit:${user.id}:${today}`;
+        const newCount = await redis.incr(key);
+        if (newCount === 1) {
+          const now = new Date();
+          const midnight = new Date(now);
+          midnight.setUTCDate(midnight.getUTCDate() + 1);
+          midnight.setUTCHours(0, 0, 0, 0);
+          const ttl = Math.ceil((midnight - now) / 1000);
+          await redis.expire(key, ttl);
+        }
+        const createdAt = user.created_at || user.createdAt;
+        let dmLimit = 3;
+        if (createdAt) {
+          const daysSince = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
+          if (daysSince > 14) dmLimit = 1;
+        }
+        req._dmRemaining = Math.max(0, dmLimit - newCount);
+      } catch (err) {
+        // Non-critical — don't block the message send
+      }
+    }
+
     // Deliver to recipient via Socket.IO if available
     const io = req.app.get('io');
     if (io) {
@@ -126,7 +156,7 @@ const sendMessage = async (req, res) => {
         created_at: msg.created_at,
       });
     }
-    return res.json({ success: true, message: msg });
+    return res.json({ success: true, message: msg, remaining: req._dmRemaining ?? null });
   } catch (err) {
     logger.error('sendMessage DM error', err);
     return res.status(500).json({ error: 'Failed to send message' });

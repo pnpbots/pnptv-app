@@ -28,6 +28,27 @@ const isBannedTier = (tier) => tier === TIER.BANNED;
 const hasMinimumTier = (userTier, requiredTier) =>
   (TIER_LEVEL[userTier] ?? -1) >= (TIER_LEVEL[requiredTier] ?? 0);
 
+const FREE_DAILY_MESSAGE_LIMIT_DEFAULT = 3;
+const FREE_DAILY_MESSAGE_LIMIT_AFTER_14_DAYS = 1;
+
+const getFreeTierMessageLimit = (user) => {
+  if (!user) return FREE_DAILY_MESSAGE_LIMIT_DEFAULT;
+  const tier = (user.tier || 'free').toLowerCase();
+  if (tier === 'member' || tier === 'prime') return null; // unlimited
+  if (user.role === 'admin' || user.role === 'superadmin') return null;
+  const createdAt = user.createdAt || user.created_at;
+  if (createdAt) {
+    const daysSinceCreation = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSinceCreation > 14) return FREE_DAILY_MESSAGE_LIMIT_AFTER_14_DAYS;
+  }
+  return FREE_DAILY_MESSAGE_LIMIT_DEFAULT;
+};
+
+const isMemberOrAbove = (tier) => {
+  const t = (tier || 'free').toLowerCase();
+  return t === 'member' || t === 'prime';
+};
+
 /**
  * User Model - Handles all user data operations with PostgreSQL
  */
@@ -1277,3 +1298,7 @@ module.exports.TIER_LEVEL = TIER_LEVEL;
 module.exports.isPrimeTier = isPrimeTier;
 module.exports.isBannedTier = isBannedTier;
 module.exports.hasMinimumTier = hasMinimumTier;
+module.exports.FREE_DAILY_MESSAGE_LIMIT_DEFAULT = FREE_DAILY_MESSAGE_LIMIT_DEFAULT;
+module.exports.FREE_DAILY_MESSAGE_LIMIT_AFTER_14_DAYS = FREE_DAILY_MESSAGE_LIMIT_AFTER_14_DAYS;
+module.exports.getFreeTierMessageLimit = getFreeTierMessageLimit;
+module.exports.isMemberOrAbove = isMemberOrAbove;

@@ -39,19 +39,6 @@ class JitsiService {
         }
     };
 
-    // Plan tier mapping
-    static PLAN_TIER_MAP = {
-        'trial_week': 'Basic',
-        'trial-week': 'Basic',
-        'pnp_member': 'PNP',
-        'pnp-member': 'PNP',
-        'crystal_member': 'Crystal',
-        'crystal-member': 'Crystal',
-        'diamond_member': 'Diamond',
-        'diamond-member': 'Diamond',
-        'lifetime_pass': 'Premium',
-        'lifetime-pass': 'Premium'
-    };
 
     /**
      * Create a new Jitsi room
@@ -125,21 +112,17 @@ class JitsiService {
     }
 
     /**
-     * Get user's plan tier
-     * Admins get Premium tier regardless of subscription
+     * Get user's Jitsi room tier based on the new three-tier system.
+     * Returns 'unlimited' (admin), 'medium' (prime), 'mini' (member), or null (free — cannot start calls).
      */
     static getPlanTier(user) {
-        // Admins always get Premium tier
-        if (user.telegramId && (PermissionService.isEnvSuperAdmin(user.telegramId) || PermissionService.isEnvAdmin(user.telegramId))) {
-            return 'Premium';
-        }
-        
-        if ((user.tier || '').toLowerCase() !== 'prime') {
-            return null;
-        }
-
-        const planId = user.planId || 'trial_week';
-        return this.PLAN_TIER_MAP[planId] || 'Basic';
+        if (!user) return null;
+        const role = user.role || '';
+        if (role === 'admin' || role === 'superadmin') return 'unlimited';
+        const tier = (user.tier || 'free').toLowerCase();
+        if (tier === 'prime') return 'medium';
+        if (tier === 'member') return 'mini';
+        return null; // free users can't start calls
     }
 
     /**

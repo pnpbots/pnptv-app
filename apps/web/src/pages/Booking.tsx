@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Badge, Button } from "@pnptv/ui-kit";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
+import { useAuth } from "@/hooks/useAuth";
 import {
   updateNearbyLocation,
   searchNearby,
   searchNearbyPlaces,
   type NearbyUser,
   type NearbyPlace,
+  type NearbySearchResponse,
 } from "@/lib/api";
 import { MapContainer, TileLayer, Marker, Circle, useMap } from "react-leaflet";
 import L from "leaflet";
@@ -281,17 +283,160 @@ function PlaceDetailSheet({ place, onClose }: PlaceDetailSheetProps) {
   );
 }
 
+// ─── Free-tier count card ────────────────────────────────────────────────────
+
+function NearbyCountCard({ count }: { count: number }) {
+  return (
+    <div className="page-container flex flex-col items-center justify-center min-h-[60vh] px-6">
+      <div
+        className="w-24 h-24 rounded-full flex items-center justify-center mb-6"
+        style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(230,145,56,0.15))", border: "1px solid rgba(212,0,122,0.3)" }}
+      >
+        <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#D4007A" }}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      </div>
+
+      <p className="text-4xl font-bold text-pnp-textPrimary mb-1">
+        {count > 0 ? count : "0"}
+      </p>
+      <p className="text-base text-pnp-textSecondary mb-1">
+        {count === 1 ? "person" : "people"} near you
+      </p>
+      <p className="text-sm text-pnp-textSecondary mb-8 text-center max-w-xs">
+        Upgrade to see who's nearby, browse profiles, and discover PNP spots on the map.
+      </p>
+
+      <Link
+        to="/subscribe"
+        className="inline-block px-6 py-3 rounded-full text-base font-semibold text-white"
+        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+      >
+        Upgrade to see the map
+      </Link>
+    </div>
+  );
+}
+
+// ─── Member-tier blurred profile list ────────────────────────────────────────
+
+function MemberNearbyList({ users }: { users: NearbyUser[] }) {
+  return (
+    <div className="page-container px-4 py-6">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">Nearby</h1>
+          <p className="text-sm text-pnp-textSecondary mt-1">
+            {users.length} {users.length === 1 ? "person" : "people"} nearby
+          </p>
+        </div>
+        <Link
+          to="/subscribe"
+          className="text-xs px-3 py-1.5 rounded-full font-semibold text-white flex-shrink-0"
+          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+        >
+          Upgrade to PRIME
+        </Link>
+      </div>
+
+      {/* PRIME upgrade prompt */}
+      <div
+        className="rounded-xl p-4 mb-4 border"
+        style={{ background: "rgba(255,180,84,0.06)", borderColor: "rgba(255,180,84,0.2)" }}
+      >
+        <div className="flex items-center gap-3">
+          <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#FFB454" }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          <p className="text-sm text-pnp-textSecondary">
+            Upgrade to{" "}
+            <Link to="/subscribe" className="font-semibold" style={{ color: "#FFB454" }}>
+              PRIME
+            </Link>{" "}
+            for the full map with exact distances
+          </p>
+        </div>
+      </div>
+
+      {users.length === 0 ? (
+        <div className="glass-card-sm p-8 text-center">
+          <p className="text-pnp-textPrimary font-medium mb-1">Nobody nearby yet</p>
+          <p className="text-sm text-pnp-textSecondary">Check back later or expand your search area</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {users.map((u) => {
+            const displayName = u.name || u.username || `User #${u.user_id}`;
+            return (
+              <div
+                key={u.user_id}
+                className="glass-card-sm p-3 flex items-center gap-3"
+                style={{ filter: "blur(0px)" }}
+              >
+                {/* Photo placeholder — blurred */}
+                <div
+                  className="w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center text-lg font-bold"
+                  style={{
+                    background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))",
+                    color: "#D4007A",
+                    filter: "blur(4px)",
+                    userSelect: "none",
+                  }}
+                >
+                  {displayName[0].toUpperCase()}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  {/* Name visible, no click through */}
+                  <p className="text-sm font-semibold text-pnp-textPrimary truncate">
+                    {displayName}
+                  </p>
+                  {/* Distance blurred for member tier */}
+                  <p
+                    className="text-xs text-pnp-textSecondary"
+                    style={{ filter: "blur(4px)", userSelect: "none" }}
+                  >
+                    {u.accuracy_estimate || "nearby"}
+                  </p>
+                </div>
+
+                {/* No profile link for member tier */}
+                <div
+                  className="text-xs px-2.5 py-1 rounded-full border flex-shrink-0"
+                  style={{ borderColor: "rgba(255,255,255,0.1)", color: "#8E8E93" }}
+                >
+                  PRIME
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 type PageState = "loading" | "denied" | "ready";
 
 export default function Booking() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { showTutorial, dismissTutorial } = useTutorial("nearby");
+
+  const userTier = user?.tier?.toLowerCase() ?? "free";
+  const isFree = userTier === "free" || !user?.tier;
+  const isPrime = userTier === "prime" || userTier === "admin";
+
   const [pageState, setPageState] = useState<PageState>("loading");
   const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null);
   const [nearbyUsers, setNearbyUsers] = useState<NearbyUser[]>([]);
   const [nearbyPlaces, setNearbyPlaces] = useState<NearbyPlace[]>([]);
+  // Free-tier: count of nearby users returned from API
+  const [nearbyCount, setNearbyCount] = useState(0);
   const [radius, setRadius] = useState(5);
   const [incognito, setIncognito] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -319,7 +464,15 @@ export default function Booking() {
           searchNearbyPlaces(lat, lng, rad),
         ]);
         if (usersData.status === "fulfilled") {
-          setNearbyUsers(usersData.value.users || []);
+          const result = usersData.value as NearbySearchResponse & { tier?: string; count?: number };
+          // Free-tier API response: { tier: 'free', count: N } — no users array
+          if (result.tier === "free" && typeof result.count === "number") {
+            setNearbyCount(result.count);
+            setNearbyUsers([]);
+          } else {
+            setNearbyUsers(result.users || []);
+            setNearbyCount(result.users?.length ?? 0);
+          }
         }
         if (placesData.status === "fulfilled") {
           setNearbyPlaces(placesData.value.places || []);
@@ -404,6 +557,16 @@ export default function Booking() {
     (path: string) => navigate(path),
     [navigate]
   );
+
+  // ─── Free-tier: show count card once we know the position ──────────────────
+  if (isFree && pageState === "ready") {
+    return <NearbyCountCard count={nearbyCount} />;
+  }
+
+  // ─── Member-tier: show blurred profile list (no map) ────────────────────────
+  if (!isPrime && pageState === "ready") {
+    return <MemberNearbyList users={nearbyUsers} />;
+  }
 
   // ─── Loading state ──────────────────────────────────────────────
   if (pageState === "loading") {

@@ -4,6 +4,7 @@ import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useNavigate } from "react-router-dom";
 import { Modal } from "@pnptv/ui-kit";
+import FreeTierOverlay from "@/components/FreeTierOverlay";
 import {
   getSocialFeedPosts,
   getWofFeedPosts,
@@ -254,8 +255,32 @@ function PostCard({
             )}
           </div>
 
-          {/* Locked exclusive content overlay */}
-          {post.is_exclusive && post.exclusive_status === "locked" ? (
+          {/* Tier-blurred content overlay (free-tier users viewing member/prime posts) */}
+          {post.blurred ? (
+            <FreeTierOverlay
+              label={
+                post.content_tier === "prime" || post.content_tier === "PRIME"
+                  ? "PRIME post"
+                  : "Member post"
+              }
+              requiredTier={
+                post.content_tier === "prime" || post.content_tier === "PRIME"
+                  ? "prime"
+                  : "member"
+              }
+            >
+              <div className="p-4 mt-1.5">
+                <p className="text-sm text-white/60">
+                  This content is available to{" "}
+                  {post.content_tier === "prime" || post.content_tier === "PRIME"
+                    ? "PRIME"
+                    : "Member"}{" "}
+                  members
+                </p>
+              </div>
+            </FreeTierOverlay>
+          ) : /* Locked exclusive content overlay */
+          post.is_exclusive && post.exclusive_status === "locked" ? (
             <div className="mt-2 rounded-lg p-6 text-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
               <svg className="w-8 h-8 mx-auto mb-2 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
