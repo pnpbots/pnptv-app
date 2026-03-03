@@ -449,12 +449,28 @@ _Responde en este topic para enviar mensajes al usuario._`;
       try {
         const SupportTicketMessageModel = require('../../models/supportTicketMessageModel');
         const replyContent = message.text || message.caption || '[Media attachment]';
-        await SupportTicketMessageModel.create({
+        const savedMessage = await SupportTicketMessageModel.create({
           userId,
           senderType: 'agent',
           senderName: adminName,
           content: replyContent,
         });
+
+        // Push to web widget in real-time via Socket.IO
+        try {
+          const io = require('./socketSingleton').get();
+          if (io && savedMessage) {
+            io.to(`user:${userId}`).emit('support:newMessage', {
+              id: savedMessage.id,
+              sender_type: 'agent',
+              sender_name: adminName,
+              content: replyContent,
+              created_at: savedMessage.created_at || new Date().toISOString(),
+            });
+          }
+        } catch (socketErr) {
+          logger.debug('Socket emit failed for agent reply', { error: socketErr.message });
+        }
       } catch (persistErr) {
         logger.warn('Failed to persist agent reply for web widget', { error: persistErr.message });
       }
@@ -474,12 +490,28 @@ _Responde en este topic para enviar mensajes al usuario._`;
         try {
           const SupportTicketMessageModel = require('../../models/supportTicketMessageModel');
           const replyContent = ctx.message?.text || ctx.message?.caption || '[Media attachment]';
-          await SupportTicketMessageModel.create({
+          const savedMessage = await SupportTicketMessageModel.create({
             userId,
             senderType: 'agent',
             senderName: adminName,
             content: replyContent,
           });
+
+          // Push to web widget in real-time via Socket.IO
+          try {
+            const io = require('./socketSingleton').get();
+            if (io && savedMessage) {
+              io.to(`user:${userId}`).emit('support:newMessage', {
+                id: savedMessage.id,
+                sender_type: 'agent',
+                sender_name: adminName,
+                content: replyContent,
+                created_at: savedMessage.created_at || new Date().toISOString(),
+              });
+            }
+          } catch (socketErr) {
+            logger.debug('Socket emit failed for agent reply (blocked user path)', { error: socketErr.message });
+          }
         } catch (persistErr) {
           logger.warn('Failed to persist agent reply for web widget', { error: persistErr.message });
         }

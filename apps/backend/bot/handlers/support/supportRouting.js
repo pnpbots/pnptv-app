@@ -1,10 +1,12 @@
 const logger = require('../../../utils/logger');
 const supportRoutingService = require('../../services/supportRoutingService');
 const SupportTopicModel = require('../../../models/supportTopicModel');
+const SupportTicketMessageModel = require('../../../models/supportTicketMessageModel');
 const UserModel = require('../../../models/userModel');
 const { getLanguage } = require('../../utils/helpers');
 const { addReaction } = require('../../utils/telegramReactions');
 const { createChatInviteLink } = require('../../utils/telegramAdmin');
+const socketSingleton = require('../../services/socketSingleton');
 
 /**
  * Support Routing Handlers
@@ -28,6 +30,16 @@ const registerSupportRoutingHandlers = (bot) => {
   const getThreadIdFromContext = (ctx) => (
     ctx.message?.message_thread_id || ctx.update?.callback_query?.message?.message_thread_id
   );
+
+  /** Emit a support socket event to a user's room. Never throws. */
+  const emitToUser = (userId, event, payload) => {
+    try {
+      const io = socketSingleton.get();
+      if (io) io.to(`user:${userId}`).emit(event, payload);
+    } catch (err) {
+      logger.debug('Socket emit failed', { event, userId, error: err.message });
+    }
+  };
 
   const sendQuickAnswer = async ({
     ctx,
@@ -90,6 +102,25 @@ const registerSupportRoutingHandlers = (bot) => {
 
     if (!supportTopic.first_response_at) {
       await SupportTopicModel.updateFirstResponse(targetUserId);
+    }
+
+    // Persist quick answer for web widget visibility (bug fix: was missing)
+    try {
+      const savedMsg = await SupportTicketMessageModel.create({
+        userId: targetUserId,
+        senderType: 'agent',
+        senderName: adminName,
+        content: messageToSend,
+      });
+      emitToUser(targetUserId, 'support:newMessage', {
+        id: savedMsg.id,
+        sender_type: 'agent',
+        sender_name: adminName,
+        content: messageToSend,
+        created_at: savedMsg.created_at || new Date().toISOString(),
+      });
+    } catch (persistErr) {
+      logger.warn('Failed to persist quick answer for web widget', { error: persistErr.message });
     }
 
     logger.info('Quick answer sent', {
@@ -255,6 +286,7 @@ _El usuario ha sido notificado._`, {
     try {
       await SupportTopicModel.updateStatus(effectiveUserId, 'resolved');
       await SupportTopicModel.updateResolutionTime(effectiveUserId);
+      emitToUser(effectiveUserId, 'support:statusChange', { status: 'resolved', updatedAt: new Date().toISOString() });
 
       if (supportTopic.thread_id) {
         try {
@@ -670,6 +702,8 @@ ${subscriptionEmoji} *Estado:* ${subscriptionStatus}
       const closed = await supportRoutingService.closeUserTopic(userId);
 
       if (closed) {
+        emitToUser(userId, 'support:statusChange', { status: 'closed', updatedAt: new Date().toISOString() });
+
         await ctx.reply(`✅ Ticket cerrado para usuario ${userId}.\n\nEl topic se ha marcado como resuelto.`, {
           message_thread_id: threadId || supportTopic.thread_id,
         });
@@ -728,6 +762,7 @@ ${subscriptionEmoji} *Estado:* ${subscriptionStatus}
       }
 
       await SupportTopicModel.updateStatus(userId, 'open');
+      emitToUser(userId, 'support:statusChange', { status: 'open', updatedAt: new Date().toISOString() });
 
       // Reopen the forum topic if possible
       if (supportTopic && ctx.telegram) {
@@ -1815,6 +1850,7 @@ También puedes ejecutar acciones del ticket con los botones superiores.`;
 
     try {
       await SupportTopicModel.updateStatus(userId, 'open');
+      emitToUser(userId, 'support:statusChange', { status: 'open', updatedAt: new Date().toISOString() });
       await ctx.answerCbQuery('Ticket reabierto.');
       await ctx.editMessageText('El ticket ha sido reabierto.', {
         reply_markup: { inline_keyboard: [] },
@@ -1859,6 +1895,7 @@ También puedes ejecutar acciones del ticket con los botones superiores.`;
 
     try {
       await SupportTopicModel.updateStatus(effectiveUserId, 'closed');
+      emitToUser(effectiveUserId, 'support:statusChange', { status: 'closed', updatedAt: new Date().toISOString() });
 
       if (supportTopic.thread_id) {
         try {

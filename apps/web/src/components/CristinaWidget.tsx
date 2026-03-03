@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { getSocket } from "@/lib/socket";
 import {
   getSupportSuggestions,
   sendSupportMessage,
@@ -52,6 +53,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
     useState<TicketCategory | null>(null);
   const [ticketDescription, setTicketDescription] = useState("");
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
+  const [hasUnreadReply, setHasUnreadReply] = useState(false);
 
   // Compute derived values before hooks that depend on them.
   const isOnboarded = !!(user?.ageVerified && user?.termsAccepted);
@@ -144,6 +146,44 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
 
     return () => clearInterval(interval);
   }, [view, ticket]);
+
+  // Real-time Socket.IO listeners for support events
+  useEffect(() => {
+    if (!isOnboarded) return;
+
+    const socket = getSocket();
+
+    const onNewMessage = (data: {
+      id: number;
+      sender_type: string;
+      sender_name: string;
+      content: string;
+      created_at: string;
+    }) => {
+      setTicketMessages((prev) => {
+        if (prev.some((m) => m.id === data.id)) return prev;
+        return [...prev, data as TicketMessage];
+      });
+      // Show notification dot if widget is closed or not in ticket view
+      if (!isOpen || view !== "ticketView") {
+        setHasUnreadReply(true);
+      }
+    };
+
+    const onStatusChange = (data: { status: string; updatedAt: string }) => {
+      setTicket((prev) =>
+        prev ? { ...prev, status: data.status as SupportTicket["status"] } : prev
+      );
+    };
+
+    socket.on("support:newMessage", onNewMessage);
+    socket.on("support:statusChange", onStatusChange);
+
+    return () => {
+      socket.off("support:newMessage", onNewMessage);
+      socket.off("support:statusChange", onStatusChange);
+    };
+  }, [isOnboarded, isOpen, view]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -264,7 +304,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
     return (
       <div className="fixed bottom-20 right-3 z-[38] flex flex-col items-end gap-2 sm:bottom-24 sm:right-4 safe-area-bottom">
         <button
-          onClick={() => setIsOpen(true)}
+          onClick={() => { setIsOpen(true); setHasUnreadReply(false); }}
           className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-full shadow-lg flex items-center justify-center text-xl sm:text-2xl transition-transform hover:scale-110 active:scale-95"
           style={{
             background: "linear-gradient(135deg, #5BC8F5, #00D4E8)",
@@ -290,6 +330,13 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
             }}
           />
           <span className="relative">🧜‍♀️</span>
+          {/* Unread reply notification dot */}
+          {hasUnreadReply && (
+            <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-red-500" />
+            </span>
+          )}
         </button>
       </div>
     );
@@ -327,7 +374,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
           {/* Ticket icon button — only visible after 3 turns or if user has an open ticket */}
           {(canCreateTicket || hasOpenTicket) && (
             <button
-              onClick={() => (ticket ? setView("ticketView") : setView("ticketForm"))}
+              onClick={() => { ticket ? setView("ticketView") : setView("ticketForm"); setHasUnreadReply(false); }}
               className="relative p-1.5 rounded-lg hover:bg-white/10 transition-colors"
               title={lang === "es" ? "Ticket de soporte" : "Support ticket"}
             >
@@ -644,7 +691,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
           {/* Open ticket banner */}
           {ticket && ticket.status !== "closed" && (
             <div
-              onClick={() => setView("ticketView")}
+              onClick={() => { setView("ticketView"); setHasUnreadReply(false); }}
               className="mx-0 mt-0 px-3 py-2 bg-cyan-900/40 border border-cyan-500/30 rounded-lg cursor-pointer hover:bg-cyan-900/60 transition-colors"
             >
               <div className="flex items-center justify-between">
