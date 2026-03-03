@@ -1745,3 +1745,202 @@ export function getCanvaExportStatus(
 ): Promise<{ success: boolean; job: CanvaExportJob }> {
   return request(`/api/canva/exports/${jobId}`);
 }
+
+// ============================================================================
+// Admin API
+// ============================================================================
+
+export interface AdminStats {
+  totalUsers: number;
+  activeSubscribers: number;
+  monthlyRevenue: number;
+  totalRevenue: number;
+  churnedUsers: number;
+  membershipBreakdown: Record<string, number>;
+  topPaymentMethods: { method: string; transactions: number; revenue: number; successRate: number }[];
+  recentTransactions: { date: string; userId: string; username: string; amount: number; status: string; method: string }[];
+  dailyRevenue?: { date: string; amount: number }[];
+}
+
+export interface AdminUser {
+  id: string;
+  username: string;
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  bio?: string;
+  role: string;
+  tier: string;
+  subscription_status: string;
+  subscription_plan?: string;
+  plan_expiry?: string;
+  created_at: string;
+  last_payment_date?: string;
+  phone_number?: string;
+}
+
+export interface AdminPlan {
+  id: string;
+  sku?: string;
+  name: string;
+  display_name: string;
+  nameEs?: string;
+  tier: string;
+  price: number;
+  currency: string;
+  duration: number;
+  features: string[];
+  featuresEs?: string[];
+  active: boolean;
+  isLifetime?: boolean;
+  isPromo?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AdminPost {
+  id: number;
+  authorId: string;
+  authorUsername: string;
+  authorFirstName: string;
+  authorPhotoUrl: string | null;
+  content: string;
+  mediaUrl: string | null;
+  mediaType: string | null;
+  likesCount: number;
+  repliesCount: number;
+  createdAt: string;
+}
+
+export interface AdminHangout {
+  id: string;
+  title: string;
+  creatorId: string;
+  creatorName: string;
+  currentParticipants: number;
+  maxParticipants: number;
+  isPublic: boolean;
+  createdAt: string;
+}
+
+export interface PaginatedResponse<T> {
+  success: boolean;
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+  [key: string]: unknown;
+}
+
+// Admin Stats
+export function getAdminStats(): Promise<{ success: boolean; stats: AdminStats }> {
+  return request("/api/webapp/admin/stats");
+}
+
+// Admin Users
+export function getAdminUsers(
+  page = 1,
+  search = ""
+): Promise<{ success: boolean; users: AdminUser[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
+  const params = new URLSearchParams({ page: String(page) });
+  if (search) params.set("search", search);
+  return request(`/api/webapp/admin/users?${params}`);
+}
+
+export function getAdminUser(id: string): Promise<{ success: boolean; user: AdminUser }> {
+  return request(`/api/webapp/admin/users/${id}`);
+}
+
+export function updateAdminUser(
+  id: string,
+  fields: { username?: string; email?: string; subscriptionStatus?: string; subscriptionPlan?: string; tier?: string; planExpiry?: string }
+): Promise<{ success: boolean; user: AdminUser }> {
+  return request(`/api/webapp/admin/users/${id}`, { method: "PUT", body: fields });
+}
+
+export function banAdminUser(
+  id: string,
+  ban: boolean,
+  reason?: string
+): Promise<{ success: boolean; user: AdminUser; action: string }> {
+  return request(`/api/webapp/admin/users/${id}/ban`, { method: "POST", body: { ban, reason } });
+}
+
+export function bulkUpdateMemberships(
+  userIds: string[],
+  action: "upgrade" | "downgrade" | "ban" | "unban",
+  planId?: string,
+  expiry?: string
+): Promise<{ success: boolean; updated: number; failed: number; errors: string[] }> {
+  return request("/api/webapp/admin/users/bulk-update", {
+    method: "POST",
+    body: { userIds, action, planId, expiry },
+  });
+}
+
+// Admin Posts
+export function getAdminPosts(
+  page = 1
+): Promise<{ success: boolean; posts: AdminPost[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
+  return request(`/api/webapp/admin/posts?page=${page}`);
+}
+
+export function deleteAdminPost(id: number): Promise<{ success: boolean; message: string }> {
+  return request(`/api/webapp/admin/posts/${id}`, { method: "DELETE" });
+}
+
+// Admin Hangouts
+export function getAdminHangouts(): Promise<{ success: boolean; hangouts: AdminHangout[] }> {
+  return request("/api/webapp/admin/hangouts");
+}
+
+export function endAdminHangout(id: string): Promise<{ success: boolean; message: string }> {
+  return request(`/api/webapp/admin/hangouts/${id}`, { method: "DELETE" });
+}
+
+// Admin Plans
+export function getAdminPlans(): Promise<{ success: boolean; plans: AdminPlan[] }> {
+  return request("/api/webapp/admin/plans");
+}
+
+export function createAdminPlan(
+  plan: Partial<AdminPlan> & { id: string }
+): Promise<{ success: boolean; plan: AdminPlan }> {
+  return request("/api/webapp/admin/plans", { method: "POST", body: plan });
+}
+
+export function updateAdminPlan(
+  id: string,
+  plan: Partial<AdminPlan>
+): Promise<{ success: boolean; plan: AdminPlan }> {
+  return request(`/api/webapp/admin/plans/${id}`, { method: "PUT", body: plan });
+}
+
+export function deleteAdminPlan(id: string): Promise<{ success: boolean; message: string }> {
+  return request(`/api/webapp/admin/plans/${id}`, { method: "DELETE" });
+}
+
+// Admin Push Notifications
+export function sendAdminNotification(payload: {
+  title: string;
+  body: string;
+  url?: string;
+  targetType: "all" | "tier" | "users";
+  tier?: string;
+  userIds?: string[];
+}): Promise<{ success: boolean; sent: number; message: string }> {
+  return request("/api/webapp/admin/notifications/push", { method: "POST", body: payload });
+}
+
+// Push Subscription
+export function subscribePush(subscription: {
+  endpoint: string;
+  keys: { auth: string; p256dh: string };
+}): Promise<{ success: boolean }> {
+  return request("/api/webapp/push/subscribe", { method: "POST", body: subscription });
+}
+
+export function unsubscribePush(endpoint: string): Promise<{ success: boolean }> {
+  return request("/api/webapp/push/unsubscribe", { method: "DELETE", body: { endpoint } });
+}
+
+export function getVapidKey(): Promise<{ success: boolean; publicKey: string }> {
+  return request("/api/webapp/push/vapid-key");
+}

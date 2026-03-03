@@ -279,6 +279,311 @@ const endHangout = async (req, res) => {
   }
 };
 
+// ==========================================
+// Bulk User Update
+// ==========================================
+
+/**
+ * POST /api/webapp/admin/users/bulk-update
+ * Apply a single action to multiple users at once.
+ */
+const bulkUpdateUsers = async (req, res) => {
+  const admin = req.user;
+
+  try {
+    const { userIds, action, planId, expiry } = req.body;
+
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({ error: 'userIds must be a non-empty array' });
+    }
+
+    const validActions = ['upgrade', 'downgrade', 'ban', 'unban'];
+    if (!validActions.includes(action)) {
+      return res.status(400).json({ error: `Invalid action. Must be one of: ${validActions.join(', ')}` });
+    }
+
+    let updated = 0;
+    let failed = 0;
+    const errors = [];
+
+    for (const userId of userIds) {
+      try {
+        if (action === 'upgrade') {
+          if (!planId) {
+            errors.push({ userId, error: 'planId is required for upgrade action' });
+            failed++;
+            continue;
+          }
+          const expiryValue = expiry ? new Date(expiry) : null;
+          await query(
+            `UPDATE users
+             SET tier = 'prime',
+                 subscription_status = 'active',
+                 subscription_plan = $2,
+                 plan_expiry = $3,
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [userId, planId, expiryValue]
+          );
+        } else if (action === 'downgrade') {
+          await query(
+            `UPDATE users
+             SET tier = 'free',
+                 subscription_status = 'free',
+                 subscription_plan = NULL,
+                 plan_expiry = NULL,
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [userId]
+          );
+        } else if (action === 'ban') {
+          await query(
+            `UPDATE users SET tier = 'banned', updated_at = NOW() WHERE id = $1`,
+            [userId]
+          );
+        } else if (action === 'unban') {
+          await query(
+            `UPDATE users SET tier = 'free', updated_at = NOW() WHERE id = $1`,
+            [userId]
+          );
+        }
+        updated++;
+      } catch (userError) {
+        logger.error('bulkUpdateUsers: error processing user', { userId, action, error: userError.message });
+        errors.push({ userId, error: userError.message });
+        failed++;
+      }
+    }
+
+    logger.info('Admin bulk updated users', { adminId: admin.id, action, updated, failed });
+    return res.json({ success: true, updated, failed, errors });
+  } catch (error) {
+    logger.error('Error in bulkUpdateUsers:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// ==========================================
+// Plan Management
+// ==========================================
+
+const Plan = require('../../../models/planModel');
+
+/**
+ * GET /api/webapp/admin/plans
+ * List all plans including promotional plans.
+ */
+const listPlans = async (req, res) => {
+  const admin = req.user;
+  try {
+    const plans = await Plan.getAdminPlans();
+    logger.info('Admin listed plans', { adminId: admin.id, count: plans.length });
+    return res.json({ success: true, plans });
+  } catch (error) {
+    logger.error('Error listing plans:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * POST /api/webapp/admin/plans
+ * Create a new plan.
+ */
+const createPlan = async (req, res) => {
+  const admin = req.user;
+  try {
+    const { id: planId, ...rest } = req.body;
+    if (!planId) {
+      return res.status(400).json({ error: 'Plan id is required' });
+    }
+    const plan = await Plan.createOrUpdate(planId, req.body);
+    logger.info('Admin created plan', { adminId: admin.id, planId });
+    return res.status(201).json({ success: true, plan });
+  } catch (error) {
+    logger.error('Error creating plan:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * PUT /api/webapp/admin/plans/:id
+ * Update an existing plan.
+ */
+const updatePlan = async (req, res) => {
+  const admin = req.user;
+  try {
+    const { id: planId } = req.params;
+    const plan = await Plan.createOrUpdate(planId, { ...req.body, id: planId });
+    logger.info('Admin updated plan', { adminId: admin.id, planId });
+    return res.json({ success: true, plan });
+  } catch (error) {
+    logger.error('Error updating plan:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * DELETE /api/webapp/admin/plans/:id
+ * Delete a plan.
+ */
+const deletePlan = async (req, res) => {
+  const admin = req.user;
+  try {
+    const { id: planId } = req.params;
+    const deleted = await Plan.delete(planId);
+    if (!deleted) {
+      return res.status(500).json({ error: 'Failed to delete plan' });
+    }
+    logger.info('Admin deleted plan', { adminId: admin.id, planId });
+    return res.json({ success: true, message: 'Plan deleted' });
+  } catch (error) {
+    logger.error('Error deleting plan:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// ==========================================
+// Push Notifications (Admin broadcast)
+// ==========================================
+
+/**
+ * POST /api/webapp/admin/notifications/push
+ * Send a push notification to all users, a tier, or specific users.
+ * Also persists a system notification row for in-app display.
+ */
+const sendPushNotification = async (req, res) => {
+  const admin = req.user;
+
+  try {
+    const { title, body, url, targetType, tier, userIds } = req.body;
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+    if (!body || !body.trim()) {
+      return res.status(400).json({ error: 'body is required' });
+    }
+
+    const validTargetTypes = ['all', 'tier', 'users'];
+    if (!validTargetTypes.includes(targetType)) {
+      return res.status(400).json({ error: `Invalid targetType. Must be one of: ${validTargetTypes.join(', ')}` });
+    }
+    if (targetType === 'tier' && !tier) {
+      return res.status(400).json({ error: 'tier is required when targetType is "tier"' });
+    }
+    if (targetType === 'users' && (!Array.isArray(userIds) || userIds.length === 0)) {
+      return res.status(400).json({ error: 'userIds must be a non-empty array when targetType is "users"' });
+    }
+
+    const PushNotificationService = require('../../../services/pushNotificationService');
+    const payload = { title, body, url };
+
+    let sent = 0;
+    if (targetType === 'all') {
+      sent = await PushNotificationService.sendToAll(payload);
+    } else if (targetType === 'tier') {
+      sent = await PushNotificationService.sendToTier(tier, payload);
+    } else if (targetType === 'users') {
+      sent = await PushNotificationService.sendToUsers(userIds, payload);
+    }
+
+    // Persist system notification for in-app display
+    // We insert one notification per targeted user. For 'all' and 'tier' we skip
+    // per-user rows to avoid mass inserts — a single global record is stored with
+    // actor_id = admin, target_user_id = admin (system record marker).
+    const notificationMessage = url ? `${body} — ${url}` : body;
+    await query(
+      `INSERT INTO notifications
+         (type, category, priority, actor_id, target_user_id, entity_type, entity_id, message, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT DO NOTHING`,
+      [
+        'system_push',
+        'announcements',
+        'high',
+        admin.id,
+        admin.id,
+        'admin_broadcast',
+        `push_${Date.now()}`,
+        notificationMessage,
+        JSON.stringify({ title, body, url, targetType, tier: tier || null, sentCount: sent }),
+      ]
+    );
+
+    logger.info('Admin sent push notification', { adminId: admin.id, targetType, tier, sent });
+    return res.json({ success: true, sent, message: 'Notification sent' });
+  } catch (error) {
+    logger.error('Error sending push notification:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// ==========================================
+// Push Subscription (public user endpoints)
+// ==========================================
+
+/**
+ * POST /api/webapp/push/subscribe
+ * Save or update a browser push subscription for the authenticated user.
+ */
+const subscribePush = async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const { endpoint, keys } = req.body;
+
+    if (!endpoint || !keys || !keys.auth || !keys.p256dh) {
+      return res.status(400).json({ error: 'endpoint and keys (auth, p256dh) are required' });
+    }
+
+    await query(
+      `INSERT INTO push_subscriptions (user_id, endpoint, auth, p256dh, created_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (user_id, endpoint) DO UPDATE
+         SET auth = EXCLUDED.auth,
+             p256dh = EXCLUDED.p256dh`,
+      [userId, endpoint, keys.auth, keys.p256dh]
+    );
+
+    return res.json({ success: true });
+  } catch (error) {
+    logger.error('Error subscribing push:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * DELETE /api/webapp/push/unsubscribe
+ * Remove a browser push subscription for the authenticated user.
+ */
+const unsubscribePush = async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const { endpoint } = req.body;
+
+    if (!endpoint) {
+      return res.status(400).json({ error: 'endpoint is required' });
+    }
+
+    await query(
+      'DELETE FROM push_subscriptions WHERE user_id = $1 AND endpoint = $2',
+      [userId, endpoint]
+    );
+
+    return res.json({ success: true });
+  } catch (error) {
+    logger.error('Error unsubscribing push:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * GET /api/webapp/push/vapid-key
+ * Return the VAPID public key so the frontend can create a PushSubscription.
+ */
+const getVapidKey = async (req, res) => {
+  return res.json({ success: true, publicKey: process.env.VAPID_PUBLIC_KEY || '' });
+};
+
 module.exports = {
   getStats,
   listUsers,
@@ -289,4 +594,17 @@ module.exports = {
   deletePost,
   listHangouts,
   endHangout,
+  // Bulk operations
+  bulkUpdateUsers,
+  // Plan management
+  listPlans,
+  createPlan,
+  updatePlan,
+  deletePlan,
+  // Admin push broadcast
+  sendPushNotification,
+  // User push subscription
+  subscribePush,
+  unsubscribePush,
+  getVapidKey,
 };

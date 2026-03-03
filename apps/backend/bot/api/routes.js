@@ -2458,6 +2458,23 @@ app.delete('/api/webapp/admin/posts/:id', adminGuard, asyncHandler(webappAdminCo
 app.get('/api/webapp/admin/hangouts', adminGuard, asyncHandler(webappAdminController.listHangouts));
 app.delete('/api/webapp/admin/hangouts/:id', adminGuard, asyncHandler(webappAdminController.endHangout));
 
+// Bulk user operations — registered BEFORE :id routes to avoid route shadowing
+app.post('/api/webapp/admin/users/bulk-update', adminGuard, asyncHandler(webappAdminController.bulkUpdateUsers));
+
+// Plan management
+app.get('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminController.listPlans));
+app.post('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminController.createPlan));
+app.put('/api/webapp/admin/plans/:id', adminGuard, asyncHandler(webappAdminController.updatePlan));
+app.delete('/api/webapp/admin/plans/:id', adminGuard, asyncHandler(webappAdminController.deletePlan));
+
+// Admin push broadcast
+app.post('/api/webapp/admin/notifications/push', adminGuard, asyncHandler(webappAdminController.sendPushNotification));
+
+// Push subscription management (any authenticated user)
+app.post('/api/webapp/push/subscribe', requireSessionAuth, asyncHandler(webappAdminController.subscribePush));
+app.delete('/api/webapp/push/unsubscribe', requireSessionAuth, asyncHandler(webappAdminController.unsubscribePush));
+app.get('/api/webapp/push/vapid-key', asyncHandler(webappAdminController.getVapidKey));
+
 // PRIME Channel Mirror Admin Routes
 const PrimeMirrorController = require('./controllers/primeMirrorController');
 app.get('/api/webapp/admin/prime-mirror/status', adminGuard, asyncHandler(PrimeMirrorController.getStatus));

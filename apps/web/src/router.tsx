@@ -1,6 +1,7 @@
 import React, { lazy } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import { Layout } from "@/components/Layout";
+import { AdminLayout } from "@/components/admin/AdminLayout";
 import { ModuleLoader } from "@/components/ModuleLoader";
 import { VerificationGate } from "@/components/VerificationGate";
 import { PrimeGate } from "@/components/PrimeGate";
@@ -12,15 +13,24 @@ const Booking = lazy(() => import("@/pages/Booking"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const Social = lazy(() => import("@/pages/Social"));
 const Profile = lazy(() => import("@/pages/Profile"));
-const AdminDashboard = lazy(() => import("@/pages/admin/Dashboard"));
 const CreatorDashboard = lazy(() => import("@/pages/CreatorDashboard"));
-const CreatorApplications = lazy(() => import("@/pages/admin/CreatorApplications"));
 const Subscribe = lazy(() => import("@/pages/Subscribe"));
 const DirectMessages = lazy(() => import("@/pages/DirectMessages"));
 const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
 const Support = lazy(() => import("@/pages/Support"));
 const Apply = lazy(() => import("@/pages/Apply"));
 const Welcome = lazy(() => import("@/pages/Welcome"));
+
+// Admin pages
+const StatsOverview = lazy(() => import("@/pages/admin/StatsOverview"));
+const UserManagement = lazy(() => import("@/pages/admin/UserManagement"));
+const UserDetail = lazy(() => import("@/pages/admin/UserDetail"));
+const PlanManagement = lazy(() => import("@/pages/admin/PlanManagement"));
+const ContentModeration = lazy(() => import("@/pages/admin/ContentModeration"));
+const HangoutModeration = lazy(() => import("@/pages/admin/HangoutModeration"));
+const CreatorApplications = lazy(() => import("@/pages/admin/CreatorApplications"));
+const AdminNotifications = lazy(() => import("@/pages/admin/AdminNotifications"));
+const ExternalServices = lazy(() => import("@/pages/admin/ExternalServices"));
 
 export const router = createBrowserRouter([
   {
@@ -173,8 +183,62 @@ export const router = createBrowserRouter([
           </ModuleLoader>
         ),
       },
+    ],
+  },
+  {
+    path: "/admin",
+    element: <AdminLayout />,
+    children: [
       {
-        path: "admin/creators",
+        index: true,
+        element: (
+          <ModuleLoader>
+            <StatsOverview />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "users",
+        element: (
+          <ModuleLoader>
+            <UserManagement />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "users/:id",
+        element: (
+          <ModuleLoader>
+            <UserDetail />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "plans",
+        element: (
+          <ModuleLoader>
+            <PlanManagement />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "posts",
+        element: (
+          <ModuleLoader>
+            <ContentModeration />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "hangouts",
+        element: (
+          <ModuleLoader>
+            <HangoutModeration />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "creators",
         element: (
           <ModuleLoader>
             <CreatorApplications />
@@ -182,10 +246,18 @@ export const router = createBrowserRouter([
         ),
       },
       {
-        path: "admin/*",
+        path: "notifications",
         element: (
           <ModuleLoader>
-            <AdminDashboard />
+            <AdminNotifications />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "services",
+        element: (
+          <ModuleLoader>
+            <ExternalServices />
           </ModuleLoader>
         ),
       },

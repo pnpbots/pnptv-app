@@ -15,6 +15,7 @@ import {
   markNotificationsAsRead,
   type Notification,
 } from "@/lib/api";
+import { subscribeToPush, isPushSubscribed } from "@/lib/pushNotifications";
 
 interface ToastData {
   id: number;
@@ -48,7 +49,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load initial notifications & counts
+  // Load initial notifications & counts + register push subscription
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -63,6 +64,16 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         setOffset(notifRes.notifications.length);
       } catch {
         // silently fail
+      }
+
+      // Register push subscription if not already subscribed
+      try {
+        const subscribed = await isPushSubscribed();
+        if (!subscribed && Notification.permission === "granted") {
+          await subscribeToPush();
+        }
+      } catch {
+        // push registration is best-effort
       }
     };
     load();

@@ -1,5 +1,5 @@
-import React from "react";
-import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import React, { useEffect } from "react";
+import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { BottomNav } from "./BottomNav";
 import { useAuth } from "@/hooks/useAuth";
 import { useTelegram } from "@/hooks/useTelegram";
@@ -17,9 +17,16 @@ const sidebarLinks = [
 ];
 
 export function Layout() {
-  const { isAuthenticated, user, isLoading } = useAuth();
+  const { isAuthenticated, isAdmin, user, isLoading } = useAuth();
   const { isTelegram } = useTelegram();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (isAuthenticated && isAdmin && location.pathname === "/") {
+      navigate("/admin", { replace: true });
+    }
+  }, [isAuthenticated, isAdmin, location.pathname, navigate]);
 
   if (!isAuthenticated && !isLoading) {
     return <LoginPage />;
