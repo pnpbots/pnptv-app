@@ -36,9 +36,8 @@ const getUserPhotoFromDb = async (userId) => {
 const getFeed = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   try {
-    const viewerSubStatus = user.subscription_status || user.subscriptionStatus;
     const viewerTier = req.session?.user?.tier || 'free';
-    const result = await SocialPostService.getFeed(user.id, req.query.cursor, req.query.limit, viewerSubStatus, viewerTier);
+    const result = await SocialPostService.getFeed(user.id, req.query.cursor, req.query.limit, viewerTier, viewerTier);
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('getFeed error', err);

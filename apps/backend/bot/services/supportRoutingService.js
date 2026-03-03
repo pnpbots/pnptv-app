@@ -349,6 +349,8 @@ _Responde en este topic para enviar mensajes al usuario._`;
       return false;
     }
 
+    const adminName = ctx.from?.first_name || 'Support';
+
     try {
       // Get user ID from thread ID
       const supportTopic = await SupportTopicModel.getByThreadId(threadId);
@@ -359,7 +361,6 @@ _Responde en este topic para enviar mensajes al usuario._`;
       }
 
       const userId = supportTopic.user_id;
-      const adminName = ctx.from.first_name || 'Support';
       
       // Check if this is the first response
       const isFirstResponse = !supportTopic.first_response_at;

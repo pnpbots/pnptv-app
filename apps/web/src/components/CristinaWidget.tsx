@@ -55,6 +55,11 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [hasUnreadReply, setHasUnreadReply] = useState(false);
 
+  // Refs that mirror isOpen/view so socket listeners can read current values
+  // without being re-registered every time these state values change.
+  const isOpenRef = useRef(isOpen);
+  const viewRef = useRef(view);
+
   // Compute derived values before hooks that depend on them.
   const isOnboarded = !!(user?.ageVerified && user?.termsAccepted);
   const lang = user?.language === "es" ? "es" : "en";
@@ -74,6 +79,10 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
     SUPPRESSED_PATHS.some((p) => location.pathname.startsWith(p));
 
   // All hooks are declared unconditionally before any early returns (Rules of Hooks).
+
+  // Keep refs in sync with state so socket listeners avoid stale closures
+  useEffect(() => { isOpenRef.current = isOpen; }, [isOpen]);
+  useEffect(() => { viewRef.current = view; }, [view]);
 
   // Load suggestions on first open
   useEffect(() => {
@@ -147,7 +156,9 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
     return () => clearInterval(interval);
   }, [view, ticket]);
 
-  // Real-time Socket.IO listeners for support events
+  // Real-time Socket.IO listeners for support events.
+  // Registered once per onboarded session; refs are used to read current
+  // isOpen/view values without re-registering listeners on every state change.
   useEffect(() => {
     if (!isOnboarded) return;
 
@@ -164,8 +175,8 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
         if (prev.some((m) => m.id === data.id)) return prev;
         return [...prev, data as TicketMessage];
       });
-      // Show notification dot if widget is closed or not in ticket view
-      if (!isOpen || view !== "ticketView") {
+      // Use refs to avoid stale closure over isOpen/view
+      if (!isOpenRef.current || viewRef.current !== "ticketView") {
         setHasUnreadReply(true);
       }
     };
@@ -183,7 +194,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
       socket.off("support:newMessage", onNewMessage);
       socket.off("support:statusChange", onStatusChange);
     };
-  }, [isOnboarded, isOpen, view]);
+  }, [isOnboarded]);
 
   const sendMessage = useCallback(
     async (text: string) => {

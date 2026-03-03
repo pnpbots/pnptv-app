@@ -198,12 +198,14 @@ class Plan {
       }
 
       const sql = `
-        INSERT INTO ${this.TABLE} (id, sku, name, name_es, price, currency, duration_days, features, features_es, active, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+        INSERT INTO ${this.TABLE} (id, sku, name, display_name, name_es, tier, price, currency, duration_days, features, features_es, active, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
         ON CONFLICT (id) DO UPDATE SET
           sku = EXCLUDED.sku,
           name = EXCLUDED.name,
+          display_name = EXCLUDED.display_name,
           name_es = EXCLUDED.name_es,
+          tier = EXCLUDED.tier,
           price = EXCLUDED.price,
           currency = EXCLUDED.currency,
           duration_days = EXCLUDED.duration_days,
@@ -218,7 +220,9 @@ class Plan {
         planId,
         data.sku,
         data.name,
+        data.display_name || data.displayName || data.name,
         data.nameEs,
+        data.tier || null,
         data.price,
         data.currency || 'USD',
         data.duration || 30,
@@ -291,6 +295,7 @@ class Plan {
         display_name: 'PNP MEMBER',
         name: 'PNP Member',
         nameEs: 'PNP Miembro',
+        tier: 'member',
         price: 4.99,
         currency: 'USD',
         duration: 30,
@@ -314,6 +319,7 @@ class Plan {
         display_name: 'WEEK PASS',
         name: 'Week Pass',
         nameEs: 'Pase Semanal',
+        tier: 'PRIME',
         price: 14.99,
         currency: 'USD',
         duration: 7,
@@ -337,6 +343,7 @@ class Plan {
         display_name: '3X MONTHLY PASS',
         name: '3 Months Pass',
         nameEs: 'Pase Trimestral',
+        tier: 'PRIME',
         price: 49.99,
         currency: 'USD',
         duration: 90,
@@ -364,6 +371,7 @@ class Plan {
         display_name: 'CRYSTAL PASS',
         name: 'Crystal Pass',
         nameEs: 'Pase Crystal',
+        tier: 'PRIME',
         price: 74.99,
         currency: 'USD',
         duration: 180,
@@ -388,8 +396,10 @@ class Plan {
       {
         id: 'yearly_pass',
         sku: 'EASYBOTS-PNP-365',
+        display_name: 'YEARLY PASS',
         name: 'Yearly Pass',
         nameEs: 'Pase Anual',
+        tier: 'PRIME',
         price: 99.99,
         currency: 'USD',
         duration: 365,
@@ -414,8 +424,10 @@ class Plan {
       {
         id: 'lifetime_pass',
         sku: 'EASYBOTS-PNP-000',
+        display_name: 'LIFETIME PASS',
         name: 'Lifetime Pass',
         nameEs: 'Pase de por Vida',
+        tier: 'PRIME',
         price: 249.99,
         currency: 'USD',
         duration: 36500,
@@ -442,8 +454,10 @@ class Plan {
       {
         id: 'lifetime100_promo',
         sku: 'EASYBOTS-PNP-100',
+        display_name: 'LIFETIME100 PROMO',
         name: 'Lifetime100 Promo',
         nameEs: 'Lifetime100 Promo',
+        tier: 'PRIME',
         price: 100.00,
         currency: 'USD',
         duration: 36500,

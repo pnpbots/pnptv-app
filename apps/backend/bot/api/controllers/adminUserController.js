@@ -74,15 +74,16 @@ class AdminUserController {
         logger.info('Admin updated user subscription', { adminId, userId, subscriptionStatus });
       }
 
-      // Update tier (PRIME/free)
+      // Update tier (PRIME/free) — also sync subscription_status for consistency
       if (isPrime !== undefined || tier !== undefined) {
         const newTier = isPrime ? 'PRIME' : 'free';
+        const newStatus = isPrime ? 'active' : 'free';
         await query(
-          'UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2',
-          [newTier, userId.toString()]
+          'UPDATE users SET tier = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3',
+          [newTier, newStatus, userId.toString()]
         );
         await require('../../../config/redis').cache.del(`user:${userId}`);
-        logger.info('Admin updated user tier', { adminId, userId, tier: newTier });
+        logger.info('Admin updated user tier', { adminId, userId, tier: newTier, subscriptionStatus: newStatus });
       }
 
       const updatedUser = await UserModel.getById(userId);

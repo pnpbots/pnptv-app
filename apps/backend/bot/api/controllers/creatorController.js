@@ -111,8 +111,10 @@ const getSubscriptionStatus = async (req, res) => {
 // POST /api/webapp/creator/:creatorId/subscribe
 const subscribeToCreator = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  // Check PRIME status
-  if (user.subscription_status !== 'active' && user.subscriptionStatus !== 'active') {
+  // Check PRIME status — admins bypass this restriction
+  const userTier = (user.tier || '').toLowerCase();
+  const isAdminRole = user.role === 'admin' || user.role === 'superadmin';
+  if (userTier !== 'prime' && !isAdminRole) {
     return res.status(403).json({ error: 'PRIME subscription required to subscribe to creators' });
   }
   try {

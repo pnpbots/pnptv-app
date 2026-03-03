@@ -583,6 +583,25 @@ ${subscriptionEmoji} *Estado:* ${subscriptionStatus}
 
             logger.info('Reply sent to user from old message', { targetUserId, adminId: ctx.from.id });
 
+            // Persist + emit for web widget (CASE 2 path)
+            try {
+              const savedMsg = await SupportTicketMessageModel.create({
+                userId: targetUserId,
+                senderType: 'agent',
+                senderName: adminName,
+                content: message.text || message.caption || '[Media attachment]',
+              });
+              emitToUser(targetUserId, 'support:newMessage', {
+                id: savedMsg.id,
+                sender_type: 'agent',
+                sender_name: adminName,
+                content: message.text || message.caption || '[Media attachment]',
+                created_at: savedMsg.created_at || new Date().toISOString(),
+              });
+            } catch (persistErr) {
+              logger.warn('Failed to persist CASE 2 reply for web widget', { error: persistErr.message });
+            }
+
             // Create topic for future conversations if it doesn't exist
             try {
               const existingTopic = await SupportTopicModel.getByUserId(targetUserId);
@@ -1294,6 +1313,25 @@ ${subscriptionEmoji} *Estado:* ${subscriptionStatus}
       );
 
       await ctx.reply(`✅ Mensaje enviado a usuario ${targetUserId}`);
+
+      // Persist + emit for web widget (/msg path)
+      try {
+        const savedMsg = await SupportTicketMessageModel.create({
+          userId: targetUserId,
+          senderType: 'agent',
+          senderName: adminName,
+          content: messageText,
+        });
+        emitToUser(targetUserId, 'support:newMessage', {
+          id: savedMsg.id,
+          sender_type: 'agent',
+          sender_name: adminName,
+          content: messageText,
+          created_at: savedMsg.created_at || new Date().toISOString(),
+        });
+      } catch (persistErr) {
+        logger.warn('Failed to persist /msg reply for web widget', { error: persistErr.message });
+      }
 
       // Create/update support topic for tracking
       try {

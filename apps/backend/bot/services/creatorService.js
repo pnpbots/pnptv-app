@@ -356,12 +356,14 @@ class CreatorService {
     // Owner always sees their own exclusive content
     if (viewerId === creatorId) return { status: 'unlocked', reason: 'owner' };
 
-    // Check viewer's PRIME status
+    // Check viewer's PRIME status via tier column
     const viewerRes = await query(
-      "SELECT subscription_status FROM users WHERE id = $1",
+      "SELECT tier, role FROM users WHERE id = $1",
       [viewerId]
     );
-    const isPrime = viewerRes.rows[0]?.subscription_status === 'active';
+    const viewerTier = (viewerRes.rows[0]?.tier || '').toLowerCase();
+    const viewerRole = viewerRes.rows[0]?.role || '';
+    const isPrime = viewerTier === 'prime' || viewerRole === 'admin' || viewerRole === 'superadmin';
 
     if (!isPrime) {
       return { status: 'locked', reason: 'not_prime' };
@@ -386,13 +388,13 @@ class CreatorService {
     return { status: 'locked', reason: 'not_subscribed' };
   }
 
-  static async filterFeedExclusivePosts(posts, viewerId, viewerSubscriptionStatus) {
+  static async filterFeedExclusivePosts(posts, viewerId, viewerTier) {
     if (!posts || posts.length === 0) return posts;
 
     const exclusivePosts = posts.filter(p => p.is_exclusive);
     if (exclusivePosts.length === 0) return posts;
 
-    const isPrime = viewerSubscriptionStatus === 'active';
+    const isPrime = (viewerTier || '').toLowerCase() === 'prime';
 
     // If not PRIME, all exclusive posts are locked
     if (!isPrime) {

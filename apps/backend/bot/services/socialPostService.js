@@ -59,8 +59,8 @@ class SocialPostService {
       params
     );
     let posts = sanitizePostRows(rows);
-    if (viewerSubscriptionStatus !== undefined) {
-      posts = await CreatorService.filterFeedExclusivePosts(posts, userId, viewerSubscriptionStatus);
+    if (viewerTier !== undefined) {
+      posts = await CreatorService.filterFeedExclusivePosts(posts, userId, viewerTier);
     }
     // Apply content_tier blurring based on viewer tier
     if (viewerTier !== undefined) {
