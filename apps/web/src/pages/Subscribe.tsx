@@ -446,6 +446,29 @@ export default function Subscribe() {
         )}
       </div>
 
+      {/* Lifetime100 promo */}
+      <div className="mb-6">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="flex-1 h-px bg-white/10" />
+          <span className="text-xs text-pnp-textSecondary">or</span>
+          <div className="flex-1 h-px bg-white/10" />
+        </div>
+        <div className="rounded-xl p-4 border border-[#FFB454]/30 bg-[#FFB454]/5">
+          <p className="text-sm text-pnp-textPrimary font-medium mb-1">
+            Want the best deal?
+          </p>
+          <p className="text-xs text-pnp-textSecondary mb-3">
+            Get our Lifetime100 promo — one single payment of $100 for lifetime PRIME access. No subscriptions, no renewals, forever yours.
+          </p>
+          <a
+            href="/lifetime100"
+            className="inline-block text-xs font-semibold text-[#FFB454] hover:text-[#ffcc80] transition-colors border-b border-[#FFB454]/50"
+          >
+            Check out the Lifetime100 deal
+          </a>
+        </div>
+      </div>
+
       {/* Error banner */}
       {error && (
         <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-400 text-center">
