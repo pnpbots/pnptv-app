@@ -78,6 +78,7 @@ async function processImage(buffer, hangoutId, userId) {
 
   const mainInfo = await sharp(buffer)
     .rotate()
+    .withMetadata(false)
     .resize(IMAGE_MAX_DIMENSION, IMAGE_MAX_DIMENSION, {
       fit: 'inside',
       withoutEnlargement: true,
@@ -87,6 +88,7 @@ async function processImage(buffer, hangoutId, userId) {
 
   await sharp(buffer)
     .rotate()
+    .withMetadata(false)
     .resize(IMAGE_THUMB_DIMENSION, IMAGE_THUMB_DIMENSION, {
       fit: 'inside',
       withoutEnlargement: true,

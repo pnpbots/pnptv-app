@@ -11,7 +11,14 @@ const NotificationEmitter = require('../../services/notificationEmitter');
 const authGuard = (req, res) => {
   const user = req.session?.user;
   if (!user) { res.status(401).json({ error: 'Not authenticated' }); return null; }
+  if (user.tier === 'banned') { res.status(403).json({ error: 'Account suspended', code: 'ACCOUNT_BANNED' }); return null; }
   return user;
+};
+
+const parsePostId = (req, res) => {
+  const id = parseInt(req.params.postId, 10);
+  if (!Number.isFinite(id) || id <= 0) { res.status(400).json({ error: 'Invalid post ID' }); return null; }
+  return id;
 };
 
 /**
@@ -37,7 +44,7 @@ const getFeed = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   try {
     const viewerTier = req.session?.user?.tier || 'free';
-    const result = await SocialPostService.getFeed(user.id, req.query.cursor, req.query.limit, viewerTier, viewerTier);
+    const result = await SocialPostService.getFeed(user.id, req.query.cursor, req.query.limit, viewerTier);
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('getFeed error', err);
@@ -74,11 +81,28 @@ const getWofFeed = async (req, res) => {
 
 const createPost = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, replyToId, repostOfId, isExclusive, isShareable } = req.body;
+  const { content, isExclusive, isShareable } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ error: 'Content required' });
-  if (content.length > 5000) return res.status(400).json({ error: 'Post too long (max 5000 chars)' });
+
+  let replyToId = req.body.replyToId ? parseInt(req.body.replyToId, 10) : null;
+  let repostOfId = req.body.repostOfId ? parseInt(req.body.repostOfId, 10) : null;
+  if (req.body.replyToId && (!Number.isFinite(replyToId) || replyToId <= 0)) {
+    return res.status(400).json({ error: 'Invalid replyToId' });
+  }
+  if (req.body.repostOfId && (!Number.isFinite(repostOfId) || repostOfId <= 0)) {
+    return res.status(400).json({ error: 'Invalid repostOfId' });
+  }
+
+  const maxLen = replyToId ? 500 : 5000;
+  if (content.length > maxLen) return res.status(400).json({ error: `Content too long (max ${maxLen} chars)` });
 
   try {
+    if (replyToId) {
+      const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
+      if (!parentCheck.rows.length) return res.status(404).json({ error: 'Parent post not found' });
+      if (parentCheck.rows[0].reply_to_id !== null) return res.status(400).json({ error: 'Cannot reply to a reply' });
+    }
+
     // Validate creator status for exclusive posts
     if (isExclusive) {
       const creatorCheck = await dbQuery('SELECT creator_status FROM users WHERE id = $1', [user.id]);
@@ -87,10 +111,11 @@ const createPost = async (req, res) => {
       }
     }
 
+    const exclusive = !!isExclusive;
     const shareable = isShareable !== false;
-    const post = await SocialPostService.createPost(user.id, content.trim(), null, null, replyToId, repostOfId, false, !!isExclusive, shareable);
+    const post = await SocialPostService.createPost(user.id, content.trim(), null, null, replyToId, repostOfId, false, exclusive, shareable);
 
-    if (!replyToId && !repostOfId) {
+    if (!replyToId && !repostOfId && !exclusive) {
       SocialPostService.mirrorToMastodon(content.trim(), post.id);
     }
 
@@ -132,18 +157,24 @@ const createPost = async (req, res) => {
 
 const toggleLike = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
+  const postId = parsePostId(req, res); if (!postId) return;
   try {
-    const result = await SocialPostService.toggleLike(req.params.postId, user.id);
+    const postCheck = await dbQuery('SELECT user_id FROM social_posts WHERE id = $1 AND is_deleted = false', [postId]);
+    if (!postCheck.rows.length) return res.status(404).json({ error: 'Post not found' });
+    if (String(postCheck.rows[0].user_id) === String(user.id)) {
+      return res.status(400).json({ error: 'Cannot like your own post' });
+    }
+
+    const result = await SocialPostService.toggleLike(postId, user.id);
 
     // Notify post author on like
     if (result.liked) {
-      const postRow = await dbQuery('SELECT user_id FROM social_posts WHERE id = $1', [req.params.postId]);
-      const postAuthorId = postRow.rows[0]?.user_id;
+      const postAuthorId = postCheck.rows[0].user_id;
       if (postAuthorId) {
         NotificationEmitter.emit({
           type: 'like', category: 'social', priority: 'normal',
           actorId: user.id, targetUserId: postAuthorId,
-          entityType: 'post', entityId: String(req.params.postId),
+          entityType: 'post', entityId: String(postId),
           message: `${user.firstName || user.first_name || user.username} liked your post`,
         });
       }
@@ -160,9 +191,10 @@ const toggleLike = async (req, res) => {
 
 const deletePost = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
+  const postId = parsePostId(req, res); if (!postId) return;
   const isAdmin = user.role === 'admin' || user.role === 'superadmin';
   try {
-    const deleted = await SocialPostService.deletePost(req.params.postId, user.id, isAdmin);
+    const deleted = await SocialPostService.deletePost(postId, user.id, isAdmin);
     if (!deleted) return res.status(404).json({ error: 'Post not found or not yours' });
     return res.json({ success: true });
   } catch (err) {
@@ -175,8 +207,9 @@ const deletePost = async (req, res) => {
 
 const getReplies = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
+  const postId = parsePostId(req, res); if (!postId) return;
   try {
-    const result = await SocialPostService.getReplies(req.params.postId, user.id, req.query.cursor);
+    const result = await SocialPostService.getReplies(postId, user.id, req.query.cursor);
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('getReplies error', err);
@@ -208,15 +241,32 @@ const postToMastodon = async (req, res) => {
 
 const createPostWithMedia = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, replyToId, repostOfId, isExclusive, isShareable } = req.body;
+  const { content, isExclusive, isShareable } = req.body;
 
   if (!content || !content.toString().trim()) return res.status(400).json({ error: 'Content required' });
-  if (content.toString().length > 5000) return res.status(400).json({ error: 'Post too long (max 5000 chars)' });
+
+  let replyToId = req.body.replyToId ? parseInt(req.body.replyToId, 10) : null;
+  let repostOfId = req.body.repostOfId ? parseInt(req.body.repostOfId, 10) : null;
+  if (req.body.replyToId && (!Number.isFinite(replyToId) || replyToId <= 0)) {
+    return res.status(400).json({ error: 'Invalid replyToId' });
+  }
+  if (req.body.repostOfId && (!Number.isFinite(repostOfId) || repostOfId <= 0)) {
+    return res.status(400).json({ error: 'Invalid repostOfId' });
+  }
+
+  const maxLen = replyToId ? 500 : 5000;
+  if (content.toString().length > maxLen) return res.status(400).json({ error: `Content too long (max ${maxLen} chars)` });
 
   let mediaUrl = null;
   let mediaType = null;
 
   try {
+    if (replyToId) {
+      const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
+      if (!parentCheck.rows.length) return res.status(404).json({ error: 'Parent post not found' });
+      if (parentCheck.rows[0].reply_to_id !== null) return res.status(400).json({ error: 'Cannot reply to a reply' });
+    }
+
     // Validate creator status for exclusive posts
     if (isExclusive === 'true' || isExclusive === true) {
       const creatorCheck = await dbQuery('SELECT creator_status FROM users WHERE id = $1', [user.id]);
@@ -259,7 +309,7 @@ const createPostWithMedia = async (req, res) => {
       user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable
     );
 
-    if (!replyToId && !repostOfId) {
+    if (!replyToId && !repostOfId && !exclusive) {
       SocialPostService.mirrorToMastodon(content.toString().trim(), post.id);
     }
 
@@ -319,6 +369,18 @@ const getPublicProfile = async (req, res) => {
   const isAdmin = viewerRole === 'admin' || viewerRole === 'superadmin';
 
   try {
+    // Bidirectional block check: deny access if either party has blocked the other
+    if (viewerId && String(viewerId) !== String(userId)) {
+      const UserModel = require('../../../models/userModel');
+      const [viewerBlocked, targetBlocked] = await Promise.all([
+        UserModel.isBlocked(viewerId, userId),
+        UserModel.isBlocked(userId, viewerId),
+      ]);
+      if (viewerBlocked || targetBlocked) {
+        return res.status(403).json({ success: false, error: 'Profile unavailable', code: 'BLOCKED' });
+      }
+    }
+
     // Free-tier profile browsing restriction:
     // Free users may only view profiles of users they have an existing connection with.
     // Connections: any DM thread between viewer and target, OR target liked viewer's post.
@@ -349,7 +411,7 @@ const getPublicProfile = async (req, res) => {
       }
     }
 
-    const result = await SocialPostService.getPublicProfile(userId, viewerId, req.query.cursor, req.query.limit);
+    const result = await SocialPostService.getPublicProfile(userId, viewerId, req.query.cursor, req.query.limit, viewerTier);
     if (!result.profile) return res.status(404).json({ error: 'User not found' });
 
     const profile = result.profile;
@@ -364,7 +426,6 @@ const getPublicProfile = async (req, res) => {
         bio: profile.bio,
         photoUrl: profile.photo_file_id,
         pnptvId: profile.pnptv_id,
-        subscriptionStatus: profile.subscription_status,
         memberSince: profile.created_at,
         postCount: result.postCount,
         creatorStatus: profile.creator_status,
@@ -397,8 +458,9 @@ const getPublicProfile = async (req, res) => {
 
 const requestWofDeletion = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
+  const postId = parsePostId(req, res); if (!postId) return;
   try {
-    const deleted = await SocialPostService.deleteWofPost(req.params.postId, user.id);
+    const deleted = await SocialPostService.deleteWofPost(postId, user.id);
     if (!deleted) return res.status(404).json({ error: 'WoF post not found or not yours' });
     return res.json({ success: true });
   } catch (err) {

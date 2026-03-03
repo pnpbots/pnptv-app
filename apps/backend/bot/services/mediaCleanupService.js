@@ -17,6 +17,12 @@ class MediaCleanupService {
     try {
       // __dirname = /app/apps/backend/bot/services
       // 4 levels up reaches /app (monorepo root), then /public
+      const uploadRoot = path.resolve(__dirname, '../../../../public/uploads');
+      const resolved = path.resolve(uploadRoot, mediaUrl.replace(/^\/uploads\//, ''));
+      if (!resolved.startsWith(uploadRoot + path.sep)) {
+        logger.warn('Path traversal attempt blocked in media cleanup', { mediaUrl });
+        return;
+      }
       const filePath = path.join(__dirname, '../../../..', 'public', mediaUrl.replace(/^\//, ''));
       await fs.unlink(filePath);
       logger.info(`Deleted media file: ${mediaUrl}`);

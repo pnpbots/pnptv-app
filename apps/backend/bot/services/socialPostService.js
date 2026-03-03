@@ -32,7 +32,7 @@ class SocialPostService {
    * Requires userId for the liked_by_me subquery.
    * Uses ID-based cursor pagination for consistent, index-friendly fetching.
    */
-  static async getFeed(userId, cursor, limit = 20, viewerSubscriptionStatus, viewerTier) {
+  static async getFeed(userId, cursor, limit = 20, viewerTier) {
     const lim = Math.min(Number(limit) || 20, 50);
     const fetchLimit = lim + 10;
     const cursorId = cursor ? parseInt(cursor, 10) : null;
@@ -220,10 +220,10 @@ class SocialPostService {
     const post = rows[0];
 
     if (replyToId) {
-      await query('UPDATE social_posts SET replies_count = replies_count + 1 WHERE id = $1', [replyToId]);
+      await query('UPDATE social_posts SET replies_count = replies_count + 1 WHERE id = $1 AND is_deleted = false', [replyToId]);
     }
     if (repostOfId) {
-      await query('UPDATE social_posts SET reposts_count = reposts_count + 1 WHERE id = $1', [repostOfId]);
+      await query('UPDATE social_posts SET reposts_count = reposts_count + 1 WHERE id = $1 AND is_deleted = false', [repostOfId]);
     }
 
     return post;
@@ -261,29 +261,48 @@ class SocialPostService {
         WHEN (SELECT COUNT(*) FROM ins) > 0 THEN likes_count + 1
         WHEN (SELECT COUNT(*) FROM del) > 0 THEN GREATEST(0, likes_count - 1)
         ELSE likes_count
-      END WHERE id = $1
-      RETURNING (SELECT COUNT(*) FROM ins) > 0 AS liked`,
+      END WHERE id = $1 AND is_deleted = false
+      RETURNING (SELECT COUNT(*) FROM ins) > 0 AS liked, likes_count`,
       [postId, userId]
     );
-    return { liked: rows[0]?.liked ?? false };
+    if (!rows[0]) return { liked: false, likes_count: 0 };
+    return { liked: rows[0].liked ?? false, likes_count: rows[0].likes_count };
   }
 
   // ── Delete Post ───────────────────────────────────────────────────────────
 
   static async deletePost(postId, userId, isAdmin = false) {
     if (isAdmin) {
-      const { rowCount } = await query(
-        'UPDATE social_posts SET is_deleted=true, updated_at=NOW() WHERE id=$1',
+      const { rows, rowCount } = await query(
+        'UPDATE social_posts SET is_deleted=true, updated_at=NOW() WHERE id=$1 RETURNING reply_to_id, repost_of_id',
         [postId]
       );
-      if (rowCount > 0) await MediaCleanupService.deletePostMedia(postId);
+      if (rowCount > 0) {
+        await MediaCleanupService.deletePostMedia(postId);
+        const { reply_to_id, repost_of_id } = rows[0];
+        if (reply_to_id) {
+          await query('UPDATE social_posts SET replies_count = GREATEST(replies_count - 1, 0) WHERE id = $1', [reply_to_id]);
+        }
+        if (repost_of_id) {
+          await query('UPDATE social_posts SET reposts_count = GREATEST(reposts_count - 1, 0) WHERE id = $1', [repost_of_id]);
+        }
+      }
       return rowCount > 0;
     }
-    const { rowCount } = await query(
-      'UPDATE social_posts SET is_deleted=true WHERE id=$1 AND user_id=$2',
+    const { rows, rowCount } = await query(
+      'UPDATE social_posts SET is_deleted=true WHERE id=$1 AND user_id=$2 RETURNING reply_to_id, repost_of_id',
       [postId, userId]
     );
-    if (rowCount > 0) await MediaCleanupService.deletePostMedia(postId);
+    if (rowCount > 0) {
+      await MediaCleanupService.deletePostMedia(postId);
+      const { reply_to_id, repost_of_id } = rows[0];
+      if (reply_to_id) {
+        await query('UPDATE social_posts SET replies_count = GREATEST(replies_count - 1, 0) WHERE id = $1', [reply_to_id]);
+      }
+      if (repost_of_id) {
+        await query('UPDATE social_posts SET reposts_count = GREATEST(reposts_count - 1, 0) WHERE id = $1', [repost_of_id]);
+      }
+    }
     return rowCount > 0;
   }
 
@@ -319,7 +338,7 @@ class SocialPostService {
 
   // ── Public Profile ────────────────────────────────────────────────────────
 
-  static async getPublicProfile(userId, viewerId, cursor, limit = 20) {
+  static async getPublicProfile(userId, viewerId, cursor, limit = 20, viewerTier) {
     const lim = Math.min(Number(limit) || 20, 50);
     const cursorId = cursor ? parseInt(cursor, 10) : null;
     const params = [userId, lim];
@@ -351,7 +370,7 @@ class SocialPostService {
       ),
       query(
         `SELECT id, username, first_name, last_name, bio, photo_file_id, pnptv_id,
-                subscription_status, created_at,
+                created_at,
                 creator_status, creator_type, creator_price_usd, creator_verified, creator_featured, creator_subscriber_count
          FROM users WHERE id = $1`,
         [userId]
@@ -369,10 +388,15 @@ class SocialPostService {
 
     const profile = profileRes.rows[0] || null;
     if (profile) profile.photo_file_id = isValidPhotoUrl(profile.photo_file_id) ? profile.photo_file_id : null;
-    const posts = sanitizePostRows(postsRes.rows).map(p => ({
+    let posts = sanitizePostRows(postsRes.rows).map(p => ({
       ...p,
       liked_by_me: viewerId ? p.liked_by_me : false,
     }));
+
+    if (viewerTier) {
+      posts = await CreatorService.filterFeedExclusivePosts(posts, viewerId, viewerTier);
+    }
+
     const nextCursor = posts.length === lim ? String(posts[posts.length - 1].id) : null;
     const postCount = postCountRes.rows[0]?.count || 0;
     const performerData = performerRes.rows[0] || null;

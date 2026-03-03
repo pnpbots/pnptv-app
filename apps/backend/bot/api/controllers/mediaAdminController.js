@@ -143,7 +143,7 @@ const uploadMedia = async (req, res) => {
     const mediaId = uuidv4();
     const fileExt = path.extname(req.file.originalname);
     const fileName = `${mediaId}${fileExt}`;
-    const uploadDir = path.join('/root/pnptvbot-production', 'uploads', 'media');
+    const uploadDir = path.join(__dirname, '../../../../../public/uploads/media');
 
     // Create upload directory if it doesn't exist
     await fs.mkdir(uploadDir, { recursive: true });
@@ -279,7 +279,7 @@ const deleteMedia = async (req, res) => {
 
     // Delete physical file if it exists (optional)
     if (media.url && media.url.startsWith('/uploads/')) {
-      const filePath = path.join('/root/pnptvbot-production', media.url);
+      const filePath = path.join(__dirname, '../../../../../public', media.url);
       await fs.unlink(filePath).catch(() => {});
     }
 

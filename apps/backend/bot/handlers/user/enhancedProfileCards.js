@@ -24,6 +24,20 @@ const registerEnhancedProfileCards = (bot) => {
 
       const targetUserId = ctx.match[1];
       const lang = getLanguage(ctx);
+      const viewerId = ctx.from?.id?.toString();
+
+      // Bidirectional block check before rendering profile
+      if (viewerId && viewerId !== targetUserId) {
+        const UserModel = require('../../../models/userModel');
+        const [viewerBlocked, targetBlocked] = await Promise.all([
+          UserModel.isBlocked(viewerId, targetUserId),
+          UserModel.isBlocked(targetUserId, viewerId),
+        ]);
+        if (viewerBlocked || targetBlocked) {
+          await ctx.answerCbQuery('Profile unavailable');
+          return;
+        }
+      }
 
       const user = await UserService.getById(targetUserId);
 

@@ -83,6 +83,16 @@ const requirePageAuth = (req, res, next) => {
 // ==========================================
 
 /**
+ * Thin session auth — returns 401 JSON if user is not authenticated.
+ * Use this before multer on upload routes to reject unauthenticated
+ * requests before any file processing begins.
+ */
+const requireSessionAuth = (req, res, next) => {
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Not authenticated' });
+  next();
+};
+
+/**
  * Soft auth — populates req.user from session if present, never blocks
  */
 const softAuth = (req, res, next) => {
@@ -1014,6 +1024,36 @@ const healthLimiter = rateLimit({
   },
 });
 
+// Rate limiter for social post creation (10 posts per 5 minutes, per user)
+const socialPostLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  handler: (req, res) => res.status(429).json({ error: 'Too many posts. Please wait.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Rate limiter for social actions (likes, follows — 30 per minute, per user)
+const socialActionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  handler: (req, res) => res.status(429).json({ error: 'Too many actions. Slow down.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Rate limiter for file uploads (20 per minute, per user)
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  handler: (req, res) => res.status(429).json({ error: 'Upload rate limit exceeded.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Health check with dependency checks and security
 app.get('/health', healthLimiter, async (req, res) => {
   // Check if request is from internal network or has valid secret
@@ -1162,6 +1202,8 @@ app.get('/pnplive', requirePageAuth, (req, res) => {
 // Age verification (AI camera)
 app.post(
   '/api/verify-age',
+  requireSessionAuth,
+  uploadLimiter,
   uploadAgeVerificationPhoto,
   asyncHandler(ageVerificationController.verifyAge)
 );
@@ -1947,7 +1989,7 @@ app.post('/api/webapp/auth/reset-password', asyncHandler(webAppController.resetP
 // Web App Profile
 app.get('/api/webapp/profile', asyncHandler(webAppController.getProfile));
 app.put('/api/webapp/profile', asyncHandler(webAppController.updateProfile));
-app.post('/api/webapp/profile/avatar', avatarUpload.single('avatar'), asyncHandler(webAppController.uploadAvatar));
+app.post('/api/webapp/profile/avatar', requireSessionAuth, uploadLimiter, avatarUpload.single('avatar'), asyncHandler(webAppController.uploadAvatar));
 
 // Model Application File Uploads
 const applyController = require('./controllers/applyController');
@@ -2587,6 +2629,8 @@ app.post('/api/webapp/chat/:room/send', asyncHandler(chatController.sendMessage)
 // Media upload for community chat rooms (images 20 MB / videos 100 MB)
 app.post(
   '/api/webapp/chat/:room/media',
+  requireSessionAuth,
+  uploadLimiter,
   uploadChatMedia,
   asyncHandler(chatController.sendMediaMessage)
 );
@@ -2611,6 +2655,8 @@ app.post('/api/webapp/hangouts/groups/:id/messages', requireMemberTier, asyncHan
 // Media upload for hangout group chat (images 10 MB / videos 50 MB, per-hangout dirs)
 app.post(
   '/api/webapp/hangouts/groups/:id/media',
+  requireSessionAuth,
+  uploadLimiter,
   uploadHangoutMedia,
   asyncHandler(hangoutMediaController.uploadHangoutMedia)
 );
@@ -2626,6 +2672,8 @@ app.use('/api/webapp/hangouts/groups', hangoutVideoCallRoutes);
 // Send an image or video as a direct message
 app.post(
   '/api/webapp/dm/media/:recipientId',
+  requireSessionAuth,
+  uploadLimiter,
   uploadChatMedia,
   asyncHandler(chatMediaController.sendDmMediaMessage)
 );
@@ -2659,9 +2707,9 @@ app.get('/api/webapp/social/feed', asyncHandler(socialController.getFeed));
 app.get('/api/webapp/social/wof-feed', asyncHandler(socialController.getWofFeed));
 app.get('/api/webapp/social/wall/:userId', asyncHandler(socialController.getWall));
 app.get('/api/webapp/social/profile/:userId', asyncHandler(socialController.getPublicProfile));
-app.post('/api/webapp/social/posts', asyncHandler(socialController.createPost));
-app.post('/api/webapp/social/posts/with-media', postMediaUpload.single('media'), asyncHandler(socialController.createPostWithMedia));
-app.post('/api/webapp/social/posts/:postId/like', asyncHandler(socialController.toggleLike));
+app.post('/api/webapp/social/posts', socialPostLimiter, asyncHandler(socialController.createPost));
+app.post('/api/webapp/social/posts/with-media', requireSessionAuth, socialPostLimiter, uploadLimiter, postMediaUpload.single('media'), asyncHandler(socialController.createPostWithMedia));
+app.post('/api/webapp/social/posts/:postId/like', socialActionLimiter, asyncHandler(socialController.toggleLike));
 app.delete('/api/webapp/social/posts/:postId', asyncHandler(socialController.deletePost));
 app.get('/api/webapp/social/posts/:postId/replies', asyncHandler(socialController.getReplies));
 app.post('/api/webapp/social/posts/:postId/mastodon', asyncHandler(socialController.postToMastodon));

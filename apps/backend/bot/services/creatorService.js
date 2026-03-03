@@ -230,10 +230,10 @@ class CreatorService {
 
     // Validate subscriber has PRIME
     const subRes = await query(
-      "SELECT subscription_status FROM users WHERE id = $1",
+      'SELECT tier FROM users WHERE id = $1',
       [subscriberId]
     );
-    if (!subRes.rows[0] || subRes.rows[0].subscription_status !== 'active') {
+    if (!subRes.rows[0] || (subRes.rows[0].tier || '').toLowerCase() !== 'prime') {
       throw new Error('PRIME subscription required to subscribe to creators');
     }
 

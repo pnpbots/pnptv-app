@@ -1248,7 +1248,7 @@ const getProfile = async (req, res) => {
   try {
     const result = await query(
       `SELECT u.id, u.pnptv_id, u.telegram, u.username, u.first_name, u.last_name, u.bio, u.photo_file_id,
-              u.email, u.subscription_status, u.tier, u.plan_id, u.plan_expiry,
+              u.subscription_status, u.tier, u.plan_id, u.plan_expiry,
               u.language, u.interests, u.location_name, u.twitter,
               u.instagram, u.tiktok, u.youtube,
               u.terms_accepted, u.wof_photo_consent, u.content_disclaimer, u.created_at,
@@ -1286,7 +1286,6 @@ const getProfile = async (req, res) => {
         username: p.username,
         firstName: p.first_name,
         lastName: p.last_name,
-        email: p.email,
         bio: p.bio,
         photoUrl: p.photo_file_id,
         subscriptionStatus: p.subscription_status,
@@ -1416,6 +1415,14 @@ const updateProfile = async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
 
+  // Server-side max-length validation
+  const MAX_LENGTHS = { firstName: 100, lastName: 100, bio: 500, locationText: 200, xHandle: 50, instagramHandle: 50, tiktokHandle: 50, youtubeHandle: 100 };
+  for (const [key, max] of Object.entries(MAX_LENGTHS)) {
+    if (req.body[key] && typeof req.body[key] === 'string' && req.body[key].length > max) {
+      return res.status(400).json({ error: `${key} exceeds maximum length of ${max} characters` });
+    }
+  }
+
   try {
     const allowed = ['firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle', 'wofPhotoConsent', 'contentDisclaimer'];
     const colMap  = {
@@ -1455,6 +1462,15 @@ const updateProfile = async (req, res) => {
       `UPDATE users SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${vals.length}`,
       vals
     );
+
+    // Invalidate Redis user cache so subsequent reads reflect new values
+    try {
+      const { cache } = require('../../../config/redis');
+      await cache.del(`user:${user.id}`);
+    } catch (cacheErr) {
+      // Non-fatal — cache will expire naturally
+      logger.warn(`Cache invalidation failed for user ${user.id}:`, cacheErr.message);
+    }
 
     // Refresh session name fields if changed
     if (req.body.firstName !== undefined) req.session.user.firstName = req.body.firstName || req.session.user.firstName;

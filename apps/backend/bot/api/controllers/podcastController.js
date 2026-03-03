@@ -8,6 +8,8 @@ function ensureUploadDir() {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
+const ALLOWED_AUDIO_EXTENSIONS = new Set(['.mp3', '.ogg', '.wav', '.aac', '.m4a', '.flac', '.opus', '.webm']);
+
 function safeBasename(name) {
   const base = path.basename(name || 'audio');
   return base.replace(/[^\w.\-]+/g, '_');
@@ -23,10 +25,11 @@ const storage = multer.diskStorage({
     }
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || '').slice(0, 16);
-    const base = safeBasename(path.basename(file.originalname || 'audio', ext));
+    const rawExt = path.extname(file.originalname || '').toLowerCase();
+    const ext = ALLOWED_AUDIO_EXTENSIONS.has(rawExt) ? rawExt : '.mp3';
+    const base = safeBasename(path.basename(file.originalname || 'audio', path.extname(file.originalname || '')));
     const stamp = Date.now();
-    cb(null, `${stamp}-${base}${ext || ''}`);
+    cb(null, `${stamp}-${base}${ext}`);
   },
 });
 

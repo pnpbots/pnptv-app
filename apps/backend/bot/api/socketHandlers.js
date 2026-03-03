@@ -167,6 +167,46 @@ function initSocketIO(io) {
         return;
       }
 
+      // ── Room validation (mirrors chat:message) ──────────────────────────────
+      const mediaHangoutMatch = String(room).match(/^hangout:(\d+)$/);
+      if (mediaHangoutMatch) {
+        const gid = parseInt(mediaHangoutMatch[1], 10);
+        try {
+          const { rows: memberRows } = await query(
+            'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+            [gid, user.id]
+          );
+          if (memberRows.length === 0) {
+            socket.emit('chat:error', { message: 'Access denied' });
+            return;
+          }
+        } catch (err) {
+          logger.error('chat:media membership check error', err);
+          socket.emit('chat:error', { message: 'Access denied' });
+          return;
+        }
+      } else if (room === 'prime') {
+        // Prime room requires prime tier
+        try {
+          const { rows: tierRows } = await query(
+            `SELECT tier FROM users WHERE id = $1`,
+            [user.id]
+          );
+          if (tierRows.length === 0 || tierRows[0].tier !== 'prime') {
+            socket.emit('chat:error', { message: 'Access denied' });
+            return;
+          }
+        } catch (err) {
+          logger.error('chat:media prime tier check error', err);
+          socket.emit('chat:error', { message: 'Access denied' });
+          return;
+        }
+      } else if (!ALLOWED_COMMUNITY_ROOMS.has(room)) {
+        socket.emit('chat:error', { message: 'Access denied' });
+        return;
+      }
+      // ── End room validation ─────────────────────────────────────────────────
+
       // Enforce a 20 MB cap over Socket.IO (images only — videos should use REST)
       const MAX_SOCKET_MEDIA_BYTES = 20 * 1024 * 1024;
       const buffer = Buffer.from(file.buffer, 'base64');

@@ -619,6 +619,22 @@ function Conversation({
       const file = e.target.files?.[0];
       if (!file) return;
 
+      const ALLOWED_DM_TYPES = new Set([
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+        "video/mp4",
+        "video/webm",
+      ]);
+      if (!ALLOWED_DM_TYPES.has(file.type)) {
+        setUploadError(
+          "Only images (JPG, PNG, WebP, GIF) and videos (MP4, WebM) are allowed."
+        );
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+
       if (file.size > MAX_FILE_SIZE) {
         setUploadError("File too large. Maximum size is 50 MB.");
         if (fileInputRef.current) fileInputRef.current.value = "";

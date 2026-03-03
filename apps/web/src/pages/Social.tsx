@@ -640,7 +640,11 @@ export default function Social() {
       const updater = (prev: SocialPostItem[]) =>
         prev.map((p) =>
           p.id === postId
-            ? { ...p, liked_by_me: res.liked, likes_count: p.likes_count + (res.liked ? 1 : -1) }
+            ? {
+                ...p,
+                liked_by_me: res.liked,
+                likes_count: res.likes_count ?? (p.likes_count + (res.liked ? 1 : -1)),
+              }
             : p
         );
       setPosts(updater);
@@ -651,6 +655,7 @@ export default function Social() {
 
   // Delete — remove from all arrays
   const handleDelete = useCallback(async (postId: number) => {
+    if (!confirm("Delete this post?")) return;
     try {
       await deleteSocialPost(postId);
       setPosts((prev) => prev.filter((p) => p.id !== postId));
@@ -815,7 +820,7 @@ export default function Social() {
             <div className="flex-1">
               <textarea
                 value={text}
-                onChange={(e) => setText(e.target.value.slice(0, 500))}
+                onChange={(e) => setText(e.target.value.slice(0, 2000))}
                 placeholder="What's on your mind?"
                 className="w-full bg-transparent text-white text-sm py-2 border-b border-white/10 mb-3 resize-none outline-none placeholder:text-white/40"
                 rows={3}
@@ -823,8 +828,8 @@ export default function Social() {
               />
 
               <div className="flex justify-end mb-2">
-                <span className={`text-xs ${text.length > 450 ? "text-red-400" : ""}`} style={{ color: text.length > 450 ? undefined : "#8E8E93" }}>
-                  {text.length}/500
+                <span className={`text-xs ${text.length > 1800 ? "text-red-400" : ""}`} style={{ color: text.length > 1800 ? undefined : "#8E8E93" }}>
+                  {text.length}/2000
                 </span>
               </div>
 
