@@ -142,6 +142,10 @@ async function suggestions(req, res) {
         { id: 'subscribe', label: '¿Cómo me suscribo a PRIME?', icon: '⭐' },
         { id: 'payments', label: 'Métodos de pago', icon: '💳' },
         { id: 'features', label: '¿Qué puedo hacer aquí?', icon: '🎬' },
+        { id: 'streams', label: 'Transmisiones en vivo y horarios', icon: '🎥' },
+        { id: 'community', label: 'Normas de la comunidad', icon: '👥' },
+        { id: 'login', label: 'Acceso y cuenta', icon: '🔑' },
+        { id: 'getting-started', label: 'Guía de inicio', icon: '🚀' },
         { id: 'privacy', label: 'Privacidad y seguridad', icon: '🔒' },
         { id: 'help', label: 'Necesito ayuda técnica', icon: '🆘' },
       ]
@@ -150,6 +154,10 @@ async function suggestions(req, res) {
         { id: 'subscribe', label: 'How do I subscribe to PRIME?', icon: '⭐' },
         { id: 'payments', label: 'Payment methods', icon: '💳' },
         { id: 'features', label: 'What can I do here?', icon: '🎬' },
+        { id: 'streams', label: 'Live streams & schedules', icon: '🎥' },
+        { id: 'community', label: 'Community guidelines', icon: '👥' },
+        { id: 'login', label: 'Login & account access', icon: '🔑' },
+        { id: 'getting-started', label: 'Getting started guide', icon: '🚀' },
         { id: 'privacy', label: 'Privacy & security', icon: '🔒' },
         { id: 'help', label: 'I need technical help', icon: '🆘' },
       ];

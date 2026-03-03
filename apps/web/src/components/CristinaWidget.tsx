@@ -57,6 +57,12 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   const isOnboarded = !!(user?.ageVerified && user?.termsAccepted);
   const lang = user?.language === "es" ? "es" : "en";
 
+  // Gate ticket creation behind 3 user messages
+  const MIN_TURNS_FOR_TICKET = 3;
+  const userMessageCount = messages.filter((m) => m.role === "user").length;
+  const canCreateTicket = userMessageCount >= MIN_TURNS_FOR_TICKET;
+  const hasOpenTicket = !!(ticket && ticket.status !== "closed");
+
   // In widget mode, suppress the FAB and panel on routes that have their own
   // fixed bottom input bars (Hangouts chat, Direct Messages conversation) to
   // prevent the widget from overlapping the send button.
@@ -318,29 +324,31 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
           </div>
         </div>
         <div className="flex items-center gap-1">
-          {/* Ticket icon button */}
-          <button
-            onClick={() => (ticket ? setView("ticketView") : setView("ticketForm"))}
-            className="relative p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-            title={lang === "es" ? "Ticket de soporte" : "Support ticket"}
-          >
-            <svg
-              className="w-4 h-4 text-gray-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+          {/* Ticket icon button — only visible after 3 turns or if user has an open ticket */}
+          {(canCreateTicket || hasOpenTicket) && (
+            <button
+              onClick={() => (ticket ? setView("ticketView") : setView("ticketForm"))}
+              className="relative p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+              title={lang === "es" ? "Ticket de soporte" : "Support ticket"}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
-            {ticket && ticket.status !== "closed" && (
-              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-cyan-400 rounded-full" />
-            )}
-          </button>
+              <svg
+                className="w-4 h-4 text-gray-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+              {hasOpenTicket && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-cyan-400 rounded-full" />
+              )}
+            </button>
+          )}
 
           <button
             onClick={handleNewConversation}
@@ -683,21 +691,6 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
                     {s.icon} {s.label}
                   </button>
                 ))}
-                {/* Create Support Ticket chip */}
-                <button
-                  onClick={() => setView("ticketForm")}
-                  className="px-3 py-1.5 rounded-full text-xs font-medium transition-all hover:scale-105 active:scale-95"
-                  style={{
-                    background: "rgba(0, 212, 232, 0.15)",
-                    border: "1px solid rgba(0, 212, 232, 0.3)",
-                    color: "rgba(255, 255, 255, 0.9)",
-                  }}
-                >
-                  📋{" "}
-                  {lang === "es"
-                    ? "Crear ticket de soporte"
-                    : "Create Support Ticket"}
-                </button>
               </div>
             </div>
           )}
@@ -723,6 +716,39 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
               </div>
             </div>
           ))}
+
+          {/* "Still need help?" banner — shown after 3 user messages, no open ticket */}
+          {canCreateTicket && !hasOpenTicket && !isLoading && (
+            <div className="animate-fade-in-up">
+              <button
+                onClick={() => setView("ticketForm")}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs transition-colors hover:bg-white/10"
+                style={{
+                  background: "rgba(0, 212, 232, 0.08)",
+                  border: "1px solid rgba(0, 212, 232, 0.2)",
+                }}
+              >
+                <svg
+                  className="w-3.5 h-3.5 text-cyan-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  />
+                </svg>
+                <span className="text-cyan-300">
+                  {lang === "es"
+                    ? "¿Aún necesitas ayuda? → Crear ticket de soporte"
+                    : "Still need help? → Create a support ticket"}
+                </span>
+              </button>
+            </div>
+          )}
 
           {isLoading && (
             <div className="flex justify-start animate-fade-in-up">
