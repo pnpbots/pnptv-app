@@ -8,6 +8,7 @@ const { getRedis } = require('../../../config/redis');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
+const FileType = require('file-type');
 
 // ── Enforced follows (shared service) ────────────────────────────────────────
 const { enforceDefaultFollows } = require('../../services/followService');
@@ -1541,40 +1542,62 @@ const uploadAvatar = async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file provided' });
 
   try {
-    const { mimetype, buffer } = req.file;
-    const isImage = /^image\/(jpeg|jpg|png|webp|gif)$/i.test(mimetype);
-    if (!isImage) return res.status(400).json({ error: 'Only image files are allowed' });
+    const { buffer } = req.file;
 
-    const ext = '.webp';
-    const filename = `${user.id}-${Date.now()}${ext}`;
+    // --- MAGIC BYTE VALIDATION ---
+    // Never trust client-supplied Content-Type; inspect actual file bytes.
+    const ALLOWED_AVATAR_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+    const detected = await FileType.fromBuffer(buffer);
+    const detectedMime = detected?.mime;
+
+    if (!detectedMime || !ALLOWED_AVATAR_MIMES.has(detectedMime)) {
+      logger.warn('uploadAvatar: rejected file — magic bytes do not match allowed image types', {
+        userId: user.id,
+        claimedMime: req.file.mimetype,
+        detectedMime: detectedMime || 'unknown',
+      });
+      return res.status(400).json({ error: 'Only image files (jpg, png, webp, gif) are allowed' });
+    }
+
+    const filename = `${user.id}-${Date.now()}.webp`;
     const uploadDir = path.join(__dirname, '../../../../../public/uploads/avatars');
     const filePath = path.join(uploadDir, filename);
     const relativeUrl = `/uploads/avatars/${filename}`;
 
     await fs.mkdir(uploadDir, { recursive: true });
 
-    // Aggressive compression: 256x256, WebP quality 75 (saves ~40% vs 85)
+    // Step 1: Process image with sharp and write to disk
     await sharp(buffer)
       .resize(256, 256, { fit: 'cover', position: 'center' })
       .webp({ quality: 75, progressive: true })
       .toFile(filePath);
 
-    // Delete old avatars for this user (keep only latest to save storage)
-    try {
-      const oldFiles = await fs.readdir(uploadDir);
-      const userOldFiles = oldFiles.filter(f => f.startsWith(`${user.id}-`) && f !== filename);
-      for (const oldFile of userOldFiles) {
-        const oldPath = path.join(uploadDir, oldFile);
-        await fs.unlink(oldPath);
-      }
-    } catch (e) {
-      // Ignore cleanup errors
-    }
-
+    // Step 2: UPDATE database FIRST (atomic PostgreSQL row-level lock).
+    // This is the race-condition fix: whichever concurrent upload commits last
+    // wins and becomes the canonical filename in the DB. The cleanup below
+    // then uses the DB value as the truth, so stale files from the losing
+    // upload are always removed regardless of ordering.
     await query(
       'UPDATE users SET photo_file_id = $1, updated_at = NOW() WHERE id = $2',
       [relativeUrl, user.id]
     );
+
+    // Step 3: Clean up old avatar files AFTER the DB is updated.
+    // Re-read the DB to get the current canonical filename (handles the race:
+    // another concurrent request may have already updated it).
+    try {
+      const currentRow = await query('SELECT photo_file_id FROM users WHERE id = $1', [user.id]);
+      const canonicalUrl = currentRow.rows[0]?.photo_file_id || relativeUrl;
+      const canonicalFilename = path.basename(canonicalUrl);
+      const allFiles = await fs.readdir(uploadDir);
+      const staleFiles = allFiles.filter(f => f.startsWith(`${user.id}-`) && f !== canonicalFilename);
+      for (const staleFile of staleFiles) {
+        await fs.unlink(path.join(uploadDir, staleFile));
+      }
+    } catch (cleanupErr) {
+      // Non-fatal: log but do not fail the request
+      logger.warn('uploadAvatar: cleanup error (non-fatal)', { userId: user.id, err: cleanupErr.message });
+    }
 
     req.session.user.photoUrl = relativeUrl;
     await new Promise((resolve, reject) =>

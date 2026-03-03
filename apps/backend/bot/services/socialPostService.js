@@ -370,7 +370,7 @@ class SocialPostService {
       ),
       query(
         `SELECT id, username, first_name, last_name, bio, photo_file_id, pnptv_id,
-                created_at,
+                created_at, privacy,
                 creator_status, creator_type, creator_price_usd, creator_verified, creator_featured, creator_subscriber_count
          FROM users WHERE id = $1`,
         [userId]
@@ -388,6 +388,26 @@ class SocialPostService {
 
     const profile = profileRes.rows[0] || null;
     if (profile) profile.photo_file_id = isValidPhotoUrl(profile.photo_file_id) ? profile.photo_file_id : null;
+
+    // --- PRIVACY SETTINGS ENFORCEMENT ---
+    // Only apply to third-party viewers (not the profile owner themselves).
+    if (profile && String(viewerId) !== String(userId)) {
+      const privacy = (typeof profile.privacy === 'object' && profile.privacy !== null)
+        ? profile.privacy
+        : {};
+      if (privacy.showLocation === false) {
+        profile.location_name = null;
+        profile.location_lat = null;
+        profile.location_lng = null;
+      }
+      if (privacy.showBio === false) {
+        profile.bio = null;
+      }
+      if (privacy.showInterests === false) {
+        profile.interests = null;
+      }
+    }
+
     let posts = sanitizePostRows(postsRes.rows).map(p => ({
       ...p,
       liked_by_me: viewerId ? p.liked_by_me : false,

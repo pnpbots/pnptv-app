@@ -1,6 +1,7 @@
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
+const FileType = require('file-type');
 const logger = require('../../../utils/logger');
 const SocialPostService = require('../../services/socialPostService');
 const axios = require('axios');
@@ -276,14 +277,36 @@ const createPostWithMedia = async (req, res) => {
     }
 
     if (req.file) {
-      const { mimetype, buffer } = req.file;
+      const { buffer } = req.file;
       // __dirname = /app/apps/backend/bot/api/controllers
       // 5 levels up reaches /app (monorepo root), then /public
       const uploadDir = path.join(__dirname, '../../../../../public/uploads/posts');
       await fs.mkdir(uploadDir, { recursive: true });
 
-      if (/^image\/(jpeg|jpg|png|webp|gif)$/i.test(mimetype)) {
-        mediaType = 'image';
+      // --- MAGIC BYTE VALIDATION ---
+      // Never trust client-supplied Content-Type; inspect actual file bytes.
+      const MAGIC_TO_MEDIA_TYPE = {
+        'image/jpeg': 'image',
+        'image/png':  'image',
+        'image/webp': 'image',
+        'image/gif':  'image',
+        'video/mp4':  'video',
+        'video/webm': 'video',
+      };
+      const detected = await FileType.fromBuffer(buffer);
+      const detectedMime = detected?.mime;
+      mediaType = MAGIC_TO_MEDIA_TYPE[detectedMime] || null;
+
+      if (!mediaType) {
+        logger.warn('socialController: rejected post media — magic bytes do not match allowed types', {
+          userId: user.id,
+          claimedMime: req.file.mimetype,
+          detectedMime: detectedMime || 'unknown',
+        });
+        return res.status(400).json({ error: 'Only image (jpg/png/webp/gif) or video (mp4/webm) files are allowed' });
+      }
+
+      if (mediaType === 'image') {
         const filename = `img-${user.id}-${Date.now()}.webp`;
         const filePath = path.join(uploadDir, filename);
         await sharp(buffer)
@@ -291,15 +314,13 @@ const createPostWithMedia = async (req, res) => {
           .webp({ quality: 70, progressive: true })
           .toFile(filePath);
         mediaUrl = `/uploads/posts/${filename}`;
-      } else if (/^video\/(mp4|webm)$/i.test(mimetype)) {
-        mediaType = 'video';
-        const ext = mimetype === 'video/webm' ? 'webm' : 'mp4';
+      } else {
+        // video — detectedMime is either video/mp4 or video/webm
+        const ext = detectedMime === 'video/webm' ? 'webm' : 'mp4';
         const filename = `vid-${user.id}-${Date.now()}.${ext}`;
         const filePath = path.join(uploadDir, filename);
         await fs.writeFile(filePath, buffer);
         mediaUrl = `/uploads/posts/${filename}`;
-      } else {
-        return res.status(400).json({ error: 'Only image (jpg/png/webp/gif) or video (mp4/webm) files are allowed' });
       }
     }
 
