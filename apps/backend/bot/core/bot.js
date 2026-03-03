@@ -369,6 +369,18 @@ const startBot = async () => {
       }
     });
 
+    // /start → redirect users to web app (bot features migrated to pnptv.app)
+    bot.command('start', async (ctx) => {
+      if (ctx.chat.type !== 'private') return;
+      await ctx.reply(
+        '🌐 PNPtv! has moved to the web!\n\n' +
+        'Visit our app for the full experience:\n' +
+        '👉 https://pnptv.app\n\n' +
+        'All features are now available on the web app.',
+        { reply_markup: { inline_keyboard: [[{ text: '🚀 Open PNPtv!', url: 'https://pnptv.app' }]] } }
+      );
+    });
+
     // DEBUG: Log all updates
     bot.use(async (ctx, next) => {
       if (ctx.message?.text?.startsWith('/')) {
@@ -494,13 +506,13 @@ const startBot = async () => {
       const isSupportIntent = isAwaitingSupportMessage || isContactingAdmin || isRequestingActivation || isReplyToSupport;
 
       if (!isSupportIntent) {
-        // Only prompt onboarding when the user isn't mid-onboarding input
+        // Redirect non-onboarded users to web app (bot features migrated to pnptv.app)
         const user = await UserService.getOrCreateFromContext(ctx);
         if (!user?.onboardingComplete && !isWaitingForEmail) {
-          const lang = getLanguage(ctx);
-          const botUsername = ctx.botInfo?.username || 'PNPtvbot';
-          const { message, keyboard } = buildOnboardingPrompt(lang, botUsername);
-          await ctx.reply(message, { ...keyboard });
+          await ctx.reply(
+            '🌐 PNPtv! has moved to the web!\n\nVisit https://pnptv.app to get started.',
+            { reply_markup: { inline_keyboard: [[{ text: '🚀 Open PNPtv!', url: 'https://pnptv.app' }]] } }
+          );
           return;
         }
         return next();
@@ -605,28 +617,29 @@ const startBot = async () => {
     });
 
 
-    registerUserHandlers(bot);
+    // --- User-facing handlers DISABLED (migrated to web app) ---
+    // registerUserHandlers(bot);
     registerAdminHandlers(bot); // This registers radio, live streams, community premium, and community posts handlers
-    registerPNPLiveModelHandlers(bot); // Register PNP Live model self-service handlers
-    registerPaymentHandlers(bot);
-    registerMediaHandlers(bot);
-    registerModerationHandlers(bot);
+    // registerPNPLiveModelHandlers(bot);
+    // registerPaymentHandlers(bot);
+    // registerMediaHandlers(bot);
+    // registerModerationHandlers(bot);
     registerModerationAdminHandlers(bot);
-    registerAccessControlHandlers(bot);
-    registerJitsiModeratorHandlers(bot);
-    registerCallManagementHandlers(bot);
+    // registerAccessControlHandlers(bot);
+    // registerJitsiModeratorHandlers(bot);
+    // registerCallManagementHandlers(bot);
     registerRoleManagementHandlers(bot);
-    registerPerformerManagementHandlers(bot);
-    registerWallOfFameHandlers(bot);
-    registerPrivateCallHandlers(bot);
-    registerPrivateCallsProntoHandlers(bot);
-    registerPaymentHistoryHandlers(bot);
-    registerPaymentAnalyticsHandlers(bot);
-    registerUserCallManagementHandlers(bot);
-    registerCallFeedbackHandlers(bot);
-    registerCallPackageHandlers(bot);
-    // Register promo handlers (for promotional offers via deep links)
-    registerPromoHandlers(bot);
+    // registerPerformerManagementHandlers(bot);
+    // registerWallOfFameHandlers(bot);
+    // registerPrivateCallHandlers(bot);
+    // registerPrivateCallsProntoHandlers(bot);
+    // registerPaymentHistoryHandlers(bot);
+    // registerPaymentAnalyticsHandlers(bot);
+    // registerUserCallManagementHandlers(bot);
+    // registerCallFeedbackHandlers(bot);
+    // registerCallPackageHandlers(bot);
+    // registerPromoHandlers(bot);
+    // --- End disabled user-facing handlers ---
     // Register support routing handlers (for forum topic-based support)
     registerSupportRoutingHandlers(bot);
 
@@ -641,29 +654,12 @@ const startBot = async () => {
     } else {
       logger.info('SLA monitor disabled (SUPPORT_GROUP_ID not configured or SLA_MONITOR_ENABLED=false)');
     }
-    // Setup age verification middleware for protected features
-    setupAgeVerificationMiddleware(bot);
-    logger.info('✓ Age verification middleware configured');
-    // Initialize call reminder service
-    CallReminderService.initialize(bot);
-    logger.info('✓ Call reminder service initialized');
-    // Initialize private calls pronto worker (expiry, reminders, auto-end)
-    try {
-      const privateCallsWorker = initializePrivateCallsWorker(bot);
-      privateCallsWorker.start();
-      logger.info('✓ Private calls pronto worker initialized and started');
-    } catch (workerError) {
-      logger.warn('Private calls worker initialization failed, continuing without background jobs:', workerError.message);
-    }
-
-    // Initialize PNP Live worker (notifications, auto-complete, model status)
-    try {
-      const pnpLiveWorker = new PNPLiveWorker(bot);
-      pnpLiveWorker.start();
-      logger.info('✓ PNP Live worker initialized and started');
-    } catch (workerError) {
-      logger.warn('PNP Live worker initialization failed, continuing without background jobs:', workerError.message);
-    }
+    // --- User-facing services DISABLED (migrated to web app) ---
+    // setupAgeVerificationMiddleware(bot);
+    // CallReminderService.initialize(bot);
+    // Private calls pronto worker — disabled
+    // PNP Live worker — disabled
+    // --- End disabled user-facing services ---
     // Initialize membership cleanup service (for daily status updates and channel management)
     MembershipCleanupService.initialize(bot);
     logger.info('✓ Membership cleanup service initialized');
@@ -680,10 +676,9 @@ const startBot = async () => {
     MessageRateLimiter.initialize();
     logger.info('✓ Message rate limiter initialized');
 
-    // Initialize tutorial reminder service (proactive tutorials for FREE and PRIME users)
-    TutorialReminderService.initialize(bot);
-    TutorialReminderService.startScheduling();
-    logger.info('✓ Tutorial reminder service initialized and started');
+    // TutorialReminderService — disabled (migrated to web app)
+    // TutorialReminderService.initialize(bot);
+    // TutorialReminderService.startScheduling();
     // Initialize group cleanup service
     const groupCleanup = new GroupCleanupService(bot);
     groupCleanup.initialize();
