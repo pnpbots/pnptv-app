@@ -94,9 +94,8 @@ const createPaymentIntent = ({
 }) => {
   const config = getDaimoConfig();
 
-  // Convert amount to token units (USDC has 6 decimals)
-  // Example: 10.00 USD -> 10000000 units
-  const amountInUnits = (parseFloat(amount) * 1e6).toString();
+  // Daimo Pay API uses human-readable format (e.g., "14.99")
+  const amountInUnits = parseFloat(amount).toFixed(2);
 
   return {
     // Destination
@@ -160,6 +159,7 @@ const createDaimoPayment = async ({
         amountUnits: amountUnits,
       },
       refundAddress: config.refundAddress,
+      webhookUrl: config.webhookUrl,
       metadata: {
         userId: userId.toString(),
         chatId: chatId?.toString() || '',
@@ -332,11 +332,12 @@ const mapDaimoStatus = (daimoStatus) => {
 };
 
 /**
- * Format amount from USDC units to display value
- * @param {string} units - Amount in token units
- * @returns {number} Amount in display value (e.g., 10.50)
+ * Format amount from Daimo amountUnits to display value.
+ * Daimo Pay uses human-readable format via formatUnits() — already a decimal string.
+ * @param {string} units - Amount (human-readable, e.g., "14.99")
+ * @returns {number} Amount in display value (e.g., 14.99)
  */
-const formatAmountFromUnits = (units) => parseFloat(units) / 1e6;
+const formatAmountFromUnits = (units) => parseFloat(units) || 0;
 
 module.exports = {
   getDaimoConfig,

@@ -734,6 +734,62 @@ class PaymentService {
     return false;
   }
 
+  /**
+   * Verify ePayco HMAC SHA256 signature from x-signature HTTP header.
+   * Tries two message formats:
+   *   1) HMAC-SHA256(key=pKey, message="custId^ref_payco^transaction_id^amount^currency")
+   *   2) HMAC-SHA256(key=pKey, message="custId^pKey^ref_payco^transaction_id^amount^currency")
+   * @param {Object} webhookData - Webhook body
+   * @param {string} headerSignature - x-signature header value
+   * @returns {{ valid: boolean }}
+   */
+  static verifyEpaycoHmacSignature(webhookData, headerSignature) {
+    if (!headerSignature) return { valid: false };
+
+    const secretKey = process.env.EPAYCO_P_KEY || process.env.EPAYCO_PRIVATE_KEY;
+    const custId = process.env.EPAYCO_P_CUST_ID || process.env.EPAYCO_PUBLIC_KEY;
+    if (!secretKey || !custId) return { valid: false };
+
+    const {
+      x_ref_payco,
+      x_transaction_id,
+      x_amount,
+      x_currency_code,
+    } = webhookData || {};
+
+    if (!x_ref_payco || !x_transaction_id || !x_amount || !x_currency_code) {
+      return { valid: false };
+    }
+
+    const amountCandidates = this.buildEpaycoAmountCandidates(x_amount);
+    const currencyCandidates = Array.from(new Set([
+      x_currency_code,
+      this.normalizeEpaycoCurrencyCode(x_currency_code),
+    ].filter(Boolean).map((v) => String(v).trim())));
+
+    const signatureValue = String(headerSignature).toLowerCase().trim();
+
+    for (const amountCandidate of amountCandidates) {
+      for (const currencyCandidate of currencyCandidates) {
+        // Format 1: HMAC key = secret, message = transaction fields only (no secret in message)
+        const msg1 = `${custId}^${x_ref_payco}^${x_transaction_id}^${amountCandidate}^${currencyCandidate}`;
+        const expected1 = crypto.createHmac('sha256', secretKey).update(msg1).digest('hex');
+        if (PaymentService.safeCompareHex(expected1, signatureValue)) {
+          return { valid: true };
+        }
+
+        // Format 2: Same as body SHA256 format but with HMAC instead of hash
+        const msg2 = `${custId}^${secretKey}^${x_ref_payco}^${x_transaction_id}^${amountCandidate}^${currencyCandidate}`;
+        const expected2 = crypto.createHmac('sha256', secretKey).update(msg2).digest('hex');
+        if (PaymentService.safeCompareHex(expected2, signatureValue)) {
+          return { valid: true };
+        }
+      }
+    }
+
+    return { valid: false };
+  }
+
   static generateEpaycoCheckoutSignature({
     invoice,
     amount,
@@ -1644,6 +1700,26 @@ class PaymentService {
   }
 
   /**
+   * Resolve the USD amount for a Daimo payment, preferring authoritative sources.
+   * Priority: 1) payment record amount, 2) plan price, 3) webhook source.amountUnits
+   * @param {Object} payment - Payment record from DB
+   * @param {Object} plan - Plan record from DB
+   * @param {Object} source - Webhook source object
+   * @returns {number} USD amount
+   */
+  static resolveDaimoAmountUSD(payment, plan, source) {
+    if (payment?.amount && parseFloat(payment.amount) > 0) return parseFloat(payment.amount);
+    if (plan?.price && parseFloat(plan.price) > 0) return parseFloat(plan.price);
+    const webhookAmount = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
+    if (webhookAmount <= 0) {
+      logger.error('resolveDaimoAmountUSD: could not determine payment amount', {
+        paymentId: payment?.id, planId: plan?.id, amountUnits: source?.amountUnits,
+      });
+    }
+    return webhookAmount;
+  }
+
+  /**
    * Process Daimo webhook confirmation
    * @param {Object} webhookData - Daimo webhook data
    * @returns {Object} { success: boolean, error?: string, alreadyProcessed?: boolean }
@@ -1776,6 +1852,13 @@ class PaymentService {
           const plan = await PlanModel.getById(planId);
           const user = await UserModel.getById(userId);
 
+          if (!plan) {
+            logger.error('Plan not found for completed Daimo payment — subscription NOT activated', {
+              planId, paymentId, userId, txHash: source?.txHash,
+            });
+            return { success: false, error: `Plan not found: ${planId}` };
+          }
+
           if (plan) {
             const expiryDate = new Date();
             const durationDays = plan.duration_days || plan.duration || 30;
@@ -1815,7 +1898,7 @@ class PaymentService {
 
             // Record payment in history
             try {
-              const amountUSD = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
+              const amountUSD = PaymentService.resolveDaimoAmountUSD(payment, plan, source);
               await PaymentHistoryService.recordPayment({
                 userId,
                 paymentMethod: 'daimo',
@@ -1847,7 +1930,7 @@ class PaymentService {
 
             // Emit real-time payment confirmation via Socket.IO (replaces bot DM)
             const userLanguage = user?.language || 'es';
-            const amountUSD = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
+            const amountUSD = PaymentService.resolveDaimoAmountUSD(payment, plan, source);
             try {
               await NotificationEmitter.emit({
                 targetUserId: userId,
@@ -1895,7 +1978,7 @@ class PaymentService {
 
             // Send Telegram DM with membership info + PRIME channel invite link
             try {
-              const daimoAmountForDM = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
+              const daimoAmountForDM = PaymentService.resolveDaimoAmountUSD(payment, plan, source);
               await PaymentService.sendPaymentConfirmationNotification({
                 userId,
                 plan,
@@ -1928,7 +2011,7 @@ class PaymentService {
             // Send admin notification for purchase (always, regardless of email)
             try {
               const bot = getBotInstance();
-              const amountUSD = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
+              const amountUSD = PaymentService.resolveDaimoAmountUSD(payment, plan, source);
               // Check if this was a promo purchase
               const promoInfo = payment?.metadata?.promoCode
                 ? ` (Promo: ${payment.metadata.promoCode})`
@@ -1952,7 +2035,7 @@ class PaymentService {
 
             // Business channel notification
             try {
-              const daimoAmount = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
+              const daimoAmount = PaymentService.resolveDaimoAmountUSD(payment, plan, source);
               const promoInfo2 = payment?.metadata?.promoCode
                 ? ` (Promo: ${payment.metadata.promoCode})`
                 : '';
@@ -1971,7 +2054,7 @@ class PaymentService {
             // Send both emails if we have an email
             if (customerEmail) {
               const userLanguage = user?.language || 'es';
-              const amountUSD = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
+              const amountUSD = PaymentService.resolveDaimoAmountUSD(payment, plan, source);
 
               // 1. Generate PDF invoice and send invoice email from pnptv.app
               try {
@@ -3457,6 +3540,148 @@ class PaymentService {
         error: error.message,
         message: 'Failed to recover stuck payment',
       };
+    }
+  }
+  /**
+   * Send all post-activation side-effects (invoice email, welcome email,
+   * Socket.IO notification, payment history). Each step is wrapped in its
+   * own try/catch so a single failure never blocks the others.
+   *
+   * Designed to be called fire-and-forget from admin activation handlers.
+   */
+  static async sendPostActivationEmails({
+    userId,
+    plan,
+    amount,
+    currency = 'USD',
+    provider = 'manual_activation',
+    transactionId,
+    expiryDate,
+    activatedBy,
+    paymentId,
+  }) {
+    // 1. Fetch user (need email, name, language)
+    let user;
+    try {
+      user = await UserModel.getById(userId);
+    } catch (err) {
+      logger.warn('sendPostActivationEmails: failed to fetch user', { userId, error: err.message });
+      return;
+    }
+    if (!user) {
+      logger.warn('sendPostActivationEmails: user not found', { userId });
+      return;
+    }
+
+    const email = user.email;
+    const customerName = user.first_name || user.firstName || 'Valued Customer';
+    const userLanguage = user.language || 'es';
+    const planDisplayName = plan.display_name || plan.name;
+
+    // 2. PDF Invoice → Invoice email
+    if (email) {
+      try {
+        const { buffer: invoicePdf } = await InvoiceService.generateInvoice({
+          invoiceNumber: transactionId || `ADM-${Date.now()}`,
+          customerName,
+          planName: planDisplayName,
+          amount: parseFloat(amount) || 0,
+          currency,
+          provider,
+          transactionId: transactionId || `admin-${Date.now()}`,
+          purchaseDate: new Date(),
+          expiryDate: expiryDate || undefined,
+          language: userLanguage,
+        });
+
+        const invoiceResult = await EmailService.sendInvoiceEmail({
+          to: email,
+          customerName,
+          invoiceNumber: transactionId || `ADM-${Date.now()}`,
+          amount: parseFloat(amount) || 0,
+          planName: planDisplayName,
+          invoicePdf,
+        });
+
+        if (invoiceResult.success) {
+          logger.info('Invoice email sent for admin activation', { userId, to: email });
+        }
+      } catch (err) {
+        logger.warn('sendPostActivationEmails: invoice email failed', { userId, error: err.message });
+      }
+    }
+
+    // 3. Onboarding guide → Welcome email
+    if (email) {
+      try {
+        const { buffer: guidePdf } = await InvoiceService.generateOnboardingGuide({
+          customerName,
+          planName: planDisplayName,
+          language: userLanguage,
+        });
+
+        const welcomeResult = await EmailService.sendWelcomeEmail({
+          to: email,
+          customerName,
+          planName: planDisplayName,
+          duration: plan.duration || 30,
+          expiryDate: expiryDate || undefined,
+          language: userLanguage,
+          onboardingGuidePdf: guidePdf,
+        });
+
+        if (welcomeResult.success) {
+          logger.info('Instructions email sent for admin activation', { userId, to: email });
+        }
+      } catch (err) {
+        logger.warn('sendPostActivationEmails: welcome email failed', { userId, error: err.message });
+      }
+    }
+
+    // 4. Socket.IO payment notification
+    try {
+      await NotificationEmitter.emit({
+        targetUserId: userId,
+        type: 'payment',
+        category: 'commerce',
+        entityType: 'payment',
+        entityId: paymentId || transactionId || null,
+        message: userLanguage === 'es'
+          ? `Membresía activada: ${planDisplayName}`
+          : `Membership activated: ${planDisplayName}`,
+        metadata: {
+          planName: planDisplayName,
+          amount: parseFloat(amount) || 0,
+          currency,
+          expiryDate: expiryDate?.toISOString?.() || null,
+          provider,
+          activatedBy,
+        },
+      });
+    } catch (err) {
+      logger.warn('sendPostActivationEmails: Socket.IO notification failed', { userId, error: err.message });
+    }
+
+    // 5. Payment history
+    try {
+      await PaymentHistoryService.recordPayment({
+        userId,
+        paymentMethod: provider,
+        amount: parseFloat(amount) || 0,
+        currency,
+        planId: plan.id,
+        planName: planDisplayName,
+        product: planDisplayName,
+        paymentReference: transactionId || `admin-${Date.now()}`,
+        status: 'completed',
+        metadata: {
+          activatedBy,
+          activationType: 'admin_activation',
+        },
+      });
+      logger.info('Payment history recorded for admin activation', { userId, planId: plan.id });
+    } catch (err) {
+      logger.warn('sendPostActivationEmails: payment history recording failed', { userId, error: err.message });
     }
   }
 }

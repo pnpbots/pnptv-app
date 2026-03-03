@@ -145,7 +145,7 @@ const schemas = {
       Joi.string().valid('1', '2', '3', '4', '5', '6', '10'),
       Joi.number().valid(1, 2, 3, 4, 5, 6, 10),
     ).optional(),
-    x_signature: Joi.string().required(),
+    x_signature: Joi.string().optional(), // present in body-hash mode, absent in header-HMAC mode
   }).or('x_transaction_state', 'x_cod_transaction_state').unknown(true),
 
   /**

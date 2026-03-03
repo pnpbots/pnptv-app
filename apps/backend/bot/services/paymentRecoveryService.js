@@ -215,14 +215,19 @@ class PaymentRecoveryService {
             }
 
             if (statusCheck.status === 'payment_completed') {
-              // Synthesize webhook data and process
+              // Synthesize webhook data and process — inject paymentId from DB row as fallback
               const webhookData = {
                 payment: {
                   id: statusCheck.id,
                   status: statusCheck.status,
                   source: statusCheck.source,
                   destination: statusCheck.destination,
-                  metadata: statusCheck.metadata,
+                  metadata: {
+                    ...statusCheck.metadata,
+                    paymentId: statusCheck.metadata?.paymentId || paymentId,
+                    userId: statusCheck.metadata?.userId || payment.user_id,
+                    planId: statusCheck.metadata?.planId || payment.plan_id,
+                  },
                 },
                 _recovery: true,
               };

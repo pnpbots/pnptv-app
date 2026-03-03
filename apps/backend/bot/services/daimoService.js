@@ -50,12 +50,12 @@ class DaimoService {
   verifyWebhookSignature(payload, authHeader) {
     try {
       if (!this.webhookSecret) {
-        logger.error('Daimo webhook secret not configured — rejecting webhook');
+        logger.warn('Daimo webhook secret not configured — cannot verify');
         return false;
       }
 
       if (!authHeader) {
-        logger.error('Missing Daimo webhook authorization');
+        logger.warn('Missing Daimo webhook authorization header');
         return false;
       }
 
@@ -178,14 +178,18 @@ class DaimoService {
   }
 
   /**
-   * Convert USDC units to USD amount
-   * @param {string} usdcUnits - USDC units (6 decimals)
+   * Convert Daimo amountUnits to USD amount.
+   * Daimo Pay API returns amountUnits in human-readable format (e.g., "14.99")
+   * via viem's formatUnits() — NOT in smallest token units.
+   * @param {string} amountUnits - USDC amount from Daimo (human-readable, e.g., "14.99")
    * @returns {number} USD amount
    */
-  convertUSDCToUSD(usdcUnits) {
+  convertUSDCToUSD(amountUnits) {
     try {
-      const units = parseFloat(usdcUnits);
-      return units / 1000000; // USDC has 6 decimals
+      const value = parseFloat(amountUnits);
+      if (isNaN(value) || value < 0) return 0;
+      // amountUnits is already human-readable via Daimo's formatUnits()
+      return value;
     } catch (error) {
       logger.error('Error converting USDC to USD:', error);
       return 0;
