@@ -15,10 +15,42 @@ const getStats = async (req, res) => {
   const user = req.user;
 
   try {
-    const stats = await AdminDashboardService.getDashboardOverview();
-    if (!stats) {
+    const raw = await AdminDashboardService.getDashboardOverview();
+    if (!raw) {
       return res.status(500).json({ error: 'Failed to load stats' });
     }
+
+    // Transform nested backend response to flat frontend AdminStats interface
+    const stats = {
+      totalRevenue: parseFloat(raw.payments?.total_revenue || 0),
+      activeSubscribers: parseInt(raw.membership?.totals?.active_subscribers || 0),
+      totalUsers: parseInt(raw.membership?.totals?.total_active_users || 0),
+      churnedUsers: parseInt(raw.membership?.totals?.churned_users || 0),
+      monthlyRevenue: parseFloat(raw.revenue?.monthly?.monthly_revenue || 0),
+      dailyRevenue: (raw.revenue?.daily || []).map(d => ({
+        date: d.payment_day,
+        amount: parseFloat(d.daily_revenue || 0),
+      })),
+      membershipBreakdown: (raw.membership?.byStatus || []).reduce((acc, row) => {
+        acc[row.subscription_status] = parseInt(row.count || 0);
+        return acc;
+      }, {}),
+      topPaymentMethods: (raw.topMethods || []).map(m => ({
+        method: m.payment_method,
+        transactions: parseInt(m.transaction_count || 0),
+        revenue: parseFloat(m.total_revenue || 0),
+        successRate: parseFloat(m.success_rate || 0),
+      })),
+      recentTransactions: (raw.recentTransactions || []).map(t => ({
+        date: t.payment_date,
+        userId: t.user_id,
+        username: t.username || t.first_name || `User ${t.user_id}`,
+        amount: parseFloat(t.amount || 0),
+        status: t.status,
+        method: t.payment_method || t.last_payment_method,
+      })),
+    };
+
     logger.info('Admin accessed dashboard stats', { adminId: user.id });
     return res.json({ success: true, stats });
   } catch (error) {
@@ -41,7 +73,8 @@ const listUsers = async (req, res) => {
     const offset = (page - 1) * limit;
 
     let countQuery = 'SELECT COUNT(*) as count FROM users WHERE is_active = true';
-    let dataQuery = `SELECT id, username, email, role, tier, subscription_status, created_at
+    let dataQuery = `SELECT id, username, email, first_name, last_name, role, tier,
+                            subscription_status, plan_id AS subscription_plan, plan_expiry, created_at
                      FROM users WHERE is_active = true`;
     const params = [];
 
@@ -86,8 +119,8 @@ const getUser = async (req, res) => {
     const { id: userId } = req.params;
     const result = await query(
       `SELECT id, username, email, first_name, last_name, bio, role, tier,
-              subscription_status, subscription_plan, plan_expiry, created_at,
-              last_payment_date, phone_number FROM users WHERE id = $1`,
+              subscription_status, plan_id AS subscription_plan, plan_expiry, created_at,
+              last_payment_date FROM users WHERE id = $1`,
       [userId]
     );
 
@@ -112,9 +145,8 @@ const updateUser = async (req, res) => {
 
   try {
     const { id: userId } = req.params;
-    const { username, email, subscriptionStatus, subscriptionPlan } = req.body;
+    const { username, email, subscriptionStatus, subscriptionPlan, tier, planExpiry } = req.body;
 
-    const updates = {};
     const queryParts = [];
     const values = [userId];
     let paramIndex = 2;
@@ -130,13 +162,23 @@ const updateUser = async (req, res) => {
     if (subscriptionStatus !== undefined) {
       queryParts.push(`subscription_status = $${paramIndex++}`);
       values.push(subscriptionStatus);
-      // Keep tier in sync: active subscription = prime tier
+      // Keep tier in sync if tier not explicitly set
+      if (tier === undefined) {
+        queryParts.push(`tier = $${paramIndex++}`);
+        values.push(subscriptionStatus === 'active' ? 'prime' : 'free');
+      }
+    }
+    if (tier !== undefined) {
       queryParts.push(`tier = $${paramIndex++}`);
-      values.push(subscriptionStatus === 'active' ? 'prime' : 'free');
+      values.push(tier);
     }
     if (subscriptionPlan !== undefined) {
-      queryParts.push(`subscription_plan = $${paramIndex++}`);
+      queryParts.push(`plan_id = $${paramIndex++}`);
       values.push(subscriptionPlan);
+    }
+    if (planExpiry !== undefined) {
+      queryParts.push(`plan_expiry = $${paramIndex++}`);
+      values.push(planExpiry ? new Date(planExpiry) : null);
     }
 
     if (queryParts.length === 0) {
@@ -151,7 +193,8 @@ const updateUser = async (req, res) => {
     logger.info('Admin updated user', { adminId: user.id, userId, updates: req.body });
 
     const result = await query(
-      `SELECT id, username, email, first_name, last_name, subscription_status FROM users WHERE id = $1`,
+      `SELECT id, username, email, first_name, last_name, role, tier,
+              subscription_status, plan_id AS subscription_plan, plan_expiry FROM users WHERE id = $1`,
       [userId]
     );
 
@@ -174,7 +217,11 @@ const banUser = async (req, res) => {
     const { ban, reason = '' } = req.body;
 
     const newTier = ban ? 'banned' : 'free';
-    await query('UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2', [newTier, userId]);
+    const newStatus = ban ? 'cancelled' : 'free';
+    await query(
+      'UPDATE users SET tier = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3',
+      [newTier, newStatus, userId]
+    );
 
     logger.info(`Admin ${ban ? 'banned' : 'unbanned'} user`, {
       adminId: user.id,
@@ -182,7 +229,10 @@ const banUser = async (req, res) => {
       reason,
     });
 
-    const result = await query('SELECT id, username, email, tier FROM users WHERE id = $1', [userId]);
+    const result = await query(
+      `SELECT id, username, email, tier, subscription_status, plan_id AS subscription_plan, plan_expiry FROM users WHERE id = $1`,
+      [userId]
+    );
 
     return res.json({ success: true, user: result.rows[0], action: ban ? 'banned' : 'unbanned' });
   } catch (error) {
@@ -202,8 +252,23 @@ const listPosts = async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page || '1'));
     const result = await SocialPostService.adminListPosts(page, 20);
 
+    // Map snake_case DB columns to camelCase frontend interface
+    const posts = (result.posts || []).map(p => ({
+      id: p.id,
+      authorId: p.user_id,
+      authorUsername: p.username,
+      authorFirstName: p.first_name,
+      authorPhotoUrl: p.photo_file_id || null,
+      content: p.content,
+      mediaUrl: p.media_url,
+      mediaType: p.media_type,
+      likesCount: p.likes_count,
+      repliesCount: p.replies_count,
+      createdAt: p.created_at,
+    }));
+
     logger.info('Admin listed posts', { adminId: user.id, page });
-    return res.json({ success: true, ...result });
+    return res.json({ success: true, posts, pagination: result.pagination });
   } catch (error) {
     logger.error('Error listing admin posts:', error);
     return res.status(500).json({ error: error.message });
@@ -319,7 +384,7 @@ const bulkUpdateUsers = async (req, res) => {
             `UPDATE users
              SET tier = 'prime',
                  subscription_status = 'active',
-                 subscription_plan = $2,
+                 plan_id = $2,
                  plan_expiry = $3,
                  updated_at = NOW()
              WHERE id = $1`,
@@ -330,7 +395,7 @@ const bulkUpdateUsers = async (req, res) => {
             `UPDATE users
              SET tier = 'free',
                  subscription_status = 'free',
-                 subscription_plan = NULL,
+                 plan_id = NULL,
                  plan_expiry = NULL,
                  updated_at = NOW()
              WHERE id = $1`,
@@ -475,7 +540,7 @@ const sendPushNotification = async (req, res) => {
       return res.status(400).json({ error: 'userIds must be a non-empty array when targetType is "users"' });
     }
 
-    const PushNotificationService = require('../../../services/pushNotificationService');
+    const PushNotificationService = require('../../services/pushNotificationService');
     const payload = { title, body, url };
 
     let sent = 0;

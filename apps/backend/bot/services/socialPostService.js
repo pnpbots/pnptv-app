@@ -432,7 +432,7 @@ class SocialPostService {
       query(
         `SELECT p.id, p.user_id, p.content, p.media_url, p.media_type,
                 p.likes_count, p.replies_count, p.created_at,
-                u.username, u.first_name
+                u.username, u.first_name, u.photo_file_id
          FROM social_posts p
          JOIN users u ON p.user_id = u.id
          WHERE p.is_deleted = false

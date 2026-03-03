@@ -1,6 +1,6 @@
 const logger = require('../utils/logger');
 const { query } = require('../config/postgres');
-const PaymentHistoryService = require('./paymentHistoryService');
+
 const MembershipCleanupService = require('../bot/services/membershipCleanupService');
 
 /**
@@ -28,7 +28,7 @@ class AdminDashboardService {
         this.getMembershipOverview(),
         MembershipCleanupService.getChurnAnalysis(),
         this.getTopPaymentMethods(),
-        PaymentHistoryService.getByMethod('epayco', 10)
+        this.getRecentTransactions()
       ]);
 
       return {
@@ -180,6 +180,28 @@ class AdminDashboardService {
       return result.rows;
     } catch (error) {
       logger.error('Error getting top payment methods:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get recent transactions across ALL payment methods with user info
+   * @returns {Promise<Array>} Recent transactions
+   */
+  static async getRecentTransactions() {
+    try {
+      const result = await query(`
+        SELECT ph.user_id, ph.amount, ph.status, ph.payment_method,
+               ph.payment_date, u.username, u.first_name
+        FROM payment_history ph
+        LEFT JOIN users u ON ph.user_id = u.id
+        WHERE ph.status = 'completed'
+        ORDER BY ph.payment_date DESC
+        LIMIT 10
+      `);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error getting recent transactions:', error);
       return [];
     }
   }
