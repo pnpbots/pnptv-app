@@ -317,6 +317,9 @@ function initSocketIO(io) {
           [room, user.id, user.username || null, firstName, photoUrl, content.trim()]
         );
 
+        // Touch activity timestamp for 72h inactivity cleanup
+        await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [gid]);
+
         io.to(room).emit('chat:message', rows[0]);
       } catch (err) {
         logger.error('hangout:message error', err);

@@ -8,6 +8,7 @@ interface CallState {
   participants: string[];
   callId: string | null;
   roomName: string | null;
+  endReason: string | null;
 }
 
 const EMPTY_CALL: CallState = {
@@ -16,6 +17,7 @@ const EMPTY_CALL: CallState = {
   participants: [],
   callId: null,
   roomName: null,
+  endReason: null,
 };
 
 export function useHangoutSocket(
@@ -119,6 +121,7 @@ export function useHangoutSocket(
         participants: [],
         callId: data.callId,
         roomName: data.roomName,
+        endReason: null,
       });
     };
 
@@ -134,14 +137,15 @@ export function useHangoutSocket(
         participants: [],
         callId: data.call?.id ?? data.callId ?? null,
         roomName: data.call?.roomName ?? data.roomName ?? null,
+        endReason: null,
       });
     };
 
-    const onCallEnded = (data?: { callId?: string }) => {
+    const onCallEnded = (data?: { callId?: string; reason?: string }) => {
       setCallState((prev) => {
         // Only reset if this matches our known call (or no callId provided)
         if (data?.callId && prev.callId && prev.callId !== data.callId) return prev;
-        return EMPTY_CALL;
+        return { ...EMPTY_CALL, endReason: data?.reason || null };
       });
     };
 

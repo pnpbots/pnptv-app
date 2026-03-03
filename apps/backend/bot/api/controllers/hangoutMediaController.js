@@ -106,6 +106,9 @@ const uploadHangoutMedia = async (req, res) => {
       photo_url: isValidPhotoUrl(rows[0].photo_url) ? rows[0].photo_url : null,
     };
 
+    // Touch activity timestamp for 72h inactivity cleanup
+    await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
+
     // Broadcast to hangout room
     const io = req.app.get('io');
     if (io) {

@@ -604,6 +604,15 @@ export default function Chat() {
     setCallId(null);
   }, [activeGroup, callId, callState.callId]);
 
+  // Show notification when call ends due to creator leaving
+  useEffect(() => {
+    if (callState.endReason === "creator_left") {
+      setUploadError("Call ended: the host left the call");
+      setCallUrl(null);
+      setCallId(null);
+    }
+  }, [callState.endReason]);
+
   // ─── Group management ──────────────────────────────────────────────
 
   const handleLeaveGroup = async (gid: number) => {
@@ -902,7 +911,8 @@ export default function Chat() {
       {/* Create group form */}
       {showCreate && (
         <div className="glass-card-sm p-4 mb-4 animate-fade-in-up">
-          <h3 className="text-sm font-semibold text-pnp-textPrimary mb-3">Create Subgroup</h3>
+          <h3 className="text-sm font-semibold text-pnp-textPrimary mb-1">Create Subgroup</h3>
+          <p className="text-xs text-pnp-textSecondary mb-3">Max 25 members &middot; 3 per month &middot; Inactive groups are auto-deleted after 72h</p>
           <label className="sr-only" htmlFor="new-group-name">Group name</label>
           <input
             id="new-group-name"

@@ -98,8 +98,9 @@ function buildJaasPayload(roomName, user, isModerator, isPersistent = false) {
   }
 
   try {
-    // In persistent community rooms everyone gets moderator-level access
+    // In persistent (main/24-7) community rooms everyone gets moderator-level access
     // so tokens last 4h and users can control their own media.
+    // In user-created subgroups, only the call creator gets moderator access.
     const useMod = isModerator || isPersistent;
     const token = useMod
       ? jaasService.generateModeratorToken(
@@ -225,12 +226,15 @@ const startCall = async (req, res) => {
 
     const newCall = callRows[0];
 
-    // Add creator as first participant
+    // Add creator as first participant (always moderator)
     await query(
-      `INSERT INTO hangout_call_participants (call_id, user_id, display_name)
-       VALUES ($1, $2, $3)`,
+      `INSERT INTO hangout_call_participants (call_id, user_id, display_name, is_moderator)
+       VALUES ($1, $2, $3, true)`,
       [newCall.id, user.id, user.firstName || user.username || 'User']
     );
+
+    // Touch activity timestamp
+    await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
 
     const jaas = buildJaasPayload(roomName, user, true, isPersistent);
 
@@ -650,7 +654,7 @@ const leaveCall = async (req, res) => {
   try {
     // Verify the call belongs to this group and is active
     const { rows: callRows } = await query(
-      `SELECT id, is_persistent FROM hangout_video_calls
+      `SELECT id, is_persistent, creator_id FROM hangout_video_calls
        WHERE id = $1 AND group_id = $2 AND status = 'active'`,
       [callId, groupId]
     );
@@ -680,9 +684,43 @@ const leaveCall = async (req, res) => {
       });
     }
 
-    // Auto-end the call only for NON-persistent calls when everyone leaves.
-    // Persistent (24/7) community calls stay active even when empty.
-    if (!callRecord.is_persistent) {
+    // For non-persistent (user-created) groups: end the call when the CREATOR leaves,
+    // regardless of whether other participants remain.
+    const isCreatorLeaving = !callRecord.is_persistent && String(callRecord.creator_id) === String(user.id);
+
+    if (isCreatorLeaving) {
+      // Creator left — terminate the call for everyone
+      await query(
+        `UPDATE hangout_video_calls
+         SET status = 'ended', ended_at = NOW(), ended_by = $1
+         WHERE id = $2 AND status = 'active'`,
+        [user.id, callId]
+      );
+
+      // Mark all remaining participants as left
+      await query(
+        `UPDATE hangout_call_participants
+         SET left_at = NOW()
+         WHERE call_id = $1 AND left_at IS NULL`,
+        [callId]
+      );
+
+      emitToHangout(req, groupId, 'hangout:call:ended', {
+        callId,
+        endedBy: {
+          id: user.id,
+          username: user.username,
+          firstName: user.firstName || user.first_name,
+        },
+        reason: 'creator_left',
+      });
+
+      // Touch activity timestamp
+      await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
+
+      logger.info('Hangout call ended (creator left)', { callId, groupId, creatorId: user.id });
+    } else if (!callRecord.is_persistent) {
+      // Auto-end the call only for NON-persistent calls when everyone leaves.
       const { rows: remaining } = await query(
         `SELECT COUNT(*)::int AS cnt
          FROM hangout_call_participants
@@ -711,6 +749,7 @@ const leaveCall = async (req, res) => {
         logger.info('Hangout call auto-ended (no participants)', { callId, groupId });
       }
     }
+    // Persistent (24/7) community calls stay active even when empty.
 
     return res.json({ success: true });
   } catch (err) {

@@ -119,9 +119,20 @@ const createGroup = async (req, res) => {
       return res.status(403).json({ error: 'Only PRIME members can create subgroups' });
     }
 
+    // Monthly limit: max 3 user-created hangouts per PRIME user per calendar month
+    const { rows: limitRows } = await query(
+      `SELECT COUNT(*)::int AS cnt FROM hangout_groups
+       WHERE creator_id = $1 AND is_main = false AND is_wall_of_fame = false
+         AND created_at >= date_trunc('month', NOW())`,
+      [user.id]
+    );
+    if (limitRows[0].cnt >= 3) {
+      return res.status(403).json({ error: 'Monthly hangout limit reached (3 per month)' });
+    }
+
     const { rows } = await query(
       `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members)
-       VALUES ($1, $2, $3, false, $4, 200)
+       VALUES ($1, $2, $3, false, $4, 25)
        RETURNING *`,
       [name.trim().slice(0, 100), description.trim().slice(0, 500), user.id, isPublic !== false]
     );
@@ -264,6 +275,9 @@ const joinGroup = async (req, res) => {
        ON CONFLICT DO NOTHING`,
       [groupId, user.id]
     );
+
+    // Touch activity timestamp
+    await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
 
     // Notify group creator about new member
     const group = rows[0];
@@ -426,6 +440,9 @@ const sendMessage = async (req, res) => {
     );
 
     const msg = normalizeMessage(rows[0]);
+
+    // Touch activity timestamp
+    await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
 
     // Broadcast via Socket.IO
     const io = req.app.get('io');
