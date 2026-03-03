@@ -5710,8 +5710,9 @@ let registerAdminHandlers = (bot) => {
       });
 
       // Record as PRIME sale (manual activation)
+      let paymentRecord;
       try {
-        await PaymentModel.create({
+        paymentRecord = await PaymentModel.create({
           userId,
           planId: `courtesy_${days}d`,
           provider: 'manual_activation',
@@ -5735,6 +5736,19 @@ let registerAdminHandlers = (bot) => {
           error: paymentError.message,
         });
       }
+
+      // Fire-and-forget: send invoice email, welcome email, Socket.IO notification, payment history
+      PaymentService.sendPostActivationEmails({
+        userId,
+        plan: { id: `courtesy_${days}d`, display_name: `Courtesy Pass (${days}d)`, name: 'Courtesy Pass', duration: days },
+        amount: 0,
+        currency: 'USD',
+        provider: 'manual_activation',
+        transactionId: paymentRecord?.id || `courtesy-${userId}-${Date.now()}`,
+        expiryDate,
+        activatedBy: ctx.from.id,
+        paymentId: paymentRecord?.id,
+      }).catch(err => logger.warn('Post-activation emails failed for courtesy pass', { userId, error: err.message }));
 
       const lang = user.language || 'es';
       const durationText = days === 2 ? '2 días' : days === 7 ? '1 semana (7 días)' : '2 semanas (14 días)';
@@ -5876,8 +5890,9 @@ let registerAdminHandlers = (bot) => {
       });
 
       // Record as PRIME sale (manual activation)
+      let paymentRecord;
       try {
-        await PaymentModel.create({
+        paymentRecord = await PaymentModel.create({
           userId,
           planId: plan.id,
           provider: 'manual_activation',
@@ -5905,6 +5920,19 @@ let registerAdminHandlers = (bot) => {
           error: paymentError.message,
         });
       }
+
+      // Fire-and-forget: send invoice email, welcome email, Socket.IO notification, payment history
+      PaymentService.sendPostActivationEmails({
+        userId,
+        plan,
+        amount: plan.price || 0,
+        currency: plan.currency || 'USD',
+        provider: 'manual_activation',
+        transactionId: paymentRecord?.id || `plan-${userId}-${Date.now()}`,
+        expiryDate,
+        activatedBy: ctx.from.id,
+        paymentId: paymentRecord?.id,
+      }).catch(err => logger.warn('Post-activation emails failed for plan activation', { userId, planId: plan.id, error: err.message }));
 
       const lang = user.language || 'es';
       const planName = lang === 'es' ? (plan.nameEs || plan.name) : plan.name;
