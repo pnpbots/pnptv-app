@@ -58,6 +58,7 @@ const PLAN_FEATURES: Record<string, string[]> = {
 const MEMBER_EXCLUDED = [
   "No Videorama access",
   "No exclusive video content",
+  "No Telegram PRIME channel access",
   "No VIP badge or priority support",
 ];
 
