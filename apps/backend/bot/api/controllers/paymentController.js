@@ -473,7 +473,76 @@ class PaymentController {
         return res.json(response);
       }
 
-      // Payment is pending - check if it's stuck or waiting for webhook
+      // Payment is pending — branch by provider
+      const provider = payment.provider || (payment.metadata?.provider);
+
+      // Daimo real-time status check
+      if (provider === 'daimo') {
+        const daimoPaymentId = payment.daimoPaymentId || payment.daimo_payment_id;
+        if (!daimoPaymentId) {
+          return res.json({
+            success: true,
+            status: 'pending',
+            message: 'Awaiting Daimo payment completion.',
+          });
+        }
+
+        const daimoCheck = await DaimoConfig.checkDaimoPaymentStatus(daimoPaymentId);
+
+        if (!daimoCheck.success) {
+          return res.json({
+            success: true,
+            status: 'pending',
+            message: 'Could not check Daimo payment status, will retry.',
+          });
+        }
+
+        if (daimoCheck.status === 'payment_completed') {
+          logger.warn('STUCK DAIMO PAYMENT DETECTED (via polling): completed at Daimo but pending locally', {
+            paymentId,
+            daimoPaymentId,
+          });
+
+          // Trigger recovery inline
+          const webhookData = {
+            payment: {
+              id: daimoCheck.id,
+              status: daimoCheck.status,
+              source: daimoCheck.source,
+              destination: daimoCheck.destination,
+              metadata: daimoCheck.metadata,
+            },
+            _recovery: true,
+          };
+          await PaymentService.processDaimoWebhook(webhookData);
+
+          return res.json({
+            success: true,
+            status: 'processing_recovery',
+            message: 'Payment completed — activating your subscription now.',
+          });
+        }
+
+        if (daimoCheck.status === 'payment_bounced' || daimoCheck.status === 'payment_failed') {
+          await PaymentModel.updateStatus(paymentId, 'failed', {
+            daimo_status: daimoCheck.status,
+            recovered_via_status_check: true,
+          });
+          return res.json({
+            success: true,
+            status: 'failed',
+            message: 'Payment failed or was bounced.',
+          });
+        }
+
+        return res.json({
+          success: true,
+          status: 'pending',
+          message: 'Awaiting Daimo payment completion.',
+        });
+      }
+
+      // ePayco flow — check if it's stuck or waiting for webhook
       if (!refPayco) {
         return res.json({
           success: true,

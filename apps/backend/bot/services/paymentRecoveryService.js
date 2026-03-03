@@ -1,5 +1,6 @@
 const PaymentModel = require('../../models/paymentModel');
 const PaymentService = require('./paymentService');
+const { checkDaimoPaymentStatus } = require('../../config/daimo');
 const { query } = require('../../config/postgres');
 const { cache } = require('../../config/redis');
 const logger = require('../../utils/logger');
@@ -144,6 +145,161 @@ class PaymentRecoveryService {
   }
 
   /**
+   * Process stuck Daimo payments (older than 10 minutes)
+   * Checks Daimo Pay API for completed payments and triggers webhook processing if needed
+   * @returns {Promise<Object>} Recovery results
+   */
+  static async processStuckDaimoPayments() {
+    logger.info('Starting Daimo payment recovery process...');
+
+    const results = {
+      checked: 0,
+      recovered: 0,
+      stillPending: 0,
+      failed: 0,
+      errors: 0,
+      startTime: new Date(),
+      endTime: null,
+    };
+
+    try {
+      const lockKey = 'payment:daimo:recovery:lock';
+      const lockAcquired = await cache.acquireLock(lockKey, 600); // 10 min lock
+      if (!lockAcquired) {
+        logger.warn('Daimo payment recovery already running, skipping');
+        return results;
+      }
+
+      try {
+        // Query pending Daimo payments with a daimo_payment_id (10min–24hr old)
+        const stuckPayments = await query(`
+          SELECT id, reference, daimo_payment_id,
+                 user_id, plan_id, created_at
+          FROM payments
+          WHERE status = 'pending'
+            AND provider = 'daimo'
+            AND daimo_payment_id IS NOT NULL
+            AND created_at > NOW() - INTERVAL '24 hours'
+            AND created_at < NOW() - INTERVAL '10 minutes'
+          ORDER BY created_at ASC
+          LIMIT 100
+        `);
+
+        const payments = stuckPayments.rows;
+        logger.info(`Found ${payments.length} stuck Daimo payments to process`, {
+          count: payments.length,
+        });
+
+        results.checked = payments.length;
+
+        for (const payment of payments) {
+          try {
+            const { id: paymentId, daimo_payment_id: daimoPaymentId } = payment;
+
+            logger.info('Processing stuck Daimo payment', {
+              paymentId,
+              daimoPaymentId,
+              createdAt: payment.created_at,
+            });
+
+            const statusCheck = await checkDaimoPaymentStatus(daimoPaymentId);
+
+            if (!statusCheck.success) {
+              results.errors++;
+              logger.error('Failed to check Daimo payment status', {
+                paymentId,
+                daimoPaymentId,
+                error: statusCheck.error,
+              });
+              continue;
+            }
+
+            if (statusCheck.status === 'payment_completed') {
+              // Synthesize webhook data and process
+              const webhookData = {
+                payment: {
+                  id: statusCheck.id,
+                  status: statusCheck.status,
+                  source: statusCheck.source,
+                  destination: statusCheck.destination,
+                  metadata: statusCheck.metadata,
+                },
+                _recovery: true,
+              };
+
+              const recoveryResult = await PaymentService.processDaimoWebhook(webhookData);
+
+              if (recoveryResult.success) {
+                results.recovered++;
+                logger.info('Daimo payment recovered successfully', {
+                  paymentId,
+                  daimoPaymentId,
+                });
+              } else {
+                results.errors++;
+                logger.error('Daimo payment recovery processing failed', {
+                  paymentId,
+                  daimoPaymentId,
+                  error: recoveryResult.error,
+                });
+              }
+            } else if (statusCheck.status === 'payment_bounced' || statusCheck.status === 'payment_failed') {
+              await PaymentModel.updateStatus(paymentId, 'failed', {
+                daimo_status: statusCheck.status,
+                recovered_via_polling: true,
+                recovered_at: new Date().toISOString(),
+              });
+              results.failed++;
+              logger.info('Daimo payment marked as failed via recovery', {
+                paymentId,
+                daimoPaymentId,
+                daimoStatus: statusCheck.status,
+              });
+            } else {
+              results.stillPending++;
+              logger.info('Daimo payment still pending', {
+                paymentId,
+                daimoPaymentId,
+                daimoStatus: statusCheck.status,
+              });
+            }
+          } catch (error) {
+            results.errors++;
+            logger.error('Error processing stuck Daimo payment', {
+              paymentId: payment.id,
+              error: error.message,
+            });
+          }
+
+          // Rate limit: 100ms between API calls
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        results.endTime = new Date();
+        const duration = (results.endTime - results.startTime) / 1000;
+
+        logger.info('Daimo payment recovery process completed', {
+          duration: `${duration}s`,
+          checked: results.checked,
+          recovered: results.recovered,
+          stillPending: results.stillPending,
+          failed: results.failed,
+          errors: results.errors,
+        });
+
+        return results;
+      } finally {
+        await cache.releaseLock(lockKey);
+      }
+    } catch (error) {
+      logger.error('Error in Daimo payment recovery process:', error);
+      results.errors++;
+      results.endTime = new Date();
+      return results;
+    }
+  }
+
+  /**
    * Clean up abandoned payments (pending for > 24 hours)
    * Marks them as 'abandoned' to prevent indefinite pending status
    * @returns {Promise<Object>} Cleanup results
@@ -159,15 +315,15 @@ class PaymentRecoveryService {
     };
 
     try {
-      // Update payments pending > 24 hours to 'abandoned'
+      // Update payments pending > 24 hours to 'abandoned' (ePayco and Daimo)
       const cleanupResult = await query(`
         UPDATE payments
         SET status = 'abandoned',
-            metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('abandoned_at', $1::text, 'reason', '3DS_TIMEOUT')
+            metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('abandoned_at', $1::text, 'reason', CASE WHEN provider = 'daimo' THEN 'DAIMO_TIMEOUT' ELSE '3DS_TIMEOUT' END)
         WHERE status = 'pending'
-          AND provider = 'epayco'
+          AND provider IN ('epayco', 'daimo')
           AND created_at < NOW() - INTERVAL '24 hours'
-        RETURNING id, user_id, reference
+        RETURNING id, user_id, reference, provider
       `, [new Date().toISOString()]);
 
       results.cleaned = cleanupResult.rowCount;
@@ -218,7 +374,7 @@ class PaymentRecoveryService {
           MIN(created_at) as oldest_pending,
           MAX(created_at) as newest_pending
         FROM payments
-        WHERE status = 'pending' AND provider = 'epayco'
+        WHERE status = 'pending' AND provider IN ('epayco', 'daimo')
       `);
 
       const row = stats.rows[0];

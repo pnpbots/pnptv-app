@@ -36,8 +36,8 @@ const SUPPORTED_PAYMENT_APPS = [
 const getDaimoConfig = () => {
   const treasuryAddress = process.env.DAIMO_TREASURY_ADDRESS;
   const refundAddress = process.env.DAIMO_REFUND_ADDRESS;
-  // Daimo webhooks must go to easybots.site (payment webhook domain)
-  const webhookDomain = process.env.EPAYCO_WEBHOOK_DOMAIN || process.env.CHECKOUT_DOMAIN || 'https://easybots.site';
+  // Daimo webhooks go to pnptv.app (same domain as bot/checkout)
+  const webhookDomain = process.env.BOT_WEBHOOK_DOMAIN || process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
   const webhookUrl = `${webhookDomain}/api/webhooks/daimo`;
 
   // Validate critical configuration
@@ -225,6 +225,54 @@ const createDaimoPayment = async ({
 };
 
 /**
+ * Check payment status directly from Daimo Pay API
+ * @param {string} daimoPaymentId - Daimo payment ID
+ * @returns {Promise<Object>} { success, id, status, source, destination, metadata, error }
+ */
+const checkDaimoPaymentStatus = async (daimoPaymentId) => {
+  const apiKey = process.env.DAIMO_API_KEY;
+  if (!apiKey) {
+    return { success: false, error: 'DAIMO_API_KEY not configured' };
+  }
+
+  try {
+    const response = await fetch(`https://pay.daimo.com/api/payment/${daimoPaymentId}`, {
+      method: 'GET',
+      headers: {
+        'Api-Key': apiKey,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error('Daimo status check API error', {
+        daimoPaymentId,
+        status: response.status,
+        error: errorText,
+      });
+      return { success: false, error: `Daimo API error: ${response.status}` };
+    }
+
+    const data = await response.json();
+
+    return {
+      success: true,
+      id: data.id,
+      status: data.status,
+      source: data.source || null,
+      destination: data.destination || null,
+      metadata: data.metadata || null,
+    };
+  } catch (error) {
+    logger.error('Error checking Daimo payment status', {
+      daimoPaymentId,
+      error: error.message,
+    });
+    return { success: false, error: error.message };
+  }
+};
+
+/**
  * Validate Daimo webhook payload
  * @param {Object} payload - Webhook payload
  * @returns {Object} { valid: boolean, error?: string }
@@ -294,6 +342,7 @@ module.exports = {
   getDaimoConfig,
   createPaymentIntent,
   createDaimoPayment,
+  checkDaimoPaymentStatus,
   validateWebhookPayload,
   mapDaimoStatus,
   formatAmountFromUnits,

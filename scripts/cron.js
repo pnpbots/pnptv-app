@@ -35,7 +35,26 @@ const startCronJobs = async (bot = null) => {
       TutorialReminderService.initialize(bot);
     }
 
-    // Payment recovery - process stuck pending payments every 2 hours
+    // Daimo payment recovery - process stuck Daimo payments every 5 minutes
+    // Checks Daimo Pay API for completed payments and replays webhooks if needed
+    // More frequent than ePayco since Daimo has no 3DS delay, payments complete fast
+    cron.schedule(process.env.DAIMO_RECOVERY_CRON || '*/5 * * * *', async () => {
+      try {
+        logger.info('Running Daimo payment recovery process...');
+        const results = await PaymentRecoveryService.processStuckDaimoPayments();
+        logger.info('Daimo payment recovery completed', {
+          checked: results.checked,
+          recovered: results.recovered,
+          stillPending: results.stillPending,
+          failed: results.failed,
+          errors: results.errors,
+        });
+      } catch (error) {
+        logger.error('Error in Daimo payment recovery cron:', error);
+      }
+    });
+
+    // ePayco payment recovery - process stuck pending payments every 2 hours
     // Checks ePayco API for completed payments and replays webhooks if needed
     cron.schedule(process.env.PAYMENT_RECOVERY_CRON || '0 */2 * * *', async () => {
       try {
