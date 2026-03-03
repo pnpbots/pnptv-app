@@ -44,7 +44,7 @@ class Plan {
   static async getPublicPlans() {
     const plans = await this.getAll();
     const hiddenIds = new Set(this.getPromotionalPlans().map((plan) => plan.id));
-    return plans.filter((plan) => !hiddenIds.has(plan.id));
+    return plans.filter((plan) => !hiddenIds.has(plan.id) && plan.tier !== 'creator');
   }
 
   /**
@@ -103,8 +103,10 @@ class Plan {
     return {
       id: row.id,
       sku: row.sku,
+      display_name: row.display_name || row.name,
       name: row.name || row.display_name,
       nameEs: row.name_es,
+      tier: row.tier || null,
       price: parseFloat(row.price),
       currency: row.currency || 'USD',
       duration: row.duration_days || row.duration || 30,
@@ -358,33 +360,6 @@ class Plan {
       },
       {
         id: 'crystal_pass',
-        sku: '180PASS',
-        display_name: 'CRYSTAL PASS',
-        name: 'Crystal Pass',
-        nameEs: 'Pase Crystal',
-        price: 74.99,
-        currency: 'USD',
-        duration: 180,
-        description: 'CRYSTAL PASS - 180PASS - $74.99 USD',
-        descriptionEs: 'PASE CRYSTAL - 180PASS - $74.99 USD',
-        features: [
-          '💎 Extended Videorama access + premieres',
-          '📍 Premium Nearby filters unlocked',
-          '🎥 12 Hangouts credit with the crew',
-          '📺 PNP Latino Live + private shows',
-          '⚡ Priority Cristina support whenever you need it',
-        ],
-        featuresEs: [
-          '💎 Acceso extendido a Videorama + estrenos',
-          '📍 Filtros Nearby Premium desbloqueados',
-          '🎥 12 créditos de Hangouts con la crew',
-          '📺 PNP Latino Live + shows privados',
-          '⚡ Soporte prioritario de Cristina cuando lo necesites',
-        ],
-        active: true,
-      },
-      {
-        id: 'six_months_pass',
         sku: '180PASS',
         display_name: 'CRYSTAL PASS',
         name: 'Crystal Pass',

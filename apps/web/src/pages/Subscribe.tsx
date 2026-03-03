@@ -14,15 +14,54 @@ type Provider = "epayco" | "daimo";
 const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
 
 const PLAN_FEATURES: Record<string, string[]> = {
-  member_monthly: ["Private hangout rooms", "Social feed access", "Nearby users discovery", "Just $4.99/month"],
-  week_pass: ["7 days of PRIME access", "Exclusive video content", "Cancel anytime"],
-  three_months: ["90 days of PRIME access", "Exclusive video content", "Hangout groups", "Save 25%"],
-  crystal: ["Premium 90-day plan", "All PRIME features", "Priority support", "Nearby discovery"],
-  yearly: ["365 days of PRIME access", "All PRIME features", "Priority support", "Best value"],
-  lifetime: ["Lifetime PRIME access", "All features forever", "Priority support", "One-time payment"],
+  "member_monthly": [
+    "Hangout group rooms",
+    "Social feed access",
+    "Nearby users discovery",
+  ],
+  "week-trial-pass": [
+    "7 days of full PRIME access",
+    "Videorama exclusive content",
+    "Nearby Premium features",
+    "Community hangouts",
+  ],
+  "monthly-pass": [
+    "30 days of full PRIME access",
+    "Unlimited Videorama library",
+    "Nearby Premium features",
+    "Full community hangouts",
+    "Priority support",
+  ],
+  "crystal-pass": [
+    "6 months of full PRIME access",
+    "Unlimited Videorama + early releases",
+    "Nearby Premium features",
+    "VIP community status",
+    "Priority support",
+  ],
+  "diamond-pass": [
+    "1 year of full PRIME access",
+    "Unlimited Videorama + exclusives",
+    "Nearby Premium features",
+    "VIP badge + priority support",
+    "Access to exclusive events",
+  ],
+  "lifetime-pass": [
+    "Lifetime PRIME access — pay once",
+    "Everything in Diamond, forever",
+    "Founder badge",
+    "Priority feature requests",
+    "Never pay again",
+  ],
 };
 
-const RECOMMENDED_PLAN = "yearly";
+const MEMBER_EXCLUDED = [
+  "No Videorama access",
+  "No exclusive video content",
+  "No VIP badge or priority support",
+];
+
+const RECOMMENDED_PLAN = "diamond-pass";
 
 function formatPrice(amount: number, currency: string): string {
   if (currency === "COP") {
@@ -190,8 +229,13 @@ export default function Subscribe() {
       <div className="space-y-3 mb-6">
         {/* Member tier plans */}
         {plans.some((p) => MEMBER_PLAN_IDS.has(p.id)) && (
-          <div className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary mb-1">
-            Member
+          <div className="mb-1">
+            <div className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary">
+              Community Member
+            </div>
+            <p className="text-[10px] text-pnp-textSecondary/70 mt-0.5">
+              Social features only — does not include Videorama or exclusive content
+            </p>
           </div>
         )}
         {plans.filter((p) => MEMBER_PLAN_IDS.has(p.id)).map((plan) => {
@@ -228,14 +272,29 @@ export default function Subscribe() {
                   </li>
                 ))}
               </ul>
+              <ul className="space-y-1 mt-2 pt-2 border-t border-white/5">
+                {MEMBER_EXCLUDED.map((f) => (
+                  <li key={f} className="flex items-center gap-2 text-xs text-red-400/70">
+                    <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                    {f}
+                  </li>
+                ))}
+              </ul>
             </button>
           );
         })}
 
         {/* PRIME tier plans */}
         {plans.some((p) => !MEMBER_PLAN_IDS.has(p.id)) && (
-          <div className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary mt-4 mb-1">
-            PRIME
+          <div className="mt-4 mb-1">
+            <div className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary">
+              PRIME
+            </div>
+            <p className="text-[10px] text-pnp-textSecondary/70 mt-0.5">
+              Full access — Videorama, Nearby Premium, hangouts, exclusive content & more
+            </p>
           </div>
         )}
         {plans.filter((p) => !MEMBER_PLAN_IDS.has(p.id)).map((plan) => {
