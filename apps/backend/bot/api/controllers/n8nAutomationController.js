@@ -1,7 +1,9 @@
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
-const EmailService = require('../../services/emailservice');
+const EmailService = require('../../../services/emailService');
 const UserModel = require('../../../models/userModel');
+
+const escapeHtml = (str) => String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const PaymentModel = require('../../../models/paymentModel');
 const SubscriberModel = require('../../../models/subscriberModel');
 const PlanModel = require('../../../models/planModel');
@@ -436,15 +438,15 @@ class N8nAutomationController {
           );
 
           for (const admin of adminEmails.rows) {
-            EmailService.sendEmail({
+            EmailService.send({
               to: admin.email,
-              subject: `[ALERT] ${severity.toUpperCase()} - ${title}`,
+              subject: `[ALERT] ${escapeHtml(severity).toUpperCase()} - ${escapeHtml(title)}`,
               html: `
-                <h2>${title}</h2>
-                <p><strong>Type:</strong> ${alertType}</p>
-                <p><strong>Severity:</strong> ${severity}</p>
-                <p><strong>Message:</strong> ${message}</p>
-                <pre>${JSON.stringify(details, null, 2)}</pre>
+                <h2>${escapeHtml(title)}</h2>
+                <p><strong>Type:</strong> ${escapeHtml(alertType)}</p>
+                <p><strong>Severity:</strong> ${escapeHtml(severity)}</p>
+                <p><strong>Message:</strong> ${escapeHtml(message)}</p>
+                <pre>${escapeHtml(JSON.stringify(details, null, 2))}</pre>
               `
             }).catch(err => logger.error('Failed to send admin alert email', { error: err.message }));
           }

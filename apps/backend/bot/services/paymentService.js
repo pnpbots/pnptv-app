@@ -3,6 +3,7 @@ const InvoiceService = require('../../bot/services/invoiceservice');
 const EmailService = require('../../bot/services/emailservice');
 const PlanModel = require('../../models/planModel');
 const UserModel = require('../../models/userModel');
+const BookingModel = require('../../models/bookingModel');
 const PromoService = require('./promoService');
 const SubscriberModel = require('../../models/subscriberModel');
 const ModelService = require('./modelService');
@@ -12,6 +13,26 @@ const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const crypto = require('crypto');
 const { Telegraf } = require('telegraf');
+
+// Singleton bot instance — avoids spawning a new Telegraf per payment event.
+let _botInstance = null;
+function getBotInstance() {
+  if (!_botInstance) {
+    try {
+      const botModule = require('../core/bot');
+      // bot.js exports { startBot, getBotInstance } — use its singleton when available.
+      _botInstance = typeof botModule.getBotInstance === 'function'
+        ? botModule.getBotInstance()
+        : null;
+    } catch (_e) {
+      // Module not yet loaded (e.g. in test context) — fall through to fallback.
+    }
+    if (!_botInstance) {
+      _botInstance = new Telegraf(process.env.BOT_TOKEN);
+    }
+  }
+  return _botInstance;
+}
 const DaimoService = require('./daimoService');
 const DaimoConfig = require('../../config/daimo');
 const MessageTemplates = require('./messageTemplates');
@@ -335,7 +356,7 @@ class PaymentService {
       userId, plan, transactionId, amount, expiryDate, language = 'es', provider = 'epayco',
     }) {
       try {
-        const bot = new Telegraf(process.env.BOT_TOKEN);
+        const bot = getBotInstance();
         const groupId = process.env.PRIME_CHANNEL_ID || '-1002997324714'; // PRIME channel ID
 
         // Create unique invite link for PRIME channel
@@ -621,7 +642,7 @@ class PaymentService {
       await EmailService.sendInvoiceEmail({
         to: user.email,
         subject: `Factura por suscripción (SKU: ${payment.sku})`,
-        invoicePdf: invoice.pdf,
+        invoicePdf: invoice.buffer,
         invoiceNumber: invoice.id,
       });
 
@@ -805,7 +826,7 @@ class PaymentService {
         });
 
         try {
-          const bot = new Telegraf(process.env.BOT_TOKEN);
+          const bot = getBotInstance();
           const user = await UserModel.getById(userId);
           const userLanguage = user?.language || 'es';
           const model = await ModelService.getModelById(booking.model_id);
@@ -1314,7 +1335,7 @@ class PaymentService {
             const user = await UserModel.getById(userId);
 
             if (plan) {
-              const bot = new Telegraf(process.env.BOT_TOKEN);
+              const bot = getBotInstance();
               // Check if this was a promo purchase
               const promoInfo = payment?.metadata?.promoCode
                 ? ` (Promo: ${payment.metadata.promoCode})`
@@ -1499,6 +1520,21 @@ class PaymentService {
           planId: planIdOrBookingId,
         });
 
+        // H3: Send failure DM to the user so they know their payment was not processed.
+        if (userId) {
+          try {
+            const bot = getBotInstance();
+            const user = await UserModel.getById(userId);
+            const lang = user?.language || 'es';
+            const msg = lang === 'es'
+              ? `❌ Tu pago no fue procesado.\n\nEstado: ${effectiveState}\nReferencia: ${x_ref_payco || 'N/A'}\n\nSi tienes dudas, escríbenos a @pnplatinotv_bot`
+              : `❌ Your payment was not processed.\n\nStatus: ${effectiveState}\nReference: ${x_ref_payco || 'N/A'}\n\nQuestions? Contact @pnplatinotv_bot`;
+            await bot.telegram.sendMessage(userId, msg);
+          } catch (dmErr) {
+            logger.error('Failed to send payment failure DM:', { error: dmErr.message, userId });
+          }
+        }
+
         return { success: true };
       } else if (effectiveState === 'Reversada') {
         if (payment) {
@@ -1517,6 +1553,21 @@ class PaymentService {
           userId,
           planId: planIdOrBookingId,
         });
+
+        // H3: Notify the user their payment has been reversed/refunded.
+        if (userId) {
+          try {
+            const bot = getBotInstance();
+            const user = await UserModel.getById(userId);
+            const lang = user?.language || 'es';
+            const msg = lang === 'es'
+              ? `↩️ Tu pago ha sido revertido (reembolsado).\n\nReferencia: ${x_ref_payco || 'N/A'}\n\nSi tienes dudas, escríbenos a @pnplatinotv_bot`
+              : `↩️ Your payment has been reversed (refunded).\n\nReference: ${x_ref_payco || 'N/A'}\n\nQuestions? Contact @pnplatinotv_bot`;
+            await bot.telegram.sendMessage(userId, msg);
+          } catch (dmErr) {
+            logger.error('Failed to send payment refund DM:', { error: dmErr.message, userId });
+          }
+        }
 
         return { success: true };
       } else if (effectiveState === 'Pendiente') {
@@ -1648,17 +1699,54 @@ class PaymentService {
         if (status === 'payment_completed') {
           await BookingAvailabilityIntegration.completeBooking(bookingId, null, userId);
           logger.info('Booking completed via Daimo webhook', { bookingId, userId });
+
+          // H4: Send booking confirmation DM to the user, mirroring the ePayco booking flow.
+          try {
+            const bot = getBotInstance();
+            const user = await UserModel.getById(userId);
+            const booking = await BookingModel.getById(bookingId);
+            const userLanguage = user?.language || 'es';
+            let model = null;
+            if (booking?.model_id) {
+              try {
+                model = await ModelService.getModelById(booking.model_id);
+              } catch (_e) {
+                // Non-critical — model name falls back to 'Desconocido'
+              }
+            }
+            const bookingType = booking?.booking_type || 'Meet & Greet';
+            const message = userLanguage === 'es'
+              ? `🎉 ¡Tu ${bookingType === 'Meet & Greet' ? 'Video Llamada VIP' : 'Show Privado'} ha sido confirmada!\n\n` +
+                `📅 Fecha: ${booking?.booking_time ? new Date(booking.booking_time).toLocaleString('es-ES') : 'N/A'}\n` +
+                `🕒 Duración: ${booking?.duration_minutes ?? 'N/A'} minutos\n` +
+                `💃 Modelo: ${model?.name || 'Desconocido'}\n` +
+                `💰 Total: $${booking?.price_usd ?? 'N/A'} USD\n\n` +
+                `📞 Tu llamada está programada y confirmada. ¡Te esperamos!`
+              : `🎉 Your ${bookingType === 'Meet & Greet' ? 'VIP Video Call' : 'Private Show'} has been confirmed!\n\n` +
+                `📅 Date: ${booking?.booking_time ? new Date(booking.booking_time).toLocaleString('en-US') : 'N/A'}\n` +
+                `🕒 Duration: ${booking?.duration_minutes ?? 'N/A'} minutes\n` +
+                `💃 Model: ${model?.name || 'Unknown'}\n` +
+                `💰 Total: $${booking?.price_usd ?? 'N/A'} USD\n\n` +
+                `📞 Your call is scheduled and confirmed. We look forward to seeing you!`;
+            await bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
+          } catch (notificationError) {
+            logger.error('Error sending Daimo booking confirmation DM (non-critical):', {
+              error: notificationError.message,
+              userId,
+              bookingId,
+            });
+          }
         }
         return { success: true };
       }
-      
+
       if (!planId) {
         return { success: false, error: 'Missing planId for subscription' };
       }
 
-      // Idempotency lock
+      // Idempotency lock — M1: explicit 120s TTL prevents orphaned locks
       const lockKey = `processing:payment:${paymentId}`;
-      const acquired = await cache.acquireLock(lockKey);
+      const acquired = await cache.acquireLock(lockKey, 120);
       if (!acquired) {
         logger.info('Daimo payment already being processed', { paymentId });
         return { success: true, alreadyProcessed: true };
@@ -1668,7 +1756,6 @@ class PaymentService {
         // Check if already processed (idempotency)
         const payment = await PaymentModel.getById(paymentId);
         if (payment && (payment.status === 'completed' || payment.status === 'success')) {
-          await cache.releaseLock(lockKey);
           logger.info('Daimo payment already processed', { paymentId, eventId: id });
           return { success: true, alreadyProcessed: true };
         }
@@ -1840,7 +1927,7 @@ class PaymentService {
 
             // Send admin notification for purchase (always, regardless of email)
             try {
-              const bot = new Telegraf(process.env.BOT_TOKEN);
+              const bot = getBotInstance();
               const amountUSD = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
               // Check if this was a promo purchase
               const promoInfo = payment?.metadata?.promoCode
@@ -1962,7 +2049,6 @@ class PaymentService {
             }
           }
 
-          await cache.releaseLock(lockKey);
           return { success: true };
         } else if (status === 'payment_bounced' || status === 'payment_failed') {
           // Payment failed
@@ -1975,7 +2061,22 @@ class PaymentService {
 
           logger.info('Daimo payment failed', { userId, planId, eventId: id });
 
-          await cache.releaseLock(lockKey);
+          // H3: Notify the user that their Daimo payment was not processed.
+          if (userId) {
+            try {
+              const bot = getBotInstance();
+              const user = await UserModel.getById(userId);
+              const lang = user?.language || 'es';
+              const txRef = source?.txHash || id || 'N/A';
+              const msg = lang === 'es'
+                ? `❌ Tu pago con Daimo no fue procesado.\n\nReferencia: ${txRef}\n\nSi tienes dudas, escríbenos a @pnplatinotv_bot`
+                : `❌ Your Daimo payment was not processed.\n\nReference: ${txRef}\n\nQuestions? Contact @pnplatinotv_bot`;
+              await bot.telegram.sendMessage(userId, msg);
+            } catch (dmErr) {
+              logger.error('Failed to send Daimo payment failure DM:', { error: dmErr.message, userId });
+            }
+          }
+
           return { success: true }; // Return success to acknowledge webhook
         } else if (status === 'payment_refunded') {
           // Payment refunded
@@ -1988,7 +2089,22 @@ class PaymentService {
 
           logger.info('Daimo payment refunded', { userId, planId, eventId: id });
 
-          await cache.releaseLock(lockKey);
+          // H3: Notify the user that their Daimo payment has been refunded.
+          if (userId) {
+            try {
+              const bot = getBotInstance();
+              const user = await UserModel.getById(userId);
+              const lang = user?.language || 'es';
+              const txRef = source?.txHash || id || 'N/A';
+              const msg = lang === 'es'
+                ? `↩️ Tu pago con Daimo ha sido reembolsado.\n\nReferencia: ${txRef}\n\nSi tienes dudas, escríbenos a @pnplatinotv_bot`
+                : `↩️ Your Daimo payment has been refunded.\n\nReference: ${txRef}\n\nQuestions? Contact @pnplatinotv_bot`;
+              await bot.telegram.sendMessage(userId, msg);
+            } catch (dmErr) {
+              logger.error('Failed to send Daimo payment refund DM:', { error: dmErr.message, userId });
+            }
+          }
+
           return { success: true };
         } else if (status === 'payment_started' || status === 'payment_unpaid') {
           // Payment pending/started
@@ -2005,7 +2121,6 @@ class PaymentService {
             status,
           });
 
-          await cache.releaseLock(lockKey);
           return { success: true };
         } else {
           // Unknown status
@@ -2013,16 +2128,17 @@ class PaymentService {
             status,
             eventId: id,
           });
-          await cache.releaseLock(lockKey);
           return { success: true };
         }
       } catch (error) {
-        await cache.releaseLock(lockKey);
         logger.error('Error processing Daimo webhook (in try block)', {
           error: error.message,
           eventId: id,
         });
         throw error;
+      } finally {
+        // M1: release lock in a single finally block so every code path releases it
+        await cache.releaseLock(lockKey);
       }
     } catch (error) {
       logger.error('Error processing Daimo webhook', {
@@ -2083,7 +2199,7 @@ class PaymentService {
    */
   static async sendPrimeConfirmation(userId, planName, expiryDate, source = 'manual') {
     try {
-      const bot = new Telegraf(process.env.BOT_TOKEN);
+      const bot = getBotInstance();
       const groupId = process.env.PRIME_CHANNEL_ID || '-1002997324714';
 
       // Get user to determine language

@@ -140,8 +140,9 @@ class PaymentNotificationService {
       try {
         const { Markup } = require('telegraf');
 
+        // H6: message body uses Markdown formatting — must match parse_mode
         await bot.telegram.sendMessage(userId, message, {
-          parse_mode: 'HTML',
+          parse_mode: 'Markdown',
           reply_markup: Markup.inlineKeyboard([
             [Markup.button.url(confirmButtonText, confirmationLink)],
           ]).reply_markup,
@@ -293,7 +294,8 @@ class PaymentNotificationService {
       const formattedAmount = parseFloat(amount).toFixed(2);
       const timestamp = new Date().toLocaleString('es-ES');
 
-      const message = [
+      // M3: Admin DM includes PII (email). Group message deliberately omits it.
+      const adminMessage = [
         '💰 *NUEVA COMPRA COMPLETADA*',
         '',
         '✅ Un cliente ha completado su pago exitosamente',
@@ -315,13 +317,35 @@ class PaymentNotificationService {
         `/plan_${planName} - Ver detalles del plan`,
       ].join('\n');
 
+      // Group message: no customer email to prevent PII broadcast.
+      const groupMessage = [
+        '💰 *NUEVA COMPRA COMPLETADA*',
+        '',
+        '✅ Un cliente ha completado su pago exitosamente',
+        '',
+        '👤 *Información del Cliente:*',
+        `• Nombre: ${customerName || 'N/A'}`,
+        `• ID Usuario: ${userId}`,
+        '',
+        '📦 *Detalles de la Compra:*',
+        `• Plan: ${planName}`,
+        `• Monto: $${formattedAmount} USD`,
+        `• Proveedor: ${this.getProviderName(provider, 'es')}`,
+        `• Transacción ID: \`${transactionId}\``,
+        `• Fecha: ${timestamp}`,
+        '',
+        '🔑 *Acciones Disponibles:*',
+        `/user_${userId} - Ver perfil del cliente`,
+        `/plan_${planName} - Ver detalles del plan`,
+      ].join('\n');
+
       let sentToAdmin = false;
       let sentToGroup = false;
 
-      // Send to admin user if configured
+      // Send to admin user if configured — full message including email
       if (adminId) {
         try {
-          await bot.telegram.sendMessage(adminId, message, {
+          await bot.telegram.sendMessage(adminId, adminMessage, {
             parse_mode: 'Markdown',
           });
 
@@ -343,10 +367,10 @@ class PaymentNotificationService {
         }
       }
 
-      // Send to support group if configured
+      // Send to support group — redacted message without customer email
       if (supportGroupId) {
         try {
-          await bot.telegram.sendMessage(supportGroupId, message, {
+          await bot.telegram.sendMessage(supportGroupId, groupMessage, {
             parse_mode: 'Markdown',
           });
 

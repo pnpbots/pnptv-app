@@ -1122,6 +1122,15 @@ Thank you for staying with us! 🙏`;
    * @returns {Promise<Object>} Webhook processing result
    */
   static async handleWebhook(webhookData, signature) {
+    // H2: idempotency lock — prevent duplicate processing of the same event
+    const eventId = webhookData?.id || webhookData?.eventId || webhookData?.eventType;
+    const lockKey = `cybersource_webhook:${eventId}`;
+    const acquired = eventId ? await cache.acquireLock(lockKey, 120) : true;
+    if (!acquired) {
+      logger.warn('Cybersource webhook already being processed, skipping', { eventId });
+      return { success: true, alreadyProcessed: true };
+    }
+
     try {
       // Verify webhook signature
       const isValid = this._verifyWebhookSignature(webhookData, signature);
@@ -1129,21 +1138,27 @@ Thank you for staying with us! 🙏`;
         throw new Error('Invalid webhook signature');
       }
 
-      // Process different webhook event types
+      // C2: all event-specific handlers are stubs — return 503 until fully implemented
       const eventType = webhookData.eventType;
-      const data = webhookData.data;
+      const unimplementedEvents = [
+        'payment.success',
+        'payment.failed',
+        'subscription.created',
+        'subscription.updated',
+      ];
+
+      if (unimplementedEvents.includes(eventType)) {
+        logger.warn('Cybersource webhook event not yet implemented', { eventType });
+        return {
+          success: false,
+          error: 'Cybersource webhook processing not yet implemented',
+          statusCode: 503,
+        };
+      }
 
       switch (eventType) {
-        case 'payment.success':
-          return await this._handlePaymentSuccess(data);
-        case 'payment.failed':
-          return await this._handlePaymentFailed(data);
-        case 'subscription.created':
-          return await this._handleSubscriptionCreated(data);
         case 'subscription.cancelled':
-          return await this._handleSubscriptionCancelled(data);
-        case 'subscription.updated':
-          return await this._handleSubscriptionUpdated(data);
+          return await this._handleSubscriptionCancelled(webhookData.data);
         default:
           logger.warn('Unhandled Visa Cybersource webhook event:', { eventType });
           return { success: true, message: 'Event type not handled' };
@@ -1155,6 +1170,10 @@ Thank you for staying with us! 🙏`;
         error: error.message,
         message: 'Failed to process webhook',
       };
+    } finally {
+      if (eventId) {
+        await cache.releaseLock(lockKey);
+      }
     }
   }
 
@@ -1165,10 +1184,8 @@ Thank you for staying with us! 🙏`;
   static _verifyWebhookSignature(data, signature) {
     const configData = config.visaCybersource;
     if (!configData.webhookSecret) {
-      if (process.env.NODE_ENV === 'production') {
-        return false;
-      }
-      return true; // Allow in dev without signature
+      // P11: never fail open — if no secret is configured, reject all requests
+      return false;
     }
 
     try {
@@ -1187,24 +1204,26 @@ Thank you for staying with us! 🙏`;
    * Webhook event handlers
    * @private
    */
+  // C2: these handlers are stubs pending full implementation.
+  // handleWebhook() intercepts all calls to these and returns 503 before reaching them.
   static async _handlePaymentSuccess(data) {
-    logger.info('Payment success webhook received', { data });
-    return { success: true, message: 'Payment success handled' };
+    logger.warn('_handlePaymentSuccess is not implemented', { data });
+    return { success: false, error: 'Not implemented' };
   }
 
   static async _handlePaymentFailed(data) {
-    logger.info('Payment failed webhook received', { data });
-    return { success: true, message: 'Payment failure handled' };
+    logger.warn('_handlePaymentFailed is not implemented', { data });
+    return { success: false, error: 'Not implemented' };
   }
 
   static async _handleSubscriptionCreated(data) {
-    logger.info('Subscription created webhook received', { data });
-    return { success: true, message: 'Subscription created handled' };
+    logger.warn('_handleSubscriptionCreated is not implemented', { data });
+    return { success: false, error: 'Not implemented' };
   }
 
   static async _handleSubscriptionUpdated(data) {
-    logger.info('Subscription updated webhook received', { data });
-    return { success: true, message: 'Subscription updated handled' };
+    logger.warn('_handleSubscriptionUpdated is not implemented', { data });
+    return { success: false, error: 'Not implemented' };
   }
 }
 

@@ -1,8 +1,9 @@
 const logger = require('../utils/logger');
-const EmailService = require('../bot/services/emailservice');
+const EmailService = require('./emailService');
 const PaymentHistoryService = require('./paymentHistoryService');
 const MembershipCleanupService = require('../bot/services/membershipCleanupService');
 const MessageTemplates = require('../bot/services/messageTemplates');
+const UserModel = require('../models/userModel');
 
 /**
  * SubscriptionReminderEmailService
@@ -45,11 +46,11 @@ class SubscriptionReminderEmailService {
 
           const message = this.buildExpiryReminderEmail(user, daysLeft, lang);
 
-          const sent = await EmailService.sendEmail(
-            user.email,
+          const sent = await EmailService.send({
+            to: user.email,
             subject,
-            message
-          );
+            html: message
+          });
 
           if (sent) {
             results.sent++;
@@ -117,11 +118,11 @@ class SubscriptionReminderEmailService {
 
           const message = this.buildReEngagementEmail(user, daysSince, lang);
 
-          const sent = await EmailService.sendEmail(
-            user.email,
+          const sent = await EmailService.send({
+            to: user.email,
             subject,
-            message
-          );
+            html: message
+          });
 
           if (sent) {
             results.sent++;
@@ -163,10 +164,7 @@ class SubscriptionReminderEmailService {
    */
   static async sendPaymentConfirmationEmail(userId, payment) {
     try {
-      const user = require('../models/userModel').mapRowToUser({
-        id: userId,
-        language: payment.language || 'es'
-      });
+      const user = await UserModel.getById(userId);
 
       if (!user?.email) {
         logger.warn('No email for payment confirmation', { userId });
@@ -180,7 +178,7 @@ class SubscriptionReminderEmailService {
 
       const message = this.buildPaymentConfirmationEmail(payment, lang);
 
-      return await EmailService.sendEmail(user.email, subject, message);
+      return await EmailService.send({ to: user.email, subject, html: message });
     } catch (error) {
       logger.error('Error sending payment confirmation email:', error);
       return false;

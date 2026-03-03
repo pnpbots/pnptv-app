@@ -170,8 +170,8 @@ export const tutorialContent: Record<string, TutorialSection> = {
       {
         titleEn: "Your Profile",
         titleEs: "Tu Perfil",
-        descEn: "Customize your avatar, display name, and bio to show the community who you are.",
-        descEs: "Personaliza tu avatar, nombre y bio para mostrarle a la comunidad quien eres.",
+        descEn: "Customize your avatar, display name, and bio. Control your privacy — choose what others can see, like your location and interests.",
+        descEs: "Personaliza tu avatar, nombre y bio. Controla tu privacidad — elige que pueden ver los demas, como tu ubicacion e intereses.",
         illustration: "profileCustomize",
       },
       {

@@ -520,23 +520,29 @@ const handlePaymentResponse = async (req, res) => {
 
     const refPayco = ref_payco || x_ref_payco || null;
     const epaycoState = x_transaction_state || status || null;
-    const paymentIdFromQuery = x_extra3 || null;
+
+    // C3: Validate x_extra3 is a well-formed UUID before using it as paymentId.
+    // Rejecting anything that isn't a UUID prevents XSS via injected JS/HTML in the
+    // server-side template literal that embeds this value into a <script> block.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const rawExtra3 = x_extra3 || null;
+    const paymentIdFromQuery = rawExtra3 && UUID_RE.test(rawExtra3.trim()) ? rawExtra3.trim() : null;
 
     logger.info('Payment response page hit', {
       refPayco,
       epaycoState,
       paymentIdFromQuery,
+      rawExtra3HasValue: !!rawExtra3,
       queryKeys: Object.keys(req.query),
     });
 
     const botUsername = sanitizeBotUsername(process.env.BOT_USERNAME);
     const botLink = botUsername ? `https://t.me/${botUsername}` : '#';
 
-    // Determine if this looks like a success
-    const isSuccess = epaycoState === 'Aceptada'
-      || epaycoState === 'Aprobada'
-      || status === 'success'
-      || status === 'approved';
+    // C4: isSuccess variable removed — we must never display a fake success state based on
+    // client-controlled URL query parameters. The polling loop is the single source of truth.
+    // The page always starts in "verifying" state; showConfirmation/showError are only reached
+    // via the /api/payment/:id/status API response.
 
     // Serve a confirmation page that polls payment status and shows results on-screen
     // Allow 3DS bank redirects to frame/load this page
@@ -544,7 +550,8 @@ const handlePaymentResponse = async (req, res) => {
     res.removeHeader('Cross-Origin-Embedder-Policy');
     res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
     res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
-    res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https:");
+    // H8: Restrict frame-ancestors to known ePayco/3DS domains only — not the entire https: scheme
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://*.epayco.co https://*.payco.co https://*.cardinalcommerce.com");
     res.send(`<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -621,7 +628,7 @@ const handlePaymentResponse = async (req, res) => {
     </div>
 
     <div class="email-note" id="emailNote">
-      <strong>Emails sent!</strong> Check your inbox for your invoice and a guide on how to use every feature of PNPtv.
+      Your subscription is active! If you provided an email, check your inbox for your invoice and onboarding guide.
     </div>
 
     <div class="actions" id="actions">
@@ -633,10 +640,13 @@ const handlePaymentResponse = async (req, res) => {
   </div>
   <script>
     (function() {
-      var pid = ${paymentIdFromQuery ? `'${paymentIdFromQuery.replace(/'/g, '')}'` : 'null'};
+      // C3: paymentIdFromQuery is UUID-validated server-side before being embedded here.
+      // It is either a valid UUID string or the literal null — no other values are possible.
+      var pid = ${paymentIdFromQuery ? `'${paymentIdFromQuery}'` : 'null'};
       try { if (!pid) pid = sessionStorage.getItem('pnptv_3ds_payment_id'); } catch(e) {}
 
-      var isSuccess = ${isSuccess ? 'true' : 'false'};
+      // C4: isSuccess removed — we never trust client-supplied URL parameters to decide
+      // what to display. The polling API response is the sole source of payment truth.
       var attempts = 0;
       var maxAttempts = 40;
       var pollInterval = 3000;
@@ -646,7 +656,10 @@ const handlePaymentResponse = async (req, res) => {
         document.getElementById('checkIcon').style.display = 'block';
         document.getElementById('subtitle').textContent = 'Payment received';
         document.getElementById('title').textContent = 'We received your payment!';
-        document.getElementById('msg').textContent = 'Your PRIME subscription is now active. Check your Telegram for your PRIME channel invite link.';
+        // M4: use dynamic plan name — do not hardcode "PRIME subscription"
+        document.getElementById('msg').textContent = (data && data.planName)
+          ? 'Your ' + data.planName + ' subscription is now active. Check your Telegram for your invite link.'
+          : 'Your subscription is now active. Check your Telegram for your invite link.';
 
         if (data && data.planName) {
           document.getElementById('dPlan').textContent = data.planName;
@@ -683,8 +696,9 @@ const handlePaymentResponse = async (req, res) => {
       }
 
       function poll() {
+        // C4: When pid is absent we always show a neutral message — never a fake success state.
         if (!pid) {
-          if (isSuccess) { showProcessing(); } else { showError('Could not track your payment. If you completed the payment, your subscription will activate automatically.'); }
+          showError('Could not track your payment. If you completed the payment, your subscription will activate automatically. Please check your Telegram for confirmation.');
           return;
         }
         attempts++;
@@ -696,14 +710,16 @@ const handlePaymentResponse = async (req, res) => {
             } else if (data.status === 'failed' || data.status === 'refunded') {
               showError(data.message || 'Your payment was not successful. Please try again.');
             } else if (attempts >= maxAttempts) {
-              if (isSuccess) { showProcessing(); } else { showError('Payment verification timed out. If you completed the payment, it will be processed shortly.'); }
+              // C4: On timeout we show the neutral processing message — we cannot claim success
+              // without a confirmed status response from the server.
+              showProcessing();
             } else {
               setTimeout(poll, pollInterval);
             }
           })
           .catch(function() {
             if (attempts >= maxAttempts) {
-              if (isSuccess) { showProcessing(); } else { showError('Could not verify payment status.'); }
+              showProcessing();
             } else {
               setTimeout(poll, pollInterval);
             }

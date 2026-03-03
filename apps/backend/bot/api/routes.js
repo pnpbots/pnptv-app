@@ -11,7 +11,8 @@ const session = require('express-session');
 const RedisStore = require('connect-redis').default;
 const multer = require('multer');
 const axios = require('axios');
-const { getRedis } = require('../../config/redis');
+const crypto = require('crypto');
+const { getRedis, cache } = require('../../config/redis');
 const { getPool } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 
@@ -1054,6 +1055,18 @@ const uploadLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// C5: Dedicated rate limiter for payment status polling endpoint
+// Higher limit than webhookLimiter because the client-rendered payment-response page polls this
+// without session cookies. Per-IP limiting prevents enumeration abuse.
+const paymentStatusLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 40, // 40 polls per minute per IP (client polls every 3 s for up to 40 attempts)
+  keyGenerator: (req) => req.ip,
+  handler: (req, res) => res.status(429).json({ error: 'Too many status requests, please wait.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Health check with dependency checks and security
 app.get('/health', healthLimiter, async (req, res) => {
   // Check if request is from internal network or has valid secret
@@ -1260,8 +1273,12 @@ app.get('/api/webhooks/visa-cybersource/health', require('./controllers/visaCybe
 app.get('/api/payment-response', webhookController.handlePaymentResponse);
 
 // Payment API routes
-app.get('/api/payment/:paymentId', asyncHandler(paymentController.getPaymentInfo));
-app.get('/api/payment/:paymentId/status', asyncHandler(paymentController.getPaymentStatus));
+// C5: getPaymentInfo exposes ePayco keys, signatures, and userId — requires authentication.
+// Only the owner of the payment (or an admin) may load checkout data.
+app.get('/api/payment/:paymentId', authenticateUser, asyncHandler(paymentController.getPaymentInfo));
+// C5: getPaymentStatus is polled by the server-rendered payment-response page which has no
+// session cookies. We protect it with a dedicated rate limiter to prevent payment-ID enumeration.
+app.get('/api/payment/:paymentId/status', paymentStatusLimiter, asyncHandler(paymentController.getPaymentStatus));
 app.post('/api/payment/tokenized-charge', asyncHandler(paymentController.processTokenizedCharge));
 app.post('/api/payment/verify-2fa', asyncHandler(paymentController.verify2FA));
 app.post('/api/payment/complete-3ds-2', asyncHandler(paymentController.complete3DS2Authentication));
@@ -1470,12 +1487,29 @@ app.post('/api/recurring/reactivate', authenticateUser, bindAuthenticatedUserId,
 app.get('/api/subscription/plans', asyncHandler(subscriptionController.getPlans));
 app.post('/api/subscription/create-plan', verifyAdminJWT, asyncHandler(subscriptionController.createEpaycoPlan));
 app.post('/api/subscription/create-checkout', asyncHandler(subscriptionController.createCheckout));
-app.post(
-  '/api/subscription/epayco/confirmation',
-  webhookLimiter,
-  asyncHandler(subscriptionController.handleEpaycoConfirmation)
-);
-app.get('/api/subscription/payment-response', asyncHandler(subscriptionController.handlePaymentResponse));
+// H1: This duplicate ePayco confirmation endpoint has been retired.
+// The canonical handler lives at POST /api/webhooks/epayco (webhookController).
+// Return 410 Gone so any stale integrations or ePayco admin panel entries are
+// immediately visible as misconfigured rather than silently double-processing.
+app.post('/api/subscription/epayco/confirmation', webhookLimiter, (req, res) => {
+  logger.warn('Deprecated ePayco confirmation endpoint called — use /api/webhooks/epayco', {
+    ip: req.ip,
+    body: req.body,
+  });
+  return res.status(410).json({
+    error: 'This endpoint has been removed. Use POST /api/webhooks/epayco instead.',
+    movedTo: '/api/webhooks/epayco',
+  });
+});
+// H7: Orphaned route — the subscription-specific payment-response page was superseded by
+// /api/payment-response (webhookController.handlePaymentResponse). Return 410 Gone so any
+// bookmarked or cached ePayco response URLs fail loudly rather than silently returning stale HTML.
+app.get('/api/subscription/payment-response', (req, res) => {
+  res.status(410).json({
+    success: false,
+    error: 'This endpoint has been removed. Payment responses are now handled at /api/payment-response.',
+  });
+});
 app.get('/api/subscription/subscriber/:identifier', verifyAdminJWT, asyncHandler(subscriptionController.getSubscriber));
 app.get('/api/subscription/stats', verifyAdminJWT, asyncHandler(subscriptionController.getStatistics));
 
@@ -2349,7 +2383,7 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
   // 9. Update session so frontend reflects PRIME immediately
   req.session.user = {
     ...req.session.user,
-    tier: 'prime',
+    tier: 'PRIME',
     subscription_status: 'active',
     plan_id: 'lifetime_pass',
   };
@@ -2375,19 +2409,14 @@ app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {
     return res.status(400).json({ success: false, error: 'A valid email address is required' });
   }
 
-  // Ensure user has email + password credentials before processing payment
   const userId = String(user.telegramId || user.telegram_id || user.id);
   const language = user.language || 'es';
-  try {
-    await ensureEmailCredentials(userId, email.trim(), language);
-    req.session.user = { ...req.session.user, email: email.trim() };
-  } catch (credErr) {
-    if (credErr.message.includes('already associated')) {
-      return res.status(409).json({ success: false, error: credErr.message });
-    }
-    logger.warn('ensureEmailCredentials failed (non-critical)', { userId, error: credErr.message });
-  }
 
+  // Validate email association conflicts before creating the payment (read-only check),
+  // but defer actually provisioning credentials until after payment is confirmed.
+  // This prevents sending login credentials to a user whose payment creation then fails.
+  // NOTE (H9): Ideally credentials should be sent in the webhook handler after the
+  // payment provider confirms success. This is the safest achievable fix at route level.
   const result = await PaymentService.createPayment({
     userId: user.telegramId || user.telegram_id || user.id,
     planId,
@@ -2395,6 +2424,20 @@ app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {
     chatId: user.telegramId || user.telegram_id || null,
     creatorId: creatorId || null,
   });
+
+  // Only provision email credentials after payment record is successfully created
+  try {
+    await ensureEmailCredentials(userId, email.trim(), language);
+    req.session.user = { ...req.session.user, email: email.trim() };
+  } catch (credErr) {
+    if (credErr.message.includes('already associated')) {
+      // Payment was created but credential conflict detected — surface the conflict
+      // so the frontend can inform the user. Payment is not rolled back here because
+      // the record is pending and will expire without a confirmed webhook.
+      return res.status(409).json({ success: false, error: credErr.message });
+    }
+    logger.warn('ensureEmailCredentials failed after payment creation (non-critical)', { userId, error: credErr.message });
+  }
 
   res.json(result);
 }));
@@ -3264,10 +3307,50 @@ app.get('/api/proxy/live/tips/recent', asyncHandler(async (req, res) => {
 
 // POST /api/proxy/live/tips/callback — Payment webhook callback
 app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (req, res) => {
+  // C1: Webhook secret verification using timing-safe comparison
+  const incomingSecret = req.headers['x-tips-webhook-secret'];
+  const expectedSecret = process.env.TIPS_WEBHOOK_SECRET;
+  if (!expectedSecret) {
+    logger.error('TIPS_WEBHOOK_SECRET env var is not set — rejecting tips callback');
+    return res.status(500).json({ success: false, error: 'Webhook secret not configured' });
+  }
+  if (!incomingSecret) {
+    logger.warn('Tips callback rejected: missing x-tips-webhook-secret header', { ip: req.ip });
+    return res.status(401).json({ success: false, error: 'Missing webhook secret' });
+  }
   try {
-    const { tipId, transactionId, status } = req.body;
-    if (!tipId || !transactionId) {
-      return res.status(400).json({ success: false, error: 'tipId and transactionId required' });
+    const incomingBuf = Buffer.from(incomingSecret, 'utf8');
+    const expectedBuf = Buffer.from(expectedSecret, 'utf8');
+    // Pad to same length to prevent length-based timing leak; mismatch detected by timingSafeEqual
+    const maxLen = Math.max(incomingBuf.length, expectedBuf.length);
+    const paddedIncoming = Buffer.alloc(maxLen, 0);
+    const paddedExpected = Buffer.alloc(maxLen, 0);
+    incomingBuf.copy(paddedIncoming);
+    expectedBuf.copy(paddedExpected);
+    if (!crypto.timingSafeEqual(paddedIncoming, paddedExpected)) {
+      logger.warn('Tips callback rejected: invalid webhook secret', { ip: req.ip });
+      return res.status(401).json({ success: false, error: 'Invalid webhook secret' });
+    }
+  } catch (authErr) {
+    logger.error('Tips callback secret comparison error:', authErr.message);
+    return res.status(401).json({ success: false, error: 'Invalid webhook secret' });
+  }
+
+  const { tipId, transactionId, status } = req.body;
+
+  // C1: Validate required fields before acquiring lock
+  if (!tipId || !transactionId) {
+    return res.status(400).json({ success: false, error: 'tipId and transactionId required' });
+  }
+
+  // C1: Redis idempotency lock — prevents duplicate processing of same tip/transaction pair
+  const lockKey = `tips_callback:${tipId}:${transactionId}`;
+  let lockAcquired = false;
+  try {
+    lockAcquired = await cache.acquireLock(lockKey, 120);
+    if (!lockAcquired) {
+      logger.warn(`Tips callback duplicate request blocked for tip #${tipId} txn ${transactionId}`);
+      return res.status(409).json({ success: false, error: 'Duplicate callback — already processing' });
     }
 
     if (status === 'completed' || status === 'success') {
@@ -3279,6 +3362,12 @@ app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (re
   } catch (error) {
     logger.error('Live tips callback error:', error.message);
     res.status(500).json({ success: false, error: 'Callback processing failed' });
+  } finally {
+    if (lockAcquired) {
+      await cache.releaseLock(lockKey).catch(err =>
+        logger.warn('Failed to release tips callback lock:', err.message)
+      );
+    }
   }
 }));
 

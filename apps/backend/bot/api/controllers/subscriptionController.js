@@ -245,117 +245,13 @@ class SubscriptionController {
   /**
    * Handle ePayco confirmation webhook
    * POST /api/subscription/epayco/confirmation
+   *
+   * H1: RETIRED — this handler is no longer registered in routes.js.
+   * The route now returns 410 Gone and directs callers to POST /api/webhooks/epayco,
+   * which is the canonical ePayco webhook handler in webhookController.js.
+   * This method is kept here only for reference and must NOT be re-registered.
    */
-  static async handleEpaycoConfirmation(req, res) {
-    try {
-      logger.info('ePayco confirmation received', { body: req.body });
-
-      const {
-        x_ref_payco,
-        x_transaction_id,
-        x_transaction_state,
-        x_amount,
-        x_currency_code,
-        x_signature,
-        x_extra1, // email
-        x_extra2, // telegramId
-        x_extra3, // planId
-      } = req.body;
-
-      let signatureValid = false;
-      try {
-        signatureValid = PaymentService.verifyEpaycoSignature(req.body);
-      } catch (error) {
-        logger.error('ePayco signature verification error', {
-          error: error.message,
-          transactionId: x_ref_payco,
-          signaturePresent: Boolean(x_signature),
-        });
-        return res.status(500).send('Signature verification error');
-      }
-
-      if (!signatureValid) {
-        logger.error('Invalid ePayco signature', {
-          transactionId: x_ref_payco,
-          signaturePresent: Boolean(x_signature),
-        });
-        return res.status(400).send('Invalid signature');
-      }
-
-      if (x_transaction_state === 'Aceptada' || x_transaction_state === 'Aprobada') {
-        // Payment successful
-        const email = x_extra1;
-        const telegramId = x_extra2;
-        const planId = x_extra3;
-
-        // Check if subscriber already exists
-        let subscriber = await SubscriberModel.getByEmail(email);
-
-        if (subscriber) {
-          // Update existing subscriber
-          await SubscriberModel.updateStatus(email, 'active', {
-            lastPaymentAt: new Date(),
-            subscriptionId: x_ref_payco,
-          });
-        } else {
-          // Create new subscriber
-          subscriber = await SubscriberModel.create({
-            email,
-            name: req.body.x_customer_name || 'Unknown',
-            telegramId,
-            plan: planId,
-            subscriptionId: x_ref_payco,
-            provider: 'epayco',
-          });
-        }
-
-        // Update user subscription if telegramId is provided
-        if (telegramId) {
-          const plan = await PlanModel.getById(planId);
-          if (plan) {
-            const expiryDate = new Date();
-            const durationDays = plan.duration_days || plan.duration || 30;
-            expiryDate.setDate(expiryDate.getDate() + durationDays);
-
-            await UserModel.updateSubscription(telegramId, {
-              status: 'active',
-              planId,
-              expiry: expiryDate,
-            });
-
-            logger.info('User subscription activated', {
-              telegramId,
-              planId,
-              expiryDate,
-            });
-
-            // Send PRIME confirmation with invite link
-            const planName = plan.name || planId;
-            await PaymentService.sendPrimeConfirmation(telegramId, planName, expiryDate, 'subscription-controller');
-          }
-        }
-
-        logger.info('Subscription activated successfully', {
-          email,
-          telegramId,
-          planId,
-          transactionId: x_ref_payco,
-        });
-      } else if (x_transaction_state === 'Rechazada' || x_transaction_state === 'Fallida') {
-        logger.warn('Payment rejected', {
-          email: x_extra1,
-          transactionId: x_ref_payco,
-        });
-      }
-
-      // Always return 200 to ePayco
-      res.status(200).send('OK');
-    } catch (error) {
-      logger.error('Error processing ePayco confirmation:', error);
-      // Still return 200 to prevent retries
-      res.status(200).send('OK');
-    }
-  }
+  // static async handleEpaycoConfirmation(req, res) { ... }
 
   /**
    * Handle payment response page

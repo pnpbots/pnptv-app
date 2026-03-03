@@ -203,20 +203,30 @@ class PaymentModel {
 
       let queryStr;
       if (isUuid) {
-        // Query by UUID id
-        queryStr = `UPDATE payments SET ${updates.join(', ')} WHERE id = $${paramIndex}::uuid`;
+        // M2: CAS guard — never overwrite a completed payment's status
+        queryStr = `UPDATE payments SET ${updates.join(', ')} WHERE id = $${paramIndex}::uuid AND status != 'completed'`;
       } else {
         // Query by reference for non-UUID strings
-        queryStr = `UPDATE payments SET ${updates.join(', ')} WHERE reference = $${paramIndex}`;
+        queryStr = `UPDATE payments SET ${updates.join(', ')} WHERE reference = $${paramIndex} AND status != 'completed'`;
       }
 
-      await query(queryStr, values);
+      const result = await query(queryStr, values);
+      const rowCount = result.rowCount || 0;
 
-      logger.info('Payment status updated', { paymentId, status });
-      return true;
+      if (rowCount === 0) {
+        logger.warn('Payment status update was a no-op — payment may already be completed or not found', {
+          paymentId,
+          attemptedStatus: status,
+        });
+      } else {
+        logger.info('Payment status updated', { paymentId, status, rowCount });
+      }
+
+      // Return row count so callers can detect a no-op (0 = already completed or not found)
+      return rowCount;
     } catch (error) {
       logger.error('Error updating payment status:', error);
-      return false;
+      return 0;
     }
   }
 
