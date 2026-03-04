@@ -1678,9 +1678,9 @@ class PaymentService {
       });
     }
 
-    // Warn if webhook amount diverges from expected amount (> $1 tolerance)
-    if (webhookAmount > 0 && resolved > 0 && Math.abs(webhookAmount - resolved) > 1) {
-      logger.warn('resolveDaimoAmountUSD: webhook amount diverges from expected', {
+    // Error if webhook amount diverges from expected amount (> $0.10 tolerance)
+    if (webhookAmount > 0 && resolved > 0 && Math.abs(webhookAmount - resolved) > 0.10) {
+      logger.error('resolveDaimoAmountUSD: webhook amount diverges from expected — possible underpayment', {
         paymentId: payment?.id, planId: plan?.id,
         expected: resolved, webhookAmount, difference: Math.abs(webhookAmount - resolved),
       });

@@ -15,8 +15,8 @@ const OPTIMISM_CHAIN_ID = 10;
 // Daimo Pay API base URL
 const DAIMO_API_BASE = 'https://api.daimo.com';
 
-// Fetch timeout (10 seconds)
-const FETCH_TIMEOUT_MS = 10_000;
+// Fetch timeout (20 seconds — Daimo API can be slow under load)
+const FETCH_TIMEOUT_MS = 20_000;
 
 /**
  * Create a fetch request with timeout via AbortController

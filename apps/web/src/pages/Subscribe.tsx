@@ -5,6 +5,7 @@ import { Card, Skeleton } from "@pnptv/ui-kit";
 import {
   getSubscriptionPlans,
   createPayment,
+  getPaymentStatus,
   activateMeruCode,
   type SubscriptionPlan,
 } from "@/lib/api";
@@ -94,6 +95,10 @@ export default function Subscribe() {
   const [email, setEmail] = useState("");
   const [emailError, setEmailError] = useState<string | null>(null);
 
+  // Payment polling state
+  const [pollingPaymentId, setPollingPaymentId] = useState<string | null>(null);
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+
   // Meru code activation
   const [meruCode, setMeruCode] = useState("");
   const [meruSubmitting, setMeruSubmitting] = useState(false);
@@ -113,6 +118,48 @@ export default function Subscribe() {
       .catch((err) => setError(err.message || "Failed to load plans"))
       .finally(() => setLoading(false));
   }, []);
+
+  // Poll payment status after Daimo checkout opens
+  useEffect(() => {
+    if (!pollingPaymentId) return;
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 60; // 5 minutes at 5s intervals
+    const interval = 5000;
+
+    const poll = async () => {
+      if (cancelled || attempts >= maxAttempts) {
+        if (attempts >= maxAttempts) {
+          setPollingPaymentId(null);
+          setError("Payment verification timed out. If you completed the payment, your subscription will activate automatically.");
+        }
+        return;
+      }
+      attempts++;
+      try {
+        const data = await getPaymentStatus(pollingPaymentId);
+        if (cancelled) return;
+        if (data.status === "completed") {
+          setPollingPaymentId(null);
+          setPaymentSuccess(true);
+          await refreshUser();
+          return;
+        }
+        if (data.status === "failed" || data.status === "refunded") {
+          setPollingPaymentId(null);
+          setError(data.message || "Payment was not successful. Please try again.");
+          return;
+        }
+        setTimeout(poll, interval);
+      } catch {
+        if (!cancelled) setTimeout(poll, interval);
+      }
+    };
+
+    poll();
+    return () => { cancelled = true; };
+  }, [pollingPaymentId, refreshUser]);
 
   function validateEmail(): boolean {
     const trimmed = email.trim();
@@ -136,6 +183,10 @@ export default function Subscribe() {
 
       if (result.success && result.paymentUrl) {
         window.open(result.paymentUrl, "_blank", "noopener,noreferrer");
+        // Start polling for payment completion
+        if (result.paymentId) {
+          setPollingPaymentId(result.paymentId);
+        }
       } else {
         setError(result.error || "Failed to create payment");
       }
@@ -184,6 +235,31 @@ export default function Subscribe() {
             <Skeleton key={i} className="h-32 w-full rounded-xl" />
           ))}
         </div>
+      </div>
+    );
+  }
+
+  // Payment success state
+  if (paymentSuccess) {
+    return (
+      <div className="page-container flex items-center justify-center min-h-[60vh]">
+        <Card className="max-w-md w-full p-6 text-center">
+          <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center mx-auto mb-4">
+            <svg className="w-6 h-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Payment Confirmed!</h2>
+          <p className="text-pnp-textSecondary mb-4 text-sm">
+            Your subscription is now active. Check your email for your invoice and onboarding guide.
+          </p>
+          <button
+            onClick={() => navigate("/welcome")}
+            className="btn-gradient px-6 py-2.5 rounded-xl text-white font-medium"
+          >
+            Go to PNPtv!
+          </button>
+        </Card>
       </div>
     );
   }
@@ -468,6 +544,22 @@ export default function Subscribe() {
           <p className="mt-2 text-xs text-red-400">{meruError}</p>
         )}
       </div>
+
+      {/* Payment polling indicator */}
+      {pollingPaymentId && (
+        <div className="mb-4 p-3 rounded-xl bg-[#D4007A]/10 border border-[#D4007A]/20 text-sm text-pnp-textPrimary text-center">
+          <div className="flex items-center justify-center gap-2 mb-1">
+            <svg className="animate-spin h-4 w-4 text-[#D4007A]" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <span className="font-medium">Waiting for payment...</span>
+          </div>
+          <p className="text-xs text-pnp-textSecondary">
+            Complete the payment in the checkout window. This page will update automatically.
+          </p>
+        </div>
+      )}
 
       {/* Error banner */}
       {error && (

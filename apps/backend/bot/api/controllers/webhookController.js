@@ -356,7 +356,7 @@ function verifyEpaycoSignature(req) {
 
 /**
  * Handle Daimo webhook
- * Receives payment events from Daimo Pay (Zelle, CashApp, Venmo, Revolut, Wise)
+ * Receives payment events from Daimo Pay (USDC on Optimism via crypto wallets)
  * Webhook URL: pnptv.app/api/daimo -> /api/webhooks/daimo
  * @param {Request} req - Express request
  * @param {Response} res - Express response
@@ -379,8 +379,11 @@ const handleDaimoWebhook = async (req, res) => {
         logger.error('Invalid Daimo webhook authorization — rejecting');
         return res.status(401).json({ success: false, error: 'Invalid signature' });
       }
+    } else if (process.env.NODE_ENV === 'production') {
+      logger.error('Daimo webhook rejected: DAIMO_WEBHOOK_SECRET not configured in production');
+      return res.status(500).json({ success: false, error: 'Webhook secret not configured' });
     } else {
-      logger.warn('Daimo webhook accepted without secret configured');
+      logger.warn('Daimo webhook accepted without secret configured (non-production)');
       isValidSignature = true;
     }
 

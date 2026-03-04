@@ -73,15 +73,14 @@ class DaimoService {
       const normalizedExpected = normalize(this.webhookSecret);
 
       try {
-        const isValid = crypto.timingSafeEqual(
-          Buffer.from(normalizedReceived),
-          Buffer.from(normalizedExpected)
-        );
+        const receivedBuf = Buffer.from(normalizedReceived, 'utf8');
+        const expectedBuf = Buffer.from(normalizedExpected, 'utf8');
+        const isValid = crypto.timingSafeEqual(receivedBuf, expectedBuf);
 
         if (!isValid) {
           logger.error('Invalid Daimo webhook authorization token', {
-            receivedLength: receivedToken.length,
-            expectedLength: expectedToken.length,
+            receivedLength: normalizedReceived.length,
+            expectedLength: normalizedExpected.length,
           });
         }
 
@@ -89,8 +88,8 @@ class DaimoService {
       } catch (bufferError) {
         // If buffer lengths don't match, timingSafeEqual throws
         logger.error('Daimo webhook token length mismatch', {
-          receivedLength: receivedToken.length,
-          expectedLength: expectedToken.length,
+          receivedLength: normalizedReceived.length,
+          expectedLength: normalizedExpected.length,
         });
         return false;
       }

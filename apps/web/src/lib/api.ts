@@ -1216,6 +1216,21 @@ export function createPayment(
   });
 }
 
+export function getPaymentStatus(
+  paymentId: string
+): Promise<{
+  success: boolean;
+  status: string;
+  planName?: string;
+  amount?: number;
+  currency?: string;
+  transactionId?: string;
+  message?: string;
+  error?: string;
+}> {
+  return request(`/api/payment/${encodeURIComponent(paymentId)}/status`);
+}
+
 export function activateMeruCode(
   code: string,
   email: string
