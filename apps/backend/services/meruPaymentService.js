@@ -1,61 +1,21 @@
-const puppeteer = require('puppeteer');
+const axios = require('axios');
 const logger = require('../utils/logger');
 
 /**
- * MeruPaymentService - Verifica pagos de Meru usando un navegador headless
- * Lee el contenido real de la página después de que JavaScript se ejecuta
+ * MeruPaymentService - Verifies Meru payments via HTTP fetch
+ * Checks page content for paid/expired patterns without needing a headless browser
  */
 class MeruPaymentService {
   constructor() {
-    this.browser = null;
     // Simple rate limiting: track recent verifications per code
     this._recentChecks = new Map(); // code -> timestamp
     this.RATE_LIMIT_MS = 10000; // 10 seconds between checks for same code
   }
 
   /**
-   * Inicializa el navegador una sola vez (with crash recovery)
-   */
-  async initBrowser() {
-    // Check if existing browser is still connected
-    if (this.browser) {
-      if (this.browser.connected) {
-        return this.browser;
-      }
-      // Browser crashed or disconnected — clean up and relaunch
-      logger.warn('Puppeteer browser disconnected, relaunching...');
-      this.browser = null;
-    }
-
-    try {
-      this.browser = await puppeteer.launch({
-        headless: true,
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-        ],
-      });
-
-      // Auto-recover on unexpected disconnect
-      this.browser.on('disconnected', () => {
-        logger.warn('Puppeteer browser disconnected unexpectedly');
-        this.browser = null;
-      });
-
-      logger.info('Puppeteer browser initialized');
-      return this.browser;
-    } catch (error) {
-      logger.error('Failed to initialize Puppeteer browser:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Verifica si un link de Meru fue pagado
-   * @param {string} meruCode - El código del link (ej: "abc123xyz")
-   * @param {string} userLanguage - Idioma del usuario ('es' o 'en')
+   * Verifies if a Meru payment link has been paid
+   * @param {string} meruCode - The link code (e.g. "abc123xyz")
+   * @param {string} userLanguage - User language ('es' or 'en')
    * @returns {Promise<{isPaid: boolean, message: string}>}
    */
   async verifyPayment(meruCode, userLanguage = 'es') {
@@ -70,7 +30,7 @@ class MeruPaymentService {
     }
     this._recentChecks.set(meruCode, Date.now());
 
-    // Clean up old entries periodically (keep map from growing)
+    // Clean up old entries periodically
     if (this._recentChecks.size > 100) {
       const cutoff = Date.now() - this.RATE_LIMIT_MS;
       for (const [code, ts] of this._recentChecks) {
@@ -78,49 +38,29 @@ class MeruPaymentService {
       }
     }
 
-    let page = null;
     try {
-      const browser = await this.initBrowser();
-      page = await browser.newPage();
-
-      // Establecer idioma del navegador según el usuario
-      const languageMap = {
-        es: 'es-ES,es;q=0.9,en;q=0.8',
-        en: 'en-US,en;q=0.9,es;q=0.8',
-      };
-      const acceptLanguage = languageMap[userLanguage] || 'es-ES,es;q=0.9,en;q=0.8';
-
-      await page.setExtraHTTPHeaders({
-        'Accept-Language': acceptLanguage,
-      });
-
-      // Timeout de 15 segundos para la página
-      await page.setDefaultTimeout(15000);
-
       const meruUrl = `https://pay.getmeru.com/${meruCode}`;
       logger.info(`Verifying Meru payment link: ${meruUrl}`);
 
-      // Ir a la página y esperar a que se cargue
-      await page.goto(meruUrl, { waitUntil: 'networkidle2' });
-
-      // Obtener el contenido HTML después de que JavaScript se ejecute
-      const pageContent = await page.content();
-
-      // Esperar un poco más para animaciones
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Obtener el texto visible
-      const visibleText = await page.evaluate(() => {
-        return document.body.innerText;
+      const response = await axios.get(meruUrl, {
+        timeout: 15000,
+        headers: {
+          'Accept-Language': userLanguage === 'en'
+            ? 'en-US,en;q=0.9,es;q=0.8'
+            : 'es-ES,es;q=0.9,en;q=0.8',
+          'User-Agent': 'Mozilla/5.0 (compatible; PNPtv/2.0)',
+        },
+        maxRedirects: 5,
       });
+
+      const pageContent = typeof response.data === 'string' ? response.data : '';
 
       logger.info(`Meru page loaded for code ${meruCode}`, {
         contentLength: pageContent.length,
-        textLength: visibleText.length,
+        status: response.status,
       });
 
-      // Detectar si fue pagado — check both languages regardless of user preference
-      // (Meru may respond in either language)
+      // Detect if already paid — check both languages
       const paidPatterns = [
         'El enlace de pago ha caducado o ya ha sido pagado',
         'El link de pago ha caducado',
@@ -128,11 +68,11 @@ class MeruPaymentService {
         'Payment link expired or already paid',
         'payment link has expired',
         'already paid',
+        'expired',
       ];
 
       const isPaid = paidPatterns.some(
-        (pattern) =>
-          pageContent.includes(pattern) || visibleText.includes(pattern)
+        (pattern) => pageContent.toLowerCase().includes(pattern.toLowerCase())
       );
 
       logger.info(`Payment verification for ${meruCode}: isPaid=${isPaid}`);
@@ -144,40 +84,16 @@ class MeruPaymentService {
           : 'Payment link is still active',
       };
     } catch (error) {
-      logger.error(`Error verifying Meru payment for ${meruCode}:`, error);
+      logger.error(`Error verifying Meru payment for ${meruCode}:`, error.message);
       return {
         isPaid: false,
         message: `Error checking payment: ${error.message}`,
       };
-    } finally {
-      if (page) {
-        await page.close().catch(() => {});
-      }
-    }
-  }
-
-  /**
-   * Cierra el navegador (llamar cuando se apague la aplicación)
-   */
-  async closeBrowser() {
-    if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
-      logger.info('Puppeteer browser closed');
     }
   }
 }
 
 // Singleton
 const meruPaymentService = new MeruPaymentService();
-
-// Cleanup al apagar
-process.on('SIGTERM', async () => {
-  await meruPaymentService.closeBrowser();
-});
-
-process.on('SIGINT', async () => {
-  await meruPaymentService.closeBrowser();
-});
 
 module.exports = meruPaymentService;
