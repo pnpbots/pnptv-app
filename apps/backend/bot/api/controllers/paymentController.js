@@ -178,7 +178,7 @@ class PaymentController {
 
       // Prepare response data
       const webhookDomain = process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
-      const epaycoWebhookDomain = process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://easybots.site';
+      const epaycoWebhookDomain = process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://pnptv.app';
       const provider = payment.provider || 'epayco';
 
       // Handle both camelCase and snake_case from payment
@@ -237,8 +237,7 @@ class PaymentController {
         basePaymentData.epaycoPublicKey = process.env.EPAYCO_PUBLIC_KEY;
         basePaymentData.testMode = process.env.EPAYCO_TEST_MODE === 'true';
         // Confirmation URL: ePayco server sends webhook callbacks here
-        // All payments in pnptv-bot context use the new /checkout/pnp route
-        const confirmationPath = '/checkout/pnp';
+        const confirmationPath = '/api/webhooks/epayco';
         basePaymentData.confirmationUrl = `${epaycoWebhookDomain}${confirmationPath}`;
         // Response URL: User's browser redirects here after payment
         basePaymentData.responseUrl = `${webhookDomain}/api/payment-response`;

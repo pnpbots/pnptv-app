@@ -1291,7 +1291,7 @@ app.get('/api/pnp-live/booking/:bookingId', asyncHandler(async (req, res) => {
   const amount = String(booking.price_usd);
   const currencyCode = 'USD';
   const webhookDomain = process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
-  const epaycoWebhookDomain = process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://easybots.site';
+  const epaycoWebhookDomain = process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://pnptv.app';
 
   res.json({
     success: true,
@@ -1309,7 +1309,7 @@ app.get('/api/pnp-live/booking/:bookingId', asyncHandler(async (req, res) => {
       epaycoPublicKey: process.env.EPAYCO_PUBLIC_KEY,
       testMode: process.env.EPAYCO_TEST_MODE === 'true',
       epaycoSignature: PaymentService.generateEpaycoCheckoutSignature({ invoice, amount, currencyCode }),
-      confirmationUrl: `${epaycoWebhookDomain}/api/webhook/epayco`,
+      confirmationUrl: `${epaycoWebhookDomain}/api/webhooks/epayco`,
       responseUrl: `${webhookDomain}/api/payment-response`,
     }
   });

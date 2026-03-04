@@ -461,7 +461,7 @@ class PaymentService {
 
       let paymentUrl;
       const webhookDomain = process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
-      const checkoutDomain = process.env.CHECKOUT_DOMAIN || 'https://easybots.site';
+      const checkoutDomain = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
 
       if (provider === 'epayco') {
         // Create payment reference
@@ -2573,11 +2573,10 @@ class PaymentService {
 
       // 4. Make single charge (NOT recurring/subscription)
       const webhookDomain = process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
-      const epaycoWebhookDomain = process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://easybots.site';
+      const epaycoWebhookDomain = process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://pnptv.app';
 
-      // For pnptv-bot payments, use new checkout/pnp route
-      // All payments in pnptv-bot context use the new route
-      const confirmationPath = '/checkout/pnp';
+      // Confirmation path: ePayco server sends webhook callbacks here
+      const confirmationPath = '/api/webhooks/epayco';
 
       // 3DS notification URL: ePayco sends the 3DS challenge result here
       const threeDSNotificationUrl = `${epaycoWebhookDomain}${confirmationPath}`;

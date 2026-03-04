@@ -118,7 +118,7 @@ class PromoService {
       }
 
       // Create payment with promo pricing
-      const checkoutDomain = process.env.CHECKOUT_DOMAIN || process.env.BOT_WEBHOOK_DOMAIN || 'https://easybots.site';
+      const checkoutDomain = process.env.CHECKOUT_DOMAIN || process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
 
       const payment = await PaymentModel.create({
         userId: userId.toString(),
