@@ -2198,7 +2198,7 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
   }
 
   // 1. Check code exists and is available
-  const meruLinkService = require('../../../services/meruLinkService');
+  const meruLinkService = require('../../services/meruLinkService');
   const availableLinks = await meruLinkService.getAvailableLinks();
   const matchingLink = availableLinks.find((link) => link.code === meruCode);
 
@@ -2207,7 +2207,7 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
   }
 
   // 2. Puppeteer verification — confirm payment was made on Meru
-  const meruPaymentService = require('../../../services/meruPaymentService');
+  const meruPaymentService = require('../../services/meruPaymentService');
   const verification = await meruPaymentService.verifyPayment(meruCode, language);
 
   if (!verification.isPaid) {
@@ -2215,7 +2215,7 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
   }
 
   // 3. Activate membership — set PRIME lifetime
-  const UserModel = require('../../../models/userModel');
+  const UserModel = require('../../models/userModel');
   await UserModel.updateSubscription(userId, {
     status: 'active',
     planId: 'lifetime_pass',
@@ -2229,14 +2229,14 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
     logger.warn('Failed to invalidate Meru link (non-critical)', { code: meruCode, error: e.message });
   }
   try {
-    const { markCodeUsed } = require('../../handlers/payments/activation');
+    const { markCodeUsed } = require('../handlers/payments/activation');
     await markCodeUsed(meruCode, userId, username);
   } catch (e) {
     logger.warn('Failed to mark activation code used (non-critical)', { code: meruCode, error: e.message });
   }
 
   // 5. Record payment history
-  const PaymentHistoryService = require('../../../services/paymentHistoryService');
+  const PaymentHistoryService = require('../../services/paymentHistoryService');
   try {
     await PaymentHistoryService.recordPayment({
       userId,
@@ -2257,13 +2257,13 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
 
   // 6. Audit log + business notification (non-critical)
   try {
-    const { logActivation } = require('../../handlers/payments/activation');
+    const { logActivation } = require('../handlers/payments/activation');
     await logActivation({ userId, username, code: meruCode, product: 'lifetime-pass', success: true });
   } catch (e) {
     logger.warn('Failed to log activation (non-critical)', { error: e.message });
   }
   try {
-    const BusinessNotificationService = require('../../services/businessNotificationService');
+    const BusinessNotificationService = require('../services/businessNotificationService');
     await BusinessNotificationService.notifyCodeActivation({ userId, username, code: meruCode, product: 'lifetime-pass' });
   } catch (e) {
     logger.warn('Failed to send business notification (non-critical)', { error: e.message });
@@ -2283,8 +2283,8 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
   // 8. Invoice + welcome emails (email is now always available)
   const customerEmail = email ? email.trim() : user.email;
   if (customerEmail) {
-    const InvoiceService = require('../../services/invoiceservice');
-    const EmailService = require('../../services/emailservice');
+    const InvoiceService = require('../services/invoiceservice');
+    const EmailService = require('../services/emailservice');
 
     // Invoice email
     (async () => {
