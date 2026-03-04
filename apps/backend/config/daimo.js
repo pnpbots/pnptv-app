@@ -1,7 +1,7 @@
 /**
  * Daimo Pay Configuration
  * Official integration for receiving crypto payments via USDC on Optimism network
- * API: https://api.daimo.com/api/payment
+ * API: https://pay.daimo.com/v1/sessions (Sessions API v1)
  */
 
 const { getAddress } = require('viem');
@@ -12,8 +12,9 @@ const logger = require('../utils/logger');
 const OPTIMISM_USDC_ADDRESS = '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85';
 const OPTIMISM_CHAIN_ID = 10;
 
-// Daimo Pay API base URL (migrated from pay.daimo.com to api.daimo.com)
-const DAIMO_API_BASE = 'https://api.daimo.com';
+// Daimo Pay API base URLs
+const DAIMO_API_BASE = 'https://pay.daimo.com';
+const DAIMO_LEGACY_API_BASE = 'https://api.daimo.com';
 
 /**
  * Get Daimo Pay configuration
@@ -22,19 +23,14 @@ const DAIMO_API_BASE = 'https://api.daimo.com';
 const getDaimoConfig = () => {
   const treasuryAddress = process.env.DAIMO_TREASURY_ADDRESS;
   const refundAddress = process.env.DAIMO_REFUND_ADDRESS;
-  // Daimo webhooks go to pnptv.app (same domain as bot/checkout)
-  const webhookDomain = process.env.BOT_WEBHOOK_DOMAIN || process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
-  const webhookUrl = `${webhookDomain}/api/webhooks/daimo`;
 
   // Validate critical configuration
   if (!treasuryAddress) {
-    // Nunca loggear el valor de la dirección
     logger.error('DAIMO_TREASURY_ADDRESS not configured');
     throw new Error('DAIMO_TREASURY_ADDRESS is required for Daimo Pay');
   }
 
   if (!refundAddress) {
-    // Nunca loggear el valor de la dirección
     logger.warn('DAIMO_REFUND_ADDRESS not configured, using treasury address as fallback');
   }
 
@@ -55,8 +51,7 @@ const getDaimoConfig = () => {
     // API base URL
     apiBase: DAIMO_API_BASE,
 
-    // Webhook configuration
-    webhookUrl,
+    // Webhook secret (for verifying legacy webhooks from in-flight payments)
     webhookSecret: process.env.DAIMO_WEBHOOK_SECRET,
 
     // API configuration
@@ -65,52 +60,12 @@ const getDaimoConfig = () => {
     // App metadata
     appName: 'PNPtv Bot',
     appDescription: 'Premium subscriptions and content access',
-    // App icon URL (optional) - defaults to null if not configured
     appIcon: process.env.DAIMO_APP_ICON || null,
   };
 };
 
 /**
- * Create payment intent for Daimo Pay
- * @param {Object} params - { amount, userId, planId, chatId }
- * @returns {Object} Payment intent object
- */
-const createPaymentIntent = ({
-  amount, userId, planId, chatId, description,
-}) => {
-  const config = getDaimoConfig();
-
-  // Daimo Pay API uses human-readable format (e.g., "14.99")
-  const amountInUnits = parseFloat(amount).toFixed(2);
-
-  return {
-    // Destination
-    toAddress: config.treasuryAddress,
-    toChain: config.chainId,
-    toToken: config.token,
-    toUnits: amountInUnits,
-
-    // Payment description
-    intent: description || `PNPtv ${planId} Subscription`,
-
-    // Refund address (if payment fails)
-    refundAddress: config.refundAddress,
-
-    // Metadata (will be returned in webhook)
-    metadata: {
-      userId: userId.toString(),
-      chatId: chatId?.toString(),
-      planId,
-      amount: amount.toString(),
-      timestamp: new Date().toISOString(),
-    },
-  };
-};
-
-
-
-/**
- * Create a payment using Daimo Pay API (Official method)
+ * Create a payment session using Daimo Pay Sessions API v1
  * @param {Object} params - Payment parameters
  * @returns {Promise<Object>} { success, paymentUrl, daimoPaymentId, error }
  */
@@ -118,91 +73,157 @@ const createDaimoPayment = async ({
   amount, userId, planId, chatId, paymentId, description,
 }) => {
   const config = getDaimoConfig();
-  
-  if (!config.apiKey) {
-    logger.error('DAIMO_API_KEY not configured');
+  // Prefer DAIMO_SECRET_KEY (new Sessions API), fall back to DAIMO_API_KEY (legacy)
+  const secretKey = process.env.DAIMO_SECRET_KEY;
+  const legacyKey = config.apiKey;
+
+  if (!secretKey && !legacyKey) {
+    logger.error('Neither DAIMO_SECRET_KEY nor DAIMO_API_KEY configured');
     return { success: false, error: 'Daimo API key not configured' };
   }
 
-  try {
-    // Format amount as string with 2 decimals (e.g., "14.99")
-    const amountUnits = parseFloat(amount).toFixed(2);
-    
-    const requestBody = {
-      display: {
-        intent: description || `PNPtv ${planId} Subscription`,
-        preferredChains: [config.chainId],
-      },
-      destination: {
-        destinationAddress: config.treasuryAddress,
-        chainId: config.chainId,
-        tokenAddress: config.token,
-        amountUnits: amountUnits,
-      },
-      refundAddress: config.refundAddress,
-      webhookUrl: config.webhookUrl,
-      metadata: {
-        userId: userId.toString(),
-        chatId: chatId?.toString() || '',
-        planId: planId,
-        paymentId: paymentId,
-        source: 'pnptv-bot',
-      },
-    };
+  const amountUnits = parseFloat(amount).toFixed(2);
+  const webhookDomain = process.env.BOT_WEBHOOK_DOMAIN || process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
 
-    logger.info('Creating Daimo payment via API', {
-      paymentId,
-      planId,
-      amountUnits,
-    });
+  // Try new Sessions API first (if secret key is available)
+  if (secretKey) {
+    try {
+      const requestBody = {
+        display: {
+          title: description || `PNPtv ${planId} Subscription`,
+          verb: 'pay',
+        },
+        destination: {
+          type: 'evm',
+          address: config.treasuryAddress,
+          chainId: config.chainId,
+          tokenAddress: config.token,
+          amountUnits,
+        },
+        refundAddress: config.refundAddress,
+        metadata: {
+          userId: userId.toString(),
+          chatId: chatId?.toString() || '',
+          planId,
+          paymentId,
+          source: 'pnptv-bot',
+        },
+      };
 
-    const response = await fetch(`${config.apiBase}/api/payment`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Api-Key': config.apiKey,
-      },
-      body: JSON.stringify(requestBody),
-    });
+      logger.info('Creating Daimo session via v1 API', { paymentId, planId, amountUnits });
 
-    if (!response.ok) {
+      const response = await fetch(`${DAIMO_API_BASE}/v1/sessions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${secretKey}`,
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const sessionId = data.session?.sessionId || data.sessionId;
+        const checkoutUrl = `https://daimo.com/checkout?id=${sessionId}`;
+
+        logger.info('Daimo session created successfully', {
+          paymentId,
+          daimoPaymentId: sessionId,
+          url: checkoutUrl,
+        });
+
+        return {
+          success: true,
+          paymentUrl: checkoutUrl,
+          daimoPaymentId: sessionId,
+          payment: data.session,
+        };
+      }
+
       const errorText = await response.text();
-      logger.error('Daimo API error', {
+      logger.warn('Daimo v1 API failed, will try legacy API', {
         status: response.status,
         error: errorText,
         paymentId,
       });
-      return { 
-        success: false, 
-        error: `Daimo API error: ${response.status}`,
-      };
+    } catch (error) {
+      logger.warn('Daimo v1 API error, will try legacy API', {
+        error: error.message,
+        paymentId,
+      });
     }
-
-    const data = await response.json();
-
-    logger.info('Daimo payment created successfully', {
-      paymentId,
-      daimoPaymentId: data.id,
-      url: data.url,
-    });
-
-    return {
-      success: true,
-      paymentUrl: data.url,
-      daimoPaymentId: data.id,
-      payment: data.payment,
-    };
-
-  } catch (error) {
-    logger.error('Error creating Daimo payment', {
-      error: error.message,
-      paymentId,
-    });
-    return { 
-      success: false, 
-      error: error.message,
-    };
   }
+
+  // Fallback to legacy API (api.daimo.com/api/payment)
+  if (legacyKey) {
+    try {
+      const requestBody = {
+        display: {
+          intent: description || `PNPtv ${planId} Subscription`,
+          preferredChains: [config.chainId],
+        },
+        destination: {
+          destinationAddress: config.treasuryAddress,
+          chainId: config.chainId,
+          tokenAddress: config.token,
+          amountUnits,
+        },
+        refundAddress: config.refundAddress,
+        webhookUrl: `${webhookDomain}/api/webhooks/daimo`,
+        metadata: {
+          userId: userId.toString(),
+          chatId: chatId?.toString() || '',
+          planId,
+          paymentId,
+          source: 'pnptv-bot',
+        },
+      };
+
+      logger.info('Creating Daimo payment via legacy API', { paymentId, planId, amountUnits });
+
+      const response = await fetch(`${DAIMO_LEGACY_API_BASE}/api/payment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Api-Key': legacyKey,
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error('Daimo legacy API error', {
+          status: response.status,
+          error: errorText,
+          paymentId,
+        });
+        return { success: false, error: `Daimo API error: ${response.status}` };
+      }
+
+      const data = await response.json();
+
+      logger.info('Daimo payment created via legacy API', {
+        paymentId,
+        daimoPaymentId: data.id,
+        url: data.url,
+      });
+
+      return {
+        success: true,
+        paymentUrl: data.url,
+        daimoPaymentId: data.id,
+        payment: data.payment,
+      };
+    } catch (error) {
+      logger.error('Error creating Daimo payment (legacy)', {
+        error: error.message,
+        paymentId,
+      });
+      return { success: false, error: error.message };
+    }
+  }
+
+  return { success: false, error: 'No valid Daimo API key available' };
 };
 
 /**
@@ -210,47 +231,105 @@ const createDaimoPayment = async ({
  * @param {string} daimoPaymentId - Daimo payment ID
  * @returns {Promise<Object>} { success, id, status, source, destination, metadata, error }
  */
+/**
+ * Map new Sessions API status to legacy status for backward compatibility
+ * @param {string} status - Status from Sessions API
+ * @returns {string} Legacy-compatible status
+ */
+const normalizeSessionStatus = (status) => {
+  const newToLegacy = {
+    requires_payment_method: 'payment_unpaid',
+    waiting_payment: 'payment_unpaid',
+    processing: 'payment_started',
+    succeeded: 'payment_completed',
+    bounced: 'payment_bounced',
+    expired: 'payment_failed',
+  };
+  // If it's already a legacy status, return as-is
+  return newToLegacy[status] || status;
+};
+
+/**
+ * Check payment status from Daimo Pay API
+ * Tries new Sessions API first (if DAIMO_SECRET_KEY set), falls back to legacy
+ * @param {string} daimoPaymentId - Daimo session/payment ID
+ * @returns {Promise<Object>} { success, id, status, source, destination, metadata, error }
+ */
 const checkDaimoPaymentStatus = async (daimoPaymentId) => {
-  const apiKey = process.env.DAIMO_API_KEY;
-  if (!apiKey) {
-    return { success: false, error: 'DAIMO_API_KEY not configured' };
+  const secretKey = process.env.DAIMO_SECRET_KEY;
+  const legacyKey = process.env.DAIMO_API_KEY;
+
+  if (!secretKey && !legacyKey) {
+    return { success: false, error: 'No Daimo API key configured' };
   }
 
-  try {
-    const response = await fetch(`${DAIMO_API_BASE}/api/payment/${daimoPaymentId}`, {
-      method: 'GET',
-      headers: {
-        'Api-Key': apiKey,
-      },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.error('Daimo status check API error', {
-        daimoPaymentId,
-        status: response.status,
-        error: errorText,
+  // Try new Sessions API first
+  if (secretKey) {
+    try {
+      const response = await fetch(`${DAIMO_API_BASE}/v1/sessions/${daimoPaymentId}`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${secretKey}` },
       });
-      return { success: false, error: `Daimo API error: ${response.status}` };
+
+      if (response.ok) {
+        const data = await response.json();
+        const session = data.session || data;
+        const rawStatus = session.status || data.status;
+        const legacyStatus = normalizeSessionStatus(rawStatus);
+
+        return {
+          success: true,
+          id: session.sessionId || session.id || daimoPaymentId,
+          status: legacyStatus,
+          rawStatus,
+          source: session.source || data.source || null,
+          destination: session.destination || data.destination || null,
+          metadata: session.metadata || data.metadata || null,
+        };
+      }
+    } catch (err) {
+      logger.warn('Daimo v1 status check failed, trying legacy', { daimoPaymentId, error: err.message });
     }
-
-    const data = await response.json();
-
-    return {
-      success: true,
-      id: data.id,
-      status: data.status,
-      source: data.source || null,
-      destination: data.destination || null,
-      metadata: data.metadata || null,
-    };
-  } catch (error) {
-    logger.error('Error checking Daimo payment status', {
-      daimoPaymentId,
-      error: error.message,
-    });
-    return { success: false, error: error.message };
   }
+
+  // Fallback to legacy API
+  if (legacyKey) {
+    try {
+      const response = await fetch(`${DAIMO_LEGACY_API_BASE}/api/payment/${daimoPaymentId}`, {
+        method: 'GET',
+        headers: { 'Api-Key': legacyKey },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error('Daimo legacy status check error', {
+          daimoPaymentId,
+          status: response.status,
+          error: errorText,
+        });
+        return { success: false, error: `Daimo API error: ${response.status}` };
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        id: data.id,
+        status: data.status,
+        rawStatus: data.status,
+        source: data.source || null,
+        destination: data.destination || null,
+        metadata: data.metadata || null,
+      };
+    } catch (error) {
+      logger.error('Error checking Daimo payment status (legacy)', {
+        daimoPaymentId,
+        error: error.message,
+      });
+      return { success: false, error: error.message };
+    }
+  }
+
+  return { success: false, error: 'No valid Daimo API key available' };
 };
 
 /**
@@ -302,12 +381,20 @@ const validateWebhookPayload = (payload) => {
  */
 const mapDaimoStatus = (daimoStatus) => {
   const statusMap = {
+    // Legacy statuses
     payment_unpaid: 'pending',
     payment_started: 'pending',
     payment_completed: 'success',
     payment_bounced: 'failed',
     payment_failed: 'failed',
     payment_refunded: 'refunded',
+    // New Sessions API statuses
+    requires_payment_method: 'pending',
+    waiting_payment: 'pending',
+    processing: 'pending',
+    succeeded: 'success',
+    bounced: 'failed',
+    expired: 'failed',
   };
 
   return statusMap[daimoStatus] || 'unknown';
@@ -323,13 +410,14 @@ const formatAmountFromUnits = (units) => parseFloat(units) || 0;
 
 module.exports = {
   getDaimoConfig,
-  createPaymentIntent,
   createDaimoPayment,
   checkDaimoPaymentStatus,
+  normalizeSessionStatus,
   validateWebhookPayload,
   mapDaimoStatus,
   formatAmountFromUnits,
   DAIMO_API_BASE,
+  DAIMO_LEGACY_API_BASE,
   OPTIMISM_USDC_ADDRESS,
   OPTIMISM_CHAIN_ID,
 };

@@ -5715,7 +5715,7 @@ let registerAdminHandlers = (bot) => {
         paymentRecord = await PaymentModel.create({
           userId,
           planId: `courtesy_${days}d`,
-          provider: 'manual_activation',
+          provider: 'manual',
           amount: 0, // Courtesy pass is free
           currency: 'USD',
           status: 'completed',
@@ -5743,7 +5743,7 @@ let registerAdminHandlers = (bot) => {
         plan: { id: `courtesy_${days}d`, display_name: `Courtesy Pass (${days}d)`, name: 'Courtesy Pass', duration: days },
         amount: 0,
         currency: 'USD',
-        provider: 'manual_activation',
+        provider: 'manual',
         transactionId: paymentRecord?.id || `courtesy-${userId}-${Date.now()}`,
         expiryDate,
         activatedBy: ctx.from.id,
@@ -5895,7 +5895,7 @@ let registerAdminHandlers = (bot) => {
         paymentRecord = await PaymentModel.create({
           userId,
           planId: plan.id,
-          provider: 'manual_activation',
+          provider: 'manual',
           amount: plan.price || 0,
           currency: plan.currency || 'USD',
           status: 'completed',
@@ -5927,7 +5927,7 @@ let registerAdminHandlers = (bot) => {
         plan,
         amount: plan.price || 0,
         currency: plan.currency || 'USD',
-        provider: 'manual_activation',
+        provider: 'manual',
         transactionId: paymentRecord?.id || `plan-${userId}-${Date.now()}`,
         expiryDate,
         activatedBy: ctx.from.id,

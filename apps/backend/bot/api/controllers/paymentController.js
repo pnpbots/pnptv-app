@@ -496,7 +496,7 @@ class PaymentController {
           });
         }
 
-        if (daimoCheck.status === 'payment_completed') {
+        if (daimoCheck.status === 'payment_completed' || daimoCheck.rawStatus === 'succeeded') {
           logger.warn('STUCK DAIMO PAYMENT DETECTED (via polling): completed at Daimo but pending locally', {
             paymentId,
             daimoPaymentId,
@@ -522,7 +522,7 @@ class PaymentController {
           });
         }
 
-        if (daimoCheck.status === 'payment_bounced' || daimoCheck.status === 'payment_failed') {
+        if (daimoCheck.status === 'payment_bounced' || daimoCheck.status === 'payment_failed' || daimoCheck.rawStatus === 'bounced' || daimoCheck.rawStatus === 'expired') {
           await PaymentModel.updateStatus(paymentId, 'failed', {
             daimo_status: daimoCheck.status,
             recovered_via_status_check: true,

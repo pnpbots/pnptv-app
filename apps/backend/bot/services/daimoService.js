@@ -1,7 +1,6 @@
-const { optimismUSDC } = require('@daimo/pay-common');
 const { getAddress } = require('viem');
 const crypto = require('crypto');
-const { DAIMO_API_BASE } = require('../../config/daimo');
+const { DAIMO_API_BASE, OPTIMISM_USDC_ADDRESS, OPTIMISM_CHAIN_ID } = require('../../config/daimo');
 const logger = require('../../utils/logger');
 
 /**
@@ -22,11 +21,11 @@ class DaimoService {
     // API base URL
     this.apiBase = DAIMO_API_BASE;
 
-    // Optimism USDC configuration
+    // Optimism USDC configuration (hardcoded, no @daimo/pay-common dependency)
     this.chain = {
-      id: optimismUSDC.chainId, // 10 = Optimism
+      id: OPTIMISM_CHAIN_ID, // 10 = Optimism
       name: 'Optimism',
-      token: getAddress(optimismUSDC.token),
+      token: getAddress(OPTIMISM_USDC_ADDRESS),
       tokenSymbol: 'USDC',
     };
 
@@ -205,11 +204,19 @@ class DaimoService {
    */
   getStatusDescription(status) {
     const statusMap = {
+      // Legacy statuses
       payment_unpaid: 'Pendiente',
       payment_started: 'Iniciado',
       payment_completed: 'Completado',
       payment_bounced: 'Rechazado/Devuelto',
       payment_refunded: 'Reembolsado',
+      // New Sessions API statuses
+      requires_payment_method: 'Pendiente',
+      waiting_payment: 'Esperando Pago',
+      processing: 'Procesando',
+      succeeded: 'Completado',
+      bounced: 'Rechazado/Devuelto',
+      expired: 'Expirado',
     };
 
     return statusMap[status] || status;

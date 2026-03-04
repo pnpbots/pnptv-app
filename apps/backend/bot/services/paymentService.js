@@ -1729,7 +1729,7 @@ class PaymentService {
 
       if (bookingId) {
         // This is a booking payment
-        if (status === 'payment_completed') {
+        if (status === 'payment_completed' || status === 'succeeded') {
           await BookingAvailabilityIntegration.completeBooking(bookingId, null, userId);
           logger.info('Booking completed via Daimo webhook', { bookingId, userId });
 
@@ -1794,7 +1794,7 @@ class PaymentService {
         }
 
         // Process based on status
-        if (status === 'payment_completed') {
+        if (status === 'payment_completed' || status === 'succeeded') {
           // Payment successful
           if (paymentId) {
             await PaymentModel.updateStatus(paymentId, 'completed', {
@@ -2090,7 +2090,7 @@ class PaymentService {
           }
 
           return { success: true };
-        } else if (status === 'payment_bounced' || status === 'payment_failed') {
+        } else if (status === 'payment_bounced' || status === 'payment_failed' || status === 'bounced' || status === 'expired') {
           // Payment failed
           if (paymentId) {
             await PaymentModel.updateStatus(paymentId, 'failed', {
@@ -2146,7 +2146,7 @@ class PaymentService {
           }
 
           return { success: true };
-        } else if (status === 'payment_started' || status === 'payment_unpaid') {
+        } else if (status === 'payment_started' || status === 'payment_unpaid' || status === 'requires_payment_method' || status === 'waiting_payment' || status === 'processing') {
           // Payment pending/started
           if (paymentId) {
             await PaymentModel.updateStatus(paymentId, 'pending', {
@@ -3595,7 +3595,7 @@ class PaymentService {
     plan,
     amount,
     currency = 'USD',
-    provider = 'manual_activation',
+    provider = 'manual',
     transactionId,
     expiryDate,
     activatedBy,

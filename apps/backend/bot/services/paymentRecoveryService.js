@@ -214,7 +214,7 @@ class PaymentRecoveryService {
               continue;
             }
 
-            if (statusCheck.status === 'payment_completed') {
+            if (statusCheck.status === 'payment_completed' || statusCheck.rawStatus === 'succeeded') {
               // Synthesize webhook data and process — inject paymentId from DB row as fallback
               const webhookData = {
                 payment: {
@@ -248,7 +248,7 @@ class PaymentRecoveryService {
                   error: recoveryResult.error,
                 });
               }
-            } else if (statusCheck.status === 'payment_bounced' || statusCheck.status === 'payment_failed') {
+            } else if (statusCheck.status === 'payment_bounced' || statusCheck.status === 'payment_failed' || statusCheck.rawStatus === 'bounced' || statusCheck.rawStatus === 'expired') {
               await PaymentModel.updateStatus(paymentId, 'failed', {
                 daimo_status: statusCheck.status,
                 recovered_via_polling: true,
