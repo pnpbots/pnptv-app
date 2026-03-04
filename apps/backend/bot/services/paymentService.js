@@ -19,11 +19,11 @@ let _botInstance = null;
 function getBotInstance() {
   if (!_botInstance) {
     try {
+      // Lazy-require to break circular dependency (bot.js -> paymentService -> bot.js)
       const botModule = require('../core/bot');
-      // bot.js exports { startBot, getBotInstance } — use its singleton when available.
-      _botInstance = typeof botModule.getBotInstance === 'function'
-        ? botModule.getBotInstance()
-        : null;
+      if (botModule && 'getBotInstance' in botModule && typeof botModule.getBotInstance === 'function') {
+        _botInstance = botModule.getBotInstance();
+      }
     } catch (_e) {
       // Module not yet loaded (e.g. in test context) — fall through to fallback.
     }
@@ -478,19 +478,36 @@ class PaymentService {
         // Create payment reference
         const paymentRef = `PAY-${payment.id.substring(0, 8).toUpperCase()}`;
 
-        // All ePayco payments use the tokenized checkout page
-        paymentUrl = `${checkoutDomain}/payment/${payment.id}`;
-        logger.info('ePayco tokenized checkout URL created', {
-          paymentId: payment.id,
-          planId,
-          paymentUrl,
+        // Use ePayco hosted subscription landing page when available (handles
+        // tokenization, PCI compliance, and charging on ePayco's side).
+        // Falls back to custom tokenized checkout for plans without an ePayco ID.
+        const subscriptionUrl = getEpaycoSubscriptionUrl(planId, {
+          extra1: String(userId),
+          extra2: planId,
+          extra3: payment.id,
         });
+
+        if (subscriptionUrl) {
+          paymentUrl = subscriptionUrl;
+          logger.info('ePayco subscription landing page URL created', {
+            paymentId: payment.id,
+            planId,
+            paymentUrl,
+          });
+        } else {
+          paymentUrl = `${checkoutDomain}/payment/${payment.id}`;
+          logger.info('ePayco tokenized checkout URL created (no subscription plan ID)', {
+            paymentId: payment.id,
+            planId,
+            paymentUrl,
+          });
+        }
 
         await PaymentModel.updateStatus(payment.id, 'pending', {
           paymentUrl,
           provider,
           reference: paymentRef,
-          fallback: false,
+          fallback: !subscriptionUrl,
         });
       } else if (provider === 'daimo') {
         // Create Daimo payment using official API
@@ -2627,24 +2644,45 @@ class PaymentService {
         extra3: paymentId,
       });
 
-      // Extract 3DS authentication fields from charge response for audit
-      const chargeThreeDSFields = this.extract3DSFields(chargeResult?.data);
+      // 5. Normalize ePayco charge response
+      // ePayco SDK returns different response structures depending on the endpoint/version:
+      //   Format A: { status: true, data: { estado, respuesta, ref_payco, ... } }
+      //   Format B: { data: { data: { estado, ... } } }  (double-nested)
+      //   Format C: { estado, respuesta, ref_payco, ... }  (flat)
+      //   Format D: { status: false, message: "...", data: { status: "error", ... } }
+      const rawData = chargeResult?.data || {};
+      const nestedData = rawData?.data || {};
+      // Pick fields from whichever level has them
+      const estado = rawData.estado || nestedData.estado || chargeResult?.estado || null;
+      const respuesta = rawData.respuesta || nestedData.respuesta || chargeResult?.respuesta || null;
+      const refPayco = rawData.ref_payco || nestedData.ref_payco || chargeResult?.ref_payco || null;
+      const transactionId = rawData.transactionID || rawData.transaction_id
+        || nestedData.transactionID || nestedData.transaction_id
+        || chargeResult?.transactionID || chargeResult?.transaction_id || null;
 
-      logger.info('ePayco charge result', {
+      // Extract 3DS authentication fields from charge response for audit
+      const chargeThreeDSFields = this.extract3DSFields(rawData);
+
+      // Log raw response structure for diagnostics
+      logger.info('ePayco charge result (raw)', {
         paymentId,
-        chargeStatus: chargeResult?.data?.estado,
-        chargeResponse: chargeResult?.data?.respuesta,
-        refPayco: chargeResult?.data?.ref_payco,
+        topLevelKeys: Object.keys(chargeResult || {}),
+        dataKeys: Object.keys(rawData),
+        nestedDataKeys: Object.keys(nestedData),
+        chargeStatus: chargeResult?.status,
+        chargeMessage: chargeResult?.message,
+      });
+
+      logger.info('ePayco charge result (normalized)', {
+        paymentId,
+        estado,
+        respuesta,
+        refPayco,
+        transactionId,
         threeDSAuthenticated: chargeThreeDSFields.hasData,
         eci: chargeThreeDSFields.eci,
         liabilityShift: chargeThreeDSFields.liabilityShift,
       });
-
-      // 5. Process result
-      const estado = chargeResult?.data?.estado;
-      const respuesta = chargeResult?.data?.respuesta;
-      const refPayco = chargeResult?.data?.ref_payco;
-      const transactionId = chargeResult?.data?.transactionID || chargeResult?.data?.transaction_id;
 
       if (estado === 'Aceptada' || estado === 'Aprobada' || respuesta === 'Aprobada') {
         // Charge approved via API. Mark as processing and wait for webhook confirmation.
@@ -2683,7 +2721,8 @@ class PaymentService {
         };
       } else if (estado === 'Pendiente') {
         // Check for 3DS authentication (can be simple redirect or Cardinal Commerce 3DS 2.0)
-        const fullResponse = chargeResult?.data || {};
+        // Use whichever level has the estado field for the full response
+        const fullResponse = rawData.estado ? rawData : (nestedData.estado ? nestedData : rawData);
 
         // Try multiple field names for 3DS redirect URL or info
         let redirectUrl = null;
@@ -2864,11 +2903,61 @@ class PaymentService {
         }
 
         return pendingResult;
+      } else if (!estado && refPayco) {
+        // ePayco returned a ref_payco but no estado — response format unknown.
+        // Treat as pending and let the webhook resolve the final status.
+        logger.warn('ePayco charge has ref_payco but undefined estado — treating as pending', {
+          paymentId,
+          refPayco,
+          transactionId,
+          rawDataKeys: Object.keys(rawData),
+          nestedDataKeys: Object.keys(nestedData),
+          chargeResultStatus: chargeResult?.status,
+        });
+
+        await PaymentModel.updateStatus(paymentId, 'pending', {
+          transaction_id: transactionId,
+          reference: refPayco,
+          epayco_ref: refPayco,
+          payment_method: 'tokenized_card',
+          api_charge_status: 'unknown_estado',
+          epayco_raw_status: chargeResult?.status,
+          expected_epayco_amount: String(amountCOP),
+          expected_epayco_currency: 'COP',
+        });
+
+        return {
+          success: true,
+          status: 'processing',
+          transactionId: refPayco || transactionId,
+          message: 'Tu pago está siendo procesado. Recibirás una confirmación en breve.',
+        };
+      } else if (!estado && !refPayco && chargeResult?.status === false) {
+        // ePayco SDK returned an error response (status: false) — no charge was created
+        const errorMessage = chargeResult?.message || respuesta || 'Error procesando el pago';
+        logger.error('ePayco charge failed (status: false, no ref_payco)', {
+          paymentId,
+          chargeResultMessage: chargeResult?.message,
+          rawDataKeys: Object.keys(rawData),
+        });
+
+        await PaymentModel.updateStatus(paymentId, 'failed', {
+          payment_method: 'tokenized_card',
+          epayco_estado: 'sdk_error',
+          epayco_respuesta: errorMessage,
+          error: errorMessage,
+        });
+
+        return {
+          success: false,
+          status: 'rejected',
+          error: errorMessage,
+        };
       } else {
-        // Rejected or failed
+        // Rejected or failed — estado has a value but it's not approved/pending
         const epaycoError = this.parseEpaycoError(
           chargeResult,
-          chargeResult?.data?.respuesta || 'Transacción rechazada'
+          respuesta || 'Transacción rechazada'
         );
         await PaymentModel.updateStatus(paymentId, 'failed', {
           transaction_id: transactionId,
@@ -2876,7 +2965,7 @@ class PaymentService {
           epayco_ref: refPayco,
           payment_method: 'tokenized_card',
           epayco_estado: estado,
-          epayco_respuesta: chargeResult?.data?.respuesta,
+          epayco_respuesta: respuesta,
           epayco_error_code: epaycoError.code,
           error: epaycoError.message,
         });
