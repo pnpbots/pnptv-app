@@ -40,6 +40,7 @@ class SocialPostService {
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
+              sp.is_promoted, sp.promoted_link, sp.promoted_link_label, sp.promoted_thumbnail,
               COALESCE(sp.content_tier, 'free') as content_tier,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
@@ -68,6 +69,39 @@ class SocialPostService {
     }
     const page = posts.slice(0, lim);
     const nextCursor = posts.length > lim ? String(page[page.length - 1].id) : null;
+
+    // Pin latest promoted post at top of first page only (no cursor = first page)
+    if (!cursorId) {
+      const pinnedIds = new Set(page.filter(p => p.is_promoted).map(p => p.id));
+      const { rows: promotedRows } = await query(
+        `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
+                sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
+                sp.is_promoted, sp.promoted_link, sp.promoted_link_label, sp.promoted_thumbnail,
+                COALESCE(sp.content_tier, 'free') as content_tier,
+                u.id as author_id, u.username as author_username,
+                u.first_name as author_first_name, u.photo_file_id as author_photo,
+                u.creator_status as author_creator_status, u.creator_type as author_creator_type,
+                u.creator_verified as author_creator_verified, u.creator_price_usd as author_creator_price,
+                EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me,
+                NULL as repost_content, NULL as repost_created_at,
+                NULL as repost_author_username, NULL as repost_author_first_name
+         FROM social_posts sp
+         JOIN users u ON sp.user_id = u.id
+         WHERE sp.is_promoted = true AND sp.is_deleted = false
+         ORDER BY sp.id DESC
+         LIMIT 1`,
+        [userId]
+      );
+      if (promotedRows.length > 0) {
+        const promoted = sanitizePostRows(promotedRows)[0];
+        // Remove duplicate if it already appears in the page
+        const filtered = pinnedIds.has(promoted.id)
+          ? page.filter(p => p.id !== promoted.id)
+          : page;
+        return { posts: [promoted, ...filtered], nextCursor };
+      }
+    }
+
     return { posts: page, nextCursor };
   }
 

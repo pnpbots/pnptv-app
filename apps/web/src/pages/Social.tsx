@@ -174,11 +174,22 @@ function PostCard({
   const authorPath = String(post.author_id) === currentUserId ? "/profile" : `/profile/${post.author_id}`;
 
   return (
-    <div className="glass-card-sm p-4" id={`post-${post.id}`}>
+    <div
+      className="glass-card-sm p-4"
+      id={`post-${post.id}`}
+      style={post.is_promoted ? { borderLeft: "3px solid transparent", borderImage: "linear-gradient(180deg, #D4007A, #E69138) 1" } : undefined}
+    >
       <div className="flex gap-3">
-        {/* Avatar — show real photo or gradient fallback */}
-        <button onClick={() => onNavigate(authorPath)} className="flex-shrink-0">
-          {isValidPhotoUrl(post.author_photo) ? (
+        {/* Avatar — promoted posts show PNPtv logo, others show user photo */}
+        <button onClick={() => post.is_promoted ? undefined : onNavigate(authorPath)} className="flex-shrink-0">
+          {post.is_promoted ? (
+            <img
+              src="/Logo2-50.png"
+              alt="PNPtv!"
+              className="w-10 h-10 rounded-full object-cover"
+              style={{ background: "#1a1a2e" }}
+            />
+          ) : isValidPhotoUrl(post.author_photo) ? (
             <img
               src={post.author_photo}
               alt={`${post.author_first_name || post.author_username || "User"}'s avatar`}
@@ -186,12 +197,14 @@ function PostCard({
               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty("display"); }}
             />
           ) : null}
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: isValidPhotoUrl(post.author_photo) ? "none" : undefined }}
-          >
-            {(post.author_first_name || post.author_username || "?")[0].toUpperCase()}
-          </div>
+          {!post.is_promoted && (
+            <div
+              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: isValidPhotoUrl(post.author_photo) ? "none" : undefined }}
+            >
+              {(post.author_first_name || post.author_username || "?")[0].toUpperCase()}
+            </div>
+          )}
         </button>
 
         {/* Content */}
@@ -215,6 +228,13 @@ function PostCard({
             {/* Bluesky-sourced post badge (imported from BSky) */}
             {post.source === "bluesky" && !post.bluesky_uri && (
               <BlueskyBadge label="From Bluesky" />
+            )}
+            {/* Featured / Promoted badge */}
+            {post.is_promoted && (
+              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))", color: "#FFB454" }}>
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                Featured
+              </span>
             )}
             {/* Wall of Fame badge */}
             {post.is_wof && (
@@ -314,12 +334,36 @@ function PostCard({
             </div>
           ) : (
             <>
+              {/* Promoted thumbnail banner */}
+              {post.is_promoted && post.promoted_thumbnail && (
+                <div className="mt-2 -mx-4">
+                  <img
+                    src={post.promoted_thumbnail}
+                    alt="Featured content"
+                    className="w-full max-h-56 object-cover"
+                    loading="lazy"
+                    onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = "none"; }}
+                  />
+                </div>
+              )}
+
               <p className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed">
                 {post.content}
               </p>
 
+              {/* Promoted CTA button */}
+              {post.is_promoted && post.promoted_link && (
+                <button
+                  onClick={() => onNavigate(post.promoted_link!)}
+                  className="mt-3 w-full text-sm font-semibold py-2.5 rounded-lg transition-opacity hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                >
+                  {post.promoted_link_label || "Watch Now"}
+                </button>
+              )}
+
               {/* Media */}
-              {post.media_url && (
+              {!post.is_promoted && post.media_url && (
                 <div className="mt-3">
                   {post.media_type === "video" ? (
                     <video

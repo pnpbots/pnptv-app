@@ -395,6 +395,11 @@ export interface SocialPostItem {
   // Tier-gating fields (free-tier users see blurred posts)
   blurred?: boolean;
   content_tier?: string;
+  // Promoted post fields (CMS-managed featured content)
+  is_promoted?: boolean;
+  promoted_link?: string | null;
+  promoted_link_label?: string | null;
+  promoted_thumbnail?: string | null;
 }
 
 // ============================================================================

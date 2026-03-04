@@ -2642,6 +2642,7 @@ const hangoutMediaController = require('./controllers/hangoutMediaController');
 const hangoutVideoCallRoutes = require('./routes/hangoutVideoCallRoutes');
 const dmController = require('./controllers/dmController');
 const socialController = require('./controllers/socialController');
+const promotedPostController = require('./controllers/promotedPostController');
 const usersController = require('./controllers/usersController');
 
 // ── Community Chat (REST fallback + media) ──────────────────────────────────
@@ -2741,6 +2742,9 @@ app.delete('/api/webapp/social/posts/:postId', asyncHandler(socialController.del
 app.get('/api/webapp/social/posts/:postId/replies', asyncHandler(socialController.getReplies));
 app.post('/api/webapp/social/posts/:postId/mastodon', asyncHandler(socialController.postToMastodon));
 app.post('/api/webapp/social/posts/:postId/request-deletion', asyncHandler(socialController.requestWofDeletion));
+
+// ── Promoted Posts (CMS Sync) ────────────────────────────────────────────────
+app.post('/api/admin/social/sync-promoted', adminGuard, asyncHandler(promotedPostController.handleSyncPromoted));
 
 // Users search
 app.get('/api/webapp/users/search', asyncHandler(usersController.searchUsers));
@@ -3542,6 +3546,9 @@ app.get('/api/webapp/auth/verify', authenticateUser, (req, res) => {
   res.status(200).send();
 });
 
+
+// ── Auto-sync promoted posts from Directus CMS ──────────────────────────────
+promotedPostController.startAutoSync();
 
 // Sentry error handler - must be last
 if (process.env.SENTRY_DSN) {
