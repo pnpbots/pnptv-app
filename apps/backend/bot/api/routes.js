@@ -2422,6 +2422,15 @@ app.delete('/api/webapp/admin/hangouts/:id', adminGuard, asyncHandler(webappAdmi
 // Bulk user operations — registered BEFORE :id routes to avoid route shadowing
 app.post('/api/webapp/admin/users/bulk-update', adminGuard, asyncHandler(webappAdminController.bulkUpdateUsers));
 
+// Nearby Places management
+const nearbyPlacesAdminController = require('./controllers/nearbyPlacesAdminController');
+app.get('/api/webapp/admin/places', adminGuard, asyncHandler(nearbyPlacesAdminController.listPlaces));
+app.get('/api/webapp/admin/places/stats', adminGuard, asyncHandler(nearbyPlacesAdminController.getPlaceStats));
+app.post('/api/webapp/admin/places/:id/approve', adminGuard, asyncHandler(nearbyPlacesAdminController.approvePlace));
+app.post('/api/webapp/admin/places/:id/reject', adminGuard, asyncHandler(nearbyPlacesAdminController.rejectPlace));
+app.post('/api/webapp/admin/places/:id/suspend', adminGuard, asyncHandler(nearbyPlacesAdminController.suspendPlace));
+app.delete('/api/webapp/admin/places/:id', adminGuard, asyncHandler(nearbyPlacesAdminController.deletePlace));
+
 // Plan management
 app.get('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminController.listPlans));
 app.post('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminController.createPlan));

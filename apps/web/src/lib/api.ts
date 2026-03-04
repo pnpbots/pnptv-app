@@ -1932,6 +1932,53 @@ export function deleteAdminPlan(id: string): Promise<{ success: boolean; message
   return request(`/api/webapp/admin/plans/${id}`, { method: "DELETE" });
 }
 
+// Admin Nearby Places
+export interface AdminPlace {
+  id: string;
+  name: string;
+  description?: string;
+  address?: string;
+  city?: string;
+  country?: string;
+  categoryName?: string;
+  categoryEmoji?: string;
+  placeType?: string;
+  status: string;
+  viewCount?: number;
+  favoriteCount?: number;
+  reportCount?: number;
+  createdAt?: string;
+}
+
+export function getAdminPlaces(
+  page = 1,
+  status?: string
+): Promise<{ success: boolean; places: AdminPlace[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
+  const params = new URLSearchParams({ page: String(page) });
+  if (status) params.set("status", status);
+  return request(`/api/webapp/admin/places?${params}`);
+}
+
+export function getAdminPlaceStats(): Promise<{ success: boolean; stats: Record<string, number> }> {
+  return request("/api/webapp/admin/places/stats");
+}
+
+export function approveAdminPlace(id: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/places/${id}/approve`, { method: "POST" });
+}
+
+export function rejectAdminPlace(id: string, reason?: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/places/${id}/reject`, { method: "POST", body: { reason } });
+}
+
+export function suspendAdminPlace(id: string, suspend: boolean): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/places/${id}/suspend`, { method: "POST", body: { suspend } });
+}
+
+export function deleteAdminPlace(id: string): Promise<{ success: boolean; message: string }> {
+  return request(`/api/webapp/admin/places/${id}`, { method: "DELETE" });
+}
+
 // Admin Push Notifications
 export function sendAdminNotification(payload: {
   title: string;

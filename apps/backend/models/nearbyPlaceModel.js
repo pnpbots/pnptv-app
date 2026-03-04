@@ -436,6 +436,40 @@ class NearbyPlaceModel {
   }
 
   /**
+   * Count all places with filters (for pagination)
+   */
+  static async countAll(filters = {}) {
+    try {
+      let sql = `SELECT COUNT(*) as total FROM ${TABLE} WHERE 1=1`;
+      const params = [];
+      let paramIndex = 1;
+
+      if (filters.status) {
+        sql += ` AND status = $${paramIndex++}`;
+        params.push(filters.status);
+      }
+      if (filters.categoryId) {
+        sql += ` AND category_id = $${paramIndex++}`;
+        params.push(filters.categoryId);
+      }
+      if (filters.placeType) {
+        sql += ` AND place_type = $${paramIndex++}`;
+        params.push(filters.placeType);
+      }
+      if (filters.city) {
+        sql += ` AND LOWER(city) LIKE LOWER($${paramIndex++})`;
+        params.push(`%${filters.city}%`);
+      }
+
+      const result = await query(sql, params);
+      return parseInt(result.rows[0]?.total || '0', 10);
+    } catch (error) {
+      logger.error('Error counting all places:', error);
+      return 0;
+    }
+  }
+
+  /**
    * Increment view count
    */
   static async incrementViewCount(placeId) {
