@@ -1,7 +1,7 @@
 /**
  * Daimo Pay Configuration
  * Official integration for receiving crypto payments via USDC on Optimism network
- * API: https://api.daimo.com/api/payment (Legacy API)
+ * API: https://api.daimo.com/v1/sessions (Sessions API v1)
  */
 
 const { getAddress } = require('viem');
@@ -20,9 +20,6 @@ const FETCH_TIMEOUT_MS = 10_000;
 
 /**
  * Create a fetch request with timeout via AbortController
- * @param {string} url
- * @param {Object} options - fetch options
- * @returns {Promise<Response>}
  */
 const fetchWithTimeout = (url, options = {}) => {
   const controller = new AbortController();
@@ -63,7 +60,8 @@ const getDaimoConfig = () => {
 };
 
 /**
- * Create a payment via Daimo Pay API
+ * Create a payment session via Daimo Pay v1 Sessions API
+ * Uses all available payment methods (Coinbase, Binance, MetaMask, Solana, Tron, etc.)
  * @param {Object} params - Payment parameters
  * @returns {Promise<Object>} { success, paymentUrl, daimoPaymentId, error }
  */
@@ -79,22 +77,21 @@ const createDaimoPayment = async ({
   }
 
   const amountUnits = parseFloat(amount).toFixed(2);
-  const webhookDomain = process.env.BOT_WEBHOOK_DOMAIN || process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
 
   try {
     const requestBody = {
-      display: {
-        intent: description || `PNPtv ${planId} Subscription`,
-        preferredChains: [config.chainId],
-      },
       destination: {
-        destinationAddress: config.treasuryAddress,
+        type: 'evm',
+        address: config.treasuryAddress,
         chainId: config.chainId,
         tokenAddress: config.token,
         amountUnits,
       },
+      display: {
+        title: description || `PNPtv ${planId} Subscription`,
+        verb: 'Pay',
+      },
       refundAddress: config.refundAddress,
-      webhookUrl: `${webhookDomain}/api/webhooks/daimo`,
       metadata: {
         userId: userId.toString(),
         chatId: chatId?.toString() || '',
@@ -104,20 +101,20 @@ const createDaimoPayment = async ({
       },
     };
 
-    logger.info('Creating Daimo payment', { paymentId, planId, amountUnits });
+    logger.info('Creating Daimo session via v1 API', { paymentId, planId, amountUnits });
 
-    const response = await fetchWithTimeout(`${DAIMO_API_BASE}/api/payment`, {
+    const response = await fetchWithTimeout(`${DAIMO_API_BASE}/v1/sessions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Api-Key': apiKey,
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      logger.error('Daimo API error', {
+      logger.error('Daimo v1 API error', {
         status: response.status,
         error: errorText,
         paymentId,
@@ -126,22 +123,25 @@ const createDaimoPayment = async ({
     }
 
     const data = await response.json();
+    const session = data.session || data;
+    const sessionId = session.sessionId || session.id;
+    const checkoutUrl = `https://daimo.com/deposit?id=${sessionId}`;
 
-    logger.info('Daimo payment created', {
+    logger.info('Daimo session created', {
       paymentId,
-      daimoPaymentId: data.id,
-      url: data.url,
+      daimoPaymentId: sessionId,
+      url: checkoutUrl,
     });
 
     return {
       success: true,
-      paymentUrl: data.url,
-      daimoPaymentId: data.id,
-      payment: data.payment,
+      paymentUrl: checkoutUrl,
+      daimoPaymentId: sessionId,
+      payment: session,
     };
   } catch (error) {
     const isTimeout = error.name === 'AbortError';
-    logger.error(isTimeout ? 'Daimo API request timed out' : 'Error creating Daimo payment', {
+    logger.error(isTimeout ? 'Daimo API request timed out' : 'Error creating Daimo session', {
       error: error.message,
       paymentId,
     });
@@ -150,7 +150,7 @@ const createDaimoPayment = async ({
 };
 
 /**
- * Map new Sessions API status to legacy status for backward compatibility
+ * Map v1 Sessions API status to legacy status for backward compatibility
  * @param {string} status - Status from Sessions API
  * @returns {string} Legacy-compatible status
  */
@@ -167,8 +167,8 @@ const normalizeSessionStatus = (status) => {
 };
 
 /**
- * Check payment status from Daimo Pay API
- * @param {string} daimoPaymentId - Daimo payment ID
+ * Check session status from Daimo Pay v1 API
+ * @param {string} daimoPaymentId - Daimo session ID
  * @returns {Promise<Object>} { success, id, status, rawStatus, source, destination, metadata, error }
  */
 const checkDaimoPaymentStatus = async (daimoPaymentId) => {
@@ -179,37 +179,57 @@ const checkDaimoPaymentStatus = async (daimoPaymentId) => {
   }
 
   try {
-    const response = await fetchWithTimeout(`${DAIMO_API_BASE}/api/payment/${daimoPaymentId}`, {
+    const response = await fetchWithTimeout(`${DAIMO_API_BASE}/v1/sessions/${daimoPaymentId}`, {
       method: 'GET',
-      headers: { 'Api-Key': apiKey },
+      headers: { 'Authorization': `Bearer ${apiKey}` },
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      logger.error('Daimo status check error', {
-        daimoPaymentId,
-        status: response.status,
-        error: errorText,
+      // Fallback: try legacy endpoint for old payment IDs created before migration
+      const legacyResponse = await fetchWithTimeout(`${DAIMO_API_BASE}/api/payment/${daimoPaymentId}`, {
+        method: 'GET',
+        headers: { 'Api-Key': apiKey },
       });
-      return { success: false, error: `Daimo API error: ${response.status}` };
+
+      if (!legacyResponse.ok) {
+        const errorText = await legacyResponse.text();
+        logger.error('Daimo status check error (both v1 and legacy failed)', {
+          daimoPaymentId,
+          v1Status: response.status,
+          legacyStatus: legacyResponse.status,
+          error: errorText,
+        });
+        return { success: false, error: `Daimo API error: ${legacyResponse.status}` };
+      }
+
+      const legacyData = await legacyResponse.json();
+      return {
+        success: true,
+        id: legacyData.id,
+        status: normalizeSessionStatus(legacyData.status),
+        rawStatus: legacyData.status,
+        source: legacyData.source || null,
+        destination: legacyData.destination || null,
+        metadata: legacyData.metadata || null,
+      };
     }
 
     const data = await response.json();
-    const rawStatus = data.status;
-    const normalizedStatus = normalizeSessionStatus(rawStatus);
+    const session = data.session || data;
+    const rawStatus = session.status;
 
     return {
       success: true,
-      id: data.id,
-      status: normalizedStatus,
+      id: session.sessionId || session.id || daimoPaymentId,
+      status: normalizeSessionStatus(rawStatus),
       rawStatus,
-      source: data.source || null,
-      destination: data.destination || null,
-      metadata: data.metadata || null,
+      source: session.source || session.paymentMethod?.source || null,
+      destination: session.destination || null,
+      metadata: session.metadata || null,
     };
   } catch (error) {
     const isTimeout = error.name === 'AbortError';
-    logger.error(isTimeout ? 'Daimo status check timed out' : 'Error checking Daimo payment status', {
+    logger.error(isTimeout ? 'Daimo status check timed out' : 'Error checking Daimo session status', {
       daimoPaymentId,
       error: error.message,
     });
