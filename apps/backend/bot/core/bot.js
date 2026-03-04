@@ -369,9 +369,32 @@ const startBot = async () => {
       }
     });
 
-    // /start → redirect users to web app (bot features migrated to pnptv.app)
+    // /start → handle web login deep links, then redirect all else to web app
     bot.command('start', async (ctx) => {
       if (ctx.chat.type !== 'private') return;
+
+      // Handle web login deep links (/start weblogin_TOKEN)
+      const startPayload = ctx.message.text.split(' ')[1] || '';
+      if (startPayload.startsWith('weblogin_')) {
+        const token = startPayload.replace('weblogin_', '');
+        const { telegramConfirmLogin } = require('../api/controllers/webAppController');
+        const success = await telegramConfirmLogin(
+          {
+            id: ctx.from.id,
+            first_name: ctx.from.first_name,
+            last_name: ctx.from.last_name,
+            username: ctx.from.username,
+          },
+          token
+        );
+        if (success) {
+          await ctx.reply('✅ ¡Login exitoso! Ya puedes volver al navegador.\n\n✅ Login successful! You can go back to your browser.');
+        } else {
+          await ctx.reply('❌ El enlace de login ha expirado. Intenta de nuevo desde la web.\n\n❌ Login link expired. Try again from the website.');
+        }
+        return;
+      }
+
       await ctx.reply(
         '🌐 PNPtv! has moved to the web!\n\n' +
         'Visit our app for the full experience:\n' +
