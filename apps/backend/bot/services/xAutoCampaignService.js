@@ -5,11 +5,17 @@ const logger = require('../../utils/logger');
 const GrokService = require('./grokService');
 const XPostService = require('./xPostService');
 
+const DIRECTUS_URL = process.env.DIRECTUS_URL || 'http://directus:8055';
+const DIRECTUS_TOKEN = process.env.DIRECTUS_ADMIN_TOKEN;
+
+let _cachedMediaFolderId = null;
+
 const ITEMS_PER_PAGE = 20;
 
 const ALLOWED_UPDATE_COLUMNS = new Set([
   'name', 'topic', 'grok_mode', 'language', 'custom_prompt',
   'interval_minutes', 'active_hours_start', 'active_hours_end', 'max_posts',
+  'media_folder_id',
 ]);
 
 class XAutoCampaignService {
@@ -20,17 +26,18 @@ class XAutoCampaignService {
     name, accountId, topic, grokMode = 'xPost', language = 'es',
     customPrompt = null, intervalMinutes = 240, activeHoursStart = 8,
     activeHoursEnd = 23, maxPosts = null, createdBy, createdByUsername,
+    mediaFolderId = null,
   }) {
     const result = await db.query(
       `INSERT INTO x_auto_campaigns
         (name, account_id, topic, grok_mode, language, custom_prompt,
          interval_minutes, active_hours_start, active_hours_end, max_posts,
-         created_by, created_by_username)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         created_by, created_by_username, media_folder_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING campaign_id`,
       [name, accountId, topic, grokMode, language, customPrompt,
        intervalMinutes, activeHoursStart, activeHoursEnd, maxPosts,
-       createdBy, createdByUsername]
+       createdBy, createdByUsername, mediaFolderId]
     );
     return result.rows[0].campaign_id;
   }
@@ -226,12 +233,25 @@ class XAutoCampaignService {
     const requiredLinks = ['t.me/pnplatinotv_bot', 'pnptv.app/lifetime100'];
     const { text: normalizedText } = XPostService.ensureRequiredLinks(postText, requiredLinks);
 
+    // Attach a random video if campaign has media folder
+    let mediaUrl = null;
+    if (campaign.media_folder_id) {
+      try {
+        mediaUrl = await this._getRandomMediaUrl(campaign.media_folder_id);
+      } catch (err) {
+        logger.warn('Failed to get random media for campaign', {
+          campaignId: campaign.campaign_id, error: err.message,
+        });
+      }
+    }
+
     // Queue into existing x_post_jobs pipeline
     const postId = await XPostService.createPostJob({
       accountId: campaign.account_id,
       adminId: campaign.created_by,
       adminUsername: campaign.created_by_username || 'auto-campaign',
       text: normalizedText,
+      mediaUrl,
       scheduledAt: new Date(),
       status: 'scheduled',
     });
@@ -311,6 +331,72 @@ class XAutoCampaignService {
       posts: postsResult.rows,
       total: parseInt(countResult.rows[0].total) || 0,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Directus media folder integration
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Ensure the "X Campaign Videos" folder exists in Directus, creating it if needed.
+   * Returns the folder UUID.
+   */
+  static async ensureMediaFolder() {
+    if (_cachedMediaFolderId) return _cachedMediaFolderId;
+
+    if (!DIRECTUS_TOKEN) {
+      throw new Error('DIRECTUS_ADMIN_TOKEN not configured');
+    }
+
+    // Check if folder already exists
+    const searchRes = await fetch(
+      `${DIRECTUS_URL}/folders?filter[name][_eq]=X Campaign Videos`,
+      { headers: { Authorization: `Bearer ${DIRECTUS_TOKEN}` } }
+    );
+    const searchData = await searchRes.json();
+
+    if (searchData.data && searchData.data.length > 0) {
+      _cachedMediaFolderId = searchData.data[0].id;
+      return _cachedMediaFolderId;
+    }
+
+    // Create the folder
+    const createRes = await fetch(`${DIRECTUS_URL}/folders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${DIRECTUS_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'X Campaign Videos' }),
+    });
+    const createData = await createRes.json();
+
+    if (!createData.data?.id) {
+      throw new Error('Failed to create Directus media folder');
+    }
+
+    _cachedMediaFolderId = createData.data.id;
+    logger.info('Created Directus folder "X Campaign Videos"', { folderId: _cachedMediaFolderId });
+    return _cachedMediaFolderId;
+  }
+
+  /**
+   * Pick a random video URL from a Directus folder.
+   * Returns the asset URL or null if no videos found.
+   */
+  static async _getRandomMediaUrl(folderId) {
+    if (!DIRECTUS_TOKEN) return null;
+
+    const res = await fetch(
+      `${DIRECTUS_URL}/files?filter[folder][_eq]=${folderId}&filter[type][_starts_with]=video&fields[]=id&limit=200`,
+      { headers: { Authorization: `Bearer ${DIRECTUS_TOKEN}` } }
+    );
+    const data = await res.json();
+
+    if (!data.data || data.data.length === 0) return null;
+
+    const randomFile = data.data[Math.floor(Math.random() * data.data.length)];
+    return `${DIRECTUS_URL}/assets/${randomFile.id}`;
   }
 
   // ---------------------------------------------------------------------------

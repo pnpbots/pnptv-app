@@ -1880,6 +1880,7 @@ export interface XAutoCampaignStats {
   totalGenerated: number;
   totalPosted: number;
   totalFailed: number;
+  mediaFolderId?: string;
 }
 
 export interface XAutoCampaign {
@@ -1903,6 +1904,7 @@ export interface XAutoCampaign {
   total_failed: number;
   max_posts?: number;
   created_by_username?: string;
+  media_folder_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -1924,7 +1926,7 @@ export interface XActiveAccount {
   display_name?: string;
 }
 
-export function getAdminXCampaignStats(): Promise<{ success: boolean; stats: XAutoCampaignStats; accounts: XActiveAccount[] }> {
+export function getAdminXCampaignStats(): Promise<{ success: boolean; stats: XAutoCampaignStats; accounts: XActiveAccount[]; mediaFolderId?: string }> {
   return request("/api/webapp/admin/x-campaigns/stats");
 }
 
@@ -1948,6 +1950,7 @@ export function createAdminXCampaign(data: {
   activeHoursStart?: number;
   activeHoursEnd?: number;
   maxPosts?: number;
+  mediaFolderId?: string;
 }): Promise<{ success: boolean; campaignId: string }> {
   return request("/api/webapp/admin/x-campaigns", { method: "POST", body: data });
 }
@@ -1980,6 +1983,10 @@ export function getAdminXCampaignHistory(
 
 export function triggerAdminXCampaignGenerate(id: string): Promise<{ success: boolean; postId: string }> {
   return request(`/api/webapp/admin/x-campaigns/${id}/generate`, { method: "POST" });
+}
+
+export function getAdminXCampaignMediaFolder(): Promise<{ success: boolean; folderId: string; cmsUrl: string }> {
+  return request("/api/webapp/admin/x-campaigns/media-folder");
 }
 
 // ============================================================================

@@ -2443,6 +2443,7 @@ app.post('/api/webapp/admin/canva/jobs/:id/cancel', adminGuard, asyncHandler(can
 // X Auto Campaigns admin routes
 const xAutoCampaignAdminController = require('./controllers/xAutoCampaignAdminController');
 app.get('/api/webapp/admin/x-campaigns/stats', adminGuard, asyncHandler(xAutoCampaignAdminController.getStats));
+app.get('/api/webapp/admin/x-campaigns/media-folder', adminGuard, asyncHandler(xAutoCampaignAdminController.getMediaFolder));
 app.get('/api/webapp/admin/x-campaigns', adminGuard, asyncHandler(xAutoCampaignAdminController.listCampaigns));
 app.post('/api/webapp/admin/x-campaigns', adminGuard, asyncHandler(xAutoCampaignAdminController.createCampaign));
 app.put('/api/webapp/admin/x-campaigns/:id', adminGuard, asyncHandler(xAutoCampaignAdminController.updateCampaign));

@@ -13,6 +13,7 @@ import {
   deleteAdminXCampaign,
   triggerAdminXCampaignGenerate,
   getAdminXCampaignHistory,
+  getAdminXCampaignMediaFolder,
   type XAutoCampaignStats,
   type XAutoCampaign,
   type XAutoCampaignPost,
@@ -75,6 +76,7 @@ const defaultForm = {
   activeHoursStart: 8,
   activeHoursEnd: 23,
   maxPosts: "",
+  attachVideos: false,
 };
 
 export default function XAutoCampaigns() {
@@ -97,6 +99,9 @@ export default function XAutoCampaigns() {
   const [historyTotalPages, setHistoryTotalPages] = useState(1);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  const [mediaFolderId, setMediaFolderId] = useState<string | null>(null);
+  const [mediaFolderCmsUrl, setMediaFolderCmsUrl] = useState<string | null>(null);
+
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -113,6 +118,7 @@ export default function XAutoCampaigns() {
       const res = await getAdminXCampaignStats();
       setStats(res.stats);
       setAccounts(res.accounts);
+      if (res.mediaFolderId) setMediaFolderId(res.mediaFolderId);
     } catch { /* ignore */ }
   }, []);
 
@@ -195,6 +201,7 @@ export default function XAutoCampaigns() {
         activeHoursStart: form.activeHoursStart,
         activeHoursEnd: form.activeHoursEnd,
         maxPosts: form.maxPosts ? parseInt(form.maxPosts) : undefined,
+        mediaFolderId: form.attachVideos && mediaFolderId ? mediaFolderId : undefined,
       });
       setSuccess("Campaign created (paused)");
       setForm(defaultForm);
@@ -256,7 +263,10 @@ export default function XAutoCampaigns() {
       header: "Campaign",
       render: (row: XAutoCampaign) => (
         <div className="max-w-[180px]">
-          <p className="text-sm font-medium truncate">{row.name}</p>
+          <p className="text-sm font-medium truncate">
+            {row.media_folder_id && <span title="Video attached" className="text-pnp-accent mr-1">&#9654;</span>}
+            {row.name}
+          </p>
           <p className="text-xs text-pnp-textSecondary">@{row.handle || "unknown"}</p>
         </div>
       ),
@@ -531,6 +541,38 @@ export default function XAutoCampaigns() {
                 className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none min-h-[60px]"
                 placeholder="Additional instructions for Grok..."
               />
+            </div>
+
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.attachVideos}
+                  onChange={async (e) => {
+                    const checked = e.target.checked;
+                    setForm((f) => ({ ...f, attachVideos: checked }));
+                    if (checked && !mediaFolderCmsUrl) {
+                      try {
+                        const res = await getAdminXCampaignMediaFolder();
+                        setMediaFolderId(res.folderId);
+                        setMediaFolderCmsUrl(res.cmsUrl);
+                      } catch { /* ignore */ }
+                    }
+                  }}
+                  className="w-4 h-4 rounded border-pnp-border bg-pnp-background text-pnp-accent focus:ring-pnp-accent"
+                />
+                <span className="text-sm text-pnp-textPrimary">Attach random video from CMS</span>
+              </label>
+              {form.attachVideos && mediaFolderCmsUrl && (
+                <a
+                  href={mediaFolderCmsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-pnp-accent hover:underline"
+                >
+                  Upload videos in CMS &rarr;
+                </a>
+              )}
             </div>
 
             <div className="flex justify-end">

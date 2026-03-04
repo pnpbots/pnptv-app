@@ -8,11 +8,12 @@ const ITEMS_PER_PAGE = 20;
 
 const getStats = async (req, res) => {
   try {
-    const [stats, accounts] = await Promise.all([
+    const [stats, accounts, mediaFolderId] = await Promise.all([
       XAutoCampaignService.getStats(),
       XPostService.listActiveAccounts(),
+      XAutoCampaignService.ensureMediaFolder().catch(() => null),
     ]);
-    return res.json({ success: true, stats, accounts });
+    return res.json({ success: true, stats, accounts, mediaFolderId });
   } catch (error) {
     logger.error('Error getting X campaign stats:', error);
     return res.status(500).json({ error: error.message });
@@ -51,6 +52,7 @@ const createCampaign = async (req, res) => {
     const {
       name, accountId, topic, grokMode, language, customPrompt,
       intervalMinutes, activeHoursStart, activeHoursEnd, maxPosts,
+      mediaFolderId,
     } = req.body;
 
     if (!name || !accountId || !topic) {
@@ -70,6 +72,7 @@ const createCampaign = async (req, res) => {
       maxPosts: maxPosts || null,
       createdBy: req.session?.user?.id,
       createdByUsername: req.session?.user?.username,
+      mediaFolderId: mediaFolderId || null,
     });
 
     logger.info('X auto campaign created', {
@@ -190,6 +193,20 @@ const triggerGenerate = async (req, res) => {
   }
 };
 
+const getMediaFolder = async (req, res) => {
+  try {
+    const folderId = await XAutoCampaignService.ensureMediaFolder();
+    return res.json({
+      success: true,
+      folderId,
+      cmsUrl: `https://cms.pnptv.app/admin/files?folder=${folderId}`,
+    });
+  } catch (error) {
+    logger.error('Error getting media folder:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   getStats,
   listCampaigns,
@@ -200,4 +217,5 @@ module.exports = {
   deleteCampaign,
   getCampaignHistory,
   triggerGenerate,
+  getMediaFolder,
 };
