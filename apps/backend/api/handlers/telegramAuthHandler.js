@@ -332,7 +332,7 @@ const checkAuthStatus = async (req, res) => {
     // Refresh tier, role, and subscription from DB (prevents stale session data)
     try {
       const { rows } = await query(
-        'SELECT tier, role, subscription_status, photo_file_id, creator_status, creator_type FROM users WHERE id = $1',
+        'SELECT tier, role, subscription_status, photo_file_id, creator_status, creator_type, age_verified, terms_accepted FROM users WHERE id = $1',
         [user.id]
       );
       if (rows.length > 0) {
@@ -342,6 +342,10 @@ const checkAuthStatus = async (req, res) => {
         user.subscriptionStatus = fresh.subscription_status || user.subscriptionStatus || 'free';
         user.creator_status = fresh.creator_status || 'none';
         user.creator_type = fresh.creator_type || null;
+        user.age_verified = fresh.age_verified;
+        user.ageVerified = fresh.age_verified;
+        user.terms_accepted = fresh.terms_accepted;
+        user.acceptedTerms = fresh.terms_accepted;
         const isValidPhoto = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
         if (isValidPhoto(fresh.photo_file_id)) {
           user.photoUrl = fresh.photo_file_id;
