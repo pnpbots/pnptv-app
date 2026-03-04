@@ -520,11 +520,18 @@ class CanvaService {
    * Update an export job.
    */
   static async updateExportJob(jobId, updates) {
+    const ALLOWED_COLUMNS = new Set([
+      'status', 'canva_export_id', 'export_url', 'directus_file_id',
+      'directus_content_id', 'error_message', 'started_at', 'completed_at',
+    ]);
     const setClauses = [];
     const values = [];
     let paramIndex = 1;
 
     for (const [key, value] of Object.entries(updates)) {
+      if (!ALLOWED_COLUMNS.has(key)) {
+        throw new Error(`Column '${key}' is not permitted in export job updates`);
+      }
       setClauses.push(`${key} = $${paramIndex}`);
       values.push(value);
       paramIndex++;

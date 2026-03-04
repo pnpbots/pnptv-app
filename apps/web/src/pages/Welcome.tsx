@@ -87,7 +87,7 @@ export default function Welcome() {
             Your membership is active. Here's everything you can do on PNPtv —
             explore each feature below to get started.
           </p>
-          {user?.tier === "PRIME" && (
+          {user?.tier?.toUpperCase() === "PRIME" && (
             <div className="inline-flex items-center gap-2 mt-3 px-3 py-1 rounded-full bg-[#D4007A]/20 border border-[#D4007A]/30">
               <span className="w-2 h-2 rounded-full bg-[#D4007A] animate-pulse" />
               <span className="text-xs text-[#D4007A] font-medium">
@@ -95,7 +95,7 @@ export default function Welcome() {
               </span>
             </div>
           )}
-          {user?.tier === "member" && (
+          {user?.tier?.toLowerCase() === "member" && (
             <div className="inline-flex items-center gap-2 mt-3 px-3 py-1 rounded-full bg-[#FFB454]/20 border border-[#FFB454]/30">
               <span className="w-2 h-2 rounded-full bg-[#FFB454] animate-pulse" />
               <span className="text-xs text-[#FFB454] font-medium">

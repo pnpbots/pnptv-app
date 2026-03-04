@@ -411,13 +411,20 @@ const handleDaimoWebhook = async (req, res) => {
         token: source?.tokenSymbol || 'USDC',
       });
 
-      // Verify webhook authorization (optional — Daimo Pay does not currently
-      // document a standard webhook authentication mechanism)
+      // Verify webhook authorization
       const authHeader = req.headers['authorization'] || req.headers['x-daimo-signature'];
       let isValidSignature = false;
 
-      if (authHeader && DaimoService.webhookSecret) {
-        // Auth header present + secret configured: verify strictly
+      if (DaimoService.webhookSecret) {
+        // Secret configured: require valid auth header
+        if (!authHeader) {
+          await PaymentWebhookEventModel.logEvent({
+            ...eventMeta,
+            isValidSignature: false,
+          });
+          logger.error('Daimo webhook rejected: secret configured but no auth header', { eventId: id });
+          return res.status(401).json({ success: false, error: 'Authorization header required' });
+        }
         isValidSignature = DaimoService.verifyWebhookSignature(req.body, authHeader);
         if (!isValidSignature) {
           await PaymentWebhookEventModel.logEvent({
@@ -431,12 +438,10 @@ const handleDaimoWebhook = async (req, res) => {
           return res.status(401).json({ success: false, error: 'Invalid signature' });
         }
       } else {
-        // No auth header or no secret: accept with warning
-        // Security maintained by payload validation, idempotency, and replay detection
-        logger.warn('Daimo webhook received without authentication', {
+        // No secret configured: accept with warning (operator should set DAIMO_WEBHOOK_SECRET)
+        logger.warn('Daimo webhook accepted without secret configured', {
           eventId: id,
           hasAuthHeader: !!authHeader,
-          hasSecret: !!DaimoService.webhookSecret,
         });
         isValidSignature = true;
       }

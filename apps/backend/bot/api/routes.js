@@ -2005,8 +2005,8 @@ const notificationsController = require('../../api/controllers/notificationsCont
 // Web App Authentication
 app.get('/api/webapp/auth/telegram/start', asyncHandler(webAppController.telegramStart));
 app.get('/api/webapp/auth/telegram/callback', asyncHandler(webAppController.telegramCallback));
-app.post('/api/webapp/auth/telegram', asyncHandler(webAppController.telegramLogin));
-app.post('/api/webapp/auth/telegram/token', asyncHandler(webAppController.telegramGenerateToken));
+app.post('/api/webapp/auth/telegram', authLimiter, asyncHandler(webAppController.telegramLogin));
+app.post('/api/webapp/auth/telegram/token', authLimiter, asyncHandler(webAppController.telegramGenerateToken));
 app.get('/api/webapp/auth/telegram/check', asyncHandler(webAppController.telegramCheckToken));
 app.post('/api/webapp/auth/email/register', authLimiter, asyncHandler(webAppController.emailRegister));
 app.post('/api/webapp/auth/email/login', authLimiter, asyncHandler(webAppController.emailLogin));
@@ -2017,8 +2017,8 @@ app.get('/api/webapp/auth/x/callback', asyncHandler(webAppController.xLoginCallb
 app.post('/api/webapp/auth/x/unlink', asyncHandler(webAppController.unlinkX));
 app.get('/api/me', asyncHandler(webAppController.authStatus));
 app.post('/api/webapp/auth/logout', asyncHandler(webAppController.logout));
-app.post('/api/webapp/auth/forgot-password', asyncHandler(webAppController.forgotPassword));
-app.post('/api/webapp/auth/reset-password', asyncHandler(webAppController.resetPassword));
+app.post('/api/webapp/auth/forgot-password', authLimiter, asyncHandler(webAppController.forgotPassword));
+app.post('/api/webapp/auth/reset-password', authLimiter, asyncHandler(webAppController.resetPassword));
 
 // Web App Profile
 app.get('/api/webapp/profile', asyncHandler(webAppController.getProfile));
@@ -2870,7 +2870,7 @@ app.get('/api/proxy/live/streams', asyncHandler(async (req, res) => {
 
     res.json({ success: true, streams });
   } catch (error) {
-    logger.error('Live proxy streams error:', error.message);
+    logger.warn('Live proxy streams unavailable:', error.message);
     res.json({ success: true, streams: [] });
   }
 }));
@@ -3530,6 +3530,22 @@ app.post(
 // N8N AUTOMATION ENDPOINTS
 // ==========================================
 const n8nAutomationController = require('./controllers/n8nAutomationController');
+
+// Auth middleware: validates X-N8N-SECRET header against env var
+const requireN8nSecret = (req, res, next) => {
+  const provided = req.get('X-N8N-SECRET');
+  const expected = process.env.N8N_WEBHOOK_SECRET;
+  if (!expected) {
+    logger.error('N8N_WEBHOOK_SECRET is not configured — rejecting n8n request');
+    return res.status(503).json({ success: false, error: 'N8n integration not configured' });
+  }
+  if (!provided || provided !== expected) {
+    logger.warn('n8n endpoint: invalid or missing X-N8N-SECRET', { ip: req.ip, path: req.path });
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+  return next();
+};
+
 const n8nRateLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
@@ -3537,15 +3553,15 @@ const n8nRateLimiter = rateLimit({
   skip: (req) => req.get('X-N8N-SECRET') === process.env.N8N_WEBHOOK_SECRET
 });
 
-app.get('/api/n8n/payments/failed', n8nRateLimiter, asyncHandler(n8nAutomationController.getFailedPayments));
-app.post('/api/n8n/payments/update-status', n8nRateLimiter, asyncHandler(n8nAutomationController.updatePaymentRecoveryStatus));
-app.get('/api/n8n/subscriptions/expiry', n8nRateLimiter, asyncHandler(n8nAutomationController.getExpiryNotifications));
-app.post('/api/n8n/workflows/log', n8nRateLimiter, asyncHandler(n8nAutomationController.logWorkflowExecution));
-app.post('/api/n8n/emails/log', n8nRateLimiter, asyncHandler(n8nAutomationController.logEmailNotification));
-app.post('/api/n8n/alerts/admin', n8nRateLimiter, asyncHandler(n8nAutomationController.sendAdminAlert));
-app.get('/api/n8n/health', n8nRateLimiter, asyncHandler(n8nAutomationController.checkSystemHealth));
-app.get('/api/n8n/errors/summary', n8nRateLimiter, asyncHandler(n8nAutomationController.getErrorSummary));
-app.get('/api/n8n/metrics/dashboard', n8nRateLimiter, asyncHandler(n8nAutomationController.getDashboardMetrics));
+app.get('/api/n8n/payments/failed', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.getFailedPayments));
+app.post('/api/n8n/payments/update-status', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.updatePaymentRecoveryStatus));
+app.get('/api/n8n/subscriptions/expiry', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.getExpiryNotifications));
+app.post('/api/n8n/workflows/log', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.logWorkflowExecution));
+app.post('/api/n8n/emails/log', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.logEmailNotification));
+app.post('/api/n8n/alerts/admin', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.sendAdminAlert));
+app.get('/api/n8n/health', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.checkSystemHealth));
+app.get('/api/n8n/errors/summary', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.getErrorSummary));
+app.get('/api/n8n/metrics/dashboard', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.getDashboardMetrics));
 
 // ==========================================
 // NGINX AUTH_REQUEST ENDPOINT (Internal)

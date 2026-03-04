@@ -209,7 +209,7 @@ class SubscriptionController {
         amountCOP,
         currencyCode,
         invoice,
-        epaycoSignature,
+        // epaycoSignature intentionally omitted — server-side HMAC must not be sent to client
         email: sanitizedEmail,
         name,
         telegramId,

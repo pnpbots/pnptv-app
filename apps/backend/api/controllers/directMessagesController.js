@@ -49,7 +49,8 @@ async function getThreads(req, res) {
         END = u.id
       )
       WHERE dt.user_a = $1 OR dt.user_b = $1
-      ORDER BY dt.last_message_at DESC`,
+      ORDER BY dt.last_message_at DESC
+      LIMIT 100`,
       [userId]
     );
 

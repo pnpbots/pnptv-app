@@ -431,26 +431,11 @@ class PaymentService {
      * @param {number} [maxRetries=2] - Maximum number of retry attempts
      * @returns {Promise<boolean>} Success status
      */
-    static async retryPayment(paymentId, maxRetries = 2) {
-      let attempt = 0;
-      let success = false;
-      while (attempt < maxRetries && !success) {
-        try {
-          // Aquí iría la lógica real de reintento con el proveedor
-          await PaymentModel.updateStatus(paymentId, 'pending', { retryAttempt: attempt + 1 });
-          // Simulación: marcar como fallido si no es el último intento
-          if (attempt < maxRetries - 1) {
-            await PaymentModel.updateStatus(paymentId, 'failed', { retryAttempt: attempt + 1 });
-          } else {
-            await PaymentModel.updateStatus(paymentId, 'completed', { retryAttempt: attempt + 1 });
-            success = true;
-          }
-        } catch (error) {
-          logger.error('Error reintentando pago:', { paymentId, attempt, error: error.message });
-        }
-        attempt++;
-      }
-      return success;
+    static async retryPayment(paymentId) {
+      // Removed simulation code that marked payments as 'completed' unconditionally.
+      // Use provider-specific retry: ePayco webhook re-verification or Daimo status polling.
+      logger.error('retryPayment() called — simulation code removed', { paymentId });
+      throw new Error('retryPayment() is not implemented. Use provider-specific payment verification flow.');
     }
   static async createPayment({ userId, planId, provider, sku, chatId, creatorId }) {
     try {
@@ -493,29 +478,13 @@ class PaymentService {
         // Create payment reference
         const paymentRef = `PAY-${payment.id.substring(0, 8).toUpperCase()}`;
 
-        // Check if this is a recurring subscription plan
-        const subscriptionUrl = getEpaycoSubscriptionUrl(planId, {
-          extra1: String(userId),
-          extra2: planId,
-          extra3: payment.id,
+        // All ePayco payments use the tokenized checkout page
+        paymentUrl = `${checkoutDomain}/payment/${payment.id}`;
+        logger.info('ePayco tokenized checkout URL created', {
+          paymentId: payment.id,
+          planId,
+          paymentUrl,
         });
-
-        if (subscriptionUrl) {
-          // Recurring plan → ePayco hosted subscription page
-          paymentUrl = subscriptionUrl;
-          logger.info('ePayco subscription URL created', {
-            paymentId: payment.id,
-            planId,
-            paymentUrl,
-          });
-        } else {
-          // One-time plan → direct tokenized checkout page (no intermediate landing step)
-          paymentUrl = `${checkoutDomain}/payment/${payment.id}`;
-          logger.info('ePayco checkout URL created (direct tokenized checkout)', {
-            paymentId: payment.id,
-            paymentUrl,
-          });
-        }
 
         await PaymentModel.updateStatus(payment.id, 'pending', {
           paymentUrl,

@@ -61,7 +61,7 @@ class MediaCleanupService {
       // Find deleted or very old media
       const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
       const { rows } = await query(
-        'SELECT media_url FROM social_posts WHERE media_url IS NOT NULL AND created_at < $1 AND is_deleted = true',
+        'SELECT media_url FROM social_posts WHERE media_url IS NOT NULL AND created_at < $1 AND is_deleted = true ORDER BY created_at LIMIT 1000',
         [cutoffDate]
       );
 

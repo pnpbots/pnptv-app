@@ -441,6 +441,8 @@ export default function Booking() {
   // Free-tier: count of nearby users returned from API
   const [nearbyCount, setNearbyCount] = useState(0);
   const [radius, setRadius] = useState(5);
+  const radiusRef = useRef(radius);
+  radiusRef.current = radius;
   const [incognito, setIncognito] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -519,7 +521,7 @@ export default function Booking() {
         setMyPos({ lat: latitude, lng: longitude });
         setPageState("ready");
         sendLocation(latitude, longitude, accuracy);
-        fetchNearby(latitude, longitude, radius);
+        fetchNearby(latitude, longitude, radiusRef.current);
       },
       () => {
         setPageState("denied");
@@ -532,7 +534,7 @@ export default function Booking() {
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
     };
-  }, [sendLocation, fetchNearby, radius]);
+  }, [sendLocation, fetchNearby]);
 
   // Auto-refresh nearby search
   useEffect(() => {

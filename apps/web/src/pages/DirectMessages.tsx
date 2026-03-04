@@ -579,17 +579,10 @@ function Conversation({
       const data = await getMessages(userId, 50);
       setMessages(data.messages || []);
       setLoadError(null);
-      if (!partnerName && data.messages?.length) {
-        const other = data.messages.find((m: DirectMessage) => !m.isMine);
-        if (other) {
-          // partnerName is derived from thread; clear it if still unknown
-          setPartnerName((prev) => prev);
-        }
-      }
     } catch {
       setLoadError("Failed to load messages. Tap to retry.");
     }
-  }, [userId, partnerName]);
+  }, [userId]);
 
   useEffect(() => {
     setIsLoading(true);

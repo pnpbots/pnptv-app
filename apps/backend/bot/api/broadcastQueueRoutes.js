@@ -1,16 +1,44 @@
 /**
  * Broadcast Queue API Routes
  * REST endpoints for monitoring and managing async broadcast queue
+ * All routes require admin authentication.
  */
 
 const express = require('express');
 const { getBroadcastQueueIntegration } = require('../services/broadcastQueueIntegration');
 const { getAsyncBroadcastQueue } = require('../services/asyncBroadcastQueue');
 const logger = require('../../utils/logger');
+const { verifyAdminJWT } = require('./middleware/jwtAuth');
+const PermissionService = require('../services/permissionService');
 
 const router = express.Router();
 const queueIntegration = getBroadcastQueueIntegration();
 const queue = getAsyncBroadcastQueue();
+
+// Admin auth — matches adminUserRoutes.js pattern
+const requireAdminAccess = async (req, res, next) => {
+  try {
+    const sessionUser = req.session?.user;
+    if (sessionUser?.id) {
+      const role = String(sessionUser.role || '').toLowerCase();
+      if (role === 'admin' || role === 'superadmin') {
+        req.user = sessionUser;
+        return next();
+      }
+      const isAdmin = await PermissionService.isAdmin(sessionUser.id);
+      if (isAdmin) {
+        req.user = sessionUser;
+        return next();
+      }
+    }
+    return verifyAdminJWT(req, res, next);
+  } catch (error) {
+    logger.error('broadcastQueueRoutes: authorization check failed', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Authorization check failed' });
+  }
+};
+
+router.use(requireAdminAccess);
 
 /**
  * GET /api/admin/queue/status

@@ -158,6 +158,7 @@ class MembershipCleanupService {
       const primeUsers = await query(`
         SELECT id, username FROM users
         WHERE subscription_status = 'active' AND tier = 'PRIME'
+        ORDER BY id LIMIT 500
       `);
 
       logger.info(`Found ${primeUsers.rows.length} active Prime users to check for PRIME channel access`);
@@ -303,6 +304,7 @@ class MembershipCleanupService {
       const churnedUsers = await query(`
         SELECT id, username FROM users
         WHERE subscription_status IN ('churned', 'expired')
+        ORDER BY id LIMIT 500
       `);
 
       logger.info(`Found ${churnedUsers.rows.length} churned/expired users to check for PRIME channel access`);

@@ -8,21 +8,25 @@ const logger = require('../../../utils/logger');
  */
 const joinCommunityRoom = async (req, res) => {
   try {
-    const { userId, displayName, email } = req.body;
+    // Use session identity — never trust req.body.userId
+    const sessionUser = req.session?.user;
+    if (!sessionUser || !sessionUser.id) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    const userId = sessionUser.id;
+    const { displayName, email } = req.body;
 
-    // Validate required fields
-    if (!userId || !displayName) {
+    if (!displayName) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: userId, displayName'
+        error: 'Missing required field: displayName'
       });
     }
 
-    // Check if user is a true moderator
     let isTrueModerator = false;
     try {
       const UserModel = require('../../../models/userModel');
-      const user = await UserModel.getById(parseInt(userId));
+      const user = await UserModel.getById(userId);
       isTrueModerator = user && (user.role === 'admin' || user.role === 'superadmin');
     } catch (e) {
       // If user lookup fails, allow as guest
@@ -134,12 +138,17 @@ const getChatHistory = async (req, res) => {
  */
 const addMessage = async (req, res) => {
   try {
-    const { userId, displayName, message } = req.body;
+    const sessionUser = req.session?.user;
+    if (!sessionUser || !sessionUser.id) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    const userId = sessionUser.id;
+    const { displayName, message } = req.body;
 
-    if (!userId || !displayName || !message) {
+    if (!displayName || !message) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: userId, displayName, message'
+        error: 'Missing required fields: displayName, message'
       });
     }
 
@@ -208,11 +217,14 @@ const getLeaderboard = async (req, res) => {
  */
 const muteUser = async (req, res) => {
   try {
-    const { userId, targetUserId } = req.body;
+    const sessionUser = req.session?.user;
+    if (!sessionUser || !sessionUser.id) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    const { targetUserId } = req.body;
 
-    // Check if requester is moderator
     const UserModel = require('../../../models/userModel');
-    const user = await UserModel.getById(parseInt(userId));
+    const user = await UserModel.getById(sessionUser.id);
     if (!user || (user.role !== 'admin' && user.role !== 'superadmin')) {
       return res.status(403).json({
         success: false,
@@ -223,7 +235,7 @@ const muteUser = async (req, res) => {
     const success = CommunityRoomService.muteUser(targetUserId);
 
     if (success) {
-      logger.info('User muted in community room', { userId, targetUserId });
+      logger.info('User muted in community room', { userId: sessionUser.id, targetUserId });
       res.json({ success: true });
     } else {
       res.status(404).json({
@@ -246,11 +258,14 @@ const muteUser = async (req, res) => {
  */
 const removeUser = async (req, res) => {
   try {
-    const { userId, targetUserId } = req.body;
+    const sessionUser = req.session?.user;
+    if (!sessionUser || !sessionUser.id) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    const { targetUserId } = req.body;
 
-    // Check if requester is moderator
     const UserModel = require('../../../models/userModel');
-    const user = await UserModel.getById(parseInt(userId));
+    const user = await UserModel.getById(sessionUser.id);
     if (!user || (user.role !== 'admin' && user.role !== 'superadmin')) {
       return res.status(403).json({
         success: false,
@@ -261,7 +276,7 @@ const removeUser = async (req, res) => {
     const success = CommunityRoomService.removeUser(targetUserId);
 
     if (success) {
-      logger.info('User removed from community room', { userId, targetUserId });
+      logger.info('User removed from community room', { userId: sessionUser.id, targetUserId });
       res.json({ success: true });
     } else {
       res.status(404).json({
@@ -284,11 +299,13 @@ const removeUser = async (req, res) => {
  */
 const clearChat = async (req, res) => {
   try {
-    const { userId } = req.body;
+    const sessionUser = req.session?.user;
+    if (!sessionUser || !sessionUser.id) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
 
-    // Check if requester is moderator
     const UserModel = require('../../../models/userModel');
-    const user = await UserModel.getById(parseInt(userId));
+    const user = await UserModel.getById(sessionUser.id);
     if (!user || (user.role !== 'admin' && user.role !== 'superadmin')) {
       return res.status(403).json({
         success: false,
@@ -298,7 +315,7 @@ const clearChat = async (req, res) => {
 
     const count = CommunityRoomService.clearChatHistory();
 
-    logger.info('Chat history cleared', { userId, messagesCleared: count });
+    logger.info('Chat history cleared', { userId: sessionUser.id, messagesCleared: count });
     res.json({
       success: true,
       messagesCleared: count

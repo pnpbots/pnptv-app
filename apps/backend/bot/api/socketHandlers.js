@@ -390,6 +390,34 @@ function initSocketIO(io) {
     socket.on('dm:send', async ({ recipientId, content } = {}) => {
       if (!recipientId || !content || !content.trim()) return;
       if (recipientId === user.id) return;
+
+      // Free-tier daily DM limit (mirrors REST requireFreeTierDmLimit middleware)
+      const tier = (user.tier || 'free').toLowerCase();
+      const role = user.role || '';
+      const isFreeUser = tier === 'free' && role !== 'admin' && role !== 'superadmin';
+      if (isFreeUser) {
+        try {
+          const redis = getRedis();
+          const today = new Date().toISOString().slice(0, 10);
+          const dmKey = `pnptv:dm_limit:${user.id}:${today}`;
+          const createdAt = user.created_at || user.createdAt;
+          let dmLimit = 3;
+          if (createdAt) {
+            const daysSince = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
+            if (daysSince > 14) dmLimit = 1;
+          }
+          const newCount = await redis.incr(dmKey);
+          if (newCount === 1) await redis.expire(dmKey, 86400);
+          if (newCount > dmLimit) {
+            await redis.decr(dmKey);
+            socket.emit('dm:error', { message: 'Daily message limit reached. Upgrade for unlimited messaging.', code: 'DM_LIMIT_REACHED' });
+            return;
+          }
+        } catch (limErr) {
+          logger.warn('dm:send tier limit check failed (fail-open)', { userId: user.id, error: limErr.message });
+        }
+      }
+
       if (!rateLimit(`dm:${user.id}`, 100, 3600000)) {
         socket.emit('dm:error', { message: 'Too many messages.' });
         return;
