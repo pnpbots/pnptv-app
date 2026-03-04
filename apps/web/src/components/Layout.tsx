@@ -1,5 +1,5 @@
-import React, { useEffect } from "react";
-import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
+import React from "react";
+import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { BottomNav } from "./BottomNav";
 import { useAuth } from "@/hooks/useAuth";
 import { useTelegram } from "@/hooks/useTelegram";
@@ -20,13 +20,6 @@ export function Layout() {
   const { isAuthenticated, isAdmin, user, isLoading } = useAuth();
   const { isTelegram } = useTelegram();
   const navigate = useNavigate();
-  const location = useLocation();
-
-  useEffect(() => {
-    if (isAuthenticated && isAdmin && location.pathname === "/") {
-      navigate("/admin", { replace: true });
-    }
-  }, [isAuthenticated, isAdmin, location.pathname, navigate]);
 
   if (!isAuthenticated && !isLoading) {
     return <LoginPage />;
@@ -58,6 +51,20 @@ export function Layout() {
               {link.label}
             </NavLink>
           ))}
+          {isAdmin && (
+            <NavLink
+              to="/admin"
+              className={({ isActive }) =>
+                `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  isActive
+                    ? "nav-active"
+                    : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                }`
+              }
+            >
+              Admin
+            </NavLink>
+          )}
         </nav>
 
         <div className="p-4 border-t border-pnp-border">
