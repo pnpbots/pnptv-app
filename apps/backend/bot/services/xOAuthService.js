@@ -22,7 +22,7 @@ class XOAuthService {
     const clientSecret = process.env.TWITTER_CLIENT_SECRET;
     const redirectUri = process.env.TWITTER_REDIRECT_URI;
     const scopes = process.env.TWITTER_OAUTH_SCOPES
-      || 'tweet.read tweet.write users.read offline.access media.write openid';
+      || 'tweet.read tweet.write users.read offline.access media.write';
 
     if (!clientId || !redirectUri) {
       throw new Error('Faltan variables TWITTER_CLIENT_ID o TWITTER_REDIRECT_URI');

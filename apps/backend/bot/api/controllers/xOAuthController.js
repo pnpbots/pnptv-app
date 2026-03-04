@@ -184,9 +184,8 @@ const handleCallback = async (req, res) => {
       if (!tokenRes) throw lastTokenError || new Error('X OAuth token exchange failed');
 
       const accessToken = tokenRes.data.access_token;
-      const idToken = tokenRes.data.id_token || null;
 
-      // Fetch X profile — try v2 API, fall back to id_token JWT decode
+      // Fetch X profile — try v2 API, then v1.1 fallback
       let xData = null;
       try {
         const profileRes = await axios.get('https://api.twitter.com/2/users/me', {
@@ -202,25 +201,28 @@ const handleCallback = async (req, res) => {
           });
           xData = profileRes2.data?.data;
         } catch (err2) {
-          logger.warn('X webapp profile fetch failed, trying id_token fallback', {
+          logger.warn('X webapp v2 profile fetch failed, trying v1.1 fallback', {
             status1: err1.response?.status,
             status2: err2.response?.status,
           });
         }
       }
 
-      // Fallback: decode id_token JWT (returned when openid scope is requested)
-      if (!xData && idToken) {
+      // Fallback: v1.1 verify_credentials (works without project enrollment)
+      if (!xData) {
         try {
-          const payload = JSON.parse(Buffer.from(idToken.split('.')[1], 'base64url').toString());
+          const v1Res = await axios.get('https://api.twitter.com/1.1/account/verify_credentials.json', {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          const v1Data = v1Res.data;
           xData = {
-            id: payload.sub,
-            username: payload.preferred_username || payload.screen_name,
-            name: payload.name || payload.preferred_username,
+            id: String(v1Data.id_str || v1Data.id),
+            username: v1Data.screen_name,
+            name: v1Data.name,
           };
-          logger.info('X webapp profile resolved from id_token JWT', { sub: payload.sub, username: xData.username });
-        } catch (jwtErr) {
-          logger.error('Failed to decode X id_token:', jwtErr.message);
+          logger.info('X webapp profile resolved via v1.1 verify_credentials', { username: xData.username });
+        } catch (v1Err) {
+          logger.error('X webapp v1.1 profile fallback also failed:', { status: v1Err.response?.status, data: v1Err.response?.data });
         }
       }
 
