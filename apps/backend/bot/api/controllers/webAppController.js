@@ -30,7 +30,7 @@ function canonicalWebUrl(pathname) {
 }
 
 function redirectToCanonicalApp(res) {
-  return res.redirect(canonicalWebUrl('/app'));
+  return res.redirect('https://app.pnptv.app');
 }
 
 function redirectToCanonicalAuthError(res) {

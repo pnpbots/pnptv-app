@@ -109,7 +109,7 @@ const handleCallback = async (req, res) => {
     const stored = req.session.xOAuth;
     delete req.session.xOAuth;
 
-    const canonicalAppUrl = (process.env.WEBAPP_ORIGIN || process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app').replace(/\/+$/, '') + '/app';
+    const canonicalAppUrl = 'https://app.pnptv.app';
     const canonicalErrorUrl = (process.env.WEBAPP_ORIGIN || process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app').replace(/\/+$/, '') + '/?error=auth_failed';
 
     if (xError || !code || !state || !stored || stored.state !== state) {
