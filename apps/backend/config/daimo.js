@@ -125,7 +125,7 @@ const createDaimoPayment = async ({
     const data = await response.json();
     const session = data.session || data;
     const sessionId = session.sessionId || session.id;
-    const checkoutUrl = `https://daimo.com/deposit?id=${sessionId}`;
+    const checkoutUrl = `https://pay.daimo.com/checkout?id=${sessionId}`;
 
     logger.info('Daimo session created', {
       paymentId,
