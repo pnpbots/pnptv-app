@@ -25,17 +25,11 @@ const isMember = async (groupId, userId) => {
   return rows.length > 0;
 };
 
-// Auto-join main group and Wall of Fame group if not already a member
+// Auto-join all public community groups (main, wall of fame, PNP English, PNP Español, etc.)
 const ensureMainGroupMembership = async (userId) => {
   await query(
     `INSERT INTO hangout_group_members (group_id, user_id, role)
-     SELECT id, $1, 'member' FROM hangout_groups WHERE is_main = true
-     ON CONFLICT DO NOTHING`,
-    [userId]
-  );
-  await query(
-    `INSERT INTO hangout_group_members (group_id, user_id, role)
-     SELECT id, $1, 'member' FROM hangout_groups WHERE is_wall_of_fame = true
+     SELECT id, $1, 'member' FROM hangout_groups WHERE is_public = true
      ON CONFLICT DO NOTHING`,
     [userId]
   );

@@ -179,10 +179,6 @@ const updateUser = async (req, res) => {
     if (tier !== undefined) {
       queryParts.push(`tier = $${paramIndex++}`);
       values.push(tier);
-    } else if (subscriptionStatus !== undefined) {
-      // Keep tier in sync if tier not explicitly set
-      queryParts.push(`tier = $${paramIndex++}`);
-      values.push(subscriptionStatus === 'active' ? 'PRIME' : 'free');
     }
     if (subscriptionPlan !== undefined) {
       queryParts.push(`plan_id = $${paramIndex++}`);

@@ -306,10 +306,11 @@ const mapDaimoStatus = (daimoStatus) => {
     payment_started: 'pending',
     payment_completed: 'success',
     payment_bounced: 'failed',
+    payment_failed: 'failed',
     payment_refunded: 'refunded',
   };
 
-  return statusMap[daimoStatus] || 'pending';
+  return statusMap[daimoStatus] || 'unknown';
 };
 
 /**

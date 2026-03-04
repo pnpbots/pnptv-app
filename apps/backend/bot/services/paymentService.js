@@ -2438,6 +2438,15 @@ class PaymentService {
         };
       }
 
+      if (payment.status === 'failed' || payment.status === 'refunded') {
+        return {
+          success: false,
+          error: payment.status === 'refunded'
+            ? 'Este pago fue reembolsado. Por favor, genera un nuevo enlace desde el bot.'
+            : 'Este pago falló previamente. Por favor, genera un nuevo enlace desde el bot.',
+        };
+      }
+
       const planId = payment.planId || payment.plan_id;
       const plan = await PlanModel.getById(planId);
       if (!plan) {
@@ -2542,6 +2551,10 @@ class PaymentService {
         }
 
         customerId = customerResult.data?.customerId || customerResult.data?.id_customer || customerResult.id;
+        if (!customerId) {
+          logger.error('ePayco customer created but no customerId returned', { paymentId, customerResult });
+          return { success: false, error: 'Error al crear el cliente. Intenta nuevamente.' };
+        }
         logger.info('ePayco customer created', { paymentId, customerId });
       } else {
         logger.info('Reusing persisted ePayco customer for idempotent retry', {

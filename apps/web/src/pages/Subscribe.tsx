@@ -20,36 +20,36 @@ const PLAN_FEATURES: Record<string, string[]> = {
     "Social feed access",
     "Nearby users discovery",
   ],
-  "week-trial-pass": [
+  "week_pass": [
     "7 days of full PRIME access",
     "Videorama exclusive content",
     "Nearby Premium features",
     "Community hangouts",
   ],
-  "monthly-pass": [
-    "30 days of full PRIME access",
-    "Unlimited Videorama library",
+  "three_months_pass": [
+    "3 months of full PRIME access",
+    "Full Videorama library access",
     "Nearby Premium features",
-    "Full community hangouts",
+    "Community hangouts",
     "Priority support",
   ],
-  "crystal-pass": [
+  "crystal_pass": [
     "6 months of full PRIME access",
     "Unlimited Videorama + early releases",
     "Nearby Premium features",
     "VIP community status",
     "Priority support",
   ],
-  "diamond-pass": [
+  "yearly_pass": [
     "1 year of full PRIME access",
     "Unlimited Videorama + exclusives",
     "Nearby Premium features",
     "VIP badge + priority support",
     "Access to exclusive events",
   ],
-  "lifetime-pass": [
+  "lifetime_pass": [
     "Lifetime PRIME access — pay once",
-    "Everything in Diamond, forever",
+    "Everything in Yearly, forever",
     "Founder badge",
     "Priority feature requests",
     "Never pay again",
@@ -63,7 +63,7 @@ const MEMBER_EXCLUDED = [
   "No VIP badge or priority support",
 ];
 
-const RECOMMENDED_PLAN = "diamond-pass";
+const RECOMMENDED_PLAN = "yearly_pass";
 
 function formatPrice(amount: number, currency: string): string {
   if (currency === "COP") {
@@ -337,7 +337,7 @@ export default function Subscribe() {
                 </div>
                 <div className="text-right">
                   <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
-                  {(plan.duration_days || plan.duration || 0) > 0 && (plan.duration_days || plan.duration || 0) < 36500 && (
+                  {(plan.duration_days || plan.duration || 0) >= 30 && (plan.duration_days || plan.duration || 0) < 36500 && (
                     <div className="text-[10px] text-pnp-textSecondary">
                       {showCOP
                         ? formatPrice(plan.priceCOP / Math.max(1, Math.round((plan.duration_days || plan.duration || 30) / 30)), "COP")

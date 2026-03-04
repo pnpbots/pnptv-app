@@ -341,7 +341,7 @@ function verifyEpaycoSignature(req) {
 
   const signatureResult = PaymentService.verifyEpaycoSignature(req.body);
   const isValid = typeof signatureResult === 'object' && signatureResult !== null
-    ? signatureResult.valid !== false
+    ? signatureResult.valid === true
     : Boolean(signatureResult);
 
   if (!isValid) {
@@ -365,7 +365,26 @@ const handleDaimoWebhook = async (req, res) => {
   const DaimoService = require('../../services/daimoService');
 
   try {
-    // Normalize payload: Daimo Pay v2 nests data under `payment` object
+    // Step 1: Verify auth BEFORE any Redis lock or payload processing
+    const authHeader = req.headers['authorization'] || req.headers['x-daimo-signature'];
+    let isValidSignature = false;
+
+    if (DaimoService.webhookSecret) {
+      if (!authHeader) {
+        logger.error('Daimo webhook rejected: secret configured but no auth header');
+        return res.status(401).json({ success: false, error: 'Authorization header required' });
+      }
+      isValidSignature = DaimoService.verifyWebhookSignature(req.body, authHeader);
+      if (!isValidSignature) {
+        logger.error('Invalid Daimo webhook authorization — rejecting');
+        return res.status(401).json({ success: false, error: 'Invalid signature' });
+      }
+    } else {
+      logger.warn('Daimo webhook accepted without secret configured');
+      isValidSignature = true;
+    }
+
+    // Step 2: Normalize payload after auth passes
     // New format: { type, paymentId, chainId, txHash, payment: { id, status, source, destination, metadata } }
     // Legacy format: { id, status, source, metadata }
     let id, status, source, metadata;
@@ -378,15 +397,17 @@ const handleDaimoWebhook = async (req, res) => {
       ({ id, status, source, metadata } = req.body);
     }
 
-    // Use event ID + status as idempotency key (allows payment_unpaid → payment_completed transitions)
-    const idempotencyKey = `daimo_${id}_${status}`;
+    // Reject payloads with undefined id/status to prevent poisoned lock keys
+    if (!id || !status) {
+      logger.warn('Daimo webhook missing id or status', { id, status });
+      return res.status(400).json({ success: false, error: 'Missing id or status' });
+    }
 
+    // Step 3: Acquire idempotency lock (safe now — auth verified, id validated)
+    const idempotencyKey = `daimo_${id}_${status}`;
     const acquired = await cache.acquireLock(idempotencyKey, 60);
     if (!acquired) {
-      logger.info('Duplicate Daimo webhook detected (already processed)', {
-        eventId: id,
-        status,
-      });
+      logger.info('Duplicate Daimo webhook detected (already processed)', { eventId: id, status });
       return res.status(200).json({ success: true, duplicate: true });
     }
 
@@ -410,41 +431,6 @@ const handleDaimoWebhook = async (req, res) => {
         chain: 'Optimism',
         token: source?.tokenSymbol || 'USDC',
       });
-
-      // Verify webhook authorization
-      const authHeader = req.headers['authorization'] || req.headers['x-daimo-signature'];
-      let isValidSignature = false;
-
-      if (DaimoService.webhookSecret) {
-        // Secret configured: require valid auth header
-        if (!authHeader) {
-          await PaymentWebhookEventModel.logEvent({
-            ...eventMeta,
-            isValidSignature: false,
-          });
-          logger.error('Daimo webhook rejected: secret configured but no auth header', { eventId: id });
-          return res.status(401).json({ success: false, error: 'Authorization header required' });
-        }
-        isValidSignature = DaimoService.verifyWebhookSignature(req.body, authHeader);
-        if (!isValidSignature) {
-          await PaymentWebhookEventModel.logEvent({
-            ...eventMeta,
-            isValidSignature: false,
-          });
-          logger.error('Invalid Daimo webhook authorization — rejecting', {
-            eventId: id,
-            hasAuthHeader: true,
-          });
-          return res.status(401).json({ success: false, error: 'Invalid signature' });
-        }
-      } else {
-        // No secret configured: accept with warning (operator should set DAIMO_WEBHOOK_SECRET)
-        logger.warn('Daimo webhook accepted without secret configured', {
-          eventId: id,
-          hasAuthHeader: !!authHeader,
-        });
-        isValidSignature = true;
-      }
 
       await PaymentWebhookEventModel.logEvent({
         ...eventMeta,

@@ -218,9 +218,9 @@ class DaimoService {
    * @returns {boolean} True if configured
    */
   isConfigured() {
+    // refundAddress is optional — getDaimoConfig() falls back to treasury
     const isConfigured = !!(
       this.treasuryAddress &&
-      this.refundAddress &&
       this.apiKey
     );
 

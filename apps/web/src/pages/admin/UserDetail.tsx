@@ -266,8 +266,7 @@ export default function UserDetail() {
               className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
             >
               <option value="active">active</option>
-              <option value="expired">expired</option>
-              <option value="cancelled">cancelled</option>
+              <option value="churned">churned</option>
               <option value="free">free</option>
             </select>
           </div>

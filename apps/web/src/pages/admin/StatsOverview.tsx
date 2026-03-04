@@ -107,7 +107,7 @@ export default function StatsOverview() {
   }, [load]);
 
   const dailyRevenue = stats?.dailyRevenue ?? [];
-  const maxRevenue = Math.max(...dailyRevenue.map((d) => d.amount), 1);
+  const maxRevenue = Math.max(...dailyRevenue.map((d) => isNaN(d.amount) ? 0 : d.amount), 1);
 
   const paymentMethodColumns = [
     {
@@ -327,7 +327,7 @@ export default function StatsOverview() {
           data={stats?.recentTransactions ?? []}
           loading={loading && !stats}
           emptyMessage="No recent transactions"
-          getRowId={(row) => `${row.date}-${row.userId}`}
+          getRowId={(row) => `${row.date}-${row.userId}-${row.amount}-${row.status}`}
         />
       </div>
     </div>

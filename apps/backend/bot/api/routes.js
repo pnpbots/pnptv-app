@@ -1226,41 +1226,6 @@ app.post('/api/webhook/epayco', webhookLimiter, webhookController.handleEpaycoWe
 app.post('/checkout/pnp', webhookLimiter, webhookController.handleEpaycoWebhook);
 app.post('/checkout/pnp/confirmation', webhookLimiter, webhookController.handleEpaycoWebhook);
 
-// Daimo webhook diagnostic endpoint (for debugging)
-app.post('/api/webhooks/daimo/debug', express.raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
-  try {
-    const contentType = req.headers['content-type'] || 'none';
-    const contentLength = req.headers['content-length'] || '0';
-    const rawBody = req.body ? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body)) : '';
-    const bodyPreview = rawBody.slice(0, 1000);
-
-    logger.info('[Daimo] Diagnostic webhook received', {
-      contentType,
-      contentLength,
-      bodyLength: rawBody.length,
-      authHeader: !!req.headers['authorization'],
-      xDaimoSignature: !!req.headers['x-daimo-signature'],
-      headersKeys: Object.keys(req.headers)
-    });
-
-    res.json({
-      received: true,
-      length: rawBody.length,
-      contentType,
-      preview: bodyPreview,
-      headers: {
-        'content-type': contentType,
-        'content-length': contentLength,
-        'authorization': req.headers['authorization'] ? 'present' : 'missing',
-        'x-daimo-signature': req.headers['x-daimo-signature'] ? 'present' : 'missing'
-      }
-    });
-  } catch (error) {
-    logger.error('[Daimo] Diagnostic error:', error);
-    res.status(500).json({ error: error.message });
-  }
-}));
-
 // Main Daimo webhook handler
 app.post('/api/webhooks/daimo', webhookLimiter, webhookController.handleDaimoWebhook);
 app.post('/api/webhooks/visa-cybersource', webhookLimiter, require('./controllers/visaCybersourceWebhookController').handleWebhook);

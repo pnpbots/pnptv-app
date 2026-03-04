@@ -12,6 +12,7 @@ export function SearchBar({ value, onChange, placeholder = "Search...", debounce
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
     setLocal(value);
   }, [value]);
 
