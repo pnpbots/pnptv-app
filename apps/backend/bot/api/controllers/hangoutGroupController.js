@@ -25,13 +25,31 @@ const isMember = async (groupId, userId) => {
   return rows.length > 0;
 };
 
-// Auto-join all public community groups (main, wall of fame, PNP English, PNP Español, etc.)
+// Auto-join community groups based on user language:
+// - PNPTV Community (is_main) for everyone
+// - PNP English for English speakers (or unknown language)
+// - PNP Español for Spanish speakers
 const ensureMainGroupMembership = async (userId) => {
+  // Always join the main community group
   await query(
     `INSERT INTO hangout_group_members (group_id, user_id, role)
-     SELECT id, $1, 'member' FROM hangout_groups WHERE is_public = true
+     SELECT id, $1, 'member' FROM hangout_groups WHERE is_main = true
      ON CONFLICT DO NOTHING`,
     [userId]
+  );
+
+  // Join language-specific group based on user's language
+  const { rows } = await query('SELECT language FROM users WHERE id = $1', [userId]);
+  const lang = rows[0]?.language || 'en';
+  const isSpanish = lang === 'es';
+
+  // Join the matching language group (PNP English id=10, PNP Español id=11)
+  const langGroupId = isSpanish ? 11 : 10;
+  await query(
+    `INSERT INTO hangout_group_members (group_id, user_id, role)
+     VALUES ($1, $2, 'member')
+     ON CONFLICT DO NOTHING`,
+    [langGroupId, userId]
   );
 };
 
@@ -70,7 +88,7 @@ const listGroups = async (req, res) => {
                  AND cm.user_id != $1::text) as unread_count
        FROM hangout_groups g
        JOIN hangout_group_members gm ON gm.group_id = g.id AND gm.user_id = $1
-       ORDER BY g.is_main DESC, g.is_wall_of_fame DESC, g.created_at DESC`,
+       ORDER BY g.is_main DESC, g.created_at DESC`,
       [user.id]
     );
 
@@ -299,11 +317,10 @@ const leaveGroup = async (req, res) => {
   if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
-    // Can't leave the main group or Wall of Fame group
-    const { rows } = await query('SELECT is_main, is_wall_of_fame FROM hangout_groups WHERE id=$1', [groupId]);
+    // Can't leave public community groups
+    const { rows } = await query('SELECT is_main, is_public FROM hangout_groups WHERE id=$1', [groupId]);
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
-    if (rows[0].is_main) return res.status(400).json({ error: 'Cannot leave the main community group' });
-    if (rows[0].is_wall_of_fame) return res.status(400).json({ error: 'Cannot leave the Wall of Fame group' });
+    if (rows[0].is_main || rows[0].is_public) return res.status(400).json({ error: 'Cannot leave a community group' });
 
     await query(
       'DELETE FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
@@ -326,8 +343,7 @@ const deleteGroup = async (req, res) => {
   try {
     const { rows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
-    if (rows[0].is_main) return res.status(400).json({ error: 'Cannot delete the main group' });
-    if (rows[0].is_wall_of_fame) return res.status(400).json({ error: 'Cannot delete the Wall of Fame group' });
+    if (rows[0].is_main || rows[0].is_public) return res.status(400).json({ error: 'Cannot delete a community group' });
     if (rows[0].creator_id !== String(user.id)) {
       return res.status(403).json({ error: 'Only the creator can delete this group' });
     }
