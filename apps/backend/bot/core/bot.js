@@ -771,6 +771,17 @@ const startBot = async () => {
       logger.warn('Canva export scheduler initialization failed, continuing without Canva exports:', error.message);
     }
 
+    // Initialize X auto campaign scheduler
+    try {
+      const XAutoCampaignScheduler = require('./schedulers/xAutoCampaignScheduler');
+      const xAutoCampaignScheduler = new XAutoCampaignScheduler(bot);
+      xAutoCampaignScheduler.start();
+      global.xAutoCampaignScheduler = xAutoCampaignScheduler;
+      logger.info('✓ X auto campaign scheduler initialized and started');
+    } catch (error) {
+      logger.warn('X auto campaign scheduler initialization failed:', error.message);
+    }
+
     // Initialize proactive reminder service
     try {
       const ProactiveReminderService = require('../services/proactiveReminderService');

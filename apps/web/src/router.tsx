@@ -34,6 +34,7 @@ const AdminNotifications = lazy(() => import("@/pages/admin/AdminNotifications")
 const ExternalServices = lazy(() => import("@/pages/admin/ExternalServices"));
 const NearbyPlaces = lazy(() => import("@/pages/admin/NearbyPlaces"));
 const CanvaIntegration = lazy(() => import("@/pages/admin/CanvaIntegration"));
+const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
 
 export const router = createBrowserRouter([
   {
@@ -277,6 +278,14 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <CanvaIntegration />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "x-campaigns",
+        element: (
+          <ModuleLoader>
+            <XAutoCampaigns />
           </ModuleLoader>
         ),
       },

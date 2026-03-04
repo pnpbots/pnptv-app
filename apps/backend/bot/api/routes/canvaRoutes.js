@@ -59,6 +59,14 @@ const exportLimiter = rateLimit({
   message: { error: 'Too many export requests. Please slow down.' },
 });
 
+const exportsListLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many export list requests. Please slow down.' },
+});
+
 // ---------------------------------------------------------------------------
 // Middleware: require Canva linked
 // ---------------------------------------------------------------------------
@@ -110,11 +118,11 @@ router.get('/auth/callback', callbackLimiter, async (req, res) => {
 
     if (oauthError) {
       logger.warn('Canva OAuth denied', { error: oauthError });
-      return res.redirect('/media?canva_error=access_denied');
+      return res.redirect('/admin/canva?canva_error=access_denied');
     }
 
     if (!code || !state) {
-      return res.redirect('/media?canva_error=invalid_request');
+      return res.redirect('/admin/canva?canva_error=invalid_request');
     }
 
     const result = await CanvaService.handleCallback(code, state);
@@ -125,12 +133,16 @@ router.get('/auth/callback', callbackLimiter, async (req, res) => {
       req.session.user.canva_display_name = result.displayName;
     }
 
-    logger.info('Canva OAuth completed', { userId: result.userId, canvaUserId: result.canvaUserId });
+    logger.info('Canva OAuth completed (audit)', {
+      userId: result.userId,
+      canvaUserId: result.canvaUserId,
+      action: 'canva_connect',
+    });
 
-    return res.redirect('/media?canva_connected=true');
+    return res.redirect('/admin/canva?canva_connected=true');
   } catch (err) {
     logger.error('Canva OAuth callback failed', { error: err.message });
-    return res.redirect('/media?canva_error=callback_failed');
+    return res.redirect('/admin/canva?canva_error=callback_failed');
   }
 });
 
@@ -146,6 +158,11 @@ router.post('/auth/unlink', authGuard, async (req, res) => {
       req.session.user.canva_connected = false;
       req.session.user.canva_display_name = null;
     }
+
+    logger.info('Canva account disconnected (audit)', {
+      userId: req.user.id,
+      action: 'canva_disconnect',
+    });
 
     return res.json({ success: true, message: 'Canva account disconnected' });
   } catch (err) {
@@ -210,10 +227,17 @@ router.post('/export', exportLimiter, authGuard, requireCanvaLinked, async (req,
 /**
  * GET /exports — List user's export jobs
  */
-router.get('/exports', authGuard, async (req, res) => {
+router.get('/exports', exportsListLimiter, authGuard, async (req, res) => {
   try {
     const jobs = await CanvaService.getUserExportJobs(req.user.id);
-    return res.json({ success: true, jobs });
+    // Sanitize error_message to avoid leaking internal details
+    const sanitized = jobs.map(j => ({
+      ...j,
+      error_message: j.status === 'failed' && j.error_message
+        ? j.error_message.substring(0, 200)
+        : null,
+    }));
+    return res.json({ success: true, jobs: sanitized });
   } catch (err) {
     logger.error('Failed to list Canva exports', { error: err.message, userId: req.user?.id });
     return res.status(500).json({ success: false, error: 'Failed to list exports' });
@@ -223,7 +247,7 @@ router.get('/exports', authGuard, async (req, res) => {
 /**
  * GET /exports/:id — Get single export job status
  */
-router.get('/exports/:id', authGuard, async (req, res) => {
+router.get('/exports/:id', exportsListLimiter, authGuard, async (req, res) => {
   try {
     const job = await CanvaService.getExportJob(req.params.id);
 

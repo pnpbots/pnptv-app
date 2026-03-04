@@ -896,6 +896,25 @@ export interface FollowListUser {
   followedAt: string;
 }
 
+export function searchUsers(
+  q: string,
+  limit = 20
+): Promise<{
+  success: boolean;
+  users: Array<{
+    id: string;
+    username: string;
+    first_name: string;
+    last_name: string | null;
+    photo_file_id: string | null;
+    pnptv_id: string;
+  }>;
+}> {
+  return request(
+    `/api/webapp/users/search?q=${encodeURIComponent(q)}&limit=${limit}`
+  );
+}
+
 export function followUser(userId: string): Promise<{
   success: boolean;
   isFollowing: boolean;
@@ -1847,6 +1866,120 @@ export function adminRetryCanvaJob(jobId: string): Promise<{ success: boolean; m
 
 export function adminCancelCanvaJob(jobId: string): Promise<{ success: boolean; message: string }> {
   return request(`/api/webapp/admin/canva/jobs/${jobId}/cancel`, { method: "POST" });
+}
+
+// ---------------------------------------------------------------------------
+// Admin X Auto Campaigns API
+// ---------------------------------------------------------------------------
+
+export interface XAutoCampaignStats {
+  totalCampaigns: number;
+  activeCampaigns: number;
+  pausedCampaigns: number;
+  completedCampaigns: number;
+  totalGenerated: number;
+  totalPosted: number;
+  totalFailed: number;
+}
+
+export interface XAutoCampaign {
+  campaign_id: string;
+  name: string;
+  account_id: string;
+  handle?: string;
+  account_display_name?: string;
+  topic: string;
+  grok_mode: string;
+  language: string;
+  custom_prompt?: string;
+  interval_minutes: number;
+  active_hours_start: number;
+  active_hours_end: number;
+  status: string;
+  last_generated_at?: string;
+  next_run_at?: string;
+  total_generated: number;
+  total_posted: number;
+  total_failed: number;
+  max_posts?: number;
+  created_by_username?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface XAutoCampaignPost {
+  post_id: string;
+  text: string;
+  status: string;
+  scheduled_at?: string;
+  sent_at?: string;
+  error_message?: string;
+  created_at: string;
+  handle?: string;
+}
+
+export interface XActiveAccount {
+  account_id: string;
+  handle: string;
+  display_name?: string;
+}
+
+export function getAdminXCampaignStats(): Promise<{ success: boolean; stats: XAutoCampaignStats; accounts: XActiveAccount[] }> {
+  return request("/api/webapp/admin/x-campaigns/stats");
+}
+
+export function getAdminXCampaigns(
+  page = 1,
+  status?: string
+): Promise<{ success: boolean; campaigns: XAutoCampaign[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
+  const params = new URLSearchParams({ page: String(page) });
+  if (status) params.set("status", status);
+  return request(`/api/webapp/admin/x-campaigns?${params}`);
+}
+
+export function createAdminXCampaign(data: {
+  name: string;
+  accountId: string;
+  topic: string;
+  grokMode?: string;
+  language?: string;
+  customPrompt?: string;
+  intervalMinutes?: number;
+  activeHoursStart?: number;
+  activeHoursEnd?: number;
+  maxPosts?: number;
+}): Promise<{ success: boolean; campaignId: string }> {
+  return request("/api/webapp/admin/x-campaigns", { method: "POST", body: data });
+}
+
+export function updateAdminXCampaign(
+  id: string,
+  data: Record<string, unknown>
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/x-campaigns/${id}`, { method: "PUT", body: data });
+}
+
+export function pauseAdminXCampaign(id: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/x-campaigns/${id}/pause`, { method: "POST" });
+}
+
+export function resumeAdminXCampaign(id: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/x-campaigns/${id}/resume`, { method: "POST" });
+}
+
+export function deleteAdminXCampaign(id: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/x-campaigns/${id}`, { method: "DELETE" });
+}
+
+export function getAdminXCampaignHistory(
+  id: string,
+  page = 1
+): Promise<{ success: boolean; posts: XAutoCampaignPost[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
+  return request(`/api/webapp/admin/x-campaigns/${id}/history?page=${page}`);
+}
+
+export function triggerAdminXCampaignGenerate(id: string): Promise<{ success: boolean; postId: string }> {
+  return request(`/api/webapp/admin/x-campaigns/${id}/generate`, { method: "POST" });
 }
 
 // ============================================================================

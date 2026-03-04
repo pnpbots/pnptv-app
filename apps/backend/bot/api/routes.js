@@ -2431,6 +2431,27 @@ app.post('/api/webapp/admin/places/:id/reject', adminGuard, asyncHandler(nearbyP
 app.post('/api/webapp/admin/places/:id/suspend', adminGuard, asyncHandler(nearbyPlacesAdminController.suspendPlace));
 app.delete('/api/webapp/admin/places/:id', adminGuard, asyncHandler(nearbyPlacesAdminController.deletePlace));
 
+// Canva admin management
+const canvaAdminController = require('./controllers/canvaAdminController');
+app.get('/api/webapp/admin/canva/stats', adminGuard, asyncHandler(canvaAdminController.getCanvaStats));
+app.get('/api/webapp/admin/canva/users', adminGuard, asyncHandler(canvaAdminController.getConnectedUsers));
+app.post('/api/webapp/admin/canva/users/:id/unlink', adminGuard, asyncHandler(canvaAdminController.unlinkUser));
+app.get('/api/webapp/admin/canva/jobs', adminGuard, asyncHandler(canvaAdminController.listJobs));
+app.post('/api/webapp/admin/canva/jobs/:id/retry', adminGuard, asyncHandler(canvaAdminController.retryJob));
+app.post('/api/webapp/admin/canva/jobs/:id/cancel', adminGuard, asyncHandler(canvaAdminController.cancelJob));
+
+// X Auto Campaigns admin routes
+const xAutoCampaignAdminController = require('./controllers/xAutoCampaignAdminController');
+app.get('/api/webapp/admin/x-campaigns/stats', adminGuard, asyncHandler(xAutoCampaignAdminController.getStats));
+app.get('/api/webapp/admin/x-campaigns', adminGuard, asyncHandler(xAutoCampaignAdminController.listCampaigns));
+app.post('/api/webapp/admin/x-campaigns', adminGuard, asyncHandler(xAutoCampaignAdminController.createCampaign));
+app.put('/api/webapp/admin/x-campaigns/:id', adminGuard, asyncHandler(xAutoCampaignAdminController.updateCampaign));
+app.post('/api/webapp/admin/x-campaigns/:id/pause', adminGuard, asyncHandler(xAutoCampaignAdminController.pauseCampaign));
+app.post('/api/webapp/admin/x-campaigns/:id/resume', adminGuard, asyncHandler(xAutoCampaignAdminController.resumeCampaign));
+app.delete('/api/webapp/admin/x-campaigns/:id', adminGuard, asyncHandler(xAutoCampaignAdminController.deleteCampaign));
+app.get('/api/webapp/admin/x-campaigns/:id/history', adminGuard, asyncHandler(xAutoCampaignAdminController.getCampaignHistory));
+app.post('/api/webapp/admin/x-campaigns/:id/generate', adminGuard, asyncHandler(xAutoCampaignAdminController.triggerGenerate));
+
 // Plan management
 app.get('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminController.listPlans));
 app.post('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminController.createPlan));

@@ -84,8 +84,9 @@ function b64url(buf) {
 }
 
 function generatePkce() {
-  const verifier = b64url(crypto.randomBytes(32));
-  const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
+  // Canva requires 43-128 char code_verifier using base64url encoding
+  const verifier = crypto.randomBytes(96).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   return { verifier, challenge };
 }
 
@@ -151,16 +152,21 @@ class CanvaService {
 
     const { codeVerifier, userId } = JSON.parse(raw);
 
-    // 2. Exchange code for tokens
+    // 2. Exchange code for tokens (Basic Auth per Canva Connect API docs)
+    const basicAuth = Buffer.from(
+      `${process.env.CANVA_CLIENT_ID}:${process.env.CANVA_CLIENT_SECRET}`
+    ).toString('base64');
+
     const tokenResponse = await axios.post(CANVA_TOKEN_URL, new URLSearchParams({
       grant_type: 'authorization_code',
       code,
       redirect_uri: process.env.CANVA_REDIRECT_URI,
       code_verifier: codeVerifier,
-      client_id: process.env.CANVA_CLIENT_ID,
-      client_secret: process.env.CANVA_CLIENT_SECRET,
     }).toString(), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${basicAuth}`,
+      },
       timeout: 15000,
     });
 
@@ -178,8 +184,13 @@ class CanvaService {
       timeout: 10000,
     });
 
-    const canvaUserId = profileResponse.data.id;
-    const displayName = profileResponse.data.display_name || profileResponse.data.name || '';
+    const profileData = profileResponse.data;
+    logger.info('Canva profile response', { profileData: JSON.stringify(profileData) });
+
+    // Canva Connect API may nest under a `profile` or `user` key
+    const profile = profileData.profile || profileData.user || profileData;
+    const canvaUserId = profile.id || profileData.id || 'unknown';
+    const displayName = profile.display_name || profile.name || profileData.display_name || profileData.name || 'Canva User';
 
     // 4. Encrypt tokens and persist
     const encryptedAccess = encryptToken(accessToken);
@@ -231,13 +242,18 @@ class CanvaService {
 
       const refreshToken = decryptToken(user.canva_refresh_token_encrypted);
 
+      const basicAuth = Buffer.from(
+        `${process.env.CANVA_CLIENT_ID}:${process.env.CANVA_CLIENT_SECRET}`
+      ).toString('base64');
+
       const tokenResponse = await axios.post(CANVA_TOKEN_URL, new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: refreshToken,
-        client_id: process.env.CANVA_CLIENT_ID,
-        client_secret: process.env.CANVA_CLIENT_SECRET,
       }).toString(), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: `Basic ${basicAuth}`,
+        },
         timeout: 15000,
       });
 
@@ -387,8 +403,11 @@ class CanvaService {
    * @returns {Promise<{fileId: string, contentId: string}>}
    */
   static async downloadAndUploadToDirectus(downloadUrl, title, userId) {
-    // Validate download URL domain
+    // Validate download URL domain and protocol
     const parsedUrl = new URL(downloadUrl);
+    if (parsedUrl.protocol !== 'https:') {
+      throw new Error('Invalid export download URL — must use HTTPS');
+    }
     if (!parsedUrl.hostname.endsWith('.canva.com') && parsedUrl.hostname !== 'canva.com') {
       throw new Error('Invalid export download URL — must be a Canva domain');
     }
@@ -489,14 +508,15 @@ class CanvaService {
    */
   static async getStatus(userId) {
     const result = await query(
-      'SELECT canva_user_id, canva_display_name FROM users WHERE id = $1',
+      'SELECT canva_user_id, canva_display_name, canva_access_token_encrypted, canva_connected_at FROM users WHERE id = $1',
       [userId]
     );
     const user = result.rows?.[0];
-    if (!user || !user.canva_user_id) {
+    // Check both canva_user_id and canva_access_token_encrypted (tokens may exist even if profile fetch failed)
+    if (!user || (!user.canva_user_id && !user.canva_access_token_encrypted)) {
       return { connected: false };
     }
-    return { connected: true, displayName: user.canva_display_name || undefined };
+    return { connected: true, displayName: user.canva_display_name || user.canva_user_id || 'Connected' };
   }
 
   // ---------------------------------------------------------------------------
@@ -522,7 +542,7 @@ class CanvaService {
   static async updateExportJob(jobId, updates) {
     const ALLOWED_COLUMNS = new Set([
       'status', 'canva_export_id', 'export_url', 'directus_file_id',
-      'directus_content_id', 'error_message', 'started_at', 'completed_at',
+      'directus_content_id', 'error_message', 'started_at', 'completed_at', 'retry_count',
     ]);
     const setClauses = [];
     const values = [];
@@ -585,6 +605,129 @@ class CanvaService {
       [jobId]
     );
     return result.rows[0] || null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Admin Methods
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Get aggregated Canva stats for admin dashboard.
+   */
+  static async getCanvaStats() {
+    const result = await query(`
+      SELECT
+        (SELECT COUNT(*) FROM users WHERE canva_user_id IS NOT NULL) AS connected_users,
+        (SELECT COUNT(*) FROM canva_export_jobs) AS total_exports,
+        (SELECT COUNT(*) FROM canva_export_jobs WHERE status = 'completed') AS completed_exports,
+        (SELECT COUNT(*) FROM canva_export_jobs WHERE status = 'failed') AS failed_exports,
+        (SELECT COUNT(*) FROM canva_export_jobs WHERE status NOT IN ('completed', 'failed')) AS active_jobs
+    `);
+    const row = result.rows[0];
+    const total = parseInt(row.total_exports) || 0;
+    const completed = parseInt(row.completed_exports) || 0;
+    return {
+      connectedUsers: parseInt(row.connected_users) || 0,
+      totalExports: total,
+      completedExports: completed,
+      failedExports: parseInt(row.failed_exports) || 0,
+      activeJobs: parseInt(row.active_jobs) || 0,
+      successRate: total > 0 ? Math.round((completed / total) * 100) : 0,
+    };
+  }
+
+  /**
+   * Get all Canva-connected users with export counts.
+   */
+  static async getConnectedUsers() {
+    const result = await query(`
+      SELECT u.id, u.username, u.display_name, u.canva_user_id, u.canva_display_name, u.canva_connected_at,
+             COUNT(j.id) AS export_count
+      FROM users u
+      LEFT JOIN canva_export_jobs j ON j.user_id = u.id
+      WHERE u.canva_user_id IS NOT NULL
+      GROUP BY u.id
+      ORDER BY u.canva_connected_at DESC
+    `);
+    return result.rows;
+  }
+
+  /**
+   * Force-unlink a user's Canva account (admin action).
+   */
+  static async forceUnlinkUser(userId) {
+    await this.unlinkAccount(userId);
+  }
+
+  /**
+   * Get all export jobs with pagination and optional status filter.
+   */
+  static async getAllExportJobs(offset = 0, limit = 20, status = null) {
+    const params = [];
+    let whereClause = '';
+    if (status) {
+      params.push(status);
+      whereClause = `WHERE j.status = $${params.length}`;
+    }
+
+    params.push(limit, offset);
+    const limitIdx = params.length - 1;
+    const offsetIdx = params.length;
+
+    const [jobsResult, countResult] = await Promise.all([
+      query(
+        `SELECT j.id, j.user_id, j.canva_design_id, j.design_title, j.export_format,
+                j.export_quality, j.status, j.directus_file_id, j.directus_content_id,
+                j.error_message, j.retry_count, j.export_url, j.started_at, j.completed_at,
+                j.created_at, j.updated_at,
+                u.username, u.display_name AS user_display_name
+         FROM canva_export_jobs j
+         LEFT JOIN users u ON u.id = j.user_id
+         ${whereClause}
+         ORDER BY j.created_at DESC
+         LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+        params
+      ),
+      query(
+        `SELECT COUNT(*) AS total FROM canva_export_jobs j ${whereClause}`,
+        status ? [status] : []
+      ),
+    ]);
+
+    return {
+      jobs: jobsResult.rows,
+      total: parseInt(countResult.rows[0].total) || 0,
+    };
+  }
+
+  /**
+   * Retry a failed export job (admin action).
+   */
+  static async retryExportJob(jobId) {
+    const job = await this.getExportJob(jobId);
+    if (!job) throw new Error('Export job not found');
+    if (job.status !== 'failed') throw new Error('Only failed jobs can be retried');
+
+    await this.updateExportJob(jobId, {
+      status: 'pending',
+      error_message: null,
+    });
+  }
+
+  /**
+   * Cancel a pending or in-progress export job (admin action).
+   */
+  static async cancelExportJob(jobId) {
+    const job = await this.getExportJob(jobId);
+    if (!job) throw new Error('Export job not found');
+    if (['completed', 'failed'].includes(job.status)) {
+      throw new Error('Cannot cancel a completed or failed job');
+    }
+
+    await this.updateExportJob(jobId, {
+      status: 'failed',
+      error_message: 'Cancelled by admin',
+    });
   }
 
   // ---------------------------------------------------------------------------

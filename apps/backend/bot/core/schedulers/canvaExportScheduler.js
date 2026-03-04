@@ -136,13 +136,11 @@ class CanvaExportScheduler {
         throw new Error('Export completed but no download URLs provided');
       }
 
-      // Store the download URL temporarily in error_message field (reused as metadata)
-      // This avoids adding a new column — we clear it on success
       const downloadUrl = exportStatus.urls[0];
 
       await CanvaService.updateExportJob(job.id, {
         status: 'downloading',
-        error_message: downloadUrl, // temporary storage for download URL
+        export_url: downloadUrl,
       });
 
       logger.info('Canva export ready for download', { jobId: job.id });
@@ -156,14 +154,13 @@ class CanvaExportScheduler {
    * downloading → download MP4 from Canva → uploading
    */
   async handleDownloading(job) {
-    const downloadUrl = job.error_message; // stored by handleExporting
-    if (!downloadUrl || !downloadUrl.startsWith('http')) {
-      throw new Error('Invalid download URL');
+    const downloadUrl = job.export_url;
+    if (!downloadUrl || !downloadUrl.startsWith('https')) {
+      throw new Error('Invalid or missing export download URL');
     }
 
     await CanvaService.updateExportJob(job.id, {
       status: 'uploading',
-      error_message: null, // clear temporary URL storage
     });
 
     logger.info('Downloading Canva export', { jobId: job.id });
