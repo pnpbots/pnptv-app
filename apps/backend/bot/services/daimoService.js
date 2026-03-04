@@ -42,7 +42,7 @@ class DaimoService {
 
   /**
    * Verify webhook authorization from Daimo
-   * Daimo uses Authorization: Basic <token> header for webhook verification
+   * Daimo uses Authorization: Basic <token> or Bearer <token> header for webhook verification
    * @param {Object} payload - Webhook payload (unused but kept for API compatibility)
    * @param {string} authHeader - Authorization header value (can be from x-daimo-signature or Authorization)
    * @returns {boolean} True if authorization is valid
@@ -59,11 +59,13 @@ class DaimoService {
         return false;
       }
 
-      // Daimo sends Authorization: Basic <token>
-      // Extract token if it has "Basic " prefix
+      // Daimo sends Authorization: Basic <token> (legacy) or Bearer <token> (new API)
+      // Extract token regardless of prefix
       let receivedToken = authHeader;
       if (authHeader.startsWith('Basic ')) {
         receivedToken = authHeader.substring(6);
+      } else if (authHeader.startsWith('Bearer ')) {
+        receivedToken = authHeader.substring(7);
       }
 
       // Compare tokens using timing-safe comparison
