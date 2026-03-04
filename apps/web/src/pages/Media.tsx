@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { Helmet } from "react-helmet-async";
 import { Card, Skeleton, Badge } from "@pnptv/ui-kit";
 import { useDirectus } from "@/hooks/useDirectus";
 import { useTutorial } from "@/hooks/useTutorial";
@@ -361,6 +362,10 @@ export default function Media() {
 
   return (
     <div className="page-container">
+      <Helmet>
+        <title>PRIME Videorama — PNPtv!</title>
+        <meta name="description" content="Exclusive PRIME video collection. Watch premium content from top PNPtv creators." />
+      </Helmet>
       {showTutorial && <TutorialOverlay section="prime" onDismiss={dismissTutorial} />}
 
       {/* Header */}

@@ -5,6 +5,7 @@ import React, {
   useCallback,
   memo,
 } from "react";
+import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
@@ -889,6 +890,10 @@ export default function Chat() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
+      <Helmet>
+        <title>Hangouts — PNPtv!</title>
+        <meta name="description" content="Join or create video call rooms and group chats on PNPtv Hangouts." />
+      </Helmet>
       {showTutorial && <TutorialOverlay section="hangouts" onDismiss={dismissTutorial} />}
       {/* Header */}
       <div className="flex items-center justify-between mb-6">

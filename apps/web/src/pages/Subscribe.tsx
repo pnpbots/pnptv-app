@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { Card, Skeleton } from "@pnptv/ui-kit";
 import {
@@ -208,6 +209,10 @@ export default function Subscribe() {
 
   return (
     <div className="page-container py-6 px-4 max-w-2xl mx-auto">
+      <Helmet>
+        <title>Subscribe — PNPtv!</title>
+        <meta name="description" content="Choose your PNPtv plan. Unlock exclusive content, PRIME video access, nearby discovery, and more." />
+      </Helmet>
       {/* Header */}
       <div className="text-center mb-6">
         <h1 className="text-2xl font-bold text-pnp-textPrimary mb-1">Choose Your Plan</h1>
@@ -409,13 +414,31 @@ export default function Subscribe() {
         </div>
       </div>
 
-      {/* Meru code section */}
+      {/* Lifetime100 promo + Meru code */}
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-3">
           <div className="flex-1 h-px bg-white/10" />
           <span className="text-xs text-pnp-textSecondary">or</span>
           <div className="flex-1 h-px bg-white/10" />
         </div>
+
+        {/* Lifetime100 promo */}
+        <div className="rounded-xl p-4 border border-[#FFB454]/30 bg-[#FFB454]/5 mb-4">
+          <p className="text-sm text-pnp-textPrimary font-medium mb-1">
+            Want the best deal?
+          </p>
+          <p className="text-xs text-pnp-textSecondary mb-3">
+            Get our Lifetime100 promo — one single payment of $100 for lifetime PRIME access. No subscriptions, no renewals, forever yours.
+          </p>
+          <a
+            href="/lifetime100"
+            className="inline-block text-xs font-semibold text-[#FFB454] hover:text-[#ffcc80] transition-colors border-b border-[#FFB454]/50"
+          >
+            Check out the Lifetime100 deal
+          </a>
+        </div>
+
+        {/* Meru code */}
         <label className="text-sm font-medium text-pnp-textPrimary mb-2 block">
           Have a Meru code?
         </label>
@@ -444,29 +467,6 @@ export default function Subscribe() {
         {meruError && (
           <p className="mt-2 text-xs text-red-400">{meruError}</p>
         )}
-      </div>
-
-      {/* Lifetime100 promo */}
-      <div className="mb-6">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="flex-1 h-px bg-white/10" />
-          <span className="text-xs text-pnp-textSecondary">or</span>
-          <div className="flex-1 h-px bg-white/10" />
-        </div>
-        <div className="rounded-xl p-4 border border-[#FFB454]/30 bg-[#FFB454]/5">
-          <p className="text-sm text-pnp-textPrimary font-medium mb-1">
-            Want the best deal?
-          </p>
-          <p className="text-xs text-pnp-textSecondary mb-3">
-            Get our Lifetime100 promo — one single payment of $100 for lifetime PRIME access. No subscriptions, no renewals, forever yours.
-          </p>
-          <a
-            href="/lifetime100"
-            className="inline-block text-xs font-semibold text-[#FFB454] hover:text-[#ffcc80] transition-colors border-b border-[#FFB454]/50"
-          >
-            Check out the Lifetime100 deal
-          </a>
-        </div>
       </div>
 
       {/* Error banner */}

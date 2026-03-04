@@ -2,15 +2,63 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+    <title>PNPtv! — Exclusive PNP Content, Live Streams & Community</title>
+    <meta name="description" content="PNPtv is the queer PNP community platform. Watch exclusive videos, join live streams, discover nearby members, hangout in video rooms, and connect with creators." />
+    <meta name="keywords" content="PNPtv, PNP community, live streams, exclusive content, video rooms, nearby users, queer community" />
+    <link rel="canonical" href="https://app.pnptv.app/" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="PNPtv!" />
+    <meta property="og:title" content="PNPtv! — Exclusive PNP Content, Live Streams & Community" />
+    <meta property="og:description" content="Watch exclusive videos, join live streams, discover nearby members, and connect with creators on the PNPtv community platform." />
+    <meta property="og:url" content="https://app.pnptv.app/" />
+    <meta property="og:image" content="https://app.pnptv.app/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="PNPtv! — Exclusive PNP Content, Live Streams & Community" />
+    <meta name="twitter:description" content="Watch exclusive videos, join live streams, discover nearby members, and connect with creators on the PNPtv community platform." />
+    <meta name="twitter:image" content="https://app.pnptv.app/og-image.png" />
+
+    <!-- Favicon & Icons -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#121212" />
-    <title>PNPTV</title>
+
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link href="https://fonts.cdnfonts.com/css/ethnocentric" rel="stylesheet" />
+
+    <!-- Telegram Web App SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "PNPtv!",
+      "url": "https://app.pnptv.app",
+      "description": "The queer PNP community platform for exclusive content, live streams, video rooms, and nearby discovery.",
+      "publisher": {
+        "@type": "Organization",
+        "name": "PNPtv!",
+        "url": "https://pnptv.app",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://app.pnptv.app/Logo2-50.png"
+        }
+      }
+    }
+    </script>
   </head>
   <body class="bg-pnp-background text-pnp-textPrimary antialiased">
     <div id="root"></div>

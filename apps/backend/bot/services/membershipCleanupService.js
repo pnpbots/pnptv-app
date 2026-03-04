@@ -81,6 +81,60 @@ class MembershipCleanupService {
   }
 
   /**
+   * Check if the bot has access to the PRIME channel
+   * @returns {Promise<boolean>} True if bot can access the channel
+   */
+  static async verifyChannelAccess() {
+    if (!this.bot || !this.primeChannelId) return false;
+    try {
+      await this.bot.telegram.getChat(this.primeChannelId);
+      return true;
+    } catch (error) {
+      logger.error('Bot cannot access PRIME channel — is the bot still an admin?', {
+        channelId: this.primeChannelId,
+        error: error.message
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Check if a Telegram API error is a benign "user not in channel" type error
+   * that should be counted as a skip, not a failure
+   * @param {Error} error - The Telegram error
+   * @returns {boolean}
+   */
+  static isBenignUserError(error) {
+    const code = error.response?.error_code;
+    const desc = (error.response?.description || error.message || '').toLowerCase();
+
+    // 400 errors that mean "user not in channel" or "can't interact with user"
+    if (code === 400) {
+      const benignPatterns = [
+        'user not found',
+        'participant_id_invalid',
+        'peer_id_invalid',
+        'chat not found',
+        'user_id_invalid',
+        'member list is inaccessible',
+      ];
+      return benignPatterns.some(p => desc.includes(p));
+    }
+
+    // 403 errors related to user blocking the bot or privacy settings
+    if (code === 403) {
+      const benignPatterns = [
+        'bot was blocked',
+        'user is deactivated',
+        'bot can\'t initiate',
+      ];
+      return benignPatterns.some(p => desc.includes(p));
+    }
+
+    return false;
+  }
+
+  /**
    * Add active Prime members to the PRIME channel if they are not already members
    * @returns {Promise<Object>} Add results
    */
@@ -89,6 +143,13 @@ class MembershipCleanupService {
 
     if (!this.bot || !this.primeChannelId) {
       logger.warn('Cannot add users: Bot or PRIME_CHANNEL_ID not configured');
+      return results;
+    }
+
+    // Verify bot can access the channel before iterating all users
+    const hasAccess = await this.verifyChannelAccess();
+    if (!hasAccess) {
+      logger.error('Skipping PRIME channel additions: bot has no access to the channel. Re-add the bot as admin.');
       return results;
     }
 
@@ -120,17 +181,15 @@ class MembershipCleanupService {
 
             results.added++;
             logger.info(`Sent invite link to user ${user.id} (${user.username || 'no username'}) for PRIME channel`);
-            
+
             // Rate limit protection
             await new Promise(resolve => setTimeout(resolve, 100));
           } else {
             results.skipped++;
           }
         } catch (error) {
-          if (error.response?.error_code === 400 && error.response?.description?.includes('user not found')) {
-            // Bot cannot initiate conversation, user must start the bot first. Skip.
+          if (this.isBenignUserError(error)) {
             results.skipped++;
-             logger.warn(`Cannot send invite to user ${user.id} because they have not started the bot.`);
           } else {
             results.failed++;
             logger.error(`Error processing user ${user.id} for PRIME channel addition:`, {
@@ -232,6 +291,13 @@ class MembershipCleanupService {
       return results;
     }
 
+    // Verify bot can access the channel before iterating all users
+    const hasAccess = await this.verifyChannelAccess();
+    if (!hasAccess) {
+      logger.error('Skipping PRIME channel kicks: bot has no access to the channel. Re-add the bot as admin.');
+      return results;
+    }
+
     try {
       // Get all churned users (formerly had subscription)
       const churnedUsers = await query(`
@@ -269,15 +335,8 @@ class MembershipCleanupService {
             results.skipped++;
           }
         } catch (error) {
-          if (error.response?.error_code === 400 && error.response?.description?.includes('user not found')) {
-            // User not in channel, skip
+          if (this.isBenignUserError(error)) {
             results.skipped++;
-          } else if (error.response?.error_code === 400 && error.response?.description?.includes('PARTICIPANT_ID_INVALID')) {
-            // User was never in the channel or invalid ID, skip
-            results.skipped++;
-          } else if (error.response?.error_code === 400 && error.response?.description?.includes('CHAT_ADMIN_REQUIRED')) {
-            logger.error('Bot needs admin rights in PRIME channel to kick users');
-            results.failed++;
           } else {
             results.failed++;
             logger.error(`Error processing user ${user.id} for PRIME channel:`, {

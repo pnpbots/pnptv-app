@@ -21,7 +21,16 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(error.error || `API error ${res.status}`);
+    // error.error can be an object { code, message } from guard middleware — extract string safely
+    const errorMessage =
+      typeof error.error === "string"
+        ? error.error
+        : typeof (error.error as { message?: string })?.message === "string"
+          ? (error.error as { message: string }).message
+          : typeof error.message === "string"
+            ? error.message
+            : `API error ${res.status}`;
+    throw new Error(errorMessage);
   }
 
   return res.json();

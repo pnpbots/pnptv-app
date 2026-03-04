@@ -14,10 +14,11 @@
     "@pnptv/ui-kit": "*",
     "hls.js": "^1.5.0",
     "leaflet": "^1.9.0",
-    "react-leaflet": "^4.2.0",
     "oidc-client-ts": "^3.1.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
+    "react-helmet-async": "^2.0.5",
+    "react-leaflet": "^4.2.0",
     "react-router-dom": "^6.28.0",
     "socket.io-client": "^4.7.0"
   },

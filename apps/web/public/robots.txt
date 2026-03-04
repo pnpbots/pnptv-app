@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Allow: /subscribe
+Allow: /profile/*
+
+Disallow: /auth/
+Disallow: /admin/
+Disallow: /dm/
+Disallow: /creator
+
+Sitemap: https://app.pnptv.app/sitemap.xml

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Helmet } from "react-helmet-async";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
@@ -180,7 +181,7 @@ function PostCard({
           {isValidPhotoUrl(post.author_photo) ? (
             <img
               src={post.author_photo}
-              alt=""
+              alt={`${post.author_first_name || post.author_username || "User"}'s avatar`}
               className="w-10 h-10 rounded-full object-cover"
               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty("display"); }}
             />
@@ -331,7 +332,7 @@ function PostCard({
                   ) : (
                     <img
                       src={post.media_url}
-                      alt=""
+                      alt="Post image"
                       className="w-full max-h-80 rounded-lg object-cover"
                       loading="lazy"
                       onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = "none"; }}
@@ -420,7 +421,7 @@ function PostCard({
                     <div key={reply.id} className="flex gap-2">
                       <button onClick={() => onNavigate(String(reply.author_id) === currentUserId ? "/profile" : `/profile/${reply.author_id}`)} className="flex-shrink-0">
                         {isValidPhotoUrl(reply.author_photo) ? (
-                          <img src={reply.author_photo} alt="" className="w-7 h-7 rounded-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty("display"); }} />
+                          <img src={reply.author_photo} alt={`${reply.author_first_name || reply.author_username || "User"}'s avatar`} className="w-7 h-7 rounded-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty("display"); }} />
                         ) : null}
                         <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: isValidPhotoUrl(reply.author_photo) ? "none" : undefined }}>
                           {(reply.author_first_name || reply.author_username || "?")[0].toUpperCase()}
@@ -722,6 +723,10 @@ export default function Social() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
+      <Helmet>
+        <title>Social Feed — PNPtv!</title>
+        <meta name="description" content="Browse and share posts with the PNPtv community. Like, comment, and connect with members." />
+      </Helmet>
       {showTutorial && <TutorialOverlay section="social" onDismiss={dismissTutorial} />}
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
@@ -808,7 +813,7 @@ export default function Social() {
           <div className="flex gap-3">
             {/* Composer avatar — show user photo */}
             {isValidPhotoUrl(user?.photoUrl) ? (
-              <img src={user.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+              <img src={user.photoUrl} alt={`${user?.displayName || "User"}'s avatar`} className="w-10 h-10 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
             ) : (
               <div
                 className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"

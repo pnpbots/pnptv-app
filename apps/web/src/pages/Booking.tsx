@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Helmet } from "react-helmet-async";
 import { useNavigate, Link } from "react-router-dom";
 import { Badge, Button } from "@pnptv/ui-kit";
 import { useTutorial } from "@/hooks/useTutorial";
@@ -122,7 +123,7 @@ function UserDetailSheet({ user, onClose, onNavigate }: UserDetailSheetProps) {
               <img
                 src={user.photo_url}
                 className="w-12 h-12 rounded-full object-cover flex-shrink-0"
-                alt=""
+                alt={`${user.name || user.username || "User"}'s avatar`}
                 onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               />
             ) : (
@@ -190,7 +191,7 @@ function PlaceDetailSheet({ place, onClose }: PlaceDetailSheetProps) {
               <img
                 src={place.photoUrl}
                 className="w-12 h-12 rounded-xl object-cover flex-shrink-0"
-                alt=""
+                alt={place.name}
               />
             ) : (
               <div
@@ -625,6 +626,10 @@ export default function Booking() {
   // ─── Map ready state ────────────────────────────────────────────
   return (
     <div className="page-container !p-0 relative" style={{ height: "calc(100vh - 8rem)" }}>
+      <Helmet>
+        <title>Nearby — PNPtv!</title>
+        <meta name="description" content="Discover PNPtv members and venues near you. See who's around on the interactive map." />
+      </Helmet>
       {showTutorial && <TutorialOverlay section="nearby" onDismiss={dismissTutorial} />}
       {/* Map */}
       {myPos && (

@@ -74,15 +74,17 @@ class BusinessNotificationService {
     await this.send(msg);
   }
 
-  static async notifyCleanupSummary({ statusUpdates, channelKicks }) {
+  static async notifyCleanupSummary({ statusUpdates, channelAdds, channelKicks }) {
+    const totalErrors = (statusUpdates?.errors || 0) + (channelKicks?.failed || 0) + (channelAdds?.failed || 0);
     const msg = [
       '🧹 <b>LIMPIEZA DIARIA DE MEMBRESÍAS</b>',
       '',
       '📊 Resultados:',
       `• Canceladas (churned): ${statusUpdates?.toChurned || 0}`,
       `• Cambiadas a free: ${statusUpdates?.toFree || 0}`,
+      `• Añadidos a PRIME: ${channelAdds?.added || 0}`,
       `• Removidos de PRIME: ${channelKicks?.kicked || 0}`,
-      `• Errores: ${(statusUpdates?.errors || 0) + (channelKicks?.failed || 0)}`,
+      `• Errores: ${totalErrors}`,
       `📅 Fecha: ${this.formatDate()}`,
     ].join('\n');
     await this.send(msg);

@@ -1,0 +1,21 @@
+{
+  "name": "PNPtv!",
+  "short_name": "PNPtv",
+  "description": "Exclusive PNP content, live streams, video rooms, and community discovery.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/Logo2-50.png",
+      "sizes": "50x50",
+      "type": "image/png"
+    }
+  ]
+}

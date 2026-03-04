@@ -5,6 +5,7 @@ import React, {
   useCallback,
   memo,
 } from "react";
+import { Helmet } from "react-helmet-async";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
@@ -362,6 +363,10 @@ export default function DirectMessages() {
   }
   return (
     <>
+      <Helmet>
+        <title>Messages — PNPtv!</title>
+        <meta name="description" content="Direct messages on PNPtv. Chat privately with community members." />
+      </Helmet>
       {showTutorial && <TutorialOverlay section="dm" onDismiss={dismissTutorial} />}
       <ThreadList currentUser={user} navigate={navigate} />
     </>

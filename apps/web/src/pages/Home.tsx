@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { Helmet } from "react-helmet-async";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
@@ -95,6 +96,10 @@ export default function Home() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
+      <Helmet>
+        <title>Home — PNPtv!</title>
+        <meta name="description" content="Your PNPtv feed. Browse announcements, featured performers, and community posts." />
+      </Helmet>
       {showTutorial && <TutorialOverlay section="home" onDismiss={dismissTutorial} />}
       {/* User greeting */}
       <div className="glass-card p-6 mb-6 animate-fade-in-up">
@@ -197,7 +202,7 @@ export default function Home() {
       >
         <div className="flex gap-3">
           {isValidPhotoUrl(user?.photoUrl) ? (
-            <img src={user.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+            <img src={user.photoUrl} alt={`${user?.displayName || "User"}'s avatar`} className="w-10 h-10 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
           ) : (
             <div
               className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
@@ -284,7 +289,7 @@ export default function Home() {
                   {/* Avatar */}
                   <button onClick={() => navigate(authorPath)} className="flex-shrink-0">
                     {isValidPhotoUrl(post.author_photo) ? (
-                      <img src={post.author_photo} alt="" className="w-10 h-10 rounded-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty("display"); }} />
+                      <img src={post.author_photo} alt={`${post.author_first_name || post.author_username || "User"}'s avatar`} className="w-10 h-10 rounded-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty("display"); }} />
                     ) : null}
                     <div
                       className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
@@ -324,7 +329,7 @@ export default function Home() {
                         ) : (
                           <img
                             src={post.media_url}
-                            alt=""
+                            alt="Post image"
                             className="w-full max-h-48 rounded-lg object-cover"
                             loading="lazy"
                             onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = "none"; }}

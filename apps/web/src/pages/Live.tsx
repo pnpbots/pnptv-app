@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { Helmet } from "react-helmet-async";
 import { LivePlayer } from "@/components/LivePlayer";
 import { Card, Badge, Skeleton, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
@@ -140,6 +141,10 @@ export default function Live() {
 
   return (
     <div className="page-container">
+      <Helmet>
+        <title>Live Streams — PNPtv!</title>
+        <meta name="description" content="Watch live broadcasts, tip performers, and book private sessions on PNPtv." />
+      </Helmet>
       {showTutorial && <TutorialOverlay section="live" onDismiss={dismissTutorial} />}
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
@@ -218,7 +223,7 @@ export default function Live() {
                 {isValidPhotoUrl(p.photoUrl) ? (
                   <img
                     src={p.photoUrl}
-                    alt=""
+                    alt={`${p.displayName}'s avatar`}
                     className="w-4 h-4 rounded-full object-cover"
                     onError={(e) => {
                       (e.target as HTMLImageElement).style.display = "none";

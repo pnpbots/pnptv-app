@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { Button, Card, Input } from "@pnptv/ui-kit";
 import {
@@ -391,6 +392,10 @@ export default function Apply() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
+      <Helmet>
+        <title>Become a Creator — PNPtv!</title>
+        <meta name="description" content="Apply to become a live performer or content creator on PNPtv. Stream live, upload exclusive content, and earn." />
+      </Helmet>
       <h1 className="text-2xl font-bold text-pnp-textPrimary mb-2">
         Become a Model
       </h1>

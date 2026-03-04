@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Helmet } from "react-helmet-async";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial, resetAllTutorials } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
@@ -94,7 +95,7 @@ function PostCard({
           {photoUrl ? (
             <img
               src={photoUrl}
-              alt=""
+              alt={`${post.author_first_name || post.author_username || "User"}'s avatar`}
               className="w-10 h-10 rounded-full object-cover"
             />
           ) : (
@@ -146,7 +147,7 @@ function PostCard({
               ) : (
                 <img
                   src={post.media_url}
-                  alt=""
+                  alt="Post image"
                   className="w-full max-h-80 rounded-lg object-cover"
                   loading="lazy"
                 />
@@ -343,7 +344,7 @@ function ComposePost({
     <div className="glass-card-sm p-4">
       <div className="flex gap-3">
         {photoUrl ? (
-          <img src={photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+          <img src={photoUrl} alt={`${displayName}'s avatar`} className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
         ) : (
           <div
             className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
@@ -1077,7 +1078,7 @@ function FollowListModal({
               className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors text-left"
             >
               {u.photoUrl && (u.photoUrl.startsWith("/") || u.photoUrl.startsWith("http")) ? (
-                <img src={u.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                <img src={u.photoUrl} alt={`${u.displayName || u.username || "User"}'s avatar`} className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
               ) : (
                 <div
                   className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
@@ -1841,6 +1842,10 @@ export default function Profile() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
+      <Helmet>
+        <title>{profile ? `${profile.display_name || profile.username} — PNPtv!` : "Profile — PNPtv!"}</title>
+        <meta name="description" content={profile ? `${profile.display_name || profile.username}'s profile on PNPtv.` : "User profile on PNPtv."} />
+      </Helmet>
       {isOwnProfile && showTutorial && <TutorialOverlay section="profile" onDismiss={dismissTutorial} />}
       {/* ── Back button for public profiles ── */}
       {paramUserId && (
