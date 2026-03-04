@@ -125,18 +125,18 @@ const createDaimoPayment = async ({
     const data = await response.json();
     const session = data.session || data;
     const sessionId = session.sessionId || session.id;
-    const checkoutUrl = `https://daimo.com/checkout?id=${sessionId}`;
+    const clientSecret = session.clientSecret;
 
     logger.info('Daimo session created', {
       paymentId,
       daimoPaymentId: sessionId,
-      url: checkoutUrl,
+      hasClientSecret: !!clientSecret,
     });
 
     return {
       success: true,
-      paymentUrl: checkoutUrl,
       daimoPaymentId: sessionId,
+      clientSecret,
       payment: session,
     };
   } catch (error) {

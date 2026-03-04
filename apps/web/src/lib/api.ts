@@ -1776,6 +1776,79 @@ export function getCanvaExportStatus(
   return request(`/api/canva/exports/${jobId}`);
 }
 
+// ---------------------------------------------------------------------------
+// Admin Canva API
+// ---------------------------------------------------------------------------
+
+export interface AdminCanvaStats {
+  connectedUsers: number;
+  totalExports: number;
+  completedExports: number;
+  failedExports: number;
+  activeJobs: number;
+  successRate: number;
+}
+
+export interface AdminCanvaUser {
+  id: string;
+  username: string;
+  display_name: string;
+  canva_user_id: string;
+  canva_display_name: string;
+  canva_connected_at: string;
+  export_count: number;
+}
+
+export interface AdminCanvaJob {
+  id: string;
+  user_id: string;
+  canva_design_id: string;
+  design_title: string;
+  export_format: string;
+  export_quality: string;
+  status: string;
+  directus_file_id?: string;
+  directus_content_id?: string;
+  error_message?: string;
+  retry_count: number;
+  export_url?: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+  username?: string;
+  user_display_name?: string;
+}
+
+export function getAdminCanvaStats(): Promise<{ success: boolean; stats: AdminCanvaStats }> {
+  return request("/api/webapp/admin/canva/stats");
+}
+
+export function getAdminCanvaUsers(): Promise<{ success: boolean; users: AdminCanvaUser[] }> {
+  return request("/api/webapp/admin/canva/users");
+}
+
+export function adminUnlinkCanvaUser(userId: string): Promise<{ success: boolean; message: string }> {
+  return request(`/api/webapp/admin/canva/users/${userId}/unlink`, { method: "POST" });
+}
+
+export function getAdminCanvaJobs(
+  page = 1,
+  status?: string
+): Promise<{ success: boolean; jobs: AdminCanvaJob[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
+  const params = new URLSearchParams({ page: String(page) });
+  if (status) params.set("status", status);
+  return request(`/api/webapp/admin/canva/jobs?${params}`);
+}
+
+export function adminRetryCanvaJob(jobId: string): Promise<{ success: boolean; message: string }> {
+  return request(`/api/webapp/admin/canva/jobs/${jobId}/retry`, { method: "POST" });
+}
+
+export function adminCancelCanvaJob(jobId: string): Promise<{ success: boolean; message: string }> {
+  return request(`/api/webapp/admin/canva/jobs/${jobId}/cancel`, { method: "POST" });
+}
+
 // ============================================================================
 // Admin API
 // ============================================================================

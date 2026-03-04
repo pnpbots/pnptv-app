@@ -257,22 +257,18 @@ class PaymentController {
           });
         }
       } else if (provider === 'daimo') {
-        try {
-          const existingLink = payment.daimoLink || payment.paymentUrl;
-          const isExternalLink = existingLink
-            && /^https?:\/\//i.test(existingLink)
-            && !existingLink.includes('/daimo-checkout/');
+        // Return Daimo session data for the SDK modal on the frontend
+        const existingSessionId = payment.metadata?.daimo_payment_id
+          || payment.daimo_payment_id;
+        const existingClientSecret = payment.metadata?.daimo_client_secret;
 
-          if (existingLink && existingLink.includes('/daimo-checkout/')) {
-            logger.warn('Ignoring self-referential Daimo checkout link', {
-              paymentId: payment.id,
-              existingLink,
-            });
-          }
-
-          if (isExternalLink) {
-            basePaymentData.daimoPaymentLink = existingLink;
-          } else {
+        if (existingSessionId && existingClientSecret) {
+          // Session already created — reuse it
+          basePaymentData.daimoSessionId = existingSessionId;
+          basePaymentData.daimoClientSecret = existingClientSecret;
+        } else {
+          // Create a new Daimo session
+          try {
             const daimoResult = await DaimoConfig.createDaimoPayment({
               amount: paymentAmount,
               userId,
@@ -283,19 +279,21 @@ class PaymentController {
             });
 
             if (daimoResult.success) {
-              basePaymentData.daimoPaymentLink = daimoResult.paymentUrl;
-              // Save the Daimo payment id and URL to prevent duplicate creation on refresh
+              basePaymentData.daimoSessionId = daimoResult.daimoPaymentId;
+              basePaymentData.daimoClientSecret = daimoResult.clientSecret;
+              // Persist session data to prevent duplicate creation on refresh
               await PaymentModel.updateStatus(payment.id, 'pending', {
                 daimo_payment_id: daimoResult.daimoPaymentId,
-                paymentUrl: daimoResult.paymentUrl,
+                daimo_client_secret: daimoResult.clientSecret,
               });
             } else {
               throw new Error(daimoResult.error || 'Daimo payment creation failed');
             }
+          } catch (error) {
+            logger.error('Error creating Daimo session:', error);
+            basePaymentData.daimoSessionId = null;
+            basePaymentData.daimoClientSecret = null;
           }
-        } catch (error) {
-          logger.error('Error creating Daimo payment link:', error);
-          basePaymentData.daimoPaymentLink = null;
         }
       }
 

@@ -17,6 +17,7 @@ const CreatorDashboard = lazy(() => import("@/pages/CreatorDashboard"));
 const Subscribe = lazy(() => import("@/pages/Subscribe"));
 const DirectMessages = lazy(() => import("@/pages/DirectMessages"));
 const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
+const DaimoCheckout = lazy(() => import("@/pages/DaimoCheckout"));
 const Support = lazy(() => import("@/pages/Support"));
 const Apply = lazy(() => import("@/pages/Apply"));
 const Welcome = lazy(() => import("@/pages/Welcome"));
@@ -32,6 +33,7 @@ const CreatorApplications = lazy(() => import("@/pages/admin/CreatorApplications
 const AdminNotifications = lazy(() => import("@/pages/admin/AdminNotifications"));
 const ExternalServices = lazy(() => import("@/pages/admin/ExternalServices"));
 const NearbyPlaces = lazy(() => import("@/pages/admin/NearbyPlaces"));
+const CanvaIntegration = lazy(() => import("@/pages/admin/CanvaIntegration"));
 
 export const router = createBrowserRouter([
   {
@@ -270,6 +272,14 @@ export const router = createBrowserRouter([
           </ModuleLoader>
         ),
       },
+      {
+        path: "canva",
+        element: (
+          <ModuleLoader>
+            <CanvaIntegration />
+          </ModuleLoader>
+        ),
+      },
     ],
   },
   {
@@ -277,6 +287,14 @@ export const router = createBrowserRouter([
     element: (
       <ModuleLoader>
         <AuthCallback />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/checkout/:paymentId",
+    element: (
+      <ModuleLoader>
+        <DaimoCheckout />
       </ModuleLoader>
     ),
   },

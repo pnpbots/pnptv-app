@@ -492,32 +492,23 @@ class PaymentService {
             description: `${plan.display_name || plan.name} Subscription`,
           });
 
-          if (daimoResult.success && daimoResult.paymentUrl) {
-            paymentUrl = daimoResult.paymentUrl;
+          if (daimoResult.success && daimoResult.daimoPaymentId) {
+            // Use our React app checkout page with Daimo SDK modal
+            const webAppUrl = process.env.WEB_APP_URL || 'https://app.pnptv.app';
+            paymentUrl = `${webAppUrl}/checkout/${payment.id}`;
             await PaymentModel.updateStatus(payment.id, 'pending', {
               paymentUrl,
               provider,
               daimo_payment_id: daimoResult.daimoPaymentId,
+              daimo_client_secret: daimoResult.clientSecret,
             });
           } else {
             throw new Error(daimoResult.error || 'Daimo payment creation failed');
           }
         } catch (daimoError) {
-          logger.error('Daimo API error, using fallback checkout page:', {
+          logger.error('Daimo API error:', {
             error: daimoError.message,
             paymentId: payment.id,
-          });
-          // Fallback to checkout page when SDK fails
-          // This ensures users can still complete payment even if the direct SDK integration fails
-          paymentUrl = `${webhookDomain}/daimo-checkout/${payment.id}`;
-          await PaymentModel.updateStatus(payment.id, 'pending', {
-            paymentUrl,
-            provider,
-            fallback: true, // Mark as fallback for tracking
-          });
-          logger.info('Daimo fallback checkout page created', {
-            paymentId: payment.id,
-            paymentUrl,
           });
         }
       } else {
