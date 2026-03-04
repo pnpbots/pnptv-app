@@ -10,6 +10,8 @@ import {
   type SubscriptionPlan,
 } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { useTutorial } from "@/hooks/useTutorial";
+import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 
 type Provider = "epayco" | "daimo";
 
@@ -83,6 +85,7 @@ function durationLabel(days: number): string {
 export default function Subscribe() {
   const navigate = useNavigate();
   const { refreshUser } = useAuth();
+  const { showTutorial, dismissTutorial } = useTutorial("subscribe");
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -285,6 +288,7 @@ export default function Subscribe() {
 
   return (
     <div className="page-container py-6 px-4 max-w-2xl mx-auto">
+      {showTutorial && <TutorialOverlay section="subscribe" onDismiss={dismissTutorial} />}
       <Helmet>
         <title>Subscribe — PNPtv!</title>
         <meta name="description" content="Choose your PNPtv plan. Unlock exclusive content, PRIME video access, nearby discovery, and more." />

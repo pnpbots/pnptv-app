@@ -165,6 +165,32 @@ export const tutorialContent: Record<string, TutorialSection> = {
     ],
   },
 
+  subscribe: {
+    slides: [
+      {
+        titleEn: "Choose Your Plan",
+        titleEs: "Elige Tu Plan",
+        descEn: "Pick the plan that fits you. Member gives you social features and hangouts. PRIME unlocks everything — Videorama, exclusive content, nearby premium, and more.",
+        descEs: "Elige el plan que te convenga. Member te da funciones sociales y hangouts. PRIME desbloquea todo — Videorama, contenido exclusivo, nearby premium y mas.",
+        illustration: "subscribePlans",
+      },
+      {
+        titleEn: "Pay Your Way",
+        titleEs: "Paga a Tu Manera",
+        descEn: "Pay with credit/debit card or PSE bank transfer via ePayco. Or pay with USDC crypto from any wallet or exchange — Coinbase, MetaMask, Binance, and more via Daimo.",
+        descEs: "Paga con tarjeta de credito/debito o transferencia PSE via ePayco. O paga con crypto USDC desde cualquier wallet o exchange — Coinbase, MetaMask, Binance y mas via Daimo.",
+        illustration: "paymentMethods",
+      },
+      {
+        titleEn: "Instant Access",
+        titleEs: "Acceso Instantaneo",
+        descEn: "After payment, your credentials are sent to your email and Telegram. Your subscription activates immediately — no waiting.",
+        descEs: "Despues del pago, tus credenciales se envian a tu email y Telegram. Tu suscripcion se activa de inmediato — sin esperas.",
+        illustration: "instantAccess",
+      },
+    ],
+  },
+
   profile: {
     slides: [
       {

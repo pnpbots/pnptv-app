@@ -227,6 +227,56 @@ const illustrations: Record<string, React.ReactNode> = {
     </Wrap>
   ),
 
+  subscribePlans: (
+    <Wrap>
+      <rect x="30" y="55" width="60" height="90" rx="10" stroke={CYAN} strokeWidth="1.5" fill={CYAN} fillOpacity="0.06" />
+      <rect x="40" y="65" width="40" height="6" rx="3" fill={CYAN} opacity="0.5" />
+      <rect x="40" y="77" width="30" height="4" rx="2" fill="white" opacity="0.2" />
+      <rect x="40" y="85" width="35" height="4" rx="2" fill="white" opacity="0.15" />
+      <rect x="40" y="93" width="25" height="4" rx="2" fill="white" opacity="0.15" />
+      <rect x="110" y="45" width="60" height="100" rx="10" stroke={PINK} strokeWidth="2" fill={PINK} fillOpacity="0.08" />
+      <rect x="120" y="50" width="25" height="10" rx="5" fill={ORANGE} opacity="0.8" />
+      <text x="125" y="58" fill="white" fontSize="6" fontWeight="bold" fontFamily="monospace">PRIME</text>
+      <rect x="120" y="67" width="40" height="6" rx="3" fill={PINK} opacity="0.5" />
+      <rect x="120" y="79" width="30" height="4" rx="2" fill="white" opacity="0.2" />
+      <rect x="120" y="87" width="35" height="4" rx="2" fill="white" opacity="0.15" />
+      <rect x="120" y="95" width="25" height="4" rx="2" fill="white" opacity="0.15" />
+      <rect x="120" y="103" width="30" height="4" rx="2" fill="white" opacity="0.15" />
+      <rect x="120" y="111" width="20" height="4" rx="2" fill="white" opacity="0.1" />
+    </Wrap>
+  ),
+
+  paymentMethods: (
+    <Wrap>
+      <rect x="35" y="55" width="55" height="40" rx="8" stroke={CYAN} strokeWidth="1.5" fill={CYAN} fillOpacity="0.08" />
+      <rect x="42" y="62" width="20" height="3" rx="1.5" fill="white" opacity="0.3" />
+      <rect x="42" y="68" width="40" height="5" rx="2.5" fill={ORANGE} opacity="0.4" />
+      <rect x="42" y="78" width="15" height="8" rx="2" fill="white" opacity="0.15" />
+      <rect x="60" y="78" width="15" height="8" rx="2" fill="white" opacity="0.1" />
+      <text x="55" y="50" fill={CYAN} fontSize="10" fontFamily="monospace" opacity="0.6">💳</text>
+      <circle cx="140" cy="75" r="22" stroke={PINK} strokeWidth="1.5" fill={PINK} fillOpacity="0.06" />
+      <text x="129" y="72" fill={ORANGE} fontSize="14" fontFamily="monospace" opacity="0.7">$</text>
+      <text x="138" y="84" fill={PINK} fontSize="7" fontWeight="bold" fontFamily="monospace" opacity="0.8">USDC</text>
+      <path d="M90 75 L110 75" stroke={ORANGE} strokeWidth="2" strokeLinecap="round" strokeDasharray="4 3" />
+      <text x="67" y="120" fill="white" fontSize="7" fontFamily="monospace" opacity="0.25">ePayco</text>
+      <text x="125" y="120" fill="white" fontSize="7" fontFamily="monospace" opacity="0.25">Daimo</text>
+    </Wrap>
+  ),
+
+  instantAccess: (
+    <Wrap>
+      <circle cx="100" cy="80" r="35" stroke="#34C759" strokeWidth="2" fill="#34C759" fillOpacity="0.08" />
+      <path d="M85 80 L95 90 L115 70" stroke="#34C759" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <path d="M65 130 L75 120 M100 130 L100 118 M135 130 L125 120" stroke={CYAN} strokeWidth="1.5" strokeLinecap="round" opacity="0.3" />
+      <circle cx="65" cy="135" r="4" fill={PINK} opacity="0.4" />
+      <circle cx="100" cy="135" r="4" fill={ORANGE} opacity="0.4" />
+      <circle cx="135" cy="135" r="4" fill={CYAN} opacity="0.4" />
+      <rect x="55" y="145" width="20" height="3" rx="1.5" fill="white" opacity="0.15" />
+      <rect x="90" y="145" width="20" height="3" rx="1.5" fill="white" opacity="0.15" />
+      <rect x="125" y="145" width="20" height="3" rx="1.5" fill="white" opacity="0.15" />
+    </Wrap>
+  ),
+
   connectAccounts: (
     <Wrap>
       <circle cx="70" cy="85" r="22" stroke={CYAN} strokeWidth="2" fill={CYAN} fillOpacity="0.08" />
