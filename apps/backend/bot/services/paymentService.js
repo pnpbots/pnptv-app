@@ -479,36 +479,18 @@ class PaymentService {
         // Create payment reference
         const paymentRef = `PAY-${payment.id.substring(0, 8).toUpperCase()}`;
 
-        // Use ePayco hosted subscription landing page when available (handles
-        // tokenization, PCI compliance, and charging on ePayco's side).
-        // Falls back to custom tokenized checkout for plans without an ePayco ID.
-        const subscriptionUrl = getEpaycoSubscriptionUrl(planId, {
-          extra1: String(userId),
-          extra2: planId,
-          extra3: payment.id,
+        // All ePayco payments use the tokenized checkout page
+        paymentUrl = `${checkoutDomain}/payment/${payment.id}`;
+        logger.info('ePayco tokenized checkout URL created', {
+          paymentId: payment.id,
+          planId,
+          paymentUrl,
         });
-
-        if (subscriptionUrl) {
-          paymentUrl = subscriptionUrl;
-          logger.info('ePayco subscription landing page URL created', {
-            paymentId: payment.id,
-            planId,
-            paymentUrl,
-          });
-        } else {
-          paymentUrl = `${checkoutDomain}/payment/${payment.id}`;
-          logger.info('ePayco tokenized checkout URL created (no subscription plan ID)', {
-            paymentId: payment.id,
-            planId,
-            paymentUrl,
-          });
-        }
 
         await PaymentModel.updateStatus(payment.id, 'pending', {
           paymentUrl,
           provider,
           reference: paymentRef,
-          fallback: !subscriptionUrl,
         });
       } else if (provider === 'daimo') {
         // Create Daimo payment using official API
