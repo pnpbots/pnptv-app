@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
     <loc>https://app.pnptv.app/</loc>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
+    <image:image>
+      <image:loc>https://app.pnptv.app/og-image.png</image:loc>
+      <image:title>PNPtv – Private Social Network</image:title>
+    </image:image>
   </url>
   <url>
     <loc>https://app.pnptv.app/subscribe</loc>
@@ -13,7 +18,7 @@
   <url>
     <loc>https://app.pnptv.app/live</loc>
     <changefreq>hourly</changefreq>
-    <priority>0.8</priority>
+    <priority>0.9</priority>
   </url>
   <url>
     <loc>https://app.pnptv.app/media</loc>
@@ -28,12 +33,12 @@
   <url>
     <loc>https://app.pnptv.app/social</loc>
     <changefreq>hourly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://app.pnptv.app/chat</loc>
     <changefreq>daily</changefreq>
-    <priority>0.6</priority>
+    <priority>0.7</priority>
   </url>
   <url>
     <loc>https://app.pnptv.app/apply</loc>

@@ -423,7 +423,14 @@ export function LoginPage() {
         {/* Divider */}
         <div className="mt-8 pt-6" style={{ borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
           <p className="text-center text-xs" style={{ color: "#8E8E93" }}>
-            By continuing, you agree to our Terms of Service
+            By continuing, you agree to our{" "}
+            <a href="https://pnptv.app/terms" target="_blank" rel="noopener noreferrer" className="underline hover:text-white transition-colors" style={{ color: "#D4007A" }}>
+              Terms of Service
+            </a>{" "}
+            and{" "}
+            <a href="https://pnptv.app/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-white transition-colors" style={{ color: "#D4007A" }}>
+              Privacy Policy
+            </a>
           </p>
         </div>
       </div>
