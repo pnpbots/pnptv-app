@@ -2,8 +2,10 @@
  * ePayco Subscription Plan ID Mapping
  *
  * Maps internal plan IDs to ePayco subscription landing page plan IDs.
- * Recurring plans use ePayco's hosted subscription pages.
- * One-time plans (week_pass, lifetime_pass) use the custom checkout page.
+ * All ePayco payments are routed through these hosted pages, which handle
+ * tokenization, PCI compliance, and charging on ePayco's side.
+ *
+ * Plans without an entry here fall back to the custom tokenized checkout page.
  */
 
 const EPAYCO_SUBSCRIPTION_PLANS = {
@@ -12,25 +14,18 @@ const EPAYCO_SUBSCRIPTION_PLANS = {
 
   // PRIME Trial - 007PASS - $14.99 USD (7 days)
   'week-trial-pass': '007PASS',
-  week_pass: '007PASS', // legacy alias
 
   // Monthly PRIME - 030PASS - $24.99 USD (30 days)
   'monthly-pass': '030PASS',
-  three_months_pass: '090PASS', // legacy alias
 
   // Crystal PRIME - 180PASS - $49.99 USD (6 months)
   'crystal-pass': '180PASS',
-  crystal_pass: '180PASS', // legacy alias
-  six_months_pass: '180PASS', // legacy alias
 
   // Diamond PRIME - 365PASS - $99.99 USD (1 year)
   'diamond-pass': '365PASS',
-  yearly_pass: '989cc3619e2a37cfe0111f0', // legacy alias
 
   // Lifetime PRIME - LIFETIME - $249.99 USD (one-time payment)
   'lifetime-pass': 'LIFETIME',
-  lifetime_pass: 'LIFETIME100', // legacy alias
-  lifetime_100: 'LIFETIME100', // legacy alias
 };
 
 /**

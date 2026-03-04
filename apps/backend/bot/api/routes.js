@@ -1481,30 +1481,6 @@ app.post('/api/recurring/reactivate', authenticateUser, bindAuthenticatedUserId,
 // Subscription API routes
 app.get('/api/subscription/plans', asyncHandler(subscriptionController.getPlans));
 app.post('/api/subscription/create-plan', verifyAdminJWT, asyncHandler(subscriptionController.createEpaycoPlan));
-app.post('/api/subscription/create-checkout', asyncHandler(subscriptionController.createCheckout));
-// H1: This duplicate ePayco confirmation endpoint has been retired.
-// The canonical handler lives at POST /api/webhooks/epayco (webhookController).
-// Return 410 Gone so any stale integrations or ePayco admin panel entries are
-// immediately visible as misconfigured rather than silently double-processing.
-app.post('/api/subscription/epayco/confirmation', webhookLimiter, (req, res) => {
-  logger.warn('Deprecated ePayco confirmation endpoint called — use /api/webhooks/epayco', {
-    ip: req.ip,
-    body: req.body,
-  });
-  return res.status(410).json({
-    error: 'This endpoint has been removed. Use POST /api/webhooks/epayco instead.',
-    movedTo: '/api/webhooks/epayco',
-  });
-});
-// H7: Orphaned route — the subscription-specific payment-response page was superseded by
-// /api/payment-response (webhookController.handlePaymentResponse). Return 410 Gone so any
-// bookmarked or cached ePayco response URLs fail loudly rather than silently returning stale HTML.
-app.get('/api/subscription/payment-response', (req, res) => {
-  res.status(410).json({
-    success: false,
-    error: 'This endpoint has been removed. Payment responses are now handled at /api/payment-response.',
-  });
-});
 app.get('/api/subscription/subscriber/:identifier', verifyAdminJWT, asyncHandler(subscriptionController.getSubscriber));
 app.get('/api/subscription/stats', verifyAdminJWT, asyncHandler(subscriptionController.getStatistics));
 

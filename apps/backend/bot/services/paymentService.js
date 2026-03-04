@@ -43,7 +43,7 @@ const PaymentNotificationService = require('./paymentNotificationService');
 const NotificationEmitter = require('./notificationEmitter');
 const BookingAvailabilityIntegration = require('./bookingAvailabilityIntegration');
 const PaymentSecurityService = require('./paymentSecurityService');
-const { isSubscriptionPlan } = require('../../config/epaycoSubscriptionPlans');
+const { isSubscriptionPlan, getEpaycoSubscriptionUrl } = require('../../config/epaycoSubscriptionPlans');
 const PaymentHistoryService = require('../../services/paymentHistoryService');
 const axios = require('axios');
 
@@ -426,18 +426,6 @@ class PaymentService {
       }
     }
 
-    /**
-     * Reintentar pago fallido (simulado)
-     * @param {string|number} paymentId - Payment ID to retry
-     * @param {number} [maxRetries=2] - Maximum number of retry attempts
-     * @returns {Promise<boolean>} Success status
-     */
-    static async retryPayment(paymentId) {
-      // Removed simulation code that marked payments as 'completed' unconditionally.
-      // Use provider-specific retry: ePayco webhook re-verification or Daimo status polling.
-      logger.error('retryPayment() called — simulation code removed', { paymentId });
-      throw new Error('retryPayment() is not implemented. Use provider-specific payment verification flow.');
-    }
   static async createPayment({ userId, planId, provider, sku, chatId, creatorId }) {
     try {
       const plan = await PlanModel.getById(planId);
