@@ -135,7 +135,7 @@ export default function HangoutModeration() {
               {/* Header */}
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h3 className="font-semibold text-pnp-textPrimary truncate">{hangout.title}</h3>
+                  <h3 className="font-semibold text-pnp-textPrimary truncate">{hangout.title || "Untitled Room"}</h3>
                   <p className="text-xs text-pnp-textSecondary mt-0.5">
                     by {hangout.creatorName}
                   </p>

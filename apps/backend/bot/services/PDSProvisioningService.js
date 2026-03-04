@@ -152,7 +152,11 @@ class PDSProvisioningService {
       };
 
     } catch (error) {
-      logger.error(`[PDS] Provisioning error for user ${user?.id}:`, error);
+      if (error.isPermanentFailure) {
+        logger.info(`[PDS] Provisioning skipped for user ${user?.id}: ${error.message}`);
+      } else {
+        logger.error(`[PDS] Provisioning error for user ${user?.id}:`, error);
+      }
 
       // Still allow login but log error
       if (user?.id) {
@@ -263,7 +267,9 @@ class PDSProvisioningService {
 
       throw new Error(`Unknown PDS mode: ${pdsMode}`);
     } catch (error) {
-      logger.error(`[PDS] PDS provisioning error:`, error);
+      if (!error.isPermanentFailure) {
+        logger.error(`[PDS] PDS provisioning error:`, error);
+      }
       throw error;
     }
   }

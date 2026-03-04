@@ -813,6 +813,10 @@ class PaymentController {
             'card[cvc]': String(rawCvc),
             'hasCvv': true,
           };
+          // Visa requires card[holder_name] for 3DS 2.x (EMV 3DS 2.2+)
+          if (name) {
+            creditInfo['card[holder_name]'] = `${name}${lastName ? ' ' + lastName : ''}`;
+          }
           logger.info('Server-side card tokenization started', { paymentId });
           const tokenResult = await epaycoClient.token.create(creditInfo);
           if (tokenResult && tokenResult.status && tokenResult.id) {

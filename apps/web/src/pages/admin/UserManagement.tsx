@@ -14,7 +14,7 @@ import {
 } from "@/lib/api";
 
 const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
-  prime: "accent",
+  PRIME: "accent",
   member: "success",
   creator: "warning",
   free: "default",
@@ -25,6 +25,7 @@ const STATUS_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "
   active: "success",
   expired: "warning",
   cancelled: "danger",
+  churned: "danger",
   free: "default",
 };
 

@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 
 const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
+  PRIME: "accent",
   prime: "accent",
   member: "success",
   creator: "warning",
@@ -117,7 +118,7 @@ export default function UserDetail() {
         tier: editForm.tier || undefined,
         planExpiry: editForm.planExpiry || undefined,
       });
-      setUser(res.user);
+      setUser((prev) => (prev ? { ...prev, ...res.user } : res.user));
       setSaveSuccess(true);
       setError(null);
     } catch (err) {
@@ -138,7 +139,7 @@ export default function UserDetail() {
     setBanLoading(true);
     try {
       const res = await banAdminUser(userId, banAction === "ban", banReason || undefined);
-      setUser(res.user);
+      setUser((prev) => (prev ? { ...prev, ...res.user } : res.user));
       setBanConfirmOpen(false);
       setError(null);
     } catch (err) {
@@ -303,8 +304,7 @@ export default function UserDetail() {
             >
               <option value="free">free</option>
               <option value="member">member</option>
-              <option value="prime">prime</option>
-              <option value="creator">creator</option>
+              <option value="PRIME">PRIME</option>
               <option value="banned">banned</option>
             </select>
           </div>

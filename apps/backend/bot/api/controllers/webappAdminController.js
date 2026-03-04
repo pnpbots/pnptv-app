@@ -175,15 +175,14 @@ const updateUser = async (req, res) => {
     if (subscriptionStatus !== undefined) {
       queryParts.push(`subscription_status = $${paramIndex++}`);
       values.push(subscriptionStatus);
-      // Keep tier in sync if tier not explicitly set
-      if (tier === undefined) {
-        queryParts.push(`tier = $${paramIndex++}`);
-        values.push(subscriptionStatus === 'active' ? 'prime' : 'free');
-      }
     }
     if (tier !== undefined) {
       queryParts.push(`tier = $${paramIndex++}`);
       values.push(tier);
+    } else if (subscriptionStatus !== undefined) {
+      // Keep tier in sync if tier not explicitly set
+      queryParts.push(`tier = $${paramIndex++}`);
+      values.push(subscriptionStatus === 'active' ? 'PRIME' : 'free');
     }
     if (subscriptionPlan !== undefined) {
       queryParts.push(`plan_id = $${paramIndex++}`);
@@ -347,7 +346,7 @@ const endHangout = async (req, res) => {
   try {
     const { id: callId } = req.params;
 
-    await query('UPDATE video_calls SET status = $1, ended_at = NOW() WHERE id = $2', ['ended', callId]);
+    await query('UPDATE video_calls SET is_active = false, ended_at = NOW() WHERE id = $1', [callId]);
 
     logger.info('Admin ended hangout', { adminId: user.id, callId });
     return res.json({ success: true, message: 'Hangout ended' });
@@ -395,7 +394,7 @@ const bulkUpdateUsers = async (req, res) => {
           const expiryValue = expiry ? new Date(expiry) : null;
           await query(
             `UPDATE users
-             SET tier = 'prime',
+             SET tier = 'PRIME',
                  subscription_status = 'active',
                  plan_id = $2,
                  plan_expiry = $3,
@@ -515,6 +514,10 @@ const deletePlan = async (req, res) => {
     logger.info('Admin deleted plan', { adminId: admin.id, planId });
     return res.json({ success: true, message: 'Plan deleted' });
   } catch (error) {
+    // FK constraint: plan has existing payments referencing it
+    if (error.code === '23503') {
+      return res.status(409).json({ error: 'Cannot delete plan — it has existing payments. Deactivate it instead.' });
+    }
     logger.error('Error deleting plan:', error);
     return res.status(500).json({ error: error.message });
   }

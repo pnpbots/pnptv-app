@@ -1,7 +1,7 @@
 const { optimismUSDC } = require('@daimo/pay-common');
 const { getAddress } = require('viem');
 const crypto = require('crypto');
-const { SUPPORTED_PAYMENT_APPS } = require('../../config/daimo');
+const { DAIMO_API_BASE } = require('../../config/daimo');
 const logger = require('../../utils/logger');
 
 /**
@@ -9,7 +9,7 @@ const logger = require('../../utils/logger');
  * Handles payment generation and processing with Daimo Pay
  * - Network: Optimism (low fees, fast finality)
  * - Token: USDC (stablecoin 1:1 with USD)
- * - Payment Apps: CashApp, Venmo, Zelle, Wise, Revolut, MercadoPago, Coinbase, Binance, MiniPay
+ * - Payment Apps: Crypto wallets via Daimo Pay checkout
  */
 class DaimoService {
   constructor() {
@@ -19,8 +19,8 @@ class DaimoService {
     this.webhookSecret = process.env.DAIMO_WEBHOOK_SECRET;
     this.apiKey = process.env.DAIMO_API_KEY;
 
-    // Supported payment apps (prioritized in UI)
-    this.supportedPaymentApps = [...SUPPORTED_PAYMENT_APPS];
+    // API base URL
+    this.apiBase = DAIMO_API_BASE;
 
     // Optimism USDC configuration
     this.chain = {
@@ -34,7 +34,7 @@ class DaimoService {
       chain: this.chain.name,
       chainId: this.chain.id,
       token: this.chain.tokenSymbol,
-      supportedApps: this.supportedPaymentApps,
+      apiBase: this.apiBase,
     });
   }
 

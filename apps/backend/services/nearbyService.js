@@ -128,7 +128,9 @@ class NearbyService {
         stored_in: ['postgres', 'redis']
       };
     } catch (error) {
-      logger.error(`❌ Failed to update location:`, error);
+      if (error.code !== 'RATE_LIMITED') {
+        logger.error(`❌ Failed to update location:`, error);
+      }
       throw error;
     }
   }

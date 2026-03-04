@@ -1192,9 +1192,11 @@ const xLoginCallback = async (req, res) => {
     logger.info(`Web app X login: user ${user.id} via @${xHandle}`);
     return redirectToCanonicalApp(res);
   } catch (error) {
-    logger.error('X OAuth callback error:', {
+    const status = error.response?.status;
+    const logLevel = [401, 403].includes(status) ? 'warn' : 'error';
+    logger[logLevel]('X OAuth callback error:', {
       message: error.message,
-      status: error.response?.status || null,
+      status: status || null,
       details: error.response?.data || null,
     });
     return redirectToCanonicalAuthError(res);

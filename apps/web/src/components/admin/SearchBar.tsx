@@ -15,6 +15,10 @@ export function SearchBar({ value, onChange, placeholder = "Search...", debounce
     setLocal(value);
   }, [value]);
 
+  useEffect(() => {
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, []);
+
   const handleChange = (v: string) => {
     setLocal(v);
     if (timerRef.current) clearTimeout(timerRef.current);

@@ -21,8 +21,9 @@ function getBotInstance() {
     try {
       // Lazy-require to break circular dependency (bot.js -> paymentService -> bot.js)
       const botModule = require('../core/bot');
-      if (botModule && 'getBotInstance' in botModule && typeof botModule.getBotInstance === 'function') {
-        _botInstance = botModule.getBotInstance();
+      const getter = botModule?.getBotInstance;
+      if (typeof getter === 'function') {
+        _botInstance = getter();
       }
     } catch (_e) {
       // Module not yet loaded (e.g. in test context) — fall through to fallback.

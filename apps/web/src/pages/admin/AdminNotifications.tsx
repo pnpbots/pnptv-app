@@ -205,9 +205,9 @@ export default function AdminNotifications() {
                 onChange={(e) => handleChange("tier", e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
               >
+                <option value="free">free</option>
                 <option value="member">member</option>
-                <option value="prime">prime</option>
-                <option value="creator">creator</option>
+                <option value="PRIME">PRIME</option>
               </select>
             </div>
           )}

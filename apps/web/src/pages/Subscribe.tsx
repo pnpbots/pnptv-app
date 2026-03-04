@@ -332,16 +332,16 @@ export default function Subscribe() {
                     )}
                   </div>
                   <span className="text-xs text-pnp-textSecondary">
-                    {durationLabel(plan.duration_days)}
+                    {durationLabel(plan.duration_days || plan.duration || 30)}
                   </span>
                 </div>
                 <div className="text-right">
                   <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
-                  {plan.duration_days > 0 && plan.duration_days < 36500 && (
+                  {(plan.duration_days || plan.duration || 0) > 0 && (plan.duration_days || plan.duration || 0) < 36500 && (
                     <div className="text-[10px] text-pnp-textSecondary">
                       {showCOP
-                        ? formatPrice(plan.priceCOP / Math.max(1, Math.round(plan.duration_days / 30)), "COP")
-                        : formatPrice(plan.priceUSD / Math.max(1, Math.round(plan.duration_days / 30)), "USD")
+                        ? formatPrice(plan.priceCOP / Math.max(1, Math.round((plan.duration_days || plan.duration || 30) / 30)), "COP")
+                        : formatPrice(plan.priceUSD / Math.max(1, Math.round((plan.duration_days || plan.duration || 30) / 30)), "USD")
                       }/mo
                     </div>
                   )}
@@ -408,8 +408,8 @@ export default function Subscribe() {
             }`}
           >
             <div className="text-lg mb-1">🪙</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">Crypto / Apps</div>
-            <div className="text-[10px] text-pnp-textSecondary">CashApp, Venmo, Zelle</div>
+            <div className="text-xs font-medium text-pnp-textPrimary">Crypto / USDC</div>
+            <div className="text-[10px] text-pnp-textSecondary">Coinbase, MetaMask, Binance</div>
           </button>
         </div>
       </div>

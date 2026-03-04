@@ -1179,6 +1179,7 @@ export interface SubscriptionPlan {
   price: number;
   currency: string;
   duration_days: number;
+  duration?: number;
   features?: string[];
   priceUSD: number;
   priceCOP: number;

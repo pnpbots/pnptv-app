@@ -463,7 +463,7 @@ app.get('/checkout/:paymentId', (req, res) => {
 });
 
 app.get('/daimo-checkout/:paymentId', (req, res) => {
-  sendCheckoutHtml(res, 'daimo-checkout.html');
+  sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
 app.get('/api/pnp/checkout', (req, res) => {
@@ -500,11 +500,6 @@ const serveStaticWithBlocking = (staticPath) => {
       // Define specific payment-related HTML files that should be allowed
       const allowedPaymentHtmls = [
         'payment-checkout.html',
-        'pnp-live-checkout.html',
-        'pnp-live-daimo-checkout.html',
-        'recurring-checkout.html',
-        'meet-greet-daimo-checkout.html',
-        'daimo-checkout.html'
       ];
 
       // Check if the request path ends with one of the allowed payment HTML files
@@ -1389,9 +1384,9 @@ app.post(
   asyncHandler(podcastController.uploadAudio)
 );
 
-// Recurring Checkout page - serves recurring-checkout.html for /recurring-checkout/:userId/:planId
+// Recurring Checkout page - serves unified payment-checkout.html
 app.get('/recurring-checkout/:userId/:planId', pageLimiter, (req, res) => {
-  res.redirect(302, '/recurring-checkout.html');
+  sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
 // Recurring Subscription API routes
@@ -2750,6 +2745,12 @@ app.get('/api/webapp/nearby/search', asyncHandler(async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
   req.user = { id: user.id, userId: user.id };
   return NearbyController.searchNearby(req, res);
+}));
+app.get('/api/webapp/nearby/places', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+  req.user = { id: user.id, userId: user.id };
+  return NearbyController.searchNearbyPlaces(req, res);
 }));
 
 // DM threads & conversations

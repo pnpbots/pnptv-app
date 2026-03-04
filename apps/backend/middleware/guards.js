@@ -11,19 +11,17 @@ const roleGuard = (requiredRole) => {
 
       const userId = req.session.user.id;
 
-      const userQuery = `
-        SELECT r.name, r.rank FROM users u
-        LEFT JOIN roles r ON u.role_id = r.id
-        WHERE u.id = $1
-      `;
-      const userResult = await getPool().query(userQuery, [userId]);
+      const userResult = await getPool().query(
+        'SELECT role FROM users WHERE id = $1',
+        [userId]
+      );
 
       if (userResult.rows.length === 0) {
         return res.status(401).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Usuario no encontrado' } });
       }
 
-      const userRole = userResult.rows[0].name || ROLES.USER;
-      const userRank = userResult.rows[0].rank || 0;
+      const userRole = userResult.rows[0].role || ROLES.USER;
+      const userRank = ROLE_HIERARCHY[userRole] || 0;
       const requiredRank = ROLE_HIERARCHY[requiredRole] || 0;
 
       if (userRank < requiredRank) {
@@ -49,19 +47,23 @@ const permissionGuard = (requiredPermission) => {
 
       const userId = req.session.user.id;
 
-      const permQuery = `
-        SELECT DISTINCT p.name
-        FROM users u
-        LEFT JOIN user_roles ur ON u.id = ur.user_id
-        LEFT JOIN roles r ON COALESCE(ur.role_id, u.role_id) = r.id
-        LEFT JOIN role_permissions rp ON r.id = rp.role_id
-        LEFT JOIN permissions p ON rp.permission_id = p.id
-        WHERE u.id = $1 AND (p.name = $2 OR r.name = $3)
-      `;
-      const permResult = await getPool().query(permQuery, [userId, requiredPermission, ROLES.SUPERADMIN]);
+      // No separate permissions table exists — grant access if user is
+      // superadmin, or if their role rank is admin-level or higher.
+      const userResult = await getPool().query(
+        'SELECT role FROM users WHERE id = $1',
+        [userId]
+      );
 
-      if (permResult.rows.length === 0) {
-        logger.warn(`Permiso denegado: Usuario ${userId} intenta usar ${requiredPermission}`);
+      if (userResult.rows.length === 0) {
+        return res.status(401).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Usuario no encontrado' } });
+      }
+
+      const userRole = userResult.rows[0].role || ROLES.USER;
+      const userRank = ROLE_HIERARCHY[userRole] || 0;
+      const adminRank = ROLE_HIERARCHY[ROLES.ADMIN] || 3;
+
+      if (userRank < adminRank) {
+        logger.warn(`Permiso denegado: Usuario ${userId} (${userRole}) intenta usar ${requiredPermission}`);
         return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: `Permiso requerido: ${requiredPermission}` } });
       }
 

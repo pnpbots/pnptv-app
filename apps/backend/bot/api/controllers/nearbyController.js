@@ -187,18 +187,17 @@ class NearbyController {
    */
   static async _countNearby(userId, lat, lon, radiusKm) {
     try {
-      const radiusMeters = radiusKm * 1000;
+      // Use bounding-box pre-filter + Haversine (no PostGIS needed)
+      const latDelta = radiusKm / 111;
+      const lngDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
       const { rows } = await dbQuery(
         `SELECT COUNT(*)::int as count
          FROM user_locations ul
          WHERE ul.user_id != $1
            AND ul.updated_at > NOW() - INTERVAL '30 minutes'
-           AND ST_DWithin(
-             ul.location::geography,
-             ST_MakePoint($3, $2)::geography,
-             $4
-           )`,
-        [userId, lat, lon, radiusMeters]
+           AND ul.latitude BETWEEN $2 AND $3
+           AND ul.longitude BETWEEN $4 AND $5`,
+        [userId, lat - latDelta, lat + latDelta, lon - lngDelta, lon + lngDelta]
       );
       return rows[0]?.count || 0;
     } catch (err) {

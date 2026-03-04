@@ -11,7 +11,7 @@ import {
 } from "@/lib/api";
 
 const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
-  prime: "accent",
+  PRIME: "accent",
   member: "success",
   creator: "warning",
   free: "default",
@@ -35,7 +35,7 @@ const EMPTY_FORM: PlanFormState = {
   id: "",
   name: "",
   display_name: "",
-  tier: "member",
+  tier: "PRIME",
   price: "0",
   currency: "USD",
   duration_days: "30",
@@ -334,8 +334,7 @@ export default function PlanManagement() {
                   >
                     <option value="free">free</option>
                     <option value="member">member</option>
-                    <option value="prime">prime</option>
-                    <option value="creator">creator</option>
+                    <option value="PRIME">PRIME</option>
                   </select>
                 </div>
                 <div>

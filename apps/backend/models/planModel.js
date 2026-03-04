@@ -111,6 +111,7 @@ class Plan {
       // duration_days is the canonical column; duration is the legacy NOT NULL column.
       // Both may be set; prefer duration_days, fall back to duration.
       duration: parseInt(row.duration_days || row.duration || 30, 10),
+      duration_days: parseInt(row.duration_days || row.duration || 30, 10),
       features: this.normalizeFeatures(row.features),
       active: row.active,
       isLifetime: row.is_lifetime || false,
@@ -252,19 +253,14 @@ class Plan {
    * @returns {Promise<boolean>} Success status
    */
   static async delete(planId) {
-    try {
-      await query(`DELETE FROM ${this.TABLE} WHERE id = $1`, [planId]);
+    await query(`DELETE FROM ${this.TABLE} WHERE id = $1`, [planId]);
 
-      // Invalidate cache
-      await cache.del(`plan:${planId}`);
-      await cache.del('plans:all');
+    // Invalidate cache
+    await cache.del(`plan:${planId}`);
+    await cache.del('plans:all');
 
-      logger.info('Plan deleted', { planId });
-      return true;
-    } catch (error) {
-      logger.error('Error deleting plan:', error);
-      return false;
-    }
+    logger.info('Plan deleted', { planId });
+    return true;
   }
 
   /**

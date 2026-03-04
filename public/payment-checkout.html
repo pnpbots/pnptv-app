@@ -656,6 +656,7 @@
             // Collect form values
             const name = document.getElementById('name').value.trim();
             const lastName = document.getElementById('lastName').value.trim();
+            const holderName = (name + ' ' + lastName).trim();
             const email = document.getElementById('email').value.trim();
             const docType = document.getElementById('docType').value;
             const docNumber = document.getElementById('docNumber').value.trim();
@@ -702,7 +703,7 @@
                 // Step 1: Try client-side tokenization, fallback to server-side
                 let tokenCard = null;
                 try {
-                    tokenCard = await tokenizeCard(cardNumber, expYear, expMonth, cvc);
+                    tokenCard = await tokenizeCard(cardNumber, expYear, expMonth, cvc, holderName);
                 } catch (tokenErr) {
                     console.warn('Client-side tokenization failed, falling back to server-side:', tokenErr.message);
                 }
@@ -755,7 +756,7 @@
         }
 
         // ── ePayco card tokenization ──────────────────────────────
-        async function tokenizeCard(number, year, month, cvc) {
+        async function tokenizeCard(number, year, month, cvc, holderName) {
             return new Promise(function(resolve, reject) {
                 // Check if ePayco SDK is loaded
                 if (typeof ePayco === 'undefined') {
@@ -769,13 +770,19 @@
                         test: paymentData.testMode || false,
                     });
 
-                    handler.token.create({
+                    var tokenParams = {
                         'card[number]': number,
                         'card[exp_year]': '20' + year,
                         'card[exp_month]': month,
                         'card[cvc]': cvc,
                         'hasCvv': true,
-                    }, function(tokenData) {
+                    };
+                    // Visa requires card[holder_name] for 3DS 2.x (EMV 3DS 2.2+)
+                    if (holderName) {
+                        tokenParams['card[holder_name]'] = holderName;
+                    }
+
+                    handler.token.create(tokenParams, function(tokenData) {
                         if (tokenData && tokenData.status && tokenData.id) {
                             resolve(tokenData.id);
                         } else if (tokenData && tokenData.token) {

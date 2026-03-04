@@ -1,7 +1,7 @@
 /**
  * Daimo Pay Configuration
- * Official integration for receiving payments via Zelle, CashApp, Venmo, Revolut, Wise
- * Using USDC on Optimism network
+ * Official integration for receiving crypto payments via USDC on Optimism network
+ * API: https://api.daimo.com/api/payment
  */
 
 const { getAddress } = require('viem');
@@ -12,22 +12,8 @@ const logger = require('../utils/logger');
 const OPTIMISM_USDC_ADDRESS = '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85';
 const OPTIMISM_CHAIN_ID = 10;
 
-// Supported payment options (Daimo Pay API format)
-// P2P Apps: CashApp, Venmo, Zelle, Wise, Revolut, MercadoPago
-// Crypto: AllWallets, AllExchanges, Coinbase, Binance
-const SUPPORTED_PAYMENT_APPS = [
-  // P2P payment apps
-  'CashApp',
-  'Venmo',
-  'Zelle',
-  'Wise',
-  'Revolut',
-  'MercadoPago',
-  // Crypto wallets/exchanges (specific options - cannot use AllWallets/AllExchanges)
-  'Coinbase',
-  'Binance',
-  'MiniPay',
-];
+// Daimo Pay API base URL (migrated from pay.daimo.com to api.daimo.com)
+const DAIMO_API_BASE = 'https://api.daimo.com';
 
 /**
  * Get Daimo Pay configuration
@@ -66,8 +52,8 @@ const getDaimoConfig = () => {
     treasuryAddress: getAddress(treasuryAddress),
     refundAddress: getAddress(refundAddress || treasuryAddress),
 
-    // Payment apps configuration
-    supportedPaymentApps: SUPPORTED_PAYMENT_APPS,
+    // API base URL
+    apiBase: DAIMO_API_BASE,
 
     // Webhook configuration
     webhookUrl,
@@ -118,9 +104,6 @@ const createPaymentIntent = ({
       amount: amount.toString(),
       timestamp: new Date().toISOString(),
     },
-
-    // Payment options (prioritize these apps)
-    paymentOptions: config.supportedPaymentApps,
   };
 };
 
@@ -148,8 +131,6 @@ const createDaimoPayment = async ({
     const requestBody = {
       display: {
         intent: description || `PNPtv ${planId} Subscription`,
-        // P2P payment apps + crypto (specific options only)
-        paymentOptions: config.supportedPaymentApps,
         preferredChains: [config.chainId],
       },
       destination: {
@@ -175,7 +156,7 @@ const createDaimoPayment = async ({
       amountUnits,
     });
 
-    const response = await fetch('https://pay.daimo.com/api/payment', {
+    const response = await fetch(`${config.apiBase}/api/payment`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -236,7 +217,7 @@ const checkDaimoPaymentStatus = async (daimoPaymentId) => {
   }
 
   try {
-    const response = await fetch(`https://pay.daimo.com/api/payment/${daimoPaymentId}`, {
+    const response = await fetch(`${DAIMO_API_BASE}/api/payment/${daimoPaymentId}`, {
       method: 'GET',
       headers: {
         'Api-Key': apiKey,
@@ -347,7 +328,7 @@ module.exports = {
   validateWebhookPayload,
   mapDaimoStatus,
   formatAmountFromUnits,
-  SUPPORTED_PAYMENT_APPS,
+  DAIMO_API_BASE,
   OPTIMISM_USDC_ADDRESS,
   OPTIMISM_CHAIN_ID,
 };

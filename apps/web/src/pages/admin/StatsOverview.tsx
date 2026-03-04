@@ -24,11 +24,21 @@ function formatDate(dateStr: unknown): string {
 }
 
 const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
+  PRIME: "accent",
   prime: "accent",
   member: "success",
   creator: "warning",
   free: "default",
   banned: "danger",
+};
+
+// membershipBreakdown is keyed by subscription_status, not tier
+const MEMBERSHIP_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
+  active: "success",
+  free: "default",
+  expired: "warning",
+  cancelled: "danger",
+  churned: "danger",
 };
 
 const STATUS_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
@@ -281,10 +291,10 @@ export default function StatsOverview() {
             Membership Breakdown
           </h2>
           <div className="flex flex-wrap gap-3">
-            {Object.entries(stats.membershipBreakdown).map(([tier, count]) => (
-              <div key={tier} className="flex items-center gap-2">
-                <Badge variant={TIER_BADGE_VARIANTS[tier] ?? "default"}>
-                  {tier}
+            {Object.entries(stats.membershipBreakdown).map(([status, count]) => (
+              <div key={status} className="flex items-center gap-2">
+                <Badge variant={MEMBERSHIP_BADGE_VARIANTS[status] ?? "default"}>
+                  {status}
                 </Badge>
                 <span className="text-sm font-semibold text-pnp-textPrimary">{count}</span>
               </div>

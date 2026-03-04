@@ -265,7 +265,7 @@ class AdminDashboardService {
     try {
       const result = await query(`
         SELECT
-          last_payment_method,
+          payment_method,
           COUNT(DISTINCT user_id) as users,
           SUM(amount) as total_revenue,
           AVG(amount) as avg_payment,
@@ -273,7 +273,7 @@ class AdminDashboardService {
           MAX(payment_date) - MIN(payment_date) as customer_lifespan_days
         FROM payment_history
         WHERE status = 'completed'
-        GROUP BY last_payment_method
+        GROUP BY payment_method
         ORDER BY clv DESC NULLS LAST
       `);
 

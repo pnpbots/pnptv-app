@@ -407,22 +407,14 @@ const registerPaymentHandlers = (bot) => {
       });
 
       if (result.success) {
-        // Get supported payment apps
-        const paymentApps = DaimoConfig.SUPPORTED_PAYMENT_APPS
-          .filter((app) => !['Coinbase', 'Binance', 'MiniPay'].includes(app))
-          .map((app) => (app === 'CashApp' ? 'Cash App' : app))
-          .join(', ');
-
         const message = lang === 'es'
           ? '🪙 *Paga en Crypto con Daimo Pay*\n\n'
             + `Plan: ${plan.display_name || plan.name}\n`
             + `Precio: $${plan.price} USDC\n\n`
             + 'Completa tu suscripción usando crypto a través de nuestro checkout de Daimo Pay — rápido, seguro, discreto y perfecto para miembros que prefieren pagos privados y sin fronteras.\n\n'
             + '💳 *Daimo Pay acepta USDC, y puedes pagar usando wallets populares como:*\n'
-            + 'Binance • Coinbase Wallet • MetaMask • Trust Wallet • Kraken Wallet • OKX Wallet • Bybit Wallet, y más.\n\n'
-            + '📱 *O paga usando las apps de pago más populares:*\n'
-            + `${paymentApps}.\n\n`
-            + 'Solo elige tu wallet o app, confirma la transacción, y listo.\n\n'
+            + 'Binance • Coinbase Wallet • MetaMask • Trust Wallet • Phantom • Rainbow • OKX Wallet, y más.\n\n'
+            + 'Solo elige tu wallet, confirma la transacción, y listo.\n\n'
             + '✅ *Una vez confirmado tu pago, recibirás automáticamente:*\n'
             + '• Tu mensaje de acceso PRIME\n'
             + '• Tu factura\n'
@@ -433,10 +425,8 @@ const registerPaymentHandlers = (bot) => {
             + `Price: $${plan.price} USDC\n\n`
             + 'You can complete your subscription using crypto through our Daimo Pay checkout — fast, secure, discreet, and perfect for members who prefer private, borderless payments.\n\n'
             + '💳 *Daimo Pay accepts USDC, and you can pay using popular wallets such as:*\n'
-            + 'Binance • Coinbase Wallet • MetaMask • Trust Wallet • Kraken Wallet • OKX Wallet • Bybit Wallet, and more.\n\n'
-            + '📱 *Or pay using the most popular payment apps, including:*\n'
-            + `${paymentApps}.\n\n`
-            + 'Just choose your wallet or app, confirm the transaction, and you\'re done.\n\n'
+            + 'Binance • Coinbase Wallet • MetaMask • Trust Wallet • Phantom • Rainbow • OKX Wallet, and more.\n\n'
+            + 'Just choose your wallet, confirm the transaction, and you\'re done.\n\n'
             + '✅ *Once your payment is confirmed, you\'ll automatically receive:*\n'
             + '• Your PRIME access message\n'
             + '• Your invoice\n'

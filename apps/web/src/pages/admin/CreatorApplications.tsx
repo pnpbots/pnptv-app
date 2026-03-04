@@ -32,6 +32,7 @@ export default function CreatorApplications() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await getCreatorApplications(filter || undefined);
       setApplications(res.applications);

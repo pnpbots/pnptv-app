@@ -7,25 +7,30 @@
  */
 
 const EPAYCO_SUBSCRIPTION_PLANS = {
-  // PNP MEMBER - PNPMEMBER030 - $4.99 USD (monthly)
+  // PNP MEMBER - PNPMEMBER030 - $9.99 USD (monthly)
   member_monthly: 'PNPMEMBER030',
 
-  // WEEK PASS - 007PASS - $14.99 USD
-  week_pass: '007PASS',
+  // PRIME Trial - 007PASS - $14.99 USD (7 days)
+  'week-trial-pass': '007PASS',
+  week_pass: '007PASS', // legacy alias
 
-  // 3X MONTHLY PASS - 090PASS - $49.99 USD (3 months = 90 days)
-  three_months_pass: '090PASS',
+  // Monthly PRIME - 030PASS - $24.99 USD (30 days)
+  'monthly-pass': '030PASS',
+  three_months_pass: '090PASS', // legacy alias
 
-  // CRYSTAL PASS - 180PASS - $74.99 USD (6 months = 180 days)
-  crystal_pass: '180PASS',
-  six_months_pass: '180PASS',
+  // Crystal PRIME - 180PASS - $49.99 USD (6 months)
+  'crystal-pass': '180PASS',
+  crystal_pass: '180PASS', // legacy alias
+  six_months_pass: '180PASS', // legacy alias
 
-  // YEARLY PASS - 365PASS
-  yearly_pass: '989cc3619e2a37cfe0111f0',
+  // Diamond PRIME - 365PASS - $99.99 USD (1 year)
+  'diamond-pass': '365PASS',
+  yearly_pass: '989cc3619e2a37cfe0111f0', // legacy alias
 
-  // LIFETIME PASS - LIFETIME100 - $100 USD (one-time payment)
-  lifetime_pass: 'LIFETIME100',
-  lifetime_100: 'LIFETIME100',
+  // Lifetime PRIME - LIFETIME - $249.99 USD (one-time payment)
+  'lifetime-pass': 'LIFETIME',
+  lifetime_pass: 'LIFETIME100', // legacy alias
+  lifetime_100: 'LIFETIME100', // legacy alias
 };
 
 /**

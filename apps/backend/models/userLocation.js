@@ -47,9 +47,13 @@ class UserLocation {
   }
 
   /**
-   * Get nearby users using PostGIS
+   * Get nearby users using bounding box + Haversine (no PostGIS needed)
    */
   static async getNearbyUsers(latitude, longitude, radiusKm = 5, limit = 50) {
+    const lat = parseFloat(latitude);
+    const lon = parseFloat(longitude);
+    const latDelta = radiusKm / 111;
+    const lngDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
     const result = await query(
       `SELECT
          ul.user_id,
@@ -60,21 +64,19 @@ class UserLocation {
          u.first_name,
          u.username,
          u.photo_file_id,
-         ST_Distance(
-           ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
-           ul.geom::geography
-         ) / 1000 AS distance_km
+         (6371 * acos(
+           LEAST(1, cos(radians($1)) * cos(radians(ul.latitude))
+           * cos(radians(ul.longitude) - radians($2))
+           + sin(radians($1)) * sin(radians(ul.latitude)))
+         )) AS distance_km
        FROM user_locations ul
        JOIN users u ON ul.user_id = u.id
        WHERE ul.is_online = true
-         AND ST_DWithin(
-           ul.geom::geography,
-           ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
-           $3 * 1000
-         )
+         AND ul.latitude BETWEEN $3 AND $4
+         AND ul.longitude BETWEEN $5 AND $6
        ORDER BY distance_km ASC
-       LIMIT $4`,
-      [parseFloat(latitude), parseFloat(longitude), radiusKm, limit]
+       LIMIT $7`,
+      [lat, lon, lat - latDelta, lat + latDelta, lon - lngDelta, lon + lngDelta, limit]
     );
     return result.rows;
   }
