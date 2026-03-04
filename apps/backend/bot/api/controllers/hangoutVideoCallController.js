@@ -329,6 +329,14 @@ const getActiveCall = async (req, res) => {
       return res.status(403).json({ error: 'Not a member of this group' });
     }
 
+    // Clean up stale participants (joined >2 hours ago, never left)
+    await query(
+      `UPDATE hangout_call_participants SET left_at = NOW()
+       WHERE left_at IS NULL AND joined_at < NOW() - INTERVAL '2 hours'
+         AND call_id IN (SELECT id FROM hangout_video_calls WHERE group_id = $1)`,
+      [groupId]
+    );
+
     let { rows } = await query(
       `SELECT hvc.id, hvc.room_name, hvc.creator_id, hvc.created_at, hvc.is_persistent,
               (SELECT COUNT(*)::int
