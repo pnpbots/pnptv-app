@@ -10,9 +10,23 @@ const SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 let syncTimer = null;
 
 /**
- * Fetch published social_posts from Directus CMS and upsert into PostgreSQL.
- * - New/updated published items are upserted with is_promoted=true
- * - Items removed from published set are soft-deleted
+ * Fetch published promoted_releases from Directus CMS and upsert into PostgreSQL.
+ *
+ * Directus collection: promoted_releases
+ * Fields:
+ *   - title        (string)  — Release headline, e.g. "New DJ Mix: Summer Vibes"
+ *   - description  (textarea) — Body text shown in the feed card
+ *   - thumbnail    (file/image) — Cover art / preview image (Directus file UUID)
+ *   - content_type (dropdown: video | podcast | clip | playlist) — Badge label
+ *   - link         (string)  — App path, e.g. "/media?play=42"
+ *   - cta_label    (string)  — CTA button text, e.g. "Watch Now", "Listen Now"
+ *   - status       (standard Directus: draft | published | archived)
+ *
+ * Mapping to social_posts:
+ *   title + description → content
+ *   thumbnail           → promoted_thumbnail
+ *   link                → promoted_link
+ *   cta_label           → promoted_link_label
  */
 async function syncPromotedPosts() {
   if (!DIRECTUS_TOKEN) {
@@ -21,10 +35,10 @@ async function syncPromotedPosts() {
   }
 
   try {
-    const res = await axios.get(`${DIRECTUS_URL}/items/social_posts`, {
+    const res = await axios.get(`${DIRECTUS_URL}/items/promoted_releases`, {
       params: {
         filter: { status: { _eq: 'published' } },
-        fields: ['id', 'content', 'media', 'promoted_link', 'promoted_link_label', 'date_created', 'date_updated'],
+        fields: ['id', 'title', 'description', 'thumbnail', 'content_type', 'link', 'cta_label', 'date_created', 'date_updated'],
         limit: 100,
       },
       headers: { Authorization: `Bearer ${DIRECTUS_TOKEN}` },
@@ -35,11 +49,25 @@ async function syncPromotedPosts() {
     const directusIds = items.map(i => i.id);
     let synced = 0;
 
+    // Default CTA labels per content type
+    const defaultCta = {
+      video: 'Watch Now',
+      podcast: 'Listen Now',
+      clip: 'Watch Clip',
+      playlist: 'View Playlist',
+    };
+
     for (const item of items) {
       // Build thumbnail URL from Directus file UUID
-      const thumbnail = item.media
-        ? `${DIRECTUS_URL}/assets/${item.media}`
+      const thumbnail = item.thumbnail
+        ? `${DIRECTUS_URL}/assets/${item.thumbnail}`
         : null;
+
+      // Compose feed content from title + description
+      const parts = [item.title, item.description].filter(Boolean);
+      const content = parts.join('\n\n') || '';
+
+      const ctaLabel = item.cta_label || defaultCta[item.content_type] || 'Watch Now';
 
       await query(
         `INSERT INTO social_posts (user_id, content, is_promoted, promoted_link, promoted_link_label, promoted_thumbnail, directus_id, is_deleted)
@@ -53,9 +81,9 @@ async function syncPromotedPosts() {
            is_deleted = false`,
         [
           SYSTEM_USER_ID,
-          item.content || '',
-          item.promoted_link || null,
-          item.promoted_link_label || null,
+          content,
+          item.link || null,
+          ctaLabel,
           thumbnail,
           item.id,
         ]
