@@ -9,8 +9,11 @@ import {
   type AdminPost,
 } from "@/lib/api";
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("en-US", {
+function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -90,7 +93,7 @@ export default function ContentModeration() {
       key: "content",
       header: "Content",
       render: (row: AdminPost) => (
-        <span className="text-sm text-pnp-textPrimary">{truncate(row.content, 80)}</span>
+        <span className="text-sm text-pnp-textPrimary">{truncate(row.content ?? "", 80)}</span>
       ),
     },
     {

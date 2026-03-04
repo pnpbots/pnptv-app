@@ -100,11 +100,27 @@ export function DataTable<T>({
                           />
                         </td>
                       )}
-                      {columns.map((col) => (
-                        <td key={col.key} className={`px-4 py-3 text-pnp-textPrimary ${col.className || ""}`}>
-                          {col.render ? col.render(row) : (row as Record<string, unknown>)[col.key] as React.ReactNode}
-                        </td>
-                      ))}
+                      {columns.map((col) => {
+                          const rawValue = (row as Record<string, unknown>)[col.key];
+                          let cellContent: React.ReactNode;
+                          if (col.render) {
+                            cellContent = col.render(row);
+                          } else if (rawValue === null || rawValue === undefined) {
+                            cellContent = <span className="text-pnp-textSecondary">—</span>;
+                          } else if (typeof rawValue === "object") {
+                            // Prevent [object Object] — render a safe string representation
+                            cellContent = <span className="text-pnp-textSecondary text-xs font-mono">{JSON.stringify(rawValue)}</span>;
+                          } else if (typeof rawValue === "boolean") {
+                            cellContent = rawValue ? "Yes" : "No";
+                          } else {
+                            cellContent = rawValue as React.ReactNode;
+                          }
+                          return (
+                            <td key={col.key} className={`px-4 py-3 text-pnp-textPrimary ${col.className || ""}`}>
+                              {cellContent}
+                            </td>
+                          );
+                        })}
                     </tr>
                   );
                 })}

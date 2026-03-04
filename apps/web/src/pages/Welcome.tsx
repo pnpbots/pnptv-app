@@ -1,4 +1,5 @@
 import React from "react";
+import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -68,6 +69,10 @@ export default function Welcome() {
 
   return (
     <div className="min-h-screen pb-24 lg:pb-8">
+      <Helmet>
+        <title>Welcome — PNPtv!</title>
+        <meta name="description" content="Welcome to PNPtv! Explore all features: Videorama, Hangouts, Live, Social Feed, Nearby, and more." />
+      </Helmet>
       {/* Hero section */}
       <div className="relative overflow-hidden rounded-2xl mx-4 mt-4 mb-6 p-6 bg-gradient-to-br from-[#D4007A]/20 to-[#E69138]/20 border border-white/10">
         <div className="relative z-10 text-center">
@@ -98,6 +103,61 @@ export default function Welcome() {
               </span>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Community Guidelines & Age Verification */}
+      <div className="mx-4 mb-6 p-5 rounded-xl bg-red-500/[0.08] border border-red-500/20">
+        <h2 className="text-base font-bold text-white mb-3 flex items-center gap-2">
+          <svg className="w-5 h-5 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Community Rules
+        </h2>
+
+        <div className="space-y-3 text-sm text-white/70 leading-relaxed">
+          <div className="flex items-start gap-2">
+            <span className="text-red-400 font-bold mt-0.5 flex-shrink-0">18+</span>
+            <p>
+              <span className="text-white font-medium">You must be 18 years or older</span> to use PNPtv! By continuing to use this platform, you confirm that you are at least 18 years of age.
+            </p>
+          </div>
+
+          <div>
+            <p className="text-white font-medium mb-1.5">The following content is strictly prohibited:</p>
+            <ul className="space-y-1 ml-4">
+              <li className="flex items-start gap-2">
+                <span className="text-red-400 text-xs mt-1">&#10005;</span>
+                <span>Content involving minors in any context</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-red-400 text-xs mt-1">&#10005;</span>
+                <span>Non-consensual content or any form of coercion</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-red-400 text-xs mt-1">&#10005;</span>
+                <span>Harassment, threats, doxxing, or hate speech</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-red-400 text-xs mt-1">&#10005;</span>
+                <span>Illegal drug sales, trafficking, or solicitation</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-red-400 text-xs mt-1">&#10005;</span>
+                <span>Spam, scams, phishing, or impersonation</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-red-400 text-xs mt-1">&#10005;</span>
+                <span>Sharing private content without the owner's consent</span>
+              </li>
+            </ul>
+          </div>
+
+          <div className="pt-2 border-t border-red-500/10">
+            <p className="text-white/60 text-xs">
+              Violations will result in <span className="text-white font-medium">immediate account termination</span> and will be <span className="text-white font-medium">reported to the appropriate authorities</span>. We actively monitor content and cooperate fully with law enforcement. By using PNPtv!, you agree to abide by these rules.
+            </p>
+          </div>
         </div>
       </div>
 

@@ -41,7 +41,7 @@ interface EditForm {
 }
 
 export default function UserDetail() {
-  const { userId } = useParams<{ userId: string }>();
+  const { id: userId } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
   const [user, setUser] = useState<AdminUser | null>(null);
@@ -80,9 +80,11 @@ export default function UserDetail() {
         email: userRes.user.email || "",
         subscriptionStatus: userRes.user.subscription_status || "free",
         subscriptionPlan: userRes.user.subscription_plan || "",
-        planExpiry: userRes.user.plan_expiry
-          ? new Date(userRes.user.plan_expiry).toISOString().split("T")[0]
-          : "",
+        planExpiry: (() => {
+          if (!userRes.user.plan_expiry) return "";
+          const d = new Date(userRes.user.plan_expiry);
+          return isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0];
+        })(),
         tier: userRes.user.tier || "free",
       });
       setError(null);
@@ -170,7 +172,7 @@ export default function UserDetail() {
     );
   }
 
-  const isBanned = user.tier === "banned" || user.subscription_status === "cancelled";
+  const isBanned = user.tier === "banned";
 
   return (
     <div className="page-container space-y-6">
@@ -211,10 +213,14 @@ export default function UserDetail() {
                 ? `${user.first_name}${user.last_name ? " " + user.last_name : ""}`
                 : user.username || "Unknown"}
             </h1>
-            <Badge variant={TIER_BADGE_VARIANTS[user.tier] ?? "default"}>{user.tier}</Badge>
-            <Badge variant={STATUS_BADGE_VARIANTS[user.subscription_status] ?? "default"}>
-              {user.subscription_status}
-            </Badge>
+            {user.tier && (
+              <Badge variant={TIER_BADGE_VARIANTS[user.tier] ?? "default"}>{user.tier}</Badge>
+            )}
+            {user.subscription_status && (
+              <Badge variant={STATUS_BADGE_VARIANTS[user.subscription_status] ?? "default"}>
+                {user.subscription_status}
+              </Badge>
+            )}
           </div>
           {user.username && (
             <p className="text-sm text-pnp-textSecondary">@{user.username}</p>

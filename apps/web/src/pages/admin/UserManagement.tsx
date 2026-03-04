@@ -189,20 +189,26 @@ export default function UserManagement() {
     {
       key: "tier",
       header: "Tier",
-      render: (row: AdminUser) => (
-        <Badge variant={TIER_BADGE_VARIANTS[row.tier] ?? "default"}>
-          {row.tier}
-        </Badge>
-      ),
+      render: (row: AdminUser) => {
+        const tier = row.tier ?? "free";
+        return (
+          <Badge variant={TIER_BADGE_VARIANTS[tier] ?? "default"}>
+            {tier}
+          </Badge>
+        );
+      },
     },
     {
       key: "subscription_status",
       header: "Status",
-      render: (row: AdminUser) => (
-        <Badge variant={STATUS_BADGE_VARIANTS[row.subscription_status] ?? "default"}>
-          {row.subscription_status}
-        </Badge>
-      ),
+      render: (row: AdminUser) => {
+        const status = row.subscription_status ?? "free";
+        return (
+          <Badge variant={STATUS_BADGE_VARIANTS[status] ?? "default"}>
+            {status}
+          </Badge>
+        );
+      },
     },
     {
       key: "subscription_plan",

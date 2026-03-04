@@ -20,34 +20,47 @@ const getStats = async (req, res) => {
       return res.status(500).json({ error: 'Failed to load stats' });
     }
 
-    // Transform nested backend response to flat frontend AdminStats interface
+    // Transform nested backend response to flat frontend AdminStats interface.
+    // All numeric PG columns arrive as strings; Date columns arrive as Date objects.
+    // We normalise every value to the correct primitive type so the frontend never
+    // receives [object Object] or NaN in place of a number/string.
+    const toNum = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+    const toInt = (v) => { const n = parseInt(v, 10); return isNaN(n) ? 0 : n; };
+    // Serialize a PG Date (or ISO string) to a stable YYYY-MM-DD date string so
+    // the frontend always gets a plain string, never a Date object.
+    const toDateStr = (v) => {
+      if (!v) return null;
+      if (v instanceof Date) return v.toISOString().split('T')[0];
+      return String(v).split('T')[0];
+    };
+
     const stats = {
-      totalRevenue: parseFloat(raw.payments?.total_revenue || 0),
-      activeSubscribers: parseInt(raw.membership?.totals?.active_subscribers || 0),
-      totalUsers: parseInt(raw.membership?.totals?.total_active_users || 0),
-      churnedUsers: parseInt(raw.membership?.totals?.churned_users || 0),
-      monthlyRevenue: parseFloat(raw.revenue?.monthly?.monthly_revenue || 0),
+      totalRevenue: toNum(raw.payments?.total_revenue),
+      activeSubscribers: toInt(raw.membership?.totals?.active_subscribers),
+      totalUsers: toInt(raw.membership?.totals?.total_active_users),
+      churnedUsers: toInt(raw.membership?.totals?.churned_users),
+      monthlyRevenue: toNum(raw.revenue?.monthly?.monthly_revenue),
       dailyRevenue: (raw.revenue?.daily || []).map(d => ({
-        date: d.payment_day,
-        amount: parseFloat(d.daily_revenue || 0),
+        date: toDateStr(d.payment_day),
+        amount: toNum(d.daily_revenue),
       })),
       membershipBreakdown: (raw.membership?.byStatus || []).reduce((acc, row) => {
-        acc[row.subscription_status] = parseInt(row.count || 0);
+        acc[row.subscription_status] = toInt(row.count);
         return acc;
       }, {}),
       topPaymentMethods: (raw.topMethods || []).map(m => ({
-        method: m.payment_method,
-        transactions: parseInt(m.transaction_count || 0),
-        revenue: parseFloat(m.total_revenue || 0),
-        successRate: parseFloat(m.success_rate || 0),
+        method: String(m.payment_method || ''),
+        transactions: toInt(m.transaction_count),
+        revenue: toNum(m.total_revenue),
+        successRate: toNum(m.success_rate),
       })),
       recentTransactions: (raw.recentTransactions || []).map(t => ({
-        date: t.payment_date,
-        userId: t.user_id,
+        date: t.payment_date instanceof Date ? t.payment_date.toISOString() : String(t.payment_date || ''),
+        userId: String(t.user_id || ''),
         username: t.username || t.first_name || `User ${t.user_id}`,
-        amount: parseFloat(t.amount || 0),
-        status: t.status,
-        method: t.payment_method || t.last_payment_method,
+        amount: toNum(t.amount),
+        status: String(t.status || ''),
+        method: String(t.payment_method || t.last_payment_method || ''),
       })),
     };
 
@@ -80,16 +93,16 @@ const listUsers = async (req, res) => {
 
     if (search) {
       const searchTerm = `%${search}%`;
-      countQuery += ' AND (username ILIKE $1 OR email ILIKE $1)';
-      dataQuery += ' AND (username ILIKE $1 OR email ILIKE $1)';
-      params.push(searchTerm);
+      countQuery += ' AND (username ILIKE $1 OR email ILIKE $1 OR id = $2)';
+      dataQuery += ' AND (username ILIKE $1 OR email ILIKE $1 OR id = $2)';
+      params.push(searchTerm, search);
     }
 
     dataQuery += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
     params.push(limit, offset);
 
     const [countResult, dataResult] = await Promise.all([
-      query(countQuery, search ? [params[0]] : []),
+      query(countQuery, search ? [params[0], params[1]] : []),
       query(dataQuery, params),
     ]);
 

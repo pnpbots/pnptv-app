@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 
-const STORAGE_KEY = "pnptv_tutorials_seen";
+const STORAGE_KEY = "pnptv_tutorials_seen_v2";
 
 function getSeenMap(): Record<string, boolean> {
   try {

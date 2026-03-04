@@ -7,8 +7,11 @@ import {
   type AdminHangout,
 } from "@/lib/api";
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("en-US", {
+function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -70,12 +73,16 @@ export default function HangoutModeration() {
   };
 
   const participantFraction = (hangout: AdminHangout): string => {
-    return `${hangout.currentParticipants} / ${hangout.maxParticipants}`;
+    const cur = hangout.currentParticipants ?? 0;
+    const max = hangout.maxParticipants ?? 0;
+    return `${cur} / ${max}`;
   };
 
   const participantPct = (hangout: AdminHangout): number => {
-    if (!hangout.maxParticipants) return 0;
-    return Math.min((hangout.currentParticipants / hangout.maxParticipants) * 100, 100);
+    const cur = hangout.currentParticipants ?? 0;
+    const max = hangout.maxParticipants ?? 0;
+    if (!max) return 0;
+    return Math.min((cur / max) * 100, 100);
   };
 
   return (

@@ -138,12 +138,13 @@ export function VerificationGate({ children }: VerificationGateProps) {
               <p className="font-medium text-pnp-textPrimary">PNPTV Terms of Service</p>
               <p>By using PNPTV, you agree to the following:</p>
               <ul className="list-disc pl-4 space-y-1">
-                <li>You are at least 18 years old.</li>
+                <li><span className="text-pnp-textPrimary font-medium">You are at least 18 years old.</span> Underage users will be immediately banned and reported.</li>
                 <li>You will not share, redistribute, or record any content without explicit permission.</li>
+                <li>You will not post or share any content involving minors, non-consensual material, or illegal activities.</li>
                 <li>You accept that all streaming content is provided as-is.</li>
                 <li>You agree to our community guidelines and respect other users.</li>
                 <li>Payments are non-refundable unless required by applicable law.</li>
-                <li>We may suspend accounts that violate these terms.</li>
+                <li>Accounts that violate these terms will be <span className="text-pnp-textPrimary font-medium">permanently terminated and reported to authorities</span>.</li>
               </ul>
               <p>
                 For the full terms, visit{" "}
@@ -184,37 +185,36 @@ export function VerificationGate({ children }: VerificationGateProps) {
             </div>
 
             <div className="max-h-56 overflow-y-auto p-3 rounded-lg bg-pnp-surface border border-pnp-border text-xs text-pnp-textSecondary space-y-3 mb-4">
-              <p className="font-medium text-pnp-textPrimary">Prohibited Activities</p>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-sm font-bold text-red-400">18+</span>
+                <p className="font-medium text-pnp-textPrimary">Adults Only Platform</p>
+              </div>
               <p>
-                The use, promotion, distribution, sale, solicitation, or discussion of illegal drugs,
-                controlled substances, or any unlawful materials is <span className="text-pnp-textPrimary font-medium">strictly prohibited</span> on this platform.
+                PNPtv is an <span className="text-pnp-textPrimary font-medium">adults-only platform</span>. You must be at least 18 years old to use this service. By continuing, you confirm you meet this requirement.
               </p>
-              <p>This includes, but is not limited to:</p>
+
+              <p className="font-medium text-pnp-textPrimary mt-2">Strictly Prohibited Content & Activities</p>
+              <p>The following are <span className="text-red-400 font-medium">strictly prohibited</span> and will result in immediate action:</p>
               <ul className="list-disc pl-4 space-y-1">
-                <li>The sale, purchase, or exchange of illegal substances</li>
-                <li>Requests for drugs or controlled substances</li>
-                <li>Instructions, advice, or facilitation regarding the acquisition, preparation, or use of illegal substances</li>
-                <li>Content depicting illegal drug use in a manner that promotes, encourages, or glorifies such behavior</li>
-                <li>Coordination of in-person or virtual activities involving unlawful substances</li>
-                <li>Advertising, selling, or distributing drug-related paraphernalia or materials intended for unlawful purposes</li>
+                <li><span className="text-pnp-textPrimary font-medium">Any content involving minors</span> — absolutely zero tolerance</li>
+                <li><span className="text-pnp-textPrimary font-medium">Non-consensual content</span> or any form of coercion, blackmail, or exploitation</li>
+                <li><span className="text-pnp-textPrimary font-medium">Harassment, threats, doxxing, or hate speech</span> of any kind</li>
+                <li><span className="text-pnp-textPrimary font-medium">Illegal drug sales, trafficking, or solicitation</span> — buying, selling, exchanging, or requesting controlled substances</li>
+                <li><span className="text-pnp-textPrimary font-medium">Spam, scams, phishing, or impersonation</span></li>
+                <li><span className="text-pnp-textPrimary font-medium">Sharing private content</span> without the explicit consent of the content owner</li>
+                <li>Redistribution or recording of any platform content without permission</li>
+                <li>Coordination of illegal activities of any kind</li>
               </ul>
-              <p className="font-medium text-pnp-textPrimary mt-2">Enforcement</p>
+
+              <p className="font-medium text-pnp-textPrimary mt-2">Enforcement & Reporting</p>
               <p>
-                PNPtv does not condone or facilitate illegal activity of any kind. Any user found engaging in
-                activities that violate local, national, or international laws may have their account
-                <span className="text-pnp-textPrimary font-medium"> suspended or permanently terminated without prior notice</span>.
+                Violations will result in <span className="text-red-400 font-medium">immediate and permanent account termination without prior notice</span>.
+              </p>
+              <p>
+                PNPtv <span className="text-pnp-textPrimary font-medium">actively monitors content</span> and will <span className="text-red-400 font-medium">report any violations to the appropriate law enforcement authorities</span>. We cooperate fully with legal investigations and preserve evidence as required by law.
               </p>
               <p>
                 All members are solely responsible for their actions and for complying with the laws applicable in their jurisdiction.
-              </p>
-              <p>
-                PNPtv reserves the right to report illegal activity to the appropriate authorities when required by law.
-              </p>
-            </div>
-
-            <div className="p-3 rounded-lg bg-pnp-accent/10 border border-pnp-accent/20 mb-4">
-              <p className="text-xs text-pnp-textPrimary">
-                You have a <span className="font-semibold text-pnp-accent">24-hour free PRIME trial</span> to explore all features. After that, subscribe to keep your access.
               </p>
             </div>
 

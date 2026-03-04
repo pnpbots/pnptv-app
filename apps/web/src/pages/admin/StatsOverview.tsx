@@ -7,14 +7,19 @@ import {
   type AdminStats,
 } from "@/lib/api";
 
-function formatCurrency(value: number): string {
-  return `$${value.toFixed(2)}`;
+function formatCurrency(value: unknown): string {
+  const n = typeof value === "number" && !isNaN(value) ? value : parseFloat(String(value ?? 0));
+  return `$${(isNaN(n) ? 0 : n).toFixed(2)}`;
 }
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("en-US", {
+function formatDate(dateStr: unknown): string {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr as string);
+  if (isNaN(d.getTime())) return String(dateStr);
+  return d.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
+    timeZone: "UTC",
   });
 }
 
@@ -95,19 +100,33 @@ export default function StatsOverview() {
   const maxRevenue = Math.max(...dailyRevenue.map((d) => d.amount), 1);
 
   const paymentMethodColumns = [
-    { key: "method", header: "Method" },
-    { key: "transactions", header: "Transactions" },
+    {
+      key: "method",
+      header: "Method",
+      render: (row: AdminStats["topPaymentMethods"][number]) => (
+        <span className="text-pnp-textPrimary font-medium">{row.method ?? "—"}</span>
+      ),
+    },
+    {
+      key: "transactions",
+      header: "Transactions",
+      render: (row: AdminStats["topPaymentMethods"][number]) => (
+        <span className="text-pnp-textSecondary">{row.transactions ?? 0}</span>
+      ),
+    },
     {
       key: "revenue",
       header: "Revenue",
       render: (row: AdminStats["topPaymentMethods"][number]) =>
-        formatCurrency(row.revenue),
+        formatCurrency(typeof row.revenue === "number" && !isNaN(row.revenue) ? row.revenue : 0),
     },
     {
       key: "successRate",
       header: "Success Rate",
-      render: (row: AdminStats["topPaymentMethods"][number]) =>
-        `${row.successRate.toFixed(1)}%`,
+      render: (row: AdminStats["topPaymentMethods"][number]) => {
+        const rate = typeof row.successRate === "number" && !isNaN(row.successRate) ? row.successRate : 0;
+        return `${rate.toFixed(1)}%`;
+      },
     },
   ];
 
@@ -116,25 +135,37 @@ export default function StatsOverview() {
       key: "date",
       header: "Date",
       render: (row: AdminStats["recentTransactions"][number]) =>
-        formatDate(row.date),
+        row.date ? formatDate(row.date) : "—",
     },
-    { key: "username", header: "User" },
+    {
+      key: "username",
+      header: "User",
+      render: (row: AdminStats["recentTransactions"][number]) => (
+        <span className="text-pnp-textPrimary">{row.username ?? "—"}</span>
+      ),
+    },
     {
       key: "amount",
       header: "Amount",
       render: (row: AdminStats["recentTransactions"][number]) =>
-        formatCurrency(row.amount),
+        formatCurrency(typeof row.amount === "number" && !isNaN(row.amount) ? row.amount : 0),
     },
     {
       key: "status",
       header: "Status",
       render: (row: AdminStats["recentTransactions"][number]) => (
         <Badge variant={STATUS_BADGE_VARIANTS[row.status] ?? "default"}>
-          {row.status}
+          {row.status ?? "—"}
         </Badge>
       ),
     },
-    { key: "method", header: "Method" },
+    {
+      key: "method",
+      header: "Method",
+      render: (row: AdminStats["recentTransactions"][number]) => (
+        <span className="text-pnp-textSecondary">{row.method ?? "—"}</span>
+      ),
+    },
   ];
 
   return (

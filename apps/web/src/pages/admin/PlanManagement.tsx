@@ -183,14 +183,18 @@ export default function PlanManagement() {
       key: "price",
       header: "Price",
       render: (row: AdminPlan) => (
-        <span className="text-pnp-textPrimary font-medium">${row.price.toFixed(2)}</span>
+        <span className="text-pnp-textPrimary font-medium">
+          ${(typeof row.price === "number" && !isNaN(row.price) ? row.price : 0).toFixed(2)}
+        </span>
       ),
     },
     {
       key: "duration",
       header: "Days",
       render: (row: AdminPlan) => (
-        <span className="text-pnp-textSecondary">{row.isLifetime ? "Lifetime" : `${row.duration}d`}</span>
+        <span className="text-pnp-textSecondary">
+          {row.isLifetime ? "Lifetime" : row.duration != null ? `${row.duration}d` : "—"}
+        </span>
       ),
     },
     {

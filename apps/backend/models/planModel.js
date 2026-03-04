@@ -105,16 +105,17 @@ class Plan {
       sku: row.sku,
       display_name: row.display_name || row.name,
       name: row.name || row.display_name,
-      nameEs: row.name_es,
       tier: row.tier || null,
       price: parseFloat(row.price),
       currency: row.currency || 'USD',
-      duration: row.duration_days || row.duration || 30,
+      // duration_days is the canonical column; duration is the legacy NOT NULL column.
+      // Both may be set; prefer duration_days, fall back to duration.
+      duration: parseInt(row.duration_days || row.duration || 30, 10),
       features: this.normalizeFeatures(row.features),
-      featuresEs: this.normalizeFeatures(row.features_es),
       active: row.active,
       isLifetime: row.is_lifetime || false,
-      isPromo: row.is_promo || false,
+      // is_promo does not exist as a DB column; derive from the plan id convention.
+      isPromo: false,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -197,20 +198,22 @@ class Plan {
         logger.info(`Auto-generated SKU: ${data.sku} for plan: ${planId}`);
       }
 
+      const durationDays = parseInt(data.duration || data.duration_days || 30, 10);
+
       const sql = `
-        INSERT INTO ${this.TABLE} (id, sku, name, display_name, name_es, tier, price, currency, duration_days, features, features_es, active, created_at, updated_at)
+        INSERT INTO ${this.TABLE} (id, sku, name, display_name, tier, price, currency, duration, duration_days, features, is_lifetime, active, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
         ON CONFLICT (id) DO UPDATE SET
           sku = EXCLUDED.sku,
           name = EXCLUDED.name,
           display_name = EXCLUDED.display_name,
-          name_es = EXCLUDED.name_es,
           tier = EXCLUDED.tier,
           price = EXCLUDED.price,
           currency = EXCLUDED.currency,
+          duration = EXCLUDED.duration,
           duration_days = EXCLUDED.duration_days,
           features = EXCLUDED.features,
-          features_es = EXCLUDED.features_es,
+          is_lifetime = EXCLUDED.is_lifetime,
           active = EXCLUDED.active,
           updated_at = NOW()
         RETURNING *
@@ -221,13 +224,13 @@ class Plan {
         data.sku,
         data.name,
         data.display_name || data.displayName || data.name,
-        data.nameEs,
         data.tier || null,
         data.price,
         data.currency || 'USD',
-        data.duration || 30,
+        durationDays,       // duration — NOT NULL column
+        durationDays,       // duration_days — nullable but kept in sync
         JSON.stringify(data.features || []),
-        JSON.stringify(data.featuresEs || []),
+        data.isLifetime !== undefined ? data.isLifetime : (data.is_lifetime || false),
         data.active !== undefined ? data.active : true,
       ]);
 
