@@ -43,7 +43,7 @@ const PaymentNotificationService = require('./paymentNotificationService');
 const NotificationEmitter = require('./notificationEmitter');
 const BookingAvailabilityIntegration = require('./bookingAvailabilityIntegration');
 const PaymentSecurityService = require('./paymentSecurityService');
-const { getEpaycoSubscriptionUrl, isSubscriptionPlan } = require('../../config/epaycoSubscriptionPlans');
+const { isSubscriptionPlan } = require('../../config/epaycoSubscriptionPlans');
 const PaymentHistoryService = require('../../services/paymentHistoryService');
 const axios = require('axios');
 
