@@ -3,7 +3,14 @@ const fs = require('fs');
 const sharp = require('sharp');
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
-const { getBotInstance } = require('../../core/bot');
+// Lazy-loaded to avoid circular dependency warning (bot.js -> routes -> applyController -> bot.js)
+let _getBotInstance;
+function getBotInstance() {
+  if (!_getBotInstance) {
+    _getBotInstance = require('../../core/bot').getBotInstance;
+  }
+  return _getBotInstance();
+}
 
 /**
  * Apply Controller
