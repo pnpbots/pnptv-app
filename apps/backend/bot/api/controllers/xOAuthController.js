@@ -3,6 +3,7 @@ const logger = require('../../../utils/logger');
 const axios = require('axios');
 const { query } = require('../../../config/postgres');
 const { enforceDefaultFollows } = require('../../services/followService');
+const { v4: uuidv4 } = require('uuid');
 
 const sanitizeBotUsername = (value) => String(value || '').replace(/^@/, '').trim();
 
@@ -100,82 +101,155 @@ const handleCallback = async (req, res) => {
   const botLink = botUsername ? `https://t.me/${botUsername}` : null;
 
   // ── Webapp login flow ────────────────────────────────────────────────────────
+  // Reached when xLoginStart (webAppController) stored xWebLogin=true in session
+  // and the redirect_uri pointed to /api/auth/x/callback (TWITTER_REDIRECT_URI).
   if (req.session?.xWebLogin) {
     delete req.session.xWebLogin;
     const { state, code, error: xError } = req.query;
     const stored = req.session.xOAuth;
     delete req.session.xOAuth;
 
+    const canonicalAppUrl = (process.env.WEBAPP_ORIGIN || process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app').replace(/\/+$/, '') + '/app';
+    const canonicalErrorUrl = (process.env.WEBAPP_ORIGIN || process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app').replace(/\/+$/, '') + '/?error=auth_failed';
+
     if (xError || !code || !state || !stored || stored.state !== state) {
       logger.warn('X webapp login failed: state mismatch or missing params', { xError, hasCode: !!code, hasStored: !!stored });
-      return res.redirect('/?error=auth_failed');
+      return res.redirect(canonicalErrorUrl);
     }
 
     try {
-      const clientId = process.env.TWITTER_CLIENT_ID;
-      const clientSecret = process.env.TWITTER_CLIENT_SECRET;
-      const redirectUri = process.env.TWITTER_REDIRECT_URI;
+      // Use credentials that match what xLoginStart stored — resolve from stored session or env
+      const clientId = stored.clientId || process.env.WEBAPP_X_CLIENT_ID || process.env.TWITTER_CLIENT_ID;
+      const redirectUri = stored.redirectUri || process.env.WEBAPP_X_REDIRECT_URI || process.env.TWITTER_REDIRECT_URI;
+      const clientSecret = stored.clientMode === 'webapp'
+        ? (process.env.WEBAPP_X_CLIENT_SECRET || process.env.TWITTER_CLIENT_SECRET)
+        : (process.env.TWITTER_CLIENT_SECRET || process.env.WEBAPP_X_CLIENT_SECRET);
 
-      const tokenRes = await axios.post(
-        'https://api.twitter.com/2/oauth2/token',
-        new URLSearchParams({
+      // Token exchange with retry across endpoints and auth modes (matches webAppController)
+      const toFormEncoded = (value) => encodeURIComponent(String(value));
+
+      const buildTokenBody = (mode) => {
+        const body = new URLSearchParams({
           grant_type: 'authorization_code',
           code,
           redirect_uri: redirectUri,
           code_verifier: stored.codeVerifier,
-        }).toString(),
-        {
-          auth: { username: clientId, password: clientSecret },
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          client_id: clientId,
+        });
+        if (mode === 'client_secret_post') {
+          body.set('client_secret', clientSecret);
         }
-      );
+        return body;
+      };
+
+      const exchangeToken = async (mode, tokenEndpoint) => {
+        const config = {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+        };
+        if (mode === 'basic') {
+          config.auth = { username: clientId, password: clientSecret };
+        }
+        if (mode === 'basic_encoded') {
+          const encodedId = toFormEncoded(clientId);
+          const basicValue = Buffer.from(`${encodedId}:${String(clientSecret)}`).toString('base64');
+          config.headers.Authorization = `Basic ${basicValue}`;
+        }
+        return axios.post(tokenEndpoint, buildTokenBody(mode).toString(), config);
+      };
+
+      const modes = clientSecret
+        ? ['basic_encoded', 'client_secret_post', 'basic', 'public']
+        : ['public'];
+      const tokenEndpoints = [
+        'https://api.twitter.com/2/oauth2/token',
+        'https://api.x.com/2/oauth2/token',
+      ];
+      let tokenRes = null;
+      let lastTokenError = null;
+
+      for (const tokenEndpoint of tokenEndpoints) {
+        for (const mode of modes) {
+          try {
+            tokenRes = await exchangeToken(mode, tokenEndpoint);
+            break;
+          } catch (tokenErr) {
+            lastTokenError = tokenErr;
+            const status = tokenErr.response?.status;
+            logger.error('X webapp token exchange failed:', { mode, tokenEndpoint, status, redirectUri });
+            if (![400, 401, 403].includes(status)) throw tokenErr;
+          }
+        }
+        if (tokenRes) break;
+      }
+      if (!tokenRes) throw lastTokenError || new Error('X OAuth token exchange failed');
 
       const accessToken = tokenRes.data.access_token;
-      const profileRes = await axios.get('https://api.twitter.com/2/users/me', {
-        params: { 'user.fields': 'name,profile_image_url' },
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+
+      // Fetch X profile (fallback to api.x.com)
+      let profileRes;
+      try {
+        profileRes = await axios.get('https://api.twitter.com/2/users/me', {
+          params: { 'user.fields': 'name,profile_image_url' },
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+      } catch (_) {
+        profileRes = await axios.get('https://api.x.com/2/users/me', {
+          params: { 'user.fields': 'name,profile_image_url' },
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+      }
 
       const xData = profileRes.data?.data;
       const xHandle = xData?.username;
-      if (!xHandle) return res.redirect('/?error=auth_failed');
+      const xId = xData?.id ? String(xData.id) : null;
+      const xName = xData?.name || xHandle;
+      if (!xHandle) return res.redirect(canonicalErrorUrl);
 
-      // Find or create user
-      let result = await query(
-        `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status, tier,
-                terms_accepted, photo_file_id, bio, language
-         FROM users WHERE twitter = $1`,
-        [xHandle]
-      );
+      const RETURN_COLS = `id, pnptv_id, first_name, last_name, username, email,
+        subscription_status, tier, terms_accepted, photo_file_id, bio, language, telegram, twitter, x_id, role`;
 
       let user;
-      if (result.rows.length === 0) {
-        if (req.session?.user?.id) {
-          await query('UPDATE users SET twitter = $1 WHERE id = $2', [xHandle, req.session.user.id]);
-          result = await query(
-            `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status, tier,
-                    terms_accepted, photo_file_id, bio, language FROM users WHERE id = $1`,
-            [req.session.user.id]
-          );
+
+      // If already logged in, link X to existing user
+      if (req.session?.user?.id) {
+        await query(
+          `UPDATE users SET twitter = $1, x_id = COALESCE(x_id, $2), updated_at = NOW() WHERE id = $3`,
+          [xHandle, xId, req.session.user.id]
+        );
+        const { rows } = await query(`SELECT ${RETURN_COLS} FROM users WHERE id = $1`, [req.session.user.id]);
+        user = rows[0];
+        logger.info(`Linked X @${xHandle} to existing session user ${user.id}`);
+      } else {
+        // Lookup by x_id first, then twitter handle
+        let result = await query(`SELECT ${RETURN_COLS} FROM users WHERE x_id = $1`, [xId]);
+        if (result.rows.length === 0) {
+          result = await query(`SELECT ${RETURN_COLS} FROM users WHERE twitter = $1`, [xHandle]);
+        }
+
+        if (result.rows.length > 0) {
           user = result.rows[0];
+          // Update x_id if missing
+          if (xId && !user.x_id) {
+            await query(`UPDATE users SET x_id = $1, updated_at = NOW() WHERE id = $2`, [xId, user.id]);
+          }
         } else {
-          const { v4: uuidv4 } = require('uuid');
-          const [firstName, ...rest] = ((xData?.name || xHandle)).split(' ');
+          // Create new user with username
+          const [firstName, ...rest] = (xName || xHandle).split(' ');
           const { rows } = await query(
-            `INSERT INTO users (id, pnptv_id, first_name, last_name, twitter,
+            `INSERT INTO users (id, pnptv_id, first_name, last_name, username, twitter, x_id,
               subscription_status, tier, role, terms_accepted, is_active, created_at, updated_at)
-             VALUES ($1,$2,$3,$4,$5,'free','free','user',false,true,NOW(),NOW())
-             RETURNING id, pnptv_id, first_name, last_name, username, subscription_status, terms_accepted, photo_file_id, bio, language, twitter`,
-            [uuidv4(), uuidv4(), firstName, rest.join(' ') || null, xHandle]
+             VALUES ($1,$2,$3,$4,$5,$6,$7,'free','free','user',false,true,NOW(),NOW())
+             RETURNING ${RETURN_COLS}`,
+            [uuidv4(), uuidv4(), firstName, rest.join(' ') || null, xHandle, xHandle, xId]
           );
           user = rows[0];
           logger.info(`Created new user via X web login: ${user.id} (@${xHandle})`);
         }
-      } else {
-        user = result.rows[0];
       }
 
       enforceDefaultFollows(user.id).catch(() => {});
+
+      // Build complete session matching webAppController.buildSession
       req.session.user = {
         id: user.id,
         pnptvId: user.pnptv_id,
@@ -187,7 +261,14 @@ const handleCallback = async (req, res) => {
         acceptedTerms: user.terms_accepted,
         photoUrl: user.photo_file_id,
         bio: user.bio,
+        language: user.language,
+        role: user.role || 'user',
         xHandle,
+        auth_methods: {
+          telegram: !!(user.telegram),
+          atproto: false,
+          x: true,
+        },
       };
 
       await new Promise((resolve, reject) =>
@@ -195,10 +276,11 @@ const handleCallback = async (req, res) => {
       );
 
       logger.info(`Web app X login success: user ${user.id} via @${xHandle}`);
-      return res.redirect('/app');
+      return res.redirect(canonicalAppUrl);
     } catch (err) {
       logger.error('X webapp login callback error:', err.message);
-      return res.redirect('/?error=auth_failed');
+      const canonicalErr = (process.env.WEBAPP_ORIGIN || process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app').replace(/\/+$/, '') + '/?error=auth_failed';
+      return res.redirect(canonicalErr);
     }
   }
   // ── End webapp login flow ────────────────────────────────────────────────────
