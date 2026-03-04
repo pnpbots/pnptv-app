@@ -1989,6 +1989,14 @@ export function getAdminXCampaignMediaFolder(): Promise<{ success: boolean; fold
   return request("/api/webapp/admin/x-campaigns/media-folder");
 }
 
+export function startXOAuth(adminId?: number, adminUsername?: string): Promise<{ success: boolean; url: string }> {
+  const params = new URLSearchParams();
+  if (adminId) params.set("admin_id", String(adminId));
+  if (adminUsername) params.set("admin_username", adminUsername);
+  const qs = params.toString();
+  return request(`/api/admin/x/oauth/start${qs ? `?${qs}` : ""}`);
+}
+
 // ============================================================================
 // Admin API
 // ============================================================================

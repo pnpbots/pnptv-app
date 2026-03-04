@@ -14,6 +14,7 @@ import {
   triggerAdminXCampaignGenerate,
   getAdminXCampaignHistory,
   getAdminXCampaignMediaFolder,
+  startXOAuth,
   type XAutoCampaignStats,
   type XAutoCampaign,
   type XAutoCampaignPost,
@@ -411,12 +412,30 @@ export default function XAutoCampaigns() {
 
       {/* Create Campaign */}
       <div className="mb-6">
-        <button
-          onClick={() => setShowForm((p) => !p)}
-          className="px-4 py-2 rounded-lg text-sm font-medium bg-pnp-accent text-white hover:bg-pnp-accent/80 transition-colors"
-        >
-          {showForm ? "Cancel" : "New Campaign"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowForm((p) => !p)}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-pnp-accent text-white hover:bg-pnp-accent/80 transition-colors"
+          >
+            {showForm ? "Cancel" : "New Campaign"}
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                const res = await startXOAuth();
+                if (res.url) {
+                  window.open(res.url, "_blank");
+                  setSuccess("X authorization opened — complete it in the new tab, then refresh this page");
+                }
+              } catch (err: unknown) {
+                setError(err instanceof Error ? err.message : "Failed to start X OAuth");
+              }
+            }}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-pnp-surface border border-pnp-border text-pnp-textPrimary hover:border-pnp-accent/50 transition-colors"
+          >
+            + Add X Account
+          </button>
+        </div>
 
         {showForm && (
           <form onSubmit={handleCreate} className="mt-3 p-4 rounded-xl bg-pnp-surface border border-pnp-border space-y-3">
