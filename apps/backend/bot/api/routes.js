@@ -718,14 +718,31 @@ app.get('/policies', pageLimiter, (req, res) => {
   res.sendFile(path.join(__dirname, `../../../public/${fileName}`));
 });
 
-// Contact page (EasyBots only)
+// Contact page
 app.get('/contact', pageLimiter, (req, res) => {
   const host = req.get('host') || '';
   if (host.includes('easybots.store') || host.includes('easybots')) {
     return res.sendFile(path.join(__dirname, '../../../public/easybots-contact.html'));
   }
-  return res.status(404).send('Not found');
+  res.sendFile(path.join(__dirname, '../../../public/contact.html'));
 });
+
+// Legal pages (cookies, community guidelines, content policy, refunds, subscriptions, creator terms, DMCA, safety)
+const legalPages = {
+  '/cookies': 'cookies.html',
+  '/community-guidelines': 'community-guidelines.html',
+  '/content-policy': 'content-policy.html',
+  '/refunds': 'refunds.html',
+  '/subscriptions': 'subscriptions.html',
+  '/creator-terms': 'creator-terms.html',
+  '/dmca': 'content-policy.html',  // DMCA is covered in content policy
+  '/safety': 'safety.html',
+};
+for (const [route, file] of Object.entries(legalPages)) {
+  app.get(route, pageLimiter, (req, res) => {
+    res.sendFile(path.join(__dirname, `../../../public/${file}`));
+  });
+}
 
 // Age Verification page
 app.get('/age-verification', pageLimiter, (req, res) => {
@@ -775,7 +792,15 @@ app.use((req, res, next) => {
       '/terms',
       '/privacy',
       '/policies',
-      '/contact'
+      '/contact',
+      '/cookies',
+      '/community-guidelines',
+      '/content-policy',
+      '/refunds',
+      '/subscriptions',
+      '/creator-terms',
+      '/dmca',
+      '/safety'
     ];
     
     const isAllowed = allowedPaths.some(path => 

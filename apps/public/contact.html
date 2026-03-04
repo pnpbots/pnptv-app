@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PNPtv - Contact</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #120d14;
+            --text-main: #FFFFFF;
+            --text-muted: #8E8E93;
+            --neon-pink: #D4007A;
+            --neon-amber: #E69138;
+            --glass-bg: rgba(44, 44, 46, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.08);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.7;
+            padding: 24px 16px 48px;
+        }
+        .container { max-width: 720px; margin: 0 auto; }
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid var(--glass-border);
+        }
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--neon-pink), var(--neon-amber));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+        }
+        .header .updated { font-size: 13px; color: var(--text-muted); }
+        .intro { font-size: 14px; color: var(--text-muted); margin-bottom: 32px; }
+        h2 {
+            font-size: 17px;
+            font-weight: 600;
+            color: var(--text-main);
+            margin: 28px 0 12px;
+            padding-left: 12px;
+            border-left: 3px solid var(--neon-pink);
+        }
+        p, li { font-size: 14px; color: rgba(255,255,255,0.8); margin-bottom: 10px; }
+        ul { padding-left: 20px; margin-bottom: 16px; }
+        li { margin-bottom: 6px; }
+        strong { color: var(--text-main); font-weight: 600; }
+        a { color: var(--neon-pink); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .back-link {
+            display: inline-block;
+            margin-top: 32px;
+            padding: 10px 24px;
+            background: linear-gradient(135deg, var(--neon-pink), var(--neon-amber));
+            color: white;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            text-decoration: none;
+        }
+        .contact-card {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .contact-card h3 {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 24px;
+            border-top: 1px solid var(--glass-border);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>Contact Us</h1>
+        <div class="updated">PNPtv Support & Legal</div>
+    </div>
+
+    <p class="intro">We're here to help. Reach out to us through any of the channels below.</p>
+
+    <div class="contact-card">
+        <h3>General Support</h3>
+        <p>For account issues, technical problems, or general questions:</p>
+        <p><strong>Email:</strong> <a href="mailto:support@pnptv.app">support@pnptv.app</a></p>
+        <p>We aim to respond within 24-48 hours.</p>
+    </div>
+
+    <div class="contact-card">
+        <h3>Legal Inquiries</h3>
+        <p>For legal matters, DMCA notices, law enforcement requests, or compliance questions:</p>
+        <p><strong>Email:</strong> <a href="mailto:legal@pnptv.app">legal@pnptv.app</a></p>
+    </div>
+
+    <div class="contact-card">
+        <h3>Payment & Billing</h3>
+        <p>For subscription issues, refund requests, or payment problems:</p>
+        <p><strong>Email:</strong> <a href="mailto:support@pnptv.app">support@pnptv.app</a></p>
+        <p>Please include your account username and transaction details.</p>
+    </div>
+
+    <div class="contact-card">
+        <h3>Report Abuse</h3>
+        <p>To report content violations, harassment, or safety concerns:</p>
+        <p><strong>Email:</strong> <a href="mailto:support@pnptv.app">support@pnptv.app</a></p>
+        <p>Use the in-app reporting tools for fastest response, or email with screenshots and details.</p>
+    </div>
+
+    <h2>Telegram Support</h2>
+    <p>You can also reach us through our Telegram bot. Open the PNPtv bot and use the <strong>/support</strong> command to submit a support request directly.</p>
+
+    <h2>Response Times</h2>
+    <ul>
+        <li><strong>General support:</strong> 24-48 hours</li>
+        <li><strong>Abuse reports:</strong> Reviewed within 24 hours</li>
+        <li><strong>Legal inquiries:</strong> 3-5 business days</li>
+        <li><strong>Payment issues:</strong> 24-48 hours</li>
+    </ul>
+
+    <div class="footer">
+        <a href="/" class="back-link">Back to PNPtv</a>
+        <p style="margin-top:16px">&copy; 2026 PNPtv. All rights reserved.</p>
+    </div>
+</div>
+</body>
+</html>

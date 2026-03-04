@@ -420,17 +420,44 @@ export function LoginPage() {
           </div>
         )}
 
-        {/* Divider */}
+        {/* Legal footer */}
         <div className="mt-8 pt-6" style={{ borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
-          <p className="text-center text-xs" style={{ color: "#8E8E93" }}>
+          <p className="text-center text-xs mb-3" style={{ color: "#8E8E93" }}>
             By continuing, you agree to our{" "}
-            <a href="https://pnptv.app/terms" target="_blank" rel="noopener noreferrer" className="underline hover:text-white transition-colors" style={{ color: "#D4007A" }}>
-              Terms of Service
+            <a href="/terms" target="_blank" rel="noopener noreferrer" className="underline hover:text-white transition-colors" style={{ color: "#D4007A" }}>
+              Terms
             </a>{" "}
             and{" "}
-            <a href="https://pnptv.app/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-white transition-colors" style={{ color: "#D4007A" }}>
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-white transition-colors" style={{ color: "#D4007A" }}>
               Privacy Policy
             </a>
+          </p>
+          <div className="flex flex-wrap justify-center gap-x-3 gap-y-1">
+            {[
+              { href: "/cookies", label: "Cookies" },
+              { href: "/community-guidelines", label: "Community Guidelines" },
+              { href: "/content-policy", label: "Content Policy" },
+              { href: "/refunds", label: "Refunds" },
+              { href: "/subscriptions", label: "Subscriptions" },
+              { href: "/creator-terms", label: "Creator Terms" },
+              { href: "/dmca", label: "DMCA" },
+              { href: "/safety", label: "Safety" },
+              { href: "/contact", label: "Contact" },
+            ].map(({ href, label }) => (
+              <a
+                key={href}
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] hover:underline transition-colors"
+                style={{ color: "#8E8E93" }}
+              >
+                {label}
+              </a>
+            ))}
+          </div>
+          <p className="text-center text-[10px] mt-3" style={{ color: "#636366" }}>
+            &copy; 2026 PNPtv. All rights reserved.
           </p>
         </div>
       </div>

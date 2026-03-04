@@ -9,7 +9,7 @@ import {
 
 function formatCurrency(value: unknown): string {
   const n = typeof value === "number" && !isNaN(value) ? value : parseFloat(String(value ?? 0));
-  return `$${(isNaN(n) ? 0 : n).toFixed(2)}`;
+  return `$${(isNaN(n) ? 0 : n).toFixed(2)} USD`;
 }
 
 function formatDate(dateStr: unknown): string {
@@ -219,10 +219,10 @@ export default function StatsOverview() {
           <>
             <StatCard
               label="Total Revenue"
-              value={stats ? formatCurrency(stats.totalRevenue) : "$0.00"}
+              value={stats ? formatCurrency(stats.totalRevenue) : "$0.00 USD"}
               icon={<DollarIcon />}
               variant="success"
-              subtitle="All time"
+              subtitle="All time (USD)"
             />
             <StatCard
               label="Active Subscribers"
@@ -233,10 +233,10 @@ export default function StatsOverview() {
             />
             <StatCard
               label="Monthly Revenue"
-              value={stats ? formatCurrency(stats.monthlyRevenue) : "$0.00"}
+              value={stats ? formatCurrency(stats.monthlyRevenue) : "$0.00 USD"}
               icon={<TrendUpIcon />}
               variant="warning"
-              subtitle="This month"
+              subtitle="Last 30 days (USD)"
             />
             <StatCard
               label="Churned Users"
@@ -253,7 +253,7 @@ export default function StatsOverview() {
       {dailyRevenue.length > 0 && (
         <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
           <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider mb-4">
-            Daily Revenue (Last 30 Days)
+            Daily Revenue USD (Last 30 Days)
           </h2>
           <div className="flex items-end gap-1 max-h-32 h-32">
             {dailyRevenue.map((day, idx) => {

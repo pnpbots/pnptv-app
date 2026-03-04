@@ -3,10 +3,14 @@ const { query } = require('../config/postgres');
 
 const MembershipCleanupService = require('../bot/services/membershipCleanupService');
 
+// Normalize all amounts to USD — COP payments are stored in COP and need conversion
+const AMOUNT_USD = `CASE WHEN currency = 'COP' THEN amount / 4000.0 ELSE amount END`;
+
 /**
  * AdminDashboardService
  * Provides comprehensive dashboard statistics for admin monitoring
  * Includes payments, revenue, churn, and subscription metrics
+ * All monetary values are normalized to USD
  */
 class AdminDashboardService {
   /**
@@ -59,8 +63,8 @@ class AdminDashboardService {
           COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
           COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
           COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
-          SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END) as total_revenue,
-          AVG(CASE WHEN status = 'completed' THEN amount ELSE NULL END) as avg_transaction,
+          SUM(CASE WHEN status = 'completed' THEN ${AMOUNT_USD} ELSE 0 END) as total_revenue,
+          AVG(CASE WHEN status = 'completed' THEN ${AMOUNT_USD} ELSE NULL END) as avg_transaction,
           MIN(payment_date) as first_payment,
           MAX(payment_date) as last_payment
         FROM payment_history
@@ -84,8 +88,8 @@ class AdminDashboardService {
           DATE_TRUNC('day', payment_date)::DATE as payment_day,
           COUNT(*) as transactions,
           COUNT(DISTINCT user_id) as unique_users,
-          SUM(amount) as daily_revenue,
-          AVG(amount) as avg_transaction
+          SUM(${AMOUNT_USD}) as daily_revenue,
+          AVG(${AMOUNT_USD}) as avg_transaction
         FROM payment_history
         WHERE status = 'completed'
           AND payment_date >= NOW() - INTERVAL '30 days'
@@ -95,7 +99,7 @@ class AdminDashboardService {
 
       const totalResult = await query(`
         SELECT
-          SUM(amount) as monthly_revenue,
+          SUM(${AMOUNT_USD}) as monthly_revenue,
           COUNT(*) as monthly_transactions,
           COUNT(DISTINCT user_id) as monthly_unique_payers
         FROM payment_history
@@ -167,11 +171,11 @@ class AdminDashboardService {
           payment_method,
           COUNT(*) as transaction_count,
           COUNT(DISTINCT user_id) as unique_users,
-          SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END) as total_revenue,
+          SUM(CASE WHEN status = 'completed' THEN ${AMOUNT_USD} ELSE 0 END) as total_revenue,
           COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful,
           COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
           ROUND(100.0 * COUNT(CASE WHEN status = 'completed' THEN 1 END) / COUNT(*), 2) as success_rate,
-          AVG(CASE WHEN status = 'completed' THEN amount ELSE NULL END) as avg_successful_transaction
+          AVG(CASE WHEN status = 'completed' THEN ${AMOUNT_USD} ELSE NULL END) as avg_successful_transaction
         FROM payment_history
         GROUP BY payment_method
         ORDER BY total_revenue DESC NULLS LAST
@@ -191,8 +195,10 @@ class AdminDashboardService {
   static async getRecentTransactions() {
     try {
       const result = await query(`
-        SELECT ph.user_id, ph.amount, ph.status, ph.payment_method,
-               ph.payment_date, u.username, u.first_name
+        SELECT ph.user_id,
+               CASE WHEN ph.currency = 'COP' THEN ph.amount / 4000.0 ELSE ph.amount END as amount,
+               ph.status, ph.payment_method, ph.payment_date, ph.currency,
+               u.username, u.first_name
         FROM payment_history ph
         LEFT JOIN users u ON ph.user_id = u.id
         WHERE ph.status = 'completed'
@@ -242,7 +248,7 @@ class AdminDashboardService {
           DATE_TRUNC('day', payment_date)::DATE as payment_day,
           payment_method,
           COUNT(*) as transaction_count,
-          SUM(amount) as daily_revenue
+          SUM(${AMOUNT_USD}) as daily_revenue
         FROM payment_history
         WHERE status = 'completed'
           AND payment_date >= NOW() - INTERVAL '30 days'
@@ -267,9 +273,9 @@ class AdminDashboardService {
         SELECT
           payment_method,
           COUNT(DISTINCT user_id) as users,
-          SUM(amount) as total_revenue,
-          AVG(amount) as avg_payment,
-          SUM(amount) / COUNT(DISTINCT user_id) as clv,
+          SUM(${AMOUNT_USD}) as total_revenue,
+          AVG(${AMOUNT_USD}) as avg_payment,
+          SUM(${AMOUNT_USD}) / COUNT(DISTINCT user_id) as clv,
           MAX(payment_date) - MIN(payment_date) as customer_lifespan_days
         FROM payment_history
         WHERE status = 'completed'
