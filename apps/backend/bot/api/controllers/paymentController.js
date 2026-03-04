@@ -806,18 +806,26 @@ class PaymentController {
         try {
           const { getEpaycoClient } = require('../../../config/epayco');
           const epaycoClient = getEpaycoClient();
+          const cardNum = String(rawCardNumber).replace(/\s/g, '');
+          const expYear = String(rawExpYear).length === 2 ? '20' + rawExpYear : String(rawExpYear);
+          const expMonth = String(rawExpMonth).padStart(2, '0');
+          const cvc = String(rawCvc);
           const creditInfo = {
-            'card[number]': String(rawCardNumber).replace(/\s/g, ''),
-            'card[exp_year]': String(rawExpYear).length === 2 ? '20' + rawExpYear : String(rawExpYear),
-            'card[exp_month]': String(rawExpMonth),
-            'card[cvc]': String(rawCvc),
+            'card[number]': cardNum,
+            'card[exp_year]': expYear,
+            'card[exp_month]': expMonth,
+            'card[cvc]': cvc,
             'hasCvv': true,
           };
-          // Visa requires card[holder_name] for 3DS 2.x (EMV 3DS 2.2+)
-          if (name) {
-            creditInfo['card[holder_name]'] = `${name}${lastName ? ' ' + lastName : ''}`;
-          }
-          logger.info('Server-side card tokenization started', { paymentId });
+          logger.info('Server-side card tokenization started', {
+            paymentId,
+            cardBin: cardNum.substring(0, 6),
+            cardLast4: cardNum.slice(-4),
+            cardLength: cardNum.length,
+            expYear,
+            expMonth,
+            cvcLength: cvc.length,
+          });
           const tokenResult = await epaycoClient.token.create(creditInfo);
           if (tokenResult && tokenResult.status && tokenResult.id) {
             resolvedToken = tokenResult.id;
