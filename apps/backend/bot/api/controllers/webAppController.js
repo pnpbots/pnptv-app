@@ -1177,6 +1177,23 @@ const xLoginCallback = async (req, res) => {
     // If already logged in via another method, prioritize linking to current session user
     if (req.session?.user?.id) {
       const existingId = req.session.user.id;
+
+      // Clear x_id/twitter from any other user that has this X identity (prevents unique constraint violations)
+      if (xId) {
+        await query(
+          `UPDATE users SET x_id = NULL, twitter = CASE WHEN twitter = $1 THEN NULL ELSE twitter END, updated_at = NOW()
+           WHERE x_id = $2 AND id != $3`,
+          [xHandle, xId, existingId]
+        );
+      }
+      if (xHandle) {
+        await query(
+          `UPDATE users SET twitter = NULL, updated_at = NOW()
+           WHERE twitter = $1 AND id != $2`,
+          [xHandle, existingId]
+        );
+      }
+
       await query(
         `UPDATE users SET twitter = $1, x_id = COALESCE(x_id, $2), updated_at = NOW() WHERE id = $3`,
         [xHandle, xId, existingId]

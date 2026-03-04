@@ -238,11 +238,23 @@ const handleCallback = async (req, res) => {
 
       // If already logged in, link X to existing user
       if (req.session?.user?.id) {
+        const existingId = req.session.user.id;
+        // Clear x_id/twitter from any other user that has this X identity
+        if (xId) {
+          await query(
+            `UPDATE users SET x_id = NULL, twitter = CASE WHEN twitter = $1 THEN NULL ELSE twitter END, updated_at = NOW()
+             WHERE x_id = $2 AND id != $3`,
+            [xHandle, xId, existingId]
+          );
+        }
+        if (xHandle) {
+          await query(`UPDATE users SET twitter = NULL, updated_at = NOW() WHERE twitter = $1 AND id != $2`, [xHandle, existingId]);
+        }
         await query(
           `UPDATE users SET twitter = $1, x_id = COALESCE(x_id, $2), updated_at = NOW() WHERE id = $3`,
-          [xHandle, xId, req.session.user.id]
+          [xHandle, xId, existingId]
         );
-        const { rows } = await query(`SELECT ${RETURN_COLS} FROM users WHERE id = $1`, [req.session.user.id]);
+        const { rows } = await query(`SELECT ${RETURN_COLS} FROM users WHERE id = $1`, [existingId]);
         user = rows[0];
         logger.info(`Linked X @${xHandle} to existing session user ${user.id}`);
       } else {

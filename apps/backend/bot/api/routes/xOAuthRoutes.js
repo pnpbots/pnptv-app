@@ -169,6 +169,23 @@ async function findOrCreateXUser({ xUserId, xUsername, xName, accessToken, refre
 
   // 1. If a session user already exists, link X to that account (merge identity).
   if (sessionUser?.id) {
+    // Clear X identity from any other user to prevent unique constraint violations
+    if (xUserId) {
+      await query(
+        `UPDATE users SET x_id = NULL, x_user_id = NULL, x_username = NULL,
+                twitter = CASE WHEN twitter = $1 THEN NULL ELSE twitter END, updated_at = NOW()
+         WHERE (x_user_id = $2 OR x_id = $2) AND id != $3`,
+        [xUsername, xUserId, sessionUser.id]
+      );
+    }
+    if (xUsername) {
+      await query(
+        `UPDATE users SET twitter = NULL, updated_at = NOW()
+         WHERE twitter = $1 AND id != $2`,
+        [xUsername, sessionUser.id]
+      );
+    }
+
     await query(
       `UPDATE users
        SET x_user_id = COALESCE(x_user_id, $1),
