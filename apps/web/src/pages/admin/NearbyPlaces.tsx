@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { DataTable } from "@/components/admin/DataTable";
 import { Pagination } from "@/components/admin/Pagination";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
@@ -15,6 +15,25 @@ import {
 
 type PlaceStatus = "all" | "pending" | "approved" | "rejected" | "suspended";
 
+interface CategoryOption {
+  id: number;
+  name: string;
+  emoji: string;
+  slug: string;
+}
+
+const CATEGORIES: CategoryOption[] = [
+  { id: 1,  name: "Wellness",              emoji: "🧘", slug: "wellness" },
+  { id: 2,  name: "Cruising Spots",        emoji: "🌙", slug: "cruising" },
+  { id: 3,  name: "+18 Businesses",        emoji: "🔞", slug: "adult_entertainment" },
+  { id: 4,  name: "PNP Friendly",          emoji: "💨", slug: "pnp_friendly" },
+  { id: 5,  name: "Help Centers",          emoji: "🏥", slug: "help_centers" },
+  { id: 6,  name: "Saunas & Bath Houses",  emoji: "🧖", slug: "saunas" },
+  { id: 7,  name: "Bars & Clubs",          emoji: "🍸", slug: "bars_clubs" },
+  { id: 8,  name: "Community Businesses",  emoji: "🏪", slug: "community_business" },
+  { id: 25, name: "Hotels & Lodging",      emoji: "🏨", slug: "hotels_lodging" },
+];
+
 const STATUS_BADGE: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
   pending: "warning",
   approved: "success",
@@ -23,10 +42,10 @@ const STATUS_BADGE: Record<string, "default" | "accent" | "success" | "warning" 
 };
 
 const STATUS_TABS: { value: PlaceStatus; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "pending", label: "Pending" },
-  { value: "approved", label: "Approved" },
-  { value: "rejected", label: "Rejected" },
+  { value: "all",       label: "All" },
+  { value: "pending",   label: "Pending" },
+  { value: "approved",  label: "Approved" },
+  { value: "rejected",  label: "Rejected" },
   { value: "suspended", label: "Suspended" },
 ];
 
@@ -40,13 +59,17 @@ function formatDate(dateStr: string | undefined): string {
 }
 
 export default function NearbyPlaces() {
-  const [places, setPlaces] = useState<AdminPlace[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [places, setPlaces]             = useState<AdminPlace[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [error, setError]               = useState<string | null>(null);
+  const [success, setSuccess]           = useState<string | null>(null);
+  const [page, setPage]                 = useState(1);
+  const [totalPages, setTotalPages]     = useState(1);
   const [statusFilter, setStatusFilter] = useState<PlaceStatus>("all");
+  const [categoryFilter, setCategoryFilter] = useState<number | undefined>(undefined);
+  const [searchInput, setSearchInput]   = useState("");
+  const [search, setSearch]             = useState("");
+  const searchTimerRef                  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Stats
   const [stats, setStats] = useState<Record<string, number>>({});
@@ -60,19 +83,27 @@ export default function NearbyPlaces() {
   const [rejectReason, setRejectReason] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
-  const loadPlaces = useCallback(async (p: number, status: PlaceStatus) => {
-    setLoading(true);
-    try {
-      const res = await getAdminPlaces(p, status === "all" ? undefined : status);
-      setPlaces(res.places);
-      setTotalPages(res.pagination.totalPages);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load places");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const loadPlaces = useCallback(
+    async (p: number, status: PlaceStatus, catId: number | undefined, q: string) => {
+      setLoading(true);
+      try {
+        const res = await getAdminPlaces(
+          p,
+          status === "all" ? undefined : status,
+          catId,
+          q || undefined
+        );
+        setPlaces(res.places);
+        setTotalPages(res.pagination.totalPages);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load places");
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
 
   const loadStats = useCallback(async () => {
     try {
@@ -84,8 +115,8 @@ export default function NearbyPlaces() {
   }, []);
 
   useEffect(() => {
-    loadPlaces(page, statusFilter);
-  }, [loadPlaces, page, statusFilter]);
+    loadPlaces(page, statusFilter, categoryFilter, search);
+  }, [loadPlaces, page, statusFilter, categoryFilter, search]);
 
   useEffect(() => {
     loadStats();
@@ -96,7 +127,24 @@ export default function NearbyPlaces() {
     setPage(1);
   };
 
-  const openAction = (type: typeof confirmAction extends infer T | null ? NonNullable<T>["type"] : never, place: AdminPlace) => {
+  const handleCategoryFilter = (id: number | undefined) => {
+    setCategoryFilter(id);
+    setPage(1);
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setSearch(value.trim());
+      setPage(1);
+    }, 400);
+  };
+
+  const openAction = (
+    type: NonNullable<typeof confirmAction>["type"],
+    place: AdminPlace
+  ) => {
     setConfirmAction({ type, placeId: place.id, placeName: place.name });
     setRejectReason("");
   };
@@ -119,7 +167,7 @@ export default function NearbyPlaces() {
       }
       setSuccess(`Place ${type === "unsuspend" ? "unsuspended" : type + "d"} successfully`);
       setConfirmAction(null);
-      await Promise.all([loadPlaces(page, statusFilter), loadStats()]);
+      await Promise.all([loadPlaces(page, statusFilter, categoryFilter, search), loadStats()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Action failed");
     } finally {
@@ -131,12 +179,12 @@ export default function NearbyPlaces() {
     if (!confirmAction) return "";
     const { type, placeName } = confirmAction;
     switch (type) {
-      case "approve": return `Approve "${placeName}"? It will become visible to users.`;
-      case "reject": return `Reject "${placeName}"? You can provide a reason below.`;
-      case "suspend": return `Suspend "${placeName}"? It will be hidden from users.`;
+      case "approve":   return `Approve "${placeName}"? It will become visible to users.`;
+      case "reject":    return `Reject "${placeName}"? You can provide a reason below.`;
+      case "suspend":   return `Suspend "${placeName}"? It will be hidden from users.`;
       case "unsuspend": return `Unsuspend "${placeName}"? It will become visible again.`;
-      case "delete": return `Permanently delete "${placeName}"? This cannot be undone.`;
-      default: return "";
+      case "delete":    return `Permanently delete "${placeName}"? This cannot be undone.`;
+      default:          return "";
     }
   };
 
@@ -155,7 +203,9 @@ export default function NearbyPlaces() {
         <div>
           <span className="font-medium text-pnp-textPrimary">{row.name}</span>
           {row.address && (
-            <div className="text-[10px] text-pnp-textSecondary truncate max-w-[200px]">{row.address}</div>
+            <div className="text-[10px] text-pnp-textSecondary truncate max-w-[200px]">
+              {row.address}
+            </div>
           )}
         </div>
       ),
@@ -165,7 +215,8 @@ export default function NearbyPlaces() {
       header: "Category",
       render: (row: AdminPlace) => (
         <span className="text-xs text-pnp-textSecondary">
-          {row.categoryEmoji ? `${row.categoryEmoji} ` : ""}{row.categoryName || "\u2014"}
+          {row.categoryEmoji ? `${row.categoryEmoji} ` : ""}
+          {row.categoryName || "\u2014"}
         </span>
       ),
     },
@@ -189,9 +240,7 @@ export default function NearbyPlaces() {
       key: "status",
       header: "Status",
       render: (row: AdminPlace) => (
-        <Badge variant={STATUS_BADGE[row.status] ?? "default"}>
-          {row.status}
-        </Badge>
+        <Badge variant={STATUS_BADGE[row.status] ?? "default"}>{row.status}</Badge>
       ),
     },
     {
@@ -215,25 +264,40 @@ export default function NearbyPlaces() {
         <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
           {row.status === "pending" && (
             <>
-              <button onClick={() => openAction("approve", row)} className="text-[10px] px-2 py-1 rounded bg-green-500/10 text-green-400 hover:bg-green-500/20">
+              <button
+                onClick={() => openAction("approve", row)}
+                className="text-[10px] px-2 py-1 rounded bg-green-500/10 text-green-400 hover:bg-green-500/20"
+              >
                 Approve
               </button>
-              <button onClick={() => openAction("reject", row)} className="text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20">
+              <button
+                onClick={() => openAction("reject", row)}
+                className="text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20"
+              >
                 Reject
               </button>
             </>
           )}
           {row.status === "approved" && (
-            <button onClick={() => openAction("suspend", row)} className="text-[10px] px-2 py-1 rounded bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20">
+            <button
+              onClick={() => openAction("suspend", row)}
+              className="text-[10px] px-2 py-1 rounded bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20"
+            >
               Suspend
             </button>
           )}
           {row.status === "suspended" && (
-            <button onClick={() => openAction("unsuspend", row)} className="text-[10px] px-2 py-1 rounded bg-green-500/10 text-green-400 hover:bg-green-500/20">
+            <button
+              onClick={() => openAction("unsuspend", row)}
+              className="text-[10px] px-2 py-1 rounded bg-green-500/10 text-green-400 hover:bg-green-500/20"
+            >
               Unsuspend
             </button>
           )}
-          <button onClick={() => openAction("delete", row)} className="text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20">
+          <button
+            onClick={() => openAction("delete", row)}
+            className="text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20"
+          >
             Delete
           </button>
         </div>
@@ -252,16 +316,17 @@ export default function NearbyPlaces() {
 
       {/* Stats */}
       {Object.keys(stats).length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           {[
-            { label: "Total", value: stats.total, color: "text-pnp-textPrimary" },
-            { label: "Pending", value: stats.pending, color: "text-yellow-400" },
-            { label: "Approved", value: stats.approved, color: "text-green-400" },
-            { label: "Rejected", value: stats.rejected, color: "text-red-400" },
+            { label: "Total",     key: "total",     color: "text-pnp-textPrimary" },
+            { label: "Pending",   key: "pending",   color: "text-yellow-400" },
+            { label: "Approved",  key: "approved",  color: "text-green-400" },
+            { label: "Rejected",  key: "rejected",  color: "text-red-400" },
+            { label: "Suspended", key: "suspended", color: "text-pnp-textSecondary" },
           ].map((s) => (
             <div key={s.label} className="rounded-xl bg-pnp-surface border border-pnp-border p-3">
               <div className="text-xs text-pnp-textSecondary">{s.label}</div>
-              <div className={`text-xl font-bold ${s.color}`}>{s.value ?? 0}</div>
+              <div className={`text-xl font-bold ${s.color}`}>{stats[s.key] ?? 0}</div>
             </div>
           ))}
         </div>
@@ -271,15 +336,54 @@ export default function NearbyPlaces() {
       {error && (
         <div className="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400 flex justify-between items-center">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300 ml-2">Dismiss</button>
+          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300 ml-2">
+            Dismiss
+          </button>
         </div>
       )}
       {success && (
         <div className="px-4 py-3 rounded-lg bg-green-500/10 border border-green-500/20 text-sm text-green-400 flex justify-between items-center">
           <span>{success}</span>
-          <button onClick={() => setSuccess(null)} className="text-green-400 hover:text-green-300 ml-2">Dismiss</button>
+          <button onClick={() => setSuccess(null)} className="text-green-400 hover:text-green-300 ml-2">
+            Dismiss
+          </button>
         </div>
       )}
+
+      {/* Search & Category Filter */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <input
+          type="text"
+          value={searchInput}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          placeholder="Search by name, city, address..."
+          className="px-3 py-2 text-sm rounded-lg border border-pnp-border bg-pnp-surface text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-pnp-accent w-64"
+        />
+        <select
+          value={categoryFilter ?? ""}
+          onChange={(e) => handleCategoryFilter(e.target.value ? Number(e.target.value) : undefined)}
+          className="px-3 py-2 text-sm rounded-lg border border-pnp-border bg-pnp-surface text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
+        >
+          <option value="">All Categories</option>
+          {CATEGORIES.map((cat) => (
+            <option key={cat.id} value={cat.id}>
+              {cat.emoji} {cat.name}
+            </option>
+          ))}
+        </select>
+        {(categoryFilter !== undefined || search) && (
+          <button
+            onClick={() => {
+              handleCategoryFilter(undefined);
+              setSearchInput("");
+              setSearch("");
+            }}
+            className="text-xs px-3 py-2 rounded-lg border border-pnp-border text-pnp-textSecondary hover:bg-pnp-surface"
+          >
+            Clear Filters
+          </button>
+        )}
+      </div>
 
       {/* Status filter tabs */}
       <div className="flex flex-wrap gap-2">
@@ -315,7 +419,11 @@ export default function NearbyPlaces() {
       {/* Confirm Modal */}
       <ConfirmModal
         open={!!confirmAction && confirmAction.type !== "reject"}
-        title={confirmAction ? `${confirmAction.type.charAt(0).toUpperCase() + confirmAction.type.slice(1)} Place` : "Confirm"}
+        title={
+          confirmAction
+            ? `${confirmAction.type.charAt(0).toUpperCase() + confirmAction.type.slice(1)} Place`
+            : "Confirm"
+        }
         message={getConfirmMessage()}
         confirmLabel={confirmAction?.type === "delete" ? "Delete" : "Confirm"}
         variant={getConfirmVariant()}
@@ -326,7 +434,10 @@ export default function NearbyPlaces() {
 
       {/* Reject Modal with reason input */}
       {confirmAction?.type === "reject" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setConfirmAction(null)}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          onClick={() => setConfirmAction(null)}
+        >
           <div className="fixed inset-0 bg-black/60" />
           <div
             className="relative bg-pnp-background border border-pnp-border rounded-xl p-6 max-w-md w-full shadow-xl"

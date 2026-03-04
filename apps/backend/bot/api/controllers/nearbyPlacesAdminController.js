@@ -11,10 +11,16 @@ const listPlaces = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page || '1'));
     const status = req.query.status || null;
+    const categoryId = req.query.categoryId ? parseInt(req.query.categoryId) : null;
+    const city = req.query.city ? String(req.query.city).trim() : null;
+    const search = req.query.search ? String(req.query.search).trim() : null;
     const offset = (page - 1) * ITEMS_PER_PAGE;
 
     const filters = {};
     if (status) filters.status = status;
+    if (categoryId) filters.categoryId = categoryId;
+    if (city) filters.city = city;
+    if (search) filters.search = search;
 
     const [places, total] = await Promise.all([
       NearbyPlaceModel.getAll(filters, ITEMS_PER_PAGE, offset),

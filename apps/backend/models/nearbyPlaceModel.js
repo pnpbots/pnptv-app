@@ -396,7 +396,9 @@ class NearbyPlaceModel {
       let sql = `
         SELECT p.*,
                c.name_en as category_name_en,
-               c.emoji as category_emoji
+               c.name_es as category_name_es,
+               c.emoji as category_emoji,
+               c.slug as category_slug
         FROM ${TABLE} p
         LEFT JOIN nearby_place_categories c ON p.category_id = c.id
         WHERE 1=1
@@ -422,6 +424,12 @@ class NearbyPlaceModel {
       if (filters.city) {
         sql += ` AND LOWER(p.city) LIKE LOWER($${paramIndex++})`;
         params.push(`%${filters.city}%`);
+      }
+
+      if (filters.search) {
+        sql += ` AND (LOWER(p.name) LIKE LOWER($${paramIndex}) OR LOWER(p.city) LIKE LOWER($${paramIndex}) OR LOWER(p.address) LIKE LOWER($${paramIndex}))`;
+        params.push(`%${filters.search}%`);
+        paramIndex++;
       }
 
       sql += ` ORDER BY p.created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
@@ -459,6 +467,11 @@ class NearbyPlaceModel {
       if (filters.city) {
         sql += ` AND LOWER(city) LIKE LOWER($${paramIndex++})`;
         params.push(`%${filters.city}%`);
+      }
+      if (filters.search) {
+        sql += ` AND (LOWER(name) LIKE LOWER($${paramIndex}) OR LOWER(city) LIKE LOWER($${paramIndex}) OR LOWER(address) LIKE LOWER($${paramIndex}))`;
+        params.push(`%${filters.search}%`);
+        paramIndex++;
       }
 
       const result = await query(sql, params);
@@ -507,12 +520,24 @@ class NearbyPlaceModel {
           COUNT(*) FILTER (WHERE status = 'pending') as pending,
           COUNT(*) FILTER (WHERE status = 'approved') as approved,
           COUNT(*) FILTER (WHERE status = 'rejected') as rejected,
+          COUNT(*) FILTER (WHERE status = 'suspended') as suspended,
           COUNT(*) FILTER (WHERE place_type = 'business') as businesses,
           COUNT(*) FILTER (WHERE place_type = 'place_of_interest') as places_of_interest,
-          SUM(view_count) as total_views
+          COALESCE(SUM(view_count), 0) as total_views
         FROM ${TABLE}
       `);
-      return result.rows[0];
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        total: parseInt(row.total, 10),
+        pending: parseInt(row.pending, 10),
+        approved: parseInt(row.approved, 10),
+        rejected: parseInt(row.rejected, 10),
+        suspended: parseInt(row.suspended, 10),
+        businesses: parseInt(row.businesses, 10),
+        places_of_interest: parseInt(row.places_of_interest, 10),
+        total_views: parseInt(row.total_views, 10),
+      };
     } catch (error) {
       logger.error('Error getting place stats:', error);
       return null;

@@ -1940,8 +1940,11 @@ export interface AdminPlace {
   address?: string;
   city?: string;
   country?: string;
+  categoryId?: number;
   categoryName?: string;
+  categoryNameEs?: string;
   categoryEmoji?: string;
+  categorySlug?: string;
   placeType?: string;
   status: string;
   viewCount?: number;
@@ -1952,10 +1955,14 @@ export interface AdminPlace {
 
 export function getAdminPlaces(
   page = 1,
-  status?: string
+  status?: string,
+  categoryId?: number,
+  search?: string
 ): Promise<{ success: boolean; places: AdminPlace[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
   const params = new URLSearchParams({ page: String(page) });
   if (status) params.set("status", status);
+  if (categoryId) params.set("categoryId", String(categoryId));
+  if (search) params.set("search", search);
   return request(`/api/webapp/admin/places?${params}`);
 }
 
