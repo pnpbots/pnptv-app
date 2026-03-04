@@ -184,22 +184,46 @@ const handleCallback = async (req, res) => {
       if (!tokenRes) throw lastTokenError || new Error('X OAuth token exchange failed');
 
       const accessToken = tokenRes.data.access_token;
+      const idToken = tokenRes.data.id_token || null;
 
-      // Fetch X profile (fallback to api.x.com)
-      let profileRes;
+      // Fetch X profile — try v2 API, fall back to id_token JWT decode
+      let xData = null;
       try {
-        profileRes = await axios.get('https://api.twitter.com/2/users/me', {
+        const profileRes = await axios.get('https://api.twitter.com/2/users/me', {
           params: { 'user.fields': 'name,profile_image_url' },
           headers: { Authorization: `Bearer ${accessToken}` },
         });
-      } catch (_) {
-        profileRes = await axios.get('https://api.x.com/2/users/me', {
-          params: { 'user.fields': 'name,profile_image_url' },
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
+        xData = profileRes.data?.data;
+      } catch (err1) {
+        try {
+          const profileRes2 = await axios.get('https://api.x.com/2/users/me', {
+            params: { 'user.fields': 'name,profile_image_url' },
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          xData = profileRes2.data?.data;
+        } catch (err2) {
+          logger.warn('X webapp profile fetch failed, trying id_token fallback', {
+            status1: err1.response?.status,
+            status2: err2.response?.status,
+          });
+        }
       }
 
-      const xData = profileRes.data?.data;
+      // Fallback: decode id_token JWT (returned when openid scope is requested)
+      if (!xData && idToken) {
+        try {
+          const payload = JSON.parse(Buffer.from(idToken.split('.')[1], 'base64url').toString());
+          xData = {
+            id: payload.sub,
+            username: payload.preferred_username || payload.screen_name,
+            name: payload.name || payload.preferred_username,
+          };
+          logger.info('X webapp profile resolved from id_token JWT', { sub: payload.sub, username: xData.username });
+        } catch (jwtErr) {
+          logger.error('Failed to decode X id_token:', jwtErr.message);
+        }
+      }
+
       const xHandle = xData?.username;
       const xId = xData?.id ? String(xData.id) : null;
       const xName = xData?.name || xHandle;

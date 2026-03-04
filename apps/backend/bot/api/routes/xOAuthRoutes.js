@@ -39,7 +39,7 @@ const X_TOKEN_URL = 'https://api.twitter.com/2/oauth2/token';
 const X_TOKEN_URL_ALT = 'https://api.x.com/2/oauth2/token';
 const X_USERINFO_URL = 'https://api.twitter.com/2/users/me';
 const X_USERINFO_URL_ALT = 'https://api.x.com/2/users/me';
-const X_SCOPE = 'tweet.read users.read offline.access';
+const X_SCOPE = 'tweet.read users.read offline.access openid';
 
 const REDIS_STATE_PREFIX = 'x:oauth:state:';
 const REDIS_STATE_TTL_SECONDS = 600; // 10 minutes
@@ -444,36 +444,54 @@ router.get('/callback', callbackLimiter, async (req, res) => {
 
   const accessToken = tokenRes.data.access_token;
   const refreshToken = tokenRes.data.refresh_token || null;
+  const idToken = tokenRes.data.id_token || null;
   const expiresIn = tokenRes.data.expires_in || 7200; // X default is 2h
   const expiresAt = new Date(Date.now() + expiresIn * 1000);
 
   // ---------------------------------------------------------------------------
-  // Fetch X user profile
+  // Fetch X user profile — try v2 API, fall back to id_token JWT decode
   // ---------------------------------------------------------------------------
 
-  let xData;
+  let xData = null;
   try {
     const profileRes = await axios.get(X_USERINFO_URL, {
       params: { 'user.fields': 'name,profile_image_url' },
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     xData = profileRes.data?.data;
-  } catch {
+  } catch (err1) {
     try {
-      const profileRes = await axios.get(X_USERINFO_URL_ALT, {
+      const profileRes2 = await axios.get(X_USERINFO_URL_ALT, {
         params: { 'user.fields': 'name,profile_image_url' },
         headers: { Authorization: `Bearer ${accessToken}` },
       });
-      xData = profileRes.data?.data;
-    } catch (profileErr) {
-      logger.error('[X OAuth] Failed to fetch user profile from X API:', profileErr.message);
-      return res.redirect('/?x_error=profile_fetch_failed');
+      xData = profileRes2.data?.data;
+    } catch (err2) {
+      logger.warn('[X OAuth] Profile fetch failed, trying id_token fallback', {
+        status1: err1.response?.status,
+        status2: err2.response?.status,
+      });
+    }
+  }
+
+  // Fallback: decode id_token JWT (returned when openid scope is requested)
+  if (!xData && idToken) {
+    try {
+      const payload = JSON.parse(Buffer.from(idToken.split('.')[1], 'base64url').toString());
+      xData = {
+        id: payload.sub,
+        username: payload.preferred_username || payload.screen_name,
+        name: payload.name || payload.preferred_username,
+      };
+      logger.info('[X OAuth] Profile resolved from id_token JWT', { sub: payload.sub, username: xData.username });
+    } catch (jwtErr) {
+      logger.error('[X OAuth] Failed to decode id_token:', jwtErr.message);
     }
   }
 
   if (!xData?.id || !xData?.username) {
-    logger.error('[X OAuth] X user profile missing required fields', { xData });
-    return res.redirect('/?x_error=profile_missing_fields');
+    logger.error('[X OAuth] X user profile missing required fields', { xData, hasIdToken: !!idToken });
+    return res.redirect('/?x_error=profile_fetch_failed');
   }
 
   const xUserId = String(xData.id);

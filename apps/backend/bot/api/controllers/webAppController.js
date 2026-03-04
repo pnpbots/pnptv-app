@@ -988,7 +988,7 @@ const xLoginStart = async (req, res) => {
       response_mode: 'query',
       client_id: clientId,
       redirect_uri: redirectUri,
-      scope: 'users.read tweet.read',
+      scope: 'users.read tweet.read openid',
       state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
@@ -1126,24 +1126,48 @@ const xLoginCallback = async (req, res) => {
     }
 
     const accessToken = tokenRes.data.access_token;
+    const idToken = tokenRes.data.id_token || null;
 
-    // Fetch X user profile
-    let profileRes;
+    // Fetch X user profile — try v2 API first, fall back to id_token JWT decode
+    let xData = null;
     try {
-      profileRes = await axios.get('https://api.twitter.com/2/users/me', {
+      const profileRes = await axios.get('https://api.twitter.com/2/users/me', {
         params: { 'user.fields': 'name,profile_image_url' },
         headers: { Authorization: `Bearer ${accessToken}` },
       });
+      xData = profileRes.data?.data;
     } catch (profileError) {
-      profileRes = await axios.get('https://api.x.com/2/users/me', {
-        params: { 'user.fields': 'name,profile_image_url' },
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      try {
+        const profileRes2 = await axios.get('https://api.x.com/2/users/me', {
+          params: { 'user.fields': 'name,profile_image_url' },
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        xData = profileRes2.data?.data;
+      } catch (profileError2) {
+        logger.warn('X profile fetch failed, trying id_token fallback', {
+          status1: profileError.response?.status,
+          status2: profileError2.response?.status,
+        });
+      }
     }
 
-    const xData = profileRes.data?.data;
+    // Fallback: decode id_token JWT (returned when openid scope is requested)
+    if (!xData && idToken) {
+      try {
+        const payload = JSON.parse(Buffer.from(idToken.split('.')[1], 'base64url').toString());
+        xData = {
+          id: payload.sub,
+          username: payload.preferred_username || payload.screen_name,
+          name: payload.name || payload.preferred_username,
+        };
+        logger.info('X profile resolved from id_token JWT', { sub: payload.sub, username: xData.username });
+      } catch (jwtErr) {
+        logger.error('Failed to decode X id_token:', jwtErr.message);
+      }
+    }
+
     const xHandle = xData?.username;
-    const xId = xData?.id ? String(xData.id) : null; // numeric X user ID (stable)
+    const xId = xData?.id ? String(xData.id) : null;
     const xName = xData?.name || xHandle;
 
     if (!xHandle) return redirectToCanonicalAuthError(res);
