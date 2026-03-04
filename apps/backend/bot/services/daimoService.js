@@ -67,13 +67,15 @@ class DaimoService {
         receivedToken = authHeader.substring(7);
       }
 
-      // Compare tokens using timing-safe comparison
-      const expectedToken = this.webhookSecret;
+      // Normalize 0x prefix — Daimo may send with or without it
+      const normalize = (t) => t.startsWith('0x') ? t.slice(2) : t;
+      const normalizedReceived = normalize(receivedToken);
+      const normalizedExpected = normalize(this.webhookSecret);
 
       try {
         const isValid = crypto.timingSafeEqual(
-          Buffer.from(receivedToken),
-          Buffer.from(expectedToken)
+          Buffer.from(normalizedReceived),
+          Buffer.from(normalizedExpected)
         );
 
         if (!isValid) {

@@ -1665,15 +1665,28 @@ class PaymentService {
    * @returns {number} USD amount
    */
   static resolveDaimoAmountUSD(payment, plan, source) {
-    if (payment?.amount && parseFloat(payment.amount) > 0) return parseFloat(payment.amount);
-    if (plan?.price && parseFloat(plan.price) > 0) return parseFloat(plan.price);
+    const paymentAmount = payment?.amount && parseFloat(payment.amount) > 0 ? parseFloat(payment.amount) : 0;
+    const planPrice = plan?.price && parseFloat(plan.price) > 0 ? parseFloat(plan.price) : 0;
     const webhookAmount = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
-    if (webhookAmount <= 0) {
+
+    // Use payment record amount (most authoritative), then plan price, then webhook
+    const resolved = paymentAmount || planPrice || webhookAmount;
+
+    if (resolved <= 0) {
       logger.error('resolveDaimoAmountUSD: could not determine payment amount', {
         paymentId: payment?.id, planId: plan?.id, amountUnits: source?.amountUnits,
       });
     }
-    return webhookAmount;
+
+    // Warn if webhook amount diverges from expected amount (> $1 tolerance)
+    if (webhookAmount > 0 && resolved > 0 && Math.abs(webhookAmount - resolved) > 1) {
+      logger.warn('resolveDaimoAmountUSD: webhook amount diverges from expected', {
+        paymentId: payment?.id, planId: plan?.id,
+        expected: resolved, webhookAmount, difference: Math.abs(webhookAmount - resolved),
+      });
+    }
+
+    return resolved;
   }
 
   /**
@@ -1733,7 +1746,7 @@ class PaymentService {
           await BookingAvailabilityIntegration.completeBooking(bookingId, null, userId);
           logger.info('Booking completed via Daimo webhook', { bookingId, userId });
 
-          // H4: Send booking confirmation DM to the user, mirroring the ePayco booking flow.
+          // Send booking confirmation DM to the user
           try {
             const bot = getBotInstance();
             const user = await UserModel.getById(userId);
@@ -1769,7 +1782,41 @@ class PaymentService {
               bookingId,
             });
           }
+          return { success: true };
         }
+
+        if (status === 'payment_bounced' || status === 'payment_failed' || status === 'bounced' || status === 'expired') {
+          // Booking payment failed — cancel booking and notify user
+          try {
+            await BookingAvailabilityIntegration.cancelBooking(bookingId, null, userId, 'Payment failed');
+          } catch (cancelErr) {
+            logger.error('Failed to cancel booking after payment failure', { bookingId, error: cancelErr.message });
+          }
+
+          if (paymentId) {
+            await PaymentModel.updateStatus(paymentId, 'failed', {
+              daimo_event_id: id,
+              booking_id: bookingId,
+            });
+          }
+
+          logger.info('Booking payment failed via Daimo', { bookingId, userId, status });
+
+          try {
+            const bot = getBotInstance();
+            const user = await UserModel.getById(userId);
+            const lang = user?.language || 'es';
+            const msg = lang === 'es'
+              ? `❌ Tu pago para la reserva no fue procesado. La reserva ha sido cancelada.\n\nSi tienes dudas, escríbenos a @pnplatinotv_bot`
+              : `❌ Your booking payment was not processed. The booking has been cancelled.\n\nQuestions? Contact @pnplatinotv_bot`;
+            await bot.telegram.sendMessage(userId, msg);
+          } catch (dmErr) {
+            logger.error('Failed to send booking payment failure DM', { error: dmErr.message, userId });
+          }
+          return { success: true };
+        }
+
+        // Pending statuses — no action needed for bookings
         return { success: true };
       }
 
