@@ -416,7 +416,7 @@ export default function XAutoCampaigns() {
                 <input
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-bg border border-pnp-border text-sm text-pnp-textPrimary"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
                   placeholder="Daily PNP Promo"
                   required
                 />
@@ -426,7 +426,7 @@ export default function XAutoCampaigns() {
                 <select
                   value={form.accountId}
                   onChange={(e) => setForm((f) => ({ ...f, accountId: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-bg border border-pnp-border text-sm text-pnp-textPrimary"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
                   required
                 >
                   <option value="">Select account...</option>
@@ -444,7 +444,7 @@ export default function XAutoCampaigns() {
               <textarea
                 value={form.topic}
                 onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-pnp-bg border border-pnp-border text-sm text-pnp-textPrimary min-h-[80px]"
+                className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none min-h-[80px]"
                 placeholder="Promote PNP Latino TV lifetime membership, highlight community features..."
                 required
               />
@@ -456,7 +456,7 @@ export default function XAutoCampaigns() {
                 <select
                   value={form.grokMode}
                   onChange={(e) => setForm((f) => ({ ...f, grokMode: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-bg border border-pnp-border text-sm text-pnp-textPrimary"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
                 >
                   {GROK_MODES.map((m) => (
                     <option key={m.value} value={m.value}>{m.label}</option>
@@ -468,7 +468,7 @@ export default function XAutoCampaigns() {
                 <select
                   value={form.language}
                   onChange={(e) => setForm((f) => ({ ...f, language: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-bg border border-pnp-border text-sm text-pnp-textPrimary"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
                 >
                   {LANGUAGES.map((l) => (
                     <option key={l.value} value={l.value}>{l.label}</option>
@@ -481,7 +481,7 @@ export default function XAutoCampaigns() {
                   type="number"
                   value={form.intervalMinutes}
                   onChange={(e) => setForm((f) => ({ ...f, intervalMinutes: parseInt(e.target.value) || 240 }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-bg border border-pnp-border text-sm text-pnp-textPrimary"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
                   min={15}
                 />
               </div>
@@ -491,7 +491,7 @@ export default function XAutoCampaigns() {
                   type="number"
                   value={form.maxPosts}
                   onChange={(e) => setForm((f) => ({ ...f, maxPosts: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-bg border border-pnp-border text-sm text-pnp-textPrimary"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
                   placeholder="Unlimited"
                   min={1}
                 />
@@ -505,7 +505,7 @@ export default function XAutoCampaigns() {
                   type="number"
                   value={form.activeHoursStart}
                   onChange={(e) => setForm((f) => ({ ...f, activeHoursStart: parseInt(e.target.value) || 0 }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-bg border border-pnp-border text-sm text-pnp-textPrimary"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
                   min={0}
                   max={23}
                 />
@@ -516,7 +516,7 @@ export default function XAutoCampaigns() {
                   type="number"
                   value={form.activeHoursEnd}
                   onChange={(e) => setForm((f) => ({ ...f, activeHoursEnd: parseInt(e.target.value) || 23 }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-bg border border-pnp-border text-sm text-pnp-textPrimary"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
                   min={0}
                   max={23}
                 />
@@ -528,7 +528,7 @@ export default function XAutoCampaigns() {
               <textarea
                 value={form.customPrompt}
                 onChange={(e) => setForm((f) => ({ ...f, customPrompt: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-pnp-bg border border-pnp-border text-sm text-pnp-textPrimary min-h-[60px]"
+                className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none min-h-[60px]"
                 placeholder="Additional instructions for Grok..."
               />
             </div>

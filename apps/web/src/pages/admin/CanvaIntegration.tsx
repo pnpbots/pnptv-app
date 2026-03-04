@@ -452,7 +452,7 @@ export default function CanvaIntegration() {
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-h-64 overflow-y-auto">
                 {designs.map((d) => (
-                  <div key={d.id} className="rounded-lg bg-pnp-bg border border-pnp-border overflow-hidden">
+                  <div key={d.id} className="rounded-lg bg-pnp-background border border-pnp-border overflow-hidden">
                     {d.thumbnail?.url ? (
                       <img src={d.thumbnail.url} alt={d.title} className="w-full aspect-video object-cover" />
                     ) : (
