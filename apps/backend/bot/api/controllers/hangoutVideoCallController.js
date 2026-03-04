@@ -490,7 +490,7 @@ const joinCall = async (req, res) => {
     const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
 
     // Get authoritative participant count from DB
-    const { rows: countRows } = await query(
+    const { rows: joinCountRows } = await query(
       `SELECT COUNT(*)::int AS cnt FROM hangout_call_participants WHERE call_id = $1 AND left_at IS NULL`,
       [callId]
     );
@@ -498,7 +498,7 @@ const joinCall = async (req, res) => {
     // Notify other call participants
     emitToHangout(req, groupId, 'hangout:call:joined', {
       callId: call.id,
-      participantCount: countRows[0]?.cnt || 0,
+      participantCount: joinCountRows[0]?.cnt || 0,
       user: {
         id: user.id,
         username: user.username,
