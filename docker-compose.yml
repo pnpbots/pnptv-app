@@ -496,6 +496,7 @@ services:
       NBXPLORER_NETWORK: mainnet
       NBXPLORER_CHAINS: "DASH"
       NBXPLORER_BIND: 0.0.0.0:24444
+      NBXPLORER_NOAUTH: "true"
       NBXPLORER_DASHNODE_RPCURL: ${DASH_RPC_URL:-http://localhost:9998}
       NBXPLORER_DASHNODE_RPCAUTH: ${DASH_RPC_AUTH:-user:pass}
       NBXPLORER_POSTGRES: "Host=pg-btcpay;Database=nbxplorer;Username=btcpay;Password=${BTCPAY_POSTGRES_PASSWORD:-changeme_btcpay}"
@@ -513,13 +514,15 @@ services:
       - "23000"
     volumes:
       - ./infrastructure/data/btcpay/server:/datadir
+      - ./infrastructure/data/btcpay/nbxplorer:/root/.nbxplorer:ro
     environment:
       BTCPAY_POSTGRES: "Host=pg-btcpay;Database=btcpayserver;Username=btcpay;Password=${BTCPAY_POSTGRES_PASSWORD:-changeme_btcpay}"
       BTCPAY_NETWORK: mainnet
       BTCPAY_ROOTPATH: /
-      BTCPAY_NBXPLORERURL: http://btcpay-nbxplorer:24444/
+      BTCPAY_DASHEXPLORERURL: http://btcpay-nbxplorer:24444/
       BTCPAY_BIND: 0.0.0.0:23000
       BTCPAY_CHAINS: "DASH"
+      BTCPAY_NBXPLORERDEFAULTCOOKIEFILE: /root/.nbxplorer/Main/.cookie
     networks:
       - pnptvapp_net
     depends_on:
