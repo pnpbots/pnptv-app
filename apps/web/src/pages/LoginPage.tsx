@@ -149,9 +149,59 @@ export function LoginPage() {
         className="glass-card neon-glow animate-subtle-glow w-full max-w-md p-8 sm:p-10 relative z-10 animate-fade-in-up"
       >
         {/* Logo / Brand */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-6">
           <img src="/Logo2-50.png" alt="PNPTV" className="h-14 w-auto mx-auto" />
+          <p className="text-sm mt-2 font-medium" style={{ color: "#E69138" }}>
+            The #1 queer PNP community
+          </p>
         </div>
+
+        {/* Marketing highlights */}
+        <div className="mb-5 grid grid-cols-3 gap-2 text-center">
+          {[
+            { icon: "🔥", title: "Hot Performers", sub: "Latino & más" },
+            { icon: "🎬", title: "PNP Content", sub: "Uncensored" },
+            { icon: "🎥", title: "Video Rooms", sub: "Live & private" },
+          ].map(({ icon, title, sub }) => (
+            <div
+              key={title}
+              className="rounded-xl py-3 px-2"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+            >
+              <div className="text-xl mb-1">{icon}</div>
+              <div className="text-xs font-semibold text-white">{title}</div>
+              <div className="text-[10px] mt-0.5" style={{ color: "#8E8E93" }}>{sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Lifetime100 CTA */}
+        <a
+          href="/lifetime100"
+          className="flex items-center justify-between w-full rounded-xl px-4 py-3 mb-6 group transition-all duration-200 hover:brightness-110"
+          style={{
+            background: "linear-gradient(135deg, #D4007A22, #E6913822)",
+            border: "1px solid #D4007A55",
+          }}
+        >
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider mb-0.5" style={{ color: "#E69138" }}>
+              🏆 Lifetime Deal
+            </div>
+            <div className="text-sm font-semibold text-white">
+              $100 — PRIME access, forever
+            </div>
+            <div className="text-[11px] mt-0.5" style={{ color: "#8E8E93" }}>
+              One payment. No renewals. Never expires.
+            </div>
+          </div>
+          <div
+            className="ml-3 shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            Get it →
+          </div>
+        </a>
 
         {/* Buttons */}
         <div className="space-y-4">
