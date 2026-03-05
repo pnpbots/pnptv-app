@@ -63,7 +63,7 @@ const authenticateUser = async (req, res, next) => {
 
     return next();
   } catch (error) {
-    logger.warn('Authentication failed:', error.message);
+    logger.warn(`Authentication failed: ${error.message}`);
 
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({

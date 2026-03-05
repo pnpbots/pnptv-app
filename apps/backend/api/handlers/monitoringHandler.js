@@ -28,7 +28,7 @@ const healthCheck = async (req, res) => {
       healthStatus.components.database = 'healthy';
     } catch (error) {
       healthStatus.components.database = 'unhealthy';
-      logger.error('Database health check failed:', error.message);
+      logger.error(`Database health check failed: ${error.message}`);
     }
     
     // Check authentication system
@@ -46,7 +46,7 @@ const healthCheck = async (req, res) => {
     } catch (error) {
       healthStatus.components.authentication = 'unhealthy';
       healthStatus.components.permissions = 'unhealthy';
-      logger.error('Authentication health check failed:', error.message);
+      logger.error(`Authentication health check failed: ${error.message}`);
     }
     
     // Determine overall status

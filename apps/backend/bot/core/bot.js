@@ -282,7 +282,7 @@ const startBot = async () => {
       initSentry();
       logger.info('✓ Sentry initialized');
     } catch (error) {
-      logger.warn('Sentry initialization failed, continuing without monitoring:', error.message);
+      logger.warn(`Sentry initialization failed, continuing without monitoring: ${error.message}`);
     }
     // Initialize PostgreSQL
     try {
@@ -295,13 +295,13 @@ const startBot = async () => {
           await SupportTopicModel.initTable();
           logger.info('✓ Support topics table initialized');
         } catch (tableError) {
-          logger.warn('Support topics table initialization failed:', tableError.message);
+          logger.warn(`Support topics table initialization failed: ${tableError.message}`);
         }
         try {
           await initializeCoreTables();
           logger.info('✓ Core tables initialized');
         } catch (coreTablesError) {
-          logger.warn('Core tables initialization failed:', coreTablesError.message);
+          logger.warn(`Core tables initialization failed: ${coreTablesError.message}`);
         }
         // Initialize Meru Link tracking in background (fire and forget)
         meruLinkInitializer.initialize();
@@ -310,7 +310,7 @@ const startBot = async () => {
       }
     } catch (error) {
       logger.error('PostgreSQL initialization failed. Bot will run in DEGRADED mode without database.');
-      logger.error('Error:', error.message);
+      logger.error(`Error: ${error.message}`);
       logger.warn('⚠️  Bot features requiring database will not work!');
     }
     // Initialize Redis (optional, will use default localhost if not configured)
@@ -318,7 +318,7 @@ const startBot = async () => {
       initializeRedis();
       logger.info('✓ Redis initialized');
     } catch (error) {
-      logger.warn('Redis initialization failed, continuing without cache:', error.message);
+      logger.warn(`Redis initialization failed, continuing without cache: ${error.message}`);
       logger.warn('⚠️  Performance may be degraded without caching');
     }
     // Create bot instance
@@ -493,7 +493,7 @@ const startBot = async () => {
           const PermissionService = require('../services/permissionService');
           isAdminUser = await PermissionService.isAdmin(ctx.from?.id);
         } catch (adminCheckError) {
-          logger.warn('Admin permission check failed during support routing guard:', adminCheckError.message);
+          logger.warn(`Admin permission check failed during support routing guard: ${adminCheckError.message}`);
         }
       }
       const isAdminFlow = isAdminUser && adminSessionFlags;
@@ -565,7 +565,7 @@ const startBot = async () => {
           try {
             supportTopic = await supportRoutingService.sendToSupportGroup(message, requestType, ctx.from, 'text', ctx);
           } catch (routingError) {
-            logger.error('Failed to send message to support group:', routingError.message);
+            logger.error(`Failed to send message to support group: ${routingError.message}`);
           }
 
           const adminIds = process.env.ADMIN_USER_IDS?.split(',').filter((id) => id.trim()) || [];
@@ -693,7 +693,7 @@ const startBot = async () => {
       await startCronJobs(bot);
       logger.info('✓ Cron jobs started');
     } catch (cronError) {
-      logger.warn('Cron jobs initialization failed, continuing without scheduled tasks:', cronError.message);
+      logger.warn(`Cron jobs initialization failed, continuing without scheduled tasks: ${cronError.message}`);
     }
     // Initialize message rate limiter (to limit group messages to 6/day)
     MessageRateLimiter.initialize();
@@ -711,13 +711,13 @@ const startBot = async () => {
       broadcastScheduler.start();
       logger.info('✓ Broadcast scheduler initialized and started');
     } catch (error) {
-      logger.warn('Broadcast scheduler initialization failed, continuing without scheduler:', error.message);
+      logger.warn(`Broadcast scheduler initialization failed, continuing without scheduler: ${error.message}`);
     }
     // Initialize broadcast buttons tables (presets/custom CTAs)
     try {
       await BroadcastButtonModel.initializeTables();
     } catch (error) {
-      logger.warn('Broadcast button tables initialization failed (broadcasts will run without presets until fixed):', error.message);
+      logger.warn(`Broadcast button tables initialization failed (broadcasts will run without presets until fixed): ${error.message}`);
     }
     // Initialize media popularity scheduler
     try {
@@ -725,7 +725,7 @@ const startBot = async () => {
       await mediaPopularityScheduler.initialize();
       logger.info('✓ Media popularity scheduler initialized');
     } catch (error) {
-      logger.error('Media popularity scheduler initialization failed:', error.message);
+      logger.error(`Media popularity scheduler initialization failed: ${error.message}`);
       logger.warn('⚠️  Automated media announcements will not work');
     }
     // Initialize async broadcast queue
@@ -738,7 +738,7 @@ const startBot = async () => {
       global.broadcastQueueIntegration = queueIntegration;
       logger.info('✓ Async broadcast queue initialized and started');
     } catch (error) {
-      logger.warn('Async broadcast queue initialization failed, continuing without async processing:', error.message);
+      logger.warn(`Async broadcast queue initialization failed, continuing without async processing: ${error.message}`);
     }
 
     // Initialize community post scheduler
@@ -748,7 +748,7 @@ const startBot = async () => {
       global.communityPostScheduler = communityPostScheduler;
       logger.info('✓ Community post scheduler initialized and started');
     } catch (error) {
-      logger.warn('Community post scheduler initialization failed, continuing without community posts:', error.message);
+      logger.warn(`Community post scheduler initialization failed, continuing without community posts: ${error.message}`);
     }
 
     // Initialize X post scheduler
@@ -758,7 +758,7 @@ const startBot = async () => {
       global.xPostScheduler = xPostScheduler;
       logger.info('✓ X post scheduler initialized and started (with admin notifications)');
     } catch (error) {
-      logger.warn('X post scheduler initialization failed, continuing without X posts:', error.message);
+      logger.warn(`X post scheduler initialization failed, continuing without X posts: ${error.message}`);
     }
 
     // Initialize Canva export scheduler
@@ -768,7 +768,7 @@ const startBot = async () => {
       global.canvaExportScheduler = canvaExportScheduler;
       logger.info('✓ Canva export scheduler initialized and started');
     } catch (error) {
-      logger.warn('Canva export scheduler initialization failed, continuing without Canva exports:', error.message);
+      logger.warn(`Canva export scheduler initialization failed, continuing without Canva exports: ${error.message}`);
     }
 
     // Initialize X auto campaign scheduler
@@ -779,7 +779,7 @@ const startBot = async () => {
       global.xAutoCampaignScheduler = xAutoCampaignScheduler;
       logger.info('✓ X auto campaign scheduler initialized and started');
     } catch (error) {
-      logger.warn('X auto campaign scheduler initialization failed:', error.message);
+      logger.warn(`X auto campaign scheduler initialization failed: ${error.message}`);
     }
 
     // Initialize proactive reminder service
@@ -803,7 +803,7 @@ const startBot = async () => {
       // Store reference for potential future use
       global.proactiveReminderService = ProactiveReminderService;
     } catch (error) {
-      logger.warn('Proactive reminder service initialization failed, continuing without reminders:', error.message);
+      logger.warn(`Proactive reminder service initialization failed, continuing without reminders: ${error.message}`);
     }
     // Register commands with Telegram
     try {
@@ -818,7 +818,7 @@ const startBot = async () => {
       await bot.telegram.setMyCommands(commands);
       logger.info('✓ Bot commands registered with Telegram:', commands.map(c => `/${c.command}`).join(', '));
     } catch (error) {
-      logger.warn('Failed to register bot commands with Telegram:', error.message);
+      logger.warn(`Failed to register bot commands with Telegram: ${error.message}`);
     }
     // Error handling
     bot.catch(errorHandler);
@@ -980,7 +980,7 @@ const startBot = async () => {
           logger.info('✓ Bot started in polling mode (webhook fallback)');
           return; // Exit webhook setup, polling is now active
         } catch (pollingError) {
-          logger.error('Failed to enable polling fallback:', pollingError.message);
+          logger.error(`Failed to enable polling fallback: ${pollingError.message}`);
           logger.warn('Bot will continue in degraded mode. Manual webhook setup required.');
           logger.warn('You can set webhook later using: curl -X POST https://api.telegram.org/bot<TOKEN>/setWebhook?url=' + webhookUrl);
         }

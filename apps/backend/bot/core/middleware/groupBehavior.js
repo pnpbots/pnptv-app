@@ -199,7 +199,7 @@ function groupBehaviorMiddleware() {
         } else if (error.description && error.description.includes("bot can't initiate")) {
           logger.info('User has not started bot, cannot send private message', { userId });
         } else {
-          logger.error('Failed to send private message:', error.message);
+          logger.error(`Failed to send private message: ${error.message}`);
         }
         return null;
       }

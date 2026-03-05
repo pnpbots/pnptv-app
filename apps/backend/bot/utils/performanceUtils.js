@@ -13,7 +13,7 @@ const logger = require('../../utils/logger');
 async function parallelOperations(operations) {
   try {
     return await Promise.all(operations.map(op => op().catch(error => {
-      logger.warn('Parallel operation failed:', error.message);
+      logger.warn(`Parallel operation failed: ${error.message}`);
       return null;
     })));
   } catch (error) {

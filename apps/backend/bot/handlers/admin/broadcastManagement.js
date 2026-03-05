@@ -794,7 +794,7 @@ async function sendBroadcastNow(ctx, bot) {
         });
         results = { success: true, jobId: job.job_id, queued: true };
       } catch (error) {
-        logger.warn('Failed to queue broadcast, falling back to sync:', error.message);
+        logger.warn(`Failed to queue broadcast, falling back to sync: ${error.message}`);
         results = await broadcastService.sendBroadcast(bot, broadcast.broadcast_id);
       }
     } else {

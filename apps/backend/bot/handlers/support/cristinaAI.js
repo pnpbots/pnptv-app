@@ -471,7 +471,7 @@ async function processQuestion(question, lang, userId) {
         return aiResponse;
       }
     } catch (aiError) {
-      logger.error('Cristina AI: Grok error, falling back to keywords:', aiError.message);
+      logger.error(`Cristina AI: Grok error, falling back to keywords: ${aiError.message}`);
     }
   }
 

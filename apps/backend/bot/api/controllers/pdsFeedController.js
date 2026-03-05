@@ -83,7 +83,7 @@ const getFeed = async (req, res) => {
 
     res.json({ success: true, posts });
   } catch (error) {
-    logger.error('Social proxy feed error:', error.message);
+    logger.error(`Social proxy feed error: ${error.message}`);
     if (error.response?.status === 401) {
       _pdsAccessJwt = null;
       _pdsJwtExpiry = 0;

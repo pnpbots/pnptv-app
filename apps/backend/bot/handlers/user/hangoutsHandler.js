@@ -99,7 +99,7 @@ const registerHangoutsHandlers = (bot) => {
       try {
         publicCalls = await VideoCallModel.getAllPublic();
       } catch (e) {
-        logger.warn('Error fetching public calls:', e.message);
+        logger.warn(`Error fetching public calls: ${e.message}`);
       }
 
       // Get main rooms
@@ -107,7 +107,7 @@ const registerHangoutsHandlers = (bot) => {
       try {
         mainRooms = await MainRoomModel.getAll();
       } catch (e) {
-        logger.warn('Error fetching main rooms:', e.message);
+        logger.warn(`Error fetching main rooms: ${e.message}`);
       }
 
       const message = lang === 'es'

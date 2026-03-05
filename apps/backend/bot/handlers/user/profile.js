@@ -855,7 +855,7 @@ const showProfile = async (ctx, targetUserId, edit = true, isOwnProfile = false)
         });
         return;
       } catch (e) {
-        logger.error('Photo send failed, falling back to text:', e.message);
+        logger.error(`Photo send failed, falling back to text: ${e.message}`);
       }
     }
 

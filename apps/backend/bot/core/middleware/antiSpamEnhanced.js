@@ -117,7 +117,7 @@ function antiSpamEnhanced() {
               
               return; // Don't process the message
             } catch (muteError) {
-              logger.error('Could not mute user:', muteError.message);
+              logger.error(`Could not mute user: ${muteError.message}`);
               await ctx.reply('⚠️ *Advertencia:* Por favor reduce la velocidad de tus mensajes para evitar ser silenciado.', {
                 parse_mode: 'Markdown',
                 reply_to_message_id: ctx.message.message_id
@@ -127,7 +127,7 @@ function antiSpamEnhanced() {
           }
         }
       } catch (rateLimitError) {
-        logger.error('Rate limit error:', rateLimitError.message);
+        logger.error(`Rate limit error: ${rateLimitError.message}`);
       }
 
       // Check 2: Flood detection (identical messages)
@@ -157,7 +157,7 @@ function antiSpamEnhanced() {
           return; // Don't process the message
         }
       } catch (floodError) {
-        logger.error('Flood detection error:', floodError.message);
+        logger.error(`Flood detection error: ${floodError.message}`);
       }
 
       // Check 3: New user education
@@ -191,7 +191,7 @@ function antiSpamEnhanced() {
           }
         }
       } catch (tutorialError) {
-        logger.error('Tutorial error:', tutorialError.message);
+        logger.error(`Tutorial error: ${tutorialError.message}`);
       }
 
       // Check 4: URL spam detection
@@ -242,7 +242,7 @@ function antiSpamEnhanced() {
             return; // Don't process the command
           }
         } catch (cmdError) {
-          logger.error('Command spam detection error:', cmdError.message);
+          logger.error(`Command spam detection error: ${cmdError.message}`);
         }
       }
 

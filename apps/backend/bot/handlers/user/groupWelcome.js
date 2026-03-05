@@ -398,7 +398,7 @@ async function handleBadgeSelection(ctx) {
     try {
       await ctx.deleteMessage();
     } catch (error) {
-      logger.warn('Could not delete badge selection message:', error.message);
+      logger.warn(`Could not delete badge selection message: ${error.message}`);
     }
 
     // Send congratulations message

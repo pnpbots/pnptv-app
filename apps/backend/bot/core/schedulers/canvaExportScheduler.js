@@ -75,7 +75,7 @@ class CanvaExportScheduler {
         }
       }
     } catch (err) {
-      logger.error('Error in Canva export scheduler:', err.message);
+      logger.error(`Error in Canva export scheduler: ${err.message}`);
     } finally {
       this.isProcessing = false;
     }

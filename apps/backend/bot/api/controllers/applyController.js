@@ -220,7 +220,7 @@ class ApplyController {
 
       // Notify admin via Telegram (fire-and-forget)
       ApplyController._notifyAdmin(userId, stageName, applicationType, application.id).catch((err) => {
-        logger.warn('Failed to send admin notification for model application:', err.message);
+        logger.warn(`Failed to send admin notification for model application: ${err.message}`);
       });
 
       return res.json({ success: true, application });
@@ -292,7 +292,7 @@ class ApplyController {
 
       await bot.telegram.sendMessage(adminId, message, { parse_mode: 'Markdown' });
     } catch (err) {
-      logger.warn('Admin notification failed:', err.message);
+      logger.warn(`Admin notification failed: ${err.message}`);
     }
   }
 }

@@ -94,7 +94,7 @@ class SupportRoutingService {
             reply_markup: quickActionsKeyboard,
           });
         } catch (reopenError) {
-          logger.warn('Could not reopen forum topic:', reopenError.message);
+          logger.warn(`Could not reopen forum topic: ${reopenError.message}`);
         }
       }
       logger.info('Using existing support topic', { userId, threadId: supportTopic.thread_id });
@@ -187,7 +187,7 @@ _Responde en este topic para enviar mensajes al usuario._`;
 
     } catch (error) {
       // If topic creation fails (e.g., group is not a forum), fall back to regular messages
-      logger.error('Failed to create forum topic, using fallback:', error.message);
+      logger.error(`Failed to create forum topic, using fallback: ${error.message}`);
 
       // Create entry with pseudo thread_id (timestamp-based)
       const fallbackThreadId = Date.now();
@@ -562,7 +562,7 @@ _Responde en este topic para enviar mensajes al usuario._`;
           logger.info('Forum topic closed', { userId, threadId: supportTopic.thread_id });
         } catch (closeError) {
           // Topic might already be closed or doesn't exist
-          logger.warn('Could not close forum topic:', closeError.message);
+          logger.warn(`Could not close forum topic: ${closeError.message}`);
         }
       }
 
@@ -962,7 +962,7 @@ ${categoryEmoji} *Ticket:* ${topic.user_id}
             
             logger.warn('SLA breach alert sent', { userId: topic.user_id, threadId: topic.thread_id });
           } catch (notifyError) {
-            logger.error('Failed to send SLA breach alert:', notifyError.message);
+            logger.error(`Failed to send SLA breach alert: ${notifyError.message}`);
           }
         }
       }

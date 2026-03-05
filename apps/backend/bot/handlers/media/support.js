@@ -430,7 +430,7 @@ const registerSupportHandlers = (bot) => {
             }
             logger.info(`Auto-escalation ticket created for user ${userId}`, { ticketId });
           } catch (escalationError) {
-            logger.warn('Failed to create auto-escalation ticket:', escalationError.message);
+            logger.warn(`Failed to create auto-escalation ticket: ${escalationError.message}`);
           }
 
           const ticketInfo = ticketId ? (lang === 'es' ? `\n\n🎫 Se ha creado el ticket #${ticketId} para tu caso.` : `\n\n🎫 Ticket #${ticketId} has been created for your case.`) : '';
@@ -551,7 +551,7 @@ const registerSupportHandlers = (bot) => {
           supportTopic = await supportRoutingService.sendToSupportGroup(message, 'support', ctx.from, 'text', ctx);
           logger.info(`Support message sent to group for user ${userId}`, { threadId: supportTopic?.thread_id });
         } catch (routingError) {
-          logger.error('Failed to send message to support group:', routingError.message);
+          logger.error(`Failed to send message to support group: ${routingError.message}`);
         }
 
         // Also send to admin users as backup
@@ -608,7 +608,7 @@ const registerSupportHandlers = (bot) => {
           supportTopic = await supportRoutingService.sendToSupportGroup(message, 'activation', ctx.from, 'text', ctx);
           logger.info(`Activation request sent to group for user ${userId}`, { threadId: supportTopic?.thread_id });
         } catch (routingError) {
-          logger.error('Failed to send activation request to support group:', routingError.message);
+          logger.error(`Failed to send activation request to support group: ${routingError.message}`);
         }
 
         // Also send to admin users as backup

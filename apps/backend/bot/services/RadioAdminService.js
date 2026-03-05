@@ -555,7 +555,7 @@ class RadioAdminService {
       return result.rows;
     } catch (error) {
       // Table might not exist
-      logger.warn('Radio queue table might not exist:', error.message);
+      logger.warn(`Radio queue table might not exist: ${error.message}`);
       return [];
     }
   }

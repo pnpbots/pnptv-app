@@ -14,9 +14,9 @@ class MeruLinkInitializer {
 
       // Create tables with timeout to prevent hanging
       Promise.all([
-        this.createPaymentHistoryTable().catch(e => logger.warn('Payment history table creation failed:', e.message)),
-        this.createMeruLinksTable().catch(e => logger.warn('Meru links table creation failed:', e.message)),
-        this.initializeKnownLinks().catch(e => logger.warn('Meru links initialization failed:', e.message))
+        this.createPaymentHistoryTable().catch(e => logger.warn(`Payment history table creation failed: ${e.message}`)),
+        this.createMeruLinksTable().catch(e => logger.warn(`Meru links table creation failed: ${e.message}`)),
+        this.initializeKnownLinks().catch(e => logger.warn(`Meru links initialization failed: ${e.message}`))
       ]).then(() => {
         logger.info('✓ Meru Link tracking system initialized');
       });

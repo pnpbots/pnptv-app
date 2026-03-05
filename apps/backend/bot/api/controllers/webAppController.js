@@ -1610,7 +1610,7 @@ const getMastodonFeed = async (req, res) => {
 
     return res.json({ success: true, posts });
   } catch (error) {
-    logger.error('Mastodon feed error:', error.message);
+    logger.error(`Mastodon feed error: ${error.message}`);
     return res.json({ success: true, posts: [], message: 'Mastodon feed temporarily unavailable' });
   }
 };

@@ -93,7 +93,7 @@ const buildPlanButtons = async (lang) => {
       Markup.button.callback(formatPlanButtonText(plan, lang), `select_plan_${plan.id}`),
     ]));
   } catch (error) {
-    logger.warn('Unable to build plan buttons:', error.message);
+    logger.warn(`Unable to build plan buttons: ${error.message}`);
     return [
       [Markup.button.callback(lang === 'es' ? '💎 Suscríbete a PRIME' : '💎 Subscribe to PRIME', 'menu_subscribe')],
     ];
@@ -171,7 +171,7 @@ const fetchUserForMenu = async (ctx) => {
   try {
     return await UserModel.getById(userId);
   } catch (error) {
-    logger.warn('Error fetching user for menu:', error.message);
+    logger.warn(`Error fetching user for menu: ${error.message}`);
     return ctx.session?.user || null;
   }
 };
@@ -434,7 +434,7 @@ const getEffectiveViewMode = async (ctx) => {
   try {
     user = await UserModel.getById(userId);
   } catch (error) {
-    logger.warn('Error fetching user in getEffectiveViewMode:', error.message);
+    logger.warn(`Error fetching user in getEffectiveViewMode: ${error.message}`);
     user = ctx.session?.user || {};
   }
 
@@ -559,7 +559,7 @@ const showMainMenu = async (ctx) => {
     });
   } catch (error) {
     // Fallback to plain text if Markdown parsing fails
-    logger.warn('Markdown parsing failed in showMainMenu, falling back to plain text:', error.message);
+    logger.warn(`Markdown parsing failed in showMainMenu, falling back to plain text: ${error.message}`);
     await ctx.reply(menuText.replace(/`/g, '').replace(/\*\*/g, ''), keyboard);
   }
 };
@@ -677,7 +677,7 @@ const showMainMenuEdit = async (ctx) => {
     });
   } catch (error) {
     // If edit fails due to Markdown, try plain text; otherwise send new message
-    logger.warn('Error in showMainMenuEdit:', error.message);
+    logger.warn(`Error in showMainMenuEdit: ${error.message}`);
     try {
       await ctx.editMessageText(menuText.replace(/`/g, '').replace(/\*\*/g, ''), keyboard);
     } catch {
@@ -765,7 +765,7 @@ const showStartMenu = async (ctx, user) => {
       { caption, parse_mode: 'Markdown', ...keyboard }
     );
   } catch (error) {
-    logger.warn('Failed to send start menu with photo, falling back to text:', error.message);
+    logger.warn(`Failed to send start menu with photo, falling back to text: ${error.message}`);
     await ctx.reply(caption, { parse_mode: 'Markdown', ...keyboard });
   }
 };

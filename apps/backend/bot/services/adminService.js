@@ -70,7 +70,7 @@ class AdminService {
           ]
         );
       } catch (dbError) {
-        logger.warn('Could not create broadcast record:', dbError.message);
+        logger.warn(`Could not create broadcast record: ${dbError.message}`);
       }
 
       for (const user of users) {
@@ -120,7 +120,7 @@ class AdminService {
           [results.failed === 0 ? 'completed' : 'completed_with_errors', broadcastId]
         );
       } catch (dbError) {
-        logger.warn('Could not update broadcast record:', dbError.message);
+        logger.warn(`Could not update broadcast record: ${dbError.message}`);
       }
 
       // Log admin action

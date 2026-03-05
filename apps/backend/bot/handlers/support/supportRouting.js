@@ -227,7 +227,7 @@ const registerSupportRoutingHandlers = (bot) => {
         const { sendPrimeMenuToUser } = require('../user/menu');
         await sendPrimeMenuToUser(ctx.telegram, targetUserId, userLang || 'es');
       } catch (notifyError) {
-        logger.warn('Could not notify user about membership activation:', notifyError.message);
+        logger.warn(`Could not notify user about membership activation: ${notifyError.message}`);
       }
 
       const userName = user.firstName || user.username || targetUserId;
@@ -321,7 +321,7 @@ _El usuario ha sido notificado._`, {
         },
       });
     } catch (notifyError) {
-      logger.warn('Could not notify user about resolution:', notifyError.message);
+      logger.warn(`Could not notify user about resolution: ${notifyError.message}`);
     }
 
       let resolutionTime = 'N/A';
@@ -614,7 +614,7 @@ ${subscriptionEmoji} *Estado:* ${subscriptionStatus}
                 }
               }
             } catch (topicError) {
-              logger.warn('Could not create topic for user:', topicError.message);
+              logger.warn(`Could not create topic for user: ${topicError.message}`);
             }
 
             return;
@@ -735,7 +735,7 @@ ${subscriptionEmoji} *Estado:* ${subscriptionStatus}
             { parse_mode: 'Markdown' }
           );
         } catch (notifyError) {
-          logger.warn('Could not notify user about ticket closure:', notifyError.message);
+          logger.warn(`Could not notify user about ticket closure: ${notifyError.message}`);
         }
       } else {
         await ctx.reply('❌ No se pudo cerrar el ticket.');
@@ -788,7 +788,7 @@ ${subscriptionEmoji} *Estado:* ${subscriptionStatus}
         try {
           await ctx.telegram.reopenForumTopic(SUPPORT_GROUP_ID, supportTopic.thread_id);
         } catch (reopenError) {
-          logger.warn('Could not reopen forum topic:', reopenError.message);
+          logger.warn(`Could not reopen forum topic: ${reopenError.message}`);
         }
       }
 
@@ -1340,7 +1340,7 @@ ${subscriptionEmoji} *Estado:* ${subscriptionStatus}
           await SupportTopicModel.updateLastMessage(targetUserId);
         }
       } catch (dbError) {
-        logger.warn('Could not update support topic:', dbError.message);
+        logger.warn(`Could not update support topic: ${dbError.message}`);
       }
 
     } catch (error) {
@@ -1953,7 +1953,7 @@ También puedes ejecutar acciones del ticket con los botones superiores.`;
       try {
         await ctx.telegram.sendMessage(effectiveUserId, closedMessage, { parse_mode: 'Markdown' });
       } catch (notifyError) {
-        logger.warn('Could not notify user about closure:', notifyError.message);
+        logger.warn(`Could not notify user about closure: ${notifyError.message}`);
       }
 
       await ctx.reply(`✅ *Caso Cerrado*

@@ -810,7 +810,7 @@ const registerCommunityPostHandlers = (bot) => {
             ...(kb ? { reply_markup: kb.reply_markup } : {}),
           });
         } catch (e) {
-          logger.warn('Preview copyMessage failed (continuing):', e.message);
+          logger.warn(`Preview copyMessage failed (continuing): ${e.message}`);
         }
       } else if (caption) {
         await ctx.reply(caption, { parse_mode: 'Markdown', ...(kb ? { reply_markup: kb.reply_markup } : {}) });

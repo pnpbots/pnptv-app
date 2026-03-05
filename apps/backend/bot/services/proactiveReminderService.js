@@ -199,7 +199,7 @@ class ProactiveReminderService {
       try {
         await this.sendRuleReminder(telegram, chatId, language);
       } catch (error) {
-        logger.error('Error sending initial rule reminder:', error.message);
+        logger.error(`Error sending initial rule reminder: ${error.message}`);
       }
     }, 5000); // 5 second delay
   }

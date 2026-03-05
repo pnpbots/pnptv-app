@@ -41,7 +41,7 @@ class AmpacheService {
         return resp.data.auth;
       }, TOKEN_TTL);
     } catch (error) {
-      logger.error('Ampache getAuthToken error:', error.message);
+      logger.error(`Ampache getAuthToken error: ${error.message}`);
       throw error;
     }
   }
@@ -70,7 +70,7 @@ class AmpacheService {
       logger.info(`Retrieved ${songs.length} songs from Ampache`);
       return Array.isArray(songs) ? songs : [songs];
     } catch (error) {
-      logger.error('Ampache getSongs error:', error.message);
+      logger.error(`Ampache getSongs error: ${error.message}`);
       throw error;
     }
   }
@@ -99,7 +99,7 @@ class AmpacheService {
       logger.info(`Retrieved ${videos.length} videos from Ampache`);
       return Array.isArray(videos) ? videos : [videos];
     } catch (error) {
-      logger.error('Ampache getVideos error:', error.message);
+      logger.error(`Ampache getVideos error: ${error.message}`);
       throw error;
     }
   }
@@ -117,7 +117,7 @@ class AmpacheService {
       logger.debug(`Generated stream URL for ${type} ${id}`);
       return streamUrl;
     } catch (error) {
-      logger.error('Ampache getStreamUrl error:', error.message);
+      logger.error(`Ampache getStreamUrl error: ${error.message}`);
       throw error;
     }
   }
@@ -135,7 +135,7 @@ class AmpacheService {
       logger.info('✓ Ampache server ping successful');
       return resp.data;
     } catch (error) {
-      logger.error('Ampache ping error:', error.message);
+      logger.error(`Ampache ping error: ${error.message}`);
       throw error;
     }
   }
@@ -148,7 +148,7 @@ class AmpacheService {
       await cache.del('ampache:session_token');
       logger.info('Cleared Ampache session token cache');
     } catch (error) {
-      logger.error('Error clearing Ampache token cache:', error.message);
+      logger.error(`Error clearing Ampache token cache: ${error.message}`);
     }
   }
 }

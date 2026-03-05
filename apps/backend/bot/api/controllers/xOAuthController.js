@@ -316,7 +316,7 @@ const handleCallback = async (req, res) => {
       logger.info(`Web app X login success: user ${user.id} via @${xHandle}`);
       return res.redirect(canonicalAppUrl);
     } catch (err) {
-      logger.error('X webapp login callback error:', err.message);
+      logger.error(`X webapp login callback error: ${err.message}`);
       const canonicalErr = (process.env.WEBAPP_ORIGIN || process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app').replace(/\/+$/, '') + '/?error=auth_failed';
       return res.redirect(canonicalErr);
     }

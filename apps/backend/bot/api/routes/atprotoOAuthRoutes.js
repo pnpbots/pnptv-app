@@ -235,7 +235,7 @@ router.get('/oauth/callback', callbackLimiter, async (req, res) => {
       handle = profile.data.handle || did;
       pdsUrl = agent.pdsUrl?.toString() || '';
     } catch (profileErr) {
-      logger.warn('[ATProto] Could not fetch profile after login:', profileErr.message);
+      logger.warn(`[ATProto] Could not fetch profile after login: ${profileErr.message}`);
     }
 
     // Link ATProto identity to PNPtv user (hybrid session merge)

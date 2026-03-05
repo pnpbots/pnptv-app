@@ -35,7 +35,7 @@ class MessageRateLimiter {
       
       logger.info('Message rate limit table ensured');
     } catch (error) {
-      logger.error('Error ensuring message rate limit table:', error.message);
+      logger.error(`Error ensuring message rate limit table: ${error.message}`);
     }
   }
 
@@ -80,7 +80,7 @@ class MessageRateLimiter {
       
       logger.info('Daily message counter reset at midnight');
     } catch (error) {
-      logger.error('Error resetting daily message counter:', error.message);
+      logger.error(`Error resetting daily message counter: ${error.message}`);
     }
   }
 
@@ -116,7 +116,7 @@ class MessageRateLimiter {
         messagesRemaining
       };
     } catch (error) {
-      logger.error('Error checking message limit:', error.message);
+      logger.error(`Error checking message limit: ${error.message}`);
       // Fail safe - allow sending if we can't check the limit
       return { canSend: true, messagesSentToday: 0, messagesRemaining: maxMessagesPerDay };
     }
@@ -136,7 +136,7 @@ class MessageRateLimiter {
         WHERE date = $1
       `, [today]);
     } catch (error) {
-      logger.error('Error recording message sent:', error.message);
+      logger.error(`Error recording message sent: ${error.message}`);
     }
   }
 
@@ -157,7 +157,7 @@ class MessageRateLimiter {
         limit: 6
       };
     } catch (error) {
-      logger.error('Error getting message stats:', error.message);
+      logger.error(`Error getting message stats: ${error.message}`);
       return { messagesSentToday: 0, limit: 6 };
     }
   }

@@ -32,7 +32,7 @@ const sessionMiddleware = () => async (ctx, next) => {
     try {
       session = await cache.get(sessionKey);
     } catch (redisError) {
-      logger.warn('Redis unavailable, using in-memory session:', redisError.message);
+      logger.warn(`Redis unavailable, using in-memory session: ${redisError.message}`);
       session = memoryStore.get(sessionKey);
     }
 

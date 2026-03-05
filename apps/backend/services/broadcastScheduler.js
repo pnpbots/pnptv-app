@@ -232,7 +232,7 @@ class BroadcastScheduler {
           });
           results = { success: true, jobId: job.job_id, queued: true };
         } catch (error) {
-          logger.warn('Failed to queue scheduled broadcast, falling back to sync:', error.message);
+          logger.warn(`Failed to queue scheduled broadcast, falling back to sync: ${error.message}`);
           results = await broadcastService.sendBroadcast(this.bot, broadcastId);
         }
       } else {

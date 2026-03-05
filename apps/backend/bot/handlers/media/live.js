@@ -733,7 +733,7 @@ const registerLiveHandlers = (bot) => {
         }
         await redis.set(likeKey, '1', 'EX', 86400); // 24h dedup window
       } catch (redisErr) {
-        logger.warn('Like dedup Redis check failed, proceeding:', redisErr.message);
+        logger.warn(`Like dedup Redis check failed, proceeding: ${redisErr.message}`);
       }
 
       await LiveStreamModel.likeStream(streamId);

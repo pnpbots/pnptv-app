@@ -115,7 +115,7 @@ class TutorialReminderService {
       });
 
     } catch (error) {
-      logger.error('Error sending health message:', error.message);
+      logger.error(`Error sending health message: ${error.message}`);
       throw error;
     }
   }
@@ -151,7 +151,7 @@ class TutorialReminderService {
       });
 
     } catch (error) {
-      logger.error('Error sending PRIME features tutorial:', error.message);
+      logger.error(`Error sending PRIME features tutorial: ${error.message}`);
       throw error;
     }
   }

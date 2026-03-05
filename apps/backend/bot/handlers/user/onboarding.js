@@ -326,7 +326,7 @@ const registerOnboardingHandlers = (bot) => {
             ]),
           });
         } catch (dbError) {
-          logger.error('[START] Failed to send database error message:', dbError.message);
+          logger.error(`[START] Failed to send database error message: ${dbError.message}`);
         }
         return;
       }
@@ -1371,7 +1371,7 @@ Membresía activada correctamente`;
         'activation',
         { id: userId, username, first_name: username }
       ).catch(err => {
-        logger.warn('Could not send admin notification:', err.message);
+        logger.warn(`Could not send admin notification: ${err.message}`);
       });
     } catch (notifyError) {
       logger.debug('Admin notification skipped:', notifyError.message);
@@ -1396,7 +1396,7 @@ Membresía activada correctamente`;
         ]),
       });
     } catch (e) {
-      logger.error('Could not send error message:', e.message);
+      logger.error(`Could not send error message: ${e.message}`);
     }
   }
 };

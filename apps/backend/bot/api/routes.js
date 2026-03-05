@@ -2913,7 +2913,7 @@ app.get('/api/proxy/media/tracks', asyncHandler(async (req, res) => {
     const songs = await AmpacheService.getSongs({ offset: +offset, limit: +limit });
     res.json({ success: true, tracks: songs });
   } catch (error) {
-    logger.error('Media proxy tracks error:', error.message);
+    logger.error(`Media proxy tracks error: ${error.message}`);
     res.json({ success: true, tracks: [] });
   }
 }));
@@ -2933,7 +2933,7 @@ app.get('/api/proxy/media/search', asyncHandler(async (req, res) => {
     const songs = resp.data.song || [];
     res.json({ success: true, tracks: Array.isArray(songs) ? songs : [songs] });
   } catch (error) {
-    logger.error('Media proxy search error:', error.message);
+    logger.error(`Media proxy search error: ${error.message}`);
     res.json({ success: true, tracks: [] });
   }
 }));
@@ -2944,7 +2944,7 @@ app.get('/api/proxy/media/stream/:songId', asyncHandler(async (req, res) => {
     const streamUrl = await AmpacheService.getStreamUrl('song', req.params.songId);
     res.json({ success: true, url: streamUrl });
   } catch (error) {
-    logger.error('Media proxy stream error:', error.message);
+    logger.error(`Media proxy stream error: ${error.message}`);
     res.status(500).json({ success: false, error: 'Stream unavailable' });
   }
 }));
@@ -2965,7 +2965,7 @@ app.get('/api/proxy/live/streams', asyncHandler(async (req, res) => {
         }, { timeout: 5000 });
         token = loginResp.data?.access_token;
       } catch (loginErr) {
-        logger.warn('Restreamer login failed, trying without auth:', loginErr.message);
+        logger.warn(`Restreamer login failed, trying without auth: ${loginErr.message}`);
       }
     }
 
@@ -2992,7 +2992,7 @@ app.get('/api/proxy/live/streams', asyncHandler(async (req, res) => {
 
     res.json({ success: true, streams });
   } catch (error) {
-    logger.warn('Live proxy streams unavailable:', error.message);
+    logger.warn(`Live proxy streams unavailable: ${error.message}`);
     res.json({ success: true, streams: [] });
   }
 }));
@@ -3083,7 +3083,7 @@ app.get('/api/proxy/social/feed', asyncHandler(async (req, res) => {
 
     res.json({ success: true, posts });
   } catch (error) {
-    logger.error('Social proxy feed error:', error.message);
+    logger.error(`Social proxy feed error: ${error.message}`);
     // Clear cached token on auth errors
     if (error.response?.status === 401) {
       _pdsAccessJwt = null;
@@ -3118,7 +3118,7 @@ app.get('/api/proxy/hangouts/rooms', asyncHandler(async (req, res) => {
       created_at: r.created_at,
     }))});
   } catch (error) {
-    logger.error('Hangouts proxy list error:', error.message);
+    logger.error(`Hangouts proxy list error: ${error.message}`);
     res.json({ success: true, rooms: [] });
   }
 }));
@@ -3163,7 +3163,7 @@ app.post('/api/proxy/hangouts/rooms', asyncHandler(async (req, res) => {
       joinUrl: result.joinUrl,
     });
   } catch (error) {
-    logger.error('Hangouts proxy create error:', error.message);
+    logger.error(`Hangouts proxy create error: ${error.message}`);
     res.status(400).json({ success: false, error: error.message || 'Failed to create room' });
   }
 }));
@@ -3193,7 +3193,7 @@ app.get('/api/proxy/hangouts/rooms/:code', asyncHandler(async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error('Hangouts proxy get room error:', error.message);
+    logger.error(`Hangouts proxy get room error: ${error.message}`);
     res.status(500).json({ success: false, error: 'Failed to get room' });
   }
 }));
@@ -3213,7 +3213,7 @@ app.post('/api/proxy/hangouts/rooms/:code/join', asyncHandler(async (req, res) =
     });
     res.json({ success: true, joinUrl: result.joinUrl });
   } catch (error) {
-    logger.error('Hangouts proxy join error:', error.message);
+    logger.error(`Hangouts proxy join error: ${error.message}`);
     const status = error.message?.includes('full') ? 409
       : error.message?.includes('password') ? 403
       : error.message?.includes('ended') ? 410
@@ -3233,7 +3233,7 @@ app.post('/api/proxy/hangouts/rooms/:id/end', asyncHandler(async (req, res) => {
     await JitsiService.endRoom(parseInt(req.params.id, 10), user.id);
     res.json({ success: true });
   } catch (error) {
-    logger.error('Hangouts proxy end error:', error.message);
+    logger.error(`Hangouts proxy end error: ${error.message}`);
     const status = error.message?.includes('host') || error.message?.includes('Only') ? 403 : 400;
     res.status(status).json({ success: false, error: error.message || 'Failed to end room' });
   }
@@ -3261,7 +3261,7 @@ app.get('/api/proxy/hangouts/my-rooms', asyncHandler(async (req, res) => {
       created_at: r.created_at,
     }))});
   } catch (error) {
-    logger.error('Hangouts proxy my-rooms error:', error.message);
+    logger.error(`Hangouts proxy my-rooms error: ${error.message}`);
     res.json({ success: true, rooms: [] });
   }
 }));
@@ -3298,7 +3298,7 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
     });
     res.json({ success: true, performers: (resp.data?.data || []).map(mapDirectusPerformer) });
   } catch (error) {
-    logger.error('Performers featured error:', error.message);
+    logger.error(`Performers featured error: ${error.message}`);
     res.json({ success: true, performers: [] });
   }
 }));
@@ -3316,7 +3316,7 @@ app.get('/api/performers', asyncHandler(async (req, res) => {
     });
     res.json({ success: true, performers: (resp.data?.data || []).map(mapDirectusPerformer) });
   } catch (error) {
-    logger.error('Performers all error:', error.message);
+    logger.error(`Performers all error: ${error.message}`);
     res.json({ success: true, performers: [] });
   }
 }));
@@ -3346,7 +3346,7 @@ app.get('/api/proxy/live/performers', asyncHandler(async (req, res) => {
     }));
     res.json({ success: true, performers });
   } catch (error) {
-    logger.error('Live performers proxy error:', error.message);
+    logger.error(`Live performers proxy error: ${error.message}`);
     res.json({ success: true, performers: [] });
   }
 }));
@@ -3430,7 +3430,7 @@ app.post('/api/proxy/live/tips', tipLimiter, asyncHandler(async (req, res) => {
           }
         }
       } catch (emitErr) {
-        logger.warn('Token tip socket emit failed:', emitErr.message);
+        logger.warn(`Token tip socket emit failed: ${emitErr.message}`);
       }
 
       return res.json({
@@ -3472,7 +3472,7 @@ app.post('/api/proxy/live/tips', tipLimiter, asyncHandler(async (req, res) => {
         paymentUrl = daimoResult.paymentUrl;
       }
     } catch (daimoErr) {
-      logger.warn('Daimo payment creation failed for tip, falling back:', daimoErr.message);
+      logger.warn(`Daimo payment creation failed for tip, falling back: ${daimoErr.message}`);
     }
 
     res.json({
@@ -3483,7 +3483,7 @@ app.post('/api/proxy/live/tips', tipLimiter, asyncHandler(async (req, res) => {
       paymentMethod: 'daimo',
     });
   } catch (error) {
-    logger.error('Live tips proxy create error:', error.message);
+    logger.error(`Live tips proxy create error: ${error.message}`);
     res.status(500).json({ success: false, error: 'Failed to create tip' });
   }
 }));
@@ -3505,7 +3505,7 @@ app.get('/api/proxy/live/tips/recent', asyncHandler(async (req, res) => {
       })),
     });
   } catch (error) {
-    logger.error('Live tips proxy recent error:', error.message);
+    logger.error(`Live tips proxy recent error: ${error.message}`);
     res.json({ success: true, tips: [] });
   }
 }));
@@ -3537,7 +3537,7 @@ app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (re
       return res.status(401).json({ success: false, error: 'Invalid webhook secret' });
     }
   } catch (authErr) {
-    logger.error('Tips callback secret comparison error:', authErr.message);
+    logger.error(`Tips callback secret comparison error: ${authErr.message}`);
     return res.status(401).json({ success: false, error: 'Invalid webhook secret' });
   }
 
@@ -3590,18 +3590,18 @@ app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (re
           });
         }
       } catch (tipEmitErr) {
-        logger.warn('Failed to emit live:tip socket event:', tipEmitErr.message);
+        logger.warn(`Failed to emit live:tip socket event: ${tipEmitErr.message}`);
       }
     }
 
     res.json({ success: true });
   } catch (error) {
-    logger.error('Live tips callback error:', error.message);
+    logger.error(`Live tips callback error: ${error.message}`);
     res.status(500).json({ success: false, error: 'Callback processing failed' });
   } finally {
     if (lockAcquired) {
       await cache.releaseLock(lockKey).catch(err =>
-        logger.warn('Failed to release tips callback lock:', err.message)
+        logger.warn(`Failed to release tips callback lock: ${err.message}`)
       );
     }
   }
@@ -3859,7 +3859,7 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
           });
         }
       } catch (emitErr) {
-        logger.warn('BTCPay sub socket emit failed:', emitErr.message);
+        logger.warn(`BTCPay sub socket emit failed: ${emitErr.message}`);
       }
 
       return res.json({ success: true, type: 'subscription', planId: order.plan_id });
@@ -3892,7 +3892,7 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
           io.to(`user:${userId}`).emit('wallet:updated', { balance: newBalance, credited: tokens });
         }
       } catch (emitErr) {
-        logger.warn('BTCPay wallet socket emit failed:', emitErr.message);
+        logger.warn(`BTCPay wallet socket emit failed: ${emitErr.message}`);
       }
     }
 
@@ -3925,7 +3925,7 @@ app.post('/api/verify-age-self', authLimiter, asyncHandler(async (req, res) => {
     logger.info(`User ${user.id} self-declared age verification`);
     res.json({ success: true });
   } catch (error) {
-    logger.error('Age self-verification error:', error.message);
+    logger.error(`Age self-verification error: ${error.message}`);
     res.status(500).json({ success: false, error: 'Verification failed' });
   }
 }));
@@ -3947,7 +3947,7 @@ app.post('/api/complete-onboarding', asyncHandler(async (req, res) => {
     logger.info(`User ${user.id} completed onboarding`);
     res.json({ success: true });
   } catch (error) {
-    logger.error('Complete onboarding error:', error.message);
+    logger.error(`Complete onboarding error: ${error.message}`);
     res.status(500).json({ success: false, error: 'Failed to complete onboarding' });
   }
 }));

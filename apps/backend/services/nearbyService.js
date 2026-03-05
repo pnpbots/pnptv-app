@@ -214,7 +214,7 @@ class NearbyService {
             }
           });
         } catch (err) {
-          logger.warn('Failed to enrich nearby users with profiles:', err.message);
+          logger.warn(`Failed to enrich nearby users with profiles: ${err.message}`);
         }
       }
 

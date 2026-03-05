@@ -101,7 +101,7 @@ const searchVideos = async (query, options = {}) => {
 
     return response.data;
   } catch (error) {
-    logger.error('Error searching videos:', error.message);
+    logger.error(`Error searching videos: ${error.message}`);
     throw error;
   }
 };
@@ -252,7 +252,7 @@ const getTrendingVideos = async (options = {}) => {
 
     return response.data;
   } catch (error) {
-    logger.error('Error getting trending videos:', error.message);
+    logger.error(`Error getting trending videos: ${error.message}`);
     throw error;
   }
 };
@@ -280,7 +280,7 @@ const getPopularVideos = async (options = {}) => {
 
     return response.data;
   } catch (error) {
-    logger.error('Error getting popular videos:', error.message);
+    logger.error(`Error getting popular videos: ${error.message}`);
     throw error;
   }
 };

@@ -1083,7 +1083,7 @@ const registerImprovedSharePostHandlers = (bot) => {
             ...(kb ? { reply_markup: kb.reply_markup } : {}),
           });
         } catch (e) {
-          logger.warn('Preview copyMessage failed:', e.message);
+          logger.warn(`Preview copyMessage failed: ${e.message}`);
           // Fallback: just show text
           await ctx.reply('📷 [Media adjunta]\n\n' + previewText, {
             ...(kb ? { reply_markup: kb.reply_markup } : {}),

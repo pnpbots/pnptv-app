@@ -1136,7 +1136,7 @@ class ComprehensiveAvailabilityService {
           );
           notificationsSent++;
         } catch (notifyError) {
-          logger.warn('Failed to notify subscriber:', notifyError.message);
+          logger.warn(`Failed to notify subscriber: ${notifyError.message}`);
         }
       }
 

@@ -61,7 +61,7 @@ class XAutoCampaignScheduler {
         }
       }
     } catch (err) {
-      logger.error('Error in X auto campaign scheduler:', err.message);
+      logger.error(`Error in X auto campaign scheduler: ${err.message}`);
     } finally {
       this.isProcessing = false;
     }

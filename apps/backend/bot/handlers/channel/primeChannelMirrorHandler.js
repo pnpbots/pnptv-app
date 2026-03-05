@@ -86,7 +86,7 @@ function registerPrimeChannelMirrorHandler(bot) {
           if (seen) return;
           await redis.set(key, '1', 'EX', 5);
         } catch (redisErr) {
-          logger.warn('[PrimeMirror] Redis album check failed, continuing:', redisErr.message);
+          logger.warn(`[PrimeMirror] Redis album check failed, continuing: ${redisErr.message}`);
         }
       }
 

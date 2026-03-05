@@ -58,7 +58,7 @@ const createRoom = async (req, res) => {
           type: call.isPublic ? 'public' : 'private',
         });
       } catch (e) {
-        logger.warn('Failed to generate Jitsi URL:', e.message);
+        logger.warn(`Failed to generate Jitsi URL: ${e.message}`);
       }
     }
 
@@ -103,7 +103,7 @@ const joinRoom = async (req, res) => {
           type: 'public',
         });
       } catch (e) {
-        logger.warn('Failed to generate Jitsi URL:', e.message);
+        logger.warn(`Failed to generate Jitsi URL: ${e.message}`);
       }
     }
 

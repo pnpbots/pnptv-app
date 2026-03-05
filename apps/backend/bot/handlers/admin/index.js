@@ -481,7 +481,7 @@ async function sendBroadcastPreview(ctx) {
       });
     }
   } catch (error) {
-    logger.warn('Failed to send rendered preview (continuing):', error.message);
+    logger.warn(`Failed to send rendered preview (continuing): ${error.message}`);
   }
 
   await ctx.reply(previewText, { parse_mode: 'Markdown', ...keyboard });
@@ -1792,7 +1792,7 @@ let registerAdminHandlers = (bot) => {
       try {
         await ctx.reply('❌ Error selecting audience. Please check logs and try again.').catch(() => {});
       } catch (replyError) {
-        logger.error('❌ Failed to send error message:', replyError.message);
+        logger.error(`❌ Failed to send error message: ${replyError.message}`);
       }
     }
   });
@@ -1852,7 +1852,7 @@ let registerAdminHandlers = (bot) => {
       try {
         await ctx.reply('❌ Error selecting audience. Please check logs and try again.').catch(() => {});
       } catch (replyError) {
-        logger.error('❌ Failed to send error message:', replyError.message);
+        logger.error(`❌ Failed to send error message: ${replyError.message}`);
       }
     }
   });
@@ -2010,7 +2010,7 @@ let registerAdminHandlers = (bot) => {
         await ctx.answerCbQuery('❌ Test failed');
         await ctx.reply('❌ Test callback failed. Check logs for details.').catch(() => {});
       } catch (replyError) {
-        logger.error('❌ Failed to send test error message:', replyError.message);
+        logger.error(`❌ Failed to send test error message: ${replyError.message}`);
       }
     }
   });
@@ -2614,7 +2614,7 @@ let registerAdminHandlers = (bot) => {
           }
         );
       } catch (editError) {
-        logger.warn('Failed to update broadcast queue message:', editError.message);
+        logger.warn(`Failed to update broadcast queue message: ${editError.message}`);
         await ctx.reply(
           '📤 *Broadcast en Cola*\n\n'
           + 'Tu broadcast se está enviando en segundo plano.\n\n'
@@ -2669,7 +2669,7 @@ let registerAdminHandlers = (bot) => {
       try {
         await ctx.answerCbQuery(sendEmail ? '✅ Email habilitado' : '📧 Email deshabilitado');
       } catch (cbError) {
-        logger.warn('Could not answer callback for email toggle:', cbError.message);
+        logger.warn(`Could not answer callback for email toggle: ${cbError.message}`);
       }
 
       // Edit message to update the keyboard
@@ -2678,7 +2678,7 @@ let registerAdminHandlers = (bot) => {
           inline_keyboard: keyboard.reply_markup.inline_keyboard
         });
       } catch (editError) {
-        logger.warn('Could not edit message for email toggle:', editError.message);
+        logger.warn(`Could not edit message for email toggle: ${editError.message}`);
       }
     } catch (error) {
       logger.error('Error toggling email in broadcast:', error);
@@ -3218,7 +3218,7 @@ let registerAdminHandlers = (bot) => {
           await ctx.telegram.deleteMessage(ctx.chat.id, ctx.session.temp.mediaPromptMessageId);
           logger.info('Deleted media prompt message', { messageId: ctx.session.temp.mediaPromptMessageId });
         } catch (deleteError) {
-          logger.warn('Could not delete media prompt message:', deleteError.message);
+          logger.warn(`Could not delete media prompt message: ${deleteError.message}`);
         }
       }
 
@@ -3296,7 +3296,7 @@ let registerAdminHandlers = (bot) => {
           await ctx.telegram.deleteMessage(ctx.chat.id, ctx.session.temp.mediaPromptMessageId);
           logger.info('Deleted media prompt message', { messageId: ctx.session.temp.mediaPromptMessageId });
         } catch (deleteError) {
-          logger.warn('Could not delete media prompt message:', deleteError.message);
+          logger.warn(`Could not delete media prompt message: ${deleteError.message}`);
         }
       }
 
@@ -3420,7 +3420,7 @@ let registerAdminHandlers = (bot) => {
         try {
           await ctx.telegram.deleteMessage(ctx.chat.id, ctx.session.temp.mediaPromptMessageId);
         } catch (deleteError) {
-          logger.warn('Could not delete media prompt message:', deleteError.message);
+          logger.warn(`Could not delete media prompt message: ${deleteError.message}`);
         }
       }
 
@@ -3488,7 +3488,7 @@ let registerAdminHandlers = (bot) => {
         try {
           await ctx.telegram.deleteMessage(ctx.chat.id, ctx.session.temp.mediaPromptMessageId);
         } catch (deleteError) {
-          logger.warn('Could not delete media prompt message:', deleteError.message);
+          logger.warn(`Could not delete media prompt message: ${deleteError.message}`);
         }
       }
 
@@ -3556,7 +3556,7 @@ let registerAdminHandlers = (bot) => {
         try {
           await ctx.telegram.deleteMessage(ctx.chat.id, ctx.session.temp.mediaPromptMessageId);
         } catch (deleteError) {
-          logger.warn('Could not delete media prompt message:', deleteError.message);
+          logger.warn(`Could not delete media prompt message: ${deleteError.message}`);
         }
       }
 

@@ -29,7 +29,7 @@ class CacheService {
         results.plans = true;
         logger.info('✓ Plans cache prewarmed');
       } catch (error) {
-        logger.warn('Plans cache prewarming failed:', error.message);
+        logger.warn(`Plans cache prewarming failed: ${error.message}`);
         results.errors.push({ type: 'plans', error: error.message });
       }
 

@@ -281,7 +281,7 @@ class CommunityPostScheduler {
             });
             nextExecution = interval.next().toDate();
           } catch (cronError) {
-            logger.error('Error parsing custom cron expression:', cronError.message);
+            logger.error(`Error parsing custom cron expression: ${cronError.message}`);
             return null;
           }
           break;

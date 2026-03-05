@@ -204,7 +204,7 @@ class HangoutsController {
             type: isPublic ? 'public' : 'private',
           });
         } catch (error) {
-          logger.warn('Failed to generate Jitsi URL:', error.message);
+          logger.warn(`Failed to generate Jitsi URL: ${error.message}`);
         }
       }
 
@@ -325,7 +325,7 @@ class HangoutsController {
             type: joinResult.call.isPublic ? 'public' : 'private',
           });
         } catch (error) {
-          logger.warn('Failed to generate Jitsi URL:', error.message);
+          logger.warn(`Failed to generate Jitsi URL: ${error.message}`);
         }
       }
 

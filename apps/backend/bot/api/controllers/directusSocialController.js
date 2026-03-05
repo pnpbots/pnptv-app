@@ -21,7 +21,7 @@ const getPosts = async (req, res) => {
     const posts = resp.data?.data || [];
     res.json({ success: true, posts });
   } catch (error) {
-    logger.error('Social posts proxy GET error:', error.message);
+    logger.error(`Social posts proxy GET error: ${error.message}`);
     res.json({ success: true, posts: [], message: 'Posts temporarily unavailable' });
   }
 };
@@ -90,7 +90,7 @@ const createPost = async (req, res) => {
     logger.info(`Social post created by user ${authorId}: post #${post?.id}`);
     res.json({ success: true, post });
   } catch (error) {
-    logger.error('Social posts proxy POST error:', error.message);
+    logger.error(`Social posts proxy POST error: ${error.message}`);
     res.status(500).json({ success: false, error: 'Failed to create post' });
   }
 };
@@ -142,7 +142,7 @@ const deletePost = async (req, res) => {
     logger.info(`Social post #${postId} deleted by user ${authorId}`);
     res.json({ success: true });
   } catch (error) {
-    logger.error('Social posts proxy DELETE error:', error.message);
+    logger.error(`Social posts proxy DELETE error: ${error.message}`);
     if (error.response?.status === 403) {
       return res.status(403).json({ success: false, error: 'Not authorized to delete this post' });
     }

@@ -319,7 +319,7 @@ class BroadcastService {
           });
           nextExecution = interval.next().toDate();
         } catch (error) {
-          logger.warn('Custom cron pattern parsing failed:', error.message);
+          logger.warn(`Custom cron pattern parsing failed: ${error.message}`);
           return null;
         }
         break;

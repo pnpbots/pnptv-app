@@ -224,7 +224,7 @@ class BookingAvailabilityIntegration {
               }
             }
           } catch (error) {
-            logger.warn('Error getting availability for booking:', error.message);
+            logger.warn(`Error getting availability for booking: ${error.message}`);
             availabilityStatus = 'error';
           }
         }
