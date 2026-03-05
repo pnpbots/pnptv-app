@@ -16,10 +16,13 @@ const CATEGORIES = {
 
 class LiveStreamModel {
   static _tableInfoCache = new Map();
+  // Fix #10: Cache entries expire after 5 minutes so schema changes at runtime are picked up.
+  static _TABLE_CACHE_TTL_MS = 5 * 60 * 1000;
 
   static async _getTableInfo(tableName) {
-    if (this._tableInfoCache.has(tableName)) {
-      return this._tableInfoCache.get(tableName);
+    const cached = this._tableInfoCache.get(tableName);
+    if (cached && Date.now() - cached.ts < this._TABLE_CACHE_TTL_MS) {
+      return cached.info;
     }
 
     try {
@@ -45,12 +48,12 @@ class LiveStreamModel {
         types,
       };
 
-      this._tableInfoCache.set(tableName, info);
+      this._tableInfoCache.set(tableName, { info, ts: Date.now() });
       return info;
     } catch (error) {
       logger.error('Error loading table info', { tableName, error: error.message });
       const info = { exists: false, columns: new Set(), types: new Map() };
-      this._tableInfoCache.set(tableName, info);
+      this._tableInfoCache.set(tableName, { info, ts: Date.now() });
       return info;
     }
   }

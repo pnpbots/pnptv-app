@@ -6,6 +6,7 @@ const { CATEGORIES } = require('../../../models/liveStreamModel');
 const UserModel = require('../../../models/userModel');
 const logger = require('../../../utils/logger');
 const { getLanguage, validateUserInput } = require('../../utils/helpers');
+const { getRedis } = require('../../../config/redis');
 
 /**
  * Live streaming handlers
@@ -217,8 +218,8 @@ const registerLiveHandlers = (bot) => {
           return;
         }
 
-        // Generate stream URL with token
-        const streamUrl = `https://stream.pnptv.com/live/${streamId}?token=${viewerToken}`;
+        // Fix #12: Use actual app domain, not dead stream.pnptv.com domain
+        const streamUrl = `${process.env.WEB_APP_URL || 'https://app.pnptv.app'}/live`;
 
         const categoryEmoji = LiveStreamModel.getCategoryEmoji(stream.category);
 
@@ -250,18 +251,9 @@ const registerLiveHandlers = (bot) => {
           [Markup.button.callback(t('back', lang), 'live_view')]
         );
 
+        // Fix #11: editMessageText only accepts 2 args — message + options.
+        // Previous code silently ignored the richer message (args 3 & 4).
         await ctx.editMessageText(
-          `${t('joinedStream', lang)}\n\n`
-            + `🎤 ${stream.title}\n`
-            + `👤 ${stream.hostName}\n`
-            + `👥 ${stream.currentViewers} watching\n\n`
-            + `${t('streamInstructions', lang)}`,
-          Markup.inlineKeyboard([
-            [Markup.button.url('📺 Watch Stream', streamUrl)],
-            [Markup.button.callback('❤️ Like', `live_like_${streamId}`)],
-            [Markup.button.callback('👋 Leave', `live_leave_${streamId}`)],
-            [Markup.button.callback(t('back', lang), 'live_view')],
-          ]),
           `${t('joinedStream', lang)}\n\n` +
             `🎤 ${stream.title}\n` +
             `👤 ${stream.hostName}\n` +
@@ -728,11 +720,26 @@ const registerLiveHandlers = (bot) => {
 
       const streamId = ctx.match[1];
       const lang = getLanguage(ctx);
+      const userId = ctx.from.id;
+
+      // Fix #8: Deduplicate likes per user per stream using Redis (24h window)
+      try {
+        const redis = getRedis();
+        const likeKey = `stream:like:${streamId}:${userId}`;
+        const alreadyLiked = await redis.get(likeKey);
+        if (alreadyLiked) {
+          await ctx.answerCbQuery(lang === 'es' ? 'Ya diste me gusta' : 'Already liked');
+          return;
+        }
+        await redis.set(likeKey, '1', 'EX', 86400); // 24h dedup window
+      } catch (redisErr) {
+        logger.warn('Like dedup Redis check failed, proceeding:', redisErr.message);
+      }
 
       await LiveStreamModel.likeStream(streamId);
       await ctx.answerCbQuery(t('streamLiked', lang));
 
-      logger.info('Stream liked', { userId: ctx.from.id, streamId });
+      logger.info('Stream liked', { userId, streamId });
     } catch (error) {
       logger.error('Error liking stream:', error);
       await ctx.answerCbQuery('Error');
@@ -1074,7 +1081,8 @@ const createLiveStream = async (ctx) => {
     });
 
     // Generate stream URL with host token
-    const streamUrl = `https://stream.pnptv.com/live/${stream.streamId}?token=${stream.hostToken}`;
+    // Fix #12: Use actual app domain for stream URL
+    const streamUrl = `${process.env.WEB_APP_URL || 'https://app.pnptv.app'}/live`;
 
     // Store show type before clearing session
     const showType = ctx.session.temp.liveStreamShowType;

@@ -1,5 +1,7 @@
+const crypto = require('crypto');
 const LiveStreamModel = require('../../../models/liveStreamModel');
 const logger = require('../../../utils/logger');
+const { getRedis } = require('../../../config/redis');
 
 // Agora stub — reads from env; token generation not available without SDK
 const agoraTokenService = {
@@ -137,9 +139,21 @@ const getRtmpKey = async (req, res) => {
       return res.status(503).json({ success: false, error: 'Live streaming not available' });
     }
 
-    // Deterministic stream key — always the same for a given user
-    const streamKey = `stream-${user.id}`;
+    // Fix #1: Cryptographically random stream key, cached per user in Redis.
+    // Using a deterministic key based on user.id is insecure — anyone who knows
+    // the user's ID can guess the key. The key is generated once and persists
+    // until the user explicitly rotates it.
+    const redis = getRedis();
+    const redisKey = `rtmp:streamkey:${user.id}`;
+    let streamKey = await redis.get(redisKey);
+    if (!streamKey) {
+      streamKey = crypto.randomBytes(20).toString('hex'); // 40-char random hex key
+      await redis.set(redisKey, streamKey); // no TTL — permanent until rotated
+    }
+
     const publicHost = restreamerPublicUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    // Note: RTMPS (rtmps://) requires TLS termination at the Restreamer level on port 443.
+    // Configure infrastructure accordingly to upgrade from plain RTMP.
     const rtmpUrl = `rtmp://${publicHost}/live`;
 
     return res.json({ success: true, rtmpUrl, streamKey });

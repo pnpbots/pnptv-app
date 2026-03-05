@@ -309,7 +309,7 @@ const sessionMiddleware = session({
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/',
-    domain: process.env.NODE_ENV === 'production' ? '.pnptv.app' : undefined
+    domain: process.env.NODE_ENV === 'production' ? 'app.pnptv.app' : undefined
   }
 });
 
@@ -1070,6 +1070,16 @@ const socialActionLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Fix #7: Rate limiter for tip submissions (10 per minute per user, prevents wallet drain)
+const tipLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  handler: (req, res) => res.status(429).json({ success: false, error: 'Too many tips. Please slow down.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Rate limiter for file uploads (20 per minute, per user)
 const uploadLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -1163,7 +1173,14 @@ app.get('/health', healthLimiter, async (req, res) => {
 // Authentication API endpoints
 app.post('/api/telegram-auth', authLimiter, handleTelegramAuth);
 app.post('/api/accept-terms', handleAcceptTerms);
-app.get('/api/auth-status', checkAuthStatus);
+const authStatusLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  keyGenerator: (req) => req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.get('/api/auth-status', authStatusLimiter, checkAuthStatus);
 
 // Admin check endpoint (for frontend role gate)
 app.get('/api/admin/check', (req, res) => {
@@ -1191,11 +1208,11 @@ app.post('/api/logout', (req, res) => {
 // ==========================================
 
 // Videorama - protected
-app.get('/app/videorama', (req, res) => {
+app.get('/app/videorama', requirePageAuth, (req, res) => {
   res.sendFile(path.join(__dirname, '../../../public/videorama/index.html'));
 });
 
-app.get('/app/videorama/*', (req, res) => {
+app.get('/app/videorama/*', requirePageAuth, (req, res) => {
   const assetPath = path.join(__dirname, '../../../public/videorama', req.path.replace('/app/videorama', ''));
   if (fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) {
     return res.sendFile(assetPath);
@@ -1269,9 +1286,9 @@ app.get('/api/payment/:paymentId', authenticateUser, asyncHandler(paymentControl
 // C5: getPaymentStatus is polled by the server-rendered payment-response page which has no
 // session cookies. We protect it with a dedicated rate limiter to prevent payment-ID enumeration.
 app.get('/api/payment/:paymentId/status', paymentStatusLimiter, asyncHandler(paymentController.getPaymentStatus));
-app.post('/api/payment/tokenized-charge', asyncHandler(paymentController.processTokenizedCharge));
-app.post('/api/payment/verify-2fa', asyncHandler(paymentController.verify2FA));
-app.post('/api/payment/complete-3ds-2', asyncHandler(paymentController.complete3DS2Authentication));
+app.post('/api/payment/tokenized-charge', authenticateUser, asyncHandler(paymentController.processTokenizedCharge));
+app.post('/api/payment/verify-2fa', authenticateUser, asyncHandler(paymentController.verify2FA));
+app.post('/api/payment/complete-3ds-2', authenticateUser, asyncHandler(paymentController.complete3DS2Authentication));
 app.get('/api/confirm-payment/:token', asyncHandler(paymentController.confirmPaymentToken));
 // Payment recovery endpoints for stuck 3DS payments
 
@@ -1281,12 +1298,17 @@ app.post('/api/payment/:paymentId/retry-webhook', verifyAdminJWT, asyncHandler(p
 const PNPLiveService = require('../services/pnpLiveService');
 const ModelService = require('../services/modelService');
 const PaymentService = require('../services/paymentService');
-app.get('/api/pnp-live/booking/:bookingId', asyncHandler(async (req, res) => {
+app.get('/api/pnp-live/booking/:bookingId', authenticateUser, asyncHandler(async (req, res) => {
   const { bookingId } = req.params;
 
   const booking = await PNPLiveService.getBookingById(bookingId);
   if (!booking) {
     return res.status(404).json({ success: false, error: 'Booking not found' });
+  }
+
+  const actorId = getActorId(req);
+  if (booking.user_id !== actorId) {
+    return res.status(403).json({ success: false, error: 'Forbidden' });
   }
 
   const model = await ModelService.getModelById(booking.model_id);
@@ -2035,10 +2057,10 @@ app.get('/api/webapp/mastodon/feed', asyncHandler(webAppController.getMastodonFe
 // Web App Hangouts (session auth)
 const webappHangoutsController = require('./controllers/webappHangoutsController');
 app.get('/api/webapp/hangouts/public', asyncHandler(webappHangoutsController.listPublic));
-app.post('/api/webapp/hangouts/create', asyncHandler(webappHangoutsController.createRoom));
-app.post('/api/webapp/hangouts/join/:callId', asyncHandler(webappHangoutsController.joinRoom));
-app.post('/api/webapp/hangouts/leave/:callId', asyncHandler(webappHangoutsController.leaveRoom));
-app.delete('/api/webapp/hangouts/:callId', asyncHandler(webappHangoutsController.endRoom));
+app.post('/api/webapp/hangouts/create', requireSessionAuth, asyncHandler(webappHangoutsController.createRoom));
+app.post('/api/webapp/hangouts/join/:callId', requireSessionAuth, asyncHandler(webappHangoutsController.joinRoom));
+app.post('/api/webapp/hangouts/leave/:callId', requireSessionAuth, asyncHandler(webappHangoutsController.leaveRoom));
+app.delete('/api/webapp/hangouts/:callId', requireSessionAuth, asyncHandler(webappHangoutsController.endRoom));
 
 // Web App Live Streaming Routes
 const webappLiveController = require('./controllers/webappLiveController');
@@ -2058,14 +2080,14 @@ const supportChatLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
-app.post('/api/webapp/support/chat', supportChatLimiter, asyncHandler(supportController.chat));
+app.post('/api/webapp/support/chat', requireSessionAuth, supportChatLimiter, asyncHandler(supportController.chat));
 app.get('/api/webapp/support/suggestions', asyncHandler(supportController.suggestions));
 app.delete('/api/webapp/support/history', authenticateUser, asyncHandler(supportController.clearHistory));
 // Support Tickets (web → Telegram support group)
-app.post('/api/webapp/support/ticket', supportChatLimiter, asyncHandler(supportController.createTicket));
-app.get('/api/webapp/support/ticket', asyncHandler(supportController.getTicket));
-app.get('/api/webapp/support/ticket/messages', asyncHandler(supportController.getTicketMessages));
-app.post('/api/webapp/support/ticket/message', supportChatLimiter, asyncHandler(supportController.addTicketMessage));
+app.post('/api/webapp/support/ticket', requireSessionAuth, supportChatLimiter, asyncHandler(supportController.createTicket));
+app.get('/api/webapp/support/ticket', requireSessionAuth, asyncHandler(supportController.getTicket));
+app.get('/api/webapp/support/ticket/messages', requireSessionAuth, asyncHandler(supportController.getTicketMessages));
+app.post('/api/webapp/support/ticket/message', requireSessionAuth, supportChatLimiter, asyncHandler(supportController.addTicketMessage));
 
 // Web App Payments (session auth → PaymentService)
 
@@ -3239,7 +3261,7 @@ app.get('/api/proxy/live/performers', asyncHandler(async (req, res) => {
 
 // POST /api/proxy/live/tips — Create a tip (auth required)
 // paymentMethod: 'daimo' (default) | 'tokens' (instant, deducts from wallet)
-app.post('/api/proxy/live/tips', asyncHandler(async (req, res) => {
+app.post('/api/proxy/live/tips', tipLimiter, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
@@ -3425,6 +3447,18 @@ app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (re
   } catch (authErr) {
     logger.error('Tips callback secret comparison error:', authErr.message);
     return res.status(401).json({ success: false, error: 'Invalid webhook secret' });
+  }
+
+  // Fix #3: Timestamp replay protection — reject requests older than 5 minutes.
+  // Callers should include x-tips-timestamp (Unix seconds). Legacy callers without
+  // this header are allowed through; add the header to new integrations.
+  const tsHeader = req.headers['x-tips-timestamp'];
+  if (tsHeader) {
+    const ts = parseInt(tsHeader, 10);
+    if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > 300) {
+      logger.warn('Tips callback rejected: stale or invalid timestamp', { ip: req.ip, ts });
+      return res.status(401).json({ success: false, error: 'Request timestamp expired or invalid' });
+    }
   }
 
   const { tipId, transactionId, status } = req.body;
@@ -3629,19 +3663,27 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
 );
 
 // --- Self-declaration age verification (for gate, not AI-photo) ---
-app.post('/api/verify-age-self', asyncHandler(async (req, res) => {
+app.post('/api/verify-age-self', authLimiter, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
   try {
-    const user = req.session?.user;
-    if (!user) {
-      return res.status(401).json({ success: false, error: 'Authentication required' });
+    const UserModel = require('../../models/userModel');
+    const updated = await UserModel.updateAgeVerification(user.id, {
+      verified: true,
+      method: 'self_declaration',
+      expiresHours: 168,
+    });
+    if (!updated) {
+      return res.status(500).json({ success: false, error: 'Verification failed' });
     }
-
-    await require('../../config/postgres').query(
-      'UPDATE users SET age_verified = TRUE WHERE id = $1',
-      [user.id]
-    );
-
     req.session.user.ageVerified = true;
+    await getPool().query(
+      `INSERT INTO audit_logs (actor_id, action, resource_type, resource_id, metadata, ip_address, user_agent, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
+      [user.id, 'age_verified_self', 'user', user.id, JSON.stringify({ method: 'self_declaration' }), req.ip || 'unknown', req.headers['user-agent'] || 'unknown']
+    );
     logger.info(`User ${user.id} self-declared age verification`);
     res.json({ success: true });
   } catch (error) {
@@ -3779,7 +3821,7 @@ const requireN8nSecret = (req, res, next) => {
     logger.error('N8N_WEBHOOK_SECRET is not configured — rejecting n8n request');
     return res.status(503).json({ success: false, error: 'N8n integration not configured' });
   }
-  if (!provided || provided !== expected) {
+  if (!provided || provided.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(provided, 'utf8'), Buffer.from(expected, 'utf8'))) {
     logger.warn('n8n endpoint: invalid or missing X-N8N-SECRET', { ip: req.ip, path: req.path });
     return res.status(401).json({ success: false, error: 'Unauthorized' });
   }
@@ -3790,7 +3832,6 @@ const n8nRateLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
   message: 'Too many n8n requests',
-  skip: (req) => req.get('X-N8N-SECRET') === process.env.N8N_WEBHOOK_SECRET
 });
 
 app.get('/api/n8n/payments/failed', requireN8nSecret, n8nRateLimiter, asyncHandler(n8nAutomationController.getFailedPayments));

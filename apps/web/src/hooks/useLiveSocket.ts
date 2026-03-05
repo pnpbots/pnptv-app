@@ -73,10 +73,12 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       setMessages(msgs);
     };
 
+    const MAX_MESSAGES = 200;
     const onMessage = (msg: LiveChatMessage) => {
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) return prev;
-        return [...prev, msg];
+        const next = [...prev, msg];
+        return next.length > MAX_MESSAGES ? next.slice(next.length - MAX_MESSAGES) : next;
       });
     };
 

@@ -42,12 +42,20 @@ export function LivePlayer({ src, title, poster }: LivePlayerProps) {
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = src;
-      video.addEventListener("loadedmetadata", () => {
+      // Fix #16: store listeners so we can remove them in cleanup (prevents memory leak)
+      const onMetadata = () => {
         setStatus("live");
         video.play().catch(() => {});
-      });
-      video.addEventListener("error", () => setStatus("error"));
+      };
+      const onError = () => setStatus("error");
+      video.src = src;
+      video.addEventListener("loadedmetadata", onMetadata);
+      video.addEventListener("error", onError);
+      return () => {
+        hls?.destroy();
+        video.removeEventListener("loadedmetadata", onMetadata);
+        video.removeEventListener("error", onError);
+      };
     } else {
       setStatus("error");
     }
@@ -84,11 +92,14 @@ export function LivePlayer({ src, title, poster }: LivePlayerProps) {
 
   return (
     <div className="relative aspect-video rounded-xl overflow-hidden bg-black">
+      {/* Fix #15: muted allows autoplay to succeed in all browsers.
+           User can unmute via the native controls. */}
       <video
         ref={videoRef}
         className="w-full h-full object-contain"
         poster={poster}
         playsInline
+        muted
         controls
       />
       {status === "live" && (

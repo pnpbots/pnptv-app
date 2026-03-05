@@ -25,8 +25,20 @@ import {
 
 const CALCOM_URL = import.meta.env.VITE_CALCOM_URL || "https://booking.pnptv.app";
 
+// Fix #17: Restrict external image URLs to known trusted domains only
+const ALLOWED_IMAGE_HOSTS = ["cms.pnptv.app", "app.pnptv.app", "pnptv.app"];
 function isValidPhotoUrl(photo: string | null | undefined): photo is string {
-  return !!photo && (photo.startsWith("/") || photo.startsWith("http"));
+  if (!photo) return false;
+  if (photo.startsWith("/")) return true;
+  try {
+    const url = new URL(photo);
+    return (
+      (url.protocol === "https:" || url.protocol === "http:") &&
+      ALLOWED_IMAGE_HOSTS.some((h) => url.hostname === h || url.hostname.endsWith(`.${h}`))
+    );
+  } catch {
+    return false;
+  }
 }
 
 export default function Live() {
@@ -71,7 +83,9 @@ export default function Live() {
   const [showGoLive, setShowGoLive] = useState(false);
   const [rtmpInfo, setRtmpInfo] = useState<{ rtmpUrl: string; streamKey: string } | null>(null);
   const [goLiveLoading, setGoLiveLoading] = useState(false);
+  const [goLiveError, setGoLiveError] = useState<string | null>(null);
   const [showStreamKey, setShowStreamKey] = useState(false);
+  const [buyError, setBuyError] = useState<string | null>(null);
 
   // Live chat
   const [chatInput, setChatInput] = useState("");
@@ -210,7 +224,8 @@ export default function Live() {
       window.open(result.checkoutUrl, "_blank", "noopener,width=600,height=800");
       setShowBuyModal(false);
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed to open Dash checkout");
+      // Fix #14: use error state instead of alert()
+      setBuyError(err instanceof Error ? err.message : "Failed to open Dash checkout");
     } finally {
       setBuyingPackage(null);
     }
@@ -233,14 +248,18 @@ export default function Live() {
 
   const handleGoLive = async () => {
     setGoLiveLoading(true);
+    setGoLiveError(null);
     try {
       const result = await getRtmpKey();
       if (result.success && result.rtmpUrl && result.streamKey) {
         setRtmpInfo({ rtmpUrl: result.rtmpUrl, streamKey: result.streamKey });
         setShowGoLive(true);
+      } else {
+        // Fix #13: surface errors instead of silently failing
+        setGoLiveError(result.error || "Live streaming is not available right now.");
       }
-    } catch {
-      // silently fail
+    } catch (err: unknown) {
+      setGoLiveError(err instanceof Error ? err.message : "Failed to load stream credentials.");
     } finally {
       setGoLiveLoading(false);
     }
@@ -273,14 +292,20 @@ export default function Live() {
         </div>
         <div className="flex items-center gap-2">
           {isCreator && (
-            <button
-              onClick={handleGoLive}
-              disabled={goLiveLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-gradient disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-            >
-              <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-              {goLiveLoading ? "Loading..." : "Go Live"}
-            </button>
+            <div className="flex flex-col items-end gap-1">
+              <button
+                onClick={handleGoLive}
+                disabled={goLiveLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-gradient disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+              >
+                <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                {goLiveLoading ? "Loading..." : "Go Live"}
+              </button>
+              {/* Fix #13: display Go Live errors */}
+              {goLiveError && (
+                <p className="text-[10px] text-pnp-error text-right max-w-[160px]">{goLiveError}</p>
+              )}
+            </div>
           )}
           <Badge variant="error">Live</Badge>
         </div>
@@ -365,7 +390,7 @@ export default function Live() {
                 </button>
               )}
               <button
-                onClick={() => setShowBuyModal(true)}
+                onClick={() => { setBuyError(null); setShowBuyModal(true); }}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-gradient"
               >
                 Buy Tokens
@@ -545,6 +570,10 @@ export default function Live() {
               1 token = $1 USD. Use tokens for instant tips — no popups, no waiting.
             </p>
 
+            {/* Fix #14: show buy error inline instead of alert() */}
+            {buyError && (
+              <p className="text-xs text-pnp-error mb-3">{buyError}</p>
+            )}
             {tokenPackages.length === 0 ? (
               <p className="text-sm text-pnp-textSecondary text-center py-6">Loading packages...</p>
             ) : (
@@ -810,11 +839,10 @@ export default function Live() {
                 </div>
               )}
               <iframe
-                src={CALCOM_URL}
+                src={`${CALCOM_URL}?embed=true`}
                 className="w-full border-0 rounded-xl"
                 style={{ height: "600px", opacity: bookingLoaded ? 1 : 0 }}
                 onLoad={() => setBookingLoaded(true)}
-                allow="camera; microphone"
                 title="Booking Calendar"
               />
             </div>
