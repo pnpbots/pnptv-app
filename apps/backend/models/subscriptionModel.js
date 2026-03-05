@@ -112,7 +112,7 @@ class SubscriptionModel {
       );
 
       const plans = result.rows.map(row => this._formatPlan(row));
-      await cache.setex(cacheKey, 3600, JSON.stringify(plans));
+      await cache.set(cacheKey, plans, 3600);
       return plans;
     } catch (error) {
       logger.error('Error getting plans by role:', error);
@@ -136,7 +136,7 @@ class SubscriptionModel {
 
       const plan = this._formatPlan(result.rows[0]);
       if (plan) {
-        await cache.setex(cacheKey, 3600, JSON.stringify(plan));
+        await cache.set(cacheKey, plan, 3600);
       }
       return plan;
     } catch (error) {
@@ -225,7 +225,7 @@ class SubscriptionModel {
 
       const subscription = this._formatSubscription(result.rows[0]);
       if (subscription) {
-        await cache.setex(cacheKey, 300, JSON.stringify(subscription));
+        await cache.set(cacheKey, subscription, 300);
       }
       return subscription;
     } catch (error) {

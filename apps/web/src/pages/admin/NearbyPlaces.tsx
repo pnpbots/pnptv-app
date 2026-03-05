@@ -34,10 +34,10 @@ const CATEGORIES: CategoryOption[] = [
   { id: 25, name: "Hotels & Lodging",      emoji: "🏨", slug: "hotels_lodging" },
 ];
 
-const STATUS_BADGE: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
+const STATUS_BADGE: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
   pending: "warning",
   approved: "success",
-  rejected: "danger",
+  rejected: "error",
   suspended: "default",
 };
 

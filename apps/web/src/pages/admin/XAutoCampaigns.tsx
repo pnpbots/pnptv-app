@@ -30,7 +30,7 @@ const STATUS_TABS: { value: CampaignStatus; label: string }[] = [
   { value: "completed", label: "Completed" },
 ];
 
-const STATUS_BADGE: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
+const STATUS_BADGE: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
   active: "success",
   paused: "warning",
   completed: "default",
@@ -365,8 +365,8 @@ export default function XAutoCampaigns() {
       key: "status",
       header: "Status",
       render: (row: XAutoCampaignPost) => {
-        const badge: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
-          scheduled: "warning", sending: "accent", sent: "success", failed: "danger",
+        const badge: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
+          scheduled: "warning", sending: "accent", sent: "success", failed: "error",
         };
         return <Badge variant={badge[row.status] || "default"}>{row.status}</Badge>;
       },

@@ -60,11 +60,17 @@ const getConversation = async (req, res) => {
     );
     // Reset unread count in thread
     const [a, b] = [user.id, partnerId].sort();
-    const field = user.id === a ? 'unread_for_a' : 'unread_for_b';
-    await query(
-      `UPDATE dm_threads SET ${field} = 0 WHERE user_a=$1 AND user_b=$2`,
-      [a, b]
-    ).catch(() => {});
+    if (user.id === a) {
+      await query(
+        'UPDATE dm_threads SET unread_for_a = 0 WHERE user_a=$1 AND user_b=$2',
+        [a, b]
+      ).catch(() => {});
+    } else {
+      await query(
+        'UPDATE dm_threads SET unread_for_b = 0 WHERE user_a=$1 AND user_b=$2',
+        [a, b]
+      ).catch(() => {});
+    }
     return res.json({ success: true, messages: rows.reverse() });
   } catch (err) {
     logger.error('getConversation error', err);
@@ -97,6 +103,14 @@ const sendMessage = async (req, res) => {
   if (!content?.trim()) return res.status(400).json({ error: 'Content required' });
   if (recipientId === user.id) return res.status(400).json({ error: 'Cannot message yourself' });
   try {
+    // Check if sender is blocked by recipient
+    const { rows: blockRows } = await query(
+      'SELECT 1 FROM blocked_users WHERE blocker_id=$1 AND blocked_id=$2',
+      [recipientId, user.id]
+    );
+    if (blockRows.length > 0) {
+      return res.status(403).json({ error: 'Cannot send message to this user' });
+    }
     const text = content.trim().slice(0, 4000);
     const { rows } = await query(
       `INSERT INTO direct_messages (sender_id, recipient_id, content)
@@ -106,16 +120,27 @@ const sendMessage = async (req, res) => {
     const msg = rows[0];
     // Upsert dm_threads
     const [a, b] = [user.id, recipientId].sort();
-    const unreadField = user.id === a ? 'unread_for_b' : 'unread_for_a';
-    await query(
-      `INSERT INTO dm_threads (user_a, user_b, last_message, last_message_at, ${unreadField})
-       VALUES ($1, $2, $3, NOW(), 1)
-       ON CONFLICT (user_a, user_b) DO UPDATE SET
-         last_message = EXCLUDED.last_message,
-         last_message_at = NOW(),
-         ${unreadField} = dm_threads.${unreadField} + 1`,
-      [a, b, text.slice(0, 100)]
-    );
+    if (user.id === a) {
+      await query(
+        `INSERT INTO dm_threads (user_a, user_b, last_message, last_message_at, unread_for_b)
+         VALUES ($1, $2, $3, NOW(), 1)
+         ON CONFLICT (user_a, user_b) DO UPDATE SET
+           last_message = EXCLUDED.last_message,
+           last_message_at = NOW(),
+           unread_for_b = dm_threads.unread_for_b + 1`,
+        [a, b, text.slice(0, 100)]
+      );
+    } else {
+      await query(
+        `INSERT INTO dm_threads (user_a, user_b, last_message, last_message_at, unread_for_a)
+         VALUES ($1, $2, $3, NOW(), 1)
+         ON CONFLICT (user_a, user_b) DO UPDATE SET
+           last_message = EXCLUDED.last_message,
+           last_message_at = NOW(),
+           unread_for_a = dm_threads.unread_for_a + 1`,
+        [a, b, text.slice(0, 100)]
+      );
+    }
     // Deliver to recipient via Socket.IO if available
     const io = req.app.get('io');
     if (io) {

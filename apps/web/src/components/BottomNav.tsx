@@ -74,7 +74,7 @@ export function BottomNav() {
             key={item.to}
             to={item.to}
             end={item.to === "/"}
-            className={({ isActive }) =>
+            className={({ isActive }: { isActive: boolean }) =>
               `flex flex-col items-center gap-0.5 px-3 py-1 transition-colors ${
                 isActive
                   ? "nav-active"

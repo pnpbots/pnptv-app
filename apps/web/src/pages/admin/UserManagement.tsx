@@ -13,19 +13,19 @@ import {
   type AdminPlan,
 } from "@/lib/api";
 
-const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
+const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
   PRIME: "accent",
   member: "success",
   creator: "warning",
   free: "default",
-  banned: "danger",
+  banned: "error",
 };
 
-const STATUS_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
+const STATUS_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
   active: "success",
   expired: "warning",
-  cancelled: "danger",
-  churned: "danger",
+  cancelled: "error",
+  churned: "error",
   free: "default",
 };
 

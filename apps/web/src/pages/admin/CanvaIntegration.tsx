@@ -32,13 +32,13 @@ const STATUS_TABS: { value: JobStatus; label: string }[] = [
   { value: "failed", label: "Failed" },
 ];
 
-const STATUS_BADGE: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
+const STATUS_BADGE: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
   pending: "warning",
   exporting: "accent",
   downloading: "accent",
   uploading: "accent",
   completed: "success",
-  failed: "danger",
+  failed: "error",
 };
 
 function formatDate(dateStr: string | undefined): string {

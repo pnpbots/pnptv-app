@@ -23,29 +23,29 @@ function formatDate(dateStr: unknown): string {
   });
 }
 
-const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
+const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
   PRIME: "accent",
   prime: "accent",
   member: "success",
   creator: "warning",
   free: "default",
-  banned: "danger",
+  banned: "error",
 };
 
 // membershipBreakdown is keyed by subscription_status, not tier
-const MEMBERSHIP_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
+const MEMBERSHIP_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
   active: "success",
   free: "default",
   expired: "warning",
-  cancelled: "danger",
-  churned: "danger",
+  cancelled: "error",
+  churned: "error",
 };
 
-const STATUS_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
+const STATUS_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
   active: "success",
   completed: "success",
   pending: "warning",
-  failed: "danger",
+  failed: "error",
   refunded: "default",
 };
 

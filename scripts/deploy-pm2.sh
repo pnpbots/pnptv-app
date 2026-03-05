@@ -8,12 +8,12 @@ set -e  # Exit on error
 echo "🚀 Starting PNPtv Bot Deployment..."
 
 # Navigate to bot directory
-cd /home/user/pnptvbot-production
+cd /opt/pnptvapp
 
 # Pull latest changes
 echo "📥 Pulling latest changes from git..."
 git fetch origin
-git pull origin claude/redesign-onboarding-screens-fx9Vb
+git pull origin main
 
 # Install/update dependencies
 echo "📦 Installing dependencies..."

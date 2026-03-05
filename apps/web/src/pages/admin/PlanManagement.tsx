@@ -10,7 +10,7 @@ import {
   type AdminPlan,
 } from "@/lib/api";
 
-const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
+const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
   PRIME: "accent",
   member: "success",
   creator: "warning",
@@ -215,7 +215,7 @@ export default function PlanManagement() {
       key: "active",
       header: "Active?",
       render: (row: AdminPlan) => (
-        <Badge variant={row.active ? "success" : "danger"}>{row.active ? "Active" : "Inactive"}</Badge>
+        <Badge variant={row.active ? "success" : "error"}>{row.active ? "Active" : "Inactive"}</Badge>
       ),
     },
     {

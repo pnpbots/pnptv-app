@@ -6,6 +6,7 @@ import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useNavigate } from "react-router-dom";
 import { Modal } from "@pnptv/ui-kit";
 import FreeTierOverlay from "@/components/FreeTierOverlay";
+import { BulkVideoUpload } from "@/components/BulkVideoUpload";
 import {
   getSocialFeedPosts,
   getWofFeedPosts,
@@ -588,6 +589,7 @@ export default function Social() {
   const [isExclusive, setIsExclusive] = useState(false);
   const [isShareable, setIsShareable] = useState(true);
   const [isActiveCreator, setIsActiveCreator] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load feed
@@ -859,6 +861,17 @@ export default function Social() {
       {/* Post Composer (hidden on WoF tab) */}
       {isAuthenticated && activeTab === "all" && (
         <div className="glass-card-sm p-4 mb-6">
+          {/* Bulk video upload panel (active creators only) */}
+          {isActiveCreator && showBulkUpload && (
+            <BulkVideoUpload
+              onSuccess={(newPosts) => {
+                setPosts((prev) => [...newPosts.reverse(), ...prev]);
+                setShowBulkUpload(false);
+              }}
+              onCancel={() => setShowBulkUpload(false)}
+            />
+          )}
+          {isActiveCreator && showBulkUpload ? null : (
           <div className="flex gap-3">
             {/* Composer avatar — show user photo */}
             {isValidPhotoUrl(user?.photoUrl) ? (
@@ -1071,6 +1084,21 @@ export default function Social() {
               </div>
             </div>
           </div>
+          )}
+
+          {/* Bulk Videos button — active creators only, shown below composer */}
+          {isActiveCreator && !showBulkUpload && (
+            <button
+              onClick={() => setShowBulkUpload(true)}
+              className="mt-3 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 hover:bg-white/5 hover:border-white/20 transition-colors w-full justify-center"
+              style={{ color: "#E69138" }}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+              </svg>
+              Bulk Upload Videos
+            </button>
+          )}
         </div>
       )}
 

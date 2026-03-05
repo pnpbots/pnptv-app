@@ -384,6 +384,8 @@ export interface UserProfile {
   memberSince: string;
   postCount?: number;
   wofPhotoConsent?: boolean;
+  contentDisclaimer?: boolean;
+  display_name?: string;
   // Creator fields
   creatorStatus?: string;
   creatorType?: string;
@@ -444,6 +446,8 @@ export interface SocialPostItem {
   // Tier-gating fields (free-tier users see blurred posts)
   blurred?: boolean;
   content_tier?: string;
+  // Video thumbnail (poster frame generated server-side)
+  video_thumbnail_url?: string | null;
   // Promoted post fields (CMS-managed featured content)
   is_promoted?: boolean;
   promoted_link?: string | null;
@@ -598,7 +602,62 @@ export function createSocialPost(
   });
 }
 
-export function togglePostLike(postId: number): Promise<{ liked: boolean }> {
+export type BulkVideoEntry = {
+  file: File;
+  caption: string;
+  isExclusive: boolean;
+  isShareable: boolean;
+};
+
+export type BulkUploadProgress = {
+  loaded: number;
+  total: number;
+  percent: number;
+};
+
+export function bulkUploadVideos(
+  entries: BulkVideoEntry[],
+  onProgress?: (p: BulkUploadProgress) => void
+): Promise<{ success: boolean; posts: SocialPostItem[]; errors: { index: number; error: string }[] }> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    entries.forEach((entry) => {
+      formData.append("videos", entry.file);
+      formData.append("captions", entry.caption || "🎬");
+      formData.append("isExclusive", entry.isExclusive ? "true" : "false");
+      formData.append("isShareable", entry.isShareable ? "true" : "false");
+    });
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE}/api/webapp/social/posts/bulk-videos`);
+    xhr.withCredentials = true;
+
+    if (onProgress) {
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          onProgress({ loaded: e.loaded, total: e.total, percent: Math.round((e.loaded / e.total) * 100) });
+        }
+      });
+    }
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText)); }
+        catch { reject(new Error("Invalid server response")); }
+      } else {
+        try {
+          const err = JSON.parse(xhr.responseText);
+          reject(new Error(err.error || `Upload failed (${xhr.status})`));
+        } catch { reject(new Error(`Upload failed (${xhr.status})`)); }
+      }
+    });
+    xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
+    xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")));
+    xhr.send(formData);
+  });
+}
+
+export function togglePostLike(postId: number): Promise<{ liked: boolean; likes_count?: number }> {
   return request(`/api/webapp/social/posts/${postId}/like`, { method: "POST" });
 }
 
@@ -948,6 +1007,7 @@ export interface FollowListUser {
   lastName: string | null;
   photoUrl: string | null;
   followedAt: string;
+  displayName?: string;
 }
 
 export function searchUsers(

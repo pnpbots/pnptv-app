@@ -110,7 +110,7 @@ class PaidContentModel {
 
       const content = this._formatContent(result.rows[0]);
       if (content) {
-        await cache.setex(cacheKey, 600, JSON.stringify(content));
+        await cache.set(cacheKey, content, 600);
       }
       return content;
     } catch (error) {
@@ -137,7 +137,7 @@ class PaidContentModel {
 
       const contents = result.rows.map(row => this._formatContent(row));
       if (contents.length > 0) {
-        await cache.setex(cacheKey, 600, JSON.stringify(contents));
+        await cache.set(cacheKey, contents, 600);
       }
       return contents;
     } catch (error) {

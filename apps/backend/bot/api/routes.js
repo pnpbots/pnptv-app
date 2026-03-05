@@ -885,6 +885,46 @@ const postMediaUpload = multer({
   }
 });
 
+// Performer bulk video upload — 200 MB per file, up to 5 videos, disk storage
+const fsSyncMkdir = require('fs');
+const PERFORMER_VIDEO_TEMP_DIR = '/tmp/pnptv-videos';
+fsSyncMkdir.mkdirSync(PERFORMER_VIDEO_TEMP_DIR, { recursive: true });
+
+const performerVideoStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, PERFORMER_VIDEO_TEMP_DIR),
+  filename: (req, file, cb) => cb(null, `vid-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`),
+});
+
+const performerVideoUpload = multer({
+  storage: performerVideoStorage,
+  limits: { fileSize: 200 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const isVideo = /^video\/(mp4|webm)$/i.test(file.mimetype || '');
+    if (isVideo) return cb(null, true);
+    cb(new Error('Only video (mp4/webm) files are allowed'));
+  },
+});
+
+const uploadPerformerVideos = (req, res, next) => {
+  performerVideoUpload.array('videos', 5)(req, res, (err) => {
+    if (!err) return next();
+    let message = 'Invalid video file. Only mp4/webm up to 200 MB are allowed.';
+    if (err.code === 'LIMIT_FILE_SIZE') message = 'Video too large. Maximum 200 MB per file.';
+    if (err.code === 'LIMIT_FILE_COUNT') message = 'Too many videos. Maximum 5 at a time.';
+    return res.status(400).json({ error: message });
+  });
+};
+
+// Rate limiter for performer bulk video uploads (10 per hour per user)
+const bulkVideoLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  handler: (req, res) => res.status(429).json({ error: 'Bulk video upload limit reached. Try again in an hour.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Chat media upload:
 //   Images up to 20 MB — processed by sharp (converted to WebP + thumbnail)
 //   Videos up to 100 MB — stored as-is, poster frame via ffmpeg
@@ -2796,6 +2836,7 @@ app.get('/api/webapp/social/wall/:userId', asyncHandler(socialController.getWall
 app.get('/api/webapp/social/profile/:userId', asyncHandler(socialController.getPublicProfile));
 app.post('/api/webapp/social/posts', socialPostLimiter, asyncHandler(socialController.createPost));
 app.post('/api/webapp/social/posts/with-media', requireSessionAuth, socialPostLimiter, uploadLimiter, postMediaUpload.single('media'), asyncHandler(socialController.createPostWithMedia));
+app.post('/api/webapp/social/posts/bulk-videos', requireSessionAuth, bulkVideoLimiter, uploadPerformerVideos, asyncHandler(socialController.bulkCreateVideos));
 app.post('/api/webapp/social/posts/:postId/like', socialActionLimiter, asyncHandler(socialController.toggleLike));
 app.delete('/api/webapp/social/posts/:postId', asyncHandler(socialController.deletePost));
 app.get('/api/webapp/social/posts/:postId/replies', asyncHandler(socialController.getReplies));

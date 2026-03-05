@@ -57,7 +57,7 @@ export function AdminLayout() {
             to={item.to}
             end={item.end}
             onClick={() => setSidebarOpen(false)}
-            className={({ isActive }) =>
+            className={({ isActive }: { isActive: boolean }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                 isActive
                   ? "bg-pnp-accent/20 text-pnp-accent"

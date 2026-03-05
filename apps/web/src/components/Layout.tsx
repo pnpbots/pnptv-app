@@ -74,7 +74,7 @@ export function Layout() {
               key={link.to}
               to={link.to}
               end={link.end}
-              className={({ isActive }) =>
+              className={({ isActive }: { isActive: boolean }) =>
                 `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   isActive
                     ? "nav-active"
@@ -88,7 +88,7 @@ export function Layout() {
           {isAdmin && (
             <NavLink
               to="/admin"
-              className={({ isActive }) =>
+              className={({ isActive }: { isActive: boolean }) =>
                 `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   isActive
                     ? "nav-active"

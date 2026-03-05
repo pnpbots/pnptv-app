@@ -193,7 +193,7 @@ function initSocketIO(io) {
             `SELECT tier FROM users WHERE id = $1`,
             [user.id]
           );
-          if (tierRows.length === 0 || tierRows[0].tier !== 'prime') {
+          if (tierRows.length === 0 || tierRows[0].tier?.toLowerCase() !== 'prime') {
             socket.emit('chat:error', { message: 'Access denied' });
             return;
           }

@@ -16,6 +16,10 @@ class RevenueReportService {
    */
   static async getRevenueReport(startDate, endDate, groupBy = 'day') {
     try {
+      const ALLOWED_GROUP_BY = ['day', 'week', 'month', 'method'];
+      if (!ALLOWED_GROUP_BY.includes(groupBy)) {
+        throw new Error('Invalid groupBy value');
+      }
       if (!startDate || !endDate) {
         throw new Error('Start and end dates are required');
       }

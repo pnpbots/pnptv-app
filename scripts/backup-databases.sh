@@ -8,29 +8,33 @@ KEEP_DAYS=7
 
 echo "[$(date)] Starting database backups..."
 
-# PostgreSQL backups (4 databases)
-for DB_INFO in \
-    "pg-authentik:authentik_user:authentik_db" \
-    "pg-directus:directus_user:directus_db" \
-    "pg-calcom:calcom_user:calcom_db" \
-    "pg-synapse:synapse_user:synapse_db"; do
+# PostgreSQL backups — use each container's own POSTGRES_USER/POSTGRES_DB env vars
+for CONTAINER in pg-authentik pg-directus pg-calcom pg-synapse pg-pnptv pg-btcpay; do
 
-    CONTAINER=$(echo $DB_INFO | cut -d: -f1)
-    USER=$(echo $DB_INFO | cut -d: -f2)
-    DB=$(echo $DB_INFO | cut -d: -f3)
-    OUTFILE="${BACKUP_DIR}/postgres/${DB}_${DATE}.sql.gz"
+    # Read credentials from the running container's environment
+    DB_USER=$(docker exec "$CONTAINER" printenv POSTGRES_USER 2>/dev/null)
+    DB_NAME=$(docker exec "$CONTAINER" printenv POSTGRES_DB 2>/dev/null)
 
-    echo "  Backing up $DB from $CONTAINER..."
-    docker exec $CONTAINER pg_dump -U $USER $DB 2>/dev/null | gzip > "$OUTFILE"
+    if [ -z "$DB_USER" ] || [ -z "$DB_NAME" ]; then
+        echo "  SKIPPED: $CONTAINER (container not running or missing env vars)"
+        continue
+    fi
+
+    OUTFILE="${BACKUP_DIR}/postgres/${CONTAINER}_${DB_NAME}_${DATE}.sql.gz"
+
+    echo "  Backing up $DB_NAME from $CONTAINER (user: $DB_USER)..."
+    docker exec "$CONTAINER" pg_dump -U "$DB_USER" "$DB_NAME" 2>"${BACKUP_DIR}/postgres/${CONTAINER}_${DATE}.err" | gzip > "$OUTFILE"
 
     if [ $? -eq 0 ] && [ -s "$OUTFILE" ]; then
         SIZE=$(du -h "$OUTFILE" | cut -f1)
         echo "    OK: $OUTFILE ($SIZE)"
+        rm -f "${BACKUP_DIR}/postgres/${CONTAINER}_${DATE}.err"
     else
-        echo "    FAILED: $DB backup"
+        echo "    FAILED: $DB_NAME backup — see ${BACKUP_DIR}/postgres/${CONTAINER}_${DATE}.err"
         rm -f "$OUTFILE"
     fi
 done
+# NOTE: Backups are stored locally at ${BACKUP_DIR}. Configure offsite replication (S3, rsync, etc.) separately.
 
 # MariaDB backup (Ampache)
 echo "  Backing up ampache_db from mariadb-ampache..."

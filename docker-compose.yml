@@ -431,10 +431,12 @@ services:
     container_name: pnptv-bot
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     working_dir: /app
     volumes:
-      - .:/app
+      - .:/app:ro
+      - ./public/uploads:/app/public/uploads
+      - ./logs:/app/logs
       - pnptv-bot-nm:/app/node_modules
     command: >
       sh -c "npm install --omit=dev;
@@ -477,7 +479,7 @@ services:
     environment:
       POSTGRES_DB: btcpayserver
       POSTGRES_USER: btcpay
-      POSTGRES_PASSWORD: ${BTCPAY_POSTGRES_PASSWORD:-changeme_btcpay}
+      POSTGRES_PASSWORD: ${BTCPAY_POSTGRES_PASSWORD}
     networks:
       - pnptvapp_net
     healthcheck:
@@ -496,10 +498,9 @@ services:
       NBXPLORER_NETWORK: mainnet
       NBXPLORER_CHAINS: "DASH"
       NBXPLORER_BIND: 0.0.0.0:24444
-      NBXPLORER_NOAUTH: "true"
       NBXPLORER_DASHNODE_RPCURL: ${DASH_RPC_URL:-http://localhost:9998}
       NBXPLORER_DASHNODE_RPCAUTH: ${DASH_RPC_AUTH:-user:pass}
-      NBXPLORER_POSTGRES: "Host=pg-btcpay;Database=nbxplorer;Username=btcpay;Password=${BTCPAY_POSTGRES_PASSWORD:-changeme_btcpay}"
+      NBXPLORER_POSTGRES: "Host=pg-btcpay;Database=nbxplorer;Username=btcpay;Password=${BTCPAY_POSTGRES_PASSWORD}"
     networks:
       - pnptvapp_net
     depends_on:
@@ -516,7 +517,7 @@ services:
       - ./infrastructure/data/btcpay/server:/datadir
       - ./infrastructure/data/btcpay/nbxplorer:/root/.nbxplorer:ro
     environment:
-      BTCPAY_POSTGRES: "Host=pg-btcpay;Database=btcpayserver;Username=btcpay;Password=${BTCPAY_POSTGRES_PASSWORD:-changeme_btcpay}"
+      BTCPAY_POSTGRES: "Host=pg-btcpay;Database=btcpayserver;Username=btcpay;Password=${BTCPAY_POSTGRES_PASSWORD}"
       BTCPAY_NETWORK: mainnet
       BTCPAY_ROOTPATH: /
       BTCPAY_DASHEXPLORERURL: http://btcpay-nbxplorer:24444/
