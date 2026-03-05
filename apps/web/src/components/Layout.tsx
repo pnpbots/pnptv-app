@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { BottomNav } from "./BottomNav";
 import { useAuth } from "@/hooks/useAuth";
@@ -7,6 +7,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { CristinaWidget } from "@/components/CristinaWidget";
 import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
+import { getMessageThreads } from "@/lib/api";
 
 const sidebarLinks = [
   { to: "/", label: "Home", end: true },
@@ -14,12 +15,35 @@ const sidebarLinks = [
   { to: "/media", label: "PRIME" },
   { to: "/live", label: "Live" },
   { to: "/booking", label: "Nearby" },
+  { to: "/dm", label: "Messages" },
 ];
 
 export function Layout() {
   const { isAuthenticated, isAdmin, user, isLoading } = useAuth();
   const { isTelegram } = useTelegram();
   const navigate = useNavigate();
+  const [dmUnread, setDmUnread] = useState(0);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    getMessageThreads()
+      .then((res) => {
+        if (res.success) {
+          setDmUnread(res.threads.filter((t: any) => t.unread_count > 0).length);
+        }
+      })
+      .catch(() => {});
+    const interval = setInterval(() => {
+      getMessageThreads()
+        .then((res) => {
+          if (res.success) {
+            setDmUnread(res.threads.filter((t: any) => t.unread_count > 0).length);
+          }
+        })
+        .catch(() => {});
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
 
   if (!isAuthenticated && !isLoading) {
     return <LoginPage />;
@@ -31,7 +55,17 @@ export function Layout() {
       <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-60 lg:flex-col border-r border-pnp-border glass-nav">
         <div className="flex items-center justify-between px-6 h-16 border-b border-pnp-border">
           <img src="/Logo2-50.png" alt="PNPTV" className="h-8 w-auto" />
-          <NotificationBell />
+          <div className="flex items-center gap-2">
+            <button onClick={() => navigate("/dm")} className="relative p-1.5 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              {dmUnread > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-[#D4007A] rounded-full text-[9px] font-bold text-white flex items-center justify-center">{dmUnread > 9 ? "9+" : dmUnread}</span>
+              )}
+            </button>
+            <NotificationBell />
+          </div>
         </div>
 
         <nav className="flex-1 py-4 px-3 space-y-1">
@@ -91,6 +125,14 @@ export function Layout() {
         </div>
 
         <div className="flex items-center gap-2">
+          <button onClick={() => navigate("/dm")} className="relative p-1 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            {dmUnread > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-[#D4007A] rounded-full text-[9px] font-bold text-white flex items-center justify-center">{dmUnread > 9 ? "9+" : dmUnread}</span>
+            )}
+          </button>
           <NotificationBell />
           <button
             onClick={() => navigate("/profile")}
