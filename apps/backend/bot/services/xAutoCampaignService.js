@@ -230,7 +230,7 @@ class XAutoCampaignService {
     }
 
     // Normalize for X character limits and ensure required links
-    const requiredLinks = ['t.me/pnplatinotv_bot', 'pnptv.app/lifetime100'];
+    const requiredLinks = ['pnptv.app'];
     const { text: normalizedText } = XPostService.ensureRequiredLinks(postText, requiredLinks);
 
     // Attach a random video if campaign has media folder
