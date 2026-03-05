@@ -464,9 +464,14 @@ export function updateProfile(
     youtubeHandle: string;
     wofPhotoConsent: boolean;
     contentDisclaimer: boolean;
+    language: "en" | "es";
   }>
 ): Promise<{ success: boolean }> {
   return request("/api/webapp/profile", { method: "PUT", body: fields });
+}
+
+export function updateLanguage(lang: "en" | "es"): Promise<{ success: boolean }> {
+  return updateProfile({ language: lang });
 }
 
 export async function uploadAvatar(file: File): Promise<{ success: boolean; photoUrl: string }> {

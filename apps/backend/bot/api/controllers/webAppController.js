@@ -1469,14 +1469,20 @@ const updateProfile = async (req, res) => {
     }
   }
 
+  // Validate language if provided
+  if (req.body.language !== undefined && !['en', 'es'].includes(req.body.language)) {
+    return res.status(400).json({ error: 'Language must be en or es' });
+  }
+
   try {
-    const allowed = ['firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle', 'wofPhotoConsent', 'contentDisclaimer'];
+    const allowed = ['firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle', 'wofPhotoConsent', 'contentDisclaimer', 'language'];
     const colMap  = {
       firstName: 'first_name', lastName: 'last_name', bio: 'bio',
       locationText: 'location_name', interests: 'interests',
       xHandle: 'twitter', instagramHandle: 'instagram', tiktokHandle: 'tiktok', youtubeHandle: 'youtube',
       wofPhotoConsent: 'wof_photo_consent',
       contentDisclaimer: 'content_disclaimer',
+      language: 'language',
     };
 
     const sets = [];

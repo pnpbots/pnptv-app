@@ -16,6 +16,7 @@ import {
   checkAuthStatus,
   unlinkAtproto,
   unlinkX,
+  updateLanguage,
   getAtprotoLoginUrl,
   getXLoginUrl,
   getAtprotoProfile,
@@ -1626,6 +1627,8 @@ export default function Profile() {
   const [wofConsentSaving, setWofConsentSaving] = useState(false);
   const [contentDisclaimer, setContentDisclaimer] = useState(false);
   const [contentDisclaimerSaving, setContentDisclaimerSaving] = useState(false);
+  const [lang, setLang] = useState<"en" | "es">("en");
+  const [langSaving, setLangSaving] = useState(false);
 
   // Follow state
   const [isFollowing, setIsFollowing] = useState(false);
@@ -1723,6 +1726,7 @@ export default function Profile() {
           setProfile(profileRes.profile);
           setWofConsent(profileRes.profile.wofPhotoConsent ?? false);
           setContentDisclaimer(profileRes.profile.contentDisclaimer ?? false);
+          setLang((profileRes.profile.language as "en" | "es") ?? user?.language ?? "en");
           setPosts(postsRes.posts);
           // Load own follow counts
           getFollowStatus(targetUserId).then((s) => {
@@ -1813,6 +1817,20 @@ export default function Profile() {
       // Revert on failure
     } finally {
       setContentDisclaimerSaving(false);
+    }
+  };
+
+  const handleLanguageChange = async (newLang: "en" | "es") => {
+    if (newLang === lang || langSaving) return;
+    setLangSaving(true);
+    try {
+      await updateLanguage(newLang);
+      setLang(newLang);
+      await refreshUser();
+    } catch {
+      // Revert on failure
+    } finally {
+      setLangSaving(false);
     }
   };
 
@@ -2625,12 +2643,49 @@ export default function Profile() {
         <IdentityConnections telegramUsername={profile.username} />
       )}
 
-      {/* ── Privacy Preferences (own profile only) ── */}
+      {/* ── App Preferences (own profile only) ── */}
       {isOwnProfile && (
         <div className="glass-card-sm p-5 mt-4">
           <h2 className="text-sm font-semibold text-white mb-4 tracking-wide uppercase opacity-60">
-            Privacy Preferences
+            App Preferences
           </h2>
+
+          {/* Language toggle */}
+          <div className="flex items-center justify-between rounded-lg px-3 py-3 mb-3" style={{ background: "rgba(94,209,196,0.06)", border: "1px solid rgba(94,209,196,0.2)" }}>
+            <div className="flex-1 min-w-0 mr-3">
+              <p className="text-sm font-medium text-white">Language / Idioma</p>
+              <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                Choose your preferred app language
+              </p>
+            </div>
+            <div className="flex items-center rounded-full p-0.5 flex-shrink-0" style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
+              <button
+                onClick={() => handleLanguageChange("en")}
+                disabled={langSaving}
+                className="px-3 py-1 rounded-full text-xs font-semibold transition-all duration-200 disabled:opacity-50"
+                style={{
+                  background: lang === "en" ? "linear-gradient(135deg, #5ED1C4, #D4007A)" : "transparent",
+                  color: lang === "en" ? "#fff" : "#8E8E93",
+                }}
+                aria-pressed={lang === "en"}
+              >
+                EN
+              </button>
+              <button
+                onClick={() => handleLanguageChange("es")}
+                disabled={langSaving}
+                className="px-3 py-1 rounded-full text-xs font-semibold transition-all duration-200 disabled:opacity-50"
+                style={{
+                  background: lang === "es" ? "linear-gradient(135deg, #5ED1C4, #D4007A)" : "transparent",
+                  color: lang === "es" ? "#fff" : "#8E8E93",
+                }}
+                aria-pressed={lang === "es"}
+              >
+                ES
+              </button>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between rounded-lg px-3 py-3" style={{ background: "rgba(255,180,84,0.06)", border: "1px solid rgba(255,180,84,0.15)" }}>
             <div className="flex-1 min-w-0 mr-3">
               <p className="text-sm font-medium text-white">Wall of Fame Photo Consent</p>
