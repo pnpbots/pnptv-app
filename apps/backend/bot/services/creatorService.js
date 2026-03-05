@@ -633,6 +633,169 @@ class CreatorService {
     );
     return rows;
   }
+
+  // ── Enrollment ──────────────────────────────────────────────────────────────
+
+  static async submitEnrollment(userId, { tier, paymentMethod, paymentAddress, paymentNetwork, signatureData }, idDocumentPath, ip) {
+    const userRes = await query('SELECT creator_status FROM users WHERE id = $1', [userId]);
+    const user = userRes.rows[0];
+    if (!user) throw new Error('User not found');
+    if (user.creator_status === 'active') throw new Error('Creator profile already active');
+    if (user.creator_status === 'pending_review') throw new Error('Enrollment already submitted and under review');
+
+    const validTiers = { ice: 5.00, crystal: 10.00, diamond: 15.00 };
+    if (!validTiers[tier]) throw new Error('Invalid tier. Choose ice, crystal, or diamond.');
+
+    const validMethods = ['meru', 'usdc', 'usdt'];
+    if (!validMethods.includes(paymentMethod)) throw new Error('Invalid payment method.');
+    if (!paymentAddress?.trim()) throw new Error('Payment address or Meru account ID is required.');
+    if (!signatureData) throw new Error('Digital signature is required.');
+    if (!idDocumentPath) throw new Error('ID document photo is required.');
+
+    await query(
+      `INSERT INTO creator_enrollments
+         (user_id, tier, status, terms_accepted_at, terms_accepted_ip, content_commitment_accepted_at,
+          payment_method, payment_address, payment_network, id_document_path, signature_data, submitted_at)
+       VALUES ($1, $2, 'pending_review', NOW(), $3, NOW(), $4, $5, $6, $7, $8, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET
+         tier = $2, status = 'pending_review',
+         terms_accepted_at = NOW(), terms_accepted_ip = $3,
+         content_commitment_accepted_at = NOW(),
+         payment_method = $4, payment_address = $5, payment_network = $6,
+         id_document_path = $7, signature_data = $8,
+         submitted_at = NOW(), reviewed_at = NULL, reviewed_by = NULL, admin_notes = NULL,
+         updated_at = NOW()`,
+      [userId, tier, ip || null, paymentMethod, paymentAddress.trim(), paymentNetwork || null, idDocumentPath, signatureData]
+    );
+
+    await query(
+      `UPDATE users SET creator_status = 'pending_review', creator_type = $2, creator_price_usd = $3 WHERE id = $1`,
+      [userId, tier, validTiers[tier]]
+    );
+
+    try {
+      NotificationEmitter.emit({
+        type: 'creator_enrollment_submitted',
+        category: 'commerce',
+        priority: 'normal',
+        actorId: userId,
+        targetUserId: userId,
+        entityType: 'creator_enrollment',
+        entityId: userId,
+        message: `Your ${tier} creator enrollment has been submitted and is under review. We'll notify you within 24-48 hours.`,
+      });
+    } catch (_) {}
+
+    return { submitted: true, tier, status: 'pending_review' };
+  }
+
+  static async getEnrollment(userId) {
+    const { rows } = await query(
+      `SELECT id, tier, status, payment_method, payment_address, payment_network,
+              submitted_at, reviewed_at, admin_notes, created_at
+       FROM creator_enrollments WHERE user_id = $1`,
+      [userId]
+    );
+    return rows[0] || null;
+  }
+
+  static async listEnrollments(statusFilter) {
+    const params = [];
+    let where = '';
+    if (statusFilter) {
+      params.push(statusFilter);
+      where = 'WHERE ce.status = $1';
+    }
+    const { rows } = await query(
+      `SELECT ce.id, ce.user_id, ce.tier, ce.status, ce.payment_method, ce.payment_address,
+              ce.payment_network, ce.id_document_path, ce.submitted_at, ce.reviewed_at,
+              ce.admin_notes, u.username, u.first_name, u.photo_file_id
+       FROM creator_enrollments ce
+       JOIN users u ON ce.user_id = u.id
+       ${where}
+       ORDER BY ce.submitted_at DESC`,
+      params
+    );
+    return rows;
+  }
+
+  static async approveEnrollment(enrollmentId, adminId, notes) {
+    const { rows } = await query('SELECT * FROM creator_enrollments WHERE id = $1', [enrollmentId]);
+    const enrollment = rows[0];
+    if (!enrollment) throw new Error('Enrollment not found');
+    if (enrollment.status === 'approved') throw new Error('Already approved');
+
+    const validTiers = { ice: 5.00, crystal: 10.00, diamond: 15.00 };
+    const price = validTiers[enrollment.tier] || 5.00;
+
+    await query(
+      `UPDATE creator_enrollments SET status = 'approved', reviewed_by = $2, admin_notes = $3,
+         reviewed_at = NOW(), updated_at = NOW()
+       WHERE id = $1`,
+      [enrollmentId, adminId, notes || null]
+    );
+
+    await query(
+      `UPDATE users SET
+         creator_status = 'active',
+         creator_type = $2,
+         creator_price_usd = $3,
+         creator_enabled_at = NOW(),
+         creator_terms_accepted_at = NOW(),
+         creator_strikes = 0,
+         role = CASE WHEN role = 'user' THEN 'model' ELSE role END
+       WHERE id = $1`,
+      [enrollment.user_id, enrollment.tier, price]
+    );
+
+    try {
+      NotificationEmitter.emit({
+        type: 'creator_approved',
+        category: 'commerce',
+        priority: 'high',
+        actorId: adminId,
+        targetUserId: enrollment.user_id,
+        entityType: 'creator_enrollment',
+        entityId: String(enrollmentId),
+        message: `Your ${enrollment.tier} creator profile has been approved! You can now start posting exclusive content and earning.`,
+      });
+    } catch (_) {}
+
+    return { success: true };
+  }
+
+  static async rejectEnrollment(enrollmentId, adminId, notes) {
+    const { rows } = await query('SELECT * FROM creator_enrollments WHERE id = $1', [enrollmentId]);
+    const enrollment = rows[0];
+    if (!enrollment) throw new Error('Enrollment not found');
+
+    await query(
+      `UPDATE creator_enrollments SET status = 'rejected', reviewed_by = $2, admin_notes = $3,
+         reviewed_at = NOW(), updated_at = NOW()
+       WHERE id = $1`,
+      [enrollmentId, adminId, notes || null]
+    );
+
+    await query(
+      `UPDATE users SET creator_status = 'none' WHERE id = $1`,
+      [enrollment.user_id]
+    );
+
+    try {
+      NotificationEmitter.emit({
+        type: 'creator_rejected',
+        category: 'commerce',
+        priority: 'normal',
+        actorId: adminId,
+        targetUserId: enrollment.user_id,
+        entityType: 'creator_enrollment',
+        entityId: String(enrollmentId),
+        message: `Your creator enrollment was not approved at this time. ${notes || 'Please contact support for more information.'}`,
+      });
+    } catch (_) {}
+
+    return { success: true };
+  }
 }
 
 module.exports = CreatorService;

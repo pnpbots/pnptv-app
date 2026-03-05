@@ -190,6 +190,75 @@ const changeTier = async (req, res) => {
   }
 };
 
+// POST /api/webapp/creator/enroll
+const submitEnrollment = async (req, res) => {
+  try {
+    const { tier, paymentMethod, paymentAddress, paymentNetwork, signatureData } = req.body || {};
+    const idDocumentPath = req.file
+      ? `/uploads/creator-enrollments/${req.file.filename}`
+      : null;
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || null;
+    const result = await CreatorService.submitEnrollment(
+      req.user.id,
+      { tier, paymentMethod, paymentAddress, paymentNetwork, signatureData },
+      idDocumentPath,
+      ip
+    );
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    logger.error('submitEnrollment error', err);
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+// GET /api/webapp/creator/enrollment
+const getEnrollment = async (req, res) => {
+  try {
+    const enrollment = await CreatorService.getEnrollment(req.user.id);
+    return res.json({ success: true, enrollment });
+  } catch (err) {
+    logger.error('getEnrollment error', err);
+    return res.status(500).json({ error: 'Failed to get enrollment' });
+  }
+};
+
+// GET /api/webapp/creator/enrollments (admin)
+const listEnrollments = async (req, res) => {
+  try {
+    const enrollments = await CreatorService.listEnrollments(req.query.status || null);
+    return res.json({ success: true, enrollments });
+  } catch (err) {
+    logger.error('listEnrollments error', err);
+    return res.status(500).json({ error: 'Failed to list enrollments' });
+  }
+};
+
+// POST /api/webapp/creator/enrollments/:id/approve (admin)
+const approveEnrollment = async (req, res) => {
+  try {
+    const result = await CreatorService.approveEnrollment(
+      req.params.id, req.user.id, req.body.notes || null
+    );
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    logger.error('approveEnrollment error', err);
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+// POST /api/webapp/creator/enrollments/:id/reject (admin)
+const rejectEnrollment = async (req, res) => {
+  try {
+    const result = await CreatorService.rejectEnrollment(
+      req.params.id, req.user.id, req.body.notes || null
+    );
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    logger.error('rejectEnrollment error', err);
+    return res.status(400).json({ error: err.message });
+  }
+};
+
 // GET /api/webapp/creator/active
 // Protected at route level by roleGuard('admin', 'superadmin')
 const listActiveCreators = async (req, res) => {
@@ -257,4 +326,9 @@ module.exports = {
   listActiveCreators,
   getStrikes,
   issueStrike,
+  submitEnrollment,
+  getEnrollment,
+  listEnrollments,
+  approveEnrollment,
+  rejectEnrollment,
 };

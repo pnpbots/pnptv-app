@@ -30,15 +30,18 @@ import {
   unsubscribeFromCreator,
   initiateCreatorSubscriptionPayment,
   getCreatorEligibility,
-  activateCreator,
   searchUsers,
+  getCreatorEnrollment,
+  submitCreatorEnrollment,
   type CreatorEligibility,
+  type CreatorEnrollment,
   type UserProfile,
   type SocialPostItem,
   type AuthMethods,
   type AtprotoProfile,
   type FollowListUser,
 } from "@/lib/api";
+import { SignaturePad } from "@/components/SignaturePad";
 
 function resolvePhotoUrl(url: string | null | undefined): string | null {
   if (!url) return null;
@@ -1231,215 +1234,519 @@ function FollowListModal({
 // ── Creator Terms & Conditions Modal ────────────────────────────────────────
 
 const CREATOR_TIERS = [
-  { id: "ice" as const, label: "Ice", price: 5, color: "#A8D8EA", gradient: "linear-gradient(135deg, #A8D8EA, #73B4D4)", emoji: "\u2744\uFE0F" },
-  { id: "crystal" as const, label: "Crystal", price: 10, color: "#C490E4", gradient: "linear-gradient(135deg, #C490E4, #9B59B6)", emoji: "\uD83D\uDD2E" },
-  { id: "diamond" as const, label: "Diamond", price: 15, color: "#5ED1C4", gradient: "linear-gradient(135deg, #5ED1C4, #00D4E8)", emoji: "\uD83D\uDC8E" },
+  { id: "ice" as const, label: "Ice", price: 5, color: "#A8D8EA", gradient: "linear-gradient(135deg, #A8D8EA, #73B4D4)", emoji: "❄️" },
+  { id: "crystal" as const, label: "Crystal", price: 10, color: "#4ADE80", gradient: "linear-gradient(135deg, #4ADE80, #22C55E)", emoji: "🔮" },
+  { id: "diamond" as const, label: "Diamond", price: 15, color: "#C4B5FD", gradient: "linear-gradient(135deg, #C4B5FD, #A78BFA)", emoji: "💎" },
 ] as const;
 
 type TierId = typeof CREATOR_TIERS[number]["id"];
 
-function CreatorTermsModal({
-  open,
-  tier,
-  onAccept,
-  onClose,
-  accepting,
-}: {
-  open: boolean;
-  tier: TierId;
-  onAccept: () => void;
-  onClose: () => void;
-  accepting: boolean;
-}) {
-  const [scrolledToBottom, setScrolledToBottom] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const tierInfo = CREATOR_TIERS.find((t) => t.id === tier)!;
+// ── Creator Tier Helpers ─────────────────────────────────────────────────────
 
-  const handleScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) {
-      setScrolledToBottom(true);
+const TIER_CONFIG = {
+  ice:     { color: "#A8D8EA", gradient: "linear-gradient(135deg, #A8D8EA, #73B4D4)",  rgb: "168,216,234", name: "Ice Profile",     emoji: "❄️", price: 5 },
+  crystal: { color: "#4ADE80", gradient: "linear-gradient(135deg, #4ADE80, #22C55E)",  rgb: "74,222,128",  name: "Crystal Profile", emoji: "🔮", price: 10 },
+  diamond: { color: "#C4B5FD", gradient: "linear-gradient(135deg, #C4B5FD, #A78BFA)",  rgb: "196,181,253", name: "Diamond Profile", emoji: "💎", price: 15 },
+} as const;
+
+// ── Enrollment Wizard ─────────────────────────────────────────────────────────
+
+function CreatorEnrollmentWizard({
+  tier,
+  onClose,
+  onSubmitted,
+}: {
+  tier: TierId;
+  onClose: () => void;
+  onSubmitted: () => void;
+}) {
+  const t = TIER_CONFIG[tier];
+  const [step, setStep] = useState(1);
+  const TOTAL_STEPS = 4;
+
+  // Step 1 state
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [commitmentAccepted, setCommitmentAccepted] = useState(false);
+
+  // Step 2 state (payment)
+  const [paymentMethod, setPaymentMethod] = useState<"meru" | "usdc" | "usdt">("usdc");
+  const [paymentAddress, setPaymentAddress] = useState("");
+  const [paymentNetwork, setPaymentNetwork] = useState("base");
+
+  // Step 3 state (ID + signature)
+  const [idFile, setIdFile] = useState<File | null>(null);
+  const [idPreview, setIdPreview] = useState<string | null>(null);
+  const [signatureData, setSignatureData] = useState("");
+
+  // Submit state
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const handleIdUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIdFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setIdPreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmit = async () => {
+    if (!idFile) { setSubmitError("ID document is required"); return; }
+    if (!signatureData) { setSubmitError("Signature is required"); return; }
+    if (!paymentAddress.trim()) { setSubmitError("Payment address is required"); return; }
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await submitCreatorEnrollment({
+        tier,
+        paymentMethod,
+        paymentAddress,
+        paymentNetwork,
+        signatureData,
+        idDocument: idFile,
+      });
+      onSubmitted();
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Submission failed");
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  useEffect(() => {
-    setScrolledToBottom(false);
-  }, [open]);
-
-  if (!open) return null;
+  const canProceedStep1 = termsAccepted && commitmentAccepted;
+  const canProceedStep2 = paymentAddress.trim().length >= 3;
+  const canProceedStep3 = !!idFile && !!signatureData;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(6px)" }}
+    >
       <div
-        className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-t-2xl sm:rounded-2xl overflow-hidden"
-        style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}
+        className="w-full max-w-sm rounded-2xl flex flex-col"
+        style={{ background: "#1C1C1E", border: `1px solid rgba(${t.rgb},0.25)`, maxHeight: "90vh" }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
-          <div>
-            <h2 className="text-lg font-bold text-white">Creator Terms & Conditions</h2>
-            <p className="text-xs mt-0.5" style={{ color: tierInfo.color }}>
-              {tierInfo.emoji} {tierInfo.label} Profile &middot; ${tierInfo.price}/mo
-            </p>
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">{t.emoji}</span>
+            <div>
+              <p className="text-sm font-semibold text-white">{t.name} Enrollment</p>
+              <p className="text-xs" style={{ color: t.color }}>Step {step} of {TOTAL_STEPS}</p>
+            </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 text-white/60">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-full flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        {/* Scrollable terms content */}
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          className="flex-1 overflow-y-auto px-5 py-4 text-sm text-white/80 leading-relaxed space-y-4"
-          style={{ maxHeight: "60vh" }}
-        >
-          <p className="font-semibold text-white text-base">PNPtv! Creator Monetization Agreement</p>
-          <p className="text-xs" style={{ color: "#8E8E93" }}>Effective Date: February 28, 2026 &middot; Last Updated: February 28, 2026</p>
-
-          <div>
-            <p className="font-semibold text-white mb-1">1. Profile Tiers & Pricing</p>
-            <p>Creators may choose one of three monetization tiers. Subscribers pay monthly to access your exclusive content:</p>
-            <ul className="list-disc list-inside mt-1 space-y-0.5 text-xs">
-              <li><span style={{ color: "#A8D8EA" }}>Ice Profile</span> &mdash; $5.00 USD/month</li>
-              <li><span style={{ color: "#C490E4" }}>Crystal Profile</span> &mdash; $10.00 USD/month</li>
-              <li><span style={{ color: "#5ED1C4" }}>Diamond Profile</span> &mdash; $15.00 USD/month</li>
-            </ul>
-          </div>
-
-          <div>
-            <p className="font-semibold text-white mb-1">2. Revenue Split</p>
-            <p>All subscription revenue is split <strong className="text-white">70/30</strong>: you receive 70% of each subscription payment, and PNPtv! retains 30% as a platform fee. Payments are processed exclusively through <strong className="text-white">Daimo Pay</strong> (USDC on Optimism network).</p>
-          </div>
-
-          <div>
-            <p className="font-semibold text-white mb-1">3. Monthly Payouts</p>
-            <p>Creator earnings are paid out automatically on the <strong className="text-white">1st day of each month</strong> via Daimo Pay to your registered wallet address. Minimum payout threshold: $1.00 USD. Earnings below the threshold carry over to the next month.</p>
-          </div>
-
-          <div>
-            <p className="font-semibold text-white mb-1">4. Content Activity Requirements</p>
-            <p>To maintain your creator profile, you must continue meeting the activity criteria that qualified you for monetization. This includes maintaining regular media posts, engagement, and follower activity. Activity is evaluated on a rolling monthly basis.</p>
-          </div>
-
-          <div>
-            <p className="font-semibold text-white mb-1">5. Strike System</p>
-            <p>If you fail to maintain the required activity levels during a calendar month, you will receive a <strong className="text-white">strike</strong>. The strike policy is as follows:</p>
-            <ul className="list-disc list-inside mt-1 space-y-0.5 text-xs">
-              <li><strong className="text-white">Strike 1:</strong> Warning notification. You have 14 days to restore activity.</li>
-              <li><strong className="text-white">Strike 2:</strong> Final warning. Your profile will be flagged. You have 7 days to restore activity.</li>
-              <li><strong className="text-white">Strike 3:</strong> Your creator profile is <strong className="text-red-400">deactivated</strong>. You revert to a regular user profile.</li>
-            </ul>
-          </div>
-
-          <div>
-            <p className="font-semibold text-white mb-1">6. Deactivation & Subscriber Reimbursement</p>
-            <p>Upon deactivation due to 3 strikes:</p>
-            <ul className="list-disc list-inside mt-1 space-y-0.5 text-xs">
-              <li>Your exclusive content becomes inaccessible to subscribers.</li>
-              <li>All active subscribers receive a <strong className="text-white">50% refund</strong> of their most recent subscription payment, issued via Daimo Pay.</li>
-              <li>Your accumulated unpaid earnings are forfeited for the current period.</li>
-              <li>You may re-apply for creator status after 90 days by meeting eligibility criteria again.</li>
-            </ul>
-          </div>
-
-          <div>
-            <p className="font-semibold text-white mb-1">7. Voluntary Deactivation</p>
-            <p>You may voluntarily deactivate your creator profile at any time. Active subscribers will retain access until their current billing period expires. No refunds are issued for voluntary deactivation.</p>
-          </div>
-
-          <div>
-            <p className="font-semibold text-white mb-1">8. Content Guidelines</p>
-            <p>All content must comply with PNPtv! Community Guidelines. Exclusive content that violates platform rules may result in immediate deactivation without the standard strike process. PNPtv! reserves the right to remove any content at its discretion.</p>
-          </div>
-
-          <div>
-            <p className="font-semibold text-white mb-1">9. Tier Changes</p>
-            <p>You may upgrade or downgrade your tier at any time. Changes take effect at the start of the next billing cycle for existing subscribers. New subscribers are charged the updated tier price immediately.</p>
-          </div>
-
-          <div>
-            <p className="font-semibold text-white mb-1">10. Amendments</p>
-            <p>PNPtv! reserves the right to modify these terms with 30 days written notice. Continued use of the creator monetization features after the notice period constitutes acceptance of the updated terms.</p>
-          </div>
-
-          <div className="pt-2 border-t border-white/10">
-            <p className="text-xs" style={{ color: "#8E8E93" }}>
-              By tapping "Accept & Activate" below, you acknowledge that you have read, understood, and agree to be bound by these Creator Terms & Conditions.
-            </p>
+        {/* Progress bar */}
+        <div className="px-5 pb-3 flex-shrink-0">
+          <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{ width: `${(step / TOTAL_STEPS) * 100}%`, background: t.gradient }}
+            />
           </div>
         </div>
 
-        {/* Footer with accept button */}
-        <div className="px-5 py-4 border-t border-white/10">
-          {!scrolledToBottom && (
-            <p className="text-xs text-center mb-2" style={{ color: "#FFB454" }}>
-              Scroll down to read the full terms before accepting
-            </p>
+        {/* Body — scrollable */}
+        <div className="overflow-y-auto flex-1 px-5 pb-4 space-y-4">
+
+          {/* Step 1: Terms & Commitment */}
+          {step === 1 && (
+            <>
+              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">Terms & Conditions</p>
+
+              <div className="space-y-3 text-xs" style={{ color: "#8E8E93" }}>
+                <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <p className="font-semibold text-white">Program Terms</p>
+                  <p>By enrolling as a creator, you agree to PNPtv!'s Creator Program Terms. Subscription revenue is split <strong className="text-white">70% to you / 30% to PNPtv!</strong>. Payouts are processed every <strong className="text-white">Tuesday before 2:00 PM UTC</strong> via your selected payment method.</p>
+                  <p>You retain ownership of all content you upload. PNPtv! reserves the right to deactivate creator profiles for violations of community standards or the strike policy (3 strikes = suspension).</p>
+                  <p>You may voluntarily deactivate at any time. Active subscribers retain access until their billing period ends. PNPtv! may amend these terms with 30 days written notice.</p>
+                </div>
+
+                <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <p className="font-semibold text-white">Content Requirements</p>
+                  <p>You commit to maintaining regular posting activity to keep your creator profile active. Content is evaluated on a rolling monthly basis:</p>
+                  <ul className="list-disc list-inside space-y-0.5 mt-1">
+                    <li>Minimum <strong className="text-white">1 media post per week</strong></li>
+                    <li>At least <strong className="text-white">10% of posts</strong> must be free (public)</li>
+                    <li>At least <strong className="text-white">10% of posts</strong> must be accessible to PNPtv! PRIME members</li>
+                    <li>Up to <strong className="text-white">80% of posts</strong> can be exclusive to your {t.emoji} subscribers</li>
+                  </ul>
+                  <p className="mt-1">All content must comply with PNPtv! community standards. No illegal content. Explicit content requires age verification to be active on your account.</p>
+                </div>
+              </div>
+
+              <label className="flex items-start gap-3 cursor-pointer">
+                <div
+                  className="mt-0.5 w-5 h-5 rounded flex items-center justify-center flex-shrink-0 transition-colors"
+                  style={{ background: termsAccepted ? t.gradient : "rgba(255,255,255,0.08)", border: `1px solid rgba(${t.rgb},0.4)` }}
+                  onClick={() => setTermsAccepted((v) => !v)}
+                >
+                  {termsAccepted && (
+                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </div>
+                <span className="text-xs" style={{ color: termsAccepted ? "#fff" : "#8E8E93" }}>
+                  I have read and agree to the <strong>Creator Program Terms & Conditions</strong> and the <strong>Payout Terms</strong>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-3 cursor-pointer">
+                <div
+                  className="mt-0.5 w-5 h-5 rounded flex items-center justify-center flex-shrink-0 transition-colors"
+                  style={{ background: commitmentAccepted ? t.gradient : "rgba(255,255,255,0.08)", border: `1px solid rgba(${t.rgb},0.4)` }}
+                  onClick={() => setCommitmentAccepted((v) => !v)}
+                >
+                  {commitmentAccepted && (
+                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </div>
+                <span className="text-xs" style={{ color: commitmentAccepted ? "#fff" : "#8E8E93" }}>
+                  I understand and commit to the <strong>content quality and quantity requirements</strong>
+                </span>
+              </label>
+            </>
           )}
-          <button
-            onClick={onAccept}
-            disabled={!scrolledToBottom || accepting}
-            className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ background: scrolledToBottom ? tierInfo.gradient : "rgba(255,255,255,0.05)" }}
-          >
-            {accepting ? "Activating..." : `Accept & Activate ${tierInfo.emoji} ${tierInfo.label} Profile`}
-          </button>
+
+          {/* Step 2: Payment Setup */}
+          {step === 2 && (
+            <>
+              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">Payment Setup</p>
+
+              <div className="rounded-xl p-3 text-xs space-y-1.5" style={{ background: `rgba(${t.rgb},0.08)`, border: `1px solid rgba(${t.rgb},0.2)` }}>
+                <p className="font-semibold text-white">Payout Terms</p>
+                <p style={{ color: "#8E8E93" }}>You receive <strong className="text-white">70%</strong> of every subscription payment.</p>
+                <p style={{ color: "#8E8E93" }}>Payouts are processed every <strong className="text-white">Tuesday before 2:00 PM UTC</strong>.</p>
+                <p style={{ color: "#8E8E93" }}>Minimum payout: <strong className="text-white">$10 USD</strong>. Earnings below threshold roll over to the next week.</p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium mb-2" style={{ color: "#8E8E93" }}>Select payment method</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { id: "meru" as const, label: "Meru App", icon: "💳" },
+                    { id: "usdc" as const, label: "USDC", icon: "🔵" },
+                    { id: "usdt" as const, label: "USDT", icon: "🟢" },
+                  ]).map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => {
+                        setPaymentMethod(m.id);
+                        setPaymentAddress("");
+                        setPaymentNetwork(m.id === "usdt" ? "tron" : "base");
+                      }}
+                      className="py-3 rounded-xl text-center transition-all"
+                      style={paymentMethod === m.id
+                        ? { background: `rgba(${t.rgb},0.15)`, border: `2px solid rgba(${t.rgb},0.5)` }
+                        : { background: "rgba(255,255,255,0.04)", border: "2px solid rgba(255,255,255,0.08)" }
+                      }
+                    >
+                      <p className="text-lg mb-0.5">{m.icon}</p>
+                      <p className="text-xs font-semibold" style={{ color: paymentMethod === m.id ? t.color : "#8E8E93" }}>{m.label}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {(paymentMethod === "usdc" || paymentMethod === "usdt") && (
+                <div>
+                  <p className="text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>Network</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(paymentMethod === "usdc"
+                      ? [{ id: "base", label: "Base" }, { id: "ethereum", label: "Ethereum" }]
+                      : [{ id: "tron", label: "Tron (TRC-20)" }, { id: "ethereum", label: "Ethereum (ERC-20)" }]
+                    ).map((n) => (
+                      <button
+                        key={n.id}
+                        onClick={() => setPaymentNetwork(n.id)}
+                        className="py-2 rounded-lg text-xs font-medium transition-colors border"
+                        style={paymentNetwork === n.id
+                          ? { background: `rgba(${t.rgb},0.12)`, color: t.color, borderColor: `rgba(${t.rgb},0.3)` }
+                          : { background: "rgba(255,255,255,0.04)", color: "#8E8E93", borderColor: "rgba(255,255,255,0.08)" }
+                        }
+                      >
+                        {n.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs font-medium block mb-1.5" style={{ color: "#8E8E93" }}>
+                  {paymentMethod === "meru" ? "Meru account ID or phone" : "Wallet address"}
+                </label>
+                <input
+                  type="text"
+                  value={paymentAddress}
+                  onChange={(e) => setPaymentAddress(e.target.value)}
+                  placeholder={paymentMethod === "meru" ? "e.g. +1234567890 or @meruuser" : "0x..."}
+                  className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none"
+                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+                  autoComplete="off"
+                />
+              </div>
+            </>
+          )}
+
+          {/* Step 3: Identity Verification */}
+          {step === 3 && (
+            <>
+              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">Identity Verification</p>
+
+              <div className="rounded-xl p-3 text-xs" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <p className="font-semibold text-white mb-1">Why we need this</p>
+                <p style={{ color: "#8E8E93" }}>
+                  To comply with payout regulations and prevent fraud, we require a photo of your government-issued ID and your digital signature. Your documents are stored securely and only reviewed by PNPtv! staff during the enrollment review process.
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>
+                  Government ID (front) <span className="text-red-400">*</span>
+                </p>
+                {idPreview ? (
+                  <div className="relative">
+                    <img
+                      src={idPreview}
+                      alt="ID preview"
+                      className="w-full rounded-xl object-cover"
+                      style={{ maxHeight: 140, border: `1px solid rgba(${t.rgb},0.3)` }}
+                    />
+                    <button
+                      onClick={() => { setIdFile(null); setIdPreview(null); }}
+                      className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center text-white text-xs"
+                      style={{ background: "rgba(0,0,0,0.6)" }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <label
+                    className="flex flex-col items-center justify-center gap-2 rounded-xl py-6 cursor-pointer transition-colors"
+                    style={{ border: `1px dashed rgba(${t.rgb},0.35)`, background: `rgba(${t.rgb},0.04)` }}
+                  >
+                    <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: t.color }}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25c0 .828.672 1.5 1.5 1.5z" />
+                    </svg>
+                    <p className="text-xs" style={{ color: "#8E8E93" }}>Tap to upload ID photo</p>
+                    <input type="file" accept="image/*" className="hidden" onChange={handleIdUpload} />
+                  </label>
+                )}
+              </div>
+
+              <div>
+                <p className="text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>
+                  Digital Signature <span className="text-red-400">*</span>
+                </p>
+                <SignaturePad
+                  onSave={setSignatureData}
+                  width={300}
+                  height={100}
+                />
+              </div>
+            </>
+          )}
+
+          {/* Step 4: Review & Submit */}
+          {step === 4 && (
+            <>
+              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">Review & Submit</p>
+
+              <div className="space-y-2 text-xs">
+                <div className="rounded-xl p-3" style={{ background: `rgba(${t.rgb},0.08)`, border: `1px solid rgba(${t.rgb},0.2)` }}>
+                  <p className="font-semibold text-white mb-2">{t.emoji} {t.name}</p>
+                  <div className="space-y-1.5" style={{ color: "#8E8E93" }}>
+                    <div className="flex justify-between">
+                      <span>Subscription price</span>
+                      <span className="text-white font-medium">${t.price}/mo</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Your earnings</span>
+                      <span className="text-white font-medium">70% · ~${(t.price * 0.7).toFixed(2)}/subscriber</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Payout day</span>
+                      <span className="text-white font-medium">Every Tuesday before 2pm UTC</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <p className="font-semibold text-white mb-2">Payment Details</p>
+                  <div className="space-y-1.5" style={{ color: "#8E8E93" }}>
+                    <div className="flex justify-between">
+                      <span>Method</span>
+                      <span className="text-white font-medium capitalize">{paymentMethod}</span>
+                    </div>
+                    {paymentNetwork && paymentMethod !== "meru" && (
+                      <div className="flex justify-between">
+                        <span>Network</span>
+                        <span className="text-white font-medium capitalize">{paymentNetwork}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <span>Address</span>
+                      <span className="text-white font-medium truncate ml-4" style={{ maxWidth: 160 }}>{paymentAddress}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold text-white">Identity Verification</p>
+                    <span className="text-xs" style={{ color: "#4ADE80" }}>Provided</span>
+                  </div>
+                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>
+                    ID document and digital signature captured. Reviewed by PNPtv! staff only.
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-center" style={{ color: "#8E8E93" }}>
+                After submitting, your enrollment will be reviewed within <strong className="text-white">24-48 hours</strong>. You'll receive a notification when approved.
+              </p>
+
+              {submitError && (
+                <p className="text-xs text-center" style={{ color: "#FF453A" }}>{submitError}</p>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer actions */}
+        <div className="px-5 pb-5 pt-3 flex-shrink-0 space-y-2" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+          {step < TOTAL_STEPS ? (
+            <button
+              onClick={() => setStep((s) => s + 1)}
+              disabled={
+                (step === 1 && !canProceedStep1) ||
+                (step === 2 && !canProceedStep2) ||
+                (step === 3 && !canProceedStep3)
+              }
+              className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-40"
+              style={{ background: t.gradient }}
+            >
+              Continue
+            </button>
+          ) : (
+            <button
+              onClick={handleSubmit}
+              disabled={submitting}
+              className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-50"
+              style={{ background: t.gradient }}
+            >
+              {submitting ? "Submitting..." : "Submit Enrollment"}
+            </button>
+          )}
+          {step > 1 && (
+            <button
+              onClick={() => setStep((s) => s - 1)}
+              className="w-full py-2 text-xs text-center"
+              style={{ color: "#8E8E93" }}
+            >
+              Back
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-// ── Monetize Content Button ──────────────────────────────────────────────────
+// ── Monetize Content Card ─────────────────────────────────────────────────────
 
 function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: string; onActivated?: () => void }) {
-  const navigate = useNavigate();
   const [eligibility, setEligibility] = useState<CreatorEligibility | null>(null);
+  const [enrollment, setEnrollment] = useState<CreatorEnrollment | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedTier, setSelectedTier] = useState<TierId>("ice");
-  const [showTerms, setShowTerms] = useState(false);
-  const [activating, setActivating] = useState(false);
-  const [activateError, setActivateError] = useState<string | null>(null);
+  const [showWizard, setShowWizard] = useState(false);
 
   useEffect(() => {
-    getCreatorEligibility()
-      .then((res) => { if (res.success) setEligibility(res); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    Promise.all([
+      getCreatorEligibility().then((res) => { if (res.success) setEligibility(res); }).catch(() => {}),
+      getCreatorEnrollment().then((res) => { if (res.success) setEnrollment(res.enrollment); }).catch(() => {}),
+    ]).finally(() => setLoading(false));
   }, []);
 
-  const handleMonetizeTap = () => {
-    setShowTerms(true);
-  };
-
-  const handleAcceptAndActivate = async () => {
-    setActivating(true);
-    setActivateError(null);
-    try {
-      await activateCreator(selectedTier, true);
-      setShowTerms(false);
-      onActivated?.();
-      navigate("/creator");
-    } catch (err) {
-      setActivateError(err instanceof Error ? err.message : "Failed to activate");
-    } finally {
-      setActivating(false);
-    }
-  };
-
-  // Don't show for active creators or pending review
-  if (creatorStatus === "active" || creatorStatus === "pending_review") return null;
+  // Hide for active or if already enrolled and pending
+  if (creatorStatus === "active") return null;
 
   if (loading) {
     return (
       <div className="glass-card-sm p-4 mt-4 animate-pulse">
         <div className="h-5 bg-white/5 rounded w-40 mb-2" />
         <div className="h-3 bg-white/5 rounded w-full" />
+      </div>
+    );
+  }
+
+  // Pending review state
+  if (creatorStatus === "pending_review" || enrollment?.status === "pending_review") {
+    const t = enrollment ? TIER_CONFIG[enrollment.tier as TierId] : TIER_CONFIG.ice;
+    return (
+      <div
+        className="glass-card-sm p-4 mt-4"
+        style={{ borderColor: `rgba(${t.rgb},0.3)` }}
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: `rgba(${t.rgb},0.15)` }}
+          >
+            <svg className="w-4 h-4 animate-spin" style={{ color: t.color }} fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-white">Enrollment Under Review</p>
+            <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+              Your {enrollment?.tier || ""} {t.emoji} creator enrollment is being reviewed. Expect a response within 24-48 hours.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Rejected — allow re-enrollment
+  if (enrollment?.status === "rejected") {
+    const t = TIER_CONFIG[enrollment.tier as TierId] || TIER_CONFIG.ice;
+    return (
+      <div className="glass-card-sm p-4 mt-4" style={{ borderColor: "rgba(239,68,68,0.25)" }}>
+        <p className="text-sm font-semibold text-white mb-1">Enrollment Not Approved</p>
+        <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+          {enrollment.admin_notes || "Your enrollment was not approved. You may re-apply after addressing the feedback."}
+        </p>
+        <button
+          onClick={() => setShowWizard(true)}
+          className="w-full py-2.5 rounded-lg text-sm font-semibold text-white"
+          style={{ background: t.gradient }}
+        >
+          Re-apply for {t.emoji} {t.name}
+        </button>
+        {showWizard && (
+          <CreatorEnrollmentWizard
+            tier={enrollment.tier as TierId}
+            onClose={() => setShowWizard(false)}
+            onSubmitted={() => { setShowWizard(false); onActivated?.(); }}
+          />
+        )}
       </div>
     );
   }
@@ -1451,19 +1758,20 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
   const totalRequired = Object.values(criteria).length;
   const totalMet = Object.values(criteria).filter((c) => c.met).length;
   const overallPct = Math.round((totalMet / totalRequired) * 100);
+  const selectedTierConfig = TIER_CONFIG[selectedTier];
 
   return (
     <>
       <div
         className="glass-card-sm p-4 mt-4"
-        style={{ borderColor: isEligible ? "rgba(94,209,196,0.3)" : "rgba(212,0,122,0.15)" }}
+        style={{ borderColor: isEligible ? `rgba(${selectedTierConfig.rgb},0.3)` : "rgba(212,0,122,0.15)" }}
       >
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: isEligible ? "#5ED1C4" : "#D4007A" }}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: isEligible ? selectedTierConfig.color : "#D4007A" }}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p className="text-sm font-semibold text-white">Monetize Content</p>
+            <p className="text-sm font-semibold text-white">Monetize Your Profile</p>
           </div>
           {!isEligible && (
             <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "rgba(212,0,122,0.12)", color: "#D4007A" }}>
@@ -1475,7 +1783,7 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
         {isEligible ? (
           <>
             <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
-              Choose your creator tier. Subscribers pay monthly for your exclusive content (70/30 revenue split, payouts via Daimo on the 1st).
+              Choose your creator tier. Subscribers pay monthly for your exclusive content (70/30 revenue split, payouts every Tuesday via Meru · USDC · USDT).
             </p>
 
             {/* Tier selector */}
@@ -1488,14 +1796,14 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
                     onClick={() => setSelectedTier(tier.id)}
                     className="relative rounded-xl p-3 text-center transition-all"
                     style={{
-                      background: isSelected ? `${tier.gradient}` : "rgba(255,255,255,0.03)",
-                      border: isSelected ? `2px solid ${tier.color}` : "2px solid rgba(255,255,255,0.08)",
+                      background: isSelected ? `rgba(${TIER_CONFIG[tier.id].rgb},0.15)` : "rgba(255,255,255,0.03)",
+                      border: isSelected ? `2px solid rgba(${TIER_CONFIG[tier.id].rgb},0.6)` : "2px solid rgba(255,255,255,0.08)",
                       opacity: isSelected ? 1 : 0.7,
                     }}
                   >
                     <p className="text-lg mb-0.5">{tier.emoji}</p>
                     <p className={`text-xs font-bold ${isSelected ? "text-white" : "text-white/70"}`}>{tier.label}</p>
-                    <p className={`text-sm font-bold mt-0.5 ${isSelected ? "text-white" : ""}`} style={!isSelected ? { color: tier.color } : undefined}>
+                    <p className="text-sm font-bold mt-0.5" style={{ color: isSelected ? tier.color : TIER_CONFIG[tier.id].color }}>
                       ${tier.price}<span className="text-xs font-normal">/mo</span>
                     </p>
                   </button>
@@ -1503,16 +1811,12 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
               })}
             </div>
 
-            {activateError && (
-              <p className="text-xs text-red-400 mb-2">{activateError}</p>
-            )}
-
             <button
-              onClick={handleMonetizeTap}
+              onClick={() => setShowWizard(true)}
               className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all"
-              style={{ background: CREATOR_TIERS.find((t) => t.id === selectedTier)!.gradient }}
+              style={{ background: selectedTierConfig.gradient }}
             >
-              {CREATOR_TIERS.find((t) => t.id === selectedTier)!.emoji} Activate {CREATOR_TIERS.find((t) => t.id === selectedTier)!.label} Profile
+              {selectedTierConfig.emoji} Start {selectedTierConfig.name} Enrollment
             </button>
           </>
         ) : (
@@ -1521,7 +1825,6 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
               Meet these requirements to unlock creator monetization:
             </p>
 
-            {/* Overall progress bar */}
             <div className="mb-3">
               <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
                 <div
@@ -1534,7 +1837,6 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
               </div>
             </div>
 
-            {/* Criteria rows */}
             <div className="space-y-2">
               {([
                 { key: "mediaPosts", label: "Media Posts", icon: "M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25c0 .828.672 1.5 1.5 1.5z" },
@@ -1553,7 +1855,7 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
                           <path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z" clipRule="evenodd" />
                         </svg>
                       ) : (
-                        <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="#8E8E93" strokeWidth={1.5}>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#8E8E93" strokeWidth={1.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d={icon} />
                         </svg>
                       )}
@@ -1579,26 +1881,24 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
               })}
             </div>
 
-            {/* Disabled button */}
             <button
               disabled
               className="w-full mt-3 py-2.5 rounded-lg text-sm font-semibold text-white/40 cursor-not-allowed"
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
             >
-              Complete requirements to monetize
+              Complete requirements to enroll
             </button>
           </>
         )}
       </div>
 
-      {/* T&C Modal */}
-      <CreatorTermsModal
-        open={showTerms}
-        tier={selectedTier}
-        onAccept={handleAcceptAndActivate}
-        onClose={() => setShowTerms(false)}
-        accepting={activating}
-      />
+      {showWizard && (
+        <CreatorEnrollmentWizard
+          tier={selectedTier}
+          onClose={() => setShowWizard(false)}
+          onSubmitted={() => { setShowWizard(false); onActivated?.(); }}
+        />
+      )}
     </>
   );
 }
@@ -2289,8 +2589,8 @@ export default function Profile() {
                   {profile.creatorStatus === "active" && (() => {
                     const tierMap: Record<string, { emoji: string; label: string; color: string }> = {
                       ice:     { emoji: "❄️", label: "Ice Creator",     color: "#A8D8EA" },
-                      crystal: { emoji: "💎", label: "Crystal Creator", color: "#5ED1C4" },
-                      diamond: { emoji: "💎", label: "Diamond Creator", color: "#D4AF37" },
+                      crystal: { emoji: "🔮", label: "Crystal Creator",  color: "#4ADE80" },
+                      diamond: { emoji: "💎", label: "Diamond Creator",  color: "#C4B5FD" },
                     };
                     const tier = tierMap[profile.creatorType ?? ""];
                     const badgeColor  = tier ? tier.color  : "#D4007A";

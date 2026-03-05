@@ -1788,6 +1788,87 @@ export function getCreatorStrikes(
   return request(`/api/webapp/creator/${creatorId}/strikes`);
 }
 
+// ── Creator Enrollments ───────────────────────────────────────────────────────
+
+export interface CreatorEnrollment {
+  id: number;
+  tier: "ice" | "crystal" | "diamond";
+  status: "pending_review" | "approved" | "rejected";
+  payment_method: "meru" | "usdc" | "usdt" | null;
+  payment_address: string | null;
+  payment_network: string | null;
+  submitted_at: string;
+  reviewed_at: string | null;
+  admin_notes: string | null;
+}
+
+export function getCreatorEnrollment(): Promise<{ success: boolean; enrollment: CreatorEnrollment | null }> {
+  return request("/api/webapp/creator/enrollment");
+}
+
+export async function submitCreatorEnrollment(data: {
+  tier: string;
+  paymentMethod: string;
+  paymentAddress: string;
+  paymentNetwork: string;
+  signatureData: string;
+  idDocument: File;
+}): Promise<{ success: boolean; submitted: boolean; tier: string; status: string }> {
+  const formData = new FormData();
+  formData.append("tier", data.tier);
+  formData.append("paymentMethod", data.paymentMethod);
+  formData.append("paymentAddress", data.paymentAddress);
+  formData.append("paymentNetwork", data.paymentNetwork);
+  formData.append("signatureData", data.signatureData);
+  formData.append("idDocument", data.idDocument);
+
+  const res = await fetch(`${API_BASE}/api/webapp/creator/enroll`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `API error ${res.status}`);
+  }
+  return res.json();
+}
+
+export interface EnrollmentListItem extends CreatorEnrollment {
+  user_id: string;
+  id_document_path: string | null;
+  username: string | null;
+  first_name: string | null;
+  photo_file_id: string | null;
+}
+
+export function listCreatorEnrollments(
+  status?: string
+): Promise<{ success: boolean; enrollments: EnrollmentListItem[] }> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  return request(`/api/webapp/creator/enrollments${qs}`);
+}
+
+export function approveCreatorEnrollment(
+  id: number,
+  notes?: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/enrollments/${id}/approve`, {
+    method: "POST",
+    body: { notes: notes || null },
+  });
+}
+
+export function rejectCreatorEnrollment(
+  id: number,
+  notes?: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/enrollments/${id}/reject`, {
+    method: "POST",
+    body: { notes: notes || null },
+  });
+}
+
 // ============================================================================
 // Model Dashboard API (role-protected: model/admin)
 // ============================================================================
@@ -2391,3 +2472,4 @@ export function unsubscribePush(endpoint: string): Promise<{ success: boolean }>
 export function getVapidKey(): Promise<{ success: boolean; publicKey: string }> {
   return request("/api/webapp/push/vapid-key");
 }
+
