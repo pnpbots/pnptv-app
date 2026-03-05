@@ -495,6 +495,7 @@ services:
     environment:
       NBXPLORER_NETWORK: mainnet
       NBXPLORER_CHAINS: "DASH"
+      NBXPLORER_BIND: 0.0.0.0:24444
       NBXPLORER_DASHNODE_RPCURL: ${DASH_RPC_URL:-http://localhost:9998}
       NBXPLORER_DASHNODE_RPCAUTH: ${DASH_RPC_AUTH:-user:pass}
       NBXPLORER_POSTGRES: "Host=pg-btcpay;Database=nbxplorer;Username=btcpay;Password=${BTCPAY_POSTGRES_PASSWORD:-changeme_btcpay}"
@@ -505,7 +506,7 @@ services:
         condition: service_healthy
 
   btcpay-server:
-    image: btcpayserver/btcpayserver:latest
+    image: btcpayserver/btcpayserver:2.3.5
     container_name: btcpay-server
     restart: unless-stopped
     expose:
@@ -516,7 +517,7 @@ services:
       BTCPAY_POSTGRES: "Host=pg-btcpay;Database=btcpayserver;Username=btcpay;Password=${BTCPAY_POSTGRES_PASSWORD:-changeme_btcpay}"
       BTCPAY_NETWORK: mainnet
       BTCPAY_ROOTPATH: /
-      BTCPAY_NBXPLORER_URL: http://btcpay-nbxplorer:32838
+      BTCPAY_NBXPLORERURL: http://btcpay-nbxplorer:24444/
       BTCPAY_BIND: 0.0.0.0:23000
       BTCPAY_CHAINS: "DASH"
     networks:
