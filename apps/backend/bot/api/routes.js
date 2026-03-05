@@ -3656,6 +3656,13 @@ app.post('/api/wallet/link-dpns', asyncHandler(async (req, res) => {
   }
 }));
 
+// GET /api/webapp/payments/dash/available — check if Dash/BTCPay is configured & reachable
+app.get('/api/webapp/payments/dash/available', asyncHandler(async (req, res) => {
+  const { checkBtcpayHealth } = require('../../config/btcpay');
+  const health = await checkBtcpayHealth();
+  return res.json({ available: health.configured && health.reachable, ...health });
+}));
+
 // POST /api/webapp/payments/dash/create — create a BTCPay Dash invoice for a subscription plan
 app.post('/api/webapp/payments/dash/create', asyncHandler(async (req, res) => {
   const user = req.session?.user;
@@ -3696,7 +3703,7 @@ app.post('/api/webapp/payments/dash/create', asyncHandler(async (req, res) => {
       usdAmount,
     });
   } catch (err) {
-    logger.error('Dash subscription invoice error:', err.message);
+    logger.error(`Dash subscription invoice error: ${err.message}`);
     if (err.message?.includes('not configured')) {
       return res.status(503).json({ success: false, error: 'Crypto payments are not available yet. Please use another payment method.', code: 'BTCPAY_NOT_CONFIGURED' });
     }

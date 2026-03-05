@@ -13,7 +13,10 @@ const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
 
+// Internal URL for server-to-server API calls (not browser-accessible)
 const BTCPAY_URL = process.env.BTCPAY_URL || 'http://btcpay-server:23000';
+// Public URL used in checkout links shown to users (must be browser-accessible)
+const BTCPAY_PUBLIC_URL = process.env.BTCPAY_PUBLIC_URL || 'https://btcpay.pnptv.app';
 const BTCPAY_API_KEY = process.env.BTCPAY_API_KEY || '';
 const BTCPAY_STORE_ID = process.env.BTCPAY_STORE_ID || '';
 const BTCPAY_WEBHOOK_SECRET = process.env.BTCPAY_WEBHOOK_SECRET || '';
@@ -66,7 +69,7 @@ async function createDashInvoice({ usdAmount, userId, orderId, description = 'PN
   return {
     success: true,
     invoiceId: invoice.id,
-    checkoutUrl: `${BTCPAY_URL}/i/${invoice.id}`,
+    checkoutUrl: `${BTCPAY_PUBLIC_URL}/i/${invoice.id}`,
     status: invoice.status,
   };
 }

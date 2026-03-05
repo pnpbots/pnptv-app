@@ -109,11 +109,11 @@ const handleTelegramAuth = async (req, res) => {
       try {
         // Create user with default 'free' status (will be auto-upgraded if they have active subscription)
         await query(
-          `INSERT INTO users (telegram, username, first_name, language, subscription_status, terms_accepted, age_verified, role)
-           VALUES ($1, $2, $3, $4, 'free', false, false, 'user')
+          `INSERT INTO users (id, telegram, username, first_name, language, subscription_status, terms_accepted, age_verified, role)
+           VALUES ($1, $1, $2, $3, $4, 'free', false, false, 'user')
            ON CONFLICT (telegram) WHERE telegram IS NOT NULL AND telegram <> '' DO NOTHING`,
           [
-            telegramUser.id,
+            String(telegramUser.id),
             telegramUser.username || '',
             telegramUser.first_name || '',
             telegramUser.language_code || 'en'
