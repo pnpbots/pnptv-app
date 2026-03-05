@@ -12,10 +12,15 @@ import {
   getRecentTips,
   sendTip,
   getRtmpKey,
+  getWalletBalance,
+  getTokenPackages,
+  buyTokens,
+  linkDPNS,
   TIP_AMOUNTS,
   type LiveStream,
   type FeaturedPerformer,
   type RecentTip,
+  type TokenPackage,
 } from "@/lib/api";
 
 const CALCOM_URL = import.meta.env.VITE_CALCOM_URL || "https://booking.pnptv.app";
@@ -46,6 +51,17 @@ export default function Live() {
   const [tipping, setTipping] = useState(false);
   const [tipError, setTipError] = useState<string | null>(null);
   const [tipSuccess, setTipSuccess] = useState<string | null>(null);
+  const [tipPaymentTab, setTipPaymentTab] = useState<"daimo" | "tokens">("tokens");
+
+  // Dash token wallet
+  const [tokenBalance, setTokenBalance] = useState<number | null>(null);
+  const [dpnsHandle, setDpnsHandle] = useState<string | null>(null);
+  const [showBuyModal, setShowBuyModal] = useState(false);
+  const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
+  const [buyingPackage, setBuyingPackage] = useState<string | null>(null);
+  const [showDpnsInput, setShowDpnsInput] = useState(false);
+  const [dpnsInput, setDpnsInput] = useState("");
+  const [dpnsSaving, setDpnsSaving] = useState(false);
 
   // Booking
   const [showBooking, setShowBooking] = useState(false);
@@ -62,7 +78,7 @@ export default function Live() {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Socket
-  const { messages: chatMessages, viewerCount, isConnected: chatConnected, sendMessage, latestTip } = useLiveSocket(activeStream?.id ?? null);
+  const { messages: chatMessages, viewerCount, isConnected: chatConnected, sendMessage, latestTip, walletBalance: socketBalance, setWalletBalance: setSocketBalance } = useLiveSocket(activeStream?.id ?? null);
 
   // Load streams
   useEffect(() => {
@@ -93,6 +109,25 @@ export default function Live() {
       .catch(() => {})
       .finally(() => setPerformersLoading(false));
   }, []);
+
+  // Load wallet balance + packages when authenticated
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    getWalletBalance()
+      .then((data) => {
+        setTokenBalance(data.balance);
+        setDpnsHandle(data.dpnsHandle);
+      })
+      .catch(() => {});
+    getTokenPackages()
+      .then((data) => setTokenPackages(data.packages || []))
+      .catch(() => {});
+  }, [isAuthenticated]);
+
+  // Sync socket-pushed balance updates
+  useEffect(() => {
+    if (socketBalance !== null) setTokenBalance(socketBalance);
+  }, [socketBalance]);
 
   // Load recent tips
   const loadTips = useCallback(() => {
@@ -130,6 +165,11 @@ export default function Live() {
       setTipError("Select a performer to tip");
       return;
     }
+    if (tipPaymentTab === "tokens" && tokenBalance !== null && tokenBalance < amount) {
+      setTipError(`Insufficient tokens. You have ${tokenBalance} tokens. Buy more below.`);
+      setShowBuyModal(true);
+      return;
+    }
 
     setTipping(true);
     setTipError(null);
@@ -139,10 +179,14 @@ export default function Live() {
       const result = await sendTip(
         selectedPerformer.id,
         amount,
-        tipMessage || undefined
+        tipMessage || undefined,
+        tipPaymentTab
       );
 
-      if (result.paymentUrl) {
+      if (tipPaymentTab === "tokens") {
+        if (result.newBalance !== undefined) setTokenBalance(result.newBalance);
+        setTipSuccess(`${amount} tokens sent to ${selectedPerformer.displayName}!`);
+      } else if (result.paymentUrl) {
         window.open(result.paymentUrl, "_blank", "noopener,width=500,height=700");
         setTipSuccess(`Payment window opened for $${amount} tip`);
       } else {
@@ -156,6 +200,34 @@ export default function Live() {
       setTipError(err instanceof Error ? err.message : "Failed to send tip");
     } finally {
       setTipping(false);
+    }
+  };
+
+  const handleBuyTokens = async (pkg: TokenPackage) => {
+    setBuyingPackage(pkg.id);
+    try {
+      const result = await buyTokens(pkg.id);
+      window.open(result.checkoutUrl, "_blank", "noopener,width=600,height=800");
+      setShowBuyModal(false);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to open Dash checkout");
+    } finally {
+      setBuyingPackage(null);
+    }
+  };
+
+  const handleSaveDpns = async () => {
+    if (!dpnsInput.trim()) return;
+    setDpnsSaving(true);
+    try {
+      const result = await linkDPNS(dpnsInput.trim());
+      setDpnsHandle(result.dpnsHandle);
+      setShowDpnsInput(false);
+      setDpnsInput("");
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Invalid DPNS handle");
+    } finally {
+      setDpnsSaving(false);
     }
   };
 
@@ -261,6 +333,67 @@ export default function Live() {
         </Card>
       )}
 
+      {/* Dash Token Wallet Widget */}
+      {isAuthenticated && (
+        <Card className="mb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {/* Dash logo */}
+              <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>
+                <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white">
+                  <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
+                </svg>
+              </div>
+              <div>
+                <p className="text-xs text-pnp-textSecondary">Token Balance</p>
+                <p className="text-base font-bold text-pnp-textPrimary">
+                  {tokenBalance === null ? "—" : `${tokenBalance} tokens`}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {dpnsHandle ? (
+                <span className="text-xs text-pnp-textSecondary px-2 py-1 bg-pnp-surface rounded-full border border-pnp-border">
+                  @{dpnsHandle}
+                </span>
+              ) : (
+                <button
+                  onClick={() => setShowDpnsInput(!showDpnsInput)}
+                  className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors"
+                >
+                  Link DPNS
+                </button>
+              )}
+              <button
+                onClick={() => setShowBuyModal(true)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-gradient"
+              >
+                Buy Tokens
+              </button>
+            </div>
+          </div>
+
+          {showDpnsInput && (
+            <div className="flex gap-2 mt-3">
+              <input
+                type="text"
+                placeholder="yourname.dash"
+                value={dpnsInput}
+                onChange={(e) => setDpnsInput(e.target.value)}
+                className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+              />
+              <button
+                onClick={handleSaveDpns}
+                disabled={dpnsSaving}
+                className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium disabled:opacity-50"
+              >
+                {dpnsSaving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          )}
+        </Card>
+      )}
+
       {/* Tip Bar */}
       <Card className="mb-4">
         <div className="flex items-center justify-between mb-3">
@@ -271,6 +404,32 @@ export default function Live() {
             </span>
           )}
         </div>
+
+        {/* Payment method tabs */}
+        {isAuthenticated && (
+          <div className="flex gap-1 mb-3 p-1 bg-pnp-surface rounded-lg">
+            <button
+              onClick={() => setTipPaymentTab("tokens")}
+              className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                tipPaymentTab === "tokens"
+                  ? "text-white btn-gradient"
+                  : "text-pnp-textSecondary hover:text-pnp-textPrimary"
+              }`}
+            >
+              Tokens {tokenBalance !== null && `(${tokenBalance})`}
+            </button>
+            <button
+              onClick={() => setTipPaymentTab("daimo")}
+              className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                tipPaymentTab === "daimo"
+                  ? "text-white btn-gradient"
+                  : "text-pnp-textSecondary hover:text-pnp-textPrimary"
+              }`}
+            >
+              Daimo / Crypto
+            </button>
+          </div>
+        )}
 
         {/* Performer selector (compact) */}
         {performers.length > 1 && (
@@ -315,10 +474,16 @@ export default function Live() {
               disabled={tipping}
               className="flex-1 min-w-[56px] py-2 rounded-lg font-semibold text-sm transition-all text-white active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed btn-gradient"
             >
-              ${amount}
+              {tipPaymentTab === "tokens" ? `${amount}T` : `$${amount}`}
             </button>
           ))}
         </div>
+
+        {tipPaymentTab === "tokens" && isAuthenticated && (
+          <p className="text-[10px] text-pnp-textSecondary mt-1.5">
+            Instant · No popup · 1 token = $1 USD
+          </p>
+        )}
 
         {/* Optional message toggle */}
         <button
@@ -348,6 +513,72 @@ export default function Live() {
           </p>
         )}
       </Card>
+
+      {/* Buy Tokens Modal */}
+      {showBuyModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setShowBuyModal(false)}
+        >
+          <div
+            className="w-full max-w-lg bg-pnp-background border border-pnp-border rounded-t-2xl p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: "#008CE7" }}>
+                  <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white">
+                    <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
+                  </svg>
+                </div>
+                <h2 className="text-base font-bold text-pnp-textPrimary">Buy PNP Tokens with Dash</h2>
+              </div>
+              <button onClick={() => setShowBuyModal(false)} className="text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors" aria-label="Close">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-xs text-pnp-textSecondary mb-4">
+              Powered by <span style={{ color: "#008CE7" }}>Dash InstaSend</span> via BTCPay Server.
+              1 token = $1 USD. Use tokens for instant tips — no popups, no waiting.
+            </p>
+
+            {tokenPackages.length === 0 ? (
+              <p className="text-sm text-pnp-textSecondary text-center py-6">Loading packages...</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                {tokenPackages.map((pkg) => (
+                  <button
+                    key={pkg.id}
+                    onClick={() => handleBuyTokens(pkg)}
+                    disabled={buyingPackage === pkg.id}
+                    className="p-3 rounded-xl border border-pnp-border bg-pnp-surface hover:border-pnp-accent/50 transition-colors text-left disabled:opacity-50"
+                  >
+                    <p className="text-lg font-bold text-pnp-textPrimary">{pkg.tokens}</p>
+                    <p className="text-xs text-pnp-textSecondary">tokens</p>
+                    <p className="text-sm font-semibold mt-1" style={{ color: "#008CE7" }}>${pkg.usd}</p>
+                    {buyingPackage === pkg.id && (
+                      <p className="text-[10px] text-pnp-textSecondary mt-1">Opening...</p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-pnp-surface border border-pnp-border/50">
+              <svg className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#008CE7" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-[11px] text-pnp-textSecondary">
+                A Dash checkout window will open. Once payment is confirmed, tokens are credited to your wallet automatically.
+                {dpnsHandle && ` Your Dash identity: @${dpnsHandle}`}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Live Chat */}
       {activeStream?.isLive && (

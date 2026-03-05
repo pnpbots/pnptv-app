@@ -116,7 +116,7 @@ module.exports = {
     // Revenue split percentages (model gets %)
     revenueSplit: {
       contentSale: {
-        standard: 80,
+        standard: 70,
       },
       streaming: {
         tips: 85,

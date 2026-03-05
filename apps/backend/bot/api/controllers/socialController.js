@@ -383,7 +383,16 @@ const getHomeFeed = async (req, res) => {
 // ── Public Profile ───────────────────────────────────────────────────────────
 
 const getPublicProfile = async (req, res) => {
-  const { userId } = req.params;
+  let { userId } = req.params;
+
+  // Resolve username to ID if the param looks like a username (not a numeric Telegram ID or UUID)
+  const isNumericOrUuid = /^\d+$/.test(userId) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+  if (!isNumericOrUuid) {
+    const resolved = await dbQuery('SELECT id FROM users WHERE lower(username) = lower($1) LIMIT 1', [userId]);
+    if (resolved.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    userId = resolved.rows[0].id;
+  }
+
   const viewerId = req.session?.user?.id || null;
   const viewerTier = (req.session?.user?.tier || 'free').toLowerCase();
   const viewerRole = req.session?.user?.role || '';

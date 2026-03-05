@@ -43,6 +43,15 @@ class CreatorService {
       .map(([k]) => k);
 
     const eligible = missing.length === 0;
+
+    // Promote to 'eligible' in DB so activateCreator can proceed without requiring a batch job
+    if (eligible) {
+      await query(
+        "UPDATE users SET creator_status = 'eligible' WHERE id = $1 AND creator_status = 'none'",
+        [userId]
+      ).catch(err => logger.warn('checkEligibility: failed to promote status', { userId, error: err.message }));
+    }
+
     return { eligible, criteria, missing };
   }
 

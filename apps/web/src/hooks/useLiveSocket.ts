@@ -17,6 +17,7 @@ export interface LiveTip {
   performerName: string;
   message?: string;
   createdAt: string;
+  paymentMethod?: string;
 }
 
 interface UseLiveSocketResult {
@@ -25,6 +26,8 @@ interface UseLiveSocketResult {
   isConnected: boolean;
   sendMessage: (content: string) => void;
   latestTip: LiveTip | null;
+  walletBalance: number | null;
+  setWalletBalance: (b: number) => void;
 }
 
 export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
@@ -32,6 +35,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
   const [viewerCount, setViewerCount] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
   const [latestTip, setLatestTip] = useState<LiveTip | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
 
   // Tracks the currently joined streamId so we can emit live:leave on change/unmount
   const joinedStreamRef = useRef<string | null>(null);
@@ -85,6 +89,10 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       setLatestTip(tip);
     };
 
+    const onWalletUpdated = (data: { balance: number }) => {
+      setWalletBalance(data.balance);
+    };
+
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onError);
@@ -92,6 +100,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     socket.on("live:message", onMessage);
     socket.on("live:viewer_count", onViewerCount);
     socket.on("live:tip", onTip);
+    socket.on("wallet:updated", onWalletUpdated);
 
     // Leave previous stream if switching mid-session
     if (joinedStreamRef.current && joinedStreamRef.current !== streamId) {
@@ -119,6 +128,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       socket.off("live:message", onMessage);
       socket.off("live:viewer_count", onViewerCount);
       socket.off("live:tip", onTip);
+      socket.off("wallet:updated", onWalletUpdated);
     };
   }, [streamId]);
 
@@ -132,5 +142,5 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     [streamId]
   );
 
-  return { messages, viewerCount, isConnected, sendMessage, latestTip };
+  return { messages, viewerCount, isConnected, sendMessage, latestTip, walletBalance, setWalletBalance };
 }

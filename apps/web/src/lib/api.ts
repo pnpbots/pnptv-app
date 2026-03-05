@@ -297,12 +297,52 @@ export const TIP_AMOUNTS = [5, 10, 20, 50, 100] as const;
 export function sendTip(
   performerId: string,
   amount: number,
-  message?: string
-): Promise<{ success: boolean; tipId: number; paymentUrl: string | null; amount: number }> {
+  message?: string,
+  paymentMethod: "daimo" | "tokens" = "daimo"
+): Promise<{ success: boolean; tipId: number; paymentUrl: string | null; amount: number; paymentMethod: string; newBalance?: number }> {
   return request("/api/proxy/live/tips", {
     method: "POST",
-    body: { performerId, amount, message },
+    body: { performerId, amount, message, paymentMethod },
   });
+}
+
+// Dash Token Wallet
+export interface TokenPackage {
+  id: string;
+  tokens: number;
+  usd: number;
+  label: string;
+}
+
+export interface TokenPurchase {
+  id: number;
+  tokens_credited: number;
+  usd_amount: number;
+  dash_amount: number | null;
+  btcpay_invoice_id: string;
+  status: string;
+  created_at: string;
+  settled_at: string | null;
+}
+
+export function getWalletBalance(): Promise<{ success: boolean; balance: number; dpnsHandle: string | null }> {
+  return request("/api/wallet/balance");
+}
+
+export function getTokenPackages(): Promise<{ success: boolean; packages: TokenPackage[] }> {
+  return request("/api/wallet/packages");
+}
+
+export function buyTokens(packageId: string): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; tokens: number; usd: number }> {
+  return request("/api/wallet/buy", { method: "POST", body: { packageId } });
+}
+
+export function linkDPNS(dpnsHandle: string): Promise<{ success: boolean; dpnsHandle: string }> {
+  return request("/api/wallet/link-dpns", { method: "POST", body: { dpnsHandle } });
+}
+
+export function getWalletHistory(): Promise<{ success: boolean; history: TokenPurchase[] }> {
+  return request("/api/wallet/history");
 }
 
 export function getRecentTips(

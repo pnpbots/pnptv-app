@@ -280,7 +280,12 @@ app.set('trust proxy', 1);
 
 // CRITICAL: Apply body parsing FIRST for ALL routes
 // This must be before any route registration
-app.use(express.json());
+// verify callback saves rawBody on req for webhook HMAC validation (BTCPay, etc.)
+app.use(express.json({
+  verify: (req, _res, buf) => {
+    req.rawBody = buf;
+  },
+}));
 app.use(express.urlencoded({ extended: true }));
 
 // Session middleware for Telegram auth with Redis store
@@ -3233,13 +3238,14 @@ app.get('/api/proxy/live/performers', asyncHandler(async (req, res) => {
 }));
 
 // POST /api/proxy/live/tips — Create a tip (auth required)
+// paymentMethod: 'daimo' (default) | 'tokens' (instant, deducts from wallet)
 app.post('/api/proxy/live/tips', asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
   }
 
-  const { performerId, amount, message } = req.body;
+  const { performerId, amount, message, paymentMethod = 'daimo' } = req.body;
   if (!performerId || !amount) {
     return res.status(400).json({ success: false, error: 'performerId and amount are required' });
   }
@@ -3248,6 +3254,10 @@ app.post('/api/proxy/live/tips', asyncHandler(async (req, res) => {
   const numAmount = parseFloat(amount);
   if (!validAmounts.includes(numAmount)) {
     return res.status(400).json({ success: false, error: `Amount must be one of: ${validAmounts.join(', ')}` });
+  }
+
+  if (!['daimo', 'tokens'].includes(paymentMethod)) {
+    return res.status(400).json({ success: false, error: 'paymentMethod must be daimo or tokens' });
   }
 
   try {
@@ -3260,6 +3270,66 @@ app.post('/api/proxy/live/tips', asyncHandler(async (req, res) => {
       if (performer) performerName = performer.displayName;
     } catch { /* ignore */ }
 
+    // --- Token-based instant tip ---
+    if (paymentMethod === 'tokens') {
+      const DashTokenService = require('../services/dashTokenService');
+      const debit = await DashTokenService.debitTokens(userId, numAmount);
+      if (!debit.success) {
+        return res.status(402).json({ success: false, error: debit.error || 'Insufficient token balance' });
+      }
+
+      const tip = await PNPLiveTipsService.createTip(
+        userId, null, null,
+        numAmount,
+        (message || '').slice(0, 200),
+        String(performerId)
+      );
+
+      if (!tip) {
+        // Refund tokens on failure
+        await DashTokenService.creditTokens(userId, numAmount, `refund-tip-fail-${Date.now()}`, { usdAmount: numAmount }).catch(() => {});
+        return res.status(500).json({ success: false, error: 'Failed to create tip' });
+      }
+
+      // Mark tip as immediately paid
+      await PNPLiveTipsService.confirmTipPayment(tip.id, `TOKEN-${tip.id}`);
+
+      // Emit real-time tip event
+      try {
+        const tipInfo = await PNPLiveTipsService.getTipById(tip.id);
+        const socketSingleton = require('../services/socketSingleton');
+        const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+        if (io && tipInfo) {
+          io.emit('live:tip', {
+            id: tipInfo.id,
+            amount: parseFloat(tipInfo.amount),
+            username: tipInfo.user_username || 'Anonymous',
+            performerName: tipInfo.model_name || 'Performer',
+            message: tipInfo.message || '',
+            createdAt: tipInfo.created_at,
+            paymentMethod: 'tokens',
+          });
+          // Notify sender of new balance
+          const socketId = req.session?.socketId;
+          if (socketId) {
+            io.to(socketId).emit('wallet:updated', { balance: debit.newBalance });
+          }
+        }
+      } catch (emitErr) {
+        logger.warn('Token tip socket emit failed:', emitErr.message);
+      }
+
+      return res.json({
+        success: true,
+        tipId: tip.id,
+        paymentUrl: null,
+        amount: numAmount,
+        paymentMethod: 'tokens',
+        newBalance: debit.newBalance,
+      });
+    }
+
+    // --- Daimo payment flow (existing) ---
     const tip = await PNPLiveTipsService.createTip(
       userId,
       null,       // model_id (legacy, no longer used)
@@ -3296,6 +3366,7 @@ app.post('/api/proxy/live/tips', asyncHandler(async (req, res) => {
       tipId: tip.id,
       paymentUrl,
       amount: numAmount,
+      paymentMethod: 'daimo',
     });
   } catch (error) {
     logger.error('Live tips proxy create error:', error.message);
@@ -3409,6 +3480,153 @@ app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (re
     }
   }
 }));
+
+// ==========================================
+// DASH TOKEN WALLET ROUTES
+// ==========================================
+const DashTokenService = require('../services/dashTokenService');
+const { createDashInvoice, validateWebhookSignature } = require('../../config/btcpay');
+
+// GET /api/wallet/balance — get current user's token balance + DPNS
+app.get('/api/wallet/balance', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+  const userId = String(user.telegram_id || user.id);
+  const wallet = await DashTokenService.getWallet(userId);
+  res.json({ success: true, balance: wallet.balance_tokens, dpnsHandle: wallet.dash_dpns || null });
+}));
+
+// GET /api/wallet/packages — available token packages
+app.get('/api/wallet/packages', (req, res) => {
+  res.json({ success: true, packages: DashTokenService.TOKEN_PACKAGES });
+});
+
+// GET /api/wallet/history — purchase history
+app.get('/api/wallet/history', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+  const userId = String(user.telegram_id || user.id);
+  const history = await DashTokenService.getPurchaseHistory(userId, 20);
+  res.json({ success: true, history });
+}));
+
+// POST /api/wallet/buy — create a BTCPay Dash invoice for token purchase
+app.post('/api/wallet/buy', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const { packageId } = req.body;
+  const pkg = DashTokenService.TOKEN_PACKAGES.find(p => p.id === packageId);
+  if (!pkg) {
+    return res.status(400).json({ success: false, error: 'Invalid package ID' });
+  }
+
+  const userId = String(user.telegram_id || user.id);
+  const orderId = `pnptv-tokens-${userId}-${Date.now()}`;
+
+  try {
+    const invoice = await createDashInvoice({
+      usdAmount: pkg.usd,
+      userId,
+      orderId,
+      description: `${pkg.tokens} PNP Tokens`,
+    });
+
+    // Record pending purchase
+    await DashTokenService.recordPurchase(userId, pkg.tokens, pkg.usd, invoice.invoiceId);
+
+    res.json({
+      success: true,
+      invoiceId: invoice.invoiceId,
+      checkoutUrl: invoice.checkoutUrl,
+      tokens: pkg.tokens,
+      usd: pkg.usd,
+    });
+  } catch (err) {
+    logger.error('Wallet buy error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to create Dash invoice. BTCPay Server may not be configured yet.' });
+  }
+}));
+
+// POST /api/wallet/link-dpns — link a Dash DPNS handle
+app.post('/api/wallet/link-dpns', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const { dpnsHandle } = req.body;
+  if (!dpnsHandle) return res.status(400).json({ success: false, error: 'dpnsHandle is required' });
+
+  const userId = String(user.telegram_id || user.id);
+  try {
+    await DashTokenService.linkDPNS(userId, dpnsHandle);
+    res.json({ success: true, dpnsHandle: dpnsHandle.toLowerCase() });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+}));
+
+// POST /api/webhooks/btcpay — BTCPay Server webhook (Dash payment confirmed)
+app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) => {
+    const signature = req.headers['btcpay-sig'];
+    // Use rawBody captured by express.json verify callback for HMAC
+    const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
+
+    if (!validateWebhookSignature(rawBody, signature)) {
+      logger.warn('BTCPay webhook rejected: invalid signature', { ip: req.ip });
+      return res.status(401).json({ success: false, error: 'Invalid signature' });
+    }
+
+    let event;
+    try {
+      event = JSON.parse(rawBody);
+    } catch {
+      return res.status(400).json({ success: false, error: 'Invalid JSON' });
+    }
+
+    // Only process successful invoice settlements
+    if (event.type !== 'InvoiceSettled') {
+      return res.json({ success: true, ignored: true });
+    }
+
+    const invoiceId = event.invoiceId;
+    if (!invoiceId) return res.status(400).json({ success: false, error: 'Missing invoiceId' });
+
+    // Look up pending purchase to get userId + tokens
+    const { query: dbQuery } = require('../../config/postgres');
+    const purchaseResult = await dbQuery(
+      `SELECT user_id, tokens_credited, usd_amount FROM token_purchases
+       WHERE btcpay_invoice_id = $1`,
+      [invoiceId]
+    );
+
+    if (purchaseResult.rows.length === 0) {
+      logger.warn('BTCPay webhook: unknown invoice', { invoiceId });
+      return res.status(404).json({ success: false, error: 'Purchase not found' });
+    }
+
+    const { user_id: userId, tokens_credited: tokens, usd_amount: usdAmount } = purchaseResult.rows[0];
+    const { newBalance, alreadyProcessed } = await DashTokenService.creditTokens(
+      userId, tokens, invoiceId, { usdAmount }
+    );
+
+    if (!alreadyProcessed) {
+      logger.info('BTCPay: tokens credited', { userId, tokens, invoiceId, newBalance });
+
+      // Notify user via socket if connected
+      try {
+        const socketSingleton = require('../services/socketSingleton');
+        const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+        if (io) {
+          io.to(`user:${userId}`).emit('wallet:updated', { balance: newBalance, credited: tokens });
+        }
+      } catch (emitErr) {
+        logger.warn('BTCPay wallet socket emit failed:', emitErr.message);
+      }
+    }
+
+    res.json({ success: true, alreadyProcessed });
+  })
+);
 
 // --- Self-declaration age verification (for gate, not AI-photo) ---
 app.post('/api/verify-age-self', asyncHandler(async (req, res) => {

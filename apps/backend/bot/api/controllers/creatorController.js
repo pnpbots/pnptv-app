@@ -19,7 +19,7 @@ const activateCreator = async (req, res) => {
     const { tier, termsAccepted } = req.body || {};
     const result = await CreatorService.activateCreator(req.user.id, tier, termsAccepted);
     // Update session role so model routes work immediately without re-login
-    if (req.session?.user) {
+    if (req.session?.user?.role !== undefined) {
       req.session.user.role = 'model';
     }
     return res.json({ success: true, ...result });

@@ -451,6 +451,7 @@ services:
       AMPACHE_URL: http://ampache:80
       DIRECTUS_URL: http://directus:8055
       BLUESKY_PDS_URL: http://bluesky-pds:3000
+      BTCPAY_URL: http://btcpay-server:23000
     networks:
       - pnptvapp_net
     depends_on:
@@ -458,6 +459,71 @@ services:
         condition: service_healthy
       redis-pnptv:
         condition: service_healthy
+
+  # ===========================================
+  # BLOCK K - BTCPay Server (Dash Pay)
+  # Self-hosted payment processor for Dash
+  # Web UI: btcpay.pnptv.app (via NPM proxy)
+  # NOTE: Dash full node (dashd) must be configured
+  #       in BTCPay web UI after first boot.
+  # ===========================================
+
+  pg-btcpay:
+    image: postgres:16-alpine
+    container_name: pg-btcpay
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/btcpay/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: btcpayserver
+      POSTGRES_USER: btcpay
+      POSTGRES_PASSWORD: ${BTCPAY_POSTGRES_PASSWORD:-changeme_btcpay}
+    networks:
+      - pnptvapp_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U btcpay -d btcpayserver"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  btcpay-nbxplorer:
+    image: nicolasdorier/nbxplorer:2.5.7
+    container_name: btcpay-nbxplorer
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/btcpay/nbxplorer:/datadir
+    environment:
+      NBXPLORER_NETWORK: mainnet
+      NBXPLORER_CHAINS: "DASH"
+      NBXPLORER_DASHNODE_RPCURL: ${DASH_RPC_URL:-http://localhost:9998}
+      NBXPLORER_DASHNODE_RPCAUTH: ${DASH_RPC_AUTH:-user:pass}
+      NBXPLORER_POSTGRES: "Host=pg-btcpay;Database=nbxplorer;Username=btcpay;Password=${BTCPAY_POSTGRES_PASSWORD:-changeme_btcpay}"
+    networks:
+      - pnptvapp_net
+    depends_on:
+      pg-btcpay:
+        condition: service_healthy
+
+  btcpay-server:
+    image: btcpayserver/btcpayserver:latest
+    container_name: btcpay-server
+    restart: unless-stopped
+    expose:
+      - "23000"
+    volumes:
+      - ./infrastructure/data/btcpay/server:/datadir
+    environment:
+      BTCPAY_POSTGRES: "Host=pg-btcpay;Database=btcpayserver;Username=btcpay;Password=${BTCPAY_POSTGRES_PASSWORD:-changeme_btcpay}"
+      BTCPAY_NETWORK: mainnet
+      BTCPAY_ROOTPATH: /
+      BTCPAY_NBXPLORER_URL: http://btcpay-nbxplorer:32838
+      BTCPAY_BIND: 0.0.0.0:23000
+      BTCPAY_CHAINS: "DASH"
+    networks:
+      - pnptvapp_net
+    depends_on:
+      - pg-btcpay
+      - btcpay-nbxplorer
 
   # ===========================================
   # BLOCK I - Frontend Web App

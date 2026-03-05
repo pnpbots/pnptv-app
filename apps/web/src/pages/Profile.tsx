@@ -2487,19 +2487,24 @@ export default function Profile() {
               >
                 Message
               </button>
-              {profile.creatorStatus === "active" && isAuthenticated && (
-                <button
-                  onClick={handleSubscribe}
-                  disabled={subscribeLoading}
-                  className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
-                  style={isSubscribed
-                    ? { background: "rgba(94,209,196,0.15)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.3)" }
-                    : { background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.3)" }
-                  }
-                >
-                  {subscribeLoading ? "..." : isSubscribed ? "Subscribed" : `Subscribe $${profile.creatorPriceUsd || 15}/mo`}
-                </button>
-              )}
+              {profile.creatorStatus === "active" && isAuthenticated && (() => {
+                const isIce = profile.creatorType === "ice";
+                return (
+                  <button
+                    onClick={handleSubscribe}
+                    disabled={subscribeLoading}
+                    className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                    style={isSubscribed
+                      ? { background: "rgba(94,209,196,0.15)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.3)" }
+                      : isIce
+                        ? { background: "rgba(168,216,234,0.15)", color: "#A8D8EA", border: "1px solid rgba(168,216,234,0.4)" }
+                        : { background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.3)" }
+                    }
+                  >
+                    {subscribeLoading ? "..." : isSubscribed ? "Subscribed" : `Subscribe $${profile.creatorPriceUsd || 15}/mo`}
+                  </button>
+                );
+              })()}
             </>
           )}
         </div>
@@ -2509,7 +2514,12 @@ export default function Profile() {
       </div>
 
       {/* ── Creator Subscription Payment Modal ── */}
-      {showSubscribeModal && profile && (
+      {showSubscribeModal && profile && (() => {
+        const isIce = profile.creatorType === "ice";
+        const accentColor   = isIce ? "#A8D8EA" : "#D4007A";
+        const accentRgb     = isIce ? "168,216,234" : "212,0,122";
+        const gradientBg    = isIce ? "linear-gradient(135deg, #A8D8EA, #73B4D4)" : "linear-gradient(135deg, #D4007A, #E69138)";
+        return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}>
           <div className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}>
             {/* Header */}
@@ -2529,8 +2539,8 @@ export default function Profile() {
             </div>
 
             {/* Price info */}
-            <div className="rounded-xl p-4 flex items-center gap-3" style={{ background: "rgba(212,0,122,0.08)", border: "1px solid rgba(212,0,122,0.2)" }}>
-              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+            <div className="rounded-xl p-4 flex items-center gap-3" style={{ background: `rgba(${accentRgb},0.08)`, border: `1px solid rgba(${accentRgb},0.2)` }}>
+              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: gradientBg }}>
                 <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33" />
                 </svg>
@@ -2553,7 +2563,7 @@ export default function Profile() {
                         onClick={() => setSubscribeProvider(p)}
                         className="py-2.5 rounded-lg text-sm font-medium transition-colors border"
                         style={subscribeProvider === p
-                          ? { background: "rgba(212,0,122,0.15)", color: "#D4007A", borderColor: "rgba(212,0,122,0.4)" }
+                          ? { background: `rgba(${accentRgb},0.15)`, color: accentColor, borderColor: `rgba(${accentRgb},0.4)` }
                           : { background: "rgba(255,255,255,0.04)", color: "#8E8E93", borderColor: "rgba(255,255,255,0.08)" }
                         }
                       >
@@ -2592,7 +2602,7 @@ export default function Profile() {
                   onClick={handleSubscribePayment}
                   disabled={subscribePaymentLoading}
                   className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-50"
-                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                  style={{ background: gradientBg }}
                 >
                   {subscribePaymentLoading ? "Opening payment..." : `Pay $${profile.creatorPriceUsd || 15}/mo`}
                 </button>
@@ -2601,8 +2611,8 @@ export default function Profile() {
               <>
                 {/* Awaiting payment state */}
                 <div className="flex flex-col items-center gap-3 py-2">
-                  <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: "rgba(212,0,122,0.12)", border: "1px solid rgba(212,0,122,0.25)" }}>
-                    <svg className="w-6 h-6 animate-spin" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24">
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: `rgba(${accentRgb},0.12)`, border: `1px solid rgba(${accentRgb},0.25)` }}>
+                    <svg className="w-6 h-6 animate-spin" style={{ color: accentColor }} fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
@@ -2636,7 +2646,8 @@ export default function Profile() {
             )}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ── Identity & Connections (own profile only) ── */}
       {isOwnProfile && (
@@ -2894,7 +2905,7 @@ export default function Profile() {
                   }}
                   disabled={subscribeLoading}
                   className="inline-flex items-center justify-center px-6 py-2.5 rounded-lg text-sm font-semibold text-white transition-all duration-150 active:scale-[0.97] disabled:opacity-50 min-h-[44px]"
-                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                  style={{ background: profile.creatorType === "ice" ? "linear-gradient(135deg, #A8D8EA, #73B4D4)" : "linear-gradient(135deg, #D4007A, #E69138)" }}
                   aria-label={`Subscribe for $${profile.creatorPriceUsd || 15}/mo`}
                 >
                   {subscribeLoading ? "Processing..." : `Subscribe $${profile.creatorPriceUsd || 15}/mo`}
