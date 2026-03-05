@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 
 const DISMISS_KEY = "pwa_install_dismissed_until";
-const DISMISS_DAYS = 3;
+const DISMISS_HOURS = 6; // Re-show after 6 hours if dismissed
 
 function isStandalone(): boolean {
   return (
@@ -31,7 +31,7 @@ function isDismissed(): boolean {
 function dismiss() {
   localStorage.setItem(
     DISMISS_KEY,
-    String(Date.now() + DISMISS_DAYS * 24 * 60 * 60 * 1000)
+    String(Date.now() + DISMISS_HOURS * 60 * 60 * 1000)
   );
 }
 
@@ -40,26 +40,36 @@ export function PWAInstallBanner() {
   const [isIOSDevice, setIsIOSDevice] = useState(false);
   const [showIOSSteps, setShowIOSSteps] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInterstitial, setShowInterstitial] = useState(false);
 
   useEffect(() => {
-    if (isStandalone() || isDismissed() || isTelegramWebApp()) return;
+    if (isStandalone() || isTelegramWebApp()) return;
 
     const ios = isIOS();
     setIsIOSDevice(ios);
 
     if (ios) {
-      setShow(true);
+      if (!isDismissed()) setShow(true);
       return;
     }
 
     const handler = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      setShow(true);
+      if (!isDismissed()) setShow(true);
     };
 
     window.addEventListener("beforeinstallprompt", handler);
-    return () => window.removeEventListener("beforeinstallprompt", handler);
+
+    // Full-screen interstitial after 4s for any browser visitor
+    const timer = setTimeout(() => {
+      if (!isDismissed() && !isStandalone()) setShowInterstitial(true);
+    }, 4000);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handler);
+      clearTimeout(timer);
+    };
   }, []);
 
   const handleInstall = useCallback(async () => {
@@ -72,6 +82,7 @@ export function PWAInstallBanner() {
     const { outcome } = await deferredPrompt.userChoice;
     if (outcome === "accepted") {
       setShow(false);
+      setShowInterstitial(false);
     }
     setDeferredPrompt(null);
   }, [deferredPrompt, isIOSDevice]);
@@ -79,8 +90,59 @@ export function PWAInstallBanner() {
   const handleDismiss = useCallback(() => {
     dismiss();
     setShow(false);
+    setShowInterstitial(false);
     setShowIOSSteps(false);
   }, []);
+
+  // Full-screen interstitial shown after 4s
+  if (showInterstitial && !isStandalone()) {
+    return (
+      <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black/90 backdrop-blur-md p-6">
+        <div className="w-full max-w-sm space-y-6 text-center">
+          <img src="/icon-192.png" alt="PNPtv" className="w-20 h-20 rounded-2xl mx-auto shadow-2xl" />
+          <div>
+            <h2 className="text-2xl font-bold text-white mb-2">Install PNPtv!</h2>
+            <p className="text-pnp-textSecondary text-sm leading-relaxed">
+              Get the full experience — faster access, push notifications, and no browser chrome. Install it on your home screen in seconds.
+            </p>
+          </div>
+
+          <div className="space-y-2 text-left">
+            {[
+              "Instant access from your home screen",
+              "Push notifications for messages and updates",
+              "Full-screen immersive experience",
+              "Works offline for key features",
+            ].map((f) => (
+              <div key={f} className="flex items-center gap-2 text-sm text-white/80">
+                <span className="text-green-400 font-bold text-base">+</span> {f}
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            <button
+              onClick={
+                isIOSDevice
+                  ? () => { setShowInterstitial(false); setShowIOSSteps(true); }
+                  : handleInstall
+              }
+              className="w-full py-3.5 rounded-2xl text-base font-bold text-white shadow-lg transition-opacity hover:opacity-90 active:opacity-80"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              {isIOSDevice ? "How to Install on iPhone" : "Install App — It's Free"}
+            </button>
+            <button
+              onClick={handleDismiss}
+              className="w-full py-2.5 text-sm text-pnp-textSecondary hover:text-white transition-colors"
+            >
+              Continue in browser (not recommended)
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!show) return null;
 
@@ -92,7 +154,7 @@ export function PWAInstallBanner() {
             <div className="flex items-center gap-3">
               <img src="/icon-192.png" alt="PNPtv" className="w-10 h-10 rounded-xl" />
               <div>
-                <p className="font-bold text-white text-sm">Instalar PNPtv!</p>
+                <p className="font-bold text-white text-sm">Install PNPtv!</p>
                 <p className="text-xs text-pnp-textSecondary">app.pnptv.app</p>
               </div>
             </div>
@@ -104,39 +166,29 @@ export function PWAInstallBanner() {
           </div>
 
           <p className="text-sm text-pnp-textSecondary">
-            Sigue estos pasos para agregar la app a tu pantalla de inicio:
+            Add to your home screen for the full app experience:
           </p>
 
           <div className="space-y-3">
-            <div className="flex items-start gap-3">
-              <span className="w-6 h-6 rounded-full bg-[#D4007A] text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">1</span>
-              <p className="text-sm text-white">
-                Toca el botón <span className="font-bold">Compartir</span>{" "}
-                <svg className="inline w-4 h-4 text-[#007AFF]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                </svg>{" "}
-                en la barra inferior de Safari
-              </p>
-            </div>
-            <div className="flex items-start gap-3">
-              <span className="w-6 h-6 rounded-full bg-[#D4007A] text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">2</span>
-              <p className="text-sm text-white">
-                Desplázate y toca <span className="font-bold">"Agregar a pantalla de inicio"</span>
-              </p>
-            </div>
-            <div className="flex items-start gap-3">
-              <span className="w-6 h-6 rounded-full bg-[#D4007A] text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">3</span>
-              <p className="text-sm text-white">
-                Toca <span className="font-bold">"Agregar"</span> en la esquina superior derecha
-              </p>
-            </div>
+            {[
+              <>Tap the <span className="font-bold">Share</span> button in Safari's bottom bar</>,
+              <>Scroll down and tap <span className="font-bold">"Add to Home Screen"</span></>,
+              <>Tap <span className="font-bold">"Add"</span> in the top-right corner</>,
+            ].map((step, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <span className="w-6 h-6 rounded-full bg-[#D4007A] text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+                  {i + 1}
+                </span>
+                <p className="text-sm text-white">{step}</p>
+              </div>
+            ))}
           </div>
 
           <button
             onClick={handleDismiss}
             className="w-full py-2 text-sm text-pnp-textSecondary hover:text-white transition-colors"
           >
-            Cerrar
+            Close
           </button>
         </div>
       </div>
@@ -149,9 +201,9 @@ export function PWAInstallBanner() {
         <div className="flex items-center gap-3">
           <img src="/icon-192.png" alt="PNPtv" className="w-12 h-12 rounded-xl flex-shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="font-bold text-white text-sm leading-tight">Instala PNPtv!</p>
+            <p className="font-bold text-white text-sm leading-tight">Install PNPtv!</p>
             <p className="text-xs text-pnp-textSecondary mt-0.5 leading-snug">
-              Acceso rápido, notificaciones y experiencia de app completa
+              Push notifications, faster access, full-screen experience
             </p>
           </div>
           <button onClick={handleDismiss} className="text-pnp-textSecondary hover:text-white p-1 flex-shrink-0">
@@ -167,13 +219,13 @@ export function PWAInstallBanner() {
             className="flex-1 py-2 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-90 active:opacity-80"
             style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
           >
-            {isIOSDevice ? "Cómo instalar" : "Instalar app"}
+            {isIOSDevice ? "How to Install" : "Install App"}
           </button>
           <button
             onClick={handleDismiss}
             className="px-4 py-2 rounded-xl text-sm text-pnp-textSecondary hover:text-white bg-pnp-surface hover:bg-pnp-border transition-colors"
           >
-            Ahora no
+            Not now
           </button>
         </div>
       </div>
