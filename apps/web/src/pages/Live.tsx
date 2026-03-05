@@ -1,15 +1,17 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { LivePlayer } from "@/components/LivePlayer";
 import { Card, Badge, Skeleton, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
+import { useLiveSocket } from "@/hooks/useLiveSocket";
 import {
   getLiveStreams,
   getAllPerformers,
   getRecentTips,
   sendTip,
+  getRtmpKey,
   TIP_AMOUNTS,
   type LiveStream,
   type FeaturedPerformer,
@@ -23,7 +25,8 @@ function isValidPhotoUrl(photo: string | null | undefined): photo is string {
 }
 
 export default function Live() {
-  const { isAuthenticated, login } = useAuth();
+  const { isAuthenticated, login, user } = useAuth();
+  const isCreator = isAuthenticated && (user?.role === "admin" || user?.role === "superadmin" || user?.role === "creator");
   const { showTutorial, dismissTutorial } = useTutorial("live");
 
   const [streams, setStreams] = useState<LiveStream[]>([]);
@@ -47,6 +50,19 @@ export default function Live() {
   // Booking
   const [showBooking, setShowBooking] = useState(false);
   const [bookingLoaded, setBookingLoaded] = useState(false);
+
+  // Go Live
+  const [showGoLive, setShowGoLive] = useState(false);
+  const [rtmpInfo, setRtmpInfo] = useState<{ rtmpUrl: string; streamKey: string } | null>(null);
+  const [goLiveLoading, setGoLiveLoading] = useState(false);
+  const [showStreamKey, setShowStreamKey] = useState(false);
+
+  // Live chat
+  const [chatInput, setChatInput] = useState("");
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Socket
+  const { messages: chatMessages, viewerCount, isConnected: chatConnected, sendMessage, latestTip } = useLiveSocket(activeStream?.id ?? null);
 
   // Load streams
   useEffect(() => {
@@ -91,6 +107,20 @@ export default function Live() {
     return () => clearInterval(interval);
   }, [loadTips]);
 
+  // Push socket-confirmed tips to the front of recentTips
+  useEffect(() => {
+    if (!latestTip) return;
+    setRecentTips((prev) => {
+      const next = [latestTip as unknown as RecentTip, ...prev.filter((t) => t.id !== (latestTip as unknown as RecentTip).id)].slice(0, 5);
+      return next;
+    });
+  }, [latestTip]);
+
+  // Auto-scroll chat to bottom on new messages
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
   const handleTip = async (amount: number) => {
     if (!isAuthenticated) {
       login();
@@ -129,6 +159,21 @@ export default function Live() {
     }
   };
 
+  const handleGoLive = async () => {
+    setGoLiveLoading(true);
+    try {
+      const result = await getRtmpKey();
+      if (result.success && result.rtmpUrl && result.streamKey) {
+        setRtmpInfo({ rtmpUrl: result.rtmpUrl, streamKey: result.streamKey });
+        setShowGoLive(true);
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setGoLiveLoading(false);
+    }
+  };
+
   const formatTimeAgo = (dateStr: string) => {
     const diff = Date.now() - new Date(dateStr).getTime();
     const mins = Math.floor(diff / 60000);
@@ -154,7 +199,19 @@ export default function Live() {
             Watch live broadcasts and tip performers
           </p>
         </div>
-        <Badge variant="error">Live</Badge>
+        <div className="flex items-center gap-2">
+          {isCreator && (
+            <button
+              onClick={handleGoLive}
+              disabled={goLiveLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-gradient disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+            >
+              <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+              {goLiveLoading ? "Loading..." : "Go Live"}
+            </button>
+          )}
+          <Badge variant="error">Live</Badge>
+        </div>
       </div>
 
       {/* Main Player */}
@@ -163,11 +220,19 @@ export default function Live() {
       ) : activeStream ? (
         <div className="mb-4">
           <LivePlayer src={activeStream.hlsUrl} title={activeStream.name} />
-          <div className="flex items-center gap-2 mt-2">
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
             {activeStream.isLive && (
               <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full dot-gradient animate-pulse" />
                 <span className="text-xs font-medium text-gradient">LIVE</span>
+              </span>
+            )}
+            {viewerCount > 0 && (
+              <span className="flex items-center gap-1 text-xs text-pnp-textSecondary">
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
+                </svg>
+                {viewerCount} watching
               </span>
             )}
             <span className="text-sm text-pnp-textPrimary font-medium">{activeStream.name}</span>
@@ -283,6 +348,69 @@ export default function Live() {
           </p>
         )}
       </Card>
+
+      {/* Live Chat */}
+      {activeStream?.isLive && (
+        <Card className="mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-pnp-textPrimary">Live Chat</h3>
+            {chatConnected && (
+              <span className="flex items-center gap-1 text-xs text-pnp-textSecondary">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                Live
+              </span>
+            )}
+          </div>
+
+          <div className="h-40 overflow-y-auto space-y-1.5 mb-3 pr-1" style={{ scrollbarWidth: "thin" }}>
+            {chatMessages.length === 0 ? (
+              <p className="text-xs text-pnp-textSecondary text-center py-4">Be the first to say hi!</p>
+            ) : (
+              chatMessages.map((msg) => (
+                <div key={msg.id} className="text-xs">
+                  <span className="font-medium text-gradient">@{msg.username}</span>
+                  <span className="text-pnp-textSecondary mx-1">·</span>
+                  <span className="text-pnp-textPrimary">{msg.content}</span>
+                </div>
+              ))
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          {isAuthenticated ? (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Say something..."
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && chatInput.trim()) {
+                    sendMessage(chatInput.trim());
+                    setChatInput("");
+                  }
+                }}
+                maxLength={500}
+                className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-2 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+              />
+              <button
+                onClick={() => {
+                  if (chatInput.trim()) {
+                    sendMessage(chatInput.trim());
+                    setChatInput("");
+                  }
+                }}
+                className="px-3 py-2 rounded-lg btn-gradient text-white text-sm font-medium"
+                aria-label="Send chat message"
+              >
+                Send
+              </button>
+            </div>
+          ) : (
+            <p className="text-xs text-pnp-textSecondary">Log in to chat</p>
+          )}
+        </Card>
+      )}
 
       {/* Recent Tips Ticker */}
       {recentTips.length > 0 && (
@@ -483,6 +611,89 @@ export default function Live() {
           </div>
         )}
       </div>
+      {/* Go Live Modal */}
+      {showGoLive && rtmpInfo && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setShowGoLive(false)}
+        >
+          <div
+            className="w-full max-w-lg bg-pnp-background border border-pnp-border rounded-t-2xl p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-bold text-pnp-textPrimary">Go Live</h2>
+              <button
+                onClick={() => setShowGoLive(false)}
+                className="text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+                aria-label="Close Go Live modal"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-sm text-pnp-textSecondary mb-4">
+              Use these credentials in OBS, Streamlabs, or any RTMP broadcaster.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-pnp-textSecondary uppercase tracking-wider block mb-1">
+                  RTMP Server
+                </label>
+                <div className="flex items-center gap-2 bg-pnp-surface border border-pnp-border rounded-lg px-3 py-2">
+                  <code className="text-sm text-pnp-textPrimary flex-1 break-all">{rtmpInfo.rtmpUrl}</code>
+                  <button
+                    onClick={() => navigator.clipboard?.writeText(rtmpInfo.rtmpUrl)}
+                    className="text-pnp-textSecondary hover:text-pnp-accent flex-shrink-0 transition-colors"
+                    aria-label="Copy RTMP server URL"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-pnp-textSecondary uppercase tracking-wider block mb-1">
+                  Stream Key
+                </label>
+                <div className="flex items-center gap-2 bg-pnp-surface border border-pnp-border rounded-lg px-3 py-2">
+                  <code className="text-sm text-pnp-textPrimary flex-1">
+                    {showStreamKey ? rtmpInfo.streamKey : "•".repeat(Math.min(rtmpInfo.streamKey.length, 20))}
+                  </code>
+                  <button
+                    onClick={() => setShowStreamKey(!showStreamKey)}
+                    className="text-pnp-textSecondary hover:text-pnp-accent flex-shrink-0 transition-colors"
+                    aria-label={showStreamKey ? "Hide stream key" : "Show stream key"}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      {showStreamKey ? (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 4.411m0 0L21 21" />
+                      ) : (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      )}
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => navigator.clipboard?.writeText(rtmpInfo.streamKey)}
+                    className="text-pnp-textSecondary hover:text-pnp-accent flex-shrink-0 transition-colors"
+                    aria-label="Copy stream key"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  </button>
+                </div>
+                <p className="text-xs text-pnp-error mt-1">Keep this private. Never share your stream key.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

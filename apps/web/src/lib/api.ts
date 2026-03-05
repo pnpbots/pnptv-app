@@ -311,6 +311,15 @@ export function getRecentTips(
   return request(`/api/proxy/live/tips/recent?limit=${limit}`);
 }
 
+export function getRtmpKey(): Promise<{
+  success: boolean;
+  rtmpUrl?: string;
+  streamKey?: string;
+  error?: string;
+}> {
+  return request("/api/webapp/live/rtmp-key");
+}
+
 // Profile
 export interface UserProfile {
   id: string;
@@ -1235,6 +1244,22 @@ export function createPayment(
   });
 }
 
+export function initiateCreatorSubscriptionPayment(
+  creatorId: string,
+  provider: "epayco" | "daimo",
+  email: string
+): Promise<{
+  success: boolean;
+  paymentUrl: string;
+  paymentId: string;
+  error?: string;
+}> {
+  return request("/api/webapp/payments/create", {
+    method: "POST",
+    body: { planId: "creator_monthly", provider, email, creatorId },
+  });
+}
+
 export function getPaymentStatus(
   paymentId: string
 ): Promise<{
@@ -1521,6 +1546,7 @@ export interface CreatorDashboard {
     call_scheduled_at: string | null;
     created_at: string;
   } | null;
+  walletAddress?: string | null;
 }
 
 export interface CreatorSubscriptionStatus {
@@ -1590,6 +1616,32 @@ export function getCreatorDashboard(): Promise<{
   return request("/api/webapp/creator/dashboard");
 }
 
+export function getCreatorWallet(): Promise<{
+  success: boolean;
+  address: string | null;
+  verified: boolean;
+}> {
+  return request("/api/webapp/creator/wallet");
+}
+
+export function saveCreatorWallet(address: string): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  return request("/api/webapp/creator/wallet", { method: "POST", body: { address } });
+}
+
+export function changeCreatorTier(
+  tier: "ice" | "crystal" | "diamond"
+): Promise<{
+  success: boolean;
+  tier: string;
+  price: number;
+  error?: string;
+}> {
+  return request("/api/webapp/creator/change-tier", { method: "POST", body: { tier } });
+}
+
 export function getCreatorSubscriptionStatus(
   creatorId: string
 ): Promise<{ success: boolean } & CreatorSubscriptionStatus> {
@@ -1644,6 +1696,51 @@ export function rejectCreatorApplication(
     method: "POST",
     body: { notes },
   });
+}
+
+export interface ActiveCreator {
+  id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  photo_url: string | null;
+  creator_type: string | null;
+  creator_status: "active" | "suspended";
+  creator_strikes: number;
+  creator_subscriber_count: number;
+  creator_price_usd: string | null;
+}
+
+export interface CreatorStrike {
+  id: string;
+  creator_id: string;
+  strike_number: number;
+  reason: string;
+  issued_by: string;
+  created_at: string;
+}
+
+export function listActiveCreators(): Promise<{
+  success: boolean;
+  creators: ActiveCreator[];
+}> {
+  return request("/api/webapp/creator/active");
+}
+
+export function issueCreatorStrike(
+  creatorId: string,
+  reason: string
+): Promise<{ success: boolean; strikeCount: number; suspended: boolean }> {
+  return request(`/api/webapp/creator/${creatorId}/strike`, {
+    method: "POST",
+    body: { reason },
+  });
+}
+
+export function getCreatorStrikes(
+  creatorId: string
+): Promise<{ success: boolean; strikes: CreatorStrike[] }> {
+  return request(`/api/webapp/creator/${creatorId}/strikes`);
 }
 
 // ============================================================================

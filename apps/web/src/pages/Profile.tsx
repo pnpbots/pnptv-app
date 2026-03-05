@@ -27,6 +27,7 @@ import {
   getCreatorSubscriptionStatus,
   subscribeToCreator,
   unsubscribeFromCreator,
+  initiateCreatorSubscriptionPayment,
   getCreatorEligibility,
   activateCreator,
   searchUsers,
@@ -72,26 +73,122 @@ function formatDate(dateStr: string): string {
 function PostCard({
   post,
   isOwn,
+  isOwnProfile,
+  isSubscribed,
+  creatorPriceUsd,
   onLike,
   onDelete,
   onAuthorTap,
+  onSubscribeCta,
 }: {
   post: SocialPostItem;
   isOwn: boolean;
+  isOwnProfile: boolean;
+  isSubscribed: boolean;
+  creatorPriceUsd?: number | null;
   onLike: (id: number) => void;
   onDelete: (id: number) => void;
   onAuthorTap?: (userId: string) => void;
+  onSubscribeCta?: () => void;
 }) {
   const [deleting, setDeleting] = useState(false);
   const photoUrl = resolvePhotoUrl(post.author_photo);
 
+  // Determine if this post should be locked behind the exclusive gate.
+  // The backend strips content/media_url for locked posts and sets exclusive_status.
+  // We lock the UI overlay when: post is exclusive, not the profile owner, not subscribed,
+  // and the backend confirmed locked status (or is_exclusive is true but status is absent).
+  const isExclusiveLocked =
+    post.is_exclusive === true &&
+    !isOwnProfile &&
+    !isSubscribed &&
+    (post.exclusive_status === "locked" || post.exclusive_status === undefined);
+
+  // Teaser: exclusive but backend allowed a preview (every 5th post for prime members)
+  const isExclusiveTeaser =
+    post.is_exclusive === true &&
+    !isOwnProfile &&
+    !isSubscribed &&
+    post.exclusive_status === "teaser";
+
   return (
-    <div className="glass-card-sm p-4">
+    <div className="relative glass-card-sm p-4 transition-all duration-300">
+      {/* ── Exclusive lock overlay (non-owner, non-subscriber) ── */}
+      {isExclusiveLocked && (
+        <div
+          className="absolute inset-0 z-10 rounded-xl flex flex-col items-center justify-center gap-2 px-6 text-center"
+          style={{
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+            background: "rgba(0,0,0,0.62)",
+            borderRadius: "inherit",
+          }}
+          aria-label="Exclusive content locked"
+        >
+          {/* Lock icon with gradient */}
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+          </div>
+          <p className="text-white font-bold text-sm leading-tight">Exclusive Content</p>
+          {creatorPriceUsd != null && (
+            <p className="text-xs leading-snug" style={{ color: "rgba(255,255,255,0.6)" }}>
+              Subscribe for ${creatorPriceUsd}/mo to unlock
+            </p>
+          )}
+          <button
+            onClick={onSubscribeCta}
+            className="mt-1 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all duration-150 active:scale-[0.97] min-h-[44px]"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            aria-label="Subscribe to unlock exclusive content"
+          >
+            Subscribe
+          </button>
+        </div>
+      )}
+
+      {/* ── Teaser overlay: blurred but slightly visible ── */}
+      {isExclusiveTeaser && (
+        <div
+          className="absolute inset-0 z-10 rounded-xl flex flex-col items-center justify-center gap-2 px-6 text-center"
+          style={{
+            backdropFilter: "blur(6px)",
+            WebkitBackdropFilter: "blur(6px)",
+            background: "rgba(0,0,0,0.45)",
+            borderRadius: "inherit",
+          }}
+          aria-label="Exclusive content preview"
+        >
+          <div
+            className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+          </div>
+          <p className="text-white font-semibold text-xs">Exclusive — Preview Only</p>
+          <button
+            onClick={onSubscribeCta}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all duration-150 active:scale-[0.97] min-h-[36px]"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            aria-label="Subscribe to see full exclusive content"
+          >
+            Subscribe to unlock
+          </button>
+        </div>
+      )}
+
       <div className="flex gap-3">
         {/* Avatar */}
         <button
           onClick={() => onAuthorTap?.(post.author_id)}
           className="flex-shrink-0"
+          aria-label={`View ${post.author_first_name || post.author_username || "user"}'s profile`}
         >
           {photoUrl ? (
             <img
@@ -129,6 +226,18 @@ function PostCard({
             <span className="text-xs" style={{ color: "#8E8E93" }}>
               &middot; {timeAgo(post.created_at)}
             </span>
+            {/* Exclusive badge — visible to the creator on their own profile */}
+            {post.is_exclusive && isOwnProfile && (
+              <span
+                className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
+                style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.3)" }}
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+                Exclusive
+              </span>
+            )}
           </div>
 
           <p className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed">
@@ -163,6 +272,7 @@ function PostCard({
               onClick={() => onLike(post.id)}
               className="flex items-center gap-1.5 text-xs hover:text-pink-400 transition-colors"
               style={post.liked_by_me ? { color: "#D4007A" } : undefined}
+              aria-label={post.liked_by_me ? "Unlike post" : "Like post"}
             >
               <svg className="w-4 h-4" fill={post.liked_by_me ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
@@ -171,8 +281,8 @@ function PostCard({
             </button>
 
             {/* Replies */}
-            <span className="flex items-center gap-1.5 text-xs">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <span className="flex items-center gap-1.5 text-xs" aria-label={`${post.replies_count} replies`}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.273 5.48.432.447.74 1.04.586 1.641a4.483 4.483 0 01-.923 1.785A5.969 5.969 0 006 21c1.282 0 2.47-.402 3.445-1.087.81.22 1.668.337 2.555.337z" />
               </svg>
               {post.replies_count > 0 && <span>{post.replies_count}</span>}
@@ -188,6 +298,7 @@ function PostCard({
                 disabled={deleting}
                 className="ml-auto text-xs hover:text-red-400 transition-colors"
                 title="Delete post"
+                aria-label="Delete post"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
@@ -1510,7 +1621,7 @@ export default function Profile() {
   const [error, setError] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"posts" | "likes">("posts");
+  const [activeTab, setActiveTab] = useState<"posts" | "likes" | "exclusive">("posts");
   const [wofConsent, setWofConsent] = useState(false);
   const [wofConsentSaving, setWofConsentSaving] = useState(false);
   const [contentDisclaimer, setContentDisclaimer] = useState(false);
@@ -1527,8 +1638,17 @@ export default function Profile() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [subscribeLoading, setSubscribeLoading] = useState(false);
   const [subscribeError, setSubscribeError] = useState<string | null>(null);
+  // Payment-gated subscribe modal state
+  const [showSubscribeModal, setShowSubscribeModal] = useState(false);
+  const [subscribeEmail, setSubscribeEmail] = useState("");
+  const [subscribeEmailError, setSubscribeEmailError] = useState<string | null>(null);
+  const [subscribeProvider, setSubscribeProvider] = useState<"epayco" | "daimo">("daimo");
+  const [subscribePaymentLoading, setSubscribePaymentLoading] = useState(false);
+  const [subscribePaymentId, setSubscribePaymentId] = useState<string | null>(null);
+  const [subscribeAwaitingPayment, setSubscribeAwaitingPayment] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const subscribeButtonRef = useRef<HTMLDivElement>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -1746,22 +1866,85 @@ export default function Profile() {
     setFollowLoading(false);
   };
 
-  const handleSubscribe = async () => {
+  const handleSubscribe = () => {
+    if (!profile) return;
+    if (isSubscribed) {
+      handleUnsubscribe();
+      return;
+    }
+    const userTier = (user?.tier || "").toLowerCase();
+    const userRole = (user?.role || "").toLowerCase();
+    const isAdminRole = userRole === "admin" || userRole === "superadmin";
+    if (userTier !== "prime" && !isAdminRole) {
+      setSubscribeError("PRIME subscription required to subscribe to creators");
+      setTimeout(() => setSubscribeError(null), 4000);
+      return;
+    }
+    setSubscribeEmail("");
+    setSubscribeEmailError(null);
+    setSubscribeError(null);
+    setSubscribeAwaitingPayment(false);
+    setSubscribePaymentId(null);
+    setShowSubscribeModal(true);
+  };
+
+  const handleUnsubscribe = async () => {
     if (subscribeLoading || !profile) return;
     setSubscribeLoading(true);
     setSubscribeError(null);
     try {
-      if (isSubscribed) {
-        await unsubscribeFromCreator(profile.id || paramUserId!);
-        setIsSubscribed(false);
-      } else {
-        await subscribeToCreator(profile.id || paramUserId!);
-        setIsSubscribed(true);
-      }
+      await unsubscribeFromCreator(profile.id || paramUserId!);
+      setIsSubscribed(false);
     } catch (err) {
-      setSubscribeError(err instanceof Error ? err.message : "Failed");
+      setSubscribeError(err instanceof Error ? err.message : "Failed to unsubscribe");
     }
     setSubscribeLoading(false);
+  };
+
+  const handleSubscribePayment = async () => {
+    if (!profile || subscribePaymentLoading) return;
+    const trimmed = subscribeEmail.trim();
+    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) || trimmed.length > 254) {
+      setSubscribeEmailError("Please enter a valid email address");
+      return;
+    }
+    setSubscribeEmailError(null);
+    setSubscribePaymentLoading(true);
+    setSubscribeError(null);
+    try {
+      const creatorId = profile.id || paramUserId!;
+      const result = await initiateCreatorSubscriptionPayment(creatorId, subscribeProvider, trimmed);
+      if (result.success && result.paymentUrl) {
+        window.open(result.paymentUrl, "_blank", "noopener,noreferrer");
+        setSubscribePaymentId(result.paymentId);
+        setSubscribeAwaitingPayment(true);
+      } else {
+        setSubscribeError(result.error || "Failed to create payment. Please try again.");
+      }
+    } catch (err) {
+      setSubscribeError(err instanceof Error ? err.message : "Payment error. Please try again.");
+    }
+    setSubscribePaymentLoading(false);
+  };
+
+  const handleCheckSubscriptionStatus = async () => {
+    if (!profile) return;
+    try {
+      const creatorId = profile.id || paramUserId!;
+      const subRes = await getCreatorSubscriptionStatus(creatorId);
+      if (subRes.success && subRes.subscribed) {
+        setIsSubscribed(true);
+        setShowSubscribeModal(false);
+        setSubscribeAwaitingPayment(false);
+        setSubscribePaymentId(null);
+      } else {
+        setSubscribeError("Payment not confirmed yet. Please wait a moment and try again.");
+        setTimeout(() => setSubscribeError(null), 4000);
+      }
+    } catch {
+      setSubscribeError("Could not verify subscription status.");
+      setTimeout(() => setSubscribeError(null), 3000);
+    }
   };
 
   const handleAuthorTap = (authorId: string) => {
@@ -1771,6 +1954,15 @@ export default function Profile() {
       navigate(`/profile/${authorId}`);
     }
   };
+
+  // Scroll to the subscribe button or trigger subscribe flow from the exclusive overlay CTA
+  const handleSubscribeCta = useCallback(() => {
+    if (subscribeButtonRef.current) {
+      subscribeButtonRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    // If the user is on the exclusive tab, switch to posts tab so they can see the subscribe button context
+    setActiveTab("posts");
+  }, []);
 
   // ── Not authenticated + no param → sign in prompt ──────────────────────────
 
@@ -2076,9 +2268,34 @@ export default function Profile() {
                       Performer
                     </span>
                   )}
-                  {profile.creatorStatus === "active" && (
-                    <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>
-                      Creator
+                  {profile.creatorStatus === "active" && (() => {
+                    const tierMap: Record<string, { emoji: string; label: string; color: string }> = {
+                      ice:     { emoji: "❄️", label: "Ice Creator",     color: "#A8D8EA" },
+                      crystal: { emoji: "💎", label: "Crystal Creator", color: "#5ED1C4" },
+                      diamond: { emoji: "💎", label: "Diamond Creator", color: "#D4AF37" },
+                    };
+                    const tier = tierMap[profile.creatorType ?? ""];
+                    const badgeColor  = tier ? tier.color  : "#D4007A";
+                    const badgeEmoji  = tier ? tier.emoji  : "⭐";
+                    const badgeLabel  = tier ? tier.label  : "Creator";
+                    // Convert hex to rgb for rgba() — only the three tiers + fallback pink need this
+                    const hexToRgb = (hex: string) => {
+                      const r = parseInt(hex.slice(1, 3), 16);
+                      const g = parseInt(hex.slice(3, 5), 16);
+                      const b = parseInt(hex.slice(5, 7), 16);
+                      return `${r},${g},${b}`;
+                    };
+                    const rgb = hexToRgb(badgeColor);
+                    return (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: `rgba(${rgb},0.15)`, color: badgeColor, border: `1px solid rgba(${rgb},0.3)` }}>
+                        <span aria-hidden="true">{badgeEmoji}</span>
+                        {badgeLabel}
+                      </span>
+                    );
+                  })()}
+                  {!isOwnProfile && profile.creatorStatus === "active" && profile.creatorPriceUsd != null && (
+                    <span className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
+                      &middot; ${profile.creatorPriceUsd}/mo
                     </span>
                   )}
                 </>
@@ -2122,6 +2339,18 @@ export default function Profile() {
                   <span className="ml-1" style={{ color: "#8E8E93" }}>Subscribers</span>
                 </span>
               )}
+              {profile.creatorStatus === "active" && (() => {
+                const exclusiveCount = posts.filter(p => p.is_exclusive).length;
+                return exclusiveCount > 0 ? (
+                  <span className="text-sm flex items-center gap-1">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true" style={{ color: "#D4007A" }}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                    </svg>
+                    <strong className="text-white">{exclusiveCount}</strong>
+                    <span style={{ color: "#8E8E93" }}>Exclusive</span>
+                  </span>
+                ) : null;
+              })()}
               {isPerformer && profile.performerData!.averageRating > 0 && (
                 <span className="text-sm flex items-center gap-1" style={{ color: "#5ED1C4" }}>
                   <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -2187,7 +2416,7 @@ export default function Profile() {
         )}
 
         {/* Action buttons */}
-        <div className="flex gap-3 mt-4">
+        <div className="flex gap-3 mt-4" ref={subscribeButtonRef}>
           {isOwnProfile ? (
             <>
               <button
@@ -2261,6 +2490,136 @@ export default function Profile() {
         )}
       </div>
 
+      {/* ── Creator Subscription Payment Modal ── */}
+      {showSubscribeModal && profile && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}>
+          <div className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}>
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-white">
+                Subscribe to {profile.firstName || profile.username || "Creator"}
+              </h2>
+              <button
+                onClick={() => { setShowSubscribeModal(false); setSubscribeAwaitingPayment(false); setSubscribePaymentId(null); setSubscribeError(null); }}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+                aria-label="Close"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Price info */}
+            <div className="rounded-xl p-4 flex items-center gap-3" style={{ background: "rgba(212,0,122,0.08)", border: "1px solid rgba(212,0,122,0.2)" }}>
+              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-white">${profile.creatorPriceUsd || 15}/month</p>
+                <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>Exclusive creator content access</p>
+              </div>
+            </div>
+
+            {!subscribeAwaitingPayment ? (
+              <>
+                {/* Provider selector */}
+                <div>
+                  <p className="text-xs font-medium mb-2" style={{ color: "#8E8E93" }}>Payment method</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(["daimo", "epayco"] as const).map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => setSubscribeProvider(p)}
+                        className="py-2.5 rounded-lg text-sm font-medium transition-colors border"
+                        style={subscribeProvider === p
+                          ? { background: "rgba(212,0,122,0.15)", color: "#D4007A", borderColor: "rgba(212,0,122,0.4)" }
+                          : { background: "rgba(255,255,255,0.04)", color: "#8E8E93", borderColor: "rgba(255,255,255,0.08)" }
+                        }
+                      >
+                        {p === "daimo" ? "Crypto (USDC)" : "ePayco (Card)"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Email input */}
+                <div>
+                  <label className="text-xs font-medium block mb-1.5" style={{ color: "#8E8E93" }}>Email for receipt</label>
+                  <input
+                    type="email"
+                    value={subscribeEmail}
+                    onChange={(e) => { setSubscribeEmail(e.target.value); setSubscribeEmailError(null); }}
+                    placeholder="you@example.com"
+                    className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none transition-colors"
+                    style={{
+                      background: "rgba(255,255,255,0.06)",
+                      border: subscribeEmailError ? "1px solid #FF453A" : "1px solid rgba(255,255,255,0.1)",
+                    }}
+                    autoComplete="email"
+                    inputMode="email"
+                  />
+                  {subscribeEmailError && (
+                    <p className="text-xs mt-1" style={{ color: "#FF453A" }}>{subscribeEmailError}</p>
+                  )}
+                </div>
+
+                {subscribeError && (
+                  <p className="text-xs text-center" style={{ color: "#FF453A" }}>{subscribeError}</p>
+                )}
+
+                <button
+                  onClick={handleSubscribePayment}
+                  disabled={subscribePaymentLoading}
+                  className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-50"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  {subscribePaymentLoading ? "Opening payment..." : `Pay $${profile.creatorPriceUsd || 15}/mo`}
+                </button>
+              </>
+            ) : (
+              <>
+                {/* Awaiting payment state */}
+                <div className="flex flex-col items-center gap-3 py-2">
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: "rgba(212,0,122,0.12)", border: "1px solid rgba(212,0,122,0.25)" }}>
+                    <svg className="w-6 h-6 animate-spin" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  </div>
+                  <p className="text-sm font-medium text-white text-center">Waiting for payment confirmation</p>
+                  <p className="text-xs text-center" style={{ color: "#8E8E93" }}>
+                    Complete your payment in the tab that opened. Once done, tap the button below.
+                  </p>
+                </div>
+
+                {subscribeError && (
+                  <p className="text-xs text-center" style={{ color: "#FF453A" }}>{subscribeError}</p>
+                )}
+
+                <button
+                  onClick={handleCheckSubscriptionStatus}
+                  className="w-full py-3 rounded-xl text-sm font-semibold text-white border transition-colors"
+                  style={{ background: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.12)" }}
+                >
+                  I've completed payment — Check status
+                </button>
+
+                <button
+                  onClick={() => { setSubscribeAwaitingPayment(false); setSubscribePaymentId(null); setSubscribeError(null); }}
+                  className="text-xs text-center"
+                  style={{ color: "#8E8E93" }}
+                >
+                  Go back
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Identity & Connections (own profile only) ── */}
       {isOwnProfile && (
         <IdentityConnections telegramUsername={profile.username} />
@@ -2325,24 +2684,47 @@ export default function Profile() {
       )}
 
       {/* ── Tabs ── */}
-      <div className="flex border-b border-white/10 mb-4">
+      <div className="flex border-b border-white/10 mb-4" role="tablist" aria-label="Profile sections">
         <button
+          role="tab"
+          aria-selected={activeTab === "posts"}
           onClick={() => setActiveTab("posts")}
           className={`flex-1 py-3 text-sm font-semibold text-center transition-colors ${
             activeTab === "posts"
               ? "text-white border-b-2"
-              : "text-white/50"
+              : "text-white/50 hover:text-white/70"
           }`}
           style={activeTab === "posts" ? { borderImage: `linear-gradient(to right, ${accentColor}, ${isPerformer ? "#00D4E8" : "#E69138"}) 1` } : undefined}
         >
           Posts
         </button>
+        {/* Exclusive tab — only shown on active creator profiles */}
+        {profile.creatorStatus === "active" && (
+          <button
+            role="tab"
+            aria-selected={activeTab === "exclusive"}
+            onClick={() => setActiveTab("exclusive")}
+            className={`flex-1 py-3 text-sm font-semibold text-center transition-colors flex items-center justify-center gap-1.5 ${
+              activeTab === "exclusive"
+                ? "text-white border-b-2"
+                : "text-white/50 hover:text-white/70"
+            }`}
+            style={activeTab === "exclusive" ? { borderImage: "linear-gradient(to right, #D4007A, #E69138) 1" } : undefined}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+            Exclusive
+          </button>
+        )}
         <button
+          role="tab"
+          aria-selected={activeTab === "likes"}
           onClick={() => setActiveTab("likes")}
           className={`flex-1 py-3 text-sm font-semibold text-center transition-colors ${
             activeTab === "likes"
               ? "text-white border-b-2"
-              : "text-white/50"
+              : "text-white/50 hover:text-white/70"
           }`}
           style={activeTab === "likes" ? { borderImage: `linear-gradient(to right, ${accentColor}, ${isPerformer ? "#00D4E8" : "#E69138"}) 1` } : undefined}
         >
@@ -2383,9 +2765,13 @@ export default function Profile() {
                   key={post.id}
                   post={post}
                   isOwn={String(user?.id) === post.author_id}
+                  isOwnProfile={isOwnProfile}
+                  isSubscribed={isSubscribed}
+                  creatorPriceUsd={profile.creatorPriceUsd}
                   onLike={handleLike}
                   onDelete={handleDelete}
                   onAuthorTap={handleAuthorTap}
+                  onSubscribeCta={handleSubscribeCta}
                 />
               ))}
 
@@ -2417,6 +2803,90 @@ export default function Profile() {
           <p className="text-sm" style={{ color: "#8E8E93" }}>
             Coming soon
           </p>
+        </div>
+      )}
+
+      {/* ── Exclusive Tab ── */}
+      {activeTab === "exclusive" && profile.creatorStatus === "active" && (
+        <div role="tabpanel" aria-label="Exclusive posts">
+          {/* Non-subscriber gate banner */}
+          {!isOwnProfile && !isSubscribed && (
+            <div
+              className="glass-card-sm p-6 mb-4 text-center"
+              style={{ border: "1px solid rgba(212,0,122,0.25)" }}
+            >
+              <div
+                className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+              </div>
+              <p className="text-white font-bold mb-1">Exclusive Content</p>
+              <p className="text-sm mb-4 leading-relaxed" style={{ color: "#8E8E93" }}>
+                {profile.creatorPriceUsd != null
+                  ? `Subscribe for $${profile.creatorPriceUsd}/mo to unlock all exclusive posts from this creator.`
+                  : "Subscribe to unlock all exclusive posts from this creator."}
+              </p>
+              {isAuthenticated ? (
+                <button
+                  onClick={() => {
+                    handleSubscribe();
+                    if (subscribeButtonRef.current) {
+                      subscribeButtonRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }
+                  }}
+                  disabled={subscribeLoading}
+                  className="inline-flex items-center justify-center px-6 py-2.5 rounded-lg text-sm font-semibold text-white transition-all duration-150 active:scale-[0.97] disabled:opacity-50 min-h-[44px]"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                  aria-label={`Subscribe for $${profile.creatorPriceUsd || 15}/mo`}
+                >
+                  {subscribeLoading ? "Processing..." : `Subscribe $${profile.creatorPriceUsd || 15}/mo`}
+                </button>
+              ) : (
+                <p className="text-xs" style={{ color: "#8E8E93" }}>Sign in to subscribe</p>
+              )}
+            </div>
+          )}
+
+          {/* Exclusive posts list */}
+          {(() => {
+            const exclusivePosts = posts.filter(p => p.is_exclusive);
+            if (exclusivePosts.length === 0) {
+              return (
+                <div className="glass-card-sm p-8 text-center">
+                  <svg className="w-12 h-12 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#8E8E93" }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                  </svg>
+                  <p className="text-white font-medium mb-1">No Exclusive Posts Yet</p>
+                  <p className="text-sm" style={{ color: "#8E8E93" }}>
+                    {isOwnProfile
+                      ? "Create your first exclusive post to share with subscribers."
+                      : "This creator hasn't posted any exclusive content yet."}
+                  </p>
+                </div>
+              );
+            }
+            return (
+              <div className="space-y-3">
+                {exclusivePosts.map((post) => (
+                  <PostCard
+                    key={post.id}
+                    post={post}
+                    isOwn={String(user?.id) === post.author_id}
+                    isOwnProfile={isOwnProfile}
+                    isSubscribed={isSubscribed}
+                    creatorPriceUsd={profile.creatorPriceUsd}
+                    onLike={handleLike}
+                    onDelete={handleDelete}
+                    onAuthorTap={handleAuthorTap}
+                    onSubscribeCta={handleSubscribeCta}
+                  />
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
 

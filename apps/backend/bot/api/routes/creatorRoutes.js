@@ -15,6 +15,17 @@ router.get('/dashboard', authGuard, creatorController.getDashboard);
 router.get('/applications', authGuard, roleGuard('admin', 'superadmin'), creatorController.listApplications);
 router.post('/applications/:id/approve', authGuard, roleGuard('admin', 'superadmin'), creatorController.approveApplication);
 router.post('/applications/:id/reject', authGuard, roleGuard('admin', 'superadmin'), creatorController.rejectApplication);
+// IMPORTANT: /active must come BEFORE /:creatorId/* routes to avoid param capture
+router.get('/active', authGuard, roleGuard('admin', 'superadmin'), creatorController.listActiveCreators);
+router.get('/:creatorId/strikes', authGuard, roleGuard('admin', 'superadmin'), creatorController.getStrikes);
+router.post('/:creatorId/strike', authGuard, roleGuard('admin', 'superadmin'), creatorController.issueStrike);
+
+// Creator wallet routes
+router.get('/wallet', authGuard, creatorController.getWalletAddress);
+router.post('/wallet', authGuard, creatorController.saveWalletAddress);
+
+// Creator tier change
+router.post('/change-tier', authGuard, creatorController.changeTier);
 
 // Creator subscription routes
 router.get('/:creatorId/subscription-status', authGuard, creatorController.getSubscriptionStatus);

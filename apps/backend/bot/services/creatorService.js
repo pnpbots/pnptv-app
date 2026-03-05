@@ -268,6 +268,35 @@ class CreatorService {
       [creatorId, rows[0].id, priceUsd, amountCreator, amountPlatform]
     );
 
+    // Notify creator of new subscriber
+    try {
+      const subscriberRes = await query(
+        'SELECT username, first_name FROM users WHERE id = $1',
+        [subscriberId]
+      );
+      const subscriberName =
+        subscriberRes.rows[0]?.first_name ||
+        subscriberRes.rows[0]?.username ||
+        'Someone';
+
+      NotificationEmitter.emit({
+        type: 'creator_new_subscriber',
+        category: 'commerce',
+        priority: 'normal',
+        actorId: subscriberId,
+        targetUserId: creatorId,
+        entityType: 'creator_subscription',
+        entityId: String(rows[0].id),
+        message: `${subscriberName} subscribed to your creator profile for $${priceUsd}/mo`,
+      });
+    } catch (notifyErr) {
+      logger.warn('subscribeToCreator: failed to emit new-subscriber notification', {
+        subscriberId,
+        creatorId,
+        error: notifyErr.message,
+      });
+    }
+
     return { subscriptionId: rows[0].id, expiresAt, price: priceUsd };
   }
 
@@ -285,6 +314,26 @@ class CreatorService {
       'UPDATE users SET creator_subscriber_count = GREATEST(0, creator_subscriber_count - 1) WHERE id = $1',
       [creatorId]
     );
+
+    // Notify creator that a subscriber left
+    try {
+      NotificationEmitter.emit({
+        type: 'creator_subscriber_left',
+        category: 'commerce',
+        priority: 'low',
+        actorId: subscriberId,
+        targetUserId: creatorId,
+        entityType: 'creator_subscription',
+        entityId: null,
+        message: 'A subscriber cancelled their subscription to your creator profile.',
+      });
+    } catch (notifyErr) {
+      logger.warn('unsubscribeFromCreator: failed to emit subscriber-left notification', {
+        subscriberId,
+        creatorId,
+        error: notifyErr.message,
+      });
+    }
 
     return { success: true };
   }
@@ -315,7 +364,7 @@ class CreatorService {
   static async getCreatorDashboard(creatorId) {
     const [subscriberRes, earningsRes, exclusiveRes, applicationRes] = await Promise.all([
       query(
-        'SELECT creator_subscriber_count, creator_status, creator_type, creator_price_usd, creator_verified, creator_featured FROM users WHERE id = $1',
+        'SELECT creator_subscriber_count, creator_status, creator_type, creator_price_usd, creator_verified, creator_featured, creator_wallet_address FROM users WHERE id = $1',
         [creatorId]
       ),
       query(
@@ -347,6 +396,7 @@ class CreatorService {
       monthlyEarnings: parseFloat(earningsRes.rows[0]?.monthly_earnings) || 0,
       exclusivePostCount: exclusiveRes.rows[0]?.count || 0,
       application: applicationRes.rows[0] || null,
+      walletAddress: user.creator_wallet_address || null,
     };
   }
 
@@ -396,10 +446,16 @@ class CreatorService {
 
     const isPrime = (viewerTier || '').toLowerCase() === 'prime';
 
-    // If not PRIME, all exclusive posts are locked
+    // If not PRIME, lock all exclusive posts — EXCEPT posts owned by the viewer themselves
+    // (creators who are not yet prime-tier must still see their own exclusive content)
     if (!isPrime) {
       return posts.map(p => {
         if (!p.is_exclusive) return p;
+        const postCreatorId = p.author_id || p.user_id;
+        // Owner always sees their own exclusive posts regardless of tier
+        if (viewerId && String(postCreatorId) === String(viewerId)) {
+          return { ...p, exclusive_status: 'unlocked' };
+        }
         return {
           ...p,
           exclusive_status: 'locked',
@@ -506,6 +562,66 @@ class CreatorService {
       params
     );
 
+    return rows;
+  }
+
+  // ── Admin: Strike Management ───────────────────────────────────────────────
+
+  static async issueStrike(creatorId, issuedBy, reason) {
+    const userRes = await query(
+      'SELECT creator_strikes, creator_status FROM users WHERE id = $1',
+      [creatorId]
+    );
+    const user = userRes.rows[0];
+    if (!user) throw new Error('Creator not found');
+    if (user.creator_status !== 'active') throw new Error('Creator is not active');
+
+    const newStrikeCount = (user.creator_strikes || 0) + 1;
+
+    await query(
+      'INSERT INTO creator_strike_log (creator_id, strike_number, reason, issued_by) VALUES ($1, $2, $3, $4)',
+      [creatorId, newStrikeCount, reason, issuedBy]
+    );
+
+    const newStatus = newStrikeCount >= 3 ? 'suspended' : user.creator_status;
+    await query(
+      'UPDATE users SET creator_strikes = $1, creator_status = $2 WHERE id = $3',
+      [newStrikeCount, newStatus, creatorId]
+    );
+
+    const messages = {
+      1: `Strike 1/3: ${reason}. You have 14 days to restore activity.`,
+      2: `Strike 2/3: ${reason}. Final warning — 7 days to restore activity.`,
+      3: `Strike 3/3: Your creator profile has been suspended. ${reason}`,
+    };
+
+    try {
+      NotificationEmitter.emit({
+        type: newStrikeCount >= 3 ? 'creator_suspended' : 'creator_strike',
+        category: 'system',
+        priority: newStrikeCount >= 3 ? 'high' : 'normal',
+        actorId: issuedBy,
+        targetUserId: creatorId,
+        entityType: 'creator',
+        entityId: String(creatorId),
+        message: messages[Math.min(newStrikeCount, 3)],
+      });
+    } catch (notifyErr) {
+      logger.warn('issueStrike: failed to emit notification', {
+        creatorId,
+        strike: newStrikeCount,
+        error: notifyErr.message,
+      });
+    }
+
+    return { strikeCount: newStrikeCount, suspended: newStrikeCount >= 3 };
+  }
+
+  static async getCreatorStrikes(creatorId) {
+    const { rows } = await query(
+      'SELECT * FROM creator_strike_log WHERE creator_id = $1 ORDER BY created_at DESC',
+      [creatorId]
+    );
     return rows;
   }
 }

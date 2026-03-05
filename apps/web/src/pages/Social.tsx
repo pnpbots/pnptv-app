@@ -564,7 +564,12 @@ export default function Social() {
         if (status.authenticated && status.user) {
           const methods = status.user.auth_methods as AuthMethods | undefined;
           setBlueskyLinked(!!methods?.atproto);
-          setIsActiveCreator(status.user.creator_status === "active");
+          setIsActiveCreator(
+            status.user.creator_status === "active" ||
+            status.user.role === "model" ||
+            status.user.role === "admin" ||
+            status.user.role === "superadmin"
+          );
         }
       })
       .catch(() => {
@@ -960,8 +965,8 @@ export default function Social() {
                   </button>
                 </div>
 
-                {/* Exclusive content toggle — only shown for active creators with media */}
-                {isActiveCreator && mediaFile && (
+                {/* Exclusive content toggle — only shown for active creators */}
+                {isActiveCreator && (
                   <div className="flex items-center justify-between rounded-lg px-3 py-2.5" style={{ background: "rgba(212,0,122,0.06)", border: "1px solid rgba(212,0,122,0.2)" }}>
                     <label
                       htmlFor="exclusive-toggle"

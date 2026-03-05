@@ -5,6 +5,7 @@ const logger = require('../../utils/logger');
 const { getRedis } = require('../../config/redis');
 const { processChatMedia } = require('../services/chatMediaService');
 const NotificationEmitter = require('../services/notificationEmitter');
+const LiveStreamModel = require('../../models/liveStreamModel');
 
 // ── Session resolution ────────────────────────────────────────────────────────
 
@@ -477,8 +478,117 @@ function initSocketIO(io) {
       io.to(`user:${recipientId}`).emit('dm:typing', { from: user.id });
     });
 
-    socket.on('disconnect', () => {
+    // ── Live Stream Chat ──────────────────────────────────────────────────────
+
+    const STREAM_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
+
+    socket.on('live:join', async ({ streamId } = {}) => {
+      if (!streamId || !STREAM_ID_RE.test(String(streamId))) {
+        socket.emit('live:error', { message: 'Invalid stream ID' });
+        return;
+      }
+      if (!rateLimit(`live:join:${user.id}`, 5, 60000)) {
+        socket.emit('live:error', { message: 'Too many join attempts. Please slow down.' });
+        return;
+      }
+      try {
+        socket.join(`live:${streamId}`);
+        socket.data.liveRooms = socket.data.liveRooms || new Set();
+        socket.data.liveRooms.add(streamId);
+
+        const redis = getRedis();
+        await redis.incr(`live:viewers:${streamId}`);
+        await redis.expire(`live:viewers:${streamId}`, 3600);
+        const countRaw = await redis.get(`live:viewers:${streamId}`);
+        const count = parseInt(countRaw, 10) || 0;
+
+        io.to(`live:${streamId}`).emit('live:viewer_count', { streamId, count });
+
+        const history = await LiveStreamModel.getComments(streamId, 50);
+        socket.emit('live:history', history);
+      } catch (err) {
+        logger.error('live:join error', { streamId, userId: user.id, error: err.message });
+        socket.emit('live:error', { message: 'Failed to join stream' });
+      }
+    });
+
+    socket.on('live:leave', async ({ streamId } = {}) => {
+      if (!streamId || !STREAM_ID_RE.test(String(streamId))) return;
+
+      socket.leave(`live:${streamId}`);
+      if (socket.data.liveRooms) socket.data.liveRooms.delete(streamId);
+
+      try {
+        const redis = getRedis();
+        const afterDecr = await redis.decr(`live:viewers:${streamId}`);
+        if (afterDecr < 0) await redis.set(`live:viewers:${streamId}`, 0);
+        await redis.expire(`live:viewers:${streamId}`, 3600);
+        const countRaw = await redis.get(`live:viewers:${streamId}`);
+        const count = Math.max(0, parseInt(countRaw, 10) || 0);
+        io.to(`live:${streamId}`).emit('live:viewer_count', { streamId, count });
+      } catch (err) {
+        logger.error('live:leave error', { streamId, userId: user.id, error: err.message });
+      }
+    });
+
+    socket.on('live:message', async ({ streamId, content } = {}) => {
+      if (!streamId || !STREAM_ID_RE.test(String(streamId))) {
+        socket.emit('live:error', { message: 'Invalid stream ID' });
+        return;
+      }
+      if (!content || !String(content).trim()) {
+        socket.emit('live:error', { message: 'Message cannot be empty' });
+        return;
+      }
+      if (String(content).length > 500) {
+        socket.emit('live:error', { message: 'Message too long (max 500 characters)' });
+        return;
+      }
+      if (!rateLimit(`live:msg:${user.id}`, 20, 60000)) {
+        socket.emit('live:error', { message: 'Too many messages. Slow down.' });
+        return;
+      }
+      if (!socket.data.liveRooms?.has(streamId)) {
+        socket.emit('live:error', { message: 'You must join the stream before sending messages' });
+        return;
+      }
+      try {
+        const username = user.username || user.firstName || user.first_name || 'Viewer';
+        const trimmedContent = String(content).trim();
+        const commentData = await LiveStreamModel.addComment(streamId, user.id, username, trimmedContent);
+
+        io.to(`live:${streamId}`).emit('live:message', {
+          id: commentData.commentId,
+          streamId,
+          userId: user.id,
+          username,
+          content: trimmedContent,
+          createdAt: commentData.timestamp || new Date(),
+        });
+      } catch (err) {
+        logger.error('live:message error', { streamId, userId: user.id, error: err.message });
+        socket.emit('live:error', { message: 'Failed to send message' });
+      }
+    });
+
+    socket.on('disconnect', async () => {
       logger.info(`Socket disconnected: user ${user.id}`);
+
+      if (socket.data.liveRooms && socket.data.liveRooms.size > 0) {
+        const redis = getRedis();
+        for (const streamId of socket.data.liveRooms) {
+          try {
+            const afterDecr = await redis.decr(`live:viewers:${streamId}`);
+            if (afterDecr < 0) await redis.set(`live:viewers:${streamId}`, 0);
+            await redis.expire(`live:viewers:${streamId}`, 3600);
+            const countRaw = await redis.get(`live:viewers:${streamId}`);
+            const count = Math.max(0, parseInt(countRaw, 10) || 0);
+            io.to(`live:${streamId}`).emit('live:viewer_count', { streamId, count });
+          } catch (err) {
+            logger.warn('live viewer count cleanup error on disconnect', { streamId, userId: user.id, error: err.message });
+          }
+        }
+      }
     });
   });
 }

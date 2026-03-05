@@ -2042,6 +2042,7 @@ app.post('/api/webapp/live/start', asyncHandler(webappLiveController.startStream
 app.get('/api/webapp/live/streams/:streamId/join', asyncHandler(webappLiveController.joinStream));
 app.post('/api/webapp/live/streams/:streamId/end', asyncHandler(webappLiveController.endStream));
 app.post('/api/webapp/live/streams/:streamId/leave', asyncHandler(webappLiveController.leaveStream));
+app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLiveController.getRtmpKey));
 
 // Web App Support Chat (Cristina AI)
 const supportController = require('./controllers/supportController');
@@ -3375,6 +3376,25 @@ app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (re
     if (status === 'completed' || status === 'success') {
       await PNPLiveTipsService.confirmTipPayment(parseInt(tipId, 10), transactionId);
       logger.info(`Tip #${tipId} payment confirmed: ${transactionId}`);
+
+      // Emit real-time tip event to all live viewers
+      try {
+        const tipInfo = await PNPLiveTipsService.getTipById(parseInt(tipId, 10));
+        const socketSingleton = require('../services/socketSingleton');
+        const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+        if (io && tipInfo) {
+          io.emit('live:tip', {
+            id: tipInfo.id,
+            amount: parseFloat(tipInfo.amount),
+            username: tipInfo.user_username || 'Anonymous',
+            performerName: tipInfo.model_name || 'Performer',
+            message: tipInfo.message || '',
+            createdAt: tipInfo.created_at,
+          });
+        }
+      } catch (tipEmitErr) {
+        logger.warn('Failed to emit live:tip socket event:', tipEmitErr.message);
+      }
     }
 
     res.json({ success: true });

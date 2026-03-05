@@ -17,6 +17,7 @@ const logger = require(path.join(backendPath, 'utils/logger'));
 const PaymentRecoveryService = require(path.join(backendPath, 'bot/services/paymentRecoveryService'));
 const MediaCleanupService = require(path.join(backendPath, 'bot/services/mediaCleanupService'));
 const CreatorService = require(path.join(backendPath, 'bot/services/creatorService'));
+const CreatorPayoutService = require(path.join(backendPath, 'bot/services/creatorPayoutService'));
 
 /**
  * Initialize and start cron jobs
@@ -210,6 +211,35 @@ const startCronJobs = async (bot = null) => {
         logger.info('Creator subscription expiry completed', results);
       } catch (error) {
         logger.error('Error in creator subscription expiry cron:', error);
+      }
+    });
+
+    // ── Creator Subscription Renewals — daily at 09:00 UTC ──────────────────
+    // Finds active subscriptions expiring within 3 days with auto_renew=true.
+    // Creates a Daimo checkout session per subscriber; extends expires_at by 30 days
+    // and records earnings on session creation. Cancels subscription on failure.
+    cron.schedule(process.env.CREATOR_RENEWAL_CRON || '0 9 * * *', async () => {
+      try {
+        logger.info('Running creator subscription renewal...');
+        const results = await CreatorPayoutService.runSubscriptionRenewals();
+        logger.info('Creator subscription renewal completed', results);
+      } catch (error) {
+        logger.error('Error in creator subscription renewal cron:', error);
+      }
+    });
+
+    // ── Creator Monthly Payouts — 1st of month at 00:00 UTC ─────────────────
+    // Groups all `available` creator_earnings by creator, sends one consolidated
+    // USDC payout per creator to their creator_wallet_address via Daimo transfer.
+    // Skips creators without a wallet address (notifies them instead).
+    // Minimum threshold: $1.00. Earnings below threshold roll over automatically.
+    cron.schedule(process.env.CREATOR_PAYOUT_CRON || '0 0 1 * *', async () => {
+      try {
+        logger.info('Running monthly creator payouts...');
+        const results = await CreatorPayoutService.runMonthlyPayouts();
+        logger.info('Monthly creator payouts completed', results);
+      } catch (error) {
+        logger.error('Error in monthly creator payout cron:', error);
       }
     });
 

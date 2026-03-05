@@ -106,4 +106,47 @@ const leaveStream = async (req, res) => {
   }
 };
 
-module.exports = { listStreams, startStream, joinStream, endStream, leaveStream };
+// GET /api/webapp/live/rtmp-key
+const getRtmpKey = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+
+  if (user.role !== 'admin' && user.role !== 'superadmin' && user.role !== 'creator') {
+    return res.status(403).json({ success: false, error: 'Creator or admin role required' });
+  }
+
+  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
+  const restreamerPublicUrl = process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app';
+
+  if (!process.env.RESTREAMER_USER || !process.env.RESTREAMER_PASSWORD) {
+    return res.status(503).json({ success: false, error: 'Live streaming not configured' });
+  }
+
+  try {
+    // Authenticate with Restreamer to verify it's reachable
+    const loginResp = await fetch(`${restreamerUrl}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: process.env.RESTREAMER_USER,
+        password: process.env.RESTREAMER_PASSWORD,
+      }),
+    });
+
+    if (!loginResp.ok) {
+      logger.error('Restreamer login failed for rtmp-key', { status: loginResp.status });
+      return res.status(503).json({ success: false, error: 'Live streaming not available' });
+    }
+
+    // Deterministic stream key — always the same for a given user
+    const streamKey = `stream-${user.id}`;
+    const publicHost = restreamerPublicUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const rtmpUrl = `rtmp://${publicHost}/live`;
+
+    return res.json({ success: true, rtmpUrl, streamKey });
+  } catch (err) {
+    logger.error('getRtmpKey error', err);
+    return res.status(500).json({ success: false, error: 'Failed to retrieve stream key' });
+  }
+};
+
+module.exports = { listStreams, startStream, joinStream, endStream, leaveStream, getRtmpKey };

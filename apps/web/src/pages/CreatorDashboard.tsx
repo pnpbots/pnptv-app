@@ -8,11 +8,22 @@ import {
   getWithdrawableAmount,
   requestWithdrawal,
   getWithdrawalHistory,
+  getCreatorWallet,
+  saveCreatorWallet,
+  changeCreatorTier,
   type CreatorEligibility,
   type CreatorDashboard as DashboardData,
   type ModelEarnings,
   type ModelWithdrawal,
 } from "@/lib/api";
+
+const ETHEREUM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+const TIERS: { key: "ice" | "crystal" | "diamond"; label: string; price: number; emoji: string }[] = [
+  { key: "ice", label: "Ice", price: 5, emoji: "❄" },
+  { key: "crystal", label: "Crystal", price: 10, emoji: "💎" },
+  { key: "diamond", label: "Diamond", price: 15, emoji: "💎" },
+];
 
 function CriterionBar({ label, current, required, met }: { label: string; current: number; required: number; met: boolean }) {
   const pct = Math.min((current / required) * 100, 100);
@@ -53,7 +64,20 @@ export default function CreatorDashboard() {
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
   const [withdrawSuccess, setWithdrawSuccess] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "earnings" | "payouts">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "earnings" | "payouts" | "settings">("overview");
+
+  // Settings tab — wallet
+  const [walletAddress, setWalletAddress] = useState<string>("");
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [walletSaving, setWalletSaving] = useState(false);
+  const [walletError, setWalletError] = useState<string | null>(null);
+  const [walletSuccess, setWalletSuccess] = useState<string | null>(null);
+
+  // Settings tab — tier change
+  const [selectedTier, setSelectedTier] = useState<"ice" | "crystal" | "diamond" | null>(null);
+  const [tierChanging, setTierChanging] = useState(false);
+  const [tierError, setTierError] = useState<string | null>(null);
+  const [tierSuccess, setTierSuccess] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,6 +105,10 @@ export default function CreatorDashboard() {
         if (historyRes.status === "fulfilled" && historyRes.value.success) {
           setWithdrawals(historyRes.value.data.withdrawals);
         }
+        // Prefill wallet from dashboard data if available; otherwise fetch separately
+        if (dashRes.walletAddress) {
+          setWalletAddress(dashRes.walletAddress);
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
@@ -89,12 +117,36 @@ export default function CreatorDashboard() {
     }
   }, []);
 
+  const loadWallet = useCallback(async () => {
+    setWalletLoading(true);
+    try {
+      const res = await getCreatorWallet();
+      if (res.success) {
+        setWalletAddress(res.address || "");
+      }
+    } catch {
+      // Non-critical — silently ignore; user can still type their address
+    } finally {
+      setWalletLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (isAuthenticated) load();
   }, [isAuthenticated, load]);
 
+  // Load wallet when Settings tab is opened (to ensure freshness)
+  useEffect(() => {
+    if (activeTab === "settings" && dashboard?.creatorStatus === "active") {
+      loadWallet();
+      // Initialize selectedTier from dashboard
+      if (dashboard.creatorType && ["ice", "crystal", "diamond"].includes(dashboard.creatorType)) {
+        setSelectedTier(dashboard.creatorType as "ice" | "crystal" | "diamond");
+      }
+    }
+  }, [activeTab, dashboard, loadWallet]);
+
   const handleActivate = () => {
-    // Redirect to profile where the tier selection + T&C flow lives
     navigate("/profile");
   };
 
@@ -105,11 +157,56 @@ export default function CreatorDashboard() {
     try {
       const res = await requestWithdrawal("bank_transfer");
       setWithdrawSuccess(`Withdrawal of $${res.data.withdrawal.amountUsd.toFixed(2)} requested successfully`);
-      await load(); // Refresh data
+      await load();
     } catch (err) {
       setWithdrawError(err instanceof Error ? err.message : "Failed to request withdrawal");
     } finally {
       setWithdrawing(false);
+    }
+  };
+
+  const handleSaveWallet = async () => {
+    setWalletError(null);
+    setWalletSuccess(null);
+    const trimmed = walletAddress.trim();
+    if (!ETHEREUM_ADDRESS_RE.test(trimmed)) {
+      setWalletError("Invalid address. Must start with 0x followed by exactly 40 hex characters.");
+      return;
+    }
+    setWalletSaving(true);
+    try {
+      const res = await saveCreatorWallet(trimmed);
+      if (res.success) {
+        setWalletSuccess("Wallet address saved successfully.");
+        setWalletAddress(trimmed.toLowerCase());
+      } else {
+        setWalletError(res.error || "Failed to save wallet address.");
+      }
+    } catch (err) {
+      setWalletError(err instanceof Error ? err.message : "Failed to save wallet address.");
+    } finally {
+      setWalletSaving(false);
+    }
+  };
+
+  const handleChangeTier = async () => {
+    if (!selectedTier) return;
+    setTierError(null);
+    setTierSuccess(null);
+    setTierChanging(true);
+    try {
+      const res = await changeCreatorTier(selectedTier);
+      if (res.success) {
+        setTierSuccess(`Tier changed to ${res.tier} ($${res.price.toFixed(2)}/mo) successfully.`);
+        // Update local dashboard state so the overview reflects new tier immediately
+        setDashboard((prev) => prev ? { ...prev, creatorType: res.tier, priceUsd: res.price } : prev);
+      } else {
+        setTierError((res as { error?: string }).error || "Failed to change tier.");
+      }
+    } catch (err) {
+      setTierError(err instanceof Error ? err.message : "Failed to change tier.");
+    } finally {
+      setTierChanging(false);
     }
   };
 
@@ -166,7 +263,7 @@ export default function CreatorDashboard() {
         <>
           {/* Tab navigation */}
           <div className="flex border-b border-white/10 mb-4">
-            {(["overview", "earnings", "payouts"] as const).map((tab) => (
+            {(["overview", "earnings", "payouts", "settings"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -175,7 +272,19 @@ export default function CreatorDashboard() {
                 }`}
                 style={activeTab === tab ? { borderImage: "linear-gradient(to right, #D4007A, #E69138) 1" } : undefined}
               >
-                {tab === "overview" ? "Overview" : tab === "earnings" ? "Earnings" : "Payouts"}
+                {tab === "overview" ? "Overview"
+                  : tab === "earnings" ? "Earnings"
+                  : tab === "payouts" ? "Payouts"
+                  : (
+                    <span className="flex items-center justify-center gap-1">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                      </svg>
+                      Settings
+                    </span>
+                  )
+                }
               </button>
             ))}
           </div>
@@ -373,6 +482,135 @@ export default function CreatorDashboard() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Settings Tab */}
+          {activeTab === "settings" && (
+            <div className="space-y-4">
+
+              {/* Payout Wallet Card */}
+              <div className="glass-card-sm p-5">
+                <p className="text-sm font-semibold text-white mb-1">Payout Wallet</p>
+                <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
+                  Your Daimo/Ethereum wallet address for monthly payouts (EVM, 0x...)
+                </p>
+
+                {walletLoading ? (
+                  <div className="h-10 bg-white/5 rounded-lg animate-pulse mb-3" />
+                ) : (
+                  <input
+                    type="text"
+                    value={walletAddress}
+                    onChange={(e) => {
+                      setWalletAddress(e.target.value);
+                      setWalletError(null);
+                      setWalletSuccess(null);
+                    }}
+                    placeholder="0x..."
+                    spellCheck={false}
+                    autoComplete="off"
+                    className="w-full px-3 py-2.5 rounded-lg text-sm font-mono text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors mb-3"
+                  />
+                )}
+
+                {walletSuccess && (
+                  <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>
+                    {walletSuccess}
+                  </div>
+                )}
+                {walletError && (
+                  <div className="mb-3 px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+                    {walletError}
+                  </div>
+                )}
+
+                <button
+                  onClick={handleSaveWallet}
+                  disabled={walletSaving || walletLoading || !walletAddress.trim()}
+                  className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                >
+                  {walletSaving ? "Saving..." : "Save Wallet Address"}
+                </button>
+
+                <p className="mt-4 text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+                  Payouts are sent on the 1st of each month. Minimum threshold: $1.00 USD.
+                </p>
+              </div>
+
+              {/* Tier Change Card — only for non-full_time creators */}
+              {dashboard.creatorType !== "full_time" && (
+                <div className="glass-card-sm p-5">
+                  <p className="text-sm font-semibold text-white mb-1">Creator Tier</p>
+                  <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
+                    Your current tier:{" "}
+                    <strong className="text-white capitalize">
+                      {dashboard.creatorType
+                        ? `${dashboard.creatorType.charAt(0).toUpperCase()}${dashboard.creatorType.slice(1)} ($${dashboard.priceUsd.toFixed(2)}/mo)`
+                        : "None"}
+                    </strong>
+                  </p>
+
+                  <div className="flex gap-2 mb-4">
+                    {TIERS.map((t) => {
+                      const isCurrent = dashboard.creatorType === t.key;
+                      const isSelected = selectedTier === t.key;
+                      return (
+                        <button
+                          key={t.key}
+                          onClick={() => {
+                            setSelectedTier(t.key);
+                            setTierError(null);
+                            setTierSuccess(null);
+                          }}
+                          className="flex-1 py-2.5 rounded-lg text-xs font-semibold transition-all"
+                          style={{
+                            background: isSelected
+                              ? "linear-gradient(135deg, #D4007A, #E69138)"
+                              : isCurrent
+                              ? "rgba(212,0,122,0.15)"
+                              : "rgba(255,255,255,0.05)",
+                            color: isSelected ? "#fff" : isCurrent ? "#D4007A" : "#8E8E93",
+                            border: isSelected
+                              ? "1px solid transparent"
+                              : isCurrent
+                              ? "1px solid rgba(212,0,122,0.4)"
+                              : "1px solid rgba(255,255,255,0.08)",
+                          }}
+                        >
+                          {t.emoji} {t.label}
+                          <span className="block text-xs font-normal mt-0.5 opacity-80">${t.price}/mo</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {tierSuccess && (
+                    <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>
+                      {tierSuccess}
+                    </div>
+                  )}
+                  {tierError && (
+                    <div className="mb-3 px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+                      {tierError}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleChangeTier}
+                    disabled={tierChanging || !selectedTier || selectedTier === dashboard.creatorType}
+                    className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
+                    style={{ background: "rgba(255,255,255,0.08)", color: "#fff", border: "1px solid rgba(255,255,255,0.15)" }}
+                  >
+                    {tierChanging ? "Changing..." : "Change Tier"}
+                  </button>
+
+                  <p className="mt-4 text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+                    Changes take effect for new subscribers immediately. Existing subscribers keep their current price until renewal.
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </>
