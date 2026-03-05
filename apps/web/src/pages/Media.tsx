@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from "react";
 import { Helmet } from "react-helmet-async";
+import { useNavigate } from "react-router-dom";
 import { Card, Skeleton, Badge } from "@pnptv/ui-kit";
 import { useDirectus } from "@/hooks/useDirectus";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
+import { useAuth } from "@/hooks/useAuth";
 import { type Content, type Performer, getAssetUrl } from "@/lib/directus";
 
 function formatDuration(seconds: number | null): string {
@@ -31,6 +33,12 @@ const PlayIcon = () => (
 );
 
 export default function Media() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const tier = (user?.tier || "free").toLowerCase();
+  const isPrime = tier === "prime";
+  const isMember = tier === "member";
+
   const { data: videos, isLoading, error } = useDirectus<Content>({
     collection: "content",
     params: {
@@ -63,6 +71,7 @@ export default function Media() {
   }, [videos, activeSeries]);
 
   const handleVideoClick = (video: Content) => {
+    if (!isPrime) { navigate("/subscribe"); return; }
     setActiveVideo((prev) => (prev?.id === video.id ? null : video));
   };
 
@@ -73,6 +82,68 @@ export default function Media() {
         <meta name="description" content="Exclusive PRIME video collection. Watch premium content from top PNPtv creators." />
       </Helmet>
       {showTutorial && <TutorialOverlay section="prime" onDismiss={dismissTutorial} />}
+
+      {/* ── Upsell Hero (non-PRIME users) ── */}
+      {!isPrime && (
+        <div
+          className="rounded-2xl p-5 mb-6 relative overflow-hidden"
+          style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.18) 0%, rgba(230,145,56,0.14) 100%)", border: "1px solid rgba(212,0,122,0.35)" }}
+        >
+          {/* Decorative glow */}
+          <div className="absolute -top-8 -right-8 w-36 h-36 rounded-full opacity-20 pointer-events-none" style={{ background: "radial-gradient(circle, #D4007A, transparent)" }} />
+
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
+              PRIME
+            </span>
+            {CROWN}
+            {isMember && (
+              <span className="text-xs font-semibold" style={{ color: "#FFB454" }}>You're a Member — one step away!</span>
+            )}
+          </div>
+
+          <h2 className="text-xl font-bold text-white mb-1">
+            {isMember ? "Upgrade to PRIME" : "Unlock Full Access"}
+          </h2>
+          <p className="text-sm mb-4" style={{ color: "rgba(255,255,255,0.7)" }}>
+            {isMember
+              ? "Your Member plan doesn't include the video library. Upgrade now and get everything."
+              : `${videos.length > 0 ? `${videos.length} exclusive videos` : "Exclusive videos"}, live streams, and raw content — all locked behind PRIME.`}
+          </p>
+
+          <ul className="space-y-1.5 mb-5">
+            {[
+              "Unlimited access to the full video library",
+              "HD streams & raw creator content",
+              "Private live rooms & call access",
+              "Priority community features",
+              isMember ? "Everything in your current Member plan" : "Cancel anytime, no questions asked",
+            ].map((benefit) => (
+              <li key={benefit} className="flex items-center gap-2 text-xs" style={{ color: "rgba(255,255,255,0.85)" }}>
+                <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor" style={{ color: "#34D399" }}>
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+                {benefit}
+              </li>
+            ))}
+          </ul>
+
+          <div className="flex flex-col sm:flex-row gap-3 items-start">
+            <button
+              onClick={() => navigate("/subscribe")}
+              className="px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-90 active:scale-95"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              {isMember ? "Upgrade to PRIME →" : "Start PRIME Trial — $14.99/wk →"}
+            </button>
+            {!isMember && (
+              <p className="text-xs self-center" style={{ color: "rgba(255,255,255,0.5)" }}>
+                Monthly from $24.99 · Lifetime available
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
@@ -256,6 +327,16 @@ export default function Media() {
                     </div>
                   )}
 
+                  {/* Lock overlay for non-PRIME */}
+                  {!isPrime && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(2px)" }}>
+                      <svg className="w-6 h-6 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ color: "#D4007A" }}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                      </svg>
+                      <span className="text-[9px] font-bold uppercase tracking-wide" style={{ color: "#FFB454" }}>PRIME</span>
+                    </div>
+                  )}
+
                   {/* Active indicator */}
                   {isActive && (
                     <div className="absolute inset-0 flex items-center justify-center bg-pnp-accent/20">
@@ -299,6 +380,34 @@ export default function Media() {
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* ── Sticky bottom CTA (non-PRIME) ── */}
+      {!isPrime && !isLoading && videos.length > 0 && (
+        <div
+          className="fixed bottom-16 left-0 right-0 z-30 px-4 pb-2 pointer-events-none"
+        >
+          <div
+            className="max-w-2xl mx-auto rounded-2xl px-4 py-3 flex items-center justify-between gap-3 pointer-events-auto shadow-2xl"
+            style={{ background: "linear-gradient(135deg, #1a0a12, #1a100a)", border: "1px solid rgba(212,0,122,0.4)" }}
+          >
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-white truncate">
+                {videos.length} videos locked
+              </p>
+              <p className="text-[10px] truncate" style={{ color: "rgba(255,255,255,0.5)" }}>
+                {isMember ? "Upgrade to PRIME to watch" : "Trial from $14.99 · Cancel anytime"}
+              </p>
+            </div>
+            <button
+              onClick={() => navigate("/subscribe")}
+              className="flex-shrink-0 px-4 py-2 rounded-xl text-xs font-bold text-white transition-opacity hover:opacity-90 active:scale-95 whitespace-nowrap"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              {isMember ? "Upgrade" : "Get PRIME"}
+            </button>
+          </div>
         </div>
       )}
     </div>
