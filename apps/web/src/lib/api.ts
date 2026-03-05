@@ -2540,3 +2540,113 @@ export function getVapidKey(): Promise<{ success: boolean; publicKey: string }> 
   return request("/api/webapp/push/vapid-key");
 }
 
+// ─── Creator CMS ──────────────────────────────────────────────────────────────
+
+export interface CmsPerformer {
+  id: number;
+  status: "published" | "draft" | "archived";
+  name: string;
+  slug: string;
+  bio: string | null;
+  bio_short: string | null;
+  categories: string[];
+  social_links: Record<string, string> | null;
+  is_available: boolean;
+  availability_message: string | null;
+  base_price_cents: number | null;
+  currency: string | null;
+  timezone: string | null;
+  durations_minutes: string[];
+  pnptv_id: string;
+}
+
+export interface CmsContent {
+  id: number;
+  status: "published" | "draft" | "archived";
+  title: string;
+  description: string | null;
+  type: "video" | "audio" | "podcast";
+  media_url: string | null;
+  thumbnail: string | null;
+  duration_seconds: number | null;
+  is_premium: boolean;
+  tags: string[];
+  series: string | null;
+  episode_number: number | null;
+  date_created: string;
+  date_updated: string;
+}
+
+export interface CmsShow {
+  id: number;
+  status: "published" | "draft";
+  title: string;
+  description: string | null;
+  scheduled_at: string;
+  duration_minutes: number | null;
+  category: string | null;
+  is_premium: boolean;
+  date_created: string;
+  date_updated: string;
+}
+
+export function getCmsProfile(): Promise<{ success: boolean; performer: CmsPerformer }> {
+  return request("/api/webapp/creator/cms/profile");
+}
+
+export function updateCmsProfile(data: Partial<CmsPerformer>): Promise<{ success: boolean; performer: CmsPerformer }> {
+  return request("/api/webapp/creator/cms/profile", { method: "PUT", body: data });
+}
+
+export function listCmsContent(params?: { page?: number; limit?: number; type?: string }): Promise<{ success: boolean; content: CmsContent[]; meta: Record<string, unknown> }> {
+  const qs = new URLSearchParams();
+  if (params?.page) qs.set("page", String(params.page));
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.type) qs.set("type", params.type);
+  return request(`/api/webapp/creator/cms/content${qs.toString() ? "?" + qs : ""}`);
+}
+
+export function createCmsContent(data: Partial<CmsContent>): Promise<{ success: boolean; content: CmsContent }> {
+  return request("/api/webapp/creator/cms/content", { method: "POST", body: data });
+}
+
+export function updateCmsContent(id: number, data: Partial<CmsContent>): Promise<{ success: boolean; content: CmsContent }> {
+  return request(`/api/webapp/creator/cms/content/${id}`, { method: "PATCH", body: data });
+}
+
+export function deleteCmsContent(id: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/cms/content/${id}`, { method: "DELETE" });
+}
+
+export function listCmsShows(upcoming?: boolean): Promise<{ success: boolean; shows: CmsShow[] }> {
+  return request(`/api/webapp/creator/cms/shows${upcoming ? "?upcoming=1" : ""}`);
+}
+
+export function createCmsShow(data: Partial<CmsShow>): Promise<{ success: boolean; show: CmsShow }> {
+  return request("/api/webapp/creator/cms/shows", { method: "POST", body: data });
+}
+
+export function updateCmsShow(id: number, data: Partial<CmsShow>): Promise<{ success: boolean; show: CmsShow }> {
+  return request(`/api/webapp/creator/cms/shows/${id}`, { method: "PATCH", body: data });
+}
+
+export function deleteCmsShow(id: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/cms/shows/${id}`, { method: "DELETE" });
+}
+
+export async function uploadCmsMedia(file: File, folder?: string): Promise<{ success: boolean; fileId: string; url: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  if (folder) form.append("folder", folder);
+  const res = await fetch("/api/webapp/creator/cms/upload", {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { error?: string }).error || "Upload failed");
+  }
+  return res.json();
+}
+

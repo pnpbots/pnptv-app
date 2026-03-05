@@ -58,6 +58,21 @@ const MSG_RETURNING_COLS = `
   media_width, media_height, media_metadata, created_at
 `;
 
+// ── Global online presence ────────────────────────────────────────────────────
+
+// Track online users: userId → { name, photoUrl, hangoutGroupIds: Set<number> }
+const onlineUsersMap = new Map();
+
+function emitGroupPresence(io, gid) {
+  const online = [];
+  for (const [uid, p] of onlineUsersMap) {
+    if (p.hangoutGroupIds.has(gid)) {
+      online.push({ userId: uid, name: p.name, photoUrl: p.photoUrl });
+    }
+  }
+  io.to(`hangout:${gid}`).emit('hangout:presence', { groupId: gid, online });
+}
+
 // ── Socket.IO initialisation ──────────────────────────────────────────────────
 
 function initSocketIO(io) {
@@ -75,6 +90,13 @@ function initSocketIO(io) {
 
     // Join personal room for DMs and targeted notifications
     socket.join(`user:${user.id}`);
+
+    // Register user in the global presence map
+    onlineUsersMap.set(user.id, {
+      name: user.firstName || user.first_name || user.username || 'User',
+      photoUrl: user.photoUrl || user.photo_url || null,
+      hangoutGroupIds: new Set(),
+    });
 
     // ── Group Chat ───────────────────────────────────────────────────────────
 
@@ -313,6 +335,25 @@ function initSocketIO(io) {
             participantCount: activeCall[0].participant_count,
           });
         }
+
+        // Update presence map and emit presence to the joining socket and room
+        onlineUsersMap.get(user.id)?.hangoutGroupIds.add(gid);
+
+        // Build online members list: all members of this group who are currently in onlineUsersMap
+        const { rows: memberRows } = await query(
+          'SELECT user_id FROM hangout_group_members WHERE group_id=$1',
+          [gid]
+        );
+        const memberIds = new Set(memberRows.map(r => r.user_id));
+        const onlineNow = [];
+        for (const [uid, p] of onlineUsersMap) {
+          if (memberIds.has(uid)) {
+            onlineNow.push({ userId: uid, name: p.name, photoUrl: p.photoUrl });
+          }
+        }
+        socket.emit('hangout:presence', { groupId: gid, online: onlineNow });
+        // Also notify others in the room that this user came online
+        emitGroupPresence(io, gid);
       } catch (err) {
         logger.error('hangout:join error', err);
       }
@@ -320,7 +361,13 @@ function initSocketIO(io) {
 
     socket.on('hangout:leave', ({ groupId } = {}) => {
       if (!groupId) return;
-      socket.leave(`hangout:${groupId}`);
+      const gid = parseInt(groupId, 10);
+      socket.leave(`hangout:${gid}`);
+      const presenceEntry = onlineUsersMap.get(user.id);
+      if (presenceEntry) {
+        presenceEntry.hangoutGroupIds.delete(gid);
+        emitGroupPresence(io, gid);
+      }
     });
 
     // Hangout text message via Socket.IO (alternative to REST POST)
@@ -384,6 +431,44 @@ function initSocketIO(io) {
         userId: user.id,
         firstName: user.firstName || user.first_name || user.username || 'Someone',
       });
+    });
+
+    socket.on('hangout:invite', async ({ groupId, targetUserId } = {}) => {
+      if (!groupId || !targetUserId) return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+      if (targetUserId === user.id) return;
+
+      if (!rateLimit(`hangout:invite:${user.id}`, 10, 60000)) return;
+
+      try {
+        // Verify sender is a member
+        const { rows: senderRows } = await query(
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+          [gid, user.id]
+        );
+        if (senderRows.length === 0) return;
+
+        // Get group name
+        const { rows: groupRows } = await query(
+          'SELECT name FROM hangout_groups WHERE id=$1',
+          [gid]
+        );
+        if (groupRows.length === 0) return;
+
+        const groupName = groupRows[0].name;
+        const fromName = user.firstName || user.first_name || user.username || 'Someone';
+
+        io.to(`user:${targetUserId}`).emit('hangout:invite:received', {
+          groupId: gid,
+          groupName,
+          fromUserId: user.id,
+          fromName,
+          fromPhotoUrl: user.photoUrl || user.photo_url || null,
+        });
+      } catch (err) {
+        logger.error('hangout:invite error', err);
+      }
     });
 
     // ── Direct Messages ──────────────────────────────────────────────────────
@@ -589,6 +674,16 @@ function initSocketIO(io) {
           }
         }
       }
+
+      const presenceEntry = onlineUsersMap.get(user.id);
+      if (presenceEntry) {
+        for (const gid of presenceEntry.hangoutGroupIds) {
+          presenceEntry.hangoutGroupIds.delete(gid);
+          // Emit after a tiny delay so the socket fully disconnects first
+          setImmediate(() => emitGroupPresence(io, gid));
+        }
+      }
+      onlineUsersMap.delete(user.id);
     });
   });
 }

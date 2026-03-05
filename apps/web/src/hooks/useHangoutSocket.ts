@@ -2,6 +2,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { connectSocket } from "@/lib/socket";
 import { getGroupMessages, type GroupMessage } from "@/lib/api";
 
+interface OnlineMember {
+  userId: string;
+  name: string;
+  photoUrl: string | null;
+}
+
 interface CallState {
   isActive: boolean;
   participantCount: number;
@@ -30,6 +36,7 @@ export function useHangoutSocket(
   const [isConnected, setIsConnected] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [onlineMembers, setOnlineMembers] = useState<OnlineMember[]>([]);
 
   // Refs for debouncing and cleanup
   const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -58,6 +65,7 @@ export function useHangoutSocket(
       setTypingUsers([]);
       setCallState(EMPTY_CALL);
       setHasMore(true);
+      setOnlineMembers([]);
       return;
     }
 
@@ -66,6 +74,7 @@ export function useHangoutSocket(
     setTypingUsers([]);
     setCallState(EMPTY_CALL);
     setHasMore(true);
+    setOnlineMembers([]);
 
     const socket = connectSocket();
 
@@ -108,6 +117,11 @@ export function useHangoutSocket(
           typingTimers.current.delete(data.userId);
         }, 3000)
       );
+    };
+
+    const onPresence = (data: { groupId: number; online: OnlineMember[] }) => {
+      if (data.groupId !== groupId) return;
+      setOnlineMembers(data.online);
     };
 
     const onCallActive = (data: {
@@ -169,6 +183,7 @@ export function useHangoutSocket(
     socket.on("hangout:history", onHistory);
     socket.on("chat:message", onMessage);
     socket.on("hangout:typing", onTyping);
+    socket.on("hangout:presence", onPresence);
     socket.on("hangout:call:active", onCallActive);
     socket.on("hangout:call:started", onCallStarted);
     socket.on("hangout:call:ended", onCallEnded);
@@ -188,6 +203,7 @@ export function useHangoutSocket(
       socket.off("hangout:history", onHistory);
       socket.off("chat:message", onMessage);
       socket.off("hangout:typing", onTyping);
+      socket.off("hangout:presence", onPresence);
       socket.off("hangout:call:active", onCallActive);
       socket.off("hangout:call:started", onCallStarted);
       socket.off("hangout:call:ended", onCallEnded);
@@ -198,6 +214,7 @@ export function useHangoutSocket(
       typingTimers.current.forEach((t) => clearTimeout(t));
       typingTimers.current.clear();
       setTypingUsers([]);
+      setOnlineMembers([]);
     };
   }, [groupId, userId, dedupeMessages]);
 
@@ -244,6 +261,15 @@ export function useHangoutSocket(
     }
   }, [groupId, hasMore, dedupeMessages]);
 
+  const inviteToCall = useCallback(
+    (targetUserId: string) => {
+      if (!groupId) return;
+      const socket = connectSocket();
+      socket.emit("hangout:invite", { groupId, targetUserId });
+    },
+    [groupId]
+  );
+
   return {
     messages,
     sendMessage,
@@ -254,5 +280,7 @@ export function useHangoutSocket(
     loadOlderMessages,
     hasMore,
     isLoadingMore,
+    onlineMembers,
+    inviteToCall,
   };
 }

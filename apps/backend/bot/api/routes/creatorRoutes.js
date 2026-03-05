@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const creatorController = require('../controllers/creatorController');
+const cmsCreatorController = require('../controllers/cmsCreatorController');
 const authGuard = require('../middleware/authGuard');
 const roleGuard = require('../middleware/roleGuard');
 
@@ -47,6 +48,22 @@ router.post('/wallet', authGuard, creatorController.saveWalletAddress);
 
 // Creator tier change
 router.post('/change-tier', authGuard, creatorController.changeTier);
+
+// ── CMS routes (active creators only) ────────────────────────────────────────
+router.get('/cms/profile', authGuard, cmsCreatorController.getProfile);
+router.put('/cms/profile', authGuard, cmsCreatorController.updateProfile);
+
+router.get('/cms/content', authGuard, cmsCreatorController.listContent);
+router.post('/cms/content', authGuard, cmsCreatorController.createContent);
+router.patch('/cms/content/:id', authGuard, cmsCreatorController.updateContent);
+router.delete('/cms/content/:id', authGuard, cmsCreatorController.deleteContent);
+
+router.get('/cms/shows', authGuard, cmsCreatorController.listShows);
+router.post('/cms/shows', authGuard, cmsCreatorController.createShow);
+router.patch('/cms/shows/:id', authGuard, cmsCreatorController.updateShow);
+router.delete('/cms/shows/:id', authGuard, cmsCreatorController.deleteShow);
+
+router.post('/cms/upload', authGuard, ...cmsCreatorController.uploadMedia);
 
 // ── Admin routes ──────────────────────────────────────────────────────────────
 // IMPORTANT: static paths must come BEFORE /:creatorId/* param routes

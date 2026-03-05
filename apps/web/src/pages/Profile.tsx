@@ -1234,9 +1234,9 @@ function FollowListModal({
 // ── Creator Terms & Conditions Modal ────────────────────────────────────────
 
 const CREATOR_TIERS = [
-  { id: "ice" as const, label: "Ice", price: 5, color: "#A8D8EA", gradient: "linear-gradient(135deg, #A8D8EA, #73B4D4)", emoji: "❄️" },
-  { id: "crystal" as const, label: "Crystal", price: 10, color: "#4ADE80", gradient: "linear-gradient(135deg, #4ADE80, #22C55E)", emoji: "🔮" },
-  { id: "diamond" as const, label: "Diamond", price: 15, color: "#C4B5FD", gradient: "linear-gradient(135deg, #C4B5FD, #A78BFA)", emoji: "💎" },
+  { id: "ice" as const, label: "Ice", price: 5, color: "#5ED1C4", gradient: "linear-gradient(135deg, #5ED1C4, #00D4E8)", emoji: "❄️" },
+  { id: "crystal" as const, label: "Crystal", price: 10, color: "#D4007A", gradient: "linear-gradient(135deg, #D4007A, #E69138)", emoji: "🔮" },
+  { id: "diamond" as const, label: "Diamond", price: 15, color: "#FFB454", gradient: "linear-gradient(135deg, #FFB454, #FF8C00)", emoji: "💎" },
 ] as const;
 
 type TierId = typeof CREATOR_TIERS[number]["id"];
@@ -1244,9 +1244,9 @@ type TierId = typeof CREATOR_TIERS[number]["id"];
 // ── Creator Tier Helpers ─────────────────────────────────────────────────────
 
 const TIER_CONFIG = {
-  ice:     { color: "#A8D8EA", gradient: "linear-gradient(135deg, #A8D8EA, #73B4D4)",  rgb: "168,216,234", name: "Ice Profile",     emoji: "❄️", price: 5 },
-  crystal: { color: "#4ADE80", gradient: "linear-gradient(135deg, #4ADE80, #22C55E)",  rgb: "74,222,128",  name: "Crystal Profile", emoji: "🔮", price: 10 },
-  diamond: { color: "#C4B5FD", gradient: "linear-gradient(135deg, #C4B5FD, #A78BFA)",  rgb: "196,181,253", name: "Diamond Profile", emoji: "💎", price: 15 },
+  ice:     { color: "#5ED1C4", gradient: "linear-gradient(135deg, #5ED1C4, #00D4E8)",  rgb: "94,209,196",  name: "Ice Profile",     emoji: "❄️", price: 5 },
+  crystal: { color: "#D4007A", gradient: "linear-gradient(135deg, #D4007A, #E69138)",  rgb: "212,0,122",   name: "Crystal Profile", emoji: "🔮", price: 10 },
+  diamond: { color: "#FFB454", gradient: "linear-gradient(135deg, #FFB454, #FF8C00)",  rgb: "255,180,84",  name: "Diamond Profile", emoji: "💎", price: 15 },
 } as const;
 
 // ── Enrollment Wizard ─────────────────────────────────────────────────────────
@@ -2588,9 +2588,9 @@ export default function Profile() {
                   )}
                   {profile.creatorStatus === "active" && (() => {
                     const tierMap: Record<string, { emoji: string; label: string; color: string }> = {
-                      ice:     { emoji: "❄️", label: "Ice Creator",     color: "#A8D8EA" },
-                      crystal: { emoji: "🔮", label: "Crystal Creator",  color: "#4ADE80" },
-                      diamond: { emoji: "💎", label: "Diamond Creator",  color: "#C4B5FD" },
+                      ice:     { emoji: TIER_CONFIG.ice.emoji,     label: "Ice Creator",     color: TIER_CONFIG.ice.color },
+                      crystal: { emoji: TIER_CONFIG.crystal.emoji, label: "Crystal Creator",  color: TIER_CONFIG.crystal.color },
+                      diamond: { emoji: TIER_CONFIG.diamond.emoji, label: "Diamond Creator",  color: TIER_CONFIG.diamond.color },
                     };
                     const tier = tierMap[profile.creatorType ?? ""];
                     const badgeColor  = tier ? tier.color  : "#D4007A";
@@ -2743,15 +2743,18 @@ export default function Profile() {
               >
                 Edit Profile
               </button>
-              {profile.creatorStatus === "active" && (
-                <button
-                  onClick={() => navigate("/creator")}
-                  className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors"
-                  style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.3)" }}
-                >
-                  Creator Dashboard
-                </button>
-              )}
+              {profile.creatorStatus === "active" && (() => {
+                const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
+                return (
+                  <button
+                    onClick={() => navigate("/creator")}
+                    className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors"
+                    style={{ background: `rgba(${tc.rgb},0.15)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.3)` }}
+                  >
+                    {tc.emoji} Creator Dashboard
+                  </button>
+                );
+              })()}
               <button
                 onClick={() => { resetAllTutorials(); window.location.reload(); }}
                 className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/90 transition-colors"
@@ -2788,20 +2791,18 @@ export default function Profile() {
                 Message
               </button>
               {profile.creatorStatus === "active" && isAuthenticated && (() => {
-                const isIce = profile.creatorType === "ice";
+                const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
                 return (
                   <button
                     onClick={handleSubscribe}
                     disabled={subscribeLoading}
                     className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
                     style={isSubscribed
-                      ? { background: "rgba(94,209,196,0.15)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.3)" }
-                      : isIce
-                        ? { background: "rgba(168,216,234,0.15)", color: "#A8D8EA", border: "1px solid rgba(168,216,234,0.4)" }
-                        : { background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.3)" }
+                      ? { background: `rgba(${tc.rgb},0.12)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.35)` }
+                      : { background: tc.gradient, color: "#fff" }
                     }
                   >
-                    {subscribeLoading ? "..." : isSubscribed ? "Subscribed" : `Subscribe $${profile.creatorPriceUsd || 15}/mo`}
+                    {subscribeLoading ? "..." : isSubscribed ? `${tc.emoji} Subscribed` : `${tc.emoji} Subscribe $${profile.creatorPriceUsd || tc.price}/mo`}
                   </button>
                 );
               })()}
@@ -2815,10 +2816,10 @@ export default function Profile() {
 
       {/* ── Creator Subscription Payment Modal ── */}
       {showSubscribeModal && profile && (() => {
-        const isIce = profile.creatorType === "ice";
-        const accentColor   = isIce ? "#A8D8EA" : "#D4007A";
-        const accentRgb     = isIce ? "168,216,234" : "212,0,122";
-        const gradientBg    = isIce ? "linear-gradient(135deg, #A8D8EA, #73B4D4)" : "linear-gradient(135deg, #D4007A, #E69138)";
+        const modalTc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
+        const accentColor   = modalTc.color;
+        const accentRgb     = modalTc.rgb;
+        const gradientBg    = modalTc.gradient;
         return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}>
           <div className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}>

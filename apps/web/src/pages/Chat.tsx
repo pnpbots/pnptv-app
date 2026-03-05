@@ -42,6 +42,7 @@ import {
   VideoCallBanner,
   VideoCallOverlay,
 } from "@/components/hangouts";
+import { connectSocket } from "@/lib/socket";
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -273,6 +274,8 @@ export default function Chat() {
     loadOlderMessages,
     hasMore,
     isLoadingMore,
+    onlineMembers,
+    inviteToCall,
   } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId);
 
   // Media upload state
@@ -292,6 +295,17 @@ export default function Chat() {
 
   // Create group error
   const [createError, setCreateError] = useState<string | null>(null);
+
+  // Online members panel
+  const [showOnline, setShowOnline] = useState(false);
+
+  // Incoming invite notification (global — received even from other groups)
+  const [inviteNotif, setInviteNotif] = useState<{
+    groupId: number;
+    groupName: string;
+    fromName: string;
+    fromPhotoUrl: string | null;
+  } | null>(null);
 
   // ─── Group list loading ─────────────────────────────────────────────
 
@@ -494,6 +508,7 @@ export default function Chat() {
     setActiveGroup(null);
     setCallUrl(null);
     setCallId(null);
+    setShowOnline(false);
     clearMedia();
     loadGroups();
   };
@@ -614,6 +629,29 @@ export default function Chat() {
     }
   }, [callState.endReason]);
 
+  // Global invite listener — works regardless of which group is active
+  useEffect(() => {
+    const socket = connectSocket();
+    const onInvite = (data: {
+      groupId: number;
+      groupName: string;
+      fromUserId: string;
+      fromName: string;
+      fromPhotoUrl: string | null;
+    }) => {
+      setInviteNotif({
+        groupId: data.groupId,
+        groupName: data.groupName,
+        fromName: data.fromName,
+        fromPhotoUrl: data.fromPhotoUrl,
+      });
+      // Auto-dismiss after 8s
+      setTimeout(() => setInviteNotif(null), 8000);
+    };
+    socket.on("hangout:invite:received", onInvite);
+    return () => { socket.off("hangout:invite:received", onInvite); };
+  }, []);
+
   // ─── Group management ──────────────────────────────────────────────
 
   const handleLeaveGroup = async (gid: number) => {
@@ -664,7 +702,67 @@ export default function Chat() {
     const showCallBanner = !callUrl && callState.isActive;
 
     return (
-      <div className="flex flex-col" style={{ height: "calc(100vh - 5rem)" }}>
+      <div className="relative flex flex-col" style={{ height: "calc(100vh - 5rem)" }}>
+        {/* Incoming call invite toast */}
+        {inviteNotif && (
+          <div
+            className="fixed top-4 left-1/2 z-50 w-full max-w-sm -translate-x-1/2 px-4 animate-fade-in-up"
+            style={{ pointerEvents: "none" }}
+          >
+            <div
+              className="rounded-2xl p-4 flex items-center gap-3 shadow-2xl"
+              style={{
+                background: "#1C1C1E",
+                border: "1px solid rgba(94,209,196,0.3)",
+                pointerEvents: "auto",
+              }}
+            >
+              {/* Avatar */}
+              {inviteNotif.fromPhotoUrl ? (
+                <img src={inviteNotif.fromPhotoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+              ) : (
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                  style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)", color: "#fff" }}
+                >
+                  {(inviteNotif.fromName || "?")[0].toUpperCase()}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-white truncate">
+                  {inviteNotif.fromName} invited you
+                </p>
+                <p className="text-xs truncate" style={{ color: "#8E8E93" }}>
+                  Join the video call in {inviteNotif.groupName}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => {
+                    const g = groups.find((gr) => gr.id === inviteNotif.groupId);
+                    if (g) openChat(g);
+                    setInviteNotif(null);
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                  style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
+                >
+                  Join
+                </button>
+                <button
+                  onClick={() => setInviteNotif(null)}
+                  className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+                  style={{ color: "#8E8E93" }}
+                  aria-label="Dismiss invite"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Lightbox */}
         {lightboxSrc && (
           <MediaLightbox
@@ -698,6 +796,20 @@ export default function Chat() {
               )}
             </p>
           </div>
+
+          {/* Online members button */}
+          <button
+            onClick={() => setShowOnline((v) => !v)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-colors hover:bg-white/5"
+            title="Who's online"
+            aria-label="Show online members"
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-60" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
+            </span>
+            <span className="text-xs font-medium text-green-400">{onlineMembers.length}</span>
+          </button>
 
           {/* Video call button */}
           <VideoCallButton
@@ -742,6 +854,86 @@ export default function Chat() {
             onClose={handleEndCall}
             initialMode="embedded"
           />
+        )}
+
+        {/* Online Members Panel */}
+        {showOnline && (
+          <div
+            className="absolute inset-0 z-40 flex flex-col justify-end"
+            style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+            onClick={(e) => { if (e.target === e.currentTarget) setShowOnline(false); }}
+          >
+            <div
+              className="rounded-t-2xl w-full max-h-[60vh] flex flex-col"
+              style={{ background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}
+            >
+              {/* Panel header */}
+              <div className="flex items-center justify-between px-5 pt-4 pb-3 flex-shrink-0">
+                <div>
+                  <p className="text-sm font-semibold text-white">Online Now</p>
+                  <p className="text-xs" style={{ color: "#8E8E93" }}>{onlineMembers.length} of {activeGroup.memberCount} members</p>
+                </div>
+                <button
+                  onClick={() => setShowOnline(false)}
+                  className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+                  style={{ color: "#8E8E93" }}
+                  aria-label="Close online panel"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              {/* Member list */}
+              <div className="overflow-y-auto flex-1 px-4 pb-6 space-y-2">
+                {onlineMembers.length === 0 ? (
+                  <p className="text-center text-sm py-6" style={{ color: "#8E8E93" }}>No other members online right now</p>
+                ) : (
+                  onlineMembers.map((member) => {
+                    const isMe = member.userId === user?.dbId;
+                    return (
+                      <div key={member.userId} className="flex items-center gap-3 py-2">
+                        {/* Avatar */}
+                        {member.photoUrl ? (
+                          <img src={member.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                        ) : (
+                          <div
+                            className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                          >
+                            {(member.name || "?")[0].toUpperCase()}
+                          </div>
+                        )}
+                        {/* Name */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-white truncate">
+                            {member.name}{isMe ? " (you)" : ""}
+                          </p>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                            <span className="text-xs" style={{ color: "#8E8E93" }}>Online</span>
+                          </div>
+                        </div>
+                        {/* Invite button — only if call is active and not self */}
+                        {(callState.isActive || callUrl) && !isMe && (
+                          <button
+                            onClick={() => {
+                              inviteToCall(member.userId);
+                              setShowOnline(false);
+                            }}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white flex-shrink-0 transition-all active:scale-95"
+                            style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
+                          >
+                            Invite
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Messages area */}
@@ -895,6 +1087,66 @@ export default function Chat() {
         <meta name="description" content="Join or create video call rooms and group chats on PNPtv Hangouts." />
       </Helmet>
       {showTutorial && <TutorialOverlay section="hangouts" onDismiss={dismissTutorial} />}
+
+      {/* Incoming call invite toast */}
+      {inviteNotif && (
+        <div
+          className="fixed top-4 left-1/2 z-50 w-full max-w-sm -translate-x-1/2 px-4 animate-fade-in-up"
+          style={{ pointerEvents: "none" }}
+        >
+          <div
+            className="rounded-2xl p-4 flex items-center gap-3 shadow-2xl"
+            style={{
+              background: "#1C1C1E",
+              border: "1px solid rgba(94,209,196,0.3)",
+              pointerEvents: "auto",
+            }}
+          >
+            {/* Avatar */}
+            {inviteNotif.fromPhotoUrl ? (
+              <img src={inviteNotif.fromPhotoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+            ) : (
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)", color: "#fff" }}
+              >
+                {(inviteNotif.fromName || "?")[0].toUpperCase()}
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white truncate">
+                {inviteNotif.fromName} invited you
+              </p>
+              <p className="text-xs truncate" style={{ color: "#8E8E93" }}>
+                Join the video call in {inviteNotif.groupName}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => {
+                  const g = groups.find((gr) => gr.id === inviteNotif.groupId);
+                  if (g) openChat(g);
+                  setInviteNotif(null);
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
+              >
+                Join
+              </button>
+              <button
+                onClick={() => setInviteNotif(null)}
+                className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+                style={{ color: "#8E8E93" }}
+                aria-label="Dismiss invite"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
