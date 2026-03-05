@@ -28,7 +28,7 @@ class DashTokenService {
   static async getWallet(userId) {
     const cacheKey = `wallet:${userId}`;
     const cached = await cache.get(cacheKey).catch(() => null);
-    if (cached) return JSON.parse(cached);
+    if (cached) return cached;
 
     // Upsert ensures wallet exists
     const result = await query(
@@ -39,7 +39,7 @@ class DashTokenService {
       [userId]
     );
     const wallet = result.rows[0] || { balance_tokens: 0, dash_dpns: null };
-    await cache.setex(cacheKey, 30, JSON.stringify(wallet)).catch(() => {});
+    await cache.set(cacheKey, wallet, 30).catch(() => {});
     return wallet;
   }
 

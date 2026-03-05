@@ -126,35 +126,54 @@ const unsubscribeFromCreator = async (req, res) => {
 const getWalletAddress = async (req, res) => {
   try {
     const { rows } = await query(
-      'SELECT creator_wallet_address, creator_wallet_verified FROM users WHERE id = $1',
+      'SELECT creator_wallet_address, creator_wallet_verified, payout_method, meru_account FROM users WHERE id = $1',
       [req.user.id]
     );
     return res.json({
       success: true,
       address: rows[0]?.creator_wallet_address || null,
       verified: rows[0]?.creator_wallet_verified || false,
+      payoutMethod: rows[0]?.payout_method || 'crypto',
+      meruAccount: rows[0]?.meru_account || null,
     });
   } catch (err) {
     logger.error('getWalletAddress error', err);
-    return res.status(500).json({ error: 'Failed to get wallet address' });
+    return res.status(500).json({ error: 'Failed to get payout info' });
   }
 };
 
 // POST /api/webapp/creator/wallet
 const saveWalletAddress = async (req, res) => {
   try {
-    const { address } = req.body || {};
-    if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
-      return res.status(400).json({ error: 'Invalid Ethereum wallet address. Must be 0x followed by 40 hex characters.' });
+    const { address, payoutMethod, meruAccount } = req.body || {};
+    const method = payoutMethod === 'meru' ? 'meru' : 'crypto';
+
+    if (method === 'crypto') {
+      if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+        return res.status(400).json({ error: 'Invalid Ethereum wallet address. Must be 0x followed by 40 hex characters.' });
+      }
+      await query(
+        'UPDATE users SET creator_wallet_address = $1, payout_method = $2, meru_account = NULL WHERE id = $3',
+        [address.toLowerCase(), 'crypto', req.user.id]
+      );
+    } else {
+      const meru = (meruAccount || '').trim();
+      if (!meru) {
+        return res.status(400).json({ error: 'Meru account (phone number or username) is required.' });
+      }
+      if (meru.length > 100) {
+        return res.status(400).json({ error: 'Meru account too long.' });
+      }
+      await query(
+        'UPDATE users SET payout_method = $1, meru_account = $2, creator_wallet_address = NULL WHERE id = $3',
+        ['meru', meru, req.user.id]
+      );
     }
-    await query(
-      'UPDATE users SET creator_wallet_address = $1 WHERE id = $2',
-      [address.toLowerCase(), req.user.id]
-    );
-    return res.json({ success: true });
+
+    return res.json({ success: true, payoutMethod: method });
   } catch (err) {
     logger.error('saveWalletAddress error', err);
-    return res.status(500).json({ error: 'Failed to save wallet address' });
+    return res.status(500).json({ error: 'Failed to save payout info' });
   }
 };
 

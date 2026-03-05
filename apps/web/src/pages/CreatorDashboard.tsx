@@ -66,8 +66,10 @@ export default function CreatorDashboard() {
   const [withdrawSuccess, setWithdrawSuccess] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"overview" | "earnings" | "payouts" | "settings">("overview");
 
-  // Settings tab — wallet
+  // Settings tab — payout method
+  const [payoutMethod, setPayoutMethod] = useState<"crypto" | "meru">("crypto");
   const [walletAddress, setWalletAddress] = useState<string>("");
+  const [meruAccount, setMeruAccount] = useState<string>("");
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletSaving, setWalletSaving] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
@@ -122,10 +124,12 @@ export default function CreatorDashboard() {
     try {
       const res = await getCreatorWallet();
       if (res.success) {
+        setPayoutMethod(res.payoutMethod || "crypto");
         setWalletAddress(res.address || "");
+        setMeruAccount(res.meruAccount || "");
       }
     } catch {
-      // Non-critical — silently ignore; user can still type their address
+      // Non-critical — silently ignore
     } finally {
       setWalletLoading(false);
     }
@@ -168,24 +172,47 @@ export default function CreatorDashboard() {
   const handleSaveWallet = async () => {
     setWalletError(null);
     setWalletSuccess(null);
-    const trimmed = walletAddress.trim();
-    if (!ETHEREUM_ADDRESS_RE.test(trimmed)) {
-      setWalletError("Invalid address. Must start with 0x followed by exactly 40 hex characters.");
-      return;
-    }
-    setWalletSaving(true);
-    try {
-      const res = await saveCreatorWallet(trimmed);
-      if (res.success) {
-        setWalletSuccess("Wallet address saved successfully.");
-        setWalletAddress(trimmed.toLowerCase());
-      } else {
-        setWalletError(res.error || "Failed to save wallet address.");
+
+    if (payoutMethod === "crypto") {
+      const trimmed = walletAddress.trim();
+      if (!ETHEREUM_ADDRESS_RE.test(trimmed)) {
+        setWalletError("Invalid address. Must start with 0x followed by exactly 40 hex characters.");
+        return;
       }
-    } catch (err) {
-      setWalletError(err instanceof Error ? err.message : "Failed to save wallet address.");
-    } finally {
-      setWalletSaving(false);
+      setWalletSaving(true);
+      try {
+        const res = await saveCreatorWallet({ payoutMethod: "crypto", address: trimmed });
+        if (res.success) {
+          setWalletSuccess("Crypto wallet saved successfully.");
+          setWalletAddress(trimmed.toLowerCase());
+        } else {
+          setWalletError(res.error || "Failed to save wallet address.");
+        }
+      } catch (err) {
+        setWalletError(err instanceof Error ? err.message : "Failed to save wallet address.");
+      } finally {
+        setWalletSaving(false);
+      }
+    } else {
+      const meru = meruAccount.trim();
+      if (!meru) {
+        setWalletError("Enter your Meru phone number or username.");
+        return;
+      }
+      setWalletSaving(true);
+      try {
+        const res = await saveCreatorWallet({ payoutMethod: "meru", meruAccount: meru });
+        if (res.success) {
+          setWalletSuccess("Meru account saved successfully.");
+          setMeruAccount(meru);
+        } else {
+          setWalletError(res.error || "Failed to save Meru account.");
+        }
+      } catch (err) {
+        setWalletError(err instanceof Error ? err.message : "Failed to save Meru account.");
+      } finally {
+        setWalletSaving(false);
+      }
     }
   };
 
@@ -489,29 +516,83 @@ export default function CreatorDashboard() {
           {activeTab === "settings" && (
             <div className="space-y-4">
 
-              {/* Payout Wallet Card */}
+              {/* Payout Method Card */}
               <div className="glass-card-sm p-5">
-                <p className="text-sm font-semibold text-white mb-1">Payout Wallet</p>
+                <p className="text-sm font-semibold text-white mb-1">Payout Method</p>
                 <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
-                  Your Daimo/Ethereum wallet address for monthly payouts (EVM, 0x...)
+                  Choose how you want to receive your monthly payouts.
                 </p>
+
+                {/* Method selector */}
+                <div className="flex gap-2 mb-4">
+                  {([
+                    { key: "meru", label: "Meru App", icon: "📱" },
+                    { key: "crypto", label: "Crypto", icon: "🔑" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.key}
+                      onClick={() => {
+                        setPayoutMethod(opt.key);
+                        setWalletError(null);
+                        setWalletSuccess(null);
+                      }}
+                      disabled={walletLoading}
+                      className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-40"
+                      style={{
+                        background: payoutMethod === opt.key
+                          ? "linear-gradient(135deg, #D4007A, #E69138)"
+                          : "rgba(255,255,255,0.05)",
+                        color: payoutMethod === opt.key ? "#fff" : "#8E8E93",
+                        border: payoutMethod === opt.key
+                          ? "1px solid transparent"
+                          : "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      <span className="block text-base mb-0.5">{opt.icon}</span>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
 
                 {walletLoading ? (
                   <div className="h-10 bg-white/5 rounded-lg animate-pulse mb-3" />
+                ) : payoutMethod === "meru" ? (
+                  <div className="mb-3">
+                    <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>
+                      Enter your Meru phone number or registered username.
+                    </p>
+                    <input
+                      type="text"
+                      value={meruAccount}
+                      onChange={(e) => {
+                        setMeruAccount(e.target.value);
+                        setWalletError(null);
+                        setWalletSuccess(null);
+                      }}
+                      placeholder="+57 300 000 0000 or @username"
+                      autoComplete="off"
+                      className="w-full px-3 py-2.5 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors"
+                    />
+                  </div>
                 ) : (
-                  <input
-                    type="text"
-                    value={walletAddress}
-                    onChange={(e) => {
-                      setWalletAddress(e.target.value);
-                      setWalletError(null);
-                      setWalletSuccess(null);
-                    }}
-                    placeholder="0x..."
-                    spellCheck={false}
-                    autoComplete="off"
-                    className="w-full px-3 py-2.5 rounded-lg text-sm font-mono text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors mb-3"
-                  />
+                  <div className="mb-3">
+                    <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>
+                      Your Ethereum/Daimo wallet address (EVM, 0x...).
+                    </p>
+                    <input
+                      type="text"
+                      value={walletAddress}
+                      onChange={(e) => {
+                        setWalletAddress(e.target.value);
+                        setWalletError(null);
+                        setWalletSuccess(null);
+                      }}
+                      placeholder="0x..."
+                      spellCheck={false}
+                      autoComplete="off"
+                      className="w-full px-3 py-2.5 rounded-lg text-sm font-mono text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors"
+                    />
+                  </div>
                 )}
 
                 {walletSuccess && (
@@ -527,15 +608,15 @@ export default function CreatorDashboard() {
 
                 <button
                   onClick={handleSaveWallet}
-                  disabled={walletSaving || walletLoading || !walletAddress.trim()}
+                  disabled={walletSaving || walletLoading || (payoutMethod === "crypto" ? !walletAddress.trim() : !meruAccount.trim())}
                   className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
                   style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
                 >
-                  {walletSaving ? "Saving..." : "Save Wallet Address"}
+                  {walletSaving ? "Saving..." : "Save Payout Info"}
                 </button>
 
                 <p className="mt-4 text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
-                  Payouts are sent on the 1st of each month. Minimum threshold: $1.00 USD.
+                  Payouts are processed on the 1st of each month. Minimum threshold: $1.00 USD.
                 </p>
               </div>
 

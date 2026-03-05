@@ -309,7 +309,7 @@ const sessionMiddleware = session({
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/',
-    domain: process.env.NODE_ENV === 'production' ? 'app.pnptv.app' : undefined
+    domain: process.env.NODE_ENV === 'production' ? '.pnptv.app' : undefined
   }
 });
 

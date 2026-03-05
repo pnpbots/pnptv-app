@@ -431,7 +431,7 @@ services:
     container_name: pnptv-bot
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3001:3001"
+      - "3001:3001"
     working_dir: /app
     volumes:
       - .:/app:ro
@@ -439,7 +439,7 @@ services:
       - ./logs:/app/logs
       - pnptv-bot-nm:/app/node_modules
     command: >
-      sh -c "npm install --omit=dev;
+      sh -c "npm install --omit=dev --package-lock=false;
              node --dns-result-order=ipv4first apps/backend/bot/core/bot.js"
     env_file:
       - .env

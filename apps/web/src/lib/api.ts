@@ -1725,15 +1725,22 @@ export function getCreatorWallet(): Promise<{
   success: boolean;
   address: string | null;
   verified: boolean;
+  payoutMethod: "crypto" | "meru";
+  meruAccount: string | null;
 }> {
   return request("/api/webapp/creator/wallet");
 }
 
-export function saveCreatorWallet(address: string): Promise<{
+export function saveCreatorWallet(payload: {
+  payoutMethod: "crypto" | "meru";
+  address?: string;
+  meruAccount?: string;
+}): Promise<{
   success: boolean;
+  payoutMethod?: string;
   error?: string;
 }> {
-  return request("/api/webapp/creator/wallet", { method: "POST", body: { address } });
+  return request("/api/webapp/creator/wallet", { method: "POST", body: payload });
 }
 
 export function changeCreatorTier(
