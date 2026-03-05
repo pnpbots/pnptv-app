@@ -1380,6 +1380,31 @@ export function getPaymentStatus(
   return request(`/api/payment/${encodeURIComponent(paymentId)}/status`);
 }
 
+export function createDashSubscription(
+  planId: string,
+  email: string
+): Promise<{
+  success: boolean;
+  invoiceId: string;
+  checkoutUrl: string;
+  planName?: string;
+  usdAmount?: number;
+  error?: string;
+}> {
+  return request("/api/webapp/payments/dash/create", {
+    method: "POST",
+    body: { planId, email },
+  });
+}
+
+export function getDashSubscriptionStatus(invoiceId: string): Promise<{
+  success: boolean;
+  status: string;
+  error?: string;
+}> {
+  return request(`/api/webapp/payments/dash/status/${encodeURIComponent(invoiceId)}`);
+}
+
 export function activateMeruCode(
   code: string,
   email: string

@@ -6,6 +6,8 @@ import {
   getSubscriptionPlans,
   createPayment,
   getPaymentStatus,
+  createDashSubscription,
+  getDashSubscriptionStatus,
   activateMeruCode,
   type SubscriptionPlan,
 } from "@/lib/api";
@@ -13,7 +15,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 
-type Provider = "epayco" | "daimo";
+type Provider = "epayco" | "daimo" | "dash";
 
 const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
 
@@ -102,6 +104,10 @@ export default function Subscribe() {
   const [pollingPaymentId, setPollingPaymentId] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
+  // Dash invoice state
+  const [dashInvoice, setDashInvoice] = useState<{ invoiceId: string; checkoutUrl: string; planName: string } | null>(null);
+  const [dashPolling, setDashPolling] = useState(false);
+
   // Meru code activation
   const [meruCode, setMeruCode] = useState("");
   const [meruSubmitting, setMeruSubmitting] = useState(false);
@@ -164,6 +170,40 @@ export default function Subscribe() {
     return () => { cancelled = true; };
   }, [pollingPaymentId, refreshUser]);
 
+  // Poll Dash invoice status after showing checkout
+  useEffect(() => {
+    if (!dashInvoice || !dashPolling) return;
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 120; // 10 minutes at 5s intervals
+
+    const poll = async () => {
+      if (cancelled || attempts >= maxAttempts) return;
+      attempts++;
+      try {
+        const data = await getDashSubscriptionStatus(dashInvoice.invoiceId);
+        if (cancelled) return;
+        if (data.status === "completed") {
+          setDashPolling(false);
+          setDashInvoice(null);
+          setPaymentSuccess(true);
+          await refreshUser();
+          return;
+        }
+        if (data.status === "expired" || data.status === "invalid") {
+          setDashPolling(false);
+          setError("Dash payment expired or was not received. Please try again.");
+          return;
+        }
+        setTimeout(poll, 5000);
+      } catch {
+        if (!cancelled) setTimeout(poll, 5000);
+      }
+    };
+    poll();
+    return () => { cancelled = true; };
+  }, [dashInvoice, dashPolling, refreshUser]);
+
   function validateEmail(): boolean {
     const trimmed = email.trim();
     if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) || trimmed.length > 254) {
@@ -182,16 +222,28 @@ export default function Subscribe() {
     setError(null);
 
     try {
-      const result = await createPayment(selectedPlan, provider, email.trim());
-
-      if (result.success && result.paymentUrl) {
-        window.open(result.paymentUrl, "_blank", "noopener,noreferrer");
-        // Start polling for payment completion
-        if (result.paymentId) {
-          setPollingPaymentId(result.paymentId);
+      if (provider === "dash") {
+        const result = await createDashSubscription(selectedPlan, email.trim());
+        if (result.success && result.checkoutUrl) {
+          setDashInvoice({
+            invoiceId: result.invoiceId,
+            checkoutUrl: result.checkoutUrl,
+            planName: result.planName || "subscription",
+          });
+          setDashPolling(true);
+        } else {
+          setError(result.error || "Failed to create Dash invoice");
         }
       } else {
-        setError(result.error || "Failed to create payment");
+        const result = await createPayment(selectedPlan, provider, email.trim());
+        if (result.success && result.paymentUrl) {
+          window.open(result.paymentUrl, "_blank", "noopener,noreferrer");
+          if (result.paymentId) {
+            setPollingPaymentId(result.paymentId);
+          }
+        } else {
+          setError(result.error || "Failed to create payment");
+        }
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Payment error";
@@ -470,7 +522,7 @@ export default function Subscribe() {
       {/* Payment method */}
       <div className="mb-6">
         <h3 className="text-sm font-medium text-pnp-textPrimary mb-3">Payment Method</h3>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-2">
           <button
             onClick={() => setProvider("epayco")}
             className={`rounded-xl p-3 border-2 transition-all text-center ${
@@ -481,7 +533,7 @@ export default function Subscribe() {
           >
             <div className="text-lg mb-1">💳</div>
             <div className="text-xs font-medium text-pnp-textPrimary">Card / PSE</div>
-            <div className="text-[10px] text-pnp-textSecondary">Credit, Debit, Bank</div>
+            <div className="text-[10px] text-pnp-textSecondary">Credit, Debit</div>
           </button>
           <button
             onClick={() => setProvider("daimo")}
@@ -492,11 +544,80 @@ export default function Subscribe() {
             }`}
           >
             <div className="text-lg mb-1">🪙</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">Crypto / USDC</div>
-            <div className="text-[10px] text-pnp-textSecondary">Coinbase, MetaMask, Binance</div>
+            <div className="text-xs font-medium text-pnp-textPrimary">USDC</div>
+            <div className="text-[10px] text-pnp-textSecondary">Coinbase, MetaMask</div>
+          </button>
+          <button
+            onClick={() => setProvider("dash")}
+            className={`rounded-xl p-3 border-2 transition-all text-center relative ${
+              provider === "dash"
+                ? "border-[#008DE4] bg-[#008DE4]/10"
+                : "border-white/10 bg-white/5 hover:border-white/20"
+            }`}
+          >
+            <div className="text-lg mb-1">🥷</div>
+            <div className="text-xs font-medium text-pnp-textPrimary">Dash</div>
+            <div className="text-[10px] text-pnp-textSecondary">Anonymous</div>
+            <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#008DE4] text-white px-1.5 py-0.5 rounded-full leading-none">
+              ANON
+            </span>
           </button>
         </div>
+
+        {/* Dash info panel */}
+        {provider === "dash" && (
+          <div className="mt-3 rounded-xl p-3 border border-[#008DE4]/30 bg-[#008DE4]/5 space-y-2">
+            <p className="text-xs text-pnp-textSecondary">
+              Pay anonymously with <span className="text-[#008DE4] font-medium">Dash</span> — no credit card, no identity required. You'll get a payment address + QR code to send from any Dash wallet.
+            </p>
+            <div className="flex flex-wrap gap-2 text-[10px]">
+              <a href="https://www.dash.org/downloads/" target="_blank" rel="noopener noreferrer"
+                className="text-[#008DE4] hover:underline">
+                Get Dash Wallet ↗
+              </a>
+              <span className="text-pnp-textSecondary/40">·</span>
+              <a href="https://www.kraken.com/learn/buy-dash-coin" target="_blank" rel="noopener noreferrer"
+                className="text-[#008DE4] hover:underline">
+                Buy on Kraken ↗
+              </a>
+              <span className="text-pnp-textSecondary/40">·</span>
+              <a href="https://uphold.com/en/assets/crypto/buy-dash" target="_blank" rel="noopener noreferrer"
+                className="text-[#008DE4] hover:underline">
+                Buy on Uphold ↗
+              </a>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Dash invoice modal */}
+      {dashInvoice && (
+        <div className="mb-6 rounded-xl border border-[#008DE4]/40 bg-[#008DE4]/5 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-[#008DE4] animate-pulse" />
+            <span className="text-sm font-medium text-pnp-textPrimary">
+              Waiting for Dash payment — {dashInvoice.planName}
+            </span>
+          </div>
+          <p className="text-xs text-pnp-textSecondary mb-3">
+            Complete your payment in the BTCPay checkout page. This page will update automatically once confirmed.
+          </p>
+          <a
+            href={dashInvoice.checkoutUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block w-full text-center py-2.5 rounded-xl bg-[#008DE4] text-white text-sm font-semibold hover:bg-[#0070b8] transition-colors mb-2"
+          >
+            Open Dash Checkout
+          </a>
+          <button
+            onClick={() => { setDashInvoice(null); setDashPolling(false); }}
+            className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       {/* Lifetime100 promo + Meru code */}
       <div className="mb-6">

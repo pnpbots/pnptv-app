@@ -2842,6 +2842,10 @@ app.delete('/api/webapp/social/posts/:postId', asyncHandler(socialController.del
 app.get('/api/webapp/social/posts/:postId/replies', asyncHandler(socialController.getReplies));
 app.post('/api/webapp/social/posts/:postId/mastodon', asyncHandler(socialController.postToMastodon));
 app.post('/api/webapp/social/posts/:postId/request-deletion', asyncHandler(socialController.requestWofDeletion));
+app.get('/api/webapp/social/wof/leaderboard', asyncHandler(socialController.getWofLeaderboard));
+app.get('/api/webapp/social/wof/stats', asyncHandler(socialController.getWofStats));
+app.post('/api/admin/social/posts/:postId/wof', adminGuard, asyncHandler(socialController.adminFlagWof));
+app.delete('/api/admin/social/posts/:postId/wof', adminGuard, asyncHandler(socialController.adminUnflagWof));
 
 // ── Promoted Posts (CMS Sync) ────────────────────────────────────────────────
 app.post('/api/admin/social/sync-promoted', adminGuard, asyncHandler(promotedPostController.handleSyncPromoted));
@@ -3640,6 +3644,67 @@ app.post('/api/wallet/link-dpns', asyncHandler(async (req, res) => {
   }
 }));
 
+// POST /api/webapp/payments/dash/create — create a BTCPay Dash invoice for a subscription plan
+app.post('/api/webapp/payments/dash/create', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const { planId, email } = req.body;
+  if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
+
+  const PlanModel = require('../../models/planModel');
+  const plan = await PlanModel.getById(planId);
+  if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
+
+  const userId = String(user.telegram_id || user.id);
+  const orderId = `pnptv-sub-${userId}-${Date.now()}`;
+  const usdAmount = parseFloat(plan.price);
+
+  try {
+    const invoice = await createDashInvoice({
+      usdAmount,
+      userId,
+      orderId,
+      description: `PNPtv ${plan.display_name || plan.name} subscription`,
+      redirectUrl: `${process.env.WEBAPP_URL || 'https://app.pnptv.app'}/subscribe`,
+    });
+
+    const { query: dbQuery } = require('../../config/postgres');
+    await dbQuery(
+      `INSERT INTO dash_subscription_orders (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending')`,
+      [userId, planId, email || null, usdAmount, invoice.invoiceId]
+    );
+
+    return res.json({
+      success: true,
+      invoiceId: invoice.invoiceId,
+      checkoutUrl: invoice.checkoutUrl,
+      planName: plan.display_name || plan.name,
+      usdAmount,
+    });
+  } catch (err) {
+    logger.error('Dash subscription invoice error:', err.message);
+    return res.status(500).json({ success: false, error: 'Failed to create Dash invoice. BTCPay Server may not be ready yet.' });
+  }
+}));
+
+// GET /api/webapp/payments/dash/status/:invoiceId — poll invoice status
+app.get('/api/webapp/payments/dash/status/:invoiceId', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const { invoiceId } = req.params;
+  const { query: dbQuery } = require('../../config/postgres');
+  const result = await dbQuery(
+    `SELECT status FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 AND user_id = $2`,
+    [invoiceId, String(user.telegram_id || user.id)]
+  );
+
+  if (result.rows.length === 0) return res.status(404).json({ success: false, error: 'Order not found' });
+  return res.json({ success: true, status: result.rows[0].status });
+}));
+
 // POST /api/webhooks/btcpay — BTCPay Server webhook (Dash payment confirmed)
 app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) => {
     const signature = req.headers['btcpay-sig'];
@@ -3666,8 +3731,68 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
     const invoiceId = event.invoiceId;
     if (!invoiceId) return res.status(400).json({ success: false, error: 'Missing invoiceId' });
 
-    // Look up pending purchase to get userId + tokens
     const { query: dbQuery } = require('../../config/postgres');
+
+    // --- 1. Check if this is a subscription order ---
+    const subResult = await dbQuery(
+      `SELECT id, user_id, plan_id, status FROM dash_subscription_orders
+       WHERE btcpay_invoice_id = $1`,
+      [invoiceId]
+    );
+
+    if (subResult.rows.length > 0) {
+      const order = subResult.rows[0];
+      if (order.status === 'completed') {
+        return res.json({ success: true, alreadyProcessed: true });
+      }
+
+      const PlanModel = require('../../models/planModel');
+      const plan = await PlanModel.getById(order.plan_id);
+      if (!plan) {
+        logger.error('BTCPay sub webhook: plan not found', { planId: order.plan_id });
+        return res.status(500).json({ success: false, error: 'Plan not found' });
+      }
+
+      const durationDays = plan.duration_days || plan.duration || 30;
+      const isLifetime = durationDays >= 36500;
+      const expiryDate = isLifetime ? null : new Date(Date.now() + durationDays * 86400000);
+      const newTier = order.plan_id === 'member_monthly' ? 'member' : 'PRIME';
+
+      await dbQuery(
+        `UPDATE users
+         SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW()
+         WHERE id = $1 OR telegram = $1`,
+        [order.user_id, newTier, order.plan_id, expiryDate]
+      );
+
+      await dbQuery(
+        `UPDATE dash_subscription_orders
+         SET status = 'completed', completed_at = NOW()
+         WHERE id = $1`,
+        [order.id]
+      );
+
+      logger.info('BTCPay: subscription activated', { userId: order.user_id, planId: order.plan_id, invoiceId });
+
+      try {
+        const socketSingleton = require('../services/socketSingleton');
+        const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+        if (io) {
+          io.to(`user:${order.user_id}`).emit('subscription:activated', {
+            planId: order.plan_id,
+            planName: plan.display_name || plan.name,
+            tier: newTier,
+            expiryDate,
+          });
+        }
+      } catch (emitErr) {
+        logger.warn('BTCPay sub socket emit failed:', emitErr.message);
+      }
+
+      return res.json({ success: true, type: 'subscription', planId: order.plan_id });
+    }
+
+    // --- 2. Fall through to token purchase ---
     const purchaseResult = await dbQuery(
       `SELECT user_id, tokens_credited, usd_amount FROM token_purchases
        WHERE btcpay_invoice_id = $1`,
@@ -3687,7 +3812,6 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
     if (!alreadyProcessed) {
       logger.info('BTCPay: tokens credited', { userId, tokens, invoiceId, newBalance });
 
-      // Notify user via socket if connected
       try {
         const socketSingleton = require('../services/socketSingleton');
         const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;

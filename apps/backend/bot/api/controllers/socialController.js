@@ -487,6 +487,58 @@ const getPublicProfile = async (req, res) => {
   }
 };
 
+// ── WoF Leaderboard ──────────────────────────────────────────────────────────
+
+const getWofLeaderboard = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  try {
+    const leaderboard = await SocialPostService.getWofLeaderboard(req.query.limit);
+    return res.json({ success: true, leaderboard });
+  } catch (err) {
+    logger.error('getWofLeaderboard error', err);
+    return res.status(500).json({ error: 'Failed to load WoF leaderboard' });
+  }
+};
+
+// ── WoF Stats ─────────────────────────────────────────────────────────────────
+
+const getWofStats = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  try {
+    const stats = await SocialPostService.getWofStats();
+    return res.json({ success: true, stats });
+  } catch (err) {
+    logger.error('getWofStats error', err);
+    return res.status(500).json({ error: 'Failed to load WoF stats' });
+  }
+};
+
+// ── Admin: Flag / Unflag WoF ──────────────────────────────────────────────────
+
+const adminFlagWof = async (req, res) => {
+  const postId = parsePostId(req, res); if (!postId) return;
+  try {
+    const id = await SocialPostService.adminFlagWof(postId);
+    if (!id) return res.status(404).json({ error: 'Post not found' });
+    return res.json({ success: true, postId: id });
+  } catch (err) {
+    logger.error('adminFlagWof error', err);
+    return res.status(500).json({ error: 'Failed to flag post as WoF' });
+  }
+};
+
+const adminUnflagWof = async (req, res) => {
+  const postId = parsePostId(req, res); if (!postId) return;
+  try {
+    const id = await SocialPostService.adminUnflagWof(postId);
+    if (!id) return res.status(404).json({ error: 'Post not found' });
+    return res.json({ success: true, postId: id });
+  } catch (err) {
+    logger.error('adminUnflagWof error', err);
+    return res.status(500).json({ error: 'Failed to unflag WoF post' });
+  }
+};
+
 // ── Request WoF Deletion ─────────────────────────────────────────────────────
 
 const requestWofDeletion = async (req, res) => {
@@ -620,4 +672,4 @@ const bulkCreateVideos = async (req, res) => {
   return res.json({ success: true, posts: createdPosts, errors });
 };
 
-module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos };
+module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof };

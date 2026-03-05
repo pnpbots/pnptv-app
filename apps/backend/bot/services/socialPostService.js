@@ -458,6 +458,68 @@ class SocialPostService {
     return { profile, posts, nextCursor, postCount, performerData };
   }
 
+  // ── Wall of Fame: Leaderboard ─────────────────────────────────────────────
+
+  /**
+   * Returns the top N WoF contributors ranked by total likes on their WoF posts.
+   */
+  static async getWofLeaderboard(limit = 10) {
+    const lim = Math.min(Number(limit) || 10, 50);
+    const { rows } = await query(
+      `SELECT u.id, u.username, u.first_name, u.photo_file_id,
+              COUNT(sp.id)::int AS total_posts,
+              COALESCE(SUM(sp.likes_count), 0)::int AS total_likes
+       FROM social_posts sp
+       JOIN users u ON sp.user_id = u.id
+       WHERE sp.is_wof = true AND sp.is_deleted = false
+       GROUP BY u.id, u.username, u.first_name, u.photo_file_id
+       ORDER BY total_likes DESC, total_posts DESC
+       LIMIT $1`,
+      [lim]
+    );
+    return rows.map(r => ({
+      ...r,
+      photo_file_id: isValidPhotoUrl(r.photo_file_id) ? r.photo_file_id : null,
+    }));
+  }
+
+  // ── Wall of Fame: Stats ───────────────────────────────────────────────────
+
+  /**
+   * Aggregate WoF statistics: total posts, total likes, unique contributors.
+   */
+  static async getWofStats() {
+    const { rows } = await query(
+      `SELECT
+         COUNT(*)::int AS total_posts,
+         COALESCE(SUM(likes_count), 0)::int AS total_likes,
+         COUNT(DISTINCT user_id)::int AS unique_contributors
+       FROM social_posts
+       WHERE is_wof = true AND is_deleted = false`
+    );
+    return rows[0] || { total_posts: 0, total_likes: 0, unique_contributors: 0 };
+  }
+
+  // ── Wall of Fame: Admin Flag / Unflag ─────────────────────────────────────
+
+  /** Admin: mark an existing post as WoF. Returns post id or null. */
+  static async adminFlagWof(postId) {
+    const { rows } = await query(
+      'UPDATE social_posts SET is_wof=true, updated_at=NOW() WHERE id=$1 AND is_deleted=false RETURNING id',
+      [postId]
+    );
+    return rows[0]?.id || null;
+  }
+
+  /** Admin: remove WoF flag without deleting the post. Returns post id or null. */
+  static async adminUnflagWof(postId) {
+    const { rows } = await query(
+      'UPDATE social_posts SET is_wof=false, updated_at=NOW() WHERE id=$1 AND is_deleted=false RETURNING id',
+      [postId]
+    );
+    return rows[0]?.id || null;
+  }
+
   // ── Admin List Posts ──────────────────────────────────────────────────────
 
   static async adminListPosts(page = 1, limit = 20) {
