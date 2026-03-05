@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -7,11 +7,13 @@ import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useDirectus } from "@/hooks/useDirectus";
 import {
   getHomeFeedPosts,
+  getSocialFeedPosts,
   getFeaturedPerformers,
   togglePostLike,
   type SocialPostItem,
   type FeaturedPerformer,
 } from "@/lib/api";
+import { useFeedI18n, translateText } from "@/lib/feedI18n";
 
 interface Announcement {
   id: number;
@@ -41,10 +43,13 @@ function isValidPhotoUrl(photo: string | null | undefined): photo is string {
 }
 
 export default function Home() {
-  const { user } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const t = useFeedI18n(user?.language);
   const [posts, setPosts] = useState<SocialPostItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [translatedPosts, setTranslatedPosts] = useState<Record<number, string>>({});
+  const [translatingId, setTranslatingId] = useState<number | null>(null);
 
   const { data: announcements } = useDirectus<Announcement>({
     collection: "announcements",
@@ -58,7 +63,9 @@ export default function Home() {
   const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
 
   useEffect(() => {
-    getHomeFeedPosts(10)
+    if (authLoading) return;
+    const loader = isAuthenticated ? getSocialFeedPosts(undefined, 10) : getHomeFeedPosts(10);
+    loader
       .then((res) => {
         if (res.success) setPosts(res.posts);
       })
@@ -70,25 +77,33 @@ export default function Home() {
         if (res.success) setPerformers(res.performers);
       })
       .catch(() => {});
-  }, []);
+  }, [authLoading, isAuthenticated]);
 
-  const handleLike = async (postId: number) => {
+  const handleLike = useCallback(async (postId: number) => {
     try {
       const res = await togglePostLike(postId);
-      // Response is { liked: boolean } — use optimistic count update
       setPosts((prev) =>
         prev.map((p) =>
           p.id === postId
             ? {
                 ...p,
                 liked_by_me: res.liked,
-                likes_count: p.likes_count + (res.liked ? 1 : -1),
+                likes_count: res.likes_count ?? (p.likes_count + (res.liked ? 1 : -1)),
               }
             : p
         )
       );
     } catch { /* silent */ }
-  };
+  }, []);
+
+  const handleTranslate = useCallback(async (postId: number, content: string) => {
+    if (translatingId === postId) return;
+    if (translatedPosts[postId]) { setTranslatedPosts((prev) => { const next = { ...prev }; delete next[postId]; return next; }); return; }
+    setTranslatingId(postId);
+    const result = await translateText(content, user?.language === "es" ? "es" : "en");
+    if (result) setTranslatedPosts((prev) => ({ ...prev, [postId]: result }));
+    setTranslatingId(null);
+  }, [translatingId, translatedPosts, user?.language]);
 
   const username = user?.username || user?.displayName || "user";
   const tier = user?.tier || "free";
@@ -213,7 +228,7 @@ export default function Home() {
           )}
           <div className="flex-1">
             <div className="w-full bg-transparent text-white/40 text-sm py-2 border-b border-white/10 mb-3 cursor-text">
-              What's on your mind?
+              {t.whatOnYourMind}
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3" style={{ color: "#8E8E93" }}>
@@ -237,9 +252,9 @@ export default function Home() {
 
       {/* Social Feed */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-white">Social Feed</h2>
+        <h2 className="text-lg font-semibold text-white">{t.socialFeed}</h2>
         <Link to="/social" className="text-xs font-medium text-gradient">
-          View all
+          {t.viewAll}
         </Link>
       </div>
 
@@ -274,9 +289,9 @@ export default function Home() {
               d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
             />
           </svg>
-          <p className="text-white font-medium mb-1">No posts yet</p>
+          <p className="text-white font-medium mb-1">{t.noPostsHome}</p>
           <p className="text-sm" style={{ color: "#8E8E93" }}>
-            Be the first to post something!
+            {t.beFirstHome}
           </p>
         </div>
       ) : (
@@ -313,8 +328,17 @@ export default function Home() {
                       </span>
                     </div>
                     <p className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed">
-                      {post.content}
+                      {translatedPosts[post.id] ?? post.content}
                     </p>
+                    {translatedPosts[post.id] && (
+                      <button
+                        onClick={() => setTranslatedPosts((prev) => { const next = { ...prev }; delete next[post.id]; return next; })}
+                        className="text-xs mt-0.5"
+                        style={{ color: "#8E8E93" }}
+                      >
+                        {t.showOriginal}
+                      </button>
+                    )}
                     {/* Media */}
                     {post.media_url && (
                       <div className="mt-2">
@@ -378,6 +402,24 @@ export default function Home() {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
                         </svg>
                       </button>
+                      {/* Translate */}
+                      {post.content && (
+                        <button
+                          onClick={() => handleTranslate(post.id, post.content)}
+                          disabled={translatingId === post.id}
+                          className="flex items-center gap-1 text-xs transition-colors hover:text-teal-400 disabled:opacity-40"
+                          style={translatedPosts[post.id] ? { color: "#5ED1C4" } : { color: "#8E8E93" }}
+                          title={translatedPosts[post.id] ? t.showOriginal : t.translate}
+                        >
+                          {translatingId === post.id ? (
+                            <span className="text-[10px]">{t.translating}</span>
+                          ) : (
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 01-3.827-5.802" />
+                            </svg>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -389,7 +431,7 @@ export default function Home() {
             onClick={() => navigate("/social")}
             className="w-full py-3 text-center text-sm font-medium text-gradient"
           >
-            View all posts
+            {t.viewAllPosts}
           </button>
         </div>
       )}

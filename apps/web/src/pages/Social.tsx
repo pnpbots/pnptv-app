@@ -23,6 +23,7 @@ import {
   type AuthMethods,
   type FeaturedPerformer,
 } from "@/lib/api";
+import { useFeedI18n, translateText } from "@/lib/feedI18n";
 
 function timeAgo(dateStr: string): string {
   if (!dateStr) return "";
@@ -94,6 +95,7 @@ function PostCard({
   post,
   currentUserId,
   isAdmin,
+  userLang,
   onLike,
   onDelete,
   onNavigate,
@@ -101,10 +103,12 @@ function PostCard({
   post: SocialPostItem;
   currentUserId: string;
   isAdmin: boolean;
+  userLang: string;
   onLike: (id: number) => void;
   onDelete: (id: number) => void;
   onNavigate: (path: string) => void;
 }) {
+  const t = useFeedI18n(userLang);
   const [showReplies, setShowReplies] = useState(false);
   const [replies, setReplies] = useState<SocialPostItem[]>([]);
   const [loadingReplies, setLoadingReplies] = useState(false);
@@ -114,6 +118,8 @@ function PostCard({
   const [localReplyCount, setLocalReplyCount] = useState(post.replies_count || 0);
   const [wofDeleting, setWofDeleting] = useState(false);
   const [wofDeleted, setWofDeleted] = useState(false);
+  const [translatedContent, setTranslatedContent] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
   const isOwn = String(post.author_id) === currentUserId;
   const canDelete = isOwn || isAdmin;
 
@@ -157,6 +163,16 @@ function PostCard({
       // Brief visual feedback handled by button state
     }
   }, [post]);
+
+  const handleTranslate = useCallback(async () => {
+    if (isTranslating) return;
+    if (translatedContent) { setTranslatedContent(null); return; }
+    if (!post.content) return;
+    setIsTranslating(true);
+    const result = await translateText(post.content, userLang === "es" ? "es" : "en");
+    if (result) setTranslatedContent(result);
+    setIsTranslating(false);
+  }, [isTranslating, translatedContent, post.content, userLang]);
 
   const handleRequestWofDeletion = useCallback(async () => {
     if (wofDeleting || wofDeleted) return;
@@ -349,8 +365,17 @@ function PostCard({
               )}
 
               <p className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed">
-                {post.content}
+                {translatedContent ?? post.content}
               </p>
+              {translatedContent && (
+                <button
+                  onClick={() => setTranslatedContent(null)}
+                  className="text-xs mt-0.5"
+                  style={{ color: "#8E8E93" }}
+                >
+                  {t.showOriginal}
+                </button>
+              )}
 
               {/* Promoted CTA button */}
               {post.is_promoted && post.promoted_link && (
@@ -433,6 +458,25 @@ function PostCard({
               </button>
             )}
 
+            {/* Translate */}
+            {post.content && !post.blurred && (
+              <button
+                onClick={handleTranslate}
+                disabled={isTranslating}
+                className="flex items-center gap-1 text-xs transition-colors hover:text-teal-400 disabled:opacity-40"
+                style={translatedContent ? { color: "#5ED1C4" } : { color: "#8E8E93" }}
+                title={translatedContent ? t.showOriginal : t.translate}
+              >
+                {isTranslating ? (
+                  <span className="text-[10px]">{t.translating}</span>
+                ) : (
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 01-3.827-5.802" />
+                  </svg>
+                )}
+              </button>
+            )}
+
             {/* Request Deletion — shown on WoF posts for the post author */}
             {post.is_wof && isOwn && !wofDeleted && (
               <button
@@ -445,7 +489,7 @@ function PostCard({
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                 </svg>
-                {wofDeleting ? "Removing..." : "Remove"}
+                {wofDeleting ? t.removing : t.remove}
               </button>
             )}
             {post.is_wof && isOwn && wofDeleted && (
@@ -457,9 +501,9 @@ function PostCard({
           {showReplies && (
             <div className="mt-3 pt-3 border-t border-white/10">
               {loadingReplies ? (
-                <p className="text-xs" style={{ color: "#8E8E93" }}>Loading comments...</p>
+                <p className="text-xs" style={{ color: "#8E8E93" }}>{t.loadingComments}</p>
               ) : replies.length === 0 ? (
-                <p className="text-xs" style={{ color: "#8E8E93" }}>No comments yet</p>
+                <p className="text-xs" style={{ color: "#8E8E93" }}>{t.noCommentsYet}</p>
               ) : (
                 <div className="space-y-3 mb-3">
                   {replies.map((reply) => (
@@ -490,7 +534,7 @@ function PostCard({
                   <input
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value.slice(0, 500))}
-                    placeholder="Write a comment..."
+                    placeholder={t.writeComment}
                     className="flex-1 bg-white/5 text-white text-xs rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 placeholder:text-white/30"
                     onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSendReply()}
                     disabled={sendingReply}
@@ -501,7 +545,7 @@ function PostCard({
                     className="text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-30 transition-colors"
                     style={{ color: "#D4007A" }}
                   >
-                    {sendingReply ? "..." : "Send"}
+                    {sendingReply ? "..." : t.send}
                   </button>
                 </div>
               )}
@@ -520,6 +564,7 @@ export default function Social() {
   const navigate = useNavigate();
   const currentUserId = String(user?.id || "");
   const { showTutorial, dismissTutorial } = useTutorial("social");
+  const t = useFeedI18n(user?.language);
 
   // Tab state
   const [activeTab, setActiveTab] = useState<"all" | "wof" | "following">("all");
@@ -782,13 +827,13 @@ export default function Social() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">Social Feed</h1>
+          <h1 className="text-2xl font-bold text-white">{t.socialFeedTitle}</h1>
           <p className="text-sm mt-1" style={{ color: "#8E8E93" }}>
-            Share updates with the PNPTV community
+            {t.socialFeedSubtitle}
           </p>
         </div>
         <span className="text-xs px-2 py-1 rounded-full font-medium" style={{ background: "rgba(255,180,84,0.15)", color: "#FFB454" }}>
-          Community
+          {t.community}
         </span>
       </div>
 
@@ -796,12 +841,12 @@ export default function Social() {
       {featuredPerformers.length > 0 && (
         <div className="mb-6">
           <div className="flex items-center gap-2 mb-3">
-            <h2 className="text-lg font-semibold text-white">Featured</h2>
+            <h2 className="text-lg font-semibold text-white">{t.featured}</h2>
             <span
               className="text-xs px-2 py-0.5 rounded-full font-medium"
               style={{ background: "rgba(94,209,196,0.12)", color: "#5ED1C4" }}
             >
-              Live
+              {t.live}
             </span>
           </div>
           <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide">
@@ -888,7 +933,7 @@ export default function Social() {
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value.slice(0, 2000))}
-                placeholder="What's on your mind?"
+                placeholder={t.whatOnYourMind}
                 className="w-full bg-transparent text-white text-sm py-2 border-b border-white/10 mb-3 resize-none outline-none placeholder:text-white/40"
                 rows={3}
                 disabled={isPosting}
@@ -948,7 +993,7 @@ export default function Social() {
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
                       </svg>
-                      Photo
+                      {t.photo}
                     </button>
                     <button
                       onClick={() => {
@@ -966,7 +1011,7 @@ export default function Social() {
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
                       </svg>
-                      Video
+                      {t.video}
                     </button>
                   </div>
                   <button
@@ -974,7 +1019,7 @@ export default function Social() {
                     disabled={!text.trim() || isPosting}
                     className="btn-gradient px-4 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-40 min-h-[36px]"
                   >
-                    {isPosting ? "Posting..." : "Post"}
+                    {isPosting ? t.posting : t.post}
                   </button>
                 </div>
 
@@ -989,7 +1034,7 @@ export default function Social() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                       </svg>
                       <span className="text-xs font-medium" style={{ color: isExclusive ? "#D4007A" : "#8E8E93" }}>
-                        Exclusive content (subscribers only)
+                        {t.exclusiveToggle}
                       </span>
                     </label>
                     <button
@@ -1024,7 +1069,7 @@ export default function Social() {
                         <path d="M180 142c-16.3-31.7-60.7-90.8-102-120C38.5-2.9 27.2 1 18.8 1 8.3 1 0 7.8 0 25.4 0 39 6.6 116.7 10.3 132.9 23 187.7 74.3 207 122.7 202c-71 10.5-133.3 41-67.3 147.9 51.7 81.4 103.3 27.8 127.2 0 24-27.9 53.7-87.3 53.7-87.3s29.7 59.4 53.7 87.3c23.9 27.8 75.5 81.4 127.2 0 66-106.9 3.7-137.4-67.3-147.9 48.4 5 99.7-14.3 112.4-69.1 3.7-16.2 10.3-93.9 10.3-107.5C360 7.8 351.7 1 341.2 1c-8.4 0-19.7-3.9-59.2 21C240.7 51.2 196.3 110.3 180 142z" />
                       </svg>
                       <span className="text-xs font-medium" style={{ color: crossPostBluesky ? "#0085FF" : "#8E8E93" }}>
-                        Also post to Bluesky
+                        {t.alsoPostBluesky}
                       </span>
                     </label>
                     {/* Toggle switch */}
@@ -1059,7 +1104,7 @@ export default function Social() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0-12.814a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0 12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
                     </svg>
                     <span className="text-xs font-medium" style={{ color: isShareable ? "#34D399" : "#8E8E93" }}>
-                      Allow sharing
+                      {t.allowSharing}
                     </span>
                   </label>
                   <button
@@ -1096,7 +1141,7 @@ export default function Social() {
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
               </svg>
-              Bulk Upload Videos
+              {t.bulkUploadVideos}
             </button>
           )}
         </div>
@@ -1111,7 +1156,7 @@ export default function Social() {
           }`}
           style={activeTab === "all" ? { borderImage: "linear-gradient(to right, #D4007A, #E69138) 1" } : undefined}
         >
-          All Posts
+          {t.allPosts}
         </button>
         <button
           onClick={() => handleTabChange("wof")}
@@ -1120,7 +1165,7 @@ export default function Social() {
           }`}
           style={activeTab === "wof" ? { borderImage: "linear-gradient(to right, #FFB454, #E69138) 1" } : undefined}
         >
-          Wall of Fame
+          {t.wallOfFame}
         </button>
         {isAuthenticated && (
           <button
@@ -1130,7 +1175,7 @@ export default function Social() {
             }`}
             style={activeTab === "following" ? { borderImage: "linear-gradient(to right, #D4007A, #E69138) 1" } : undefined}
           >
-            Following
+            {t.following}
           </button>
         )}
       </div>
@@ -1156,10 +1201,10 @@ export default function Social() {
           <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
-          <p className="text-white font-medium mb-1">Feed Unavailable</p>
+          <p className="text-white font-medium mb-1">{t.feedUnavailable}</p>
           <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>{error}</p>
           <button onClick={() => { setError(null); setIsLoading(true); loadFeed(); }} className="btn-gradient px-4 py-1.5 rounded-lg text-white text-sm font-semibold">
-            Retry
+            {t.retry}
           </button>
         </div>
       ) : posts.length === 0 ? (
@@ -1167,8 +1212,8 @@ export default function Social() {
           <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
           </svg>
-          <p className="text-white font-medium mb-1">No Posts Yet</p>
-          <p className="text-sm" style={{ color: "#8E8E93" }}>Be the first to share something with the community!</p>
+          <p className="text-white font-medium mb-1">{t.noPostsYet}</p>
+          <p className="text-sm" style={{ color: "#8E8E93" }}>{t.beTheFirst}</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -1178,6 +1223,7 @@ export default function Social() {
               post={post}
               currentUserId={currentUserId}
               isAdmin={isAdmin}
+              userLang={user?.language || "en"}
               onLike={handleLike}
               onDelete={handleDelete}
               onNavigate={navigate}
@@ -1193,7 +1239,7 @@ export default function Social() {
                 className="text-sm font-medium px-6 py-2 rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
                 style={{ color: "#D4007A" }}
               >
-                {loadingMore ? "Loading..." : "Load More"}
+                {loadingMore ? t.loading : t.loadMore}
               </button>
             </div>
           )}
@@ -1218,10 +1264,10 @@ export default function Social() {
         </div>
       ) : wofError ? (
         <div className="glass-card-sm p-8 text-center">
-          <p className="text-white font-medium mb-1">Feed Unavailable</p>
+          <p className="text-white font-medium mb-1">{t.feedUnavailable}</p>
           <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>{wofError}</p>
           <button onClick={() => { setWofError(null); setWofLoading(true); loadWofFeed(); }} className="btn-gradient px-4 py-1.5 rounded-lg text-white text-sm font-semibold">
-            Retry
+            {t.retry}
           </button>
         </div>
       ) : wofPosts.length === 0 ? (
@@ -1229,9 +1275,9 @@ export default function Social() {
           <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#FFB454" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-3.375c0-.621-.503-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.007 0H9.497m5.007 0a7.454 7.454 0 01-.982-3.172M9.497 14.25a7.454 7.454 0 00.981-3.172M5.25 4.236c-.982.143-1.954.317-2.916.52A6.003 6.003 0 007.73 9.728M5.25 4.236V4.5c0 2.108.966 3.99 2.48 5.228M5.25 4.236V2.721C7.456 2.41 9.71 2.25 12 2.25c2.291 0 4.545.16 6.75.47v1.516M18.75 4.236c.982.143 1.954.317 2.916.52A6.003 6.003 0 0016.27 9.728M18.75 4.236V4.5c0 2.108-.966 3.99-2.48 5.228m0 0a6.023 6.023 0 01-2.77.93m0 0a6.022 6.022 0 01-2.77-.93" />
           </svg>
-          <p className="text-white font-medium mb-1">No Wall of Fame Posts Yet</p>
+          <p className="text-white font-medium mb-1">{t.noWofPostsYet}</p>
           <p className="text-sm" style={{ color: "#8E8E93" }}>
-            Post photos in the Telegram group to appear here!
+            {t.wofHint}
           </p>
         </div>
       ) : (
@@ -1242,6 +1288,7 @@ export default function Social() {
               post={post}
               currentUserId={currentUserId}
               isAdmin={isAdmin}
+              userLang={user?.language || "en"}
               onLike={handleLike}
               onDelete={handleDelete}
               onNavigate={navigate}
@@ -1257,7 +1304,7 @@ export default function Social() {
                 className="text-sm font-medium px-6 py-2 rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
                 style={{ color: "#FFB454" }}
               >
-                {wofLoadingMore ? "Loading..." : "Load More"}
+                {wofLoadingMore ? t.loading : t.loadMore}
               </button>
             </div>
           )}
@@ -1282,13 +1329,13 @@ export default function Social() {
         </div>
       ) : followingError ? (
         <div className="glass-card-sm p-8 text-center">
-          <p className="text-white font-medium mb-1">Feed Unavailable</p>
+          <p className="text-white font-medium mb-1">{t.feedUnavailable}</p>
           <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>{followingError}</p>
           <button
             onClick={() => { setFollowingError(null); setFollowingLoading(true); loadFollowingFeed(); }}
             className="btn-gradient px-4 py-1.5 rounded-lg text-white text-sm font-semibold"
           >
-            Retry
+            {t.retry}
           </button>
         </div>
       ) : followingPosts.length === 0 ? (
@@ -1296,9 +1343,9 @@ export default function Social() {
           <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
           </svg>
-          <p className="text-white font-medium mb-1">No Posts Yet</p>
+          <p className="text-white font-medium mb-1">{t.noFollowingPostsYet}</p>
           <p className="text-sm" style={{ color: "#8E8E93" }}>
-            Follow some users to see their posts here.
+            {t.followSomeone}
           </p>
         </div>
       ) : (
@@ -1309,6 +1356,7 @@ export default function Social() {
               post={post}
               currentUserId={currentUserId}
               isAdmin={isAdmin}
+              userLang={user?.language || "en"}
               onLike={handleLike}
               onDelete={handleDelete}
               onNavigate={navigate}
@@ -1322,7 +1370,7 @@ export default function Social() {
                 className="text-sm font-medium px-6 py-2 rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
                 style={{ color: "#D4007A" }}
               >
-                {followingLoadingMore ? "Loading..." : "Load More"}
+                {followingLoadingMore ? t.loading : t.loadMore}
               </button>
             </div>
           )}

@@ -11,10 +11,24 @@ import {
   getCreatorWallet,
   saveCreatorWallet,
   changeCreatorTier,
+  getCmsProfile,
+  updateCmsProfile,
+  listCmsContent,
+  createCmsContent,
+  updateCmsContent,
+  deleteCmsContent,
+  listCmsShows,
+  createCmsShow,
+  updateCmsShow,
+  deleteCmsShow,
+  uploadCmsMedia,
   type CreatorEligibility,
   type CreatorDashboard as DashboardData,
   type ModelEarnings,
   type ModelWithdrawal,
+  type CmsPerformer,
+  type CmsContent,
+  type CmsShow,
 } from "@/lib/api";
 
 const ETHEREUM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -64,7 +78,7 @@ export default function CreatorDashboard() {
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
   const [withdrawSuccess, setWithdrawSuccess] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "earnings" | "payouts" | "settings">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "earnings" | "payouts" | "settings" | "content">("overview");
 
   // Settings tab — payout method
   const [payoutMethod, setPayoutMethod] = useState<"crypto" | "meru">("crypto");
@@ -80,6 +94,31 @@ export default function CreatorDashboard() {
   const [tierChanging, setTierChanging] = useState(false);
   const [tierError, setTierError] = useState<string | null>(null);
   const [tierSuccess, setTierSuccess] = useState<string | null>(null);
+
+  // Content (CMS) tab
+  const [cmsPerformer, setCmsPerformer] = useState<CmsPerformer | null>(null);
+  const [cmsContent, setCmsContent] = useState<CmsContent[]>([]);
+  const [cmsShows, setCmsShows] = useState<CmsShow[]>([]);
+  const [cmsLoading, setCmsLoading] = useState(false);
+  const [cmsError, setCmsError] = useState<string | null>(null);
+  const [cmsContentSection, setCmsContentSection] = useState<"profile" | "content" | "shows">("profile");
+
+  // CMS profile edit form
+  const [cmsProfileForm, setCmsProfileForm] = useState<Partial<CmsPerformer>>({});
+  const [cmsProfileSaving, setCmsProfileSaving] = useState(false);
+  const [cmsProfileMsg, setCmsProfileMsg] = useState<string | null>(null);
+
+  // CMS content form (create/edit)
+  const [contentModal, setContentModal] = useState<{ mode: "create" | "edit"; item?: CmsContent } | null>(null);
+  const [contentForm, setContentForm] = useState<Partial<CmsContent>>({});
+  const [contentSaving, setContentSaving] = useState(false);
+  const [contentUploadFile, setContentUploadFile] = useState<File | null>(null);
+  const [contentUploadProgress, setContentUploadProgress] = useState(false);
+
+  // CMS show form (create/edit)
+  const [showModal, setShowModal] = useState<{ mode: "create" | "edit"; item?: CmsShow } | null>(null);
+  const [showForm, setShowForm] = useState<Partial<CmsShow>>({});
+  const [showSaving, setShowSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -149,6 +188,34 @@ export default function CreatorDashboard() {
       }
     }
   }, [activeTab, dashboard, loadWallet]);
+
+  // Load CMS data when Content tab is opened
+  useEffect(() => {
+    if (activeTab !== "content" || dashboard?.creatorStatus !== "active") return;
+    if (cmsPerformer) return; // already loaded
+    setCmsLoading(true);
+    setCmsError(null);
+    Promise.all([getCmsProfile(), listCmsContent(), listCmsShows()])
+      .then(([prof, cont, shows]) => {
+        setCmsPerformer(prof.performer);
+        setCmsProfileForm({
+          name: prof.performer.name,
+          bio: prof.performer.bio ?? "",
+          bio_short: prof.performer.bio_short ?? "",
+          categories: prof.performer.categories ?? [],
+          is_available: prof.performer.is_available,
+          availability_message: prof.performer.availability_message ?? "",
+          base_price_cents: prof.performer.base_price_cents ?? null,
+          currency: prof.performer.currency ?? "USD",
+          timezone: prof.performer.timezone ?? "",
+          social_links: prof.performer.social_links ?? {},
+        });
+        setCmsContent(cont.content);
+        setCmsShows(shows.shows);
+      })
+      .catch((err) => setCmsError(err.message || "Failed to load CMS data"))
+      .finally(() => setCmsLoading(false));
+  }, [activeTab, dashboard, cmsPerformer]);
 
   const handleActivate = () => {
     navigate("/profile");
@@ -237,6 +304,112 @@ export default function CreatorDashboard() {
     }
   };
 
+  // ── CMS handlers ──────────────────────────────────────────────────────────
+
+  const handleCmsProfileSave = async () => {
+    setCmsProfileSaving(true);
+    setCmsProfileMsg(null);
+    try {
+      const res = await updateCmsProfile(cmsProfileForm);
+      setCmsPerformer(res.performer);
+      setCmsProfileMsg("Profile updated!");
+    } catch (err) {
+      setCmsProfileMsg(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setCmsProfileSaving(false);
+    }
+  };
+
+  const openContentCreate = () => {
+    setContentForm({ status: "draft", type: "video", tags: [], is_premium: false });
+    setContentUploadFile(null);
+    setContentModal({ mode: "create" });
+  };
+
+  const openContentEdit = (item: CmsContent) => {
+    setContentForm({ ...item });
+    setContentUploadFile(null);
+    setContentModal({ mode: "edit", item });
+  };
+
+  const handleContentSave = async () => {
+    if (!contentForm.title || !contentForm.type) return;
+    setContentSaving(true);
+    try {
+      let mediaUrl = contentForm.media_url;
+      if (contentUploadFile) {
+        setContentUploadProgress(true);
+        const uploaded = await uploadCmsMedia(contentUploadFile);
+        mediaUrl = uploaded.url;
+        setContentUploadProgress(false);
+      }
+      const payload = { ...contentForm, media_url: mediaUrl };
+      if (contentModal?.mode === "edit" && contentModal.item) {
+        const res = await updateCmsContent(contentModal.item.id, payload);
+        setCmsContent((prev) => prev.map((c) => c.id === res.content.id ? res.content : c));
+      } else {
+        const res = await createCmsContent(payload);
+        setCmsContent((prev) => [res.content, ...prev]);
+      }
+      setContentModal(null);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setContentSaving(false);
+      setContentUploadProgress(false);
+    }
+  };
+
+  const handleContentDelete = async (id: number) => {
+    if (!confirm("Delete this content item?")) return;
+    try {
+      await deleteCmsContent(id);
+      setCmsContent((prev) => prev.filter((c) => c.id !== id));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Delete failed");
+    }
+  };
+
+  const openShowCreate = () => {
+    const dt = new Date(); dt.setDate(dt.getDate() + 1);
+    setShowForm({ status: "draft", is_premium: false, scheduled_at: dt.toISOString().slice(0, 16) });
+    setShowModal({ mode: "create" });
+  };
+
+  const openShowEdit = (item: CmsShow) => {
+    setShowForm({ ...item, scheduled_at: item.scheduled_at?.slice(0, 16) });
+    setShowModal({ mode: "edit", item });
+  };
+
+  const handleShowSave = async () => {
+    if (!showForm.title || !showForm.scheduled_at) return;
+    setShowSaving(true);
+    try {
+      if (showModal?.mode === "edit" && showModal.item) {
+        const res = await updateCmsShow(showModal.item.id, showForm);
+        setCmsShows((prev) => prev.map((s) => s.id === res.show.id ? res.show : s));
+      } else {
+        const res = await createCmsShow(showForm);
+        setCmsShows((prev) => [...prev, res.show]);
+      }
+      setShowModal(null);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setShowSaving(false);
+    }
+  };
+
+  const handleShowDelete = async (id: number) => {
+    if (!confirm("Delete this show?")) return;
+    try {
+      await deleteCmsShow(id);
+      setCmsShows((prev) => prev.filter((s) => s.id !== id));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Delete failed");
+    }
+  };
+
   if (!isAuthenticated) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-16 text-center">
@@ -290,11 +463,11 @@ export default function CreatorDashboard() {
         <>
           {/* Tab navigation */}
           <div className="flex border-b border-white/10 mb-4">
-            {(["overview", "earnings", "payouts", "settings"] as const).map((tab) => (
+            {(["overview", "earnings", "payouts", "content", "settings"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`flex-1 py-3 text-sm font-semibold text-center transition-colors ${
+                className={`flex-1 py-3 text-xs font-semibold text-center transition-colors ${
                   activeTab === tab ? "text-white border-b-2" : "text-white/50"
                 }`}
                 style={activeTab === tab ? { borderImage: "linear-gradient(to right, #D4007A, #E69138) 1" } : undefined}
@@ -302,15 +475,8 @@ export default function CreatorDashboard() {
                 {tab === "overview" ? "Overview"
                   : tab === "earnings" ? "Earnings"
                   : tab === "payouts" ? "Payouts"
-                  : (
-                    <span className="flex items-center justify-center gap-1">
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                      </svg>
-                      Settings
-                    </span>
-                  )
+                  : tab === "content" ? "Content"
+                  : "Settings"
                 }
               </button>
             ))}
@@ -508,6 +674,378 @@ export default function CreatorDashboard() {
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Content (CMS) Tab */}
+          {activeTab === "content" && (
+            <div className="space-y-4">
+              {cmsLoading && (
+                <div className="text-center py-10 text-white/40 text-sm">Loading CMS data...</div>
+              )}
+              {cmsError && (
+                <div className="px-4 py-3 rounded-lg text-sm text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+                  {cmsError}
+                </div>
+              )}
+              {!cmsLoading && !cmsError && (
+                <>
+                  {/* Sub-nav */}
+                  <div className="flex gap-2">
+                    {(["profile", "content", "shows"] as const).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setCmsContentSection(s)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+                        style={cmsContentSection === s
+                          ? { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }
+                          : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.1)" }
+                        }
+                      >
+                        {s === "profile" ? "Performer Profile" : s === "content" ? "Content Library" : "Shows"}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* ── Performer Profile Section ── */}
+                  {cmsContentSection === "profile" && cmsPerformer && (
+                    <div className="glass-card-sm p-5 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-white">Performer Profile</p>
+                        <span className="text-xs px-2 py-0.5 rounded-full" style={{
+                          background: cmsPerformer.status === "published" ? "rgba(94,209,196,0.15)" : "rgba(255,255,255,0.08)",
+                          color: cmsPerformer.status === "published" ? "#5ED1C4" : "#8E8E93",
+                        }}>
+                          {cmsPerformer.status}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-white/50 mb-1">Display Name</label>
+                          <input
+                            value={cmsProfileForm.name ?? ""}
+                            onChange={(e) => setCmsProfileForm((p) => ({ ...p, name: e.target.value }))}
+                            className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-white/50 mb-1">Availability Message</label>
+                          <input
+                            value={cmsProfileForm.availability_message ?? ""}
+                            onChange={(e) => setCmsProfileForm((p) => ({ ...p, availability_message: e.target.value }))}
+                            className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs text-white/50 mb-1">Short Bio</label>
+                          <input
+                            value={cmsProfileForm.bio_short ?? ""}
+                            onChange={(e) => setCmsProfileForm((p) => ({ ...p, bio_short: e.target.value }))}
+                            className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs text-white/50 mb-1">Full Bio</label>
+                          <textarea
+                            rows={3}
+                            value={cmsProfileForm.bio ?? ""}
+                            onChange={(e) => setCmsProfileForm((p) => ({ ...p, bio: e.target.value }))}
+                            className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent resize-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-white/50 mb-1">Base Price (cents)</label>
+                          <input
+                            type="number"
+                            value={cmsProfileForm.base_price_cents ?? ""}
+                            onChange={(e) => setCmsProfileForm((p) => ({ ...p, base_price_cents: Number(e.target.value) || null }))}
+                            className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-white/50 mb-1">Currency</label>
+                          <select
+                            value={cmsProfileForm.currency ?? "USD"}
+                            onChange={(e) => setCmsProfileForm((p) => ({ ...p, currency: e.target.value }))}
+                            className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                          >
+                            <option value="USD">USD</option>
+                            <option value="EUR">EUR</option>
+                            <option value="COP">COP</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!cmsProfileForm.is_available}
+                            onChange={(e) => setCmsProfileForm((p) => ({ ...p, is_available: e.target.checked }))}
+                            className="rounded"
+                          />
+                          Available for bookings
+                        </label>
+                        <select
+                          value={cmsProfileForm.status ?? "draft"}
+                          onChange={(e) => setCmsProfileForm((p) => ({ ...p, status: e.target.value as CmsPerformer["status"] }))}
+                          className="ml-auto px-3 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 focus:outline-none"
+                        >
+                          <option value="draft">Draft</option>
+                          <option value="published">Published</option>
+                          <option value="archived">Archived</option>
+                        </select>
+                      </div>
+
+                      {cmsProfileMsg && (
+                        <p className="text-xs" style={{ color: cmsProfileMsg.includes("fail") || cmsProfileMsg.includes("error") ? "#FF453A" : "#5ED1C4" }}>
+                          {cmsProfileMsg}
+                        </p>
+                      )}
+
+                      <button
+                        onClick={handleCmsProfileSave}
+                        disabled={cmsProfileSaving}
+                        className="px-5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50 transition-colors"
+                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                      >
+                        {cmsProfileSaving ? "Saving..." : "Save Profile"}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* ── Content Library Section ── */}
+                  {cmsContentSection === "content" && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-white">Content Library ({cmsContent.length})</p>
+                        <button
+                          onClick={openContentCreate}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                        >
+                          + New Item
+                        </button>
+                      </div>
+
+                      {cmsContent.length === 0 && (
+                        <div className="glass-card-sm p-6 text-center">
+                          <p className="text-sm text-white/40">No content yet. Add your first video, audio, or podcast.</p>
+                        </div>
+                      )}
+
+                      {cmsContent.map((item) => (
+                        <div key={item.id} className="glass-card-sm p-4 flex items-start gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-sm font-medium text-white truncate">{item.title}</span>
+                              <span className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{
+                                background: item.status === "published" ? "rgba(94,209,196,0.15)" : "rgba(255,255,255,0.06)",
+                                color: item.status === "published" ? "#5ED1C4" : "#8E8E93",
+                              }}>{item.status}</span>
+                              {item.is_premium && <span className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>PRIME</span>}
+                            </div>
+                            <p className="text-xs text-white/40">{item.type} {item.duration_seconds ? `· ${Math.round(item.duration_seconds / 60)}m` : ""}</p>
+                          </div>
+                          <div className="flex gap-2 flex-shrink-0">
+                            <button onClick={() => openContentEdit(item)} className="text-xs text-pnp-accent hover:underline">Edit</button>
+                            <button onClick={() => handleContentDelete(item.id)} className="text-xs text-red-400 hover:underline">Delete</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── Shows Section ── */}
+                  {cmsContentSection === "shows" && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-white">Scheduled Shows ({cmsShows.length})</p>
+                        <button
+                          onClick={openShowCreate}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                        >
+                          + Schedule Show
+                        </button>
+                      </div>
+
+                      {cmsShows.length === 0 && (
+                        <div className="glass-card-sm p-6 text-center">
+                          <p className="text-sm text-white/40">No shows scheduled. Create your first show!</p>
+                        </div>
+                      )}
+
+                      {cmsShows.map((show) => (
+                        <div key={show.id} className="glass-card-sm p-4 flex items-start gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-sm font-medium text-white truncate">{show.title}</span>
+                              <span className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{
+                                background: show.status === "published" ? "rgba(94,209,196,0.15)" : "rgba(255,255,255,0.06)",
+                                color: show.status === "published" ? "#5ED1C4" : "#8E8E93",
+                              }}>{show.status}</span>
+                              {show.is_premium && <span className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>PRIME</span>}
+                            </div>
+                            <p className="text-xs text-white/40">
+                              {show.scheduled_at ? new Date(show.scheduled_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+                              {show.duration_minutes ? ` · ${show.duration_minutes}min` : ""}
+                            </p>
+                          </div>
+                          <div className="flex gap-2 flex-shrink-0">
+                            <button onClick={() => openShowEdit(show)} className="text-xs text-pnp-accent hover:underline">Edit</button>
+                            <button onClick={() => handleShowDelete(show.id)} className="text-xs text-red-400 hover:underline">Delete</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── Content Modal (create/edit) ── */}
+          {contentModal && (
+            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}>
+              <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div className="flex items-center justify-between">
+                  <p className="text-base font-semibold text-white">{contentModal.mode === "create" ? "New Content" : "Edit Content"}</p>
+                  <button onClick={() => setContentModal(null)} className="text-white/40 hover:text-white text-xl leading-none">&times;</button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-white/50 mb-1">Title *</label>
+                    <input value={contentForm.title ?? ""} onChange={(e) => setContentForm((p) => ({ ...p, title: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-white/50 mb-1">Type *</label>
+                      <select value={contentForm.type ?? "video"} onChange={(e) => setContentForm((p) => ({ ...p, type: e.target.value as CmsContent["type"] }))}
+                        className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none">
+                        <option value="video">Video</option>
+                        <option value="audio">Audio</option>
+                        <option value="podcast">Podcast</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-white/50 mb-1">Status</label>
+                      <select value={contentForm.status ?? "draft"} onChange={(e) => setContentForm((p) => ({ ...p, status: e.target.value as CmsContent["status"] }))}
+                        className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none">
+                        <option value="draft">Draft</option>
+                        <option value="published">Published</option>
+                        <option value="archived">Archived</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-white/50 mb-1">Media URL (or upload below)</label>
+                    <input value={contentForm.media_url ?? ""} onChange={(e) => setContentForm((p) => ({ ...p, media_url: e.target.value }))}
+                      placeholder="https://..." className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-white/50 mb-1">Upload Media File</label>
+                    <input type="file" accept="video/*,audio/*" onChange={(e) => setContentUploadFile(e.target.files?.[0] ?? null)}
+                      className="w-full text-xs text-white/60 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-white/10 file:text-white/70 hover:file:bg-white/20" />
+                    {contentUploadFile && <p className="text-xs text-white/40 mt-1">{contentUploadFile.name}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-xs text-white/50 mb-1">Description</label>
+                    <textarea rows={2} value={contentForm.description ?? ""} onChange={(e) => setContentForm((p) => ({ ...p, description: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none resize-none" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-white/50 mb-1">Duration (sec)</label>
+                      <input type="number" value={contentForm.duration_seconds ?? ""} onChange={(e) => setContentForm((p) => ({ ...p, duration_seconds: Number(e.target.value) || null }))}
+                        className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none" />
+                    </div>
+                    <div className="flex items-end pb-2">
+                      <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer">
+                        <input type="checkbox" checked={!!contentForm.is_premium} onChange={(e) => setContentForm((p) => ({ ...p, is_premium: e.target.checked }))} className="rounded" />
+                        PRIME only
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <button onClick={handleContentSave} disabled={contentSaving || !contentForm.title || !contentForm.type}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+                    {contentUploadProgress ? "Uploading..." : contentSaving ? "Saving..." : contentModal.mode === "create" ? "Create" : "Save"}
+                  </button>
+                  <button onClick={() => setContentModal(null)} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">Cancel</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Show Modal (create/edit) ── */}
+          {showModal && (
+            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}>
+              <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div className="flex items-center justify-between">
+                  <p className="text-base font-semibold text-white">{showModal.mode === "create" ? "Schedule Show" : "Edit Show"}</p>
+                  <button onClick={() => setShowModal(null)} className="text-white/40 hover:text-white text-xl leading-none">&times;</button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-white/50 mb-1">Show Title *</label>
+                    <input value={showForm.title ?? ""} onChange={(e) => setShowForm((p) => ({ ...p, title: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-white/50 mb-1">Date & Time *</label>
+                      <input type="datetime-local" value={showForm.scheduled_at ?? ""} onChange={(e) => setShowForm((p) => ({ ...p, scheduled_at: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-white/50 mb-1">Duration (min)</label>
+                      <input type="number" value={showForm.duration_minutes ?? ""} onChange={(e) => setShowForm((p) => ({ ...p, duration_minutes: Number(e.target.value) || null }))}
+                        className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-white/50 mb-1">Description</label>
+                    <textarea rows={2} value={showForm.description ?? ""} onChange={(e) => setShowForm((p) => ({ ...p, description: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none resize-none" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-white/50 mb-1">Category</label>
+                      <input value={showForm.category ?? ""} onChange={(e) => setShowForm((p) => ({ ...p, category: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-white/50 mb-1">Status</label>
+                      <select value={showForm.status ?? "draft"} onChange={(e) => setShowForm((p) => ({ ...p, status: e.target.value as CmsShow["status"] }))}
+                        className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none">
+                        <option value="draft">Draft</option>
+                        <option value="published">Published</option>
+                      </select>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer">
+                    <input type="checkbox" checked={!!showForm.is_premium} onChange={(e) => setShowForm((p) => ({ ...p, is_premium: e.target.checked }))} className="rounded" />
+                    PRIME only
+                  </label>
+                </div>
+
+                <div className="flex gap-3">
+                  <button onClick={handleShowSave} disabled={showSaving || !showForm.title || !showForm.scheduled_at}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+                    {showSaving ? "Saving..." : showModal.mode === "create" ? "Schedule" : "Save"}
+                  </button>
+                  <button onClick={() => setShowModal(null)} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">Cancel</button>
+                </div>
               </div>
             </div>
           )}
