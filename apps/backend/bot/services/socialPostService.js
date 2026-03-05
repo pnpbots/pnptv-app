@@ -243,13 +243,13 @@ class SocialPostService {
 
   // ── Create Post ───────────────────────────────────────────────────────────
 
-  static async createPost(userId, content, mediaUrl, mediaType, replyToId, repostOfId, isWof = false, isExclusive = false, isShareable = true) {
+  static async createPost(userId, content, mediaUrl, mediaType, replyToId, repostOfId, isWof = false, isExclusive = false, isShareable = true, videoThumbnailUrl = null) {
     const { rows } = await query(
-      `INSERT INTO social_posts (user_id, content, media_url, media_type, reply_to_id, repost_of_id, is_wof, is_exclusive, is_shareable)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING id, content, media_url, media_type, reply_to_id, repost_of_id,
+      `INSERT INTO social_posts (user_id, content, media_url, media_type, reply_to_id, repost_of_id, is_wof, is_exclusive, is_shareable, video_thumbnail_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id, content, media_url, media_type, video_thumbnail_url, reply_to_id, repost_of_id,
                  likes_count, reposts_count, replies_count, is_wof, is_exclusive, is_shareable, created_at`,
-      [userId, content, mediaUrl, mediaType, replyToId || null, repostOfId || null, isWof, isExclusive, isShareable]
+      [userId, content, mediaUrl, mediaType, replyToId || null, repostOfId || null, isWof, isExclusive, isShareable, videoThumbnailUrl || null]
     );
     const post = rows[0];
 

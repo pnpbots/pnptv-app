@@ -2,6 +2,7 @@ const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
 const FileType = require('file-type');
+const ffmpeg = require('fluent-ffmpeg');
 const logger = require('../../../utils/logger');
 const SocialPostService = require('../../services/socialPostService');
 const axios = require('axios');
@@ -499,4 +500,122 @@ const requestWofDeletion = async (req, res) => {
   }
 };
 
-module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, getPublicProfile, requestWofDeletion };
+// ── Bulk Video Upload (performers only) ───────────────────────────────────────
+
+const bulkCreateVideos = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+
+  // Verify active creator status
+  try {
+    const creatorCheck = await dbQuery('SELECT creator_status FROM users WHERE id = $1', [user.id]);
+    if (creatorCheck.rows[0]?.creator_status !== 'active') {
+      if (req.files) {
+        for (const f of req.files) await fs.unlink(f.path).catch(() => {});
+      }
+      return res.status(403).json({ error: 'Only active creators can bulk upload videos' });
+    }
+  } catch (err) {
+    logger.error('bulkCreateVideos: creator check failed', err);
+    return res.status(500).json({ error: 'Failed to verify creator status' });
+  }
+
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: 'No video files uploaded' });
+  }
+
+  const rawCaptions = req.body.captions;
+  const rawExclusive = req.body.isExclusive;
+  const rawShareable = req.body.isShareable;
+  const captions = Array.isArray(rawCaptions) ? rawCaptions : (rawCaptions ? [rawCaptions] : []);
+  const exclusiveArr = Array.isArray(rawExclusive) ? rawExclusive : (rawExclusive ? [rawExclusive] : []);
+  const shareableArr = Array.isArray(rawShareable) ? rawShareable : (rawShareable ? [rawShareable] : []);
+
+  const uploadDir = path.join(__dirname, '../../../../../public/uploads/posts');
+  await fs.mkdir(uploadDir, { recursive: true });
+
+  const createdPosts = [];
+  const errors = [];
+
+  for (let i = 0; i < req.files.length; i++) {
+    const file = req.files[i];
+    const caption = (captions[i] || '').trim() || '🎬';
+    const exclusive = exclusiveArr[i] === 'true';
+    const shareable = shareableArr[i] !== 'false';
+
+    if (caption.length > 5000) {
+      await fs.unlink(file.path).catch(() => {});
+      errors.push({ index: i, error: 'Caption too long (max 5000 chars)' });
+      continue;
+    }
+
+    try {
+      // Validate magic bytes from first 256 bytes
+      const headerBuf = Buffer.alloc(256);
+      const fd = await fs.open(file.path, 'r');
+      await fd.read(headerBuf, 0, 256, 0);
+      await fd.close();
+
+      const detected = await FileType.fromBuffer(headerBuf);
+      const detectedMime = detected?.mime;
+      const isValidVideo = detectedMime === 'video/mp4' || detectedMime === 'video/webm';
+
+      if (!isValidVideo) {
+        logger.warn('bulkCreateVideos: rejected file — magic bytes mismatch', { userId: user.id, index: i, detectedMime });
+        await fs.unlink(file.path).catch(() => {});
+        errors.push({ index: i, error: 'Invalid file type — only mp4/webm allowed' });
+        continue;
+      }
+
+      const ext = detectedMime === 'video/webm' ? 'webm' : 'mp4';
+      const filename = `vid-${user.id}-${Date.now()}-${i}.${ext}`;
+      const finalPath = path.join(uploadDir, filename);
+      await fs.rename(file.path, finalPath);
+      const mediaUrl = `/uploads/posts/${filename}`;
+
+      // Generate thumbnail (non-fatal)
+      let videoThumbnailUrl = null;
+      try {
+        const thumbFilename = `thumb-${user.id}-${Date.now()}-${i}.jpg`;
+        const thumbPath = path.join(uploadDir, thumbFilename);
+        await new Promise((resolve, reject) => {
+          ffmpeg(finalPath)
+            .screenshots({ count: 1, timemarks: ['2'], filename: thumbFilename, folder: uploadDir })
+            .on('end', resolve)
+            .on('error', reject);
+        });
+        videoThumbnailUrl = `/uploads/posts/${thumbFilename}`;
+      } catch (thumbErr) {
+        logger.warn('bulkCreateVideos: thumbnail generation failed', { userId: user.id, index: i, err: thumbErr.message });
+      }
+
+      const post = await SocialPostService.createPost(
+        user.id, caption, mediaUrl, 'video', null, null, false, exclusive, shareable, videoThumbnailUrl
+      );
+
+      const authorPhoto = await getUserPhotoFromDb(user.id) || user.photoUrl || null;
+      const fullPost = {
+        ...post,
+        author_id: user.id,
+        author_username: user.username,
+        author_first_name: user.firstName || user.first_name,
+        author_photo: authorPhoto,
+        liked_by_me: false,
+      };
+      createdPosts.push(fullPost);
+
+      const io = req.app.get('io');
+      if (io) io.emit('feed:new_post', fullPost);
+    } catch (err) {
+      logger.error('bulkCreateVideos: error processing file', { userId: user.id, index: i, err });
+      await fs.unlink(file.path).catch(() => {});
+      errors.push({ index: i, error: 'Failed to process video' });
+    }
+  }
+
+  if (createdPosts.length === 0) {
+    return res.status(400).json({ error: 'No videos could be processed', details: errors });
+  }
+  return res.json({ success: true, posts: createdPosts, errors });
+};
+
+module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos };
