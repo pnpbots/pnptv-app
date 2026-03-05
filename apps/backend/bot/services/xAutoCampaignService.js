@@ -237,7 +237,7 @@ class XAutoCampaignService {
     let mediaUrl = null;
     if (campaign.media_folder_id) {
       try {
-        mediaUrl = await this._getRandomMediaUrl(campaign.media_folder_id);
+        mediaUrl = await this._getRandomMediaUrl(campaign.media_folder_id, campaign.campaign_id);
       } catch (err) {
         logger.warn('Failed to get random media for campaign', {
           campaignId: campaign.campaign_id, error: err.message,
@@ -381,10 +381,11 @@ class XAutoCampaignService {
   }
 
   /**
-   * Pick a random video URL from a Directus folder.
+   * Pick a random video URL from a Directus folder, avoiding recently used videos.
+   * Tracks used media per campaign to prevent repeats until all videos have been used.
    * Returns the asset URL or null if no videos found.
    */
-  static async _getRandomMediaUrl(folderId) {
+  static async _getRandomMediaUrl(folderId, campaignId = null) {
     if (!DIRECTUS_TOKEN) return null;
 
     const res = await fetch(
@@ -395,8 +396,44 @@ class XAutoCampaignService {
 
     if (!data.data || data.data.length === 0) return null;
 
-    const randomFile = data.data[Math.floor(Math.random() * data.data.length)];
-    return `${DIRECTUS_URL}/assets/${randomFile.id}`;
+    const allIds = data.data.map((f) => f.id);
+
+    // Get recently used media IDs for this campaign to avoid repeats
+    let usedIds = new Set();
+    if (campaignId) {
+      try {
+        const usedResult = await db.query(
+          `SELECT media_url FROM x_post_jobs
+           WHERE campaign_id = $1 AND media_url IS NOT NULL
+           ORDER BY created_at DESC
+           LIMIT $2`,
+          [campaignId, Math.max(allIds.length - 1, 1)]
+        );
+        for (const row of usedResult.rows) {
+          // Extract file ID from the Directus asset URL
+          const match = row.media_url && row.media_url.match(/\/assets\/([a-f0-9-]+)/i);
+          if (match) usedIds.add(match[1]);
+        }
+      } catch (err) {
+        logger.warn('Failed to check used media for campaign', {
+          campaignId, error: err.message,
+        });
+      }
+    }
+
+    // Filter out recently used videos
+    let available = allIds.filter((id) => !usedIds.has(id));
+
+    // If all videos have been used, reset and allow all
+    if (available.length === 0) {
+      available = allIds;
+      logger.info('All media used for campaign, resetting pool', {
+        campaignId, totalVideos: allIds.length,
+      });
+    }
+
+    const chosen = available[Math.floor(Math.random() * available.length)];
+    return `${DIRECTUS_URL}/assets/${chosen}`;
   }
 
   // ---------------------------------------------------------------------------
@@ -407,12 +444,12 @@ class XAutoCampaignService {
    * Extract a random option from Grok's xPost response (3 options A/B/C).
    */
   static _extractRandomOption(text) {
-    // Try to split by "OPCIÓN A", "OPCIÓN B", "OPCIÓN C" patterns
-    const optionRegex = /OPCI[OÓ]N\s+[ABC][\s:.\-—]*([\s\S]*?)(?=OPCI[OÓ]N\s+[ABC]|$)/gi;
+    // Try to split by "OPCIÓN A/B/C" or "OPTION A/B/C" patterns
+    const optionRegex = /(?:OPCI[OÓ]N|OPTION)\s+[ABC][\s:.\-—]*([\s\S]*?)(?=(?:OPCI[OÓ]N|OPTION)\s+[ABC]|$)/gi;
     const matches = [];
     let match;
     while ((match = optionRegex.exec(text)) !== null) {
-      const cleaned = match[1].trim();
+      const cleaned = this._stripOptionLabel(match[1].trim());
       if (cleaned) matches.push(cleaned);
     }
 
@@ -423,11 +460,24 @@ class XAutoCampaignService {
     // Fallback: try splitting by numbered options (1., 2., 3.)
     const numbered = text.split(/\n\s*[123]\.\s+/).filter(Boolean);
     if (numbered.length > 1) {
-      return numbered[Math.floor(Math.random() * numbered.length)].trim();
+      return this._stripOptionLabel(numbered[Math.floor(Math.random() * numbered.length)].trim());
     }
 
-    // Last resort: return the full text
-    return text.trim();
+    // Last resort: return the full text stripped of any leading label
+    return this._stripOptionLabel(text.trim());
+  }
+
+  /**
+   * Remove any leading option label line from extracted tweet text.
+   * e.g. "El Gancho Directo:\nTweet text..." → "Tweet text..."
+   */
+  static _stripOptionLabel(text) {
+    // Remove lines that look like option labels / style descriptors (no sentence punctuation)
+    return text
+      .replace(/^[\s]*(?:OPCI[OÓ]N|OPTION)\s+[ABC][^\n]*\n/gi, '')
+      .replace(/^\(.*?\)[^\n]*\n/gm, '')
+      .replace(/^El\s+\w+[\s\w]*:\s*/im, '')
+      .trim();
   }
 }
 

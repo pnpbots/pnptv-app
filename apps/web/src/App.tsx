@@ -5,6 +5,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import { NotificationProvider } from "@/hooks/useNotifications";
 import { router } from "@/router";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
         <AuthProvider>
           <NotificationProvider>
             <RouterProvider router={router} />
+            <PWAInstallBanner />
           </NotificationProvider>
         </AuthProvider>
       </HelmetProvider>
