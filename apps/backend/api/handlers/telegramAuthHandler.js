@@ -111,7 +111,7 @@ const handleTelegramAuth = async (req, res) => {
         await query(
           `INSERT INTO users (telegram, username, first_name, language, subscription_status, terms_accepted, age_verified, role)
            VALUES ($1, $2, $3, $4, 'free', false, false, 'user')
-           ON CONFLICT (telegram) DO NOTHING`,
+           ON CONFLICT (telegram) WHERE telegram IS NOT NULL AND telegram <> '' DO NOTHING`,
           [
             telegramUser.id,
             telegramUser.username || '',

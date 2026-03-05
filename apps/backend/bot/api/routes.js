@@ -3618,7 +3618,7 @@ app.post('/api/wallet/buy', asyncHandler(async (req, res) => {
       usd: pkg.usd,
     });
   } catch (err) {
-    logger.error('Wallet buy error:', err.message);
+    logger.error(`Wallet buy error: ${err.message}`);
     res.status(500).json({ success: false, error: 'Failed to create Dash invoice. BTCPay Server may not be configured yet.' });
   }
 }));

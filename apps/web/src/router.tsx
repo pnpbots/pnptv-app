@@ -21,6 +21,7 @@ const DaimoCheckout = lazy(() => import("@/pages/DaimoCheckout"));
 const Support = lazy(() => import("@/pages/Support"));
 const Apply = lazy(() => import("@/pages/Apply"));
 const Welcome = lazy(() => import("@/pages/Welcome"));
+const Join = lazy(() => import("@/pages/Join"));
 
 // Admin pages
 const StatsOverview = lazy(() => import("@/pages/admin/StatsOverview"));
@@ -290,6 +291,14 @@ export const router = createBrowserRouter([
         ),
       },
     ],
+  },
+  {
+    path: "/join",
+    element: (
+      <ModuleLoader>
+        <Join />
+      </ModuleLoader>
+    ),
   },
   {
     path: "/auth/callback",
