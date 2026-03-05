@@ -98,13 +98,19 @@ export default function Join() {
       <Helmet>
         <title>Join PNPtv! — The Queer PNP Community</title>
         <meta name="description" content="Join PNPtv! — the private queer community for party & play. Connect, explore exclusive content, and find your people. Free to join." />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="PNPtv" />
         <meta property="og:title" content="Join PNPtv! — The Queer PNP Community" />
         <meta property="og:description" content="4,000+ members. Private hangouts. Exclusive content. Join free or go PRIME." />
-        <meta property="og:image" content="https://pnptv.app/og-image.jpg" />
-        <meta property="og:url" content="https://pnptv.app/join" />
+        <meta property="og:image" content="https://app.pnptv.app/og-image.png" />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:url" content="https://pnptv.app/login" />
         <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:site" content="@PNPTelevision" />
         <meta name="twitter:title" content="Join PNPtv! — The Queer PNP Community" />
         <meta name="twitter:description" content="4,000+ members. Private hangouts. Exclusive content. Join free or go PRIME." />
+        <meta name="twitter:image" content="https://app.pnptv.app/og-image.png" />
       </Helmet>
 
       <div className="min-h-screen" style={{ background: "#0A0A0B", color: "#fff" }}>
