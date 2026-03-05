@@ -641,7 +641,7 @@ class CanvaService {
    */
   static async getConnectedUsers() {
     const result = await query(`
-      SELECT u.id, u.username, u.display_name, u.canva_user_id, u.canva_display_name, u.canva_connected_at,
+      SELECT u.id, u.username, u.first_name AS display_name, u.canva_user_id, u.canva_display_name, u.canva_connected_at,
              COUNT(j.id) AS export_count
       FROM users u
       LEFT JOIN canva_export_jobs j ON j.user_id = u.id
@@ -680,7 +680,7 @@ class CanvaService {
                 j.export_quality, j.status, j.directus_file_id, j.directus_content_id,
                 j.error_message, j.retry_count, j.export_url, j.started_at, j.completed_at,
                 j.created_at, j.updated_at,
-                u.username, u.display_name AS user_display_name
+                u.username, u.first_name AS user_display_name
          FROM canva_export_jobs j
          LEFT JOIN users u ON u.id = j.user_id
          ${whereClause}
