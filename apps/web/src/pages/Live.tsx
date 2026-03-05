@@ -224,8 +224,14 @@ export default function Live() {
       window.open(result.checkoutUrl, "_blank", "noopener,width=600,height=800");
       setShowBuyModal(false);
     } catch (err: unknown) {
-      // Fix #14: use error state instead of alert()
-      setBuyError(err instanceof Error ? err.message : "Failed to open Dash checkout");
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("not available") || msg.includes("not configured")) {
+        setBuyError("Dash payments are not available yet. Contact support.");
+      } else if (msg.includes("temporarily unavailable")) {
+        setBuyError("Payment server is temporarily unavailable. Please try again later.");
+      } else {
+        setBuyError(msg || "Failed to open Dash checkout");
+      }
     } finally {
       setBuyingPackage(null);
     }

@@ -3564,7 +3564,13 @@ app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (re
 // DASH TOKEN WALLET ROUTES
 // ==========================================
 const DashTokenService = require('../services/dashTokenService');
-const { createDashInvoice, validateWebhookSignature } = require('../../config/btcpay');
+const { createDashInvoice, validateWebhookSignature, checkBtcpayHealth, isConfigured: btcpayConfigured } = require('../../config/btcpay');
+
+// GET /api/webapp/dash/btcpay-status — check if BTCPay is configured and reachable
+app.get('/api/webapp/dash/btcpay-status', asyncHandler(async (req, res) => {
+  const health = await checkBtcpayHealth();
+  res.json({ success: true, ...health });
+}));
 
 // GET /api/wallet/balance — get current user's token balance + DPNS
 app.get('/api/wallet/balance', asyncHandler(async (req, res) => {
@@ -3623,7 +3629,13 @@ app.post('/api/wallet/buy', asyncHandler(async (req, res) => {
     });
   } catch (err) {
     logger.error(`Wallet buy error: ${err.message}`);
-    res.status(500).json({ success: false, error: 'Failed to create Dash invoice. BTCPay Server may not be configured yet.' });
+    if (err.message?.includes('not configured')) {
+      return res.status(503).json({ success: false, error: 'Crypto payments are not available yet. Please use another payment method.', code: 'BTCPAY_NOT_CONFIGURED' });
+    }
+    if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT') {
+      return res.status(503).json({ success: false, error: 'Payment server is temporarily unavailable. Please try again later.', code: 'BTCPAY_UNREACHABLE' });
+    }
+    res.status(500).json({ success: false, error: 'Failed to create Dash invoice. Please try again.', code: 'BTCPAY_ERROR' });
   }
 }));
 
@@ -3685,7 +3697,13 @@ app.post('/api/webapp/payments/dash/create', asyncHandler(async (req, res) => {
     });
   } catch (err) {
     logger.error('Dash subscription invoice error:', err.message);
-    return res.status(500).json({ success: false, error: 'Failed to create Dash invoice. BTCPay Server may not be ready yet.' });
+    if (err.message?.includes('not configured')) {
+      return res.status(503).json({ success: false, error: 'Crypto payments are not available yet. Please use another payment method.', code: 'BTCPAY_NOT_CONFIGURED' });
+    }
+    if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT') {
+      return res.status(503).json({ success: false, error: 'Payment server is temporarily unavailable. Please try again later.', code: 'BTCPAY_UNREACHABLE' });
+    }
+    return res.status(500).json({ success: false, error: 'Failed to create Dash invoice. Please try again.', code: 'BTCPAY_ERROR' });
   }
 }));
 
@@ -3756,7 +3774,8 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       const durationDays = plan.duration_days || plan.duration || 30;
       const isLifetime = durationDays >= 36500;
       const expiryDate = isLifetime ? null : new Date(Date.now() + durationDays * 86400000);
-      const newTier = order.plan_id === 'member_monthly' ? 'member' : 'PRIME';
+      // Derive tier from plan: use plan.tier if set, else infer from plan_id prefix
+      const newTier = (plan.tier === 'member' || order.plan_id.startsWith('member_')) ? 'member' : 'PRIME';
 
       await dbQuery(
         `UPDATE users

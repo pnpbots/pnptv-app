@@ -232,7 +232,14 @@ export default function Subscribe() {
           });
           setDashPolling(true);
         } else {
-          setError(result.error || "Failed to create Dash invoice");
+          const code = (result as { code?: string }).code;
+          if (code === "BTCPAY_NOT_CONFIGURED") {
+            setError("Dash payments are not available yet. Please use ePayco or Daimo instead.");
+          } else if (code === "BTCPAY_UNREACHABLE") {
+            setError("Payment server is temporarily unavailable. Please try again in a few minutes.");
+          } else {
+            setError(result.error || "Failed to create Dash invoice");
+          }
         }
       } else {
         const result = await createPayment(selectedPlan, provider, email.trim());

@@ -108,9 +108,27 @@ function validateWebhookSignature(rawBody, signature) {
   return crypto.timingSafeEqual(expectedBuf, providedBuf);
 }
 
+/**
+ * Check whether BTCPay is configured and reachable.
+ * Returns { configured: boolean, reachable: boolean, reason?: string }
+ */
+async function checkBtcpayHealth() {
+  const configured = !!(BTCPAY_API_KEY && BTCPAY_STORE_ID);
+  if (!configured) return { configured: false, reachable: false, reason: 'not_configured' };
+  try {
+    await btcpayClient.get(`/stores/${BTCPAY_STORE_ID}`);
+    return { configured: true, reachable: true };
+  } catch (err) {
+    const reason = (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') ? 'unreachable' : 'api_error';
+    return { configured: true, reachable: false, reason };
+  }
+}
+
 module.exports = {
   createDashInvoice,
   getInvoice,
   validateWebhookSignature,
+  checkBtcpayHealth,
   BTCPAY_WEBHOOK_SECRET,
+  get isConfigured() { return !!(BTCPAY_API_KEY && BTCPAY_STORE_ID); },
 };
