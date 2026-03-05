@@ -9,6 +9,7 @@ import {
   getProfile,
   getPublicProfile,
   updateProfile,
+  updatePrivacy,
   uploadAvatar,
   togglePostLike,
   deleteSocialPost,
@@ -333,6 +334,19 @@ function EditProfileModal({
   const [lastName, setLastName] = useState(profile.lastName || "");
   const [bio, setBio] = useState(profile.bio || "");
   const [locationText, setLocationText] = useState(profile.locationText || "");
+  const [dob, setDob] = useState<string>(profile.dateOfBirth || "");
+  const [city, setCity] = useState<string>(profile.city || "");
+  const [country, setCountry] = useState<string>(profile.country || "");
+  const [privacy, setPrivacy] = useState<Record<string, boolean>>({
+    showDob: true,
+    showLocation: true,
+    showBio: true,
+    showInterests: true,
+    allowMessages: true,
+    showOnline: true,
+    ...(profile.privacy || {}),
+  });
+  const [savingPrivacy, setSavingPrivacy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -341,13 +355,44 @@ function EditProfileModal({
     setLastName(profile.lastName || "");
     setBio(profile.bio || "");
     setLocationText(profile.locationText || "");
+    setDob(profile.dateOfBirth || "");
+    setCity(profile.city || "");
+    setCountry(profile.country || "");
+    setPrivacy({
+      showDob: true,
+      showLocation: true,
+      showBio: true,
+      showInterests: true,
+      allowMessages: true,
+      showOnline: true,
+      ...(profile.privacy || {}),
+    });
   }, [profile]);
+
+  const handlePrivacyToggle = async (key: string) => {
+    const newVal = !privacy[key];
+    const optimistic = { ...privacy, [key]: newVal };
+    setPrivacy(optimistic);
+    setSavingPrivacy(true);
+    try {
+      await updatePrivacy({ [key]: newVal });
+    } catch {
+      // Revert on failure
+      setPrivacy(privacy);
+    } finally {
+      setSavingPrivacy(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     try {
-      await updateProfile({ firstName, lastName, bio, locationText });
+      const payload: Parameters<typeof updateProfile>[0] = { firstName, lastName, bio, locationText };
+      if (dob) payload.dateOfBirth = dob;
+      if (city.trim()) payload.city = city.trim();
+      if (country.trim()) payload.country = country.trim();
+      await updateProfile(payload);
       onSaved();
       onClose();
     } catch (err: unknown) {
@@ -357,9 +402,23 @@ function EditProfileModal({
     }
   };
 
+  // 18-years-ago max date for DOB
+  const dobMax = new Date(Date.now() - 18 * 365.25 * 24 * 3600 * 1000).toISOString().split("T")[0];
+
   return (
     <Modal open={open} onClose={onClose} title="Edit Profile">
       <div className="space-y-4">
+        {/* Profile Incomplete nudge */}
+        {(!profile.dateOfBirth || !profile.city) && (
+          <div className="rounded-xl p-3 bg-yellow-500/10 border border-yellow-500/30 flex items-start gap-2">
+            <span className="text-yellow-400 text-lg leading-none mt-0.5" aria-hidden="true">!</span>
+            <div>
+              <p className="text-sm font-medium text-yellow-300">Complete your profile</p>
+              <p className="text-xs text-yellow-400/80">Add your date of birth and location to help us personalize your experience.</p>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs text-pnp-textSecondary mb-1">First Name</label>
@@ -390,13 +449,84 @@ function EditProfileModal({
           <span className="text-xs text-pnp-textSecondary float-right">{bio.length}/160</span>
         </div>
         <div>
-          <label className="block text-xs text-pnp-textSecondary mb-1">Location</label>
+          <label className="block text-xs text-pnp-textSecondary mb-1">Location (display)</label>
           <Input
             value={locationText}
             onChange={(e) => setLocationText(e.target.value)}
             placeholder="City, Country"
           />
         </div>
+
+        {/* Date of Birth */}
+        <div>
+          <label className="block text-xs font-medium text-pnp-textSecondary mb-1.5">
+            Date of Birth <span className="text-pnp-textSecondary/50">(required for personalization)</span>
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={dob}
+              onChange={(e) => setDob(e.target.value)}
+              max={dobMax}
+              className="flex-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
+            />
+            <button
+              type="button"
+              onClick={() => handlePrivacyToggle("showDob")}
+              disabled={savingPrivacy}
+              className={`flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-medium border transition-all disabled:opacity-50 ${
+                privacy.showDob
+                  ? "border-green-500/40 bg-green-500/10 text-green-400"
+                  : "border-white/10 bg-white/5 text-pnp-textSecondary"
+              }`}
+              title={privacy.showDob ? "Visible to others" : "Private"}
+              aria-label={privacy.showDob ? "Date of birth is public — click to make private" : "Date of birth is private — click to make public"}
+            >
+              {privacy.showDob ? "Public" : "Private"}
+            </button>
+          </div>
+          <p className="text-[10px] text-pnp-textSecondary/60 mt-1">Used for age verification and community analytics. Never shared publicly unless set to Public.</p>
+        </div>
+
+        {/* City / Country */}
+        <div>
+          <label className="block text-xs font-medium text-pnp-textSecondary mb-1.5">
+            Location <span className="text-pnp-textSecondary/50">(city &amp; country)</span>
+          </label>
+          <div className="flex gap-2 mb-2">
+            <input
+              type="text"
+              placeholder="City"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              maxLength={100}
+              className="flex-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary/40 focus:outline-none focus:border-pnp-accent"
+            />
+            <input
+              type="text"
+              placeholder="Country"
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              maxLength={100}
+              className="flex-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary/40 focus:outline-none focus:border-pnp-accent"
+            />
+            <button
+              type="button"
+              onClick={() => handlePrivacyToggle("showLocation")}
+              disabled={savingPrivacy}
+              className={`flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-medium border transition-all disabled:opacity-50 ${
+                privacy.showLocation
+                  ? "border-green-500/40 bg-green-500/10 text-green-400"
+                  : "border-white/10 bg-white/5 text-pnp-textSecondary"
+              }`}
+              title={privacy.showLocation ? "Visible to others" : "Private"}
+              aria-label={privacy.showLocation ? "Location is public — click to make private" : "Location is private — click to make public"}
+            >
+              {privacy.showLocation ? "Public" : "Private"}
+            </button>
+          </div>
+        </div>
+
         {error && <p className="text-xs text-red-400">{error}</p>}
         <div className="flex gap-3 pt-2">
           <Button variant="danger" className="flex-1" onClick={onClose}>

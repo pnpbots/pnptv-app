@@ -36,6 +36,7 @@ const ExternalServices = lazy(() => import("@/pages/admin/ExternalServices"));
 const NearbyPlaces = lazy(() => import("@/pages/admin/NearbyPlaces"));
 const CanvaIntegration = lazy(() => import("@/pages/admin/CanvaIntegration"));
 const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
+const AdminDemographics = lazy(() => import("@/pages/admin/AdminDemographics"));
 
 export const router = createBrowserRouter([
   {
@@ -287,6 +288,14 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <XAutoCampaigns />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "demographics",
+        element: (
+          <ModuleLoader>
+            <AdminDemographics />
           </ModuleLoader>
         ),
       },

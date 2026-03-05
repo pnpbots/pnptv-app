@@ -1462,7 +1462,7 @@ const updateProfile = async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
 
   // Server-side max-length validation
-  const MAX_LENGTHS = { firstName: 100, lastName: 100, bio: 500, locationText: 200, xHandle: 50, instagramHandle: 50, tiktokHandle: 50, youtubeHandle: 100 };
+  const MAX_LENGTHS = { firstName: 100, lastName: 100, bio: 500, locationText: 200, xHandle: 50, instagramHandle: 50, tiktokHandle: 50, youtubeHandle: 100, city: 100, country: 100 };
   for (const [key, max] of Object.entries(MAX_LENGTHS)) {
     if (req.body[key] && typeof req.body[key] === 'string' && req.body[key].length > max) {
       return res.status(400).json({ error: `${key} exceeds maximum length of ${max} characters` });
@@ -1474,8 +1474,18 @@ const updateProfile = async (req, res) => {
     return res.status(400).json({ error: 'Language must be en or es' });
   }
 
+  // Validate dateOfBirth if provided
+  const { dateOfBirth } = req.body;
+  if (dateOfBirth !== undefined && dateOfBirth !== null && dateOfBirth !== '') {
+    const dob = new Date(dateOfBirth);
+    if (isNaN(dob.getTime())) return res.status(400).json({ error: 'Invalid date of birth' });
+    const age = (Date.now() - dob.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+    if (age < 18) return res.status(400).json({ error: 'You must be at least 18 years old' });
+    if (dob > new Date()) return res.status(400).json({ error: 'Date of birth cannot be in the future' });
+  }
+
   try {
-    const allowed = ['firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle', 'wofPhotoConsent', 'contentDisclaimer', 'language'];
+    const allowed = ['firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle', 'wofPhotoConsent', 'contentDisclaimer', 'language', 'dateOfBirth', 'city', 'country'];
     const colMap  = {
       firstName: 'first_name', lastName: 'last_name', bio: 'bio',
       locationText: 'location_name', interests: 'interests',
@@ -1483,6 +1493,9 @@ const updateProfile = async (req, res) => {
       wofPhotoConsent: 'wof_photo_consent',
       contentDisclaimer: 'content_disclaimer',
       language: 'language',
+      dateOfBirth: 'date_of_birth',
+      city: 'city',
+      country: 'country',
     };
 
     const sets = [];
@@ -1500,12 +1513,32 @@ const updateProfile = async (req, res) => {
           } else {
             vals.push(String(raw).split(',').map(s => s.trim()).filter(Boolean));
           }
+        } else if (key === 'dateOfBirth') {
+          // Store as DATE or null; empty string clears the field
+          const rawDob = req.body[key];
+          vals.push((!rawDob || rawDob === '') ? null : rawDob);
         } else {
           // Allow clearing fields (null / empty string → null)
           vals.push(req.body[key] === '' ? null : req.body[key]);
         }
       }
     });
+
+    // Auto-derive location_name from city + country when both are provided in this request
+    // Only override if city/country were explicitly sent and location_name was NOT also sent
+    const cityProvided    = Object.prototype.hasOwnProperty.call(req.body, 'city');
+    const countryProvided = Object.prototype.hasOwnProperty.call(req.body, 'country');
+    const locationTextProvided = Object.prototype.hasOwnProperty.call(req.body, 'locationText');
+    if ((cityProvided || countryProvided) && !locationTextProvided) {
+      const cityVal    = cityProvided    ? (req.body.city    || '').trim() : null;
+      const countryVal = countryProvided ? (req.body.country || '').trim() : null;
+      // Only push a derived location_name if we have enough data to form one
+      if (cityVal || countryVal) {
+        const derived = [cityVal, countryVal].filter(Boolean).join(', ');
+        sets.push(`location_name = $${sets.length + 1}`);
+        vals.push(derived);
+      }
+    }
 
     if (sets.length === 0) return res.status(400).json({ error: 'No fields to update' });
 

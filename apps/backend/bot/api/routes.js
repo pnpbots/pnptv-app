@@ -2053,6 +2053,52 @@ app.get('/api/webapp/profile', asyncHandler(webAppController.getProfile));
 app.put('/api/webapp/profile', asyncHandler(webAppController.updateProfile));
 app.post('/api/webapp/profile/avatar', requireSessionAuth, uploadLimiter, avatarUpload.single('avatar'), asyncHandler(webAppController.uploadAvatar));
 
+// Web App Privacy Settings
+app.patch('/api/webapp/privacy', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+
+  const ALLOWED_KEYS = ['showBio', 'showOnline', 'showLocation', 'showDob', 'allowMessages', 'showInterests'];
+  const updates = {};
+  for (const key of ALLOWED_KEYS) {
+    if (typeof req.body[key] === 'boolean') updates[key] = req.body[key];
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: 'No valid privacy fields provided' });
+  }
+
+  const { query: dbQuery } = require('../../config/postgres');
+
+  // Build jsonb_set chain
+  let privacyExpr = "COALESCE(privacy, '{}'::jsonb)";
+  const params = [user.id];
+  for (const [key, val] of Object.entries(updates)) {
+    params.push(JSON.stringify(val));
+    privacyExpr = `jsonb_set(${privacyExpr}, '{${key}}', $${params.length}::jsonb)`;
+  }
+
+  try {
+    const result = await dbQuery(
+      `UPDATE users SET privacy = ${privacyExpr}, updated_at = NOW() WHERE id = $1 RETURNING privacy`,
+      params
+    );
+
+    // Update session so subsequent auth-status calls reflect the change
+    if (req.session?.user) {
+      req.session.user.privacy = result.rows[0]?.privacy;
+      await new Promise((resolve, reject) =>
+        req.session.save(err => (err ? reject(err) : resolve()))
+      );
+    }
+
+    return res.json({ success: true, privacy: result.rows[0]?.privacy });
+  } catch (err) {
+    logger.error('PATCH /api/webapp/privacy error:', err);
+    return res.status(500).json({ error: 'Failed to update privacy settings' });
+  }
+}));
+
 // Model Application File Uploads
 const applyController = require('./controllers/applyController');
 app.post('/api/apply/profile-photo', authenticateUser, uploadModelProfilePhoto, asyncHandler(applyController.uploadProfilePhoto));
@@ -2478,6 +2524,7 @@ const { adminGuard } = require('../../middleware/guards');
 
 // Admin endpoints with session-based authentication
 app.get('/api/webapp/admin/stats', adminGuard, asyncHandler(webappAdminController.getStats));
+app.get('/api/webapp/admin/demographics', adminGuard, asyncHandler(webappAdminController.getDemographics));
 app.get('/api/webapp/admin/users', adminGuard, asyncHandler(webappAdminController.listUsers));
 app.get('/api/webapp/admin/users/:id', adminGuard, asyncHandler(webappAdminController.getUser));
 app.put('/api/webapp/admin/users/:id', adminGuard, asyncHandler(webappAdminController.updateUser));

@@ -377,6 +377,10 @@ export interface UserProfile {
   language?: string;
   interests?: string[];
   locationText?: string;
+  dateOfBirth?: string | null;
+  city?: string | null;
+  country?: string | null;
+  privacy?: Record<string, boolean>;
   xHandle?: string;
   instagramHandle?: string;
   tiktokHandle?: string;
@@ -501,6 +505,9 @@ export function updateProfile(
     lastName: string;
     bio: string;
     locationText: string;
+    dateOfBirth: string;
+    city: string;
+    country: string;
     interests: string;
     xHandle: string;
     instagramHandle: string;
@@ -512,6 +519,17 @@ export function updateProfile(
   }>
 ): Promise<{ success: boolean }> {
   return request("/api/webapp/profile", { method: "PUT", body: fields });
+}
+
+export function updatePrivacy(settings: {
+  showBio?: boolean;
+  showOnline?: boolean;
+  showLocation?: boolean;
+  showDob?: boolean;
+  allowMessages?: boolean;
+  showInterests?: boolean;
+}): Promise<{ success: boolean; privacy: Record<string, boolean> }> {
+  return request("/api/webapp/privacy", { method: "PATCH", body: settings });
 }
 
 export function updateLanguage(lang: "en" | "es"): Promise<{ success: boolean }> {
@@ -2407,6 +2425,32 @@ export interface PaginatedResponse<T> {
 // Admin Stats
 export function getAdminStats(): Promise<{ success: boolean; stats: AdminStats }> {
   return request("/api/webapp/admin/stats");
+}
+
+// Admin Demographics
+export interface AdminDemographics {
+  tiers: { label: string; count: number }[];
+  languages: { label: string; count: number }[];
+  locations: { label: string; count: number }[];
+  signupTrend: { day: string; count: number }[];
+  subscriptionTypes: { label: string; count: number }[];
+  activity: {
+    total: number; active1d: number; active7d: number; active30d: number; active90d: number;
+    new7d: number; new30d: number; ageVerified: number; withBio: number; withPhoto: number;
+    withLocation: number; avgXp: number;
+  };
+  xpBuckets: { label: string; count: number }[];
+  retention: { cohortSize: number; retained: number; rate: number | null };
+  features: {
+    posts: number; postLikes: number; dms: number; chatMessages: number; hangouts: number;
+    hangoutMembers: number; streams: number; notificationsSent: number; follows: number;
+    mediaPlays: number; mediaFavorites: number; tips: number; pushSubscribers: number;
+    xLinked: number; blueskyLinked: number;
+  };
+  insights: { type: string; title: string; body: string }[];
+}
+export function getAdminDemographics(): Promise<{ success: boolean; demographics: AdminDemographics }> {
+  return request("/api/webapp/admin/demographics");
 }
 
 // Admin Users

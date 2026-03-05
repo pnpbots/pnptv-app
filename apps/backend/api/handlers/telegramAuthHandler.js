@@ -332,7 +332,7 @@ const checkAuthStatus = async (req, res) => {
     // Refresh tier, role, and subscription from DB (prevents stale session data)
     try {
       const { rows } = await query(
-        'SELECT tier, role, subscription_status, photo_file_id, creator_status, creator_type, age_verified, terms_accepted FROM users WHERE id = $1',
+        'SELECT tier, role, subscription_status, photo_file_id, creator_status, creator_type, age_verified, terms_accepted, date_of_birth FROM users WHERE id = $1',
         [user.id]
       );
       if (rows.length > 0) {
@@ -346,6 +346,7 @@ const checkAuthStatus = async (req, res) => {
         user.ageVerified = fresh.age_verified;
         user.terms_accepted = fresh.terms_accepted;
         user.acceptedTerms = fresh.terms_accepted;
+        user.date_of_birth = fresh.date_of_birth || null;
         const isValidPhoto = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
         if (isValidPhoto(fresh.photo_file_id)) {
           user.photoUrl = fresh.photo_file_id;
@@ -386,6 +387,8 @@ const checkAuthStatus = async (req, res) => {
         // Creator status
         creator_status: user.creator_status || 'none',
         creator_type: user.creator_type || null,
+        // Profile fields
+        date_of_birth: user.date_of_birth || null,
         // Auth methods flags (used by Profile.tsx IdentityConnections)
         auth_methods: authMethods,
       }

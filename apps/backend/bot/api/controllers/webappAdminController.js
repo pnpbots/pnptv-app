@@ -661,8 +661,195 @@ const getVapidKey = async (req, res) => {
   return res.json({ success: true, publicKey: process.env.VAPID_PUBLIC_KEY || '' });
 };
 
+/**
+ * GET /api/webapp/admin/demographics
+ * User population demographics + feature engagement + strategy insights
+ */
+const getDemographics = async (req, res) => {
+  try {
+    const toInt = (v) => { const n = parseInt(v, 10); return isNaN(n) ? 0 : n; };
+
+    const [
+      tierRows,
+      languageRows,
+      locationRows,
+      signupRows,
+      activityRows,
+      featureRows,
+      subscriptionTypeRows,
+      xpRows,
+      retentionRows,
+    ] = await Promise.all([
+      // Tier distribution
+      query(`SELECT tier, COUNT(*) as cnt FROM users GROUP BY tier ORDER BY cnt DESC`),
+
+      // Language distribution (top 10)
+      query(`SELECT COALESCE(language, 'unknown') as lang, COUNT(*) as cnt FROM users GROUP BY lang ORDER BY cnt DESC LIMIT 10`),
+
+      // Location/region distribution
+      query(`SELECT COALESCE(location_name, 'Unknown') as region, COUNT(*) as cnt FROM users WHERE location_name IS NOT NULL AND location_name != '' GROUP BY region ORDER BY cnt DESC LIMIT 12`),
+
+      // Signup trend — new users per day last 30 days
+      query(`SELECT DATE_TRUNC('day', created_at)::DATE as day, COUNT(*) as cnt FROM users WHERE created_at >= NOW() - INTERVAL '30 days' GROUP BY day ORDER BY day ASC`),
+
+      // Activity cohorts
+      query(`SELECT
+        COUNT(*) as total,
+        COUNT(CASE WHEN last_active >= NOW() - INTERVAL '1 day' THEN 1 END) as active_1d,
+        COUNT(CASE WHEN last_active >= NOW() - INTERVAL '7 days' THEN 1 END) as active_7d,
+        COUNT(CASE WHEN last_active >= NOW() - INTERVAL '30 days' THEN 1 END) as active_30d,
+        COUNT(CASE WHEN last_active >= NOW() - INTERVAL '90 days' THEN 1 END) as active_90d,
+        COUNT(CASE WHEN created_at >= NOW() - INTERVAL '7 days' THEN 1 END) as new_7d,
+        COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' THEN 1 END) as new_30d,
+        COUNT(CASE WHEN age_verified = true THEN 1 END) as age_verified,
+        COUNT(CASE WHEN terms_accepted = true THEN 1 END) as terms_accepted,
+        COUNT(CASE WHEN location_lat IS NOT NULL THEN 1 END) as with_location,
+        COUNT(CASE WHEN bio IS NOT NULL AND bio != '' THEN 1 END) as with_bio,
+        COUNT(CASE WHEN photo_file_id IS NOT NULL THEN 1 END) as with_photo,
+        ROUND(AVG(COALESCE(xp, 0)), 1) as avg_xp,
+        MAX(COALESCE(xp, 0)) as max_xp
+      FROM users`),
+
+      // Feature engagement counts
+      query(`SELECT
+        (SELECT COUNT(*) FROM social_posts) as posts,
+        (SELECT COUNT(*) FROM social_post_likes) as post_likes,
+        (SELECT COUNT(*) FROM direct_messages) as dms,
+        (SELECT COUNT(*) FROM chat_messages) as chat_msgs,
+        (SELECT COUNT(*) FROM hangout_groups) as hangouts,
+        (SELECT COUNT(*) FROM hangout_group_members) as hangout_members,
+        (SELECT COUNT(*) FROM live_streams) as streams,
+        (SELECT COUNT(*) FROM notifications) as notifications_sent,
+        (SELECT COUNT(*) FROM user_follows) as follows,
+        (SELECT COUNT(*) FROM media_play_history) as media_plays,
+        (SELECT COUNT(*) FROM media_favorites) as media_favorites,
+        (SELECT COUNT(*) FROM pnp_tips) as tips,
+        (SELECT COUNT(*) FROM push_subscriptions) as push_subs,
+        (SELECT COUNT(*) FROM x_accounts) as x_linked,
+        (SELECT COUNT(*) FROM user_pds_mapping) as bluesky_linked
+      `),
+
+      // Subscription type
+      query(`SELECT COALESCE(subscription_type, 'one_time') as sub_type, COUNT(*) as cnt FROM users GROUP BY sub_type ORDER BY cnt DESC`),
+
+      // XP distribution buckets
+      query(`SELECT
+        COUNT(CASE WHEN xp = 0 THEN 1 END) as xp_zero,
+        COUNT(CASE WHEN xp BETWEEN 1 AND 50 THEN 1 END) as xp_low,
+        COUNT(CASE WHEN xp BETWEEN 51 AND 200 THEN 1 END) as xp_mid,
+        COUNT(CASE WHEN xp BETWEEN 201 AND 500 THEN 1 END) as xp_high,
+        COUNT(CASE WHEN xp > 500 THEN 1 END) as xp_super
+      FROM users`),
+
+      // 30-day retention: users who signed up 30-60 days ago and were active in last 30 days
+      query(`SELECT
+        COUNT(*) as cohort_size,
+        COUNT(CASE WHEN last_active >= NOW() - INTERVAL '30 days' THEN 1 END) as retained
+      FROM users WHERE created_at BETWEEN NOW() - INTERVAL '60 days' AND NOW() - INTERVAL '30 days'`),
+    ]);
+
+    const activity = activityRows.rows[0] || {};
+    const features = featureRows.rows[0] || {};
+    const xp = xpRows.rows[0] || {};
+    const retention = retentionRows.rows[0] || {};
+    const total = toInt(activity.total) || 1;
+
+    // Compute strategy insights
+    const insights = [];
+    const spanishPct = Math.round((languageRows.rows.find(r => r.lang === 'es')?.cnt || 0) / total * 100);
+    if (spanishPct >= 15) {
+      insights.push({ type: 'opportunity', title: 'Spanish Audience', body: `${spanishPct}% of users are Spanish-speaking. Prioritize bilingual content, onboarding, and creator outreach in Spanish.` });
+    }
+    const freePct = Math.round((tierRows.rows.find(r => r.tier === 'free')?.cnt || 0) / total * 100);
+    if (freePct >= 10) {
+      insights.push({ type: 'conversion', title: 'Free-to-Paid Gap', body: `${freePct}% of users are on the free tier. Improve conversion with targeted upsell flows, limited-time promos, and Lifetime100 visibility.` });
+    }
+    const socialEngagement = toInt(features.posts) + toInt(features.post_likes) + toInt(features.follows);
+    if (socialEngagement < total * 0.1) {
+      insights.push({ type: 'engagement', title: 'Social Feed Underused', body: 'Post volume is low relative to user base. Encourage creators to post regularly and promote content reactions.' });
+    }
+    const dmPct = toInt(features.dms) / total;
+    if (dmPct < 0.5) {
+      insights.push({ type: 'engagement', title: 'DM Feature Underutilized', body: 'Direct messaging is low. Surface the DM inbox more prominently and prompt users to connect after matching.' });
+    }
+    const withBioPct = Math.round(toInt(activity.with_bio) / total * 100);
+    if (withBioPct < 40) {
+      insights.push({ type: 'onboarding', title: 'Profile Completion Low', body: `Only ${withBioPct}% of users have a bio. A profile completion nudge or gamified XP reward can drive this up significantly.` });
+    }
+    const retentionRate = toInt(retention.cohort_size) > 0 ? Math.round(toInt(retention.retained) / toInt(retention.cohort_size) * 100) : null;
+    if (retentionRate !== null && retentionRate < 30) {
+      insights.push({ type: 'retention', title: 'Retention Needs Work', body: `30-day retention is ${retentionRate}%. Focus on habit-forming features: daily content drops, push notifications, and social prompts.` });
+    }
+    if (toInt(features.push_subs) < total * 0.2) {
+      insights.push({ type: 'engagement', title: 'Push Opt-in Low', body: `Only ${Math.round(toInt(features.push_subs) / total * 100)}% opted into push notifications. A well-timed permission prompt can boost re-engagement significantly.` });
+    }
+    if (insights.length === 0) {
+      insights.push({ type: 'success', title: 'Strong Platform Health', body: 'All key engagement and demographic indicators are within healthy ranges. Keep up the momentum.' });
+    }
+
+    return res.json({
+      success: true,
+      demographics: {
+        tiers: tierRows.rows.map(r => ({ label: r.tier || 'unknown', count: toInt(r.cnt) })),
+        languages: languageRows.rows.map(r => ({ label: r.lang, count: toInt(r.cnt) })),
+        locations: locationRows.rows.map(r => ({ label: r.region, count: toInt(r.cnt) })),
+        signupTrend: signupRows.rows.map(r => ({ day: String(r.day).slice(0, 10), count: toInt(r.cnt) })),
+        subscriptionTypes: subscriptionTypeRows.rows.map(r => ({ label: r.sub_type, count: toInt(r.cnt) })),
+        activity: {
+          total: toInt(activity.total),
+          active1d: toInt(activity.active_1d),
+          active7d: toInt(activity.active_7d),
+          active30d: toInt(activity.active_30d),
+          active90d: toInt(activity.active_90d),
+          new7d: toInt(activity.new_7d),
+          new30d: toInt(activity.new_30d),
+          ageVerified: toInt(activity.age_verified),
+          withBio: toInt(activity.with_bio),
+          withPhoto: toInt(activity.with_photo),
+          withLocation: toInt(activity.with_location),
+          avgXp: parseFloat(activity.avg_xp) || 0,
+        },
+        xpBuckets: [
+          { label: 'No XP', count: toInt(xp.xp_zero) },
+          { label: '1–50', count: toInt(xp.xp_low) },
+          { label: '51–200', count: toInt(xp.xp_mid) },
+          { label: '201–500', count: toInt(xp.xp_high) },
+          { label: '500+', count: toInt(xp.xp_super) },
+        ],
+        retention: {
+          cohortSize: toInt(retention.cohort_size),
+          retained: toInt(retention.retained),
+          rate: retentionRate,
+        },
+        features: {
+          posts: toInt(features.posts),
+          postLikes: toInt(features.post_likes),
+          dms: toInt(features.dms),
+          chatMessages: toInt(features.chat_msgs),
+          hangouts: toInt(features.hangouts),
+          hangoutMembers: toInt(features.hangout_members),
+          streams: toInt(features.streams),
+          notificationsSent: toInt(features.notifications_sent),
+          follows: toInt(features.follows),
+          mediaPlays: toInt(features.media_plays),
+          mediaFavorites: toInt(features.media_favorites),
+          tips: toInt(features.tips),
+          pushSubscribers: toInt(features.push_subs),
+          xLinked: toInt(features.x_linked),
+          blueskyLinked: toInt(features.bluesky_linked),
+        },
+        insights,
+      },
+    });
+  } catch (error) {
+    logger.error('getDemographics error:', error);
+    return res.status(500).json({ error: 'Failed to load demographics' });
+  }
+};
+
 module.exports = {
   getStats,
+  getDemographics,
   listUsers,
   getUser,
   updateUser,

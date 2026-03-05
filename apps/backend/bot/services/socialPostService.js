@@ -404,7 +404,7 @@ class SocialPostService {
       ),
       query(
         `SELECT id, username, first_name, last_name, bio, photo_file_id, pnptv_id,
-                created_at, privacy,
+                created_at, privacy, date_of_birth,
                 creator_status, creator_type, creator_price_usd, creator_verified, creator_featured, creator_subscriber_count
          FROM users WHERE id = $1`,
         [userId]
@@ -439,6 +439,9 @@ class SocialPostService {
       }
       if (privacy.showInterests === false) {
         profile.interests = null;
+      }
+      if (privacy.showDob === false) {
+        profile.date_of_birth = null;
       }
     }
 
