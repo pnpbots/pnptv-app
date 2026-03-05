@@ -44,17 +44,29 @@ Formateo Visual:
 - Usa saltos de línea dobles para separar ideas. El espacio en blanco es vital para la lectura en móvil.
 - No uses bloques de texto densos (más de 3 líneas seguidas es demasiado).
 
+PROHIBIDO MARKDOWN:
+- NUNCA uses formato markdown: no asteriscos (*bold*), no guiones bajos (_italic_), no backticks, no headers (#), no bullet points con -.
+- El texto debe ser PLAIN TEXT puro, listo para copiar y pegar en X sin caracteres extraños.
+- Si necesitas énfasis, usa MAYÚSCULAS o emojis, nunca markdown.
+
 Restricciones de Elementos:
 - Hashtags: NO uses hashtags a menos que yo te lo pida explícitamente. Matan el alcance orgánico en los posts modernos.
 - Emojis: Úsalos con extrema moderación y solo si encajan perfectamente con mi estilo previamente aprendido. Ante la duda, no los uses.
 - Enlaces: Nunca incluyas un enlace en el post principal (el primer tweet). Si hay un CTA (llamada a la acción), el enlace va en la primera respuesta.
 
+ESTRUCTURA OBLIGATORIA DE CADA OPCIÓN:
+Cada opción DEBE seguir este flujo en orden:
+1. GANCHO: Primera línea que para el scroll (afirmación audaz, pregunta provocadora o dato sorprendente).
+2. DESARROLLO: 1-2 líneas que describen el beneficio concreto que obtiene el usuario (qué gana, qué resuelve, qué puede hacer).
+3. CTA: Una llamada a la acción clara y directa (ej: "Entra ahora", "Únete hoy", "Consíguelo").
+4. LINK: El enlace pnptv.app (o pnptv.app/lifetime100, pnptv.app/plans, etc.) va al final, solo una vez.
+
 TU FLUJO DE TRABAJO:
 Cuando te dé un tema, una noticia o una idea desordenada, no me des explicaciones ni me hagas preguntas. Tu respuesta debe contener exclusivamente tres variaciones del post listas para copiar y pegar, siguiendo esta estructura:
 
-OPCIÓN A (El Gancho Directo): Enfocada en una opinión fuerte o una verdad incómoda.
-OPCIÓN B (El Aportador de Valor): Enfocada en enseñar algo útil o dar un consejo rápido.
-OPCIÓN C (El Estilo Hilo/Curiosidad): Un tweet diseñado para que la gente quiera leer más o hacer clic en mi perfil (ideal para empezar hilos).
+OPCIÓN A (El Gancho Directo): Gancho con opinión fuerte o verdad incómoda. Desarrollo directo del beneficio. CTA contundente. Link.
+OPCIÓN B (El Aportador de Valor): Gancho con promesa de valor útil. Desarrollo explicando qué aprende o gana el usuario. CTA orientada a descubrir más. Link.
+OPCIÓN C (El Estilo Curiosidad): Gancho que genera intriga o pregunta retórica. Desarrollo que amplía la curiosidad con un beneficio real. CTA que invita a actuar. Link.
 
 OUTPUT EN EL IDIOMA ESCOGIDO POR EL USUARIO.`;
 
@@ -92,26 +104,49 @@ EXAMPLE:
 Respond ONLY in this style. Direct, benefit-focused, confident.`;
 
   if (mode === 'broadcast') {
-    return `${methDaddyPersona}\n\n${langHint}\n\nOUTPUT FORMAT FOR BROADCAST:\n- HOOK: 1 attention-grabbing dominant line\n- BODY: 2-3 sentences with PnP vibe and desire\n- HASHTAGS: Relevant hashtags\n\nRules:\n- Return ONLY the final formatted text (no labels)\n- No quotes, no markdown headings\n- CRITICAL: Keep text UNDER 450 characters total\n- Separate sections with line breaks\n- Include relevant emojis and hashtags`;
+    return `${methDaddyPersona}\n\n${langHint}\n\nOUTPUT FORMAT FOR BROADCAST:\n- HOOK: 1 attention-grabbing dominant line\n- BODY: 2-3 sentences with PnP vibe and desire\n- HASHTAGS: Relevant hashtags\n\nRules:\n- Return ONLY the final formatted text (no labels)\n- ABSOLUTELY NO MARKDOWN: no asterisks, no underscores, no backticks, no # headers, no bullet dashes. PLAIN TEXT ONLY.\n- CRITICAL: Keep text UNDER 450 characters total\n- Separate sections with line breaks\n- Include relevant emojis and hashtags`;
   }
 
   if (mode === 'sharePost') {
-    return `${methDaddyPersona}\n\n${langHint}\n\nOUTPUT FORMAT FOR SHARE POST:\n- TITLE: 1 short, dominant engaging line\n- DESCRIPTION: 1-2 sentences max with PnP vibe\n- HASHTAGS: 2-4 relevant hashtags\n\nRules:\n- Return ONLY the final formatted text (no labels)\n- No quotes, no markdown headings\n- CRITICAL: Keep text UNDER 450 characters total\n- Separate sections with line breaks\n- Hashtags: #PNPLatinoTV #MethDaddy #CultoSantino etc`;
+    return `${methDaddyPersona}\n\n${langHint}\n\nOUTPUT FORMAT FOR SHARE POST:\n- TITLE: 1 short, dominant engaging line\n- DESCRIPTION: 1-2 sentences max with PnP vibe\n- HASHTAGS: 2-4 relevant hashtags\n\nRules:\n- Return ONLY the final formatted text (no labels)\n- ABSOLUTELY NO MARKDOWN: no asterisks, no underscores, no backticks, no # headers, no bullet dashes. PLAIN TEXT ONLY.\n- CRITICAL: Keep text UNDER 450 characters total\n- Separate sections with line breaks\n- Hashtags: #PNPLatinoTV #MethDaddy #CultoSantino etc`;
   }
 
   if (mode === 'videoDescription') {
-    return `${methDaddyPersona}\n\n${langHint}\n\nOUTPUT FORMAT FOR VIDEO DESCRIPTION:\n- TITLE: ALL CAPS, bold style, attention-grabbing (1 line)\n- DESCRIPTION: Narrative, descriptive text inviting people to watch the video. Maximum 6 lines. Paint a picture of what they'll see, tease the content, make them curious and horny to watch.\n- HASHTAGS: 3-5 relevant hashtags\n\nRules:\n- Return ONLY the final formatted text (no labels like "TITLE:" or "DESCRIPTION:")\n- Title must be in ALL CAPS\n- Description should be seductive, inviting, narrative style\n- Maximum 6 lines for description (not counting title and hashtags)\n- CRITICAL: Keep text UNDER 500 characters total\n- Separate title from description with blank line\n- End with hashtags`;
+    return `${methDaddyPersona}\n\n${langHint}\n\nOUTPUT FORMAT FOR VIDEO DESCRIPTION:\n- TITLE: ALL CAPS, attention-grabbing (1 line)\n- DESCRIPTION: Narrative, descriptive text inviting people to watch the video. Maximum 6 lines. Paint a picture of what they'll see, tease the content, make them curious and horny to watch.\n- HASHTAGS: 3-5 relevant hashtags\n\nRules:\n- Return ONLY the final formatted text (no labels like "TITLE:" or "DESCRIPTION:")\n- ABSOLUTELY NO MARKDOWN: no asterisks, no underscores, no backticks, no # headers, no bullet dashes. PLAIN TEXT ONLY. Use ALL CAPS for emphasis instead.\n- Title must be in ALL CAPS\n- Description should be seductive, inviting, narrative style\n- Maximum 6 lines for description (not counting title and hashtags)\n- CRITICAL: Keep text UNDER 500 characters total\n- Separate title from description with blank line\n- End with hashtags`;
   }
 
   if (mode === 'salesPost') {
-    return `${methDaddyPersona}\n\n${langHint}\n\nOUTPUT FORMAT FOR SALES POST:\n- HOOK: ALL CAPS, bold, attention-grabbing opening line that stops the scroll\n- BODY: Develop the sales pitch including:\n  * The offer/product being promoted\n  * Price (if provided in prompt)\n  * Benefits or discount/extra service\n  * Urgency or exclusivity\n- CTA: Clear call to action\n\nRules:\n- Return ONLY the final formatted text (no labels)\n- Hook must be in ALL CAPS\n- Include price and benefits clearly\n- ONLY use pnptv.app (with paths like pnptv.app/plans, pnptv.app/lifetime100)\n- NO other URLs or links allowed\n- CRITICAL: Keep text UNDER 500 characters total\n- End with 2-3 hashtags`;
+    return `${methDaddyPersona}\n\n${langHint}\n\nOUTPUT FORMAT FOR SALES POST:\n- HOOK: ALL CAPS, attention-grabbing opening line that stops the scroll\n- BODY: Develop the sales pitch including the offer, price, benefits, urgency\n- CTA: Clear call to action\n\nRules:\n- Return ONLY the final formatted text (no labels)\n- ABSOLUTELY NO MARKDOWN: no asterisks, no underscores, no backticks, no # headers, no bullet dashes. PLAIN TEXT ONLY. Use ALL CAPS for emphasis instead.\n- Hook must be in ALL CAPS\n- Include price and benefits clearly\n- ONLY use pnptv.app (with paths like pnptv.app/plans, pnptv.app/lifetime100)\n- NO other URLs or links allowed\n- CRITICAL: Keep text UNDER 500 characters total\n- End with 2-3 hashtags`;
   }
 
   if (mode === 'xPost') {
-    return `${methDaddyPersona}\n\n${xPostBasePrompt}\n\n${langHint}\n\nOUTPUT RULES:\n- Genera EXACTAMENTE 3 opciones (A, B, C) como se describe arriba.\n- No agregues explicaciones ni texto extra, solo las 3 opciones.\n- Respeta el limite de 280 caracteres por opción.\n- Incluye SIEMPRE el link pnptv.app (puede ser pnptv.app, pnptv.app/lifetime100, pnptv.app/plans, etc.) exactamente una vez en cada opción.\n- NO incluyas ningún otro link o URL.`;
+    return `${methDaddyPersona}\n\n${xPostBasePrompt}\n\n${langHint}\n\nOUTPUT RULES:\n- Genera EXACTAMENTE 3 opciones (A, B, C) como se describe arriba.\n- No agregues explicaciones ni texto extra, solo las 3 opciones.\n- Respeta el limite de 280 caracteres por opción.\n- Incluye SIEMPRE el link pnptv.app (puede ser pnptv.app, pnptv.app/lifetime100, pnptv.app/plans, etc.) exactamente una vez en cada opción.\n- NO incluyas ningún otro link o URL.\n- ABSOLUTAMENTE NADA DE MARKDOWN: no asteriscos (*), no guiones bajos (_), no backticks, no headers (#), no listas con guiones. SOLO TEXTO PLANO.\n- CRÍTICO / CRITICAL: Write ALL post content EXCLUSIVELY in ${language}. ZERO language mixing. No Spanglish. Every single word of the post text must be in ${language} only. Slang and expressions must also be in ${language}.`;
   }
 
-  return `${methDaddyPersona}\n\n${langHint}\n\nOutput rules:\n- Return ONLY the final message text in Meth Daddy style\n- No quotes, no markdown headings\n- CRITICAL: Keep text UNDER 450 characters total\n- End with hashtags`;
+  return `${methDaddyPersona}\n\n${langHint}\n\nOutput rules:\n- Return ONLY the final message text in Meth Daddy style\n- ABSOLUTELY NO MARKDOWN: no asterisks, no underscores, no backticks, no # headers, no bullet dashes. PLAIN TEXT ONLY.\n- CRITICAL: Keep text UNDER 450 characters total\n- End with hashtags`;
+}
+
+/**
+ * Strip markdown formatting from text for plain-text platforms like X.
+ */
+function stripMarkdown(text) {
+  return text
+    // Bold: **text** or __text__
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    // Italic: *text* or _text_ (but not inside words like don't)
+    .replace(/(?<!\w)\*(.+?)\*(?!\w)/g, '$1')
+    .replace(/(?<!\w)_(.+?)_(?!\w)/g, '$1')
+    // Strikethrough: ~~text~~
+    .replace(/~~(.+?)~~/g, '$1')
+    // Inline code: `text`
+    .replace(/`(.+?)`/g, '$1')
+    // Headers: # text
+    .replace(/^#{1,6}\s+/gm, '')
+    // Bullet lists: - item or * item at line start
+    .replace(/^[\s]*[-*]\s+/gm, '')
+    // Numbered lists with dots: 1. item (but keep "1." in context)
+    .replace(/^(\d+)\.\s+/gm, '$1) ');
 }
 
 async function chat({ mode, language, prompt, hasMedia = false, maxTokens }) {
@@ -172,8 +207,9 @@ async function chat({ mode, language, prompt, hasMedia = false, maxTokens }) {
       throw new Error('Grok returned empty response');
     }
     
-    logger.info('Grok API success', { contentLength: content.length });
-    return String(content).trim();
+    const cleaned = stripMarkdown(String(content).trim());
+    logger.info('Grok API success', { contentLength: cleaned.length });
+    return cleaned;
   } catch (error) {
     if (error.name === 'AbortError') {
       logger.error('Grok API timeout', { timeoutMs: cfg.timeoutMs, error: error.message });
