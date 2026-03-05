@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs').promises;
 const FileType = require('file-type');
 const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('ffmpeg-static');
+if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
 const logger = require('../../../utils/logger');
 const SocialPostService = require('../../services/socialPostService');
 const axios = require('axios');
