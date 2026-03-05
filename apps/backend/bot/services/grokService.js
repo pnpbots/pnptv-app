@@ -17,6 +17,7 @@ function getModeConfig(mode, hasMedia) {
     post: { temperature: 0.7, defaultTokens: 320, mediaTokens: 260 },
     videoDescription: { temperature: 0.7, defaultTokens: 350, mediaTokens: 300 },
     salesPost: { temperature: 0.7, defaultTokens: 400, mediaTokens: 350 },
+    xPost: { temperature: 0.7, defaultTokens: 750, mediaTokens: 750 },
   };
 
   const fallback = { temperature: 0.7, defaultTokens: 300, mediaTokens: 240 };
