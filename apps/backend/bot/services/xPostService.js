@@ -656,7 +656,7 @@ class XPostService {
 
     logger.info('Waiting for X media processing', { mediaId, initialState: state, checkAfter });
 
-    while (state && state !== 'succeeded' && state !== 'failed' && attempts < 10) {
+    while (state && state !== 'succeeded' && state !== 'failed' && attempts < 20) {
       await new Promise((resolve) => setTimeout(resolve, checkAfter * 1000));
       const statusRes = await axios.get(
         X_MEDIA_UPLOAD_V2_BASE,
@@ -669,7 +669,7 @@ class XPostService {
 
       const info = statusRes.data?.data?.processing_info || statusRes.data?.processing_info;
       state = info?.state || state;
-      checkAfter = info?.check_after_secs || checkAfter;
+      checkAfter = Math.min(info?.check_after_secs || checkAfter, 10); // cap at 10s per poll
       attempts += 1;
 
       logger.info('X media processing status check', { mediaId, state, attempts });
@@ -689,7 +689,7 @@ class XPostService {
 
     logger.info('Waiting for X media processing (v1.1)', { mediaId, initialState: state, checkAfter });
 
-    while (state && state !== 'succeeded' && state !== 'failed' && attempts < 10) {
+    while (state && state !== 'succeeded' && state !== 'failed' && attempts < 20) {
       await new Promise((resolve) => setTimeout(resolve, checkAfter * 1000));
       const statusRes = await axios.get(
         X_MEDIA_UPLOAD_V1_URL,
@@ -702,7 +702,7 @@ class XPostService {
 
       const info = statusRes.data?.processing_info;
       state = info?.state || state;
-      checkAfter = info?.check_after_secs || checkAfter;
+      checkAfter = Math.min(info?.check_after_secs || checkAfter, 10); // cap at 10s per poll
       attempts += 1;
 
       logger.info('X media processing status check (v1.1)', { mediaId, state, attempts });

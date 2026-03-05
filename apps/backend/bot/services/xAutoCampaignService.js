@@ -224,9 +224,12 @@ class XAutoCampaignService {
     });
 
     // For xPost mode, Grok returns 3 options (A/B/C) — pick one randomly
-    let postText = grokResponse;
+    // For all other modes, still strip any label artifacts Grok may have included
+    let postText;
     if (campaign.grok_mode === 'xPost') {
       postText = this._extractRandomOption(grokResponse);
+    } else {
+      postText = this._stripOptionLabel(grokResponse);
     }
 
     // Normalize for X character limits and ensure required links
@@ -469,14 +472,27 @@ class XAutoCampaignService {
 
   /**
    * Remove any leading option label line from extracted tweet text.
-   * e.g. "El Gancho Directo:\nTweet text..." → "Tweet text..."
+   * Handles all label formats Grok has been observed to output:
+   *   "OPTION A (El Gancho Directo):\n..."
+   *   "(El Aportador de Valor):\n..."
+   *   "El Gancho Directo:\n..."
+   *   "Post 1 (Focus: Launch Hype)\n..."
+   *   "**Post 1 (Focus: ...)**\n..."
    */
   static _stripOptionLabel(text) {
-    // Remove lines that look like option labels / style descriptors (no sentence punctuation)
     return text
-      .replace(/^[\s]*(?:OPCI[OÓ]N|OPTION)\s+[ABC][^\n]*\n/gi, '')
-      .replace(/^\(.*?\)[^\n]*\n/gm, '')
-      .replace(/^El\s+\w+[\s\w]*:\s*/im, '')
+      // "OPCIÓN A / OPTION A ..." at line start (with or without trailing newline)
+      .replace(/^[\s]*(?:OPCI[OÓ]N|OPTION)\s+[ABC][^\n]*\n?/gim, '')
+      // "(El Gancho Directo):" or "(El Aportador de Valor):" — parenthesized label lines
+      .replace(/^\s*\([^)\n]{2,60}\)\s*:?\s*\n?/gim, '')
+      // "El Gancho Directo:" / "El Aportador de Valor:" bare label lines
+      .replace(/^El\s+\w+[\s\w]{1,40}:\s*\n?/gim, '')
+      // "Post 1 (Focus: ...)" or "Post 2 — ..." style series labels (whole line)
+      .replace(/^Post\s+\d+[^\n]*\n?/gim, '')
+      // "**Post 1 (Focus: ...)**" markdown-wrapped series labels
+      .replace(/^\*{1,2}Post\s+\d+[^\n]*\*{0,2}\n?/gim, '')
+      // Any remaining lone markdown-wrapped header lines e.g. **¡NUBES, ARRIBA!** at very start
+      .replace(/^\*{1,2}([^*\n]{1,80})\*{1,2}\n/m, '$1\n')
       .trim();
   }
 }
