@@ -8,6 +8,7 @@ import {
   getPaymentStatus,
   createDashSubscription,
   getDashSubscriptionStatus,
+  getDashAvailable,
   activateMeruCode,
   type SubscriptionPlan,
 } from "@/lib/api";
@@ -104,6 +105,9 @@ export default function Subscribe() {
   const [pollingPaymentId, setPollingPaymentId] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
+  // Dash availability
+  const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
+
   // Dash invoice state
   const [dashInvoice, setDashInvoice] = useState<{ invoiceId: string; checkoutUrl: string; planName: string } | null>(null);
   const [dashPolling, setDashPolling] = useState(false);
@@ -126,6 +130,10 @@ export default function Subscribe() {
       })
       .catch((err) => setError(err.message || "Failed to load plans"))
       .finally(() => setLoading(false));
+
+    getDashAvailable()
+      .then((res) => setDashAvailable(res.available))
+      .catch(() => setDashAvailable(false));
   }, []);
 
   // Poll payment status after Daimo checkout opens
@@ -555,19 +563,24 @@ export default function Subscribe() {
             <div className="text-[10px] text-pnp-textSecondary">Coinbase, MetaMask</div>
           </button>
           <button
-            onClick={() => setProvider("dash")}
+            onClick={() => dashAvailable !== false && setProvider("dash")}
+            disabled={dashAvailable === false}
             className={`rounded-xl p-3 border-2 transition-all text-center relative ${
-              provider === "dash"
+              dashAvailable === false
+                ? "border-white/5 bg-white/3 opacity-50 cursor-not-allowed"
+                : provider === "dash"
                 ? "border-[#008DE4] bg-[#008DE4]/10"
                 : "border-white/10 bg-white/5 hover:border-white/20"
             }`}
           >
             <div className="text-lg mb-1">🥷</div>
             <div className="text-xs font-medium text-pnp-textPrimary">Dash</div>
-            <div className="text-[10px] text-pnp-textSecondary">Anonymous</div>
-            <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#008DE4] text-white px-1.5 py-0.5 rounded-full leading-none">
-              ANON
-            </span>
+            <div className="text-[10px] text-pnp-textSecondary">{dashAvailable === false ? "Coming soon" : "Anonymous"}</div>
+            {dashAvailable !== false && (
+              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#008DE4] text-white px-1.5 py-0.5 rounded-full leading-none">
+                ANON
+              </span>
+            )}
           </button>
         </div>
 

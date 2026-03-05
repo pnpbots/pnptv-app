@@ -1405,6 +1405,15 @@ export function getDashSubscriptionStatus(invoiceId: string): Promise<{
   return request(`/api/webapp/payments/dash/status/${encodeURIComponent(invoiceId)}`);
 }
 
+export function getDashAvailable(): Promise<{
+  available: boolean;
+  configured: boolean;
+  reachable: boolean;
+  reason?: string;
+}> {
+  return request("/api/webapp/payments/dash/available");
+}
+
 export function activateMeruCode(
   code: string,
   email: string
