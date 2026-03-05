@@ -203,7 +203,11 @@ export default function Subscribe() {
 
   async function handleMeruActivate() {
     if (!meruCode.trim() || meruSubmitting) return;
-    if (!validateEmail()) return;
+    if (!validateEmail()) {
+      setMeruError("Please enter a valid email address above");
+      document.getElementById("subscribe-email")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
 
     setMeruSubmitting(true);
     setMeruError(null);
