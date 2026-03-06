@@ -6,8 +6,8 @@ import { useAuth } from "@/hooks/useAuth";
 const features = [
   {
     icon: "\ud83d\udcfa",
-    title: "Videorama",
-    desc: "Videos, music, and podcasts. Browse exclusive content and create your own playlists.",
+    title: "Media",
+    desc: "Videos, music, and podcasts. Browse exclusive PRIME content and create your own playlists.",
     route: "/media",
     color: "from-pink-600 to-purple-600",
   },
@@ -71,7 +71,7 @@ export default function Welcome() {
     <div className="min-h-screen pb-24 lg:pb-8">
       <Helmet>
         <title>Welcome — PNPtv!</title>
-        <meta name="description" content="Welcome to PNPtv! Explore all features: Videorama, Hangouts, Live, Social Feed, Nearby, and more." />
+        <meta name="description" content="Welcome to PNPtv! Explore all features: Media, Hangouts, Live, Social Feed, Nearby, and more." />
       </Helmet>
       {/* Hero section */}
       <div className="relative overflow-hidden rounded-2xl mx-4 mt-4 mb-6 p-6 bg-gradient-to-br from-[#D4007A]/20 to-[#E69138]/20 border border-white/10">
@@ -234,7 +234,7 @@ export default function Welcome() {
         <div className="space-y-2">
           {[
             "Complete your profile with a photo and bio",
-            "Explore Videorama for exclusive content",
+            "Explore exclusive PRIME content",
             "Join a Hangout or create your own group",
             "Publish your first post on the Social Feed",
             "Join the PRIME Telegram Channel",

@@ -198,8 +198,8 @@ export const tutorialContent: Record<string, TutorialSection> = {
       {
         titleEn: "Choose Your Plan",
         titleEs: "Elige Tu Plan",
-        descEn: "Pick the plan that fits you. Member gives you social features and hangouts. PRIME unlocks everything — Videorama, exclusive content, nearby premium, and more.",
-        descEs: "Elige el plan que te convenga. Member te da funciones sociales y hangouts. PRIME desbloquea todo — Videorama, contenido exclusivo, nearby premium y mas.",
+        descEn: "Pick the plan that fits you. Member gives you social features and hangouts. PRIME unlocks everything — PRIME media, exclusive content, nearby premium, and more.",
+        descEs: "Elige el plan que te convenga. Member te da funciones sociales y hangouts. PRIME desbloquea todo — PRIME media, contenido exclusivo, nearby premium y mas.",
         illustration: "subscribePlans",
       },
       {

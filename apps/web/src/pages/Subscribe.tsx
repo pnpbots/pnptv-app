@@ -28,27 +28,27 @@ const PLAN_FEATURES: Record<string, string[]> = {
   ],
   "week_pass": [
     "7 days of full PRIME access",
-    "Videorama exclusive content",
+    "Exclusive PRIME content",
     "Nearby Premium features",
     "Community hangouts",
   ],
   "three_months_pass": [
     "3 months of full PRIME access",
-    "Full Videorama library access",
+    "Full PRIME media library access",
     "Nearby Premium features",
     "Community hangouts",
     "Priority support",
   ],
   "crystal_pass": [
     "6 months of full PRIME access",
-    "Unlimited Videorama + early releases",
+    "Unlimited PRIME content + early releases",
     "Nearby Premium features",
     "VIP community status",
     "Priority support",
   ],
   "yearly_pass": [
     "1 year of full PRIME access",
-    "Unlimited Videorama + exclusives",
+    "Unlimited PRIME content + exclusives",
     "Nearby Premium features",
     "VIP badge + priority support",
     "Access to exclusive events",
@@ -63,7 +63,7 @@ const PLAN_FEATURES: Record<string, string[]> = {
 };
 
 const MEMBER_EXCLUDED = [
-  "No Videorama access",
+  "No PRIME media access",
   "No exclusive video content",
   "No Telegram PRIME channel access",
   "No VIP badge or priority support",
@@ -391,7 +391,7 @@ export default function Subscribe() {
               Community Member
             </div>
             <p className="text-[10px] text-pnp-textSecondary/70 mt-0.5">
-              Social features only — does not include Videorama or exclusive content
+              Social features only — does not include PRIME media or exclusive content
             </p>
           </div>
         )}
@@ -450,7 +450,7 @@ export default function Subscribe() {
               PRIME
             </div>
             <p className="text-[10px] text-pnp-textSecondary/70 mt-0.5">
-              Full access — Videorama, Nearby Premium, hangouts, exclusive content & more
+              Full access — PRIME media, Nearby Premium, hangouts, exclusive content & more
             </p>
           </div>
         )}

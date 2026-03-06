@@ -78,7 +78,7 @@ export default function Media() {
   return (
     <div className="page-container">
       <Helmet>
-        <title>PRIME Videorama — PNPtv!</title>
+        <title>PRIME Media — PNPtv!</title>
         <meta name="description" content="Exclusive PRIME video collection. Watch premium content from top PNPtv creators." />
       </Helmet>
       {showTutorial && <TutorialOverlay section="prime" onDismiss={dismissTutorial} />}
