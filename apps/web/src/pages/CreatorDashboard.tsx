@@ -23,6 +23,7 @@ import {
   updateCmsShow,
   deleteCmsShow,
   uploadCmsMedia,
+  createSocialPost,
   type CreatorEligibility,
   type CreatorDashboard as DashboardData,
   type ModelEarnings,
@@ -133,6 +134,11 @@ export default function CreatorDashboard() {
   const [contentDeleteConfirm, setContentDeleteConfirm] = useState<number | null>(null);
   const [showSaveError, setShowSaveError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
+
+  // Share to Feed modal
+  const [shareModal, setShareModal] = useState<{ text: string } | null>(null);
+  const [sharePosting, setSharePosting] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -451,6 +457,25 @@ export default function CreatorDashboard() {
       setCmsShows((prev) => prev.filter((s) => s.id !== id));
     } catch (err) {
       setShowSaveError(err instanceof Error ? err.message : "Delete failed");
+    }
+  };
+
+  const openShareModal = (text: string) => {
+    setShareError(null);
+    setShareModal({ text });
+  };
+
+  const handleConfirmShare = async () => {
+    if (!shareModal?.text.trim()) return;
+    setSharePosting(true);
+    setShareError(null);
+    try {
+      await createSocialPost(shareModal.text.trim());
+      setShareModal(null);
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : "Failed to post");
+    } finally {
+      setSharePosting(false);
     }
   };
 
@@ -931,6 +956,15 @@ export default function CreatorDashboard() {
                             </p>
                           </div>
                           <div className="flex gap-2 flex-shrink-0">
+                            <button
+                              onClick={() => openShareModal(
+                                `${item.type === "video" ? "🎬" : item.type === "audio" ? "🎵" : "🎙"} New ${item.type}: "${item.title}"${item.description ? `\n\n${item.description}` : ""}\n\n#PNPtv #Creator`
+                              )}
+                              className="text-xs hover:underline"
+                              style={{ color: "#E69138" }}
+                            >
+                              Share
+                            </button>
                             <button onClick={() => openContentEdit(item)} className="text-xs text-pnp-accent hover:underline">Edit</button>
                             <button onClick={() => handleContentDelete(item.id)} className="text-xs text-red-400 hover:underline">Delete</button>
                           </div>
@@ -976,6 +1010,15 @@ export default function CreatorDashboard() {
                             </p>
                           </div>
                           <div className="flex gap-2 flex-shrink-0">
+                            <button
+                              onClick={() => openShareModal(
+                                `🎥 Live show: "${show.title}"${show.scheduled_at ? `\n📅 ${new Date(show.scheduled_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}` : ""}${show.duration_minutes ? ` · ${show.duration_minutes}min` : ""}${show.description ? `\n\n${show.description}` : ""}\n\n#PNPtv #LiveShow`
+                              )}
+                              className="text-xs hover:underline"
+                              style={{ color: "#E69138" }}
+                            >
+                              Share
+                            </button>
                             <button onClick={() => openShowEdit(show)} className="text-xs text-pnp-accent hover:underline">Edit</button>
                             <button onClick={() => handleShowDelete(show.id)} className="text-xs text-red-400 hover:underline">Delete</button>
                           </div>
@@ -1359,6 +1402,50 @@ export default function CreatorDashboard() {
                 Book Interview with Santino
               </a>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Share to Feed Modal ── */}
+      {shareModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}>
+          <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <div className="flex items-center justify-between">
+              <p className="text-base font-semibold text-white">Share to Feed</p>
+              <button onClick={() => setShareModal(null)} className="text-white/40 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+
+            <p className="text-xs" style={{ color: "#8E8E93" }}>
+              This will post to your social feed so your followers and the community can see it.
+            </p>
+
+            <textarea
+              rows={5}
+              value={shareModal.text}
+              onChange={(e) => setShareModal({ text: e.target.value })}
+              className="w-full px-3 py-2.5 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent resize-none"
+              placeholder="Write your announcement..."
+            />
+
+            {shareError && (
+              <div className="px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+                {shareError}
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleConfirmShare}
+                disabled={sharePosting || !shareModal.text.trim()}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                {sharePosting ? "Posting…" : "Post to Feed"}
+              </button>
+              <button onClick={() => setShareModal(null)} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
