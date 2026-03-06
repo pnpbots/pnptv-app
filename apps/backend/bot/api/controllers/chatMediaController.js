@@ -177,8 +177,8 @@ const sendDmMediaMessage = async (req, res) => {
     // Check if sender is blocked by recipient or vice versa
     const { rows: blockRows } = await query(
       `SELECT 1 FROM blocked_users
-       WHERE (blocker_id = $1 AND blocked_id = $2)
-          OR (blocker_id = $2 AND blocked_id = $1)
+       WHERE (user_id = $1 AND blocked_user_id = $2)
+          OR (user_id = $2 AND blocked_user_id = $1)
        LIMIT 1`,
       [recipientId, user.id]
     );

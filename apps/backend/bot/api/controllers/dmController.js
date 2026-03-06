@@ -105,7 +105,7 @@ const sendMessage = async (req, res) => {
   try {
     // Check if sender is blocked by recipient
     const { rows: blockRows } = await query(
-      'SELECT 1 FROM blocked_users WHERE blocker_id=$1 AND blocked_id=$2',
+      'SELECT 1 FROM blocked_users WHERE user_id=$1 AND blocked_user_id=$2',
       [recipientId, user.id]
     );
     if (blockRows.length > 0) {
