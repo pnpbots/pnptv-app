@@ -1,4 +1,5 @@
 const Sentry = require('@sentry/node');
+const multer = require('multer');
 const logger = require('../../../utils/logger');
 const { isOperationalError } = require('../../../utils/errors');
 
@@ -7,6 +8,12 @@ const { isOperationalError } = require('../../../utils/errors');
  * Handles all errors thrown in routes and controllers
  */
 function errorHandler(err, req, res, _next) {
+  // Handle multer errors (file upload validation) as 400s
+  if (err instanceof multer.MulterError || err.message?.includes('files are allowed')) {
+    logger.warn('Upload validation error:', { error: err.message, url: req.url, ip: req.ip });
+    return res.status(400).json({ error: err.message });
+  }
+
   // Log the error
   logger.error('Express error handler:', {
     error: err.message,
