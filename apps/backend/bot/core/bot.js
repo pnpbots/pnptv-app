@@ -92,6 +92,7 @@ const registerUserCallManagementHandlers = require('../handlers/user/callManagem
 const registerCallFeedbackHandlers = require('../handlers/user/callFeedback');
 const registerCallPackageHandlers = require('../handlers/user/callPackages');
 const { registerPromoHandlers } = require('../handlers/promo/promoHandler');
+const registerPaymentTutorialHandlers = require('../handlers/user/paymentTutorial');
 const { getLanguage } = require('../utils/helpers');
 const { t } = require('../../utils/i18n');
 const { buildOnboardingPrompt } = require('../handlers/user/menu');
@@ -668,6 +669,9 @@ const startBot = async () => {
     // registerCallPackageHandlers(bot);
     // registerPromoHandlers(bot);
     // --- End disabled user-facing handlers ---
+    // Payment tutorial (active — /pay command)
+    registerPaymentTutorialHandlers(bot);
+
     // Register support routing handlers (for forum topic-based support)
     registerSupportRoutingHandlers(bot);
 
@@ -827,6 +831,7 @@ const startBot = async () => {
         { command: 'stats', description: 'View real-time statistics (admin only)' },
         { command: 'viewas', description: 'Preview as different user type (admin only)' },
         { command: 'support', description: 'Get help and support' },
+        { command: 'pay', description: 'How to pay — step-by-step tutorials' },
         { command: 'about', description: 'Learn about PNPtv' },
       ];
       await bot.telegram.setMyCommands(commands);
