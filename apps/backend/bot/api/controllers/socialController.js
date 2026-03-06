@@ -293,8 +293,16 @@ const createPostWithMedia = async (req, res) => {
         'image/png':  'image',
         'image/webp': 'image',
         'image/gif':  'image',
+        'image/heic': 'image',
+        'image/heif': 'image',
+        'image/avif': 'image',
+        'image/tiff': 'image',
+        'image/bmp':  'image',
         'video/mp4':  'video',
         'video/webm': 'video',
+        'video/quicktime': 'video',
+        'video/3gpp': 'video',
+        'video/hevc': 'video',
       };
       const detected = await FileType.fromBuffer(buffer);
       const detectedMime = detected?.mime;
@@ -306,7 +314,7 @@ const createPostWithMedia = async (req, res) => {
           claimedMime: req.file.mimetype,
           detectedMime: detectedMime || 'unknown',
         });
-        return res.status(400).json({ error: 'Only image (jpg/png/webp/gif) or video (mp4/webm) files are allowed' });
+        return res.status(400).json({ error: 'Only image (jpg/png/webp/gif/heic/hevc/avif/tiff/bmp) or video (mp4/webm/mov/3gp) files are allowed' });
       }
 
       if (mediaType === 'image') {
@@ -318,8 +326,8 @@ const createPostWithMedia = async (req, res) => {
           .toFile(filePath);
         mediaUrl = `/uploads/posts/${filename}`;
       } else {
-        // video — detectedMime is either video/mp4 or video/webm
-        const ext = detectedMime === 'video/webm' ? 'webm' : 'mp4';
+        const VIDEO_EXT = { 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/3gpp': '3gp', 'video/hevc': 'mp4' };
+        const ext = VIDEO_EXT[detectedMime] || 'mp4';
         const filename = `vid-${user.id}-${Date.now()}.${ext}`;
         const filePath = path.join(uploadDir, filename);
         await fs.writeFile(filePath, buffer);

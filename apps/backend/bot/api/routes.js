@@ -53,6 +53,7 @@ const pdsRoutes = require('./routes/pdsRoutes');
 const blueskyRoutes = require('./routes/blueskyRoutes');
 const elementRoutes = require('./routes/elementRoutes');
 const creatorRoutes = require('./routes/creatorRoutes');
+const gamificationRoutes = require('./routes/gamificationRoutes');
 const canvaRoutes = require('./routes/canvaRoutes');
 
 // ATProto / Bluesky OAuth routes (public endpoints served at the monorepo root)
@@ -893,9 +894,9 @@ const postMediaUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const isAllowed = /^(image\/(jpeg|jpg|png|webp|gif)|video\/(mp4|webm))$/i.test(file.mimetype || '');
+    const isAllowed = /^(image\/(jpeg|jpg|png|webp|gif|heic|heif|avif|tiff|bmp)|video\/(mp4|webm|quicktime|3gpp|hevc))$/i.test(file.mimetype || '');
     if (isAllowed) return cb(null, true);
-    cb(new Error('Only image (jpg/png/webp/gif) and video (mp4/webm) files are allowed'));
+    cb(new Error('Only image (jpg/png/webp/gif/heic/hevc/avif/tiff/bmp) and video (mp4/webm/mov/3gp/hevc) files are allowed'));
   }
 });
 
@@ -4289,6 +4290,9 @@ app.use('/api/element', elementRoutes);
 
 // Creator monetization routes
 app.use('/api/webapp/creator', creatorRoutes);
+
+// Gamification routes
+app.use('/api/webapp/gamification', gamificationRoutes);
 
 // Canva Connect API routes
 app.use('/api/canva', canvaRoutes);
