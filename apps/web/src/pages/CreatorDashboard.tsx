@@ -36,7 +36,7 @@ const ETHEREUM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
 const TIERS: { key: "ice" | "crystal" | "diamond"; label: string; price: number; emoji: string }[] = [
   { key: "ice", label: "Ice", price: 5, emoji: "❄" },
-  { key: "crystal", label: "Crystal", price: 10, emoji: "💎" },
+  { key: "crystal", label: "Crystal", price: 10, emoji: "🔮" },
   { key: "diamond", label: "Diamond", price: 15, emoji: "💎" },
 ];
 
@@ -127,6 +127,12 @@ export default function CreatorDashboard() {
   const [showModal, setShowModal] = useState<{ mode: "create" | "edit"; item?: CmsShow } | null>(null);
   const [showForm, setShowForm] = useState<Partial<CmsShow>>({});
   const [showSaving, setShowSaving] = useState(false);
+
+  // Inline error/confirm states (replaces browser alert/confirm)
+  const [contentSaveError, setContentSaveError] = useState<string | null>(null);
+  const [contentDeleteConfirm, setContentDeleteConfirm] = useState<number | null>(null);
+  const [showSaveError, setShowSaveError] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -371,6 +377,7 @@ export default function CreatorDashboard() {
         mediaUrl = uploaded.url;
         setContentUploadProgress(false);
       }
+      setContentSaveError(null);
       const payload = { ...contentForm, media_url: mediaUrl };
       if (contentModal?.mode === "edit" && contentModal.item) {
         const res = await updateCmsContent(contentModal.item.id, payload);
@@ -381,20 +388,24 @@ export default function CreatorDashboard() {
       }
       setContentModal(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Save failed");
+      setContentSaveError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setContentSaving(false);
       setContentUploadProgress(false);
     }
   };
 
-  const handleContentDelete = async (id: number) => {
-    if (!confirm("Delete this content item?")) return;
+  const handleContentDelete = (id: number) => {
+    setContentDeleteConfirm(id);
+  };
+
+  const confirmContentDelete = async (id: number) => {
+    setContentDeleteConfirm(null);
     try {
       await deleteCmsContent(id);
       setCmsContent((prev) => prev.filter((c) => c.id !== id));
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Delete failed");
+      setContentSaveError(err instanceof Error ? err.message : "Delete failed");
     }
   };
 
@@ -421,20 +432,25 @@ export default function CreatorDashboard() {
         setCmsShows((prev) => [...prev, res.show]);
       }
       setShowModal(null);
+      setShowSaveError(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Save failed");
+      setShowSaveError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setShowSaving(false);
     }
   };
 
-  const handleShowDelete = async (id: number) => {
-    if (!confirm("Delete this show?")) return;
+  const handleShowDelete = (id: number) => {
+    setShowDeleteConfirm(id);
+  };
+
+  const confirmShowDelete = async (id: number) => {
+    setShowDeleteConfirm(null);
     try {
       await deleteCmsShow(id);
       setCmsShows((prev) => prev.filter((s) => s.id !== id));
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Delete failed");
+      setShowSaveError(err instanceof Error ? err.message : "Delete failed");
     }
   };
 
@@ -476,9 +492,40 @@ export default function CreatorDashboard() {
       </button>
 
       <h1 className="text-2xl font-bold text-white mb-1">Creator Dashboard</h1>
-      <p className="text-sm mb-6" style={{ color: "#8E8E93" }}>
+      <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>
         Earn money by sharing exclusive content with your subscribers
       </p>
+
+      {/* Creator identity hero — shown only for active creators */}
+      {isActive && dashboard && (() => {
+        const tierInfo = TIERS.find((t) => t.key === dashboard.creatorType);
+        const initials = (user?.displayName || user?.username || "C").charAt(0).toUpperCase();
+        return (
+          <div className="flex items-center gap-4 mb-6 px-4 py-3 rounded-2xl" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <div className="w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold flex-shrink-0 text-white" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+              {initials}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-bold text-white truncate">{user?.displayName || user?.username || "Creator"}</span>
+                {dashboard.verified && (
+                  <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="#5ED1C4">
+                    <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                )}
+                {tierInfo && (
+                  <span className="text-xs px-2 py-0.5 rounded-full font-semibold flex-shrink-0" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>
+                    {tierInfo.emoji} {tierInfo.label}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                {dashboard.subscriberCount} subscriber{dashboard.subscriberCount !== 1 ? "s" : ""} &middot; ${dashboard.priceUsd.toFixed(2)}/mo
+              </p>
+            </div>
+          </div>
+        );
+      })()}
 
       {error && (
         <div className="mb-4 px-4 py-3 rounded-lg text-sm text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
@@ -536,7 +583,11 @@ export default function CreatorDashboard() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-white">
-                      {dashboard.creatorType === "full_time" ? "Full-Time Creator" : "Occasional Creator"}
+                      {dashboard.creatorType === "full_time" ? "Full-Time Creator"
+                        : dashboard.creatorType === "diamond" ? "💎 Diamond Creator"
+                        : dashboard.creatorType === "crystal" ? "🔮 Crystal Creator"
+                        : dashboard.creatorType === "ice" ? "❄ Ice Creator"
+                        : "Creator"}
                     </p>
                     <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
                       ${dashboard.priceUsd.toFixed(2)}/month &middot; 70/30 revenue split
@@ -875,7 +926,9 @@ export default function CreatorDashboard() {
                               }}>{item.status}</span>
                               {item.is_premium && <span className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>PRIME</span>}
                             </div>
-                            <p className="text-xs text-white/40">{item.type} {item.duration_seconds ? `· ${Math.round(item.duration_seconds / 60)}m` : ""}</p>
+                            <p className="text-xs text-white/40">
+                              {item.type === "video" ? "🎬" : item.type === "audio" ? "🎵" : "🎙"} {item.type}{item.duration_seconds ? ` · ${Math.round(item.duration_seconds / 60)}m` : ""}
+                            </p>
                           </div>
                           <div className="flex gap-2 flex-shrink-0">
                             <button onClick={() => openContentEdit(item)} className="text-xs text-pnp-accent hover:underline">Edit</button>
@@ -1001,13 +1054,19 @@ export default function CreatorDashboard() {
                   </div>
                 </div>
 
+                {contentSaveError && (
+                  <div className="px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+                    {contentSaveError}
+                  </div>
+                )}
+
                 <div className="flex gap-3">
                   <button onClick={handleContentSave} disabled={contentSaving || !contentForm.title || !contentForm.type}
                     className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
                     style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
                     {contentUploadProgress ? "Uploading..." : contentSaving ? "Saving..." : contentModal.mode === "create" ? "Create" : "Save"}
                   </button>
-                  <button onClick={() => setContentModal(null)} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">Cancel</button>
+                  <button onClick={() => { setContentModal(null); setContentSaveError(null); }} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">Cancel</button>
                 </div>
               </div>
             </div>
@@ -1066,13 +1125,19 @@ export default function CreatorDashboard() {
                   </label>
                 </div>
 
+                {showSaveError && (
+                  <div className="px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+                    {showSaveError}
+                  </div>
+                )}
+
                 <div className="flex gap-3">
                   <button onClick={handleShowSave} disabled={showSaving || !showForm.title || !showForm.scheduled_at}
                     className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
                     style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
                     {showSaving ? "Saving..." : showModal.mode === "create" ? "Schedule" : "Save"}
                   </button>
-                  <button onClick={() => setShowModal(null)} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">Cancel</button>
+                  <button onClick={() => { setShowModal(null); setShowSaveError(null); }} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">Cancel</button>
                 </div>
               </div>
             </div>
@@ -1329,6 +1394,34 @@ export default function CreatorDashboard() {
         </div>
       )}
 
+      {/* ── Content Delete Confirm Dialog ── */}
+      {contentDeleteConfirm !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/70">
+          <div className="w-full max-w-xs rounded-2xl p-5 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
+            <p className="text-sm font-semibold text-white">Delete this content item?</p>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>This action cannot be undone.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setContentDeleteConfirm(null)} className="flex-1 py-2 rounded-xl text-sm font-medium" style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}>Cancel</button>
+              <button onClick={() => confirmContentDelete(contentDeleteConfirm)} className="flex-1 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "rgba(239,68,68,0.8)" }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Show Delete Confirm Dialog ── */}
+      {showDeleteConfirm !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/70">
+          <div className="w-full max-w-xs rounded-2xl p-5 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
+            <p className="text-sm font-semibold text-white">Delete this show?</p>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>This action cannot be undone.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowDeleteConfirm(null)} className="flex-1 py-2 rounded-xl text-sm font-medium" style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}>Cancel</button>
+              <button onClick={() => confirmShowDelete(showDeleteConfirm)} className="flex-1 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "rgba(239,68,68,0.8)" }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Activation Modal ── */}
       {showActivateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/70">
@@ -1402,18 +1495,40 @@ export default function CreatorDashboard() {
       )}
 
       {/* ── Not Eligible — Progress ── */}
-      {!isActive && !isEligible && !isPending && eligibility && (
-        <div className="glass-card-sm p-5 mb-4">
-          <p className="text-lg font-bold text-white mb-1">Become a Creator</p>
-          <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>
-            Meet these criteria to qualify:
-          </p>
-          <CriterionBar label="Media posts" {...eligibility.criteria.mediaPosts} />
-          <CriterionBar label="Total likes" {...eligibility.criteria.totalLikes} />
-          <CriterionBar label="Followers" {...eligibility.criteria.followers} />
-          <CriterionBar label="Weekly consistency (4 weeks)" {...eligibility.criteria.weeklyConsistency} />
-        </div>
-      )}
+      {!isActive && !isEligible && !isPending && eligibility && (() => {
+        const criteria = [
+          { label: "Media posts", ...eligibility.criteria.mediaPosts },
+          { label: "Total likes", ...eligibility.criteria.totalLikes },
+          { label: "Followers", ...eligibility.criteria.followers },
+          { label: "Weekly consistency (4 weeks)", ...eligibility.criteria.weeklyConsistency },
+        ];
+        const metCount = criteria.filter((c) => c.met).length;
+        const totalPct = Math.round(criteria.reduce((acc, c) => acc + Math.min(c.current / c.required, 1), 0) / criteria.length * 100);
+        const closest = [...criteria].filter((c) => !c.met).sort((a, b) => (b.current / b.required) - (a.current / a.required))[0];
+        return (
+          <div className="glass-card-sm p-5 mb-4">
+            <div className="flex items-start justify-between mb-1">
+              <p className="text-lg font-bold text-white">Become a Creator</p>
+              <span className="text-sm font-bold" style={{ color: totalPct >= 75 ? "#5ED1C4" : "#E69138" }}>{totalPct}%</span>
+            </div>
+            <p className="text-sm mb-1" style={{ color: "#8E8E93" }}>
+              {metCount === 0 ? "Start building your presence to qualify:" : metCount < criteria.length ? `${metCount}/${criteria.length} criteria met — you're almost there!` : ""}
+            </p>
+            {closest && !closest.met && (
+              <p className="text-xs mb-4 font-medium" style={{ color: "#E69138" }}>
+                Closest: {closest.label} — {closest.required - closest.current} more to go
+              </p>
+            )}
+            <CriterionBar label="Media posts" {...eligibility.criteria.mediaPosts} />
+            <CriterionBar label="Total likes" {...eligibility.criteria.totalLikes} />
+            <CriterionBar label="Followers" {...eligibility.criteria.followers} />
+            <CriterionBar label="Weekly consistency (4 weeks)" {...eligibility.criteria.weeklyConsistency} />
+            <p className="text-xs mt-4 text-center" style={{ color: "#8E8E93" }}>
+              Post consistently, engage with the community, and grow your followers to unlock creator status.
+            </p>
+          </div>
+        );
+      })()}
 
     </div>
   );
