@@ -174,7 +174,12 @@ class XPostScheduler {
       return true;
     }
 
-    // Auth errors and client errors (4xx except 429) are not retryable
+    // 401 Unauthorized is retryable (token refresh may fix it on next attempt)
+    if (error.response?.status === 401) {
+      return true;
+    }
+
+    // Other client errors (4xx except 429/401) are not retryable
     if (error.response?.status >= 400 && error.response?.status < 500) {
       return false;
     }

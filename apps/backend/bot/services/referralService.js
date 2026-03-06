@@ -1,6 +1,6 @@
 'use strict';
 
-const { query, pool } = require('../config/postgres');
+const { query, pool } = require('../../config/postgres');
 const crypto = require('crypto');
 
 function generateCode(userId) {

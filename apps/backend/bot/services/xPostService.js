@@ -289,7 +289,17 @@ class XPostService {
         if (error?.response?.status === 403) {
           throw new Error('X API 403 al subir media. Reconecta la cuenta desde ⚙️ Gestionar Cuentas para obtener el scope media.write.');
         }
-        throw error;
+        // Fallback: post without media if processing times out or fails
+        if (error.message && error.message.includes('Media processing failed')) {
+          logger.warn('Media processing failed, posting without media', {
+            accountId: account.account_id,
+            handle: account.handle,
+            error: error.message,
+          });
+          mediaId = null;
+        } else {
+          throw error;
+        }
       }
       if (mediaId) {
         payload.media = { media_ids: [String(mediaId)] };

@@ -460,6 +460,13 @@ class XAutoCampaignService {
       return matches[Math.floor(Math.random() * matches.length)];
     }
 
+    // Fallback: try splitting by "Post 1 (Focus: ...)" / "Post 2 —" patterns
+    const postSections = text.split(/\n(?=Post\s+\d+[\s(—\-:])/i).filter(Boolean);
+    if (postSections.length > 1) {
+      const chosen = postSections[Math.floor(Math.random() * postSections.length)].trim();
+      return this._stripOptionLabel(chosen);
+    }
+
     // Fallback: try splitting by numbered options (1., 2., 3.)
     const numbered = text.split(/\n\s*[123]\.\s+/).filter(Boolean);
     if (numbered.length > 1) {
