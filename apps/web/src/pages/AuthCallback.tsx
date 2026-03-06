@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { handleCallback } from "@/lib/auth";
+import { redeemReferralCode } from "@/lib/api";
 
 export default function AuthCallback() {
   const navigate = useNavigate();
@@ -9,6 +10,12 @@ export default function AuthCallback() {
   useEffect(() => {
     handleCallback()
       .then(() => {
+        // Redeem referral code if one was stored before login
+        const refCode = localStorage.getItem("pnptv:pendingRef");
+        if (refCode) {
+          localStorage.removeItem("pnptv:pendingRef");
+          redeemReferralCode(refCode).catch(() => {});
+        }
         navigate("/", { replace: true });
       })
       .catch((err) => {

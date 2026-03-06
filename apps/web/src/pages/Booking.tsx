@@ -9,9 +9,12 @@ import {
   updateNearbyLocation,
   searchNearby,
   searchNearbyPlaces,
+  getFallbackNearbyPlaces,
+  submitNearbyPlace,
   type NearbyUser,
   type NearbyPlace,
   type NearbySearchResponse,
+  type SubmitPlacePayload,
 } from "@/lib/api";
 import { MapContainer, TileLayer, Marker, Circle, useMap } from "react-leaflet";
 import L from "leaflet";
@@ -429,6 +432,139 @@ function MemberNearbyList({ users }: { users: NearbyUser[] }) {
   );
 }
 
+// ─── Submit Place Modal ──────────────────────────────────────────────────────
+
+const PLACE_CATEGORIES = [
+  { id: 1,  name: "Wellness",             emoji: "🧘" },
+  { id: 2,  name: "Cruising Spots",       emoji: "🌙" },
+  { id: 3,  name: "+18 Businesses",       emoji: "🔞" },
+  { id: 4,  name: "PNP Friendly",         emoji: "💨" },
+  { id: 5,  name: "Help Centers",         emoji: "🏥" },
+  { id: 6,  name: "Saunas & Bath Houses", emoji: "🧖" },
+  { id: 7,  name: "Bars & Clubs",         emoji: "🍸" },
+  { id: 8,  name: "Community Businesses", emoji: "🏪" },
+  { id: 25, name: "Hotels & Lodging",     emoji: "🏨" },
+];
+
+function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: number } | null; onClose: () => void }) {
+  const [form, setForm] = React.useState<SubmitPlacePayload>({
+    name: "", placeType: "establishment",
+    lat: myPos?.lat, lng: myPos?.lng,
+  });
+  const [loading, setLoading] = React.useState(false);
+  const [done, setDone] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  const set = (k: keyof SubmitPlacePayload, v: string | number | undefined) =>
+    setForm(f => ({ ...f, [k]: v }));
+
+  const submit = async () => {
+    if (!form.name.trim()) { setErr("Name is required"); return; }
+    setLoading(true); setErr(null);
+    try {
+      await submitNearbyPlace(form);
+      setDone(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to submit");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[2000] flex items-end justify-center" onClick={onClose}>
+      <div className="fixed inset-0 bg-black/60" />
+      <div
+        className="relative w-full max-w-lg bg-pnp-background border-t border-pnp-border rounded-t-2xl p-5 pb-8 animate-slide-up"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-bold text-pnp-textPrimary">Add a Place</h2>
+          <button onClick={onClose} className="text-pnp-textSecondary hover:text-pnp-textPrimary">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        {done ? (
+          <div className="text-center py-6">
+            <div className="text-3xl mb-3">📍</div>
+            <p className="text-pnp-textPrimary font-semibold mb-1">Thanks!</p>
+            <p className="text-sm text-pnp-textSecondary mb-4">Your place has been submitted for review. We'll approve it within 24h.</p>
+            <button onClick={onClose} className="px-4 py-2 rounded-lg bg-pnp-accent text-white text-sm">Close</button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <input
+              placeholder="Place name *"
+              value={form.name}
+              onChange={e => set("name", e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
+            />
+            <select
+              value={form.categoryId ?? ""}
+              onChange={e => set("categoryId", e.target.value ? Number(e.target.value) : undefined)}
+              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
+            >
+              <option value="">Select category</option>
+              {PLACE_CATEGORIES.map(c => (
+                <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>
+              ))}
+            </select>
+            <input
+              placeholder="Address"
+              value={form.address ?? ""}
+              onChange={e => set("address", e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
+            />
+            <div className="flex gap-2">
+              <input
+                placeholder="City"
+                value={form.city ?? ""}
+                onChange={e => set("city", e.target.value)}
+                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
+              />
+              <input
+                placeholder="Country"
+                value={form.country ?? ""}
+                onChange={e => set("country", e.target.value)}
+                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
+              />
+            </div>
+            <textarea
+              placeholder="Description (optional)"
+              value={form.description ?? ""}
+              onChange={e => set("description", e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent resize-none"
+            />
+            <div className="flex gap-2">
+              <input
+                placeholder="Instagram (optional)"
+                value={form.instagram ?? ""}
+                onChange={e => set("instagram", e.target.value)}
+                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
+              />
+              <input
+                placeholder="Website (optional)"
+                value={form.website ?? ""}
+                onChange={e => set("website", e.target.value)}
+                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
+              />
+            </div>
+            {err && <p className="text-xs text-red-400">{err}</p>}
+            <button
+              onClick={submit}
+              disabled={loading}
+              className="w-full py-2.5 rounded-xl bg-pnp-accent text-white text-sm font-semibold hover:bg-pnp-accent/80 disabled:opacity-40 transition-colors"
+            >
+              {loading ? "Submitting..." : "Submit for Review"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 type PageState = "loading" | "denied" | "ready";
@@ -470,6 +606,7 @@ export default function Booking() {
   const [filter, setFilter] = useState<FilterSegment>("all");
   const [selectedUser, setSelectedUser] = useState<NearbyUser | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<NearbyPlace | null>(null);
+  const [submitPlaceOpen, setSubmitPlaceOpen] = useState(false);
   const watchIdRef = useRef<number | null>(null);
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const userIconRef = useRef(createUserIcon());
@@ -502,7 +639,15 @@ export default function Booking() {
           }
         }
         if (placesData.status === "fulfilled") {
-          setNearbyPlaces(placesData.value.places || []);
+          const places = placesData.value.places || [];
+          if (places.length > 0) {
+            setNearbyPlaces(places);
+          } else {
+            // No places in radius — load nearest 1-5 as fallback so map is never empty
+            getFallbackNearbyPlaces(lat, lng).then(fb => {
+              setNearbyPlaces(fb.places || []);
+            }).catch(() => {});
+          }
         }
         setError(null);
       } catch (err: unknown) {
@@ -829,6 +974,27 @@ export default function Booking() {
           </div>
         </div>
       </div>
+
+      {/* Submit place FAB */}
+      {!submitPlaceOpen && (
+        <button
+          onClick={() => setSubmitPlaceOpen(true)}
+          className="absolute bottom-32 right-4 z-[1001] w-11 h-11 rounded-full bg-pnp-accent text-white flex items-center justify-center shadow-lg hover:bg-pnp-accent/80 active:scale-95 transition-all"
+          title="Add a place"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+        </button>
+      )}
+
+      {/* Submit place modal */}
+      {submitPlaceOpen && (
+        <SubmitPlaceModal
+          myPos={myPos}
+          onClose={() => setSubmitPlaceOpen(false)}
+        />
+      )}
 
       {/* Detail sheets */}
       {selectedUser && (

@@ -282,6 +282,49 @@ export function searchNearbyPlaces(
   );
 }
 
+export function getFallbackNearbyPlaces(
+  latitude: number,
+  longitude: number,
+): Promise<NearbyPlacesResponse & { fallback: boolean }> {
+  return request(
+    `/api/webapp/nearby/places/fallback?lat=${latitude}&lng=${longitude}`
+  );
+}
+
+export interface SubmitPlacePayload {
+  name: string;
+  description?: string;
+  address?: string;
+  city?: string;
+  country?: string;
+  categoryId?: number;
+  placeType: string;
+  lat?: number;
+  lng?: number;
+  phone?: string;
+  website?: string;
+  instagram?: string;
+}
+
+export function submitNearbyPlace(payload: SubmitPlacePayload): Promise<{ success: boolean; message: string }> {
+  return request("/api/webapp/nearby/places/submit", { method: "POST", body: payload });
+}
+
+export interface ReferralStats {
+  code: string;
+  link: string;
+  total: number;
+  completed: number;
+}
+
+export function getMyReferral(): Promise<ReferralStats> {
+  return request("/api/webapp/me/referral");
+}
+
+export function redeemReferralCode(code: string): Promise<{ success?: boolean; alreadyRedeemed?: boolean }> {
+  return request("/api/webapp/referral/redeem", { method: "POST", body: { code } });
+}
+
 // Live tips
 export interface RecentTip {
   id: number;
@@ -2750,4 +2793,13 @@ export function chatWithMono(message: string): Promise<{ success: boolean; messa
 
 export function resetMonoChat(): Promise<{ success: boolean }> {
   return request("/api/webapp/admin/mono/chat", { method: "POST", body: { message: "_reset_", reset: true } });
+}
+
+// Admin: campaigns
+export function triggerCristinaNeighborDM(): Promise<{ success: boolean; message: string }> {
+  return request("/api/webapp/admin/cristina/neighbor-dm", { method: "POST" });
+}
+
+export function triggerRevokeUnusedTrials(dryRun = false): Promise<{ success: boolean; message: string }> {
+  return request(`/api/webapp/admin/trials/revoke-unused${dryRun ? "?dry_run=1" : ""}`, { method: "POST" });
 }

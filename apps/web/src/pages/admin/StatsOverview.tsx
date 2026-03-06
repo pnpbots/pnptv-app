@@ -4,6 +4,8 @@ import { DataTable } from "@/components/admin/DataTable";
 import { Badge } from "@pnptv/ui-kit";
 import {
   getAdminStats,
+  triggerCristinaNeighborDM,
+  triggerRevokeUnusedTrials,
   type AdminStats,
 } from "@/lib/api";
 
@@ -87,6 +89,8 @@ export default function StatsOverview() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -329,6 +333,76 @@ export default function StatsOverview() {
           emptyMessage="No recent transactions"
           getRowId={(row) => `${row.date}-${row.userId}-${row.amount}-${row.status}`}
         />
+      </div>
+
+      {/* Admin Campaign Actions */}
+      <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
+        <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider mb-4">
+          Automated Campaigns
+        </h2>
+        {actionMsg && (
+          <div className="mb-3 px-3 py-2 rounded-lg bg-green-500/10 border border-green-500/20 text-sm text-green-400">
+            {actionMsg}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-3">
+          <div className="flex-1 min-w-[220px] p-3 rounded-lg border border-pnp-border bg-pnp-background">
+            <p className="text-sm font-medium text-pnp-textPrimary mb-1">Cristina — Neighbor DM</p>
+            <p className="text-xs text-pnp-textSecondary mb-3">Send each user a DM from Cristina about their closest neighbor + referral link. One send per user per 30 days.</p>
+            <button
+              disabled={!!actionLoading}
+              onClick={async () => {
+                setActionLoading("neighbor");
+                try {
+                  const r = await triggerCristinaNeighborDM();
+                  setActionMsg(r.message);
+                  setTimeout(() => setActionMsg(null), 8000);
+                } catch { setActionMsg("Error triggering campaign"); }
+                finally { setActionLoading(null); }
+              }}
+              className="px-3 py-1.5 text-xs rounded-lg bg-pnp-accent/20 text-pnp-accent border border-pnp-accent/30 hover:bg-pnp-accent/30 disabled:opacity-40 transition-colors"
+            >
+              {actionLoading === "neighbor" ? "Starting..." : "Run Campaign"}
+            </button>
+          </div>
+          <div className="flex-1 min-w-[220px] p-3 rounded-lg border border-pnp-border bg-pnp-background">
+            <p className="text-sm font-medium text-pnp-textPrimary mb-1">Revoke Unused Trials</p>
+            <p className="text-xs text-pnp-textSecondary mb-3">Downgrade PRIME trial users who have 0 posts and incomplete profiles. Sends each user a Cristina DM.</p>
+            <div className="flex gap-2">
+              <button
+                disabled={!!actionLoading}
+                onClick={async () => {
+                  setActionLoading("revoke-dry");
+                  try {
+                    const r = await triggerRevokeUnusedTrials(true);
+                    setActionMsg("Dry run: " + r.message + " (check server logs for details)");
+                    setTimeout(() => setActionMsg(null), 8000);
+                  } catch { setActionMsg("Error"); }
+                  finally { setActionLoading(null); }
+                }}
+                className="px-3 py-1.5 text-xs rounded-lg border border-pnp-border text-pnp-textSecondary hover:bg-pnp-surface disabled:opacity-40 transition-colors"
+              >
+                {actionLoading === "revoke-dry" ? "Running..." : "Dry Run"}
+              </button>
+              <button
+                disabled={!!actionLoading}
+                onClick={async () => {
+                  if (!confirm("This will revoke PRIME trials and send DMs. Are you sure?")) return;
+                  setActionLoading("revoke");
+                  try {
+                    const r = await triggerRevokeUnusedTrials(false);
+                    setActionMsg(r.message);
+                    setTimeout(() => setActionMsg(null), 8000);
+                  } catch { setActionMsg("Error"); }
+                  finally { setActionLoading(null); }
+                }}
+                className="px-3 py-1.5 text-xs rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 disabled:opacity-40 transition-colors"
+              >
+                {actionLoading === "revoke" ? "Running..." : "Revoke Now"}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

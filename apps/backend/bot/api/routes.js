@@ -3035,6 +3035,101 @@ app.get('/api/webapp/nearby/places', asyncHandler(async (req, res) => {
   return NearbyController.searchNearbyPlaces(req, res);
 }));
 
+// Fallback places — nearest 1-5 approved places regardless of radius (so map is never empty)
+app.get('/api/webapp/nearby/places/fallback', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+  const lat = parseFloat(req.query.lat);
+  const lng = parseFloat(req.query.lng);
+  if (isNaN(lat) || isNaN(lng)) return res.status(400).json({ error: 'lat/lng required' });
+  const { rows } = await query(`
+    SELECT id, name, description, address, city, country, place_type,
+           location_lat, location_lng, category_id,
+           ST_Distance(
+             ST_SetSRID(ST_Point($2, $1), 4326)::geography,
+             ST_SetSRID(ST_Point(location_lng, location_lat), 4326)::geography
+           ) / 1000 AS dist_km
+    FROM nearby_places
+    WHERE status = 'approved'
+      AND location_lat IS NOT NULL AND location_lng IS NOT NULL
+    ORDER BY dist_km ASC
+    LIMIT 5
+  `, [lat, lng]);
+  return res.json({ places: rows.map(p => ({
+    id: p.id, name: p.name, description: p.description,
+    address: p.address, city: p.city, country: p.country,
+    placeType: p.place_type, categoryId: p.category_id,
+    location: { lat: parseFloat(p.location_lat), lng: parseFloat(p.location_lng) },
+    distance: parseFloat(p.dist_km),
+    isFallback: true,
+  })), fallback: true });
+}));
+
+// Submit a new place
+app.post('/api/webapp/nearby/places/submit', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+  const { name, description, address, city, country, categoryId, placeType, lat, lng, phone, website, instagram } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
+  if (!placeType) return res.status(400).json({ error: 'Place type is required' });
+  await query(`
+    INSERT INTO nearby_place_submissions
+      (submitted_by_user_id, name, description, address, city, country,
+       category_id, place_type, location_lat, location_lng, phone, website, instagram)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+  `, [
+    user.id, name.trim().slice(0,200), description?.trim().slice(0,1000) || null,
+    address?.trim().slice(0,500) || null, city?.trim().slice(0,100) || null,
+    country?.trim().slice(0,100) || null, categoryId || null, placeType,
+    lat || null, lng || null, phone?.trim().slice(0,50) || null,
+    website?.trim().slice(0,500) || null, instagram?.trim().slice(0,100) || null,
+  ]);
+  return res.json({ success: true, message: 'Place submitted for review!' });
+}));
+
+// Referral: get my code + stats
+app.get('/api/webapp/me/referral', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+  const referralService = require('../services/referralService');
+  const stats = await referralService.getReferralStats(user.id);
+  return res.json({ ...stats, link: `https://pnptv.app/join?ref=${stats.code}` });
+}));
+
+// Referral: redeem a code (called on register)
+app.post('/api/webapp/referral/redeem', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ error: 'Code required' });
+  const referralService = require('../services/referralService');
+  const result = await referralService.redeemReferral(code, user.id);
+  return res.json(result);
+}));
+
+// Admin: trigger Cristina neighbor DM campaign
+app.post('/api/webapp/admin/cristina/neighbor-dm', adminGuard, asyncHandler(async (req, res) => {
+  const { exec } = require('child_process');
+  const scriptPath = require('path').join(__dirname, '../../../scripts/cristinaNeighborDM.js');
+  exec(`node ${scriptPath}`, (err, stdout, stderr) => {
+    if (err) logger.error('cristinaNeighborDM script error', { err: err.message });
+  });
+  return res.json({ success: true, message: 'Cristina neighbor DM campaign started in background' });
+}));
+
+// Admin: revoke unused free trials
+app.post('/api/webapp/admin/trials/revoke-unused', adminGuard, asyncHandler(async (req, res) => {
+  const dryRun = req.query.dry_run === '1';
+  const { exec } = require('child_process');
+  const scriptPath = require('path').join(__dirname, '../../../scripts/revokeUnusedTrials.js');
+  const args = dryRun ? '--dry-run' : '';
+  exec(`node ${scriptPath} ${args}`, (err, stdout, stderr) => {
+    if (err) logger.error('revokeUnusedTrials script error', { err: err.message });
+    logger.info('revokeUnusedTrials output', { stdout, stderr });
+  });
+  return res.json({ success: true, message: `Trial revocation started${dryRun ? ' (dry run)' : ''}` });
+}));
+
 // DM threads & conversations
 app.get('/api/webapp/dm/threads', asyncHandler(dmController.getThreads));
 app.get('/api/webapp/dm/conversation/:partnerId', asyncHandler(dmController.getConversation));

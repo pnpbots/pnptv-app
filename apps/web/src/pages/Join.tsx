@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Helmet } from "react-helmet-async";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { getSubscriptionPlans, getFeaturedPerformers, type SubscriptionPlan, type FeaturedPerformer } from "@/lib/api";
 
@@ -50,11 +50,20 @@ const COMPARISON_ROWS = [
 export default function Join() {
   const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
   const [memberPlan, setMemberPlan] = useState<SubscriptionPlan | null>(null);
   const [primePlan, setPrimePlan] = useState<SubscriptionPlan | null>(null);
   const [stats, setStats] = useState<{ totalUsers: number; newUsersLast30Days: number } | null>(null);
+
+  // Capture referral code from URL and persist for post-auth redemption
+  useEffect(() => {
+    const ref = searchParams.get("ref");
+    if (ref) {
+      localStorage.setItem("pnptv:pendingRef", ref.toUpperCase());
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     getFeaturedPerformers().catch(() => null).then((res) => {
