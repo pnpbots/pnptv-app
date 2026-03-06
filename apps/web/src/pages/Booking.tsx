@@ -19,6 +19,7 @@ import "leaflet/dist/leaflet.css";
 
 const RADIUS_OPTIONS = [1, 5, 10, 25];
 const REFRESH_INTERVAL = 30_000;
+const LAST_POS_KEY = "pnptv:nearbyLastPos";
 
 // ─── Filter types ───────────────────────────────────────────────────────────
 
@@ -45,6 +46,15 @@ function createMyIcon() {
     iconSize: [18, 18],
     iconAnchor: [9, 9],
     html: `<div style="width:18px;height:18px;border-radius:50%;background:#4A90D9;border:3px solid #fff;box-shadow:0 0 8px rgba(74,144,217,0.6);"></div>`,
+  });
+}
+
+function createMyIconOffline() {
+  return L.divIcon({
+    className: "",
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+    html: `<div style="width:18px;height:18px;border-radius:50%;background:#555;border:2px dashed #888;opacity:0.75;"></div>`,
   });
 }
 
@@ -435,7 +445,18 @@ export default function Booking() {
   const isPrime = userTier === "prime" || isAdmin;
 
   const [pageState, setPageState] = useState<PageState>("loading");
-  const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationStatus, setLocationStatus] = useState<"online" | "offline">("offline");
+  const [lastPosSavedAt, setLastPosSavedAt] = useState<number | null>(null);
+  const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(() => {
+    try {
+      const cached = localStorage.getItem(LAST_POS_KEY);
+      if (cached) {
+        const { lat, lng } = JSON.parse(cached);
+        if (typeof lat === "number" && typeof lng === "number") return { lat, lng };
+      }
+    } catch { /* ignore */ }
+    return null;
+  });
   const [nearbyUsers, setNearbyUsers] = useState<NearbyUser[]>([]);
   const [nearbyPlaces, setNearbyPlaces] = useState<NearbyPlace[]>([]);
   // Free-tier: count of nearby users returned from API
@@ -453,6 +474,7 @@ export default function Booking() {
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const userIconRef = useRef(createUserIcon());
   const myIconRef = useRef(createMyIcon());
+  const myIconOfflineRef = useRef(createMyIconOffline());
   const placeIconRef = useRef(createPlaceIcon());
 
   // Computed filtered counts
@@ -506,6 +528,21 @@ export default function Booking() {
     [incognito]
   );
 
+  // If we have a cached position, show map immediately as "offline"
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem(LAST_POS_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (typeof parsed.lat === "number" && typeof parsed.lng === "number") {
+          setPageState("ready");
+          setLocationStatus("offline");
+          setLastPosSavedAt(parsed.savedAt || null);
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   // Start geolocation watch
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -518,13 +555,24 @@ export default function Booking() {
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const { latitude, longitude, accuracy } = pos.coords;
+        const now = Date.now();
         setMyPos({ lat: latitude, lng: longitude });
         setPageState("ready");
+        setLocationStatus("online");
+        setLastPosSavedAt(now);
+        try {
+          localStorage.setItem(LAST_POS_KEY, JSON.stringify({ lat: latitude, lng: longitude, savedAt: now }));
+        } catch { /* ignore */ }
         sendLocation(latitude, longitude, accuracy);
         fetchNearby(latitude, longitude, radiusRef.current);
       },
       () => {
-        setPageState("denied");
+        // Keep "ready" if we have a cached position, otherwise go to denied
+        setMyPos((prev) => {
+          if (!prev) setPageState("denied");
+          return prev;
+        });
+        setLocationStatus("offline");
       },
       { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
     );
@@ -573,8 +621,8 @@ export default function Booking() {
     return <MemberNearbyList users={nearbyUsers} />;
   }
 
-  // ─── Loading state ──────────────────────────────────────────────
-  if (pageState === "loading") {
+  // ─── Loading state (only show if no cached position) ───────────
+  if (pageState === "loading" && !myPos) {
     return (
       <div className="page-container flex flex-col items-center justify-center min-h-[60vh]">
         <div className="relative w-20 h-20 mb-6">
@@ -670,7 +718,10 @@ export default function Booking() {
             />
 
             {/* My position */}
-            <Marker position={[myPos.lat, myPos.lng]} icon={myIconRef.current} />
+            <Marker
+              position={[myPos.lat, myPos.lng]}
+              icon={locationStatus === "online" ? myIconRef.current : myIconOfflineRef.current}
+            />
 
             {/* Nearby users */}
             {showUsers &&
@@ -717,6 +768,22 @@ export default function Booking() {
             {isSearching && (
               <div className="w-2 h-2 rounded-full animate-pulse dot-gradient" />
             )}
+            {/* Location status badge */}
+            {locationStatus === "online" ? (
+              <div className="flex items-center gap-1 bg-green-500/20 border border-green-500/30 rounded-full px-2 py-0.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                <span className="text-[10px] text-green-400 font-medium">Online</span>
+              </div>
+            ) : myPos ? (
+              <div className="flex items-center gap-1 bg-pnp-surface/80 border border-white/10 rounded-full px-2 py-0.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                <span className="text-[10px] text-pnp-textSecondary font-medium">
+                  {lastPosSavedAt
+                    ? `Last seen ${Math.round((Date.now() - lastPosSavedAt) / 60000)}m ago`
+                    : "Last known"}
+                </span>
+              </div>
+            ) : null}
             {showUsers && (
               <Badge variant="accent">
                 {nearbyUsers.length} {nearbyUsers.length === 1 ? "user" : "users"}
