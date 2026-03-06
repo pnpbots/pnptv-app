@@ -271,6 +271,7 @@ export default function XAutoCampaigns() {
   const [statusFilter, setStatusFilter] = useState<CampaignStatus>("all");
 
   const [showForm, setShowForm] = useState(false);
+  const [editingCampaign, setEditingCampaign] = useState<XAutoCampaign | null>(null);
   const [form, setForm] = useState(defaultForm);
   const [formLoading, setFormLoading] = useState(false);
 
@@ -379,26 +380,43 @@ export default function XAutoCampaigns() {
     }
     setFormLoading(true);
     try {
-      await createAdminXCampaign({
-        name: form.name,
-        accountId: form.accountId,
-        topic: form.topic,
-        grokMode: form.grokMode,
-        language: form.language,
-        customPrompt: form.customPrompt || undefined,
-        intervalMinutes: form.intervalMinutes,
-        activeHoursStart: form.activeHoursStart,
-        activeHoursEnd: form.activeHoursEnd,
-        maxPosts: form.maxPosts ? parseInt(form.maxPosts) : undefined,
-        mediaFolderId: form.attachVideos && mediaFolderId ? mediaFolderId : undefined,
-      });
-      setSuccess("Campaign created (paused)");
+      if (editingCampaign) {
+        await updateAdminXCampaign(editingCampaign.campaign_id, {
+          name: form.name,
+          topic: form.topic,
+          grokMode: form.grokMode,
+          language: form.language,
+          customPrompt: form.customPrompt || null,
+          intervalMinutes: form.intervalMinutes,
+          activeHoursStart: form.activeHoursStart,
+          activeHoursEnd: form.activeHoursEnd,
+          maxPosts: form.maxPosts ? parseInt(form.maxPosts) : null,
+          mediaFolderId: form.attachVideos && mediaFolderId ? mediaFolderId : null,
+        });
+        setSuccess(`Campaign "${form.name}" updated`);
+      } else {
+        await createAdminXCampaign({
+          name: form.name,
+          accountId: form.accountId,
+          topic: form.topic,
+          grokMode: form.grokMode,
+          language: form.language,
+          customPrompt: form.customPrompt || undefined,
+          intervalMinutes: form.intervalMinutes,
+          activeHoursStart: form.activeHoursStart,
+          activeHoursEnd: form.activeHoursEnd,
+          maxPosts: form.maxPosts ? parseInt(form.maxPosts) : undefined,
+          mediaFolderId: form.attachVideos && mediaFolderId ? mediaFolderId : undefined,
+        });
+        setSuccess("Campaign created (paused)");
+      }
       setForm(defaultForm);
       setShowForm(false);
+      setEditingCampaign(null);
       loadStats();
       loadCampaigns(page, statusFilter);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to create campaign");
+      setError(err instanceof Error ? err.message : editingCampaign ? "Failed to update campaign" : "Failed to create campaign");
     } finally {
       setFormLoading(false);
     }
@@ -443,6 +461,25 @@ export default function XAutoCampaigns() {
     setSelectedCampaign(campaign);
     setHistoryPage(1);
     loadHistory(campaign.campaign_id, 1);
+  };
+
+  const handleEditClick = (campaign: XAutoCampaign) => {
+    setEditingCampaign(campaign);
+    setForm({
+      name: campaign.name,
+      accountId: campaign.account_id,
+      topic: campaign.topic,
+      grokMode: campaign.grok_mode || "xPost",
+      language: campaign.language || "es",
+      customPrompt: campaign.custom_prompt || "",
+      intervalMinutes: campaign.interval_minutes,
+      activeHoursStart: campaign.active_hours_start,
+      activeHoursEnd: campaign.active_hours_end,
+      maxPosts: campaign.max_posts ? String(campaign.max_posts) : "",
+      attachVideos: !!campaign.media_folder_id,
+    });
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   // Grok Manager handlers
@@ -583,7 +620,7 @@ export default function XAutoCampaigns() {
       key: "actions",
       header: "",
       render: (row: XAutoCampaign) => (
-        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+        <div className="flex gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
           {row.status !== "completed" && (
             <button
               onClick={() => handlePauseResume(row)}
@@ -596,6 +633,12 @@ export default function XAutoCampaigns() {
               {row.status === "active" ? "Pause" : "Resume"}
             </button>
           )}
+          <button
+            onClick={() => handleEditClick(row)}
+            className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+          >
+            Edit
+          </button>
           <button
             onClick={() =>
               setConfirmAction({ type: "generate", id: row.campaign_id, label: `Generate a post now for "${row.name}"?` })
@@ -678,7 +721,7 @@ export default function XAutoCampaigns() {
       <div className="mb-6">
         <div className="flex gap-2">
           <button
-            onClick={() => setShowForm((p) => !p)}
+            onClick={() => { setShowForm((p) => !p); setEditingCampaign(null); setForm(defaultForm); }}
             className="px-4 py-2 rounded-lg text-sm font-medium bg-pnp-accent text-white hover:bg-pnp-accent/80 transition-colors"
           >
             {showForm ? "Cancel" : "New Campaign"}
@@ -703,6 +746,9 @@ export default function XAutoCampaigns() {
 
         {showForm && (
           <form onSubmit={handleCreate} className="mt-3 p-4 rounded-xl bg-pnp-surface border border-pnp-border space-y-3">
+            {editingCampaign && (
+              <p className="text-xs font-semibold text-blue-400">Editing: {editingCampaign.name}</p>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-pnp-textSecondary block mb-1">Campaign Name</label>
@@ -714,22 +760,24 @@ export default function XAutoCampaigns() {
                   required
                 />
               </div>
-              <div>
-                <label className="text-xs text-pnp-textSecondary block mb-1">X Account</label>
-                <select
-                  value={form.accountId}
-                  onChange={(e) => setForm((f) => ({ ...f, accountId: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
-                  required
-                >
-                  <option value="">Select account...</option>
-                  {accounts.map((a) => (
-                    <option key={a.account_id} value={a.account_id}>
-                      @{a.handle}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {!editingCampaign && (
+                <div>
+                  <label className="text-xs text-pnp-textSecondary block mb-1">X Account</label>
+                  <select
+                    value={form.accountId}
+                    onChange={(e) => setForm((f) => ({ ...f, accountId: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
+                    required
+                  >
+                    <option value="">Select account...</option>
+                    {accounts.map((a) => (
+                      <option key={a.account_id} value={a.account_id}>
+                        @{a.handle}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             <div>
@@ -864,7 +912,7 @@ export default function XAutoCampaigns() {
                 disabled={formLoading}
                 className="px-4 py-2 rounded-lg text-sm font-medium bg-pnp-accent text-white hover:bg-pnp-accent/80 disabled:opacity-50 transition-colors"
               >
-                {formLoading ? "Creating..." : "Create Campaign (Paused)"}
+                {formLoading ? (editingCampaign ? "Saving..." : "Creating...") : (editingCampaign ? "Save Changes" : "Create Campaign (Paused)")}
               </button>
             </div>
           </form>
