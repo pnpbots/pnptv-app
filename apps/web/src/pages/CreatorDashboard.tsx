@@ -92,7 +92,7 @@ export default function CreatorDashboard() {
 
   // Activation modal state (eligible → active)
   const [showActivateModal, setShowActivateModal] = useState(false);
-  const [activateTier, setActivateTier] = useState<"ice" | "crystal" | "diamond">("diamond");
+  const [activateTier] = useState<"ice" | "crystal" | "diamond">("ice");
   const [activateTerms, setActivateTerms] = useState(false);
   const [activating, setActivating] = useState(false);
   const [activateError, setActivateError] = useState<string | null>(null);
@@ -1251,76 +1251,42 @@ export default function CreatorDashboard() {
                 </p>
               </div>
 
-              {/* Tier Change Card — only for non-full_time creators */}
+              {/* Tier milestone info — read-only */}
               {dashboard.creatorType !== "full_time" && (
                 <div className="glass-card-sm p-5">
                   <p className="text-sm font-semibold text-white mb-1">Creator Tier</p>
                   <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
-                    Your current tier:{" "}
-                    <strong className="text-white capitalize">
-                      {dashboard.creatorType
-                        ? `${dashboard.creatorType.charAt(0).toUpperCase()}${dashboard.creatorType.slice(1)} ($${dashboard.priceUsd.toFixed(2)}/mo)`
-                        : "None"}
-                    </strong>
+                    Tiers are unlocked automatically as you hit higher milestones. Keep growing to advance.
                   </p>
-
-                  <div className="flex gap-2 mb-4">
+                  <div className="flex gap-2">
                     {TIERS.map((t) => {
                       const isCurrent = dashboard.creatorType === t.key;
-                      const isSelected = selectedTier === t.key;
+                      const tierOrder = { ice: 0, crystal: 1, diamond: 2 };
+                      const currentOrder = tierOrder[dashboard.creatorType as keyof typeof tierOrder] ?? -1;
+                      const isUnlocked = tierOrder[t.key] <= currentOrder;
                       return (
-                        <button
+                        <div
                           key={t.key}
-                          onClick={() => {
-                            setSelectedTier(t.key);
-                            setTierError(null);
-                            setTierSuccess(null);
-                          }}
-                          className="flex-1 py-2.5 rounded-lg text-xs font-semibold transition-all"
+                          className="flex-1 py-2.5 rounded-lg text-xs font-semibold text-center"
                           style={{
-                            background: isSelected
+                            background: isCurrent
                               ? "linear-gradient(135deg, #D4007A, #E69138)"
-                              : isCurrent
+                              : isUnlocked
                               ? "rgba(212,0,122,0.15)"
-                              : "rgba(255,255,255,0.05)",
-                            color: isSelected ? "#fff" : isCurrent ? "#D4007A" : "#8E8E93",
-                            border: isSelected
+                              : "rgba(255,255,255,0.04)",
+                            color: isCurrent ? "#fff" : isUnlocked ? "#D4007A" : "#8E8E93",
+                            border: isCurrent
                               ? "1px solid transparent"
-                              : isCurrent
-                              ? "1px solid rgba(212,0,122,0.4)"
                               : "1px solid rgba(255,255,255,0.08)",
                           }}
                         >
                           {t.emoji} {t.label}
-                          <span className="block text-xs font-normal mt-0.5 opacity-80">${t.price}/mo</span>
-                        </button>
+                          {isCurrent && <span className="block text-xs font-normal mt-0.5 opacity-80">Current</span>}
+                          {!isCurrent && !isUnlocked && <span className="block text-xs font-normal mt-0.5 opacity-60">Locked</span>}
+                        </div>
                       );
                     })}
                   </div>
-
-                  {tierSuccess && (
-                    <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>
-                      {tierSuccess}
-                    </div>
-                  )}
-                  {tierError && (
-                    <div className="mb-3 px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
-                      {tierError}
-                    </div>
-                  )}
-
-                  <button
-                    onClick={handleChangeTier}
-                    disabled={tierChanging || !selectedTier || selectedTier === dashboard.creatorType}
-                    className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
-                    style={{ background: "rgba(255,255,255,0.08)", color: "#fff", border: "1px solid rgba(255,255,255,0.15)" }}
-                  >
-                    {tierChanging ? "Changing..." : "Change Tier"}
-                  </button>
-
-                  <p className="mt-4 text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
-                    Changes take effect for new subscribers immediately. Existing subscribers keep their current price until renewal.
-                  </p>
                 </div>
               )}
             </div>
@@ -1338,23 +1304,26 @@ export default function CreatorDashboard() {
 
           <div className="space-y-3">
             <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <p className="text-sm font-semibold text-white">Occasional Creator</p>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-sm font-semibold text-white">❄ Ice Creator</span>
+                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>Starting tier</span>
+              </div>
               <p className="text-xs mt-1 mb-3" style={{ color: "#8E8E93" }}>
-                Fixed $15/month subscription. Start immediately. 70/30 revenue split.
+                70/30 revenue split. As you grow your audience, you unlock Crystal and Diamond tiers with higher earnings potential.
               </p>
               <button
                 onClick={handleActivate}
                 className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors"
                 style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
               >
-                Choose Tier & Activate
+                Activate as Creator
               </button>
             </div>
 
             <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
               <p className="text-sm font-semibold text-white">Full-Time Creator</p>
               <p className="text-xs mt-1 mb-3" style={{ color: "#8E8E93" }}>
-                Set your own price. Verified badge. Featured placement. Live streams. Interview with Santino required.
+                Verified badge. Featured placement. Live streams. Interview with Santino required.
               </p>
               <button
                 onClick={() => navigate("/apply")}
@@ -1428,27 +1397,11 @@ export default function CreatorDashboard() {
           <div className="w-full max-w-sm rounded-2xl p-6 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
             <h2 className="text-lg font-bold text-white">Activate Creator Profile</h2>
 
-            <p className="text-sm" style={{ color: "#8E8E93" }}>
-              Choose your subscription tier. Subscribers pay this monthly to access your exclusive content.
-            </p>
-
-            {/* Tier picker */}
-            <div className="space-y-2">
-              {TIERS.map((t) => (
-                <button
-                  key={t.key}
-                  onClick={() => setActivateTier(t.key)}
-                  className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all"
-                  style={{
-                    background: activateTier === t.key ? "rgba(212,0,122,0.15)" : "rgba(255,255,255,0.04)",
-                    border: `1px solid ${activateTier === t.key ? "#D4007A" : "rgba(255,255,255,0.08)"}`,
-                    color: "#fff",
-                  }}
-                >
-                  <span>{t.emoji} {t.label}</span>
-                  <span style={{ color: activateTier === t.key ? "#E69138" : "#8E8E93" }}>${t.price}/mo</span>
-                </button>
-              ))}
+            <div className="rounded-xl px-4 py-3" style={{ background: "rgba(94,209,196,0.07)", border: "1px solid rgba(94,209,196,0.2)" }}>
+              <p className="text-sm font-semibold text-white mb-1">❄ Starting at Ice tier</p>
+              <p className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+                Your tier is a milestone — it advances automatically as you grow your audience and meet higher requirements. Crystal and Diamond unlock greater earnings potential.
+              </p>
             </div>
 
             {/* Terms */}
