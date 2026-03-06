@@ -565,7 +565,7 @@ function initSocketIO(io) {
 
     // ── Live Stream Chat ──────────────────────────────────────────────────────
 
-    const STREAM_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
+    const STREAM_ID_RE = /^[a-zA-Z0-9_:\-\.]{1,200}$/;
 
     socket.on('live:join', async ({ streamId } = {}) => {
       if (!streamId || !STREAM_ID_RE.test(String(streamId))) {

@@ -28,6 +28,7 @@ interface UseLiveSocketResult {
   latestTip: LiveTip | null;
   walletBalance: number | null;
   setWalletBalance: (b: number) => void;
+  socketError: string | null;
 }
 
 export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
@@ -36,6 +37,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
   const [isConnected, setIsConnected] = useState(false);
   const [latestTip, setLatestTip] = useState<LiveTip | null>(null);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [socketError, setSocketError] = useState<string | null>(null);
 
   // Tracks the currently joined streamId so we can emit live:leave on change/unmount
   const joinedStreamRef = useRef<string | null>(null);
@@ -54,14 +56,20 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
 
     const socket = connectSocket();
 
-    const onConnect = () => {
-      setIsConnected(true);
+    const joinStream = () => {
       socket.emit("live:join", { streamId });
       joinedStreamRef.current = streamId;
     };
 
+    const onConnect = () => {
+      setIsConnected(true);
+      setSocketError(null);
+      joinStream();
+    };
+
     const onDisconnect = () => {
       setIsConnected(false);
+      joinedStreamRef.current = null;
     };
 
     const onError = () => {
@@ -95,6 +103,12 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       setWalletBalance(data.balance);
     };
 
+    const onLiveError = (data: { message: string }) => {
+      setSocketError(data.message);
+      // Auto-clear after 5s
+      setTimeout(() => setSocketError(null), 5000);
+    };
+
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onError);
@@ -103,16 +117,19 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     socket.on("live:viewer_count", onViewerCount);
     socket.on("live:tip", onTip);
     socket.on("wallet:updated", onWalletUpdated);
+    socket.on("live:error", onLiveError);
 
     // Leave previous stream if switching mid-session
     if (joinedStreamRef.current && joinedStreamRef.current !== streamId) {
       socket.emit("live:leave", { streamId: joinedStreamRef.current });
+      joinedStreamRef.current = null;
     }
 
+    // Join immediately if already connected
     if (socket.connected) {
       setIsConnected(true);
-      socket.emit("live:join", { streamId });
-      joinedStreamRef.current = streamId;
+      setSocketError(null);
+      joinStream();
     }
 
     setMessages([]);
@@ -131,6 +148,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       socket.off("live:viewer_count", onViewerCount);
       socket.off("live:tip", onTip);
       socket.off("wallet:updated", onWalletUpdated);
+      socket.off("live:error", onLiveError);
     };
   }, [streamId]);
 
@@ -139,10 +157,15 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       if (!streamId || !content.trim()) return;
       const socket = connectSocket();
       if (!socket.connected) return;
+      // Re-join if not already joined (handles reconnect edge case)
+      if (joinedStreamRef.current !== streamId) {
+        socket.emit("live:join", { streamId });
+        joinedStreamRef.current = streamId;
+      }
       socket.emit("live:message", { streamId, content: content.trim() });
     },
     [streamId]
   );
 
-  return { messages, viewerCount, isConnected, sendMessage, latestTip, walletBalance, setWalletBalance };
+  return { messages, viewerCount, isConnected, sendMessage, latestTip, walletBalance, setWalletBalance, socketError };
 }

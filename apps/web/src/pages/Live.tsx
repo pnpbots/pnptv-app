@@ -16,16 +16,17 @@ import {
   getTokenPackages,
   buyTokens,
   linkDPNS,
+  getWalletHistory,
   TIP_AMOUNTS,
   type LiveStream,
   type FeaturedPerformer,
   type RecentTip,
   type TokenPackage,
+  type TokenPurchase,
 } from "@/lib/api";
 
 const CALCOM_URL = import.meta.env.VITE_CALCOM_URL || "https://booking.pnptv.app";
 
-// Fix #17: Restrict external image URLs to known trusted domains only
 const ALLOWED_IMAGE_HOSTS = ["cms.pnptv.app", "app.pnptv.app", "pnptv.app"];
 function isValidPhotoUrl(photo: string | null | undefined): photo is string {
   if (!photo) return false;
@@ -74,6 +75,12 @@ export default function Live() {
   const [showDpnsInput, setShowDpnsInput] = useState(false);
   const [dpnsInput, setDpnsInput] = useState("");
   const [dpnsSaving, setDpnsSaving] = useState(false);
+  const [buyError, setBuyError] = useState<string | null>(null);
+
+  // Wallet history
+  const [showWalletHistory, setShowWalletHistory] = useState(false);
+  const [walletHistory, setWalletHistory] = useState<TokenPurchase[]>([]);
+  const [walletHistoryLoading, setWalletHistoryLoading] = useState(false);
 
   // Booking
   const [showBooking, setShowBooking] = useState(false);
@@ -85,29 +92,51 @@ export default function Live() {
   const [goLiveLoading, setGoLiveLoading] = useState(false);
   const [goLiveError, setGoLiveError] = useState<string | null>(null);
   const [showStreamKey, setShowStreamKey] = useState(false);
-  const [buyError, setBuyError] = useState<string | null>(null);
 
   // Live chat
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Socket
-  const { messages: chatMessages, viewerCount, isConnected: chatConnected, sendMessage, latestTip, walletBalance: socketBalance, setWalletBalance: setSocketBalance } = useLiveSocket(activeStream?.id ?? null);
+  const {
+    messages: chatMessages,
+    viewerCount,
+    isConnected: chatConnected,
+    sendMessage,
+    latestTip,
+    walletBalance: socketBalance,
+    setWalletBalance: setSocketBalance,
+    socketError,
+  } = useLiveSocket(activeStream?.id ?? null);
 
-  // Load streams
-  useEffect(() => {
-    setIsLoading(true);
+  // Load streams + auto-refresh every 30s
+  const loadStreams = useCallback(() => {
     getLiveStreams()
       .then((data) => {
         const liveStreams = data.streams || [];
         setStreams(liveStreams);
-        const live = liveStreams.find((s) => s.isLive);
-        if (live) setActiveStream(live);
-        else if (liveStreams.length > 0) setActiveStream(liveStreams[0]);
+        setActiveStream((prev) => {
+          // Keep selection if stream still exists; pick first live stream otherwise
+          if (prev) {
+            const still = liveStreams.find((s) => s.id === prev.id);
+            if (still) return still;
+          }
+          const live = liveStreams.find((s) => s.isLive);
+          if (live) return live;
+          return liveStreams.length > 0 ? liveStreams[0] : null;
+        });
+        setError(null);
       })
-      .catch((err) => setError(err.message))
-      .finally(() => setIsLoading(false));
+      .catch((err) => setError(err.message));
   }, []);
+
+  useEffect(() => {
+    setIsLoading(true);
+    loadStreams();
+    setIsLoading(false);
+    const interval = setInterval(loadStreams, 30000);
+    return () => clearInterval(interval);
+  }, [loadStreams]);
 
   // Load performers
   useEffect(() => {
@@ -156,7 +185,7 @@ export default function Live() {
     return () => clearInterval(interval);
   }, [loadTips]);
 
-  // Push socket-confirmed tips to the front of recentTips
+  // Push socket-confirmed tips to front of recentTips
   useEffect(() => {
     if (!latestTip) return;
     setRecentTips((prev) => {
@@ -165,38 +194,24 @@ export default function Live() {
     });
   }, [latestTip]);
 
-  // Auto-scroll chat to bottom on new messages
+  // Auto-scroll chat to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
   const handleTip = async (amount: number) => {
-    if (!isAuthenticated) {
-      login();
-      return;
-    }
-    if (!selectedPerformer) {
-      setTipError("Select a performer to tip");
-      return;
-    }
+    if (!isAuthenticated) { login(); return; }
+    if (!selectedPerformer) { setTipError("Select a performer to tip"); return; }
     if (tipPaymentTab === "tokens" && tokenBalance !== null && tokenBalance < amount) {
       setTipError(`Insufficient tokens. You have ${tokenBalance} tokens. Buy more below.`);
       setShowBuyModal(true);
       return;
     }
-
     setTipping(true);
     setTipError(null);
     setTipSuccess(null);
-
     try {
-      const result = await sendTip(
-        selectedPerformer.id,
-        amount,
-        tipMessage || undefined,
-        tipPaymentTab
-      );
-
+      const result = await sendTip(selectedPerformer.id, amount, tipMessage || undefined, tipPaymentTab);
       if (tipPaymentTab === "tokens") {
         if (result.newBalance !== undefined) setTokenBalance(result.newBalance);
         setTipSuccess(`${amount} tokens sent to ${selectedPerformer.displayName}!`);
@@ -206,7 +221,6 @@ export default function Live() {
       } else {
         setTipSuccess(`$${amount} tip submitted!`);
       }
-
       setTipMessage("");
       setShowTipMessage(false);
       setTimeout(loadTips, 3000);
@@ -219,6 +233,7 @@ export default function Live() {
 
   const handleBuyTokens = async (pkg: TokenPackage) => {
     setBuyingPackage(pkg.id);
+    setBuyError(null);
     try {
       const result = await buyTokens(pkg.id);
       window.open(result.checkoutUrl, "_blank", "noopener,width=600,height=800");
@@ -261,7 +276,6 @@ export default function Live() {
         setRtmpInfo({ rtmpUrl: result.rtmpUrl, streamKey: result.streamKey });
         setShowGoLive(true);
       } else {
-        // Fix #13: surface errors instead of silently failing
         setGoLiveError(result.error || "Live streaming is not available right now.");
       }
     } catch (err: unknown) {
@@ -269,6 +283,24 @@ export default function Live() {
     } finally {
       setGoLiveLoading(false);
     }
+  };
+
+  const handleLoadWalletHistory = async () => {
+    if (walletHistoryLoading) return;
+    setWalletHistoryLoading(true);
+    try {
+      const data = await getWalletHistory();
+      setWalletHistory(data.history || []);
+    } catch {
+      // ignore
+    } finally {
+      setWalletHistoryLoading(false);
+    }
+  };
+
+  const openWalletHistory = () => {
+    setShowWalletHistory(true);
+    handleLoadWalletHistory();
   };
 
   const formatTimeAgo = (dateStr: string) => {
@@ -288,6 +320,7 @@ export default function Live() {
         <meta name="description" content="Watch live broadcasts, tip performers, and book private sessions on PNPtv." />
       </Helmet>
       {showTutorial && <TutorialOverlay section="live" onDismiss={dismissTutorial} />}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -307,7 +340,6 @@ export default function Live() {
                 <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                 {goLiveLoading ? "Loading..." : "Go Live"}
               </button>
-              {/* Fix #13: display Go Live errors */}
               {goLiveError && (
                 <p className="text-[10px] text-pnp-error text-right max-w-[160px]">{goLiveError}</p>
               )}
@@ -339,6 +371,17 @@ export default function Live() {
               </span>
             )}
             <span className="text-sm text-pnp-textPrimary font-medium">{activeStream.name}</span>
+            {/* Refresh button */}
+            <button
+              onClick={loadStreams}
+              className="ml-auto text-pnp-textSecondary hover:text-pnp-accent transition-colors"
+              title="Refresh streams"
+              aria-label="Refresh streams"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
           </div>
           {activeStream.description && (
             <p className="text-sm text-pnp-textSecondary mt-1">{activeStream.description}</p>
@@ -346,21 +389,17 @@ export default function Live() {
         </div>
       ) : (
         <Card className="text-center py-12 mb-4">
-          <svg
-            className="w-16 h-16 text-pnp-textSecondary mx-auto mb-3"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-            />
+          <svg className="w-16 h-16 text-pnp-textSecondary mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
           <p className="text-pnp-textPrimary font-medium mb-1">No Streams Available</p>
-          <p className="text-sm text-pnp-textSecondary">Check back later for live content</p>
+          <p className="text-sm text-pnp-textSecondary mb-3">Check back later for live content</p>
+          <button
+            onClick={loadStreams}
+            className="text-xs text-pnp-accent hover:underline"
+          >
+            Refresh
+          </button>
         </Card>
       )}
 
@@ -369,7 +408,6 @@ export default function Live() {
         <Card className="mb-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              {/* Dash logo */}
               <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>
                 <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white">
                   <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
@@ -395,6 +433,13 @@ export default function Live() {
                   Link DPNS
                 </button>
               )}
+              <button
+                onClick={openWalletHistory}
+                className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors"
+                title="View purchase history"
+              >
+                History
+              </button>
               <button
                 onClick={() => { setBuyError(null); setShowBuyModal(true); }}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-gradient"
@@ -430,9 +475,7 @@ export default function Live() {
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-medium text-pnp-textPrimary">Send a Tip</h3>
           {selectedPerformer && (
-            <span className="text-xs text-gradient">
-              to {selectedPerformer.displayName}
-            </span>
+            <span className="text-xs text-gradient">to {selectedPerformer.displayName}</span>
           )}
         </div>
 
@@ -462,8 +505,8 @@ export default function Live() {
           </div>
         )}
 
-        {/* Performer selector (compact) */}
-        {performers.length > 1 && (
+        {/* Performer selector — shown with 1 or more performers */}
+        {performers.length > 0 && (
           <div className="flex gap-2 mb-3 overflow-x-auto pb-1 -mx-1 px-1">
             {performers.map((p) => (
               <button
@@ -482,14 +525,13 @@ export default function Live() {
                     className="w-4 h-4 rounded-full object-cover"
                     onError={(e) => {
                       (e.target as HTMLImageElement).style.display = "none";
-                      const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
-                      if (fallback) fallback.style.display = "inline-flex";
                     }}
                   />
-                ) : null}
-                <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: isValidPhotoUrl(p.photoUrl) ? "none" : undefined }}>
-                  {p.displayName.charAt(0)}
-                </span>
+                ) : (
+                  <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
+                    {p.displayName.charAt(0)}
+                  </span>
+                )}
                 {p.displayName}
               </button>
             ))}
@@ -516,7 +558,6 @@ export default function Live() {
           </p>
         )}
 
-        {/* Optional message toggle */}
         <button
           onClick={() => setShowTipMessage(!showTipMessage)}
           className="text-xs text-pnp-textSecondary mt-2 hover:text-pnp-accent transition-colors"
@@ -537,100 +578,32 @@ export default function Live() {
 
         {tipError && <p className="text-xs text-pnp-error mt-2">{tipError}</p>}
         {tipSuccess && <p className="text-xs mt-2 text-gradient">{tipSuccess}</p>}
-
         {!isAuthenticated && (
-          <p className="text-xs text-pnp-textSecondary mt-2">
-            Log in to send tips to performers
-          </p>
+          <p className="text-xs text-pnp-textSecondary mt-2">Log in to send tips to performers</p>
         )}
       </Card>
 
-      {/* Buy Tokens Modal */}
-      {showBuyModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
-          onClick={() => setShowBuyModal(false)}
-        >
-          <div
-            className="w-full max-w-lg bg-pnp-background border border-pnp-border rounded-t-2xl p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: "#008CE7" }}>
-                  <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white">
-                    <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
-                  </svg>
-                </div>
-                <h2 className="text-base font-bold text-pnp-textPrimary">Buy PNP Tokens with Dash</h2>
-              </div>
-              <button onClick={() => setShowBuyModal(false)} className="text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors" aria-label="Close">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <p className="text-xs text-pnp-textSecondary mb-4">
-              Powered by <span style={{ color: "#008CE7" }}>Dash InstaSend</span> via BTCPay Server.
-              1 token = $1 USD. Use tokens for instant tips — no popups, no waiting.
-            </p>
-
-            {/* Fix #14: show buy error inline instead of alert() */}
-            {buyError && (
-              <p className="text-xs text-pnp-error mb-3">{buyError}</p>
-            )}
-            {tokenPackages.length === 0 ? (
-              <p className="text-sm text-pnp-textSecondary text-center py-6">Loading packages...</p>
-            ) : (
-              <div className="grid grid-cols-2 gap-2 mb-4">
-                {tokenPackages.map((pkg) => (
-                  <button
-                    key={pkg.id}
-                    onClick={() => handleBuyTokens(pkg)}
-                    disabled={buyingPackage === pkg.id}
-                    className="p-3 rounded-xl border border-pnp-border bg-pnp-surface hover:border-pnp-accent/50 transition-colors text-left disabled:opacity-50"
-                  >
-                    <p className="text-lg font-bold text-pnp-textPrimary">{pkg.tokens}</p>
-                    <p className="text-xs text-pnp-textSecondary">tokens</p>
-                    <p className="text-sm font-semibold mt-1" style={{ color: "#008CE7" }}>${pkg.usd}</p>
-                    {buyingPackage === pkg.id && (
-                      <p className="text-[10px] text-pnp-textSecondary mt-1">Opening...</p>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="flex items-start gap-2 p-3 rounded-lg bg-pnp-surface border border-pnp-border/50">
-              <svg className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#008CE7" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <p className="text-[11px] text-pnp-textSecondary">
-                A Dash checkout window will open. Once payment is confirmed, tokens are credited to your wallet automatically.
-                {dpnsHandle && ` Your Dash identity: @${dpnsHandle}`}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Live Chat */}
-      {activeStream?.isLive && (
+      {/* Live Chat — shown whenever there's an active stream (live or not) */}
+      {activeStream && (
         <Card className="mb-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-medium text-pnp-textPrimary">Live Chat</h3>
-            {chatConnected && (
-              <span className="flex items-center gap-1 text-xs text-pnp-textSecondary">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                Live
+            <div className="flex items-center gap-2">
+              {socketError && (
+                <span className="text-[10px] text-pnp-error">{socketError}</span>
+              )}
+              <span className={`flex items-center gap-1 text-xs ${chatConnected ? "text-pnp-textSecondary" : "text-pnp-textSecondary/50"}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${chatConnected ? "bg-green-500" : "bg-pnp-textSecondary/30"}`} />
+                {chatConnected ? "Connected" : "Connecting..."}
               </span>
-            )}
+            </div>
           </div>
 
-          <div className="h-40 overflow-y-auto space-y-1.5 mb-3 pr-1" style={{ scrollbarWidth: "thin" }}>
+          <div className="h-44 overflow-y-auto space-y-1.5 mb-3 pr-1" style={{ scrollbarWidth: "thin" }}>
             {chatMessages.length === 0 ? (
-              <p className="text-xs text-pnp-textSecondary text-center py-4">Be the first to say hi!</p>
+              <p className="text-xs text-pnp-textSecondary text-center py-4">
+                {chatConnected ? "Be the first to say hi!" : "Connecting to chat..."}
+              </p>
             ) : (
               chatMessages.map((msg) => (
                 <div key={msg.id} className="text-xs">
@@ -673,7 +646,12 @@ export default function Live() {
               </button>
             </div>
           ) : (
-            <p className="text-xs text-pnp-textSecondary">Log in to chat</p>
+            <button
+              onClick={login}
+              className="text-xs text-pnp-accent hover:underline"
+            >
+              Log in to chat
+            </button>
           )}
         </Card>
       )}
@@ -681,15 +659,10 @@ export default function Live() {
       {/* Recent Tips Ticker */}
       {recentTips.length > 0 && (
         <div className="mb-6">
-          <h3 className="text-xs font-medium text-pnp-textSecondary uppercase tracking-wider mb-2">
-            Recent Tips
-          </h3>
+          <h3 className="text-xs font-medium text-pnp-textSecondary uppercase tracking-wider mb-2">Recent Tips</h3>
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
             {recentTips.map((tip) => (
-              <div
-                key={tip.id}
-                className="flex-shrink-0 px-3 py-1.5 rounded-full bg-pnp-surface border border-pnp-border text-xs"
-              >
+              <div key={tip.id} className="flex-shrink-0 px-3 py-1.5 rounded-full bg-pnp-surface border border-pnp-border text-xs">
                 <span className="text-gradient font-medium">${tip.amount}</span>
                 <span className="text-pnp-textSecondary mx-1">by</span>
                 <span className="text-pnp-textPrimary">@{tip.user_username}</span>
@@ -704,9 +677,7 @@ export default function Live() {
       {/* Stream list (if multiple) */}
       {streams.length > 1 && (
         <>
-          <h2 className="text-sm font-medium text-pnp-textSecondary uppercase tracking-wider mb-3">
-            All Streams
-          </h2>
+          <h2 className="text-sm font-medium text-pnp-textSecondary uppercase tracking-wider mb-3">All Streams</h2>
           <div className="space-y-2 mb-6">
             {streams.map((stream) => (
               <Card
@@ -716,11 +687,7 @@ export default function Live() {
                 className={activeStream?.id === stream.id ? "border-pnp-accent" : ""}
               >
                 <div className="flex items-center gap-3">
-                  <div
-                    className={`w-3 h-3 rounded-full ${
-                      stream.isLive ? "bg-pnp-error animate-pulse" : "bg-pnp-textSecondary"
-                    }`}
-                  />
+                  <div className={`w-3 h-3 rounded-full ${stream.isLive ? "bg-pnp-error animate-pulse" : "bg-pnp-textSecondary"}`} />
                   <div className="flex-1">
                     <p className="font-medium text-pnp-textPrimary">{stream.name}</p>
                     {stream.description && (
@@ -740,9 +707,7 @@ export default function Live() {
       {/* Performer List */}
       {!performersLoading && performers.length > 0 && (
         <>
-          <h2 className="text-sm font-medium text-pnp-textSecondary uppercase tracking-wider mb-3">
-            Performers
-          </h2>
+          <h2 className="text-sm font-medium text-pnp-textSecondary uppercase tracking-wider mb-3">Performers</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
             {performers.map((p) => (
               <Card
@@ -756,20 +721,17 @@ export default function Live() {
                     src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
                     alt={p.displayName}
                     className="w-14 h-14 rounded-full object-cover mx-auto mb-2"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = "/default-performer.svg";
-                    }}
+                    onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
                   />
                   <p className="text-sm font-medium text-pnp-textPrimary truncate">{p.displayName}</p>
                   {p.isFeatured && (
-                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "#5ED1C4" }}>
-                      Featured
-                    </p>
+                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "#5ED1C4" }}>Featured</p>
                   )}
                   {p.isAvailable && !p.isFeatured && (
-                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "#5ED1C4" }}>
-                      Available
-                    </p>
+                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "#5ED1C4" }}>Available</p>
+                  )}
+                  {selectedPerformer?.id === p.id && (
+                    <p className="text-[10px] mt-0.5 text-gradient font-medium">Tipping</p>
                   )}
                 </div>
               </Card>
@@ -780,16 +742,12 @@ export default function Live() {
 
       {performersLoading && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-28 rounded-xl" />
-          ))}
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
         </div>
       )}
 
       {error && (
-        <p className="text-xs text-pnp-textSecondary mt-4">
-          Stream service temporarily unavailable.
-        </p>
+        <p className="text-xs text-pnp-textSecondary mt-4">Stream service temporarily unavailable.</p>
       )}
 
       {/* Book a Session */}
@@ -799,27 +757,12 @@ export default function Live() {
           className="w-full flex items-center justify-between py-3 border-t border-white/5"
         >
           <div className="flex items-center gap-2">
-            <svg
-              className="w-5 h-5 text-pnp-accent"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-              />
+            <svg className="w-5 h-5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
             <span className="text-sm font-medium text-pnp-textPrimary">Book a Private Session</span>
           </div>
-          <svg
-            className={`w-4 h-4 text-pnp-textSecondary transition-transform ${showBooking ? "rotate-180" : ""}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
+          <svg className={`w-4 h-4 text-pnp-textSecondary transition-transform ${showBooking ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         </button>
@@ -827,11 +770,7 @@ export default function Live() {
         {showBooking && (
           <div className="mt-2">
             <div className="flex gap-2 mb-3">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => window.open(CALCOM_URL, "_blank")}
-              >
+              <Button variant="secondary" size="sm" onClick={() => window.open(CALCOM_URL, "_blank")}>
                 Open Full Calendar
               </Button>
             </div>
@@ -854,45 +793,127 @@ export default function Live() {
             </div>
             <Card className="mt-3">
               <div className="flex items-start gap-3">
-                <svg
-                  className="w-4 h-4 text-pnp-accent flex-shrink-0 mt-0.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
+                <svg className="w-4 h-4 text-pnp-accent flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <p className="text-xs text-pnp-textSecondary">
-                  Sessions are scheduled in your local timezone. You'll receive a confirmation with
-                  details.
+                  Sessions are scheduled in your local timezone. You'll receive a confirmation with details.
                 </p>
               </div>
             </Card>
           </div>
         )}
       </div>
+
+      {/* Buy Tokens Modal */}
+      {showBuyModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowBuyModal(false)}>
+          <div className="w-full max-w-lg bg-pnp-background border border-pnp-border rounded-t-2xl p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: "#008CE7" }}>
+                  <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white">
+                    <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
+                  </svg>
+                </div>
+                <h2 className="text-base font-bold text-pnp-textPrimary">Buy PNP Tokens with Dash</h2>
+              </div>
+              <button onClick={() => setShowBuyModal(false)} className="text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors" aria-label="Close">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-xs text-pnp-textSecondary mb-4">
+              Powered by <span style={{ color: "#008CE7" }}>Dash InstaSend</span> via BTCPay Server.
+              1 token = $1 USD. Use tokens for instant tips — no popups, no waiting.
+            </p>
+
+            {buyError && <p className="text-xs text-pnp-error mb-3">{buyError}</p>}
+
+            {tokenPackages.length === 0 ? (
+              <p className="text-sm text-pnp-textSecondary text-center py-6">Loading packages...</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                {tokenPackages.map((pkg) => (
+                  <button
+                    key={pkg.id}
+                    onClick={() => handleBuyTokens(pkg)}
+                    disabled={buyingPackage === pkg.id}
+                    className="p-3 rounded-xl border border-pnp-border bg-pnp-surface hover:border-pnp-accent/50 transition-colors text-left disabled:opacity-50"
+                  >
+                    <p className="text-lg font-bold text-pnp-textPrimary">{pkg.tokens}</p>
+                    <p className="text-xs text-pnp-textSecondary">tokens</p>
+                    <p className="text-sm font-semibold mt-1" style={{ color: "#008CE7" }}>${pkg.usd}</p>
+                    {buyingPackage === pkg.id && (
+                      <p className="text-[10px] text-pnp-textSecondary mt-1">Opening...</p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-pnp-surface border border-pnp-border/50">
+              <svg className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#008CE7" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-[11px] text-pnp-textSecondary">
+                A Dash checkout window will open. Once payment is confirmed, tokens are credited automatically.
+                {dpnsHandle && ` Your Dash identity: @${dpnsHandle}`}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Wallet History Modal */}
+      {showWalletHistory && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowWalletHistory(false)}>
+          <div className="w-full max-w-lg bg-pnp-background border border-pnp-border rounded-t-2xl p-6 max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-bold text-pnp-textPrimary">Token Purchase History</h2>
+              <button onClick={() => setShowWalletHistory(false)} className="text-pnp-textSecondary hover:text-pnp-textPrimary" aria-label="Close">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1">
+              {walletHistoryLoading ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 rounded-lg" />)}
+                </div>
+              ) : walletHistory.length === 0 ? (
+                <p className="text-sm text-pnp-textSecondary text-center py-8">No purchases yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {walletHistory.map((h) => (
+                    <div key={h.id} className="flex items-center justify-between p-3 rounded-lg bg-pnp-surface border border-pnp-border">
+                      <div>
+                        <p className="text-sm font-semibold text-pnp-textPrimary">{h.tokens_credited} tokens</p>
+                        <p className="text-xs text-pnp-textSecondary">${h.usd_amount} · {new Date(h.created_at).toLocaleDateString()}</p>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${h.status === "settled" ? "bg-green-500/10 text-green-400" : "bg-pnp-surface text-pnp-textSecondary border border-pnp-border"}`}>
+                        {h.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Go Live Modal */}
       {showGoLive && rtmpInfo && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
-          onClick={() => setShowGoLive(false)}
-        >
-          <div
-            className="w-full max-w-lg bg-pnp-background border border-pnp-border rounded-t-2xl p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowGoLive(false)}>
+          <div className="w-full max-w-lg bg-pnp-background border border-pnp-border rounded-t-2xl p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-base font-bold text-pnp-textPrimary">Go Live</h2>
-              <button
-                onClick={() => setShowGoLive(false)}
-                className="text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
-                aria-label="Close Go Live modal"
-              >
+              <button onClick={() => setShowGoLive(false)} className="text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors" aria-label="Close Go Live modal">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -905,9 +926,7 @@ export default function Live() {
 
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-pnp-textSecondary uppercase tracking-wider block mb-1">
-                  RTMP Server
-                </label>
+                <label className="text-xs text-pnp-textSecondary uppercase tracking-wider block mb-1">RTMP Server</label>
                 <div className="flex items-center gap-2 bg-pnp-surface border border-pnp-border rounded-lg px-3 py-2">
                   <code className="text-sm text-pnp-textPrimary flex-1 break-all">{rtmpInfo.rtmpUrl}</code>
                   <button
@@ -923,9 +942,7 @@ export default function Live() {
               </div>
 
               <div>
-                <label className="text-xs text-pnp-textSecondary uppercase tracking-wider block mb-1">
-                  Stream Key
-                </label>
+                <label className="text-xs text-pnp-textSecondary uppercase tracking-wider block mb-1">Stream Key</label>
                 <div className="flex items-center gap-2 bg-pnp-surface border border-pnp-border rounded-lg px-3 py-2">
                   <code className="text-sm text-pnp-textPrimary flex-1">
                     {showStreamKey ? rtmpInfo.streamKey : "•".repeat(Math.min(rtmpInfo.streamKey.length, 20))}
