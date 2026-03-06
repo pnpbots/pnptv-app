@@ -900,10 +900,10 @@ export default function Booking() {
 
             {/* Nearby places */}
             {showPlaces &&
-              nearbyPlaces.map((p) => (
+              nearbyPlaces.filter((p) => p.location !== null).map((p) => (
                 <Marker
                   key={`place-${p.id}`}
-                  position={[p.location.lat, p.location.lng]}
+                  position={[p.location!.lat, p.location!.lng]}
                   icon={placeIconRef.current}
                   eventHandlers={{
                     click: () => {

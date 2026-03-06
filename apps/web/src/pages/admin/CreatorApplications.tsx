@@ -90,7 +90,7 @@ function CreatorAvatar({ creator }: { creator: ActiveCreator }) {
   const displayName =
     creator.first_name || creator.username || "?";
   const initial = displayName[0].toUpperCase();
-  const photoSrc = resolvePhotoUrl(creator.photo_url);
+  const photoSrc = resolvePhotoUrl(creator.photo_file_id);
 
   if (photoSrc) {
     return (

@@ -149,6 +149,7 @@ async function markAsRead(req, res) {
 }
 
 function formatNotification(row) {
+  const meta = row.metadata || {};
   return {
     id: row.id,
     type: row.type,
@@ -162,6 +163,10 @@ function formatNotification(row) {
     entityId: row.entity_id,
     message: row.message,
     metadata: row.metadata,
+    postId: meta.postId ?? meta.post_id ?? null,
+    groupId: meta.groupId ?? meta.group_id ?? null,
+    groupName: meta.groupName ?? meta.group_name ?? null,
+    content: meta.content ?? null,
     isRead: row.is_read,
     createdAt: row.created_at,
   };

@@ -38,7 +38,9 @@ class SocialPostService {
     const cursorId = cursor ? parseInt(cursor, 10) : null;
     const params = cursorId ? [userId, fetchLimit, cursorId] : [userId, fetchLimit];
     const { rows } = await query(
-      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
+      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.video_thumbnail_url,
+              sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
+              sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
               sp.is_promoted, sp.promoted_link, sp.promoted_link_label, sp.promoted_thumbnail,
               COALESCE(sp.content_tier, 'free') as content_tier,
@@ -74,7 +76,9 @@ class SocialPostService {
     if (!cursorId) {
       const pinnedIds = new Set(page.filter(p => p.is_promoted).map(p => p.id));
       const { rows: promotedRows } = await query(
-        `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
+        `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.video_thumbnail_url,
+                sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
+                sp.reply_to_id, sp.repost_of_id,
                 sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
                 sp.is_promoted, sp.promoted_link, sp.promoted_link_label, sp.promoted_thumbnail,
                 COALESCE(sp.content_tier, 'free') as content_tier,
@@ -161,7 +165,9 @@ class SocialPostService {
   static async getHomeFeed(limit = 10) {
     const lim = Math.min(Number(limit) || 10, 20);
     const { rows } = await query(
-      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
+      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.video_thumbnail_url,
+              sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
+              sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_wof, sp.created_at,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
@@ -191,7 +197,9 @@ class SocialPostService {
     const cursorId = cursor ? parseInt(cursor, 10) : null;
     const params = cursorId ? [userId, lim, cursorId] : [userId, lim];
     const { rows } = await query(
-      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
+      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.video_thumbnail_url,
+              sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
+              sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_shareable, sp.is_wof, sp.created_at,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
@@ -216,7 +224,9 @@ class SocialPostService {
     const params = cursorId ? [viewerId, userId, lim, cursorId] : [viewerId, userId, lim];
     const [postsRes, profileRes] = await Promise.all([
       query(
-        `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
+        `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.video_thumbnail_url,
+                sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
+                sp.reply_to_id, sp.repost_of_id,
                 sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_shareable, sp.is_wof, sp.created_at,
                 u.id as author_id, u.username as author_username,
                 u.first_name as author_first_name, u.photo_file_id as author_photo,
@@ -244,12 +254,13 @@ class SocialPostService {
   // ── Create Post ───────────────────────────────────────────────────────────
 
   static async createPost(userId, content, mediaUrl, mediaType, replyToId, repostOfId, isWof = false, isExclusive = false, isShareable = true, videoThumbnailUrl = null) {
+    const contentTier = isExclusive ? 'PRIME' : 'free';
     const { rows } = await query(
-      `INSERT INTO social_posts (user_id, content, media_url, media_type, reply_to_id, repost_of_id, is_wof, is_exclusive, is_shareable, video_thumbnail_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO social_posts (user_id, content, media_url, media_type, reply_to_id, repost_of_id, is_wof, is_exclusive, is_shareable, video_thumbnail_url, content_tier)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING id, content, media_url, media_type, video_thumbnail_url, reply_to_id, repost_of_id,
-                 likes_count, reposts_count, replies_count, is_wof, is_exclusive, is_shareable, created_at`,
-      [userId, content, mediaUrl, mediaType, replyToId || null, repostOfId || null, isWof, isExclusive, isShareable, videoThumbnailUrl || null]
+                 likes_count, reposts_count, replies_count, is_wof, is_exclusive, is_shareable, content_tier, created_at`,
+      [userId, content, mediaUrl, mediaType, replyToId || null, repostOfId || null, isWof, isExclusive, isShareable, videoThumbnailUrl || null, contentTier]
     );
     const post = rows[0];
 
@@ -390,7 +401,9 @@ class SocialPostService {
 
     const [postsRes, profileRes, postCountRes, performerRes] = await Promise.all([
       query(
-        `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.reply_to_id, sp.repost_of_id,
+        `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.video_thumbnail_url,
+                sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
+                sp.reply_to_id, sp.repost_of_id,
                 sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
                 u.id as author_id, u.username as author_username,
                 u.first_name as author_first_name, u.photo_file_id as author_photo

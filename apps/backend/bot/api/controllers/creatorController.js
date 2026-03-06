@@ -283,7 +283,7 @@ const rejectEnrollment = async (req, res) => {
 const listActiveCreators = async (req, res) => {
   try {
     const { rows } = await query(
-      `SELECT id, username, first_name, last_name, photo_url, creator_type, creator_status,
+      `SELECT id, username, first_name, last_name, photo_file_id, creator_type, creator_status,
               creator_strikes, creator_subscriber_count, creator_price_usd
        FROM users
        WHERE creator_status IN ('active', 'suspended')
