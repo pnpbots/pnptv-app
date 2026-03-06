@@ -426,6 +426,19 @@ app.use(conditionalMiddleware(compression()));
 // Logging (before other middleware for accurate request tracking)
 app.use(morgan('combined', { stream: logger.stream }));
 
+// Track user last_active — throttled to once per hour per user via Redis
+app.use((req, res, next) => {
+  const userId = req.session?.user?.id;
+  if (!userId) return next();
+  const key = `last_active:${userId}`;
+  cache.get(key).then(val => {
+    if (val) return; // already tracked within last hour
+    cache.set(key, '1', 3600).catch(() => {});
+    getPool().query('UPDATE users SET last_active = NOW() WHERE id = $1', [userId]).catch(() => {});
+  }).catch(() => {});
+  next();
+});
+
 // ========== PAYMENT ROUTES (BEFORE static middleware) ==========
 // These must be BEFORE serveStaticWithBlocking to ensure they're processed first
 
