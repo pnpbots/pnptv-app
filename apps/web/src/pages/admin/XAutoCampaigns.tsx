@@ -14,6 +14,7 @@ import {
   triggerAdminXCampaignGenerate,
   getAdminXCampaignHistory,
   getAdminXCampaignMediaFolder,
+  getRandomCampaignVideo,
   startXOAuth,
   chatWithGrokManager,
   resetGrokManagerChat,
@@ -32,24 +33,30 @@ interface GrokChatMessage {
 }
 
 interface GrokAction {
-  action: "create_campaign";
-  name: string;
-  accountHandle: string;
-  topic: string;
-  language: string;
-  activeHoursStart: number;
-  activeHoursEnd: number;
-  intervalMinutes: number;
+  action: "create_campaign" | "add_random_video";
+  name?: string;
+  accountHandle?: string;
+  topic?: string;
+  language?: string;
+  activeHoursStart?: number;
+  activeHoursEnd?: number;
+  intervalMinutes?: number;
   customPrompt?: string;
+  campaignId?: string;
+  reason?: string;
 }
 
 function parseGrokAction(text: string): { cleanText: string; action: GrokAction | null } {
-  const jsonMatch = text.match(/```json\s*([\s\S]*?)```/i) || text.match(/(\{[\s\S]*?"action"\s*:\s*"create_campaign"[\s\S]*?\})/);
+  const jsonMatch = text.match(/```json\s*([\s\S]*?)```/i) || text.match(/(\{[\s\S]*?"action"\s*:\s*"(?:create_campaign|add_random_video)"[\s\S]*?\})/);
   if (!jsonMatch) return { cleanText: text, action: null };
   try {
     const raw = jsonMatch[1] || jsonMatch[0];
     const action = JSON.parse(raw) as GrokAction;
     if (action.action === "create_campaign" && action.name && action.topic) {
+      const cleanText = text.replace(jsonMatch[0], "").trim();
+      return { cleanText, action };
+    }
+    if (action.action === "add_random_video") {
       const cleanText = text.replace(jsonMatch[0], "").trim();
       return { cleanText, action };
     }
@@ -98,6 +105,58 @@ function GrokActionCard({ action, accounts, onApply }: {
   );
 }
 
+function RandomVideoActionCard({ action, onFetch }: {
+  action: GrokAction;
+  onFetch: (campaignId?: string) => void;
+}) {
+  const [mediaUrl, setMediaUrl] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const fetchVideo = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await getRandomCampaignVideo(action.campaignId);
+      setMediaUrl(res.mediaUrl);
+      onFetch(action.campaignId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to fetch video");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 p-3 rounded-lg bg-purple-500/10 border border-purple-500/30">
+      <p className="text-xs font-semibold text-purple-400 mb-1">Random Video</p>
+      {action.reason && (
+        <p className="text-xs text-pnp-textSecondary mb-2">{action.reason}</p>
+      )}
+      {mediaUrl ? (
+        <div className="mb-2">
+          <video
+            src={mediaUrl}
+            controls
+            className="w-full rounded-lg max-h-48 bg-black"
+            preload="metadata"
+          />
+          <p className="text-xs text-pnp-textSecondary mt-1 break-all">{mediaUrl}</p>
+        </div>
+      ) : (
+        <button
+          onClick={fetchVideo}
+          disabled={loading}
+          className="cursor-pointer px-3 py-1.5 text-xs rounded-lg bg-purple-500 text-white hover:bg-purple-500/80 active:scale-95 transition-all font-medium disabled:opacity-40"
+        >
+          {loading ? "Fetching..." : "Get Random Video"}
+        </button>
+      )}
+      {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
+    </div>
+  );
+}
+
 const QUICK_ACTIONS = [
   { label: "Analyze campaigns", prompt: "Analyze my current campaigns. What's working and what should I change?" },
   { label: "Demographics insights", prompt: "Based on the demographics, what's the best content strategy to convert free users to paid?" },
@@ -105,6 +164,7 @@ const QUICK_ACTIONS = [
   { label: "Create strategy", prompt: "Create a full 3-campaign strategy to grow subscribers in LATAM and Asia Pacific. Give me the campaign configs." },
   { label: "Fix failing posts", prompt: "Why are my posts failing? What do you recommend to fix it?" },
   { label: "Improve prompts", prompt: "Review my campaign custom prompts and rewrite them for better X algorithm performance." },
+  { label: "Add random video", prompt: "I want to add a random video from our media library to boost engagement. Suggest adding one and explain why video content performs better on X." },
 ];
 
 type CampaignStatus = "all" | "active" | "paused" | "completed";
@@ -898,11 +958,18 @@ export default function XAutoCampaigns() {
                       {msg.content}
                     </div>
                     {/* Action card — Grok proposed a campaign */}
-                    {msg.action && (
+                    {msg.action && msg.action.action === "create_campaign" && (
                       <GrokActionCard
                         action={msg.action}
                         accounts={accounts}
                         onApply={applyGrokCampaign}
+                      />
+                    )}
+                    {/* Action card — Grok proposed adding a random video */}
+                    {msg.action && msg.action.action === "add_random_video" && (
+                      <RandomVideoActionCard
+                        action={msg.action}
+                        onFetch={() => {}}
                       />
                     )}
                   </div>

@@ -21,3 +21,5 @@ CREATE TABLE IF NOT EXISTS referrals (
 CREATE INDEX IF NOT EXISTS idx_referrals_referrer  ON referrals(referrer_id);
 CREATE INDEX IF NOT EXISTS idx_referrals_code      ON referrals(code);
 CREATE INDEX IF NOT EXISTS idx_referrals_referee   ON referrals(referee_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_referrals_code_referee ON referrals(code, referee_id);

@@ -1,6 +1,6 @@
 'use strict';
 
-const { query } = require('../config/postgres');
+const { query, pool } = require('../config/postgres');
 const crypto = require('crypto');
 
 function generateCode(userId) {
@@ -40,39 +40,51 @@ async function redeemReferral(code, refereeId) {
   const referrerId = refRows[0].id;
   if (referrerId === refereeId) throw new Error('Cannot use your own referral code');
 
-  // Idempotency
-  const { rows: existing } = await query(
-    'SELECT 1 FROM referrals WHERE code=$1 AND referee_id=$2',
-    [code.toUpperCase(), refereeId]
-  );
-  if (existing.length) return { alreadyRedeemed: true };
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  await query(
-    `INSERT INTO referrals (code, referrer_id, referee_id, status, completed_at)
-     VALUES ($1, $2, $3, 'completed', NOW())`,
-    [code.toUpperCase(), referrerId, refereeId]
-  );
+    const { rows: inserted } = await client.query(
+      `INSERT INTO referrals (code, referrer_id, referee_id, status, completed_at)
+       VALUES ($1, $2, $3, 'completed', NOW())
+       ON CONFLICT (code, referee_id) DO NOTHING
+       RETURNING id`,
+      [code.toUpperCase(), referrerId, refereeId]
+    );
 
-  const expiryReferee = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-  // Give referee 3 days PRIME (only if not already paying)
-  await query(
-    `UPDATE users
-     SET tier='PRIME', plan_id='prime-referral-3d', plan_expiry=$1, subscription_type='referral'
-     WHERE id=$2 AND tier IN ('free','member')`,
-    [expiryReferee.toISOString(), refereeId]
-  );
+    if (!inserted.length) {
+      await client.query('ROLLBACK');
+      return { alreadyRedeemed: true };
+    }
 
-  // Give referrer +3 days PRIME
-  await query(
-    `UPDATE users
-     SET tier='PRIME',
-         plan_id=COALESCE(NULLIF(plan_id,''), 'prime-referral-3d'),
-         plan_expiry=GREATEST(COALESCE(plan_expiry, NOW()), NOW()) + INTERVAL '3 days'
-     WHERE id=$1`,
-    [referrerId]
-  );
+    const expiryReferee = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
 
-  return { success: true, referrerId, rewardDays: 3 };
+    // Give referee 3 days PRIME (only if not already paying)
+    await client.query(
+      `UPDATE users
+       SET tier='PRIME', plan_id='prime_referral_3d', plan_expiry=$1, subscription_type='referral'
+       WHERE id=$2 AND tier IN ('free','member')`,
+      [expiryReferee.toISOString(), refereeId]
+    );
+
+    // Give referrer +3 days PRIME
+    await client.query(
+      `UPDATE users
+       SET tier='PRIME',
+           plan_id=COALESCE(NULLIF(plan_id,''), 'prime_referral_3d'),
+           plan_expiry=GREATEST(COALESCE(plan_expiry, NOW()), NOW()) + INTERVAL '3 days'
+       WHERE id=$1`,
+      [referrerId]
+    );
+
+    await client.query('COMMIT');
+    return { success: true, referrerId, rewardDays: 3 };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 module.exports = { getOrCreateRefCode, getReferralStats, redeemReferral };

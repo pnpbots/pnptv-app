@@ -207,6 +207,21 @@ const getMediaFolder = async (req, res) => {
   }
 };
 
+const getRandomVideo = async (req, res) => {
+  try {
+    const folderId = await XAutoCampaignService.ensureMediaFolder();
+    const campaignId = req.query.campaignId || null;
+    const mediaUrl = await XAutoCampaignService._getRandomMediaUrl(folderId, campaignId);
+    if (!mediaUrl) {
+      return res.status(404).json({ error: 'No videos found in media folder' });
+    }
+    return res.json({ success: true, mediaUrl });
+  } catch (error) {
+    logger.error('Error getting random video:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   getStats,
   listCampaigns,
@@ -218,4 +233,5 @@ module.exports = {
   getCampaignHistory,
   triggerGenerate,
   getMediaFolder,
+  getRandomVideo,
 };

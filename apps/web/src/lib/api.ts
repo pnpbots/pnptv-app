@@ -2386,6 +2386,11 @@ export function getAdminXCampaignMediaFolder(): Promise<{ success: boolean; fold
   return request("/api/webapp/admin/x-campaigns/media-folder");
 }
 
+export function getRandomCampaignVideo(campaignId?: string): Promise<{ success: boolean; mediaUrl: string }> {
+  const qs = campaignId ? `?campaignId=${campaignId}` : "";
+  return request(`/api/webapp/admin/x-campaigns/random-video${qs}`);
+}
+
 export function startXOAuth(adminId?: number, adminUsername?: string): Promise<{ success: boolean; url: string }> {
   const params = new URLSearchParams();
   if (adminId) params.set("admin_id", String(adminId));

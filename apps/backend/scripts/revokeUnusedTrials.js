@@ -34,15 +34,16 @@ async function run() {
     SELECT u.id, u.username, u.first_name, u.plan_expiry
     FROM users u
     LEFT JOIN (
-      SELECT author_id, COUNT(*) AS post_count
-      FROM posts
-      GROUP BY author_id
-    ) p ON p.author_id = u.id
+      SELECT user_id, COUNT(*) AS post_count
+      FROM social_posts
+      GROUP BY user_id
+    ) p ON p.user_id = u.id
     WHERE u.tier = 'PRIME'
       AND u.plan_id = 'prime-trial-3d'
       AND u.is_active = true
       AND COALESCE(p.post_count, 0) = 0
-      AND (u.bio IS NULL OR u.bio = '' OR u.photo_file_id IS NULL OR u.photo_file_id = '')
+      AND (u.bio IS NULL OR u.bio = '')
+      AND (u.photo_file_id IS NULL OR u.photo_file_id = '')
   `);
 
   console.log(`[RevokeTrials] Found ${targets.length} users to revoke`);

@@ -251,7 +251,7 @@ function PlaceDetailSheet({ place, onClose }: PlaceDetailSheetProps) {
 
           {/* Action buttons */}
           <div className="flex gap-2">
-            {place.website && (
+            {place.website && /^https?:\/\//i.test(place.website) && (
               <a
                 href={place.website}
                 target="_blank"
@@ -460,6 +460,11 @@ function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: numbe
 
   const submit = async () => {
     if (!form.name.trim()) { setErr("Name is required"); return; }
+    if (form.lat !== undefined && form.lng !== undefined) {
+      if (form.lat < -90 || form.lat > 90 || form.lng < -180 || form.lng > 180) {
+        setErr("Invalid coordinates"); return;
+      }
+    }
     setLoading(true); setErr(null);
     try {
       await submitNearbyPlace(form);

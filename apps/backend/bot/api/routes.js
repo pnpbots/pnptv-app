@@ -38,6 +38,7 @@ const { verifyAdminJWT } = require('./middleware/jwtAuth');
 const { asyncHandler } = require('./middleware/errorHandler');
 const { authenticateUser } = require('./middleware/auth');
 const PermissionService = require('../services/permissionService');
+const referralService = require('../services/referralService');
 
 // Authentication middleware and handlers
 const { telegramAuth, checkTermsAccepted } = require('../../api/middleware/telegramAuth');
@@ -2585,6 +2586,7 @@ app.post('/api/webapp/admin/canva/jobs/:id/cancel', adminGuard, asyncHandler(can
 const xAutoCampaignAdminController = require('./controllers/xAutoCampaignAdminController');
 app.get('/api/webapp/admin/x-campaigns/stats', adminGuard, asyncHandler(xAutoCampaignAdminController.getStats));
 app.get('/api/webapp/admin/x-campaigns/media-folder', adminGuard, asyncHandler(xAutoCampaignAdminController.getMediaFolder));
+app.get('/api/webapp/admin/x-campaigns/random-video', adminGuard, asyncHandler(xAutoCampaignAdminController.getRandomVideo));
 app.get('/api/webapp/admin/x-campaigns', adminGuard, asyncHandler(xAutoCampaignAdminController.listCampaigns));
 app.post('/api/webapp/admin/x-campaigns', adminGuard, asyncHandler(xAutoCampaignAdminController.createCampaign));
 app.put('/api/webapp/admin/x-campaigns/:id', adminGuard, asyncHandler(xAutoCampaignAdminController.updateCampaign));
@@ -3042,6 +3044,7 @@ app.get('/api/webapp/nearby/places/fallback', asyncHandler(async (req, res) => {
   const lat = parseFloat(req.query.lat);
   const lng = parseFloat(req.query.lng);
   if (isNaN(lat) || isNaN(lng)) return res.status(400).json({ error: 'lat/lng required' });
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return res.status(400).json({ error: 'Invalid coordinates' });
   const { rows } = await query(`
     SELECT id, name, description, address, city, country, place_type,
            location_lat, location_lng, category_id,
@@ -3070,8 +3073,15 @@ app.post('/api/webapp/nearby/places/submit', asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
   const { name, description, address, city, country, categoryId, placeType, lat, lng, phone, website, instagram } = req.body;
+  const submitKey = `ratelimit:place_submit:${user.id}`;
+  const submitCount = await redisClient.incr(submitKey);
+  if (submitCount === 1) await redisClient.expire(submitKey, 3600);
+  if (submitCount > 5) return res.status(429).json({ error: 'Too many submissions. Try again later.' });
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
   if (!placeType) return res.status(400).json({ error: 'Place type is required' });
+  const VALID_PLACE_TYPES = ['establishment', 'cruising', 'sauna', 'bar', 'community', 'hotel', 'help_center', 'wellness', 'club', 'bath_house'];
+  if (!VALID_PLACE_TYPES.includes(placeType)) return res.status(400).json({ error: 'Invalid place type' });
+  if (website && !/^https?:\/\//i.test(website.trim())) return res.status(400).json({ error: 'Website must start with http:// or https://' });
   await query(`
     INSERT INTO nearby_place_submissions
       (submitted_by_user_id, name, description, address, city, country,
@@ -3091,7 +3101,6 @@ app.post('/api/webapp/nearby/places/submit', asyncHandler(async (req, res) => {
 app.get('/api/webapp/me/referral', asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
-  const referralService = require('../services/referralService');
   const stats = await referralService.getReferralStats(user.id);
   return res.json({ ...stats, link: `https://pnptv.app/join?ref=${stats.code}` });
 }));
@@ -3102,13 +3111,19 @@ app.post('/api/webapp/referral/redeem', asyncHandler(async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
   const { code } = req.body;
   if (!code) return res.status(400).json({ error: 'Code required' });
-  const referralService = require('../services/referralService');
+  const redeemKey = `ratelimit:referral_redeem:${user.id}`;
+  const redeemCount = await redisClient.incr(redeemKey);
+  if (redeemCount === 1) await redisClient.expire(redeemKey, 3600);
+  if (redeemCount > 3) return res.status(429).json({ error: 'Too many attempts. Try again later.' });
   const result = await referralService.redeemReferral(code, user.id);
   return res.json(result);
 }));
 
 // Admin: trigger Cristina neighbor DM campaign
 app.post('/api/webapp/admin/cristina/neighbor-dm', adminGuard, asyncHandler(async (req, res) => {
+  const lockKey = 'admin:script:lock:cristina-neighbor-dm';
+  const locked = await redisClient.set(lockKey, '1', 'EX', 300, 'NX');
+  if (!locked) return res.status(409).json({ error: 'Script already running. Try again later.' });
   const { exec } = require('child_process');
   const scriptPath = require('path').join(__dirname, '../../../scripts/cristinaNeighborDM.js');
   exec(`node ${scriptPath}`, (err, stdout, stderr) => {
@@ -3119,6 +3134,9 @@ app.post('/api/webapp/admin/cristina/neighbor-dm', adminGuard, asyncHandler(asyn
 
 // Admin: revoke unused free trials
 app.post('/api/webapp/admin/trials/revoke-unused', adminGuard, asyncHandler(async (req, res) => {
+  const lockKey = 'admin:script:lock:revoke-trials';
+  const locked = await redisClient.set(lockKey, '1', 'EX', 300, 'NX');
+  if (!locked) return res.status(409).json({ error: 'Script already running. Try again later.' });
   const dryRun = req.query.dry_run === '1';
   const { exec } = require('child_process');
   const scriptPath = require('path').join(__dirname, '../../../scripts/revokeUnusedTrials.js');

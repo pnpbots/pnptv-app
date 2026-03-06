@@ -15,17 +15,17 @@ async function sendSystemDM(senderId, recipientId, content, pgQuery) {
   );
 
   const [a, b] = [senderId, recipientId].sort();
-  const senderIsA = senderId === a;
-  const unreadCol = senderIsA ? 'unread_for_b' : 'unread_for_a';
+  const incrementB = senderId === a;
 
   await pgQuery(
-    `INSERT INTO dm_threads (user_a, user_b, last_message, last_message_at, ${unreadCol})
-     VALUES ($1, $2, $3, NOW(), 1)
+    `INSERT INTO dm_threads (user_a, user_b, last_message, last_message_at, unread_for_a, unread_for_b)
+     VALUES ($1, $2, $3, NOW(), CASE WHEN $4 THEN 0 ELSE 1 END, CASE WHEN $4 THEN 1 ELSE 0 END)
      ON CONFLICT (user_a, user_b) DO UPDATE SET
-       last_message     = EXCLUDED.last_message,
-       last_message_at  = NOW(),
-       ${unreadCol}     = dm_threads.${unreadCol} + 1`,
-    [a, b, text.slice(0, 100)]
+       last_message    = EXCLUDED.last_message,
+       last_message_at = NOW(),
+       unread_for_a    = dm_threads.unread_for_a + CASE WHEN $4 THEN 0 ELSE 1 END,
+       unread_for_b    = dm_threads.unread_for_b + CASE WHEN $4 THEN 1 ELSE 0 END`,
+    [a, b, text.slice(0, 100), incrementB]
   );
 }
 
