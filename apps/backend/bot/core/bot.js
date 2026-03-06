@@ -658,7 +658,7 @@ const startBot = async () => {
     // registerCallManagementHandlers(bot);
     registerRoleManagementHandlers(bot);
     // registerPerformerManagementHandlers(bot);
-    // registerWallOfFameHandlers(bot);
+    registerWallOfFameHandlers(bot);
     // registerPrivateCallHandlers(bot);
     // registerPrivateCallsProntoHandlers(bot);
     // registerPaymentHistoryHandlers(bot);

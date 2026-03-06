@@ -15,6 +15,8 @@ import {
   togglePostLike,
   deleteSocialPost,
   requestWofDeletion,
+  adminFlagWofPost,
+  adminUnflagWofPost,
   getReplies,
   createReply,
   checkAuthStatus,
@@ -98,6 +100,7 @@ function PostCard({
   userLang,
   onLike,
   onDelete,
+  onWofToggle,
   onNavigate,
 }: {
   post: SocialPostItem;
@@ -106,6 +109,7 @@ function PostCard({
   userLang: string;
   onLike: (id: number) => void;
   onDelete: (id: number) => void;
+  onWofToggle?: (id: number, nowWof: boolean) => void;
   onNavigate: (path: string) => void;
 }) {
   const t = useFeedI18n(userLang);
@@ -118,10 +122,29 @@ function PostCard({
   const [localReplyCount, setLocalReplyCount] = useState(post.replies_count || 0);
   const [wofDeleting, setWofDeleting] = useState(false);
   const [wofDeleted, setWofDeleted] = useState(false);
+  const [isWof, setIsWof] = useState(post.is_wof ?? false);
+  const [wofToggling, setWofToggling] = useState(false);
   const [translatedContent, setTranslatedContent] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
   const isOwn = String(post.author_id) === currentUserId;
   const canDelete = isOwn || isAdmin;
+
+  const handleWofToggle = useCallback(async () => {
+    if (wofToggling) return;
+    setWofToggling(true);
+    try {
+      if (isWof) {
+        await adminUnflagWofPost(post.id);
+        setIsWof(false);
+        onWofToggle?.(post.id, false);
+      } else {
+        await adminFlagWofPost(post.id);
+        setIsWof(true);
+        onWofToggle?.(post.id, true);
+      }
+    } catch { /* silent */ }
+    setWofToggling(false);
+  }, [post.id, isWof, wofToggling, onWofToggle]);
 
   const loadReplies = useCallback(async () => {
     if (loadingReplies) return;
@@ -275,6 +298,22 @@ function PostCard({
               <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="#5ED1C4" aria-label="Verified creator">
                 <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
               </svg>
+            )}
+
+            {/* Admin: WoF flag toggle */}
+            {isAdmin && (
+              <button
+                onClick={handleWofToggle}
+                disabled={wofToggling}
+                className="text-xs transition-colors disabled:opacity-40"
+                style={{ color: isWof ? "#FFB454" : "#8E8E93" }}
+                title={isWof ? "Remove from Wall of Fame" : "Add to Wall of Fame"}
+                aria-label={isWof ? "Remove from Wall of Fame" : "Add to Wall of Fame"}
+              >
+                <svg className="w-4 h-4" fill={isWof ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
+                </svg>
+              </button>
             )}
 
             {/* Delete (own posts or admin) */}
@@ -761,6 +800,17 @@ export default function Social() {
     } catch { /* silent */ }
   }, []);
 
+  const handleWofToggle = useCallback((postId: number, nowWof: boolean) => {
+    // Update is_wof flag across all feed slices
+    const updater = (prev: SocialPostItem[]) =>
+      prev.map((p) => p.id === postId ? { ...p, is_wof: nowWof } : p);
+    setPosts(updater);
+    setWofPosts(nowWof
+      ? (prev) => prev // already there if it was in WoF tab
+      : (prev) => prev.filter((p) => p.id !== postId)); // remove if unflagged
+    setFollowingPosts(updater);
+  }, []);
+
   // Post composer
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1226,6 +1276,7 @@ export default function Social() {
               userLang={user?.language || "en"}
               onLike={handleLike}
               onDelete={handleDelete}
+              onWofToggle={handleWofToggle}
               onNavigate={navigate}
             />
           ))}
@@ -1291,6 +1342,7 @@ export default function Social() {
               userLang={user?.language || "en"}
               onLike={handleLike}
               onDelete={handleDelete}
+              onWofToggle={handleWofToggle}
               onNavigate={navigate}
             />
           ))}
@@ -1359,6 +1411,7 @@ export default function Social() {
               userLang={user?.language || "en"}
               onLike={handleLike}
               onDelete={handleDelete}
+              onWofToggle={handleWofToggle}
               onNavigate={navigate}
             />
           ))}

@@ -730,6 +730,18 @@ export function requestWofDeletion(postId: number): Promise<{ success: boolean }
   return request(`/api/webapp/social/posts/${postId}/request-deletion`, { method: "POST" });
 }
 
+export function adminFlagWofPost(postId: number): Promise<{ success: boolean }> {
+  return request(`/api/admin/social/posts/${postId}/wof`, { method: "POST" });
+}
+
+export function adminUnflagWofPost(postId: number): Promise<{ success: boolean }> {
+  return request(`/api/admin/social/posts/${postId}/wof`, { method: "DELETE" });
+}
+
+export function getWofStats(): Promise<{ total_posts: number; total_likes: number; unique_contributors: number }> {
+  return request("/api/webapp/social/wof/stats");
+}
+
 export function getReplies(
   postId: number,
   cursor?: string
