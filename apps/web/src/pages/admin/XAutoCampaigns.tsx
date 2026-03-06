@@ -57,6 +57,47 @@ function parseGrokAction(text: string): { cleanText: string; action: GrokAction 
   return { cleanText: text, action: null };
 }
 
+function GrokActionCard({ action, accounts, onApply }: {
+  action: GrokAction;
+  accounts: XActiveAccount[];
+  onApply: (action: GrokAction) => void;
+}) {
+  const defaultAccount = accounts.find((a) => a.handle.toLowerCase() === action.accountHandle?.toLowerCase()) || accounts[0];
+  const [selectedHandle, setSelectedHandle] = React.useState(defaultAccount?.handle || "");
+
+  return (
+    <div className="mt-2 p-3 rounded-lg bg-pnp-accent/10 border border-pnp-accent/30">
+      <p className="text-xs font-semibold text-pnp-accent mb-1">Campaign proposal</p>
+      <p className="text-xs text-pnp-textPrimary mb-0.5"><strong>Name:</strong> {action.name}</p>
+      <p className="text-xs text-pnp-textSecondary mb-0.5">{action.language} | every {action.intervalMinutes}min | UTC {action.activeHoursStart}–{action.activeHoursEnd}</p>
+      <p className="text-xs text-pnp-textSecondary mb-2 line-clamp-2">{action.topic}</p>
+      {accounts.length > 1 ? (
+        <select
+          value={selectedHandle}
+          onChange={(e) => setSelectedHandle(e.target.value)}
+          className="w-full mb-2 px-2 py-1 text-xs rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
+        >
+          {accounts.map((a) => (
+            <option key={a.account_id} value={a.handle}>@{a.handle}</option>
+          ))}
+        </select>
+      ) : (
+        <p className="text-xs text-pnp-textSecondary mb-2">Account: @{selectedHandle || action.accountHandle}</p>
+      )}
+      <button
+        onClick={() => onApply({ ...action, accountHandle: selectedHandle || accounts[0]?.handle || action.accountHandle })}
+        disabled={accounts.length === 0}
+        className="cursor-pointer px-3 py-1.5 text-xs rounded-lg bg-pnp-accent text-white hover:bg-pnp-accent/80 active:scale-95 transition-all font-medium disabled:opacity-40"
+      >
+        ✓ Apply — Create Campaign
+      </button>
+      {accounts.length === 0 && (
+        <p className="text-xs text-red-400 mt-1">Connect an X account first.</p>
+      )}
+    </div>
+  );
+}
+
 const QUICK_ACTIONS = [
   { label: "Analyze campaigns", prompt: "Analyze my current campaigns. What's working and what should I change?" },
   { label: "Demographics insights", prompt: "Based on the demographics, what's the best content strategy to convert free users to paid?" },
@@ -858,18 +899,11 @@ export default function XAutoCampaigns() {
                     </div>
                     {/* Action card — Grok proposed a campaign */}
                     {msg.action && (
-                      <div className="mt-2 p-3 rounded-lg bg-pnp-accent/10 border border-pnp-accent/30">
-                        <p className="text-xs font-semibold text-pnp-accent mb-1">Campaign proposal</p>
-                        <p className="text-xs text-pnp-textPrimary mb-0.5"><strong>Name:</strong> {msg.action.name}</p>
-                        <p className="text-xs text-pnp-textSecondary mb-0.5">Account: @{msg.action.accountHandle} | {msg.action.language} | every {msg.action.intervalMinutes}min | UTC {msg.action.activeHoursStart}–{msg.action.activeHoursEnd}</p>
-                        <p className="text-xs text-pnp-textSecondary mb-2 line-clamp-2">{msg.action.topic}</p>
-                        <button
-                          onClick={() => applyGrokCampaign(msg.action!)}
-                          className="px-3 py-1 text-xs rounded-lg bg-pnp-accent text-white hover:bg-pnp-accent/80 transition-colors font-medium"
-                        >
-                          Apply — Create Campaign
-                        </button>
-                      </div>
+                      <GrokActionCard
+                        action={msg.action}
+                        accounts={accounts}
+                        onApply={applyGrokCampaign}
+                      />
                     )}
                   </div>
                 </div>

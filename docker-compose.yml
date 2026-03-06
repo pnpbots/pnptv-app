@@ -514,9 +514,9 @@ services:
       NBXPLORER_NETWORK: mainnet
       NBXPLORER_CHAINS: "DASH"
       NBXPLORER_BIND: 0.0.0.0:24444
-      NBXPLORER_DASH_RPC_URL: ${DASH_RPC_URL:-http://dashd:9998/}
-      NBXPLORER_DASH_RPC_AUTH: ${DASH_RPC_AUTH:-dashuser:dashpassword}
-      NBXPLORER_DASH_NODE_ENDPOINT: dashd:9999
+      NBXPLORER_DASHNODEENDPOINT: dashd:9999
+      NBXPLORER_DASHNODERPCURL: http://dashd:9998/
+      NBXPLORER_DASHNODERPCAUTH: dashuser:dashpassword
       NBXPLORER_POSTGRES: "Host=pg-btcpay;Database=nbxplorer;Username=btcpay;Password=${BTCPAY_POSTGRES_PASSWORD}"
     networks:
       - pnptvapp_net
