@@ -42,6 +42,7 @@ interface GrokAction {
   activeHoursEnd?: number;
   intervalMinutes?: number;
   customPrompt?: string;
+  attachVideos?: boolean;
   campaignId?: string;
   reason?: string;
 }
@@ -77,7 +78,10 @@ function GrokActionCard({ action, accounts, onApply }: {
       <p className="text-xs font-semibold text-pnp-accent mb-1">Campaign proposal</p>
       <p className="text-xs text-pnp-textPrimary mb-0.5"><strong>Name:</strong> {action.name}</p>
       <p className="text-xs text-pnp-textSecondary mb-0.5">{action.language} | every {action.intervalMinutes}min | UTC {action.activeHoursStart}–{action.activeHoursEnd}</p>
-      <p className="text-xs text-pnp-textSecondary mb-2 line-clamp-2">{action.topic}</p>
+      <p className="text-xs text-pnp-textSecondary mb-0.5 line-clamp-2">{action.topic}</p>
+      {action.attachVideos && (
+        <p className="text-xs text-purple-400 mb-2">&#9654; Attach random video from CMS</p>
+      )}
       {accounts.length > 1 ? (
         <select
           value={selectedHandle}
@@ -468,6 +472,7 @@ export default function XAutoCampaigns() {
         intervalMinutes: action.intervalMinutes || 480,
         activeHoursStart: action.activeHoursStart ?? 14,
         activeHoursEnd: action.activeHoursEnd ?? 23,
+        mediaFolderId: action.attachVideos && mediaFolderId ? mediaFolderId : undefined,
       });
       setSuccess(`Campaign "${action.name}" created (paused)`);
       loadStats();

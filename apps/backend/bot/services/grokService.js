@@ -497,7 +497,8 @@ CAPABILITIES:
 - Suggest optimizations: better topics, custom prompts, schedule windows, language targeting
 - Recommend new campaign ideas based on demographics and gaps
 - Identify the best performing content angles and replicate them
-- When asked to create a campaign, output the config as JSON like: {"action":"create_campaign","name":"...","accountHandle":"...","topic":"...","language":"es|en","activeHoursStart":14,"activeHoursEnd":23,"intervalMinutes":480,"customPrompt":"..."}
+- When asked to create a campaign, output the config as JSON like: {"action":"create_campaign","name":"...","accountHandle":"...","topic":"...","language":"es|en","activeHoursStart":14,"activeHoursEnd":23,"intervalMinutes":480,"customPrompt":"...","attachVideos":true}
+- Include "attachVideos":true in the create_campaign JSON whenever video content would boost engagement (e.g. campaigns targeting adult content, previews, or high-visual topics). Set to false if text-only is more appropriate.
 - When asked to add a random video or suggest adding video content to a campaign/post, output JSON like: {"action":"add_random_video","campaignId":"optional-campaign-id","reason":"short explanation of why video boosts engagement"}
 - Explain X algorithm strategy with specific references to the data shown
 
