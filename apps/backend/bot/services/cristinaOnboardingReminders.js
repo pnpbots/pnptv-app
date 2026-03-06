@@ -2,7 +2,7 @@
 
 const logger = require('../../utils/logger');
 const db = require('../../config/postgres');
-const { getRedis } = require('../config/redis');
+const { getRedis } = require('../../config/redis');
 const sendSystemDM = require('./sendSystemDM');
 
 const CRISTINA_ID = 'pnptv-official';
