@@ -55,17 +55,19 @@ class PushNotificationService {
 
   /**
    * Build the web-push payload object.
-   * @param {{ title: string, body: string, url?: string, icon?: string }} opts
+   * @param {{ title: string, body: string, url?: string, icon?: string, tag?: string }} opts
    * @returns {string} JSON string
    */
-  static _buildPayload({ title, body, url, icon }) {
-    return JSON.stringify({
+  static _buildPayload({ title, body, url, icon, tag }) {
+    const payload = {
       title: title || 'PNPtv!',
       body: body || '',
       url: url || '/',
       icon: icon || '/icons/icon-192x192.png',
       badge: '/icons/badge-96x96.png',
-    });
+    };
+    if (tag) payload.tag = tag;
+    return JSON.stringify(payload);
   }
 
   /**

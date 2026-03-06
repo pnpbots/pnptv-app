@@ -4,8 +4,11 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'PNPtv!';
   const options = {
     body: data.body || '',
-    icon: '/Logo2-50.png',
+    icon: data.icon || '/Logo2-50.png',
     badge: '/Logo2-50.png',
+    tag: data.tag || undefined,
+    renotify: !!data.tag,
+    vibrate: [200, 100, 200],
     data: { url: data.url || '/' },
   };
   event.waitUntil(self.registration.showNotification(title, options));

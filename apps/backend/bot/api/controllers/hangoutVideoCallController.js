@@ -21,6 +21,8 @@
 const { query, getClient } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const jaasService = require('../../services/jaasService');
+const PushNotificationService = require('../../services/pushNotificationService');
+const NotificationEmitter = require('../../services/notificationEmitter');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -140,6 +142,45 @@ function emitToHangout(req, groupId, event, payload) {
   if (io) {
     // Hangout group chats join room "hangout:<groupId>" via chat:join
     io.to(`hangout:${groupId}`).emit(event, payload);
+  }
+}
+
+/**
+ * Send push + in-app notifications to all group members except the actor.
+ * @param {'hangout_call'|'hangout_creator_joined'} type
+ */
+async function notifyGroupMembers({ type, groupId, groupName, actor, callId, message }) {
+  try {
+    const { rows: members } = await query(
+      'SELECT user_id FROM hangout_group_members WHERE group_id = $1 AND user_id != $2',
+      [groupId, actor.id]
+    );
+    if (members.length === 0) return;
+
+    const memberIds = members.map(m => m.user_id);
+    const url = `/hangouts?group=${groupId}`;
+
+    // Web Push (fire-and-forget)
+    PushNotificationService.sendToUsers(memberIds, {
+      title: groupName || 'Hangouts',
+      body: message,
+      url,
+      tag: `hangout-${type}-${callId}`,
+    }).catch(() => {});
+
+    // In-app notifications via NotificationEmitter
+    NotificationEmitter.emitToMany(memberIds, {
+      type,
+      category: 'hangouts',
+      priority: type === 'hangout_creator_joined' ? 'high' : 'normal',
+      actorId: actor.id,
+      entityType: 'hangout_call',
+      entityId: String(callId),
+      message,
+      metadata: { groupId, groupName },
+    }).catch(() => {});
+  } catch (err) {
+    logger.error('notifyGroupMembers error', { type, groupId, error: err.message });
   }
 }
 
@@ -264,6 +305,39 @@ const startCall = async (req, res) => {
       creatorId: user.id,
       roomName,
     });
+
+    // Push + in-app notifications for non-persistent groups
+    if (!isPersistent) {
+      const { rows: gRows } = await query('SELECT name FROM hangout_groups WHERE id = $1', [groupId]);
+      const gName = gRows[0]?.name || 'Hangout';
+      const displayName = user.firstName || user.first_name || user.username || 'Someone';
+
+      // Notify: new call started
+      notifyGroupMembers({
+        type: 'hangout_call',
+        groupId,
+        groupName: gName,
+        actor: user,
+        callId: newCall.id,
+        message: `${displayName} started a video call in ${gName}`,
+      });
+
+      // If the caller is a creator, also send creator-joined notification
+      const { rows: callerRows } = await query(
+        "SELECT creator_status FROM users WHERE id = $1",
+        [user.id]
+      );
+      if (callerRows[0]?.creator_status === 'active') {
+        notifyGroupMembers({
+          type: 'hangout_creator_joined',
+          groupId,
+          groupName: gName,
+          actor: user,
+          callId: newCall.id,
+          message: `${displayName} (creator) started a video call in ${gName}`,
+        });
+      }
+    }
 
     return res.status(201).json({
       success: true,
@@ -520,6 +594,25 @@ const joinCall = async (req, res) => {
       groupId,
       userId: user.id,
     });
+
+    // If the joining user is a creator, push-notify group members
+    const { rows: userRows } = await query(
+      "SELECT creator_status FROM users WHERE id = $1",
+      [user.id]
+    );
+    if (userRows[0]?.creator_status === 'active') {
+      const { rows: gRows } = await query('SELECT name FROM hangout_groups WHERE id = $1', [groupId]);
+      const gName = gRows[0]?.name || 'Hangout';
+      const displayName = user.firstName || user.first_name || user.username || 'A creator';
+      notifyGroupMembers({
+        type: 'hangout_creator_joined',
+        groupId,
+        groupName: gName,
+        actor: user,
+        callId: call.id,
+        message: `${displayName} (creator) joined the call in ${gName}`,
+      });
+    }
 
     return res.json({
       success: true,

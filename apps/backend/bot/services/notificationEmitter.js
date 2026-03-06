@@ -15,6 +15,8 @@ const TYPE_TO_PREF = {
   announcement: 'announcements',
   system: 'announcements',
   follow: 'follows',
+  hangout_call: 'hangout_calls',
+  hangout_creator_joined: 'hangout_calls',
 };
 
 let _io = null;
