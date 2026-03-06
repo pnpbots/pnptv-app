@@ -894,9 +894,12 @@ const postMediaUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const isAllowed = /^(image\/(jpeg|jpg|png|webp|gif|heic|heif|avif|tiff|bmp)|video\/(mp4|webm|quicktime|3gpp|hevc))$/i.test(file.mimetype || '');
+    // Accept known media types + application/octet-stream (iOS often sends this for HEIC/MOV).
+    // Real validation happens via magic bytes in the controller.
+    const isAllowed = /^(application\/octet-stream|image\/(jpeg|jpg|png|webp|gif|heic|heif|avif|tiff|bmp|x-ms-bmp)|video\/(mp4|webm|quicktime|3gpp|hevc|x-m4v))$/i.test(file.mimetype || '');
     if (isAllowed) return cb(null, true);
-    cb(new Error('Only image (jpg/png/webp/gif/heic/hevc/avif/tiff/bmp) and video (mp4/webm/mov/3gp/hevc) files are allowed'));
+    logger.warn('postMediaUpload rejected mime', { mime: file.mimetype, originalname: file.originalname, ip: req.ip });
+    cb(new Error('Unsupported file type. Supported: images (jpg/png/webp/gif/heic/avif) and videos (mp4/webm/mov)'));
   }
 });
 
@@ -4078,13 +4081,34 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       return res.status(400).json({ success: false, error: 'Invalid JSON' });
     }
 
-    // Only process successful invoice settlements
+    const invoiceId = event.invoiceId;
+    if (!invoiceId) return res.status(400).json({ success: false, error: 'Missing invoiceId' });
+
+    // Handle terminal failure states — mark stale pending rows so they stop accumulating
+    if (event.type === 'InvoiceExpired' || event.type === 'InvoiceInvalid') {
+      const terminalStatus = event.type === 'InvoiceExpired' ? 'expired' : 'invalid';
+      const { query: dbQuery } = require('../../config/postgres');
+
+      const [subUpd, purchUpd] = await Promise.all([
+        dbQuery(
+          `UPDATE dash_subscription_orders SET status = $2 WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
+          [invoiceId, terminalStatus]
+        ),
+        dbQuery(
+          `UPDATE token_purchases SET status = $2 WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
+          [invoiceId, terminalStatus]
+        ),
+      ]);
+
+      const affected = (subUpd.rowCount || 0) + (purchUpd.rowCount || 0);
+      logger.info(`BTCPay webhook: ${event.type}`, { invoiceId, rowsUpdated: affected });
+      return res.json({ success: true, type: terminalStatus, rowsUpdated: affected });
+    }
+
+    // Only process successful invoice settlements beyond this point
     if (event.type !== 'InvoiceSettled') {
       return res.json({ success: true, ignored: true });
     }
-
-    const invoiceId = event.invoiceId;
-    if (!invoiceId) return res.status(400).json({ success: false, error: 'Missing invoiceId' });
 
     const { query: dbQuery } = require('../../config/postgres');
 

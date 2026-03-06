@@ -956,16 +956,16 @@ export default function Social() {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,image/avif,image/tiff,image/bmp,video/mp4,video/webm,video/quicktime,video/3gpp,video/hevc"
+                      accept="image/*,video/*"
                       className="hidden"
                       onChange={handleFileSelect}
                     />
                     <button
                       onClick={() => {
                         if (fileInputRef.current) {
-                          fileInputRef.current.accept = "image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,image/avif,image/tiff,image/bmp";
+                          fileInputRef.current.accept = "image/*";
                           fileInputRef.current.click();
-                          fileInputRef.current.accept = "image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,image/avif,image/tiff,image/bmp,video/mp4,video/webm,video/quicktime,video/3gpp,video/hevc";
+                          fileInputRef.current.accept = "image/*,video/*";
                         }
                       }}
                       disabled={isPosting}
@@ -981,9 +981,9 @@ export default function Social() {
                     <button
                       onClick={() => {
                         if (fileInputRef.current) {
-                          fileInputRef.current.accept = "video/mp4,video/webm,video/quicktime,video/3gpp,video/hevc";
+                          fileInputRef.current.accept = "video/*";
                           fileInputRef.current.click();
-                          fileInputRef.current.accept = "image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,image/avif,image/tiff,image/bmp,video/mp4,video/webm,video/quicktime,video/3gpp,video/hevc";
+                          fileInputRef.current.accept = "image/*,video/*";
                         }
                       }}
                       disabled={isPosting}
