@@ -23,6 +23,7 @@ import { gates, type GatesStrings } from "./gates";
 import { checkout, type CheckoutStrings } from "./checkout";
 import { support, type SupportStrings } from "./support";
 import { feed, type FeedStrings } from "./feed";
+import { gamification, type GamificationStrings } from "./gamification";
 
 export type Lang = "en" | "es";
 
@@ -46,6 +47,7 @@ export interface I18n {
   checkout: CheckoutStrings;
   support: SupportStrings;
   feed: FeedStrings;
+  gamification: GamificationStrings;
 }
 
 function resolve(lang: Lang): I18n {
@@ -69,6 +71,7 @@ function resolve(lang: Lang): I18n {
     checkout: checkout[lang],
     support: support[lang],
     feed: feed[lang],
+    gamification: gamification[lang],
   };
 }
 

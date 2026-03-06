@@ -256,7 +256,7 @@ export interface NearbyPlace {
   categoryName?: string;
   categoryEmoji?: string;
   categorySlug?: string;
-  location: { lat: number; lng: number };
+  location: { lat: number; lng: number } | null;
   distance: number;
   website?: string;
   phone?: string;
@@ -1922,7 +1922,7 @@ export interface ActiveCreator {
   username: string | null;
   first_name: string | null;
   last_name: string | null;
-  photo_url: string | null;
+  photo_file_id: string | null;
   creator_type: string | null;
   creator_status: "active" | "suspended";
   creator_strikes: number;
@@ -2819,4 +2819,85 @@ export function triggerCristinaNeighborDM(): Promise<{ success: boolean; message
 
 export function triggerRevokeUnusedTrials(dryRun = false): Promise<{ success: boolean; message: string }> {
   return request(`/api/webapp/admin/trials/revoke-unused${dryRun ? "?dry_run=1" : ""}`, { method: "POST" });
+}
+
+// Gamification API
+
+export interface GamificationBadge {
+  id: number;
+  slug: string;
+  name_en: string;
+  name_es: string;
+  description_en?: string | null;
+  description_es?: string | null;
+  icon: string;
+  level: number;
+}
+
+export interface GamificationCategory {
+  id: number;
+  slug: string;
+  name_en: string;
+  name_es: string;
+  icon: string;
+  badges: GamificationBadge[];
+}
+
+export interface GamificationHolder {
+  id: string;
+  first_name: string | null;
+  username: string | null;
+  awarded_at: string;
+}
+
+export interface UserBadgeEntry {
+  badge_slug: string;
+  badge_name_en: string;
+  badge_name_es: string;
+  badge_icon: string;
+  badge_level: number;
+  awarded_at: string;
+  note: string | null;
+}
+
+export function getGamificationCategories(): Promise<{ success: boolean; categories: GamificationCategory[] }> {
+  return request("/api/webapp/gamification/categories");
+}
+
+export function getGamificationBadges(category?: string): Promise<{ success: boolean; badges: GamificationBadge[] }> {
+  const qs = category ? `?category=${encodeURIComponent(category)}` : "";
+  return request(`/api/webapp/gamification/badges${qs}`);
+}
+
+export function getUserGamificationBadges(userId: string | number): Promise<{ success: boolean; badges: UserBadgeEntry[] }> {
+  return request(`/api/webapp/gamification/user/${userId}/badges`);
+}
+
+export function getGamificationBadgeHolders(badgeSlug: string): Promise<{ success: boolean; holders: GamificationHolder[] }> {
+  return request(`/api/webapp/gamification/badge/${encodeURIComponent(badgeSlug)}/holders`);
+}
+
+export function awardGamificationBadge(
+  userId: string | number,
+  badgeSlug: string,
+  note?: string,
+): Promise<{ success: boolean; awarded: boolean; badge: GamificationBadge }> {
+  return request("/api/webapp/gamification/award", {
+    method: "POST",
+    body: { userId, badgeSlug, note },
+  });
+}
+
+export function revokeGamificationBadge(
+  userId: string | number,
+  badgeSlug: string,
+): Promise<{ success: boolean; revoked: boolean }> {
+  return request("/api/webapp/gamification/revoke", {
+    method: "POST",
+    body: { userId, badgeSlug },
+  });
+}
+
+export function awardMeCuidoToAllCreators(): Promise<{ success: boolean; awarded: number; total: number }> {
+  return request("/api/webapp/gamification/award-creators-mecuido", { method: "POST" });
 }

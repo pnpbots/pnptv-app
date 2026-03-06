@@ -39,6 +39,7 @@ const CanvaIntegration = lazy(() => import("@/pages/admin/CanvaIntegration"));
 const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
 const AdminDemographics = lazy(() => import("@/pages/admin/AdminDemographics"));
 const Mono = lazy(() => import("@/pages/admin/Mono"));
+const Gamification = lazy(() => import("@/pages/admin/Gamification"));
 
 export const router = createBrowserRouter([
   {
@@ -306,6 +307,14 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <Mono />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "gamification",
+        element: (
+          <ModuleLoader>
+            <Gamification />
           </ModuleLoader>
         ),
       },
