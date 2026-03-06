@@ -2175,6 +2175,19 @@ app.get('/api/webapp/support/ticket', requireSessionAuth, asyncHandler(supportCo
 app.get('/api/webapp/support/ticket/messages', requireSessionAuth, asyncHandler(supportController.getTicketMessages));
 app.post('/api/webapp/support/ticket/message', requireSessionAuth, supportChatLimiter, asyncHandler(supportController.addTicketMessage));
 
+// Admin: manually trigger Cristina ticket worker
+app.post('/api/admin/support/cristina/run', verifyAdminJWT, asyncHandler(async (req, res) => {
+  const cristinaTicketWorker = require('../services/cristinaTicketWorker');
+  if (cristinaTicketWorker.isRunning) {
+    return res.json({ success: false, message: 'Worker is already running' });
+  }
+  // Fire and forget
+  cristinaTicketWorker.processOpenTickets().catch((err) => {
+    logger.error('Admin-triggered cristina ticket worker error', { error: err.message });
+  });
+  return res.json({ success: true, message: 'Cristina ticket worker run triggered' });
+}));
+
 // Web App Payments (session auth → PaymentService)
 
 // Helper: HTML-escape for safe email template interpolation
@@ -2567,6 +2580,133 @@ app.post('/api/webapp/admin/x-campaigns/:id/resume', adminGuard, asyncHandler(xA
 app.delete('/api/webapp/admin/x-campaigns/:id', adminGuard, asyncHandler(xAutoCampaignAdminController.deleteCampaign));
 app.get('/api/webapp/admin/x-campaigns/:id/history', adminGuard, asyncHandler(xAutoCampaignAdminController.getCampaignHistory));
 app.post('/api/webapp/admin/x-campaigns/:id/generate', adminGuard, asyncHandler(xAutoCampaignAdminController.triggerGenerate));
+
+// Grok Social Media Manager chat
+app.post('/api/webapp/admin/grok/manager-chat', adminGuard, asyncHandler(async (req, res) => {
+  const { chatWithGrokManager } = require('../services/grokService');
+  const redis = getRedis();
+  const pool = getPool();
+
+  const { message, reset } = req.body;
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ success: false, error: 'Message is required' });
+  }
+
+  const adminId = String(req.session?.user?.id || 'admin');
+  const redisKey = `grok:manager:chat:${adminId}`;
+  const HISTORY_TTL = 7200; // 2 hours
+  const MAX_HISTORY = 20;   // 10 pairs
+
+  // Reset conversation
+  if (reset) {
+    await redis.del(redisKey).catch(() => {});
+    return res.json({ success: true, reset: true });
+  }
+
+  // Load conversation history
+  let history = [];
+  try {
+    const stored = await redis.get(redisKey);
+    if (stored) history = JSON.parse(stored);
+  } catch { /* ignore */ }
+
+  // Build live context block from DB
+  let contextBlock = '';
+  try {
+    // Campaigns
+    const { rows: campaigns } = await pool.query(`
+      SELECT c.campaign_id, c.name, c.language, c.status, c.interval_minutes,
+             c.active_hours_start, c.active_hours_end, c.total_generated,
+             c.total_posted, c.total_failed, a.handle
+      FROM x_auto_campaigns c
+      JOIN x_accounts a ON c.account_id = a.account_id
+      ORDER BY c.created_at DESC LIMIT 20`);
+
+    // Recent post performance (last 7 days)
+    const { rows: postStats } = await pool.query(`
+      SELECT DATE(created_at) as day,
+             COUNT(*) FILTER (WHERE status = 'sent') as sent,
+             COUNT(*) FILTER (WHERE status = 'failed') as failed,
+             COUNT(*) FILTER (WHERE status = 'scheduled') as scheduled
+      FROM x_post_jobs
+      WHERE created_at > NOW() - INTERVAL '7 days'
+      GROUP BY DATE(created_at)
+      ORDER BY day DESC LIMIT 7`);
+
+    // User demographics
+    const { rows: demog } = await pool.query(`
+      SELECT
+        COUNT(*) as total_users,
+        COUNT(*) FILTER (WHERE tier = 'PRIME') as prime_users,
+        COUNT(*) FILTER (WHERE tier = 'member') as member_users,
+        COUNT(*) FILTER (WHERE tier = 'free' OR tier IS NULL) as free_users,
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') as new_last_30d,
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') as new_last_7d
+      FROM users WHERE is_active = true`);
+
+    // Language distribution
+    const { rows: langs } = await pool.query(`
+      SELECT COALESCE(language, 'unknown') as lang, COUNT(*) as cnt
+      FROM users WHERE is_active = true
+      GROUP BY language ORDER BY cnt DESC LIMIT 8`);
+
+    // Accounts
+    const { rows: accounts } = await pool.query(`
+      SELECT handle, display_name, is_active FROM x_accounts ORDER BY updated_at DESC`);
+
+    // Recent failed posts (for analysis)
+    const { rows: recentFailed } = await pool.query(`
+      SELECT j.error_message, c.name as campaign_name
+      FROM x_post_jobs j
+      JOIN x_auto_campaigns c ON j.campaign_id = c.campaign_id
+      WHERE j.status = 'failed' AND j.created_at > NOW() - INTERVAL '7 days'
+      ORDER BY j.created_at DESC LIMIT 5`);
+
+    const d = demog[0] || {};
+    const convRate = d.total_users > 0
+      ? ((Number(d.prime_users) + Number(d.member_users)) / Number(d.total_users) * 100).toFixed(1)
+      : '0';
+
+    contextBlock = `=== PLATFORM DEMOGRAPHICS ===
+Total active users: ${d.total_users || 0}
+PRIME members: ${d.prime_users || 0} | Regular members: ${d.member_users || 0} | Free: ${d.free_users || 0}
+Paid conversion rate: ${convRate}%
+New users last 7 days: ${d.new_last_7d || 0} | Last 30 days: ${d.new_last_30d || 0}
+
+Language distribution:
+${langs.map(l => `  ${l.lang}: ${l.cnt} users`).join('\n') || '  No data'}
+
+=== X ACCOUNTS ===
+${accounts.map(a => `  @${a.handle} (${a.display_name || 'no display name'}) — ${a.is_active ? 'ACTIVE' : 'INACTIVE'}`).join('\n') || '  No accounts'}
+
+=== CAMPAIGNS (${campaigns.length} total) ===
+${campaigns.map(c => `  [${c.status.toUpperCase()}] "${c.name}" → @${c.handle} | ${c.language} | every ${c.interval_minutes}min | UTC ${c.active_hours_start}-${c.active_hours_end} | generated: ${c.total_generated} | posted: ${c.total_posted} | failed: ${c.total_failed}`).join('\n') || '  No campaigns'}
+
+=== POST PERFORMANCE (last 7 days) ===
+${postStats.map(r => `  ${r.day}: ${r.sent} sent / ${r.failed} failed / ${r.scheduled} scheduled`).join('\n') || '  No data yet'}
+
+${recentFailed.length > 0 ? `=== RECENT FAILURES ===\n${recentFailed.map(f => `  [${f.campaign_name}] ${f.error_message || 'unknown error'}`).join('\n')}` : ''}
+
+Today: ${new Date().toISOString().split('T')[0]} UTC`;
+  } catch (ctxErr) {
+    logger.warn('Grok manager context fetch failed', { error: ctxErr.message });
+    contextBlock = 'Context unavailable — answer based on general PNPtv knowledge.';
+  }
+
+  // Append user message to history
+  const userMsg = { role: 'user', content: message.trim().substring(0, 2000) };
+  const messages = [...history, userMsg];
+
+  // Call Grok
+  const replyText = await chatWithGrokManager({ messages, contextBlock });
+
+  // Save updated history
+  const assistantMsg = { role: 'assistant', content: replyText };
+  const updatedHistory = [...messages, assistantMsg].slice(-MAX_HISTORY);
+  await redis.set(redisKey, JSON.stringify(updatedHistory), 'EX', HISTORY_TTL).catch(() => {});
+
+  res.json({ success: true, message: replyText });
+}));
 
 // Plan management
 app.get('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminController.listPlans));

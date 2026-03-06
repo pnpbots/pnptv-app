@@ -15,11 +15,56 @@ import {
   getAdminXCampaignHistory,
   getAdminXCampaignMediaFolder,
   startXOAuth,
+  chatWithGrokManager,
+  resetGrokManagerChat,
   type XAutoCampaignStats,
   type XAutoCampaign,
   type XAutoCampaignPost,
   type XActiveAccount,
 } from "@/lib/api";
+
+// ── Grok Manager Types ─────────────────────────────────────────────────────────
+interface GrokChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  id: string;
+  action?: GrokAction | null;
+}
+
+interface GrokAction {
+  action: "create_campaign";
+  name: string;
+  accountHandle: string;
+  topic: string;
+  language: string;
+  activeHoursStart: number;
+  activeHoursEnd: number;
+  intervalMinutes: number;
+  customPrompt?: string;
+}
+
+function parseGrokAction(text: string): { cleanText: string; action: GrokAction | null } {
+  const jsonMatch = text.match(/```json\s*([\s\S]*?)```/i) || text.match(/(\{[\s\S]*?"action"\s*:\s*"create_campaign"[\s\S]*?\})/);
+  if (!jsonMatch) return { cleanText: text, action: null };
+  try {
+    const raw = jsonMatch[1] || jsonMatch[0];
+    const action = JSON.parse(raw) as GrokAction;
+    if (action.action === "create_campaign" && action.name && action.topic) {
+      const cleanText = text.replace(jsonMatch[0], "").trim();
+      return { cleanText, action };
+    }
+  } catch { /* ignore */ }
+  return { cleanText: text, action: null };
+}
+
+const QUICK_ACTIONS = [
+  { label: "Analyze campaigns", prompt: "Analyze my current campaigns. What's working and what should I change?" },
+  { label: "Demographics insights", prompt: "Based on the demographics, what's the best content strategy to convert free users to paid?" },
+  { label: "Optimize schedules", prompt: "Review my campaign schedules and suggest better time windows based on the target regions." },
+  { label: "Create strategy", prompt: "Create a full 3-campaign strategy to grow subscribers in LATAM and Asia Pacific. Give me the campaign configs." },
+  { label: "Fix failing posts", prompt: "Why are my posts failing? What do you recommend to fix it?" },
+  { label: "Improve prompts", prompt: "Review my campaign custom prompts and rewrite them for better X algorithm performance." },
+];
 
 type CampaignStatus = "all" | "active" | "paused" | "completed";
 
@@ -110,6 +155,14 @@ export default function XAutoCampaigns() {
     id: string;
     label: string;
   } | null>(null);
+
+  // Grok Manager chat state
+  const [grokOpen, setGrokOpen] = useState(false);
+  const [grokMessages, setGrokMessages] = useState<GrokChatMessage[]>([]);
+  const [grokInput, setGrokInput] = useState("");
+  const [grokLoading, setGrokLoading] = useState(false);
+  const grokEndRef = useRef<HTMLDivElement>(null);
+  const grokInputRef = useRef<HTMLTextAreaElement>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval>>();
 
@@ -256,6 +309,81 @@ export default function XAutoCampaigns() {
     setHistoryPage(1);
     loadHistory(campaign.campaign_id, 1);
   };
+
+  // Grok Manager handlers
+  useEffect(() => {
+    if (grokOpen && grokMessages.length === 0) {
+      // Auto-welcome on first open
+      setGrokMessages([{
+        id: "welcome",
+        role: "assistant",
+        content: "Hey! I'm Grok, your X social media strategist. I have access to your campaigns, post performance, and user demographics in real time.\n\nWhat do you want to work on?",
+      }]);
+    }
+  }, [grokOpen, grokMessages.length]);
+
+  useEffect(() => {
+    if (grokOpen) grokEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [grokMessages, grokOpen]);
+
+  const sendGrokMessage = useCallback(async (msg: string) => {
+    if (!msg.trim() || grokLoading) return;
+    const userMsg: GrokChatMessage = { id: `u-${Date.now()}`, role: "user", content: msg };
+    setGrokMessages((prev) => [...prev, userMsg]);
+    setGrokInput("");
+    setGrokLoading(true);
+    try {
+      const res = await chatWithGrokManager(msg);
+      const { cleanText, action } = parseGrokAction(res.message);
+      setGrokMessages((prev) => [
+        ...prev,
+        { id: `a-${Date.now()}`, role: "assistant", content: cleanText, action },
+      ]);
+    } catch (err) {
+      setGrokMessages((prev) => [
+        ...prev,
+        { id: `err-${Date.now()}`, role: "assistant", content: "Sorry, I couldn't connect to Grok right now. Try again in a moment." },
+      ]);
+    } finally {
+      setGrokLoading(false);
+    }
+  }, [grokLoading]);
+
+  const applyGrokCampaign = useCallback(async (action: GrokAction) => {
+    // Find account by handle
+    const account = accounts.find((a) => a.handle.toLowerCase() === action.accountHandle?.toLowerCase());
+    if (!account) {
+      setError(`Account @${action.accountHandle} not found. Connect it first.`);
+      return;
+    }
+    try {
+      await createAdminXCampaign({
+        name: action.name,
+        accountId: account.account_id,
+        topic: action.topic,
+        grokMode: "xPost",
+        language: action.language || "en",
+        customPrompt: action.customPrompt,
+        intervalMinutes: action.intervalMinutes || 480,
+        activeHoursStart: action.activeHoursStart ?? 14,
+        activeHoursEnd: action.activeHoursEnd ?? 23,
+      });
+      setSuccess(`Campaign "${action.name}" created (paused)`);
+      loadStats();
+      loadCampaigns(page, statusFilter);
+      setGrokMessages((prev) => [
+        ...prev,
+        { id: `sys-${Date.now()}`, role: "assistant", content: `✓ Campaign "${action.name}" created and added to your campaigns list (paused). Activate it when ready.` },
+      ]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create campaign");
+    }
+  }, [accounts, loadStats, loadCampaigns, page, statusFilter]);
+
+  const resetGrokChat = useCallback(async () => {
+    await resetGrokManagerChat().catch(() => {});
+    setGrokMessages([]);
+  }, []);
 
   // Table columns
   const campaignColumns = [
@@ -693,6 +821,121 @@ export default function XAutoCampaigns() {
           onCancel={() => setConfirmAction(null)}
         />
       )}
+
+      {/* Grok Strategy Manager */}
+      <div className="mt-6 rounded-xl border border-pnp-border bg-pnp-surface overflow-hidden">
+        {/* Header / toggle */}
+        <button
+          onClick={() => setGrokOpen((p) => !p)}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-lg">⚡</span>
+            <span className="text-sm font-semibold text-pnp-textPrimary">Grok Strategy Manager</span>
+            <span className="text-xs text-pnp-textSecondary">— AI social media strategist with live campaign data</span>
+          </div>
+          <span className="text-pnp-textSecondary text-xs">{grokOpen ? "▲ Collapse" : "▼ Open"}</span>
+        </button>
+
+        {grokOpen && (
+          <div className="border-t border-pnp-border">
+            {/* Messages */}
+            <div className="h-[400px] overflow-y-auto p-4 space-y-3 flex flex-col">
+              {grokMessages.map((msg) => (
+                <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] ${msg.role === "user" ? "order-1" : "order-0"}`}>
+                    {msg.role === "assistant" && (
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="text-xs font-medium text-pnp-accent">Grok</span>
+                      </div>
+                    )}
+                    <div className={`rounded-xl px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed ${
+                      msg.role === "user"
+                        ? "bg-pnp-accent text-white rounded-br-sm"
+                        : "bg-pnp-background border border-pnp-border text-pnp-textPrimary rounded-bl-sm"
+                    }`}>
+                      {msg.content}
+                    </div>
+                    {/* Action card — Grok proposed a campaign */}
+                    {msg.action && (
+                      <div className="mt-2 p-3 rounded-lg bg-pnp-accent/10 border border-pnp-accent/30">
+                        <p className="text-xs font-semibold text-pnp-accent mb-1">Campaign proposal</p>
+                        <p className="text-xs text-pnp-textPrimary mb-0.5"><strong>Name:</strong> {msg.action.name}</p>
+                        <p className="text-xs text-pnp-textSecondary mb-0.5">Account: @{msg.action.accountHandle} | {msg.action.language} | every {msg.action.intervalMinutes}min | UTC {msg.action.activeHoursStart}–{msg.action.activeHoursEnd}</p>
+                        <p className="text-xs text-pnp-textSecondary mb-2 line-clamp-2">{msg.action.topic}</p>
+                        <button
+                          onClick={() => applyGrokCampaign(msg.action!)}
+                          className="px-3 py-1 text-xs rounded-lg bg-pnp-accent text-white hover:bg-pnp-accent/80 transition-colors font-medium"
+                        >
+                          Apply — Create Campaign
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {grokLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-pnp-background border border-pnp-border rounded-xl rounded-bl-sm px-3 py-2">
+                    <span className="text-pnp-textSecondary text-xs animate-pulse">Grok is thinking...</span>
+                  </div>
+                </div>
+              )}
+              <div ref={grokEndRef} />
+            </div>
+
+            {/* Quick actions */}
+            <div className="px-4 py-2 flex gap-2 flex-wrap border-t border-pnp-border/50">
+              {QUICK_ACTIONS.map((qa) => (
+                <button
+                  key={qa.label}
+                  onClick={() => sendGrokMessage(qa.prompt)}
+                  disabled={grokLoading}
+                  className="text-xs px-2.5 py-1 rounded-full bg-pnp-background border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/50 hover:text-pnp-textPrimary transition-colors disabled:opacity-40"
+                >
+                  {qa.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Input */}
+            <div className="px-4 pb-4 pt-2 border-t border-pnp-border/50">
+              <div className="flex gap-2 items-end">
+                <textarea
+                  ref={grokInputRef}
+                  value={grokInput}
+                  onChange={(e) => setGrokInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      sendGrokMessage(grokInput);
+                    }
+                  }}
+                  placeholder="Ask Grok anything about your campaigns, strategy, demographics..."
+                  className="flex-1 px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none resize-none min-h-[38px] max-h-[120px]"
+                  rows={1}
+                  disabled={grokLoading}
+                />
+                <button
+                  onClick={() => sendGrokMessage(grokInput)}
+                  disabled={!grokInput.trim() || grokLoading}
+                  className="px-4 py-2 rounded-lg bg-pnp-accent text-white text-sm font-medium hover:bg-pnp-accent/80 disabled:opacity-40 transition-colors flex-shrink-0"
+                >
+                  Send
+                </button>
+              </div>
+              <div className="flex justify-end mt-1">
+                <button
+                  onClick={resetGrokChat}
+                  className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+                >
+                  Clear conversation
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

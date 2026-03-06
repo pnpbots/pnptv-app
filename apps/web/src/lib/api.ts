@@ -2728,3 +2728,17 @@ export async function uploadCmsMedia(file: File, folder?: string): Promise<{ suc
   return res.json();
 }
 
+
+// Grok Social Media Manager
+export interface GrokManagerMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export function chatWithGrokManager(message: string): Promise<{ success: boolean; message: string }> {
+  return request("/api/webapp/admin/grok/manager-chat", { method: "POST", body: { message } });
+}
+
+export function resetGrokManagerChat(): Promise<{ success: boolean; reset: boolean }> {
+  return request("/api/webapp/admin/grok/manager-chat", { method: "POST", body: { message: "_reset_", reset: true } });
+}

@@ -113,6 +113,7 @@ const XPostScheduler = require('./schedulers/xPostScheduler');
 const CanvaExportScheduler = require('./schedulers/canvaExportScheduler');
 const { initializeWorker: initializePrivateCallsWorker } = require('../../workers/privateCallsWorker');
 const PNPLiveWorker = require('../../workers/pnpLiveWorker');
+const cristinaTicketWorker = require('../services/cristinaTicketWorker');
 const { startCronJobs } = require('../../../../scripts/cron');
 // Models for cache prewarming
 // Support model for ticket tracking
@@ -805,6 +806,14 @@ const startBot = async () => {
     } catch (error) {
       logger.warn(`Proactive reminder service initialization failed, continuing without reminders: ${error.message}`);
     }
+    // Initialize Cristina proactive ticket worker
+    try {
+      cristinaTicketWorker.initialize(bot);
+      logger.info('✓ Cristina ticket worker initialized');
+    } catch (error) {
+      logger.warn(`Cristina ticket worker initialization failed: ${error.message}`);
+    }
+
     // Register commands with Telegram
     try {
       const commands = [

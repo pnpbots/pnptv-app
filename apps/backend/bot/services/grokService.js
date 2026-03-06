@@ -475,3 +475,76 @@ module.exports = {
   generateVideoDescription,
   generateSalesPost,
 };
+
+/**
+ * Chat with Grok as a social media manager.
+ * Receives a multi-turn messages array + live platform context string.
+ */
+async function chatWithGrokManager({ messages, contextBlock }) {
+  const cfg = getGrokConfig();
+  if (!cfg.apiKey) throw new Error('GROK_API_KEY not configured');
+
+  const systemPrompt = `You are Grok, the social media strategist and growth manager for PNPtv (pnptv.app) — a private queer PNP community platform. You have deep expertise in X/Twitter marketing, viral content strategy, audience growth, and PNP community culture.
+
+YOUR ROLE:
+Analyze PNPtv's X campaign performance, platform demographics, and provide concrete, data-driven strategy recommendations. You can also create new campaigns, optimize existing ones, rewrite prompts, and identify growth opportunities.
+
+PLATFORM CONTEXT (live data from the system):
+${contextBlock || 'No data loaded yet.'}
+
+CAPABILITIES:
+- Analyze what campaigns are working vs failing, and why
+- Suggest optimizations: better topics, custom prompts, schedule windows, language targeting
+- Recommend new campaign ideas based on demographics and gaps
+- Identify the best performing content angles and replicate them
+- When asked to create a campaign, output the config as JSON like: {"action":"create_campaign","name":"...","accountHandle":"...","topic":"...","language":"es|en","activeHoursStart":14,"activeHoursEnd":23,"intervalMinutes":480,"customPrompt":"..."}
+- Explain X algorithm strategy with specific references to the data shown
+
+TONE: Direct, strategic, CMO mindset. Give concrete recommendations with data reasoning. Be concise and actionable — no filler. Reference actual numbers from the context.
+
+RULES:
+- pnptv.app/login is the primary CTA URL — never recommend other URLs
+- Available accounts: see context above
+- When creating a campaign config, output valid JSON that can be parsed
+- Keep responses under 400 words unless doing a full strategic analysis`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), cfg.timeoutMs);
+
+  try {
+    const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cfg.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        temperature: 0.6,
+        max_tokens: 1200,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages,
+        ],
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      throw new Error(`Grok API error ${res.status}: ${txt || res.statusText}`);
+    }
+
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) throw new Error('Grok returned empty response');
+    return String(content).trim();
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('Grok API request timed out');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+module.exports.chatWithGrokManager = chatWithGrokManager;
