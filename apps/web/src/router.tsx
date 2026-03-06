@@ -22,6 +22,7 @@ const Support = lazy(() => import("@/pages/Support"));
 const Apply = lazy(() => import("@/pages/Apply"));
 const Welcome = lazy(() => import("@/pages/Welcome"));
 const Join = lazy(() => import("@/pages/Join"));
+const CmsPage = lazy(() => import("@/pages/CmsPage"));
 
 // Admin pages
 const StatsOverview = lazy(() => import("@/pages/admin/StatsOverview"));
@@ -319,6 +320,30 @@ export const router = createBrowserRouter([
     element: (
       <ModuleLoader>
         <Join />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/terms",
+    element: (
+      <ModuleLoader>
+        <CmsPage />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/privacy",
+    element: (
+      <ModuleLoader>
+        <CmsPage />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/page/:slug",
+    element: (
+      <ModuleLoader>
+        <CmsPage />
       </ModuleLoader>
     ),
   },

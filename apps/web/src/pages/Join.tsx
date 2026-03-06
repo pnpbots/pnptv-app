@@ -450,9 +450,9 @@ export default function Join() {
             &copy; {new Date().getFullYear()} PNPtv! · For adults 18+ only
           </p>
           <p className="text-xs mt-2 flex items-center justify-center gap-2 flex-wrap" style={{ color: "rgba(255,255,255,0.25)" }}>
-            <a href="/terms" target="_blank" rel="noopener noreferrer" className="underline hover:text-white/50 transition-colors" style={{ color: "#D4007A" }}>Terms of Service</a>
+            <button onClick={() => navigate("/terms")} className="underline hover:text-white/50 transition-colors" style={{ color: "#D4007A" }}>Terms of Service</button>
             <span>·</span>
-            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-white/50 transition-colors" style={{ color: "#D4007A" }}>Privacy Policy</a>
+            <button onClick={() => navigate("/privacy")} className="underline hover:text-white/50 transition-colors" style={{ color: "#D4007A" }}>Privacy Policy</button>
             <span>·</span>
             <button onClick={() => navigate("/support")} className="underline hover:text-white/50 transition-colors" style={{ color: "#D4007A" }}>Support</button>
           </p>
