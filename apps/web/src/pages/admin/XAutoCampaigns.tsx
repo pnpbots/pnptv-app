@@ -15,6 +15,7 @@ import {
   getAdminXCampaignHistory,
   getAdminXCampaignMediaFolder,
   getRandomCampaignVideo,
+  updateAdminXCampaign,
   startXOAuth,
   chatWithGrokManager,
   resetGrokManagerChat,
@@ -109,12 +110,15 @@ function GrokActionCard({ action, accounts, onApply }: {
   );
 }
 
-function RandomVideoActionCard({ action, onFetch }: {
+function RandomVideoActionCard({ action, mediaFolderId, onSaved }: {
   action: GrokAction;
-  onFetch: (campaignId?: string) => void;
+  mediaFolderId: string | null;
+  onSaved?: () => void;
 }) {
   const [mediaUrl, setMediaUrl] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [saved, setSaved] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const fetchVideo = async () => {
@@ -123,11 +127,25 @@ function RandomVideoActionCard({ action, onFetch }: {
     try {
       const res = await getRandomCampaignVideo(action.campaignId);
       setMediaUrl(res.mediaUrl);
-      onFetch(action.campaignId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to fetch video");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const saveToCamera = async () => {
+    if (!action.campaignId || !mediaFolderId) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await updateAdminXCampaign(action.campaignId, { mediaFolderId });
+      setSaved(true);
+      onSaved?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to enable video on campaign");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -153,8 +171,20 @@ function RandomVideoActionCard({ action, onFetch }: {
           disabled={loading}
           className="cursor-pointer px-3 py-1.5 text-xs rounded-lg bg-purple-500 text-white hover:bg-purple-500/80 active:scale-95 transition-all font-medium disabled:opacity-40"
         >
-          {loading ? "Fetching..." : "Get Random Video"}
+          {loading ? "Fetching..." : "Preview Random Video"}
         </button>
+      )}
+      {action.campaignId && mediaFolderId && !saved && (
+        <button
+          onClick={saveToCamera}
+          disabled={saving}
+          className="cursor-pointer mt-2 px-3 py-1.5 text-xs rounded-lg bg-pnp-accent text-white hover:bg-pnp-accent/80 active:scale-95 transition-all font-medium disabled:opacity-40 block"
+        >
+          {saving ? "Saving..." : "✓ Enable video on campaign"}
+        </button>
+      )}
+      {saved && (
+        <p className="text-xs text-green-400 mt-2">✓ Video enabled on campaign</p>
       )}
       {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
     </div>
@@ -974,7 +1004,8 @@ export default function XAutoCampaigns() {
                     {msg.action && msg.action.action === "add_random_video" && (
                       <RandomVideoActionCard
                         action={msg.action}
-                        onFetch={() => {}}
+                        mediaFolderId={mediaFolderId}
+                        onSaved={() => { loadStats(); loadCampaigns(page, statusFilter); }}
                       />
                     )}
                   </div>
