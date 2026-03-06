@@ -1,20 +1,23 @@
 import React from "react";
 import { Helmet } from "react-helmet-async";
+import { useI18n } from "@/lib/i18n";
 import { CristinaWidget } from "@/components/CristinaWidget";
 
 export function Support() {
+  const { support: t } = useI18n();
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
       <Helmet>
-        <title>Support — PNPtv!</title>
-        <meta name="description" content="Get instant help with your PNPtv account, subscription, or any questions from Cristina AI." />
+        <title>{t.pageTitle}</title>
+        <meta name="description" content={t.pageDescription} />
       </Helmet>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-pnp-textPrimary mb-1">
-          🧜‍♀️ Cristina AI Support
+          {t.pageHeading}
         </h1>
         <p className="text-sm text-pnp-textSecondary">
-          Get instant help with your account, subscription, or any questions about PNPtv.
+          {t.pageSubtitle}
         </p>
       </div>
       <CristinaWidget mode="page" />

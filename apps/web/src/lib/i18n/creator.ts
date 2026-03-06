@@ -1,0 +1,392 @@
+const strings = {
+  en: {
+    // Auth guard
+    signInRequired: "Sign in to access the Creator Dashboard",
+
+    // Page header
+    back: "Back",
+    dashboardTitle: "Creator Dashboard",
+    dashboardSubtitle: "Earn money by sharing exclusive content with your subscribers",
+
+    // Tabs
+    tabOverview: "Overview",
+    tabEarnings: "Earnings",
+    tabPayouts: "Payouts",
+    tabContent: "Content",
+    tabSettings: "Settings",
+
+    // Overview — stats cards
+    statSubscribers: "Subscribers",
+    statThisMonth: "This Month",
+    statTotalEarnings: "Total Earnings",
+    statExclusivePosts: "Exclusive Posts",
+
+    // Overview — creator type labels
+    creatorTypeFullTime: "Full-Time Creator",
+    creatorTypeDiamond: "Diamond Creator",
+    creatorTypeCrystal: "Crystal Creator",
+    creatorTypeIce: "Ice Creator",
+    creatorTypeDefault: "Creator",
+
+    // Overview — plan detail
+    revenueSplit: "70/30 revenue split",
+
+    // Overview — withdrawable
+    availableToWithdraw: "Available to withdraw",
+    withdrawBtn: "Withdraw",
+
+    // Overview — upgrade prompt
+    wantMore: "Want more?",
+    wantMoreDesc: "Apply as a full-time creator to set your own price, get verified, and appear in featured placements.",
+    applyFullTime: "Apply for Full-Time",
+
+    // Earnings tab
+    yourEarnings70: "Your Earnings (70%)",
+    grossRevenue: "Gross Revenue",
+    monthlyTrends: "Monthly Trends",
+    noEarningsYet: "No earnings data yet. Start sharing exclusive content to earn!",
+
+    // Payouts tab
+    requestWithdrawalTitle: "Request Withdrawal",
+    availableBalance: "Available balance:",
+    processing: "Processing...",
+    noBalance: "No balance to withdraw",
+    withdrawAmount: (amount: string) => `Withdraw $${amount}`,
+    withdrawalHistoryTitle: "Withdrawal History",
+    noWithdrawalsYet: "No withdrawals yet",
+
+    // Settings — payout method
+    payoutMethodTitle: "Payout Method",
+    payoutMethodDesc: "Choose how you want to receive your monthly payouts.",
+    payoutMeruLabel: "Meru App",
+    payoutCryptoLabel: "Crypto",
+    meruInputHint: "Enter your Meru phone number or registered username.",
+    meruPlaceholder: "+57 300 000 0000 or @username",
+    cryptoInputHint: "Your Ethereum/Daimo wallet address (EVM, 0x...).",
+    cryptoPlaceholder: "0x...",
+    savingWallet: "Saving...",
+    savePayoutInfo: "Save Payout Info",
+    payoutScheduleNote: "Payouts are processed on the 1st of each month. Minimum threshold: $1.00 USD.",
+    walletSavedCrypto: "Crypto wallet saved successfully.",
+    walletSavedMeru: "Meru account saved successfully.",
+    errorInvalidAddress: "Invalid address. Must start with 0x followed by exactly 40 hex characters.",
+    errorMeruEmpty: "Enter your Meru phone number or username.",
+    errorSaveWallet: "Failed to save wallet address.",
+    errorSaveMeru: "Failed to save Meru account.",
+
+    // Settings — tier
+    creatorTierTitle: "Creator Tier",
+    creatorTierDesc: "Tiers are unlocked automatically as you hit higher milestones. Keep growing to advance.",
+    tierCurrent: "Current",
+    tierLocked: "Locked",
+
+    // Content (CMS) tab — sub-nav
+    subNavProfile: "Performer Profile",
+    subNavContent: "Content Library",
+    subNavShows: "Shows",
+
+    // CMS loading
+    loadingCmsData: "Loading CMS data...",
+    errorFailedLoadCms: "Failed to load CMS data",
+
+    // Performer profile section
+    performerProfileTitle: "Performer Profile",
+    fieldDisplayName: "Display Name",
+    fieldAvailabilityMessage: "Availability Message",
+    fieldShortBio: "Short Bio",
+    fieldFullBio: "Full Bio",
+    fieldBasePriceCents: "Base Price (cents)",
+    fieldCurrency: "Currency",
+    fieldAvailableForBookings: "Available for bookings",
+    fieldStatus: "Status",
+    statusDraft: "Draft",
+    statusPublished: "Published",
+    statusArchived: "Archived",
+    savingProfile: "Saving...",
+    saveProfile: "Save Profile",
+    profileUpdated: "Profile updated!",
+    profileSaveFailed: "Save failed",
+
+    // Content library section
+    contentLibraryTitle: (count: number) => `Content Library (${count})`,
+    newItemBtn: "+ New Item",
+    noContentYet: "No content yet. Add your first video, audio, or podcast.",
+    contentTypeVideo: "Video",
+    contentTypeAudio: "Audio",
+    contentTypePodcast: "Podcast",
+    primeBadge: "PRIME",
+    shareBtn: "Share",
+    editBtn: "Edit",
+    deleteBtn: "Delete",
+
+    // Content modal
+    newContentTitle: "New Content",
+    editContentTitle: "Edit Content",
+    fieldTitle: "Title *",
+    fieldType: "Type *",
+    fieldContentStatus: "Status",
+    fieldMediaUrl: "Media URL (or upload below)",
+    mediaUrlPlaceholder: "https://...",
+    fieldUploadFile: "Upload Media File",
+    fieldDescription: "Description",
+    fieldDurationSec: "Duration (sec)",
+    fieldPrimeOnly: "PRIME only",
+    uploadingMedia: "Uploading...",
+    savingContent: "Saving...",
+    createBtn: "Create",
+    saveBtn: "Save",
+    cancelBtn: "Cancel",
+
+    // Shows section
+    scheduledShowsTitle: (count: number) => `Scheduled Shows (${count})`,
+    scheduleShowBtn: "+ Schedule Show",
+    noShowsYet: "No shows scheduled. Create your first show!",
+
+    // Show modal
+    scheduleShowTitle: "Schedule Show",
+    editShowTitle: "Edit Show",
+    fieldShowTitle: "Show Title *",
+    fieldDateTime: "Date & Time *",
+    fieldDurationMin: "Duration (min)",
+    fieldCategory: "Category",
+    schedulingShow: "Saving...",
+    scheduleBtn: "Schedule",
+
+    // Share to feed modal
+    shareToFeedTitle: "Share to Feed",
+    shareToFeedDesc: "This will post to your social feed so your followers and the community can see it.",
+    sharePlaceholder: "Write your announcement...",
+    postingToFeed: "Posting\u2026",
+    postToFeedBtn: "Post to Feed",
+
+    // Delete confirm dialogs
+    deleteContentConfirm: "Delete this content item?",
+    deleteShowConfirm: "Delete this show?",
+    cannotBeUndone: "This action cannot be undone.",
+    deleteConfirmBtn: "Delete",
+
+    // Activation modal
+    activateTitle: "Activate Creator Profile",
+    activateIceTierLabel: "Starting at Ice tier",
+    activateIceTierDesc: "Your tier is a milestone — it advances automatically as you grow your audience and meet higher requirements. Crystal and Diamond unlock greater earnings potential.",
+    activateTermsLabel: "I accept the",
+    activateTermsLink: "Creator Terms & Conditions",
+    activateTermsAnd: "and understand the 70/30 revenue split.",
+    errorMustAcceptTerms: "You must accept the Creator Terms to continue.",
+    errorActivationFailed: "Activation failed. Please try again.",
+    activatingBtn: "Activating\u2026",
+    activateBtn: "Activate",
+
+    // Eligible section
+    eligibleTitle: "You're eligible!",
+    eligibleSubtitle: "You meet all the criteria to become a creator. Choose your path:",
+    iceCreatorLabel: "Ice Creator",
+    iceStartingTier: "Starting tier",
+    iceDesc: "70/30 revenue split. As you grow your audience, you unlock Crystal and Diamond tiers with higher earnings potential.",
+    activateAsCreatorBtn: "Activate as Creator",
+    fullTimeCreatorLabel: "Full-Time Creator",
+    fullTimeDesc: "Verified badge. Featured placement. Live streams. Interview with Santino required.",
+    applyFullTimeBtn: "Apply for Full-Time",
+
+    // Pending review section
+    pendingTitle: "Application Under Review",
+    callScheduled: "Call Scheduled",
+    pendingReview: "Pending Review",
+    bookInterviewBtn: "Book Interview with Santino",
+
+    // Progress (not eligible) section
+    becomeCreatorTitle: "Become a Creator",
+    criteriaMediaPosts: "Media posts",
+    criteriaTotalLikes: "Total likes",
+    criteriaFollowers: "Followers",
+    criteriaWeekly: "Weekly consistency (4 weeks)",
+    noCriteriaMet: "Start building your presence to qualify:",
+    someCriteriaMet: (met: number, total: number) => `${met}/${total} criteria met — you're almost there!`,
+    closestHint: (label: string, remaining: number) => `Closest: ${label} — ${remaining} more to go`,
+    progressFootnote: "Post consistently, engage with the community, and grow your followers to unlock creator status.",
+  },
+  es: {
+    signInRequired: "Inicia sesión para acceder al Panel de Creador",
+
+    back: "Atrás",
+    dashboardTitle: "Panel de Creador",
+    dashboardSubtitle: "Gana dinero compartiendo contenido exclusivo con tus suscriptores",
+
+    tabOverview: "Resumen",
+    tabEarnings: "Ganancias",
+    tabPayouts: "Pagos",
+    tabContent: "Contenido",
+    tabSettings: "Ajustes",
+
+    statSubscribers: "Suscriptores",
+    statThisMonth: "Este Mes",
+    statTotalEarnings: "Ganancias Totales",
+    statExclusivePosts: "Posts Exclusivos",
+
+    creatorTypeFullTime: "Creador de Tiempo Completo",
+    creatorTypeDiamond: "Creador Diamante",
+    creatorTypeCrystal: "Creador Cristal",
+    creatorTypeIce: "Creador Hielo",
+    creatorTypeDefault: "Creador",
+
+    revenueSplit: "División 70/30 de ingresos",
+
+    availableToWithdraw: "Disponible para retirar",
+    withdrawBtn: "Retirar",
+
+    wantMore: "¿Quieres más?",
+    wantMoreDesc: "Solicita ser creador de tiempo completo para fijar tu precio, obtener verificación y aparecer en posiciones destacadas.",
+    applyFullTime: "Solicitar Tiempo Completo",
+
+    yourEarnings70: "Tus Ganancias (70%)",
+    grossRevenue: "Ingresos Brutos",
+    monthlyTrends: "Tendencias Mensuales",
+    noEarningsYet: "Aún no hay datos de ganancias. ¡Comienza a compartir contenido exclusivo para ganar!",
+
+    requestWithdrawalTitle: "Solicitar Retiro",
+    availableBalance: "Saldo disponible:",
+    processing: "Procesando...",
+    noBalance: "Sin saldo para retirar",
+    withdrawAmount: (amount: string) => `Retirar $${amount}`,
+    withdrawalHistoryTitle: "Historial de Retiros",
+    noWithdrawalsYet: "Aún no hay retiros",
+
+    payoutMethodTitle: "Método de Pago",
+    payoutMethodDesc: "Elige cómo quieres recibir tus pagos mensuales.",
+    payoutMeruLabel: "App Meru",
+    payoutCryptoLabel: "Cripto",
+    meruInputHint: "Ingresa tu número de teléfono o nombre de usuario de Meru.",
+    meruPlaceholder: "+57 300 000 0000 o @usuario",
+    cryptoInputHint: "Tu dirección de billetera Ethereum/Daimo (EVM, 0x...).",
+    cryptoPlaceholder: "0x...",
+    savingWallet: "Guardando...",
+    savePayoutInfo: "Guardar Info de Pago",
+    payoutScheduleNote: "Los pagos se procesan el 1 de cada mes. Umbral mínimo: $1.00 USD.",
+    walletSavedCrypto: "Billetera cripto guardada exitosamente.",
+    walletSavedMeru: "Cuenta Meru guardada exitosamente.",
+    errorInvalidAddress: "Dirección inválida. Debe comenzar con 0x seguido de exactamente 40 caracteres hexadecimales.",
+    errorMeruEmpty: "Ingresa tu número de teléfono o nombre de usuario de Meru.",
+    errorSaveWallet: "Error al guardar la dirección de billetera.",
+    errorSaveMeru: "Error al guardar la cuenta Meru.",
+
+    creatorTierTitle: "Nivel de Creador",
+    creatorTierDesc: "Los niveles se desbloquean automáticamente al alcanzar hitos más altos. Sigue creciendo para avanzar.",
+    tierCurrent: "Actual",
+    tierLocked: "Bloqueado",
+
+    subNavProfile: "Perfil de Performer",
+    subNavContent: "Biblioteca de Contenido",
+    subNavShows: "Shows",
+
+    loadingCmsData: "Cargando datos...",
+    errorFailedLoadCms: "Error al cargar los datos",
+
+    performerProfileTitle: "Perfil de Performer",
+    fieldDisplayName: "Nombre a Mostrar",
+    fieldAvailabilityMessage: "Mensaje de Disponibilidad",
+    fieldShortBio: "Bio Corta",
+    fieldFullBio: "Bio Completa",
+    fieldBasePriceCents: "Precio Base (centavos)",
+    fieldCurrency: "Moneda",
+    fieldAvailableForBookings: "Disponible para reservas",
+    fieldStatus: "Estado",
+    statusDraft: "Borrador",
+    statusPublished: "Publicado",
+    statusArchived: "Archivado",
+    savingProfile: "Guardando...",
+    saveProfile: "Guardar Perfil",
+    profileUpdated: "¡Perfil actualizado!",
+    profileSaveFailed: "Error al guardar",
+
+    contentLibraryTitle: (count: number) => `Biblioteca de Contenido (${count})`,
+    newItemBtn: "+ Nuevo Item",
+    noContentYet: "Sin contenido aún. Agrega tu primer video, audio o podcast.",
+    contentTypeVideo: "Video",
+    contentTypeAudio: "Audio",
+    contentTypePodcast: "Podcast",
+    primeBadge: "PRIME",
+    shareBtn: "Compartir",
+    editBtn: "Editar",
+    deleteBtn: "Eliminar",
+
+    newContentTitle: "Nuevo Contenido",
+    editContentTitle: "Editar Contenido",
+    fieldTitle: "Título *",
+    fieldType: "Tipo *",
+    fieldContentStatus: "Estado",
+    fieldMediaUrl: "URL del Medio (o sube abajo)",
+    mediaUrlPlaceholder: "https://...",
+    fieldUploadFile: "Subir Archivo de Medio",
+    fieldDescription: "Descripción",
+    fieldDurationSec: "Duración (seg)",
+    fieldPrimeOnly: "Solo PRIME",
+    uploadingMedia: "Subiendo...",
+    savingContent: "Guardando...",
+    createBtn: "Crear",
+    saveBtn: "Guardar",
+    cancelBtn: "Cancelar",
+
+    scheduledShowsTitle: (count: number) => `Shows Programados (${count})`,
+    scheduleShowBtn: "+ Programar Show",
+    noShowsYet: "Sin shows programados. ¡Crea tu primer show!",
+
+    scheduleShowTitle: "Programar Show",
+    editShowTitle: "Editar Show",
+    fieldShowTitle: "Título del Show *",
+    fieldDateTime: "Fecha y Hora *",
+    fieldDurationMin: "Duración (min)",
+    fieldCategory: "Categoría",
+    schedulingShow: "Guardando...",
+    scheduleBtn: "Programar",
+
+    shareToFeedTitle: "Compartir al Feed",
+    shareToFeedDesc: "Esto se publicará en tu feed social para que tus seguidores y la comunidad lo vean.",
+    sharePlaceholder: "Escribe tu anuncio...",
+    postingToFeed: "Publicando\u2026",
+    postToFeedBtn: "Publicar al Feed",
+
+    deleteContentConfirm: "¿Eliminar este contenido?",
+    deleteShowConfirm: "¿Eliminar este show?",
+    cannotBeUndone: "Esta acción no se puede deshacer.",
+    deleteConfirmBtn: "Eliminar",
+
+    activateTitle: "Activar Perfil de Creador",
+    activateIceTierLabel: "Comenzando en nivel Hielo",
+    activateIceTierDesc: "Tu nivel es un hito — avanza automáticamente a medida que creces tu audiencia y cumples requisitos más altos. Cristal y Diamante desbloquean mayor potencial de ganancias.",
+    activateTermsLabel: "Acepto los",
+    activateTermsLink: "Términos y Condiciones del Creador",
+    activateTermsAnd: "y entiendo la división de ingresos 70/30.",
+    errorMustAcceptTerms: "Debes aceptar los Términos del Creador para continuar.",
+    errorActivationFailed: "La activación falló. Intenta de nuevo.",
+    activatingBtn: "Activando\u2026",
+    activateBtn: "Activar",
+
+    eligibleTitle: "¡Eres elegible!",
+    eligibleSubtitle: "Cumples todos los criterios para convertirte en creador. Elige tu camino:",
+    iceCreatorLabel: "Creador Hielo",
+    iceStartingTier: "Nivel inicial",
+    iceDesc: "División 70/30 de ingresos. A medida que creces tu audiencia, desbloqueas los niveles Cristal y Diamante con mayor potencial de ganancias.",
+    activateAsCreatorBtn: "Activar como Creador",
+    fullTimeCreatorLabel: "Creador de Tiempo Completo",
+    fullTimeDesc: "Insignia verificada. Posición destacada. Transmisiones en vivo. Se requiere entrevista con Santino.",
+    applyFullTimeBtn: "Solicitar Tiempo Completo",
+
+    pendingTitle: "Solicitud en Revisión",
+    callScheduled: "Llamada Programada",
+    pendingReview: "Pendiente de Revisión",
+    bookInterviewBtn: "Reservar Entrevista con Santino",
+
+    becomeCreatorTitle: "Conviértete en Creador",
+    criteriaMediaPosts: "Posts con medios",
+    criteriaTotalLikes: "Likes totales",
+    criteriaFollowers: "Seguidores",
+    criteriaWeekly: "Consistencia semanal (4 semanas)",
+    noCriteriaMet: "Comienza a construir tu presencia para calificar:",
+    someCriteriaMet: (met: number, total: number) => `${met}/${total} criterios cumplidos — ¡casi llegas!`,
+    closestHint: (label: string, remaining: number) => `Más cercano: ${label} — faltan ${remaining}`,
+    progressFootnote: "Publica con constancia, interactúa con la comunidad y crece tus seguidores para desbloquear el estado de creador.",
+  },
+} as const;
+
+export type CreatorStrings = typeof strings.en;
+export { strings as creator };

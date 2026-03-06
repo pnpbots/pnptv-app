@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useDirectus } from "@/hooks/useDirectus";
+import { useI18n } from "@/lib/i18n";
 import {
   getHomeFeedPosts,
   getSocialFeedPosts,
@@ -13,7 +14,7 @@ import {
   type SocialPostItem,
   type FeaturedPerformer,
 } from "@/lib/api";
-import { useFeedI18n, translateText } from "@/lib/feedI18n";
+import { translateText } from "@/lib/feedI18n";
 
 interface Announcement {
   id: number;
@@ -45,7 +46,7 @@ function isValidPhotoUrl(photo: string | null | undefined): photo is string {
 export default function Home() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const t = useFeedI18n(user?.language);
+  const { feed: t } = useI18n();
   const [posts, setPosts] = useState<SocialPostItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [translatedPosts, setTranslatedPosts] = useState<Record<number, string>>({});
@@ -210,7 +211,7 @@ export default function Home() {
       {/* Featured Performers */}
       {performers.length > 0 && (
         <div className="mb-5">
-          <h2 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3">Featured</h2>
+          <h2 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3">{t.featured}</h2>
           <div className="flex gap-2.5 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide">
             {performers.map((p) => {
               const profilePath = p.userId ? `/profile/${p.userId}` : "#";
@@ -274,7 +275,7 @@ export default function Home() {
                 </svg>
               </div>
               <span className="btn-gradient px-4 py-1.5 rounded-lg text-white text-sm font-semibold">
-                Post
+                {t.post}
               </span>
             </div>
           </div>

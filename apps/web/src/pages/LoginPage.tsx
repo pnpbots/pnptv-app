@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
 import { getXLoginUrl } from "@/lib/api";
+import { getI18n, getLang } from "@/lib/i18n";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
 const API = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
 export function LoginPage() {
+  const t = getI18n(getLang(navigator.language?.startsWith("es") ? "es" : undefined)).login;
+
   const [status, setStatus] = useState<"idle" | "waiting" | "error">("idle");
   const [xRedirecting, setXRedirecting] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -82,7 +85,7 @@ export function LoginPage() {
   const handleEmailLogin = async () => {
     const trimmedEmail = emailVal.trim().toLowerCase();
     if (!trimmedEmail || !passwordVal) {
-      setEmailLoginError("Please enter your email and password");
+      setEmailLoginError(t.emailAndPasswordRequired);
       return;
     }
     setEmailLogging(true);
@@ -98,10 +101,10 @@ export function LoginPage() {
       if (res.ok && data.authenticated) {
         window.location.reload();
       } else {
-        setEmailLoginError(data.error || data.message || "Login failed");
+        setEmailLoginError(data.error || data.message || t.loginFailed);
       }
     } catch {
-      setEmailLoginError("Connection error. Please try again.");
+      setEmailLoginError(t.connectionError);
     } finally {
       setEmailLogging(false);
     }
@@ -130,17 +133,17 @@ export function LoginPage() {
         <div className="text-center mb-6">
           <img src="/Logo2-50.png" alt="PNPTV" className="h-14 w-auto mx-auto" />
           <p className="text-sm mt-2 font-medium" style={{ color: "#E69138" }}>
-            The #1 queer PNP community
+            {t.tagline}
           </p>
         </div>
 
         {/* Marketing highlights */}
         <div className="mb-5 grid grid-cols-3 gap-2 text-center">
-          {[
-            { icon: "🔥", title: "Hot Performers", sub: "Latino & más" },
-            { icon: "🎬", title: "PNP Content", sub: "Uncensored" },
-            { icon: "🎥", title: "Video Rooms", sub: "Live & private" },
-          ].map(({ icon, title, sub }) => (
+          {([
+            { icon: "🔥", ...t.featureBadges[0] },
+            { icon: "🎬", ...t.featureBadges[1] },
+            { icon: "🎥", ...t.featureBadges[2] },
+          ] as { icon: string; title: string; sub: string }[]).map(({ icon, title, sub }) => (
             <div
               key={title}
               className="rounded-xl py-3 px-2"
@@ -164,20 +167,20 @@ export function LoginPage() {
         >
           <div>
             <div className="text-xs font-bold uppercase tracking-wider mb-0.5" style={{ color: "#E69138" }}>
-              🏆 Lifetime Deal
+              🏆 {t.lifetimeDealLabel}
             </div>
             <div className="text-sm font-semibold text-white">
-              $100 — PRIME access, forever
+              {t.lifetimeDealTitle}
             </div>
             <div className="text-[11px] mt-0.5" style={{ color: "#8E8E93" }}>
-              One payment. No renewals. Never expires.
+              {t.lifetimeDealSub}
             </div>
           </div>
           <div
             className="ml-3 shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold text-white"
             style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
           >
-            Get it →
+            {t.lifetimeDealCta}
           </div>
         </a>
 
@@ -195,27 +198,27 @@ export function LoginPage() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                Waiting for Telegram...
+                {t.waitingForTelegram}
               </>
             ) : (
               <>
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.492-1.302.48-.428-.013-1.252-.242-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
                 </svg>
-                Login with Telegram
+                {t.loginWithTelegram}
               </>
             )}
           </button>
 
           {status === "waiting" && (
             <p className="text-center text-xs" style={{ color: "#8E8E93" }}>
-              Open Telegram and press Start to log in
+              {t.telegramInstructions}
             </p>
           )}
 
           {status === "error" && (
             <p className="text-center text-xs text-red-400">
-              Login failed. Please try again.
+              {t.loginFailedRetry}
             </p>
           )}
 
@@ -236,14 +239,14 @@ export function LoginPage() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                Redirecting to X...
+                {t.redirectingToX}
               </>
             ) : (
               <>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
                 </svg>
-                Login with X
+                {t.loginWithX}
               </>
             )}
           </button>
@@ -253,7 +256,7 @@ export function LoginPage() {
         {/* Email login divider */}
         <div className="flex items-center gap-3 mt-6 mb-4">
           <div className="flex-1 h-px" style={{ background: "rgba(255, 255, 255, 0.08)" }} />
-          <span className="text-xs" style={{ color: "#8E8E93" }}>or</span>
+          <span className="text-xs" style={{ color: "#8E8E93" }}>{t.orDivider}</span>
           <div className="flex-1 h-px" style={{ background: "rgba(255, 255, 255, 0.08)" }} />
         </div>
 
@@ -275,7 +278,7 @@ export function LoginPage() {
               <rect x="2" y="4" width="20" height="16" rx="2" />
               <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
             </svg>
-            Login with Email
+            {t.loginWithEmail}
           </button>
         ) : (
           <div
@@ -291,7 +294,7 @@ export function LoginPage() {
               value={emailVal}
               onChange={(e) => { setEmailVal(e.target.value); setEmailLoginError(null); }}
               onKeyDown={(e) => { if (e.key === "Enter") handleEmailLogin(); }}
-              placeholder="Email address"
+              placeholder={t.emailPlaceholder}
               disabled={emailLogging}
               className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
               style={{ borderColor: emailLoginError ? "#FF453A" : "rgba(255,255,255,0.15)" }}
@@ -304,7 +307,7 @@ export function LoginPage() {
               value={passwordVal}
               onChange={(e) => { setPasswordVal(e.target.value); setEmailLoginError(null); }}
               onKeyDown={(e) => { if (e.key === "Enter") handleEmailLogin(); }}
-              placeholder="Password"
+              placeholder={t.passwordPlaceholder}
               disabled={emailLogging}
               className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
               style={{ borderColor: emailLoginError ? "#FF453A" : "rgba(255,255,255,0.15)" }}
@@ -316,7 +319,7 @@ export function LoginPage() {
                 onChange={(e) => setRememberMe(e.target.checked)}
                 className="w-3.5 h-3.5 rounded accent-[#D4007A]"
               />
-              <span className="text-xs" style={{ color: "#8E8E93" }}>Remember me</span>
+              <span className="text-xs" style={{ color: "#8E8E93" }}>{t.rememberMe}</span>
             </label>
             {emailLoginError && (
               <p className="text-xs text-red-400">{emailLoginError}</p>
@@ -334,7 +337,7 @@ export function LoginPage() {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                 ) : (
-                  "Log In"
+                  t.logIn
                 )}
               </button>
               <button
@@ -347,7 +350,7 @@ export function LoginPage() {
                 className="px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-white/5 transition-colors"
                 style={{ color: "#8E8E93" }}
               >
-                Cancel
+                {t.cancel}
               </button>
             </div>
           </div>
@@ -356,27 +359,27 @@ export function LoginPage() {
         {/* Legal footer */}
         <div className="mt-8 pt-6" style={{ borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
           <p className="text-center text-xs mb-3" style={{ color: "#8E8E93" }}>
-            By continuing, you agree to our{" "}
+            {t.legalPrefix}{" "}
             <a href="/terms" target="_blank" rel="noopener noreferrer" className="underline hover:text-white transition-colors" style={{ color: "#D4007A" }}>
-              Terms
+              {t.legalTerms}
             </a>{" "}
-            and{" "}
+            {t.legalAnd}{" "}
             <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-white transition-colors" style={{ color: "#D4007A" }}>
-              Privacy Policy
+              {t.legalPrivacyPolicy}
             </a>
           </p>
           <div className="flex flex-wrap justify-center gap-x-3 gap-y-1">
-            {[
-              { href: "/cookies", label: "Cookies" },
-              { href: "/community-guidelines", label: "Community Guidelines" },
-              { href: "/content-policy", label: "Content Policy" },
-              { href: "/refunds", label: "Refunds" },
-              { href: "/subscriptions", label: "Subscriptions" },
-              { href: "/creator-terms", label: "Creator Terms" },
-              { href: "/dmca", label: "DMCA" },
-              { href: "/safety", label: "Safety" },
-              { href: "/contact", label: "Contact" },
-            ].map(({ href, label }) => (
+            {([
+              { href: "/cookies", label: t.footerLinks.cookies },
+              { href: "/community-guidelines", label: t.footerLinks.communityGuidelines },
+              { href: "/content-policy", label: t.footerLinks.contentPolicy },
+              { href: "/refunds", label: t.footerLinks.refunds },
+              { href: "/subscriptions", label: t.footerLinks.subscriptions },
+              { href: "/creator-terms", label: t.footerLinks.creatorTerms },
+              { href: "/dmca", label: t.footerLinks.dmca },
+              { href: "/safety", label: t.footerLinks.safety },
+              { href: "/contact", label: t.footerLinks.contact },
+            ] as { href: string; label: string }[]).map(({ href, label }) => (
               <a
                 key={href}
                 href={href}
@@ -390,7 +393,7 @@ export function LoginPage() {
             ))}
           </div>
           <p className="text-center text-[10px] mt-3" style={{ color: "#636366" }}>
-            &copy; 2026 PNPtv. All rights reserved.
+            {t.copyright}
           </p>
         </div>
       </div>

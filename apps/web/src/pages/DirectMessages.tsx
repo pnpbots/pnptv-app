@@ -10,6 +10,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
+import { useI18n } from "@/lib/i18n";
 import {
   getMessageThreads,
   getMessages,
@@ -22,11 +23,11 @@ import {
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
-function timeAgo(dateStr: string): string {
+function timeAgo(dateStr: string, nowLabel: string): string {
   if (!dateStr) return "";
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "now";
+  if (mins < 1) return nowLabel;
   if (mins < 60) return `${mins}m`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h`;
@@ -48,6 +49,8 @@ interface LightboxProps {
 }
 
 function Lightbox({ src, onClose }: LightboxProps) {
+  const { dm: t } = useI18n();
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -62,12 +65,12 @@ function Lightbox({ src, onClose }: LightboxProps) {
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Image fullscreen view"
+      aria-label={t.imageLightboxLabel}
     >
       <button
         onClick={onClose}
         className="absolute top-4 right-4 w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-        aria-label="Close fullscreen image"
+        aria-label={t.closeLightbox}
       >
         <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -75,7 +78,7 @@ function Lightbox({ src, onClose }: LightboxProps) {
       </button>
       <img
         src={src}
-        alt="Full size"
+        alt={t.sharedImage}
         className="max-w-full max-h-full object-contain rounded-lg"
         onClick={(e) => e.stopPropagation()}
       />
@@ -98,6 +101,7 @@ const MediaBubble = memo(function MediaBubble({
   thumbUrl,
   onExpandImage,
 }: MediaBubbleProps) {
+  const { dm: t } = useI18n();
   const [imgError, setImgError] = useState(false);
   const [vidError, setVidError] = useState(false);
   // For images: use thumbnail for display, open full URL in lightbox
@@ -110,7 +114,7 @@ const MediaBubble = memo(function MediaBubble({
           <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
           </svg>
-          Image failed to load
+          {t.imageFailedToLoad}
         </div>
       );
     }
@@ -118,11 +122,11 @@ const MediaBubble = memo(function MediaBubble({
       <button
         onClick={() => onExpandImage(mediaUrl)}
         className="mt-2 block max-w-[240px] sm:max-w-[300px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 rounded-lg"
-        aria-label="View full image"
+        aria-label={t.viewFullImage}
       >
         <img
           src={displayUrl}
-          alt="Shared image"
+          alt={t.sharedImage}
           loading="lazy"
           className="max-h-60 rounded-lg object-cover w-full hover:opacity-90 active:opacity-75 transition-opacity"
           onError={() => setImgError(true)}
@@ -137,7 +141,7 @@ const MediaBubble = memo(function MediaBubble({
         <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
         </svg>
-        Video failed to load
+        {t.videoFailedToLoad}
       </div>
     );
   }
@@ -149,7 +153,7 @@ const MediaBubble = memo(function MediaBubble({
       preload="metadata"
       className="mt-2 max-h-60 max-w-[240px] sm:max-w-[300px] w-full rounded-lg object-cover"
       onError={() => setVidError(true)}
-      aria-label="Shared video"
+      aria-label={t.sharedVideo}
     />
   );
 });
@@ -174,6 +178,7 @@ const DmBubble = memo(function DmBubble({
   onNavigate,
   onExpandImage,
 }: DmBubbleProps) {
+  const { dm: t } = useI18n();
   const isMe = msg.isMine;
   const avatarPath = isMe ? "/profile" : `/profile/${userId}`;
   const rawAvatarUrl = isMe ? currentUser?.photoUrl : null;
@@ -192,7 +197,7 @@ const DmBubble = memo(function DmBubble({
       <button
         onClick={() => onNavigate(avatarPath)}
         className="flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded-full"
-        aria-label={isMe ? "View your profile" : "View conversation partner's profile"}
+        aria-label={isMe ? t.viewYourProfile : t.viewPartnerProfile}
       >
         {avatarUrl ? (
           <img
@@ -218,7 +223,7 @@ const DmBubble = memo(function DmBubble({
         {/* Timestamp */}
         <div className={`flex items-center gap-1.5 mb-0.5 ${isMe ? "justify-end" : ""}`}>
           <span className="text-[10px]" style={{ color: "#8E8E93" }}>
-            {timeAgo(msg.createdAt)}
+            {timeAgo(msg.createdAt, t.timeNow)}
           </span>
         </div>
 
@@ -267,6 +272,7 @@ function UploadPreview({
   uploadError,
   onCancel,
 }: UploadPreviewProps) {
+  const { dm: t } = useI18n();
   const isVid = isVideoFile(file);
 
   return (
@@ -278,12 +284,12 @@ function UploadPreview({
             className="w-16 h-16 rounded-lg object-cover"
             muted
             playsInline
-            aria-label="Video preview"
+            aria-label={t.videoPreview}
           />
         ) : (
           <img
             src={previewUrl}
-            alt="Upload preview"
+            alt={t.uploadPreview}
             className="w-16 h-16 rounded-lg object-cover"
           />
         )}
@@ -294,7 +300,7 @@ function UploadPreview({
             color: isVid ? "#E69138" : "#D4007A",
           }}
         >
-          {isVid ? "VID" : "IMG"}
+          {isVid ? t.vidLabel : t.imgLabel}
         </div>
       </div>
 
@@ -317,12 +323,12 @@ function UploadPreview({
               />
             </div>
             <p className="text-[10px] mt-0.5" style={{ color: "#8E8E93" }}>
-              Uploading…
+              {t.uploading}
             </p>
           </div>
         ) : (
           <p className="text-[10px] mt-1" style={{ color: "#8E8E93" }}>
-            Press send to share
+            {t.pressToShare}
           </p>
         )}
       </div>
@@ -331,7 +337,7 @@ function UploadPreview({
         <button
           onClick={onCancel}
           className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-          aria-label="Remove selected media"
+          aria-label={t.removeMedia}
         >
           <svg className="w-4 h-4" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -349,6 +355,7 @@ export default function DirectMessages() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { showTutorial, dismissTutorial } = useTutorial("dm");
+  const { dm: t } = useI18n();
 
   if (userId) {
     return (
@@ -364,8 +371,8 @@ export default function DirectMessages() {
   return (
     <>
       <Helmet>
-        <title>Messages — PNPtv!</title>
-        <meta name="description" content="Direct messages on PNPtv. Chat privately with community members." />
+        <title>{t.pageTitle}</title>
+        <meta name="description" content={t.pageDescription} />
       </Helmet>
       {showTutorial && <TutorialOverlay section="dm" onDismiss={dismissTutorial} />}
       <ThreadList currentUser={user} navigate={navigate} />
@@ -382,6 +389,7 @@ function ThreadList({
   currentUser: { firstName?: string; username?: string } | null;
   navigate: (path: string) => void;
 }) {
+  const { dm: t } = useI18n();
   const [threads, setThreads] = useState<MessageThread[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -392,9 +400,9 @@ function ThreadList({
       setThreads(data.threads || []);
       setError(null);
     } catch {
-      setError("Failed to load messages");
+      setError(t.loadThreadsError);
     }
-  }, []);
+  }, [t.loadThreadsError]);
 
   useEffect(() => {
     setIsLoading(true);
@@ -405,9 +413,9 @@ function ThreadList({
     <div className="max-w-2xl mx-auto px-4 py-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">Messages</h1>
+          <h1 className="text-2xl font-bold text-white">{t.messagesTitle}</h1>
           <p className="text-sm mt-1" style={{ color: "#8E8E93" }}>
-            Direct messages
+            {t.directMessagesSubtitle}
           </p>
         </div>
       </div>
@@ -427,7 +435,7 @@ function ThreadList({
             className="text-xs font-semibold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30 rounded"
             style={{ color: "#D4007A" }}
           >
-            Retry
+            {t.retry}
           </button>
         </div>
       )}
@@ -451,9 +459,9 @@ function ThreadList({
           <svg className="w-16 h-16 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
-          <p className="text-white font-medium mb-1">No messages yet</p>
+          <p className="text-white font-medium mb-1">{t.noThreadsTitle}</p>
           <p className="text-sm" style={{ color: "#8E8E93" }}>
-            Visit a profile and tap Message to start a conversation
+            {t.noThreadsHint}
           </p>
         </div>
       ) : (
@@ -502,12 +510,12 @@ function ThreadList({
                       {thread.firstName || thread.username}
                     </span>
                     <span className="text-[10px] flex-shrink-0" style={{ color: "#8E8E93" }}>
-                      {timeAgo(thread.lastMessageAt)}
+                      {timeAgo(thread.lastMessageAt, t.timeNow)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between mt-0.5 gap-2">
                     <span className="text-xs truncate min-w-0" style={{ color: "#8E8E93" }}>
-                      {thread.lastMessage || "Photo/Video"}
+                      {thread.lastMessage || t.mediaFallback}
                     </span>
                     {thread.unreadCount > 0 && (
                       <span
@@ -549,6 +557,7 @@ function Conversation({
   userTier: string | null | undefined;
   userRole: string | null | undefined;
 }) {
+  const { dm: t } = useI18n();
   const [messages, setMessages] = useState<DirectMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -580,9 +589,9 @@ function Conversation({
       setMessages(data.messages || []);
       setLoadError(null);
     } catch {
-      setLoadError("Failed to load messages. Tap to retry.");
+      setLoadError(t.loadMessagesError);
     }
-  }, [userId]);
+  }, [userId, t.loadMessagesError]);
 
   useEffect(() => {
     setIsLoading(true);
@@ -626,15 +635,13 @@ function Conversation({
         "video/webm",
       ]);
       if (!ALLOWED_DM_TYPES.has(file.type)) {
-        setUploadError(
-          "Only images (JPG, PNG, WebP, GIF) and videos (MP4, WebM) are allowed."
-        );
+        setUploadError(t.invalidFileType);
         if (fileInputRef.current) fileInputRef.current.value = "";
         return;
       }
 
       if (file.size > MAX_FILE_SIZE) {
-        setUploadError("File too large. Maximum size is 50 MB.");
+        setUploadError(t.fileTooLarge);
         if (fileInputRef.current) fileInputRef.current.value = "";
         return;
       }
@@ -644,7 +651,7 @@ function Conversation({
       setMediaPreview(URL.createObjectURL(file));
       setUploadError(null);
     },
-    [clearMedia]
+    [clearMedia, t.invalidFileType, t.fileTooLarge]
   );
 
   // ─── Send logic ──────────────────────────────────────────────────────────
@@ -689,21 +696,21 @@ function Conversation({
       const errMsg = err instanceof Error ? err.message : "";
       if (errMsg.includes("DM_LIMIT_REACHED") || errMsg.includes("limit")) {
         setDmRemaining(0);
-        setSendError("Daily message limit reached. Upgrade for unlimited messaging.");
+        setSendError(t.limitReached);
       } else {
-        setSendError(errMsg || "Failed to send message. Try again.");
+        setSendError(errMsg || t.sendFailed);
       }
       setUploadError(
         hasMedia
           ? err instanceof Error
             ? err.message
-            : "Upload failed. Try again."
+            : t.uploadFailed
           : null
       );
     } finally {
       setSending(false);
     }
-  }, [sending, msgInput, mediaFile, userId, clearMedia, isFree, dmRemaining]);
+  }, [sending, msgInput, mediaFile, userId, clearMedia, isFree, dmRemaining, t.limitReached, t.sendFailed, t.uploadFailed]);
 
   const handleNavigate = useCallback(
     (path: string) => navigate(path),
@@ -737,7 +744,7 @@ function Conversation({
         <button
           onClick={() => navigate("/dm")}
           className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-          aria-label="Back to message threads"
+          aria-label={t.backToThreads}
         >
           <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
@@ -748,10 +755,10 @@ function Conversation({
           className="flex-1 min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded-lg px-1"
         >
           <h2 className="text-sm font-bold text-white truncate">
-            {partnerName || "Conversation"}
+            {partnerName || t.conversationFallbackTitle}
           </h2>
           <p className="text-xs" style={{ color: "#8E8E93" }}>
-            Tap to view profile
+            {t.tapToViewProfile}
           </p>
         </button>
       </div>
@@ -780,7 +787,7 @@ function Conversation({
               onClick={() => { setIsLoading(true); loadMessages().finally(() => setIsLoading(false)); }}
               className="btn-gradient px-5 py-2 rounded-lg text-white text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
             >
-              Try Again
+              {t.tryAgain}
             </button>
           </div>
         ) : messages.length === 0 ? (
@@ -788,9 +795,9 @@ function Conversation({
             <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
-            <p className="text-white font-medium text-sm">No messages yet</p>
+            <p className="text-white font-medium text-sm">{t.noConversationMessages}</p>
             <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>
-              Say hello!
+              {t.sayHello}
             </p>
           </div>
         ) : (
@@ -825,7 +832,7 @@ function Conversation({
           <button
             onClick={() => setSendError(null)}
             className="flex-shrink-0 hover:opacity-70 transition-opacity"
-            aria-label="Dismiss error"
+            aria-label={t.dismissError}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -850,14 +857,14 @@ function Conversation({
         <div className="mx-4 mb-2 rounded-lg border border-purple-500/30 bg-purple-900/30 p-3 text-center">
           <p className="text-sm text-purple-200">
             {dmRemaining > 0
-              ? `${dmRemaining} of ${dmLimit} messages left today`
-              : "Daily message limit reached"}
+              ? t.messagesRemaining(dmRemaining, dmLimit)
+              : t.dailyLimitReached}
             {" — "}
             <Link
               to="/subscribe"
               className="font-semibold text-purple-400 hover:text-purple-300"
             >
-              Go unlimited
+              {t.goUnlimited}
             </Link>
           </p>
         </div>
@@ -873,7 +880,7 @@ function Conversation({
             onClick={() => fileInputRef.current?.click()}
             disabled={sending}
             className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/5 active:scale-95 transition-all disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-            aria-label="Attach photo or video"
+            aria-label={t.attachPhotoVideo}
           >
             <svg className="w-5 h-5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
@@ -885,7 +892,7 @@ function Conversation({
             accept={ACCEPTED_TYPES}
             className="hidden"
             onChange={handleFileSelect}
-            aria-label="Select photo or video to send"
+            aria-label={t.selectPhotoVideo}
           />
 
           {/* Text input */}
@@ -893,11 +900,11 @@ function Conversation({
             value={msgInput}
             onChange={(e) => setMsgInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-            placeholder={mediaFile ? "Add a caption…" : "Type a message…"}
+            placeholder={mediaFile ? t.placeholderCaption : t.placeholderText}
             className="flex-1 bg-white/5 rounded-full px-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-white/20 min-w-0"
             maxLength={1000}
             disabled={sending}
-            aria-label="Message input"
+            aria-label={t.messageInput}
           />
 
           {/* Send button */}
@@ -906,7 +913,7 @@ function Conversation({
             disabled={!canSend}
             className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center active:scale-95 transition-all disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
             style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-            aria-label="Send message"
+            aria-label={t.sendMessage}
           >
             {sending ? (
               <svg className="w-4 h-4 text-white animate-spin" fill="none" viewBox="0 0 24 24">

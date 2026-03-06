@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "@/hooks/useAuth";
+import { useI18n } from "@/lib/i18n";
 import { useTutorial, resetAllTutorials } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useParams, useNavigate } from "react-router-dom";
@@ -94,6 +95,8 @@ function PostCard({
   onAuthorTap?: (userId: string) => void;
   onSubscribeCta?: () => void;
 }) {
+  const t = useI18n();
+  const p = t.profile;
   const [deleting, setDeleting] = useState(false);
   const photoUrl = resolvePhotoUrl(post.author_photo);
 
@@ -137,10 +140,10 @@ function PostCard({
               <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
             </svg>
           </div>
-          <p className="text-white font-bold text-sm leading-tight">Exclusive Content</p>
+          <p className="text-white font-bold text-sm leading-tight">{p.exclusiveContent}</p>
           {creatorPriceUsd != null && (
             <p className="text-xs leading-snug" style={{ color: "rgba(255,255,255,0.6)" }}>
-              Subscribe for ${creatorPriceUsd}/mo to unlock
+              {p.subscribeForPrice.replace('${price}', String(creatorPriceUsd))}
             </p>
           )}
           <button
@@ -149,7 +152,7 @@ function PostCard({
             style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
             aria-label="Subscribe to unlock exclusive content"
           >
-            Subscribe
+            {p.subscribe}
           </button>
         </div>
       )}
@@ -174,14 +177,14 @@ function PostCard({
               <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
             </svg>
           </div>
-          <p className="text-white font-semibold text-xs">Exclusive — Preview Only</p>
+          <p className="text-white font-semibold text-xs">{p.exclusivePreviewOnly}</p>
           <button
             onClick={onSubscribeCta}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all duration-150 active:scale-[0.97] min-h-[36px]"
             style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
             aria-label="Subscribe to see full exclusive content"
           >
-            Subscribe to unlock
+            {p.subscribeToUnlock}
           </button>
         </div>
       )}
@@ -219,7 +222,7 @@ function PostCard({
               onClick={() => onAuthorTap?.(post.author_id)}
               className="font-semibold text-white text-sm truncate hover:underline"
             >
-              {post.author_first_name || post.author_username || "Anonymous"}
+              {post.author_first_name || post.author_username || p.anonymous}
             </button>
             {post.author_username && (
               <span className="text-xs" style={{ color: "#8E8E93" }}>
@@ -238,7 +241,7 @@ function PostCard({
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                 </svg>
-                Exclusive
+                {p.exclusiveLabel}
               </span>
             )}
           </div>
@@ -275,7 +278,7 @@ function PostCard({
               onClick={() => onLike(post.id)}
               className="flex items-center gap-1.5 text-xs hover:text-pink-400 transition-colors"
               style={post.liked_by_me ? { color: "#D4007A" } : undefined}
-              aria-label={post.liked_by_me ? "Unlike post" : "Like post"}
+              aria-label={post.liked_by_me ? p.unlikePost : p.likePost}
             >
               <svg className="w-4 h-4" fill={post.liked_by_me ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
@@ -300,8 +303,8 @@ function PostCard({
                 }}
                 disabled={deleting}
                 className="ml-auto text-xs hover:text-red-400 transition-colors"
-                title="Delete post"
-                aria-label="Delete post"
+                title={p.deletePost}
+                aria-label={p.deletePost}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
@@ -344,6 +347,8 @@ function EditProfileModal({
     showOnline: true,
     ...(profile.privacy || {}),
   });
+  const t = useI18n();
+  const p = t.profile;
   const [savingPrivacy, setSavingPrivacy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -394,7 +399,7 @@ function EditProfileModal({
       onSaved();
       onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to save");
+      setError(err instanceof Error ? err.message : p.failedToSave);
     } finally {
       setSaving(false);
     }
@@ -404,61 +409,61 @@ function EditProfileModal({
   const dobMax = new Date(Date.now() - 18 * 365.25 * 24 * 3600 * 1000).toISOString().split("T")[0];
 
   return (
-    <Modal open={open} onClose={onClose} title="Edit Profile">
+    <Modal open={open} onClose={onClose} title={p.editProfileTitle}>
       <div className="space-y-4">
         {/* Profile Incomplete nudge */}
         {(!profile.dateOfBirth || !profile.city) && (
           <div className="rounded-xl p-3 bg-yellow-500/10 border border-yellow-500/30 flex items-start gap-2">
             <span className="text-yellow-400 text-lg leading-none mt-0.5" aria-hidden="true">!</span>
             <div>
-              <p className="text-sm font-medium text-yellow-300">Complete your profile</p>
-              <p className="text-xs text-yellow-400/80">Add your date of birth and location to help us personalize your experience.</p>
+              <p className="text-sm font-medium text-yellow-300">{p.completeYourProfile}</p>
+              <p className="text-xs text-yellow-400/80">{p.completeProfileDesc}</p>
             </div>
           </div>
         )}
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs text-pnp-textSecondary mb-1">First Name</label>
+            <label className="block text-xs text-pnp-textSecondary mb-1">{p.firstName}</label>
             <Input
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
-              placeholder="First name"
+              placeholder={p.firstNamePlaceholder}
             />
           </div>
           <div>
-            <label className="block text-xs text-pnp-textSecondary mb-1">Last Name</label>
+            <label className="block text-xs text-pnp-textSecondary mb-1">{p.lastName}</label>
             <Input
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
-              placeholder="Last name"
+              placeholder={p.lastNamePlaceholder}
             />
           </div>
         </div>
         <div>
-          <label className="block text-xs text-pnp-textSecondary mb-1">Bio</label>
+          <label className="block text-xs text-pnp-textSecondary mb-1">{p.bio}</label>
           <textarea
             value={bio}
             onChange={(e) => setBio(e.target.value.slice(0, 160))}
-            placeholder="Tell the world about yourself..."
+            placeholder={p.bioPlaceholder}
             className="w-full rounded-lg border border-pnp-border bg-pnp-bg text-pnp-textPrimary text-sm p-3 resize-none outline-none focus:border-pnp-accent"
             rows={3}
           />
           <span className="text-xs text-pnp-textSecondary float-right">{bio.length}/160</span>
         </div>
         <div>
-          <label className="block text-xs text-pnp-textSecondary mb-1">Location (display)</label>
+          <label className="block text-xs text-pnp-textSecondary mb-1">{p.locationDisplay}</label>
           <Input
             value={locationText}
             onChange={(e) => setLocationText(e.target.value)}
-            placeholder="City, Country"
+            placeholder={p.locationPlaceholder}
           />
         </div>
 
         {/* Date of Birth */}
         <div>
           <label className="block text-xs font-medium text-pnp-textSecondary mb-1.5">
-            Date of Birth <span className="text-pnp-textSecondary/50">(required for personalization)</span>
+            {p.dateOfBirth} <span className="text-pnp-textSecondary/50">{p.dobRequired}</span>
           </label>
           <div className="flex items-center gap-2">
             <input
@@ -478,23 +483,23 @@ function EditProfileModal({
                   : "border-white/10 bg-white/5 text-pnp-textSecondary"
               }`}
               title={privacy.showDob ? "Visible to others" : "Private"}
-              aria-label={privacy.showDob ? "Date of birth is public — click to make private" : "Date of birth is private — click to make public"}
+              aria-label={privacy.showDob ? p.dobIsPublic : p.dobIsPrivate}
             >
-              {privacy.showDob ? "Public" : "Private"}
+              {privacy.showDob ? p.public : p.private}
             </button>
           </div>
-          <p className="text-[10px] text-pnp-textSecondary/60 mt-1">Used for age verification and community analytics. Never shared publicly unless set to Public.</p>
+          <p className="text-[10px] text-pnp-textSecondary/60 mt-1">{p.dobPrivacyNote}</p>
         </div>
 
         {/* City / Country */}
         <div>
           <label className="block text-xs font-medium text-pnp-textSecondary mb-1.5">
-            Location <span className="text-pnp-textSecondary/50">(city &amp; country)</span>
+            {p.locationCityCountry}
           </label>
           <div className="flex gap-2 mb-2">
             <input
               type="text"
-              placeholder="City"
+              placeholder={p.cityPlaceholder}
               value={city}
               onChange={(e) => setCity(e.target.value)}
               maxLength={100}
@@ -502,7 +507,7 @@ function EditProfileModal({
             />
             <input
               type="text"
-              placeholder="Country"
+              placeholder={p.countryPlaceholder}
               value={country}
               onChange={(e) => setCountry(e.target.value)}
               maxLength={100}
@@ -518,9 +523,9 @@ function EditProfileModal({
                   : "border-white/10 bg-white/5 text-pnp-textSecondary"
               }`}
               title={privacy.showLocation ? "Visible to others" : "Private"}
-              aria-label={privacy.showLocation ? "Location is public — click to make private" : "Location is private — click to make public"}
+              aria-label={privacy.showLocation ? p.locationIsPublic : p.locationIsPrivate}
             >
-              {privacy.showLocation ? "Public" : "Private"}
+              {privacy.showLocation ? p.public : p.private}
             </button>
           </div>
         </div>
@@ -528,14 +533,14 @@ function EditProfileModal({
         {error && <p className="text-xs text-red-400">{error}</p>}
         <div className="flex gap-3 pt-2">
           <Button variant="danger" className="flex-1" onClick={onClose}>
-            Cancel
+            {p.cancel}
           </Button>
           <button
             onClick={handleSave}
             disabled={saving || !firstName.trim()}
             className="flex-1 btn-gradient px-4 py-2 rounded-lg text-white text-sm font-semibold disabled:opacity-40"
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? p.saving : p.save}
           </button>
         </div>
       </div>
@@ -554,6 +559,8 @@ function ComposePost({
   photoUrl: string | null;
   displayName: string;
 }) {
+  const t = useI18n();
+  const p = t.profile;
   const [text, setText] = useState("");
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
@@ -601,7 +608,7 @@ function ComposePost({
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value.slice(0, 500))}
-            placeholder="What's happening?"
+            placeholder={p.composePlaceholder}
             className="w-full bg-transparent text-white text-sm py-2 border-b border-white/10 mb-2 resize-none outline-none placeholder:text-white/40"
             rows={2}
             disabled={posting}
@@ -642,7 +649,7 @@ function ComposePost({
                   const file = e.target.files?.[0];
                   if (file) {
                     if (file.size > 50 * 1024 * 1024) {
-                      setError("File too large (max 50MB)");
+                      setError(p.fileTooLarge);
                       return;
                     }
                     setMediaFile(file);
@@ -654,7 +661,7 @@ function ComposePost({
                 onClick={() => fileRef.current?.click()}
                 disabled={posting}
                 className="hover:text-pnp-accent transition-colors"
-                title="Photo or Video"
+                title={p.photoOrVideo}
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25c0 .828.672 1.5 1.5 1.5z" />
@@ -664,7 +671,7 @@ function ComposePost({
                 onClick={() => fileRef.current?.click()}
                 disabled={posting}
                 className="hover:text-pnp-accent transition-colors"
-                title="Upload Video"
+                title={p.uploadVideo}
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
@@ -676,7 +683,7 @@ function ComposePost({
               disabled={!text.trim() || posting}
               className="btn-gradient px-4 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-40"
             >
-              {posting ? "Posting..." : "Post"}
+              {posting ? p.posting : p.post}
             </button>
           </div>
         </div>
@@ -688,6 +695,8 @@ function ComposePost({
 // ── Referral Card ─────────────────────────────────────────────────────────────
 
 function ReferralCard() {
+  const t = useI18n();
+  const p = t.profile;
   const [stats, setStats] = useState<ReferralStats | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -705,9 +714,9 @@ function ReferralCard() {
 
   return (
     <div className="glass-card-sm p-5 mt-4">
-      <h2 className="text-sm font-semibold text-white mb-1 tracking-wide uppercase opacity-60">Referral Program</h2>
+      <h2 className="text-sm font-semibold text-white mb-1 tracking-wide uppercase opacity-60">{p.referralProgram}</h2>
       <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
-        Invite friends and both of you get <strong style={{ color: "#FFB454" }}>3 days FREE PRIME</strong> when they join.
+        {p.referralInviteDesc} <strong style={{ color: "#FFB454" }}>{p.referralFreePrime}</strong> {p.referralWhenTheyJoin}
       </p>
       {stats ? (
         <>
@@ -727,21 +736,21 @@ function ReferralCard() {
                 color: copied ? "#5ED1C4" : "#FFB454",
               }}
             >
-              {copied ? "Copied!" : "Copy"}
+              {copied ? p.copied : p.copy}
             </button>
           </div>
           <div className="flex gap-4">
             <div className="text-center">
               <div className="text-xl font-bold text-white">{stats.total}</div>
-              <div className="text-[10px]" style={{ color: "#8E8E93" }}>Invited</div>
+              <div className="text-[10px]" style={{ color: "#8E8E93" }}>{p.invited}</div>
             </div>
             <div className="text-center">
               <div className="text-xl font-bold" style={{ color: "#FFB454" }}>{stats.completed}</div>
-              <div className="text-[10px]" style={{ color: "#8E8E93" }}>Joined</div>
+              <div className="text-[10px]" style={{ color: "#8E8E93" }}>{p.joined_noun}</div>
             </div>
             <div className="text-center">
               <div className="text-xl font-bold" style={{ color: "#5ED1C4" }}>{stats.completed * 3}</div>
-              <div className="text-[10px]" style={{ color: "#8E8E93" }}>Days earned</div>
+              <div className="text-[10px]" style={{ color: "#8E8E93" }}>{p.daysEarned}</div>
             </div>
           </div>
         </>
@@ -755,6 +764,8 @@ function ReferralCard() {
 // ── Identity & Connections Section ───────────────────────────────────────────
 
 function IdentityConnections({ telegramUsername }: { telegramUsername?: string }) {
+  const t = useI18n();
+  const p = t.profile;
   const [xLinked, setXLinked] = useState(false);
   const [xHandle, setXHandle] = useState<string | null>(null);
   const [xLoading, setXLoading] = useState(true);
@@ -799,7 +810,7 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
       setXHandle(null);
       setUnlinkVersion((v) => v + 1);
     } catch (err: unknown) {
-      setXUnlinkError(err instanceof Error ? err.message : "Failed to unlink X account");
+      setXUnlinkError(err instanceof Error ? err.message : p.failedToUnlinkX);
     } finally {
       setXUnlinking(false);
     }
@@ -808,7 +819,7 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
   return (
     <div className="glass-card-sm p-5 mt-4">
       <h2 className="text-sm font-semibold text-white mb-4 tracking-wide uppercase opacity-60">
-        Identity &amp; Connections
+        {p.identityConnections}
       </h2>
 
       <div className="space-y-3">
@@ -825,11 +836,11 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
               </svg>
             </div>
             <div>
-              <p className="text-sm font-medium text-white">Telegram</p>
+              <p className="text-sm font-medium text-white">{p.telegram}</p>
               {telegramUsername ? (
                 <p className="text-xs" style={{ color: "#8E8E93" }}>@{telegramUsername}</p>
               ) : (
-                <p className="text-xs" style={{ color: "#8E8E93" }}>Connected</p>
+                <p className="text-xs" style={{ color: "#8E8E93" }}>{p.connected}</p>
               )}
             </div>
           </div>
@@ -837,7 +848,7 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
             className="text-xs font-semibold px-2.5 py-1 rounded-full"
             style={{ background: "rgba(52, 199, 89, 0.15)", color: "#34C759" }}
           >
-            Connected
+            {p.connected}
           </span>
         </div>
 
@@ -854,13 +865,13 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
               </svg>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white">X (Twitter)</p>
+              <p className="text-sm font-medium text-white">{p.xTwitter}</p>
               {xLoading ? (
                 <div className="h-3 w-24 bg-white/10 rounded animate-pulse mt-0.5" />
               ) : xLinked && xHandle ? (
                 <p className="text-xs truncate" style={{ color: "#8E8E93" }}>@{xHandle}</p>
               ) : (
-                <p className="text-xs" style={{ color: "#8E8E93" }}>Not connected</p>
+                <p className="text-xs" style={{ color: "#8E8E93" }}>{p.notConnected}</p>
               )}
             </div>
             {!xLoading && (
@@ -869,7 +880,7 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
                   className="text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0"
                   style={{ background: "rgba(52, 199, 89, 0.15)", color: "#34C759" }}
                 >
-                  Connected
+                  {p.connected}
                 </span>
               ) : (
                 <button
@@ -877,7 +888,7 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
                   className="text-xs font-semibold px-3 py-1.5 rounded-full flex-shrink-0 transition-colors hover:opacity-80"
                   style={{ background: "rgba(255, 255, 255, 0.1)", color: "#FFFFFF" }}
                 >
-                  Connect
+                  {p.connect}
                 </button>
               )
             )}
@@ -892,7 +903,7 @@ function IdentityConnections({ telegramUsername }: { telegramUsername?: string }
                 className="text-xs font-medium hover:underline disabled:opacity-50"
                 style={{ color: "#FF453A" }}
               >
-                {xUnlinking ? "Unlinking..." : "Unlink X account"}
+                {xUnlinking ? p.unlinking : p.unlinkXAccount}
               </button>
               {xUnlinkError && (
                 <span className="text-xs text-red-400">{xUnlinkError}</span>
@@ -920,6 +931,8 @@ function FollowListModal({
   onClose: () => void;
   onNavigate: (userId: string) => void;
 }) {
+  const t = useI18n();
+  const p = t.profile;
   const [users, setUsers] = useState<FollowListUser[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -954,7 +967,7 @@ function FollowListModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title={mode === "followers" ? "Followers" : "Following"}>
+    <Modal open={open} onClose={onClose} title={mode === "followers" ? p.followersTitle : p.followingTitle}>
       {loading ? (
         <div className="space-y-3 py-2">
           {Array.from({ length: 5 }).map((_, i) => (
@@ -969,9 +982,9 @@ function FollowListModal({
         </div>
       ) : users.length === 0 ? (
         <div className="py-8 text-center">
-          <p className="text-white font-medium mb-1">No {mode === "followers" ? "Followers" : "Following"}</p>
+          <p className="text-white font-medium mb-1">{mode === "followers" ? p.noFollowers : p.noFollowing}</p>
           <p className="text-sm" style={{ color: "#8E8E93" }}>
-            {mode === "followers" ? "No one is following yet." : "Not following anyone yet."}
+            {mode === "followers" ? p.noFollowersDesc : p.noFollowingDesc}
           </p>
         </div>
       ) : (
@@ -1010,7 +1023,7 @@ function FollowListModal({
                 className="text-sm font-medium px-4 py-1.5 rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
                 style={{ color: "#D4007A" }}
               >
-                {loadingMore ? "Loading..." : "Load More"}
+                {loadingMore ? p.loading : p.loadMore}
               </button>
             </div>
           )}
@@ -1049,6 +1062,8 @@ function CreatorEnrollmentWizard({
   onClose: () => void;
   onSubmitted: () => void;
 }) {
+  const i18n = useI18n();
+  const pr = i18n.profile;
   const t = TIER_CONFIG[tier];
   const [step, setStep] = useState(1);
   const TOTAL_STEPS = 4;
@@ -1081,9 +1096,9 @@ function CreatorEnrollmentWizard({
   };
 
   const handleSubmit = async () => {
-    if (!idFile) { setSubmitError("ID document is required"); return; }
-    if (!signatureData) { setSubmitError("Signature is required"); return; }
-    if (!paymentAddress.trim()) { setSubmitError("Payment address is required"); return; }
+    if (!idFile) { setSubmitError(pr.idDocumentRequired); return; }
+    if (!signatureData) { setSubmitError(pr.signatureRequired); return; }
+    if (!paymentAddress.trim()) { setSubmitError(pr.paymentAddressRequired); return; }
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -1097,7 +1112,7 @@ function CreatorEnrollmentWizard({
       });
       onSubmitted();
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Submission failed");
+      setSubmitError(err instanceof Error ? err.message : pr.submissionFailed);
     } finally {
       setSubmitting(false);
     }
@@ -1121,8 +1136,8 @@ function CreatorEnrollmentWizard({
           <div className="flex items-center gap-2">
             <span className="text-lg">{t.emoji}</span>
             <div>
-              <p className="text-sm font-semibold text-white">{t.name} Enrollment</p>
-              <p className="text-xs" style={{ color: t.color }}>Step {step} of {TOTAL_STEPS}</p>
+              <p className="text-sm font-semibold text-white">{t.name} {pr.enrollment}</p>
+              <p className="text-xs" style={{ color: t.color }}>{pr.stepOf} {step} {pr.of} {TOTAL_STEPS}</p>
             </div>
           </div>
           <button
@@ -1151,26 +1166,26 @@ function CreatorEnrollmentWizard({
           {/* Step 1: Terms & Commitment */}
           {step === 1 && (
             <>
-              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">Terms & Conditions</p>
+              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">{pr.termsAndConditions}</p>
 
               <div className="space-y-3 text-xs" style={{ color: "#8E8E93" }}>
                 <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                  <p className="font-semibold text-white">Program Terms</p>
-                  <p>By enrolling as a creator, you agree to PNPtv!'s Creator Program Terms. Subscription revenue is split <strong className="text-white">70% to you / 30% to PNPtv!</strong>. Payouts are processed every <strong className="text-white">Tuesday before 2:00 PM UTC</strong> via your selected payment method.</p>
-                  <p>You retain ownership of all content you upload. PNPtv! reserves the right to deactivate creator profiles for violations of community standards or the strike policy (3 strikes = suspension).</p>
-                  <p>You may voluntarily deactivate at any time. Active subscribers retain access until their billing period ends. PNPtv! may amend these terms with 30 days written notice.</p>
+                  <p className="font-semibold text-white">{pr.programTerms}</p>
+                  <p>{pr.programTermsBody}</p>
+                  <p>{pr.programTermsBody2}</p>
+                  <p>{pr.programTermsBody3}</p>
                 </div>
 
                 <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                  <p className="font-semibold text-white">Content Requirements</p>
-                  <p>You commit to maintaining regular posting activity to keep your creator profile active. Content is evaluated on a rolling monthly basis:</p>
+                  <p className="font-semibold text-white">{pr.contentRequirements}</p>
+                  <p>{pr.contentReqBody}</p>
                   <ul className="list-disc list-inside space-y-0.5 mt-1">
-                    <li>Minimum <strong className="text-white">1 media post per week</strong></li>
-                    <li>At least <strong className="text-white">10% of posts</strong> must be free (public)</li>
-                    <li>At least <strong className="text-white">10% of posts</strong> must be accessible to PNPtv! PRIME members</li>
-                    <li>Up to <strong className="text-white">80% of posts</strong> can be exclusive to your {t.emoji} subscribers</li>
+                    <li>{pr.contentReqItem1}</li>
+                    <li>{pr.contentReqItem2}</li>
+                    <li>{pr.contentReqItem3}</li>
+                    <li>{pr.contentReqItem4}</li>
                   </ul>
-                  <p className="mt-1">All content must comply with PNPtv! community standards. No illegal content. Explicit content requires age verification to be active on your account.</p>
+                  <p className="mt-1">{pr.contentReqDisclaimer}</p>
                 </div>
               </div>
 
@@ -1187,7 +1202,7 @@ function CreatorEnrollmentWizard({
                   )}
                 </div>
                 <span className="text-xs" style={{ color: termsAccepted ? "#fff" : "#8E8E93" }}>
-                  I have read and agree to the <strong>Creator Program Terms & Conditions</strong> and the <strong>Payout Terms</strong>
+                  {pr.agreeToTerms} <strong>{pr.creatorProgramTerms}</strong> {pr.and} <strong>{pr.payoutTerms}</strong>
                 </span>
               </label>
 
@@ -1204,7 +1219,7 @@ function CreatorEnrollmentWizard({
                   )}
                 </div>
                 <span className="text-xs" style={{ color: commitmentAccepted ? "#fff" : "#8E8E93" }}>
-                  I understand and commit to the <strong>content quality and quantity requirements</strong>
+                  {pr.understandCommitment} <strong>{pr.contentRequirementsLabel}</strong>
                 </span>
               </label>
             </>
@@ -1213,20 +1228,20 @@ function CreatorEnrollmentWizard({
           {/* Step 2: Payment Setup */}
           {step === 2 && (
             <>
-              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">Payment Setup</p>
+              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">{pr.paymentSetup}</p>
 
               <div className="rounded-xl p-3 text-xs space-y-1.5" style={{ background: `rgba(${t.rgb},0.08)`, border: `1px solid rgba(${t.rgb},0.2)` }}>
-                <p className="font-semibold text-white">Payout Terms</p>
-                <p style={{ color: "#8E8E93" }}>You receive <strong className="text-white">70%</strong> of every subscription payment.</p>
-                <p style={{ color: "#8E8E93" }}>Payouts are processed every <strong className="text-white">Tuesday before 2:00 PM UTC</strong>.</p>
-                <p style={{ color: "#8E8E93" }}>Minimum payout: <strong className="text-white">$10 USD</strong>. Earnings below threshold roll over to the next week.</p>
+                <p className="font-semibold text-white">{pr.payoutTermsTitle}</p>
+                <p style={{ color: "#8E8E93" }}>{pr.youReceive70}</p>
+                <p style={{ color: "#8E8E93" }}>{pr.payoutsEveryTuesday}</p>
+                <p style={{ color: "#8E8E93" }}>{pr.minimumPayout}</p>
               </div>
 
               <div>
-                <p className="text-xs font-medium mb-2" style={{ color: "#8E8E93" }}>Select payment method</p>
+                <p className="text-xs font-medium mb-2" style={{ color: "#8E8E93" }}>{pr.selectPaymentMethod}</p>
                 <div className="grid grid-cols-3 gap-2">
                   {([
-                    { id: "meru" as const, label: "Meru App", icon: "💳" },
+                    { id: "meru" as const, label: pr.meruApp, icon: "💳" },
                     { id: "usdc" as const, label: "USDC", icon: "🔵" },
                     { id: "usdt" as const, label: "USDT", icon: "🟢" },
                   ]).map((m) => (
@@ -1252,7 +1267,7 @@ function CreatorEnrollmentWizard({
 
               {(paymentMethod === "usdc" || paymentMethod === "usdt") && (
                 <div>
-                  <p className="text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>Network</p>
+                  <p className="text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>{pr.network}</p>
                   <div className="grid grid-cols-2 gap-2">
                     {(paymentMethod === "usdc"
                       ? [{ id: "base", label: "Base" }, { id: "ethereum", label: "Ethereum" }]
@@ -1276,13 +1291,13 @@ function CreatorEnrollmentWizard({
 
               <div>
                 <label className="text-xs font-medium block mb-1.5" style={{ color: "#8E8E93" }}>
-                  {paymentMethod === "meru" ? "Meru account ID or phone" : "Wallet address"}
+                  {paymentMethod === "meru" ? pr.meruAccountOrPhone : pr.walletAddress}
                 </label>
                 <input
                   type="text"
                   value={paymentAddress}
                   onChange={(e) => setPaymentAddress(e.target.value)}
-                  placeholder={paymentMethod === "meru" ? "e.g. +1234567890 or @meruuser" : "0x..."}
+                  placeholder={paymentMethod === "meru" ? pr.meruPlaceholder : pr.walletPlaceholder}
                   className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none"
                   style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
                   autoComplete="off"
@@ -1294,18 +1309,18 @@ function CreatorEnrollmentWizard({
           {/* Step 3: Identity Verification */}
           {step === 3 && (
             <>
-              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">Identity Verification</p>
+              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">{pr.identityVerification}</p>
 
               <div className="rounded-xl p-3 text-xs" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                <p className="font-semibold text-white mb-1">Why we need this</p>
+                <p className="font-semibold text-white mb-1">{pr.whyWeNeedThis}</p>
                 <p style={{ color: "#8E8E93" }}>
-                  To comply with payout regulations and prevent fraud, we require a photo of your government-issued ID and your digital signature. Your documents are stored securely and only reviewed by PNPtv! staff during the enrollment review process.
+                  {pr.idVerificationExplanation}
                 </p>
               </div>
 
               <div>
                 <p className="text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>
-                  Government ID (front) <span className="text-red-400">*</span>
+                  {pr.governmentIdFront} <span className="text-red-400">*</span>
                 </p>
                 {idPreview ? (
                   <div className="relative">
@@ -1331,7 +1346,7 @@ function CreatorEnrollmentWizard({
                     <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: t.color }}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25c0 .828.672 1.5 1.5 1.5z" />
                     </svg>
-                    <p className="text-xs" style={{ color: "#8E8E93" }}>Tap to upload ID photo</p>
+                    <p className="text-xs" style={{ color: "#8E8E93" }}>{pr.tapToUploadId}</p>
                     <input type="file" accept="image/*" className="hidden" onChange={handleIdUpload} />
                   </label>
                 )}
@@ -1339,7 +1354,7 @@ function CreatorEnrollmentWizard({
 
               <div>
                 <p className="text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>
-                  Digital Signature <span className="text-red-400">*</span>
+                  {pr.digitalSignature} <span className="text-red-400">*</span>
                 </p>
                 <SignaturePad
                   onSave={setSignatureData}
@@ -1353,42 +1368,42 @@ function CreatorEnrollmentWizard({
           {/* Step 4: Review & Submit */}
           {step === 4 && (
             <>
-              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">Review & Submit</p>
+              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">{pr.reviewAndSubmit}</p>
 
               <div className="space-y-2 text-xs">
                 <div className="rounded-xl p-3" style={{ background: `rgba(${t.rgb},0.08)`, border: `1px solid rgba(${t.rgb},0.2)` }}>
                   <p className="font-semibold text-white mb-2">{t.emoji} {t.name}</p>
                   <div className="space-y-1.5" style={{ color: "#8E8E93" }}>
                     <div className="flex justify-between">
-                      <span>Subscription price</span>
+                      <span>{pr.subscriptionPrice}</span>
                       <span className="text-white font-medium">${t.price}/mo</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Your earnings</span>
+                      <span>{pr.yourEarnings}</span>
                       <span className="text-white font-medium">70% · ~${(t.price * 0.7).toFixed(2)}/subscriber</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Payout day</span>
-                      <span className="text-white font-medium">Every Tuesday before 2pm UTC</span>
+                      <span>{pr.payoutDay}</span>
+                      <span className="text-white font-medium">{pr.payoutDayValue}</span>
                     </div>
                   </div>
                 </div>
 
                 <div className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                  <p className="font-semibold text-white mb-2">Payment Details</p>
+                  <p className="font-semibold text-white mb-2">{pr.paymentDetails}</p>
                   <div className="space-y-1.5" style={{ color: "#8E8E93" }}>
                     <div className="flex justify-between">
-                      <span>Method</span>
+                      <span>{pr.method}</span>
                       <span className="text-white font-medium capitalize">{paymentMethod}</span>
                     </div>
                     {paymentNetwork && paymentMethod !== "meru" && (
                       <div className="flex justify-between">
-                        <span>Network</span>
+                        <span>{pr.network}</span>
                         <span className="text-white font-medium capitalize">{paymentNetwork}</span>
                       </div>
                     )}
                     <div className="flex justify-between">
-                      <span>Address</span>
+                      <span>{pr.address}</span>
                       <span className="text-white font-medium truncate ml-4" style={{ maxWidth: 160 }}>{paymentAddress}</span>
                     </div>
                   </div>
@@ -1396,17 +1411,17 @@ function CreatorEnrollmentWizard({
 
                 <div className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
                   <div className="flex items-center justify-between">
-                    <p className="font-semibold text-white">Identity Verification</p>
-                    <span className="text-xs" style={{ color: "#4ADE80" }}>Provided</span>
+                    <p className="font-semibold text-white">{pr.idVerificationProvided}</p>
+                    <span className="text-xs" style={{ color: "#4ADE80" }}>{pr.idProvided}</span>
                   </div>
                   <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>
-                    ID document and digital signature captured. Reviewed by PNPtv! staff only.
+                    {pr.idCapturedNote}
                   </p>
                 </div>
               </div>
 
               <p className="text-xs text-center" style={{ color: "#8E8E93" }}>
-                After submitting, your enrollment will be reviewed within <strong className="text-white">24-48 hours</strong>. You'll receive a notification when approved.
+                {pr.reviewNote}
               </p>
 
               {submitError && (
@@ -1429,7 +1444,7 @@ function CreatorEnrollmentWizard({
               className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-40"
               style={{ background: t.gradient }}
             >
-              Continue
+              {pr.continue}
             </button>
           ) : (
             <button
@@ -1438,7 +1453,7 @@ function CreatorEnrollmentWizard({
               className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-50"
               style={{ background: t.gradient }}
             >
-              {submitting ? "Submitting..." : "Submit Enrollment"}
+              {submitting ? pr.submitting : pr.submitEnrollment}
             </button>
           )}
           {step > 1 && (
@@ -1447,7 +1462,7 @@ function CreatorEnrollmentWizard({
               className="w-full py-2 text-xs text-center"
               style={{ color: "#8E8E93" }}
             >
-              Back
+              {pr.backStep}
             </button>
           )}
         </div>
@@ -1459,6 +1474,8 @@ function CreatorEnrollmentWizard({
 // ── Monetize Content Card ─────────────────────────────────────────────────────
 
 function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: string; onActivated?: () => void }) {
+  const t = useI18n();
+  const p = t.profile;
   const [eligibility, setEligibility] = useState<CreatorEligibility | null>(null);
   const [enrollment, setEnrollment] = useState<CreatorEnrollment | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1503,9 +1520,9 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
             </svg>
           </div>
           <div>
-            <p className="text-sm font-semibold text-white">Enrollment Under Review</p>
+            <p className="text-sm font-semibold text-white">{p.enrollmentUnderReview}</p>
             <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
-              Your {enrollment?.tier || ""} {t.emoji} creator enrollment is being reviewed. Expect a response within 24-48 hours.
+              {enrollment?.tier || ""} {t.emoji} {p.enrollmentUnderReviewDesc}
             </p>
           </div>
         </div>
@@ -1518,16 +1535,16 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
     const t = TIER_CONFIG[enrollment.tier as TierId] || TIER_CONFIG.ice;
     return (
       <div className="glass-card-sm p-4 mt-4" style={{ borderColor: "rgba(239,68,68,0.25)" }}>
-        <p className="text-sm font-semibold text-white mb-1">Enrollment Not Approved</p>
+        <p className="text-sm font-semibold text-white mb-1">{p.enrollmentNotApproved}</p>
         <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
-          {enrollment.admin_notes || "Your enrollment was not approved. You may re-apply after addressing the feedback."}
+          {enrollment.admin_notes || p.enrollmentRejectedDefault}
         </p>
         <button
           onClick={() => setShowWizard(true)}
           className="w-full py-2.5 rounded-lg text-sm font-semibold text-white"
           style={{ background: t.gradient }}
         >
-          Re-apply for {t.emoji} {t.name}
+          {p.reApplyFor} {t.emoji} {t.name}
         </button>
         {showWizard && (
           <CreatorEnrollmentWizard
@@ -1560,7 +1577,7 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: isEligible ? selectedTierConfig.color : "#D4007A" }}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p className="text-sm font-semibold text-white">Monetize Your Profile</p>
+            <p className="text-sm font-semibold text-white">{p.monetizeYourProfile}</p>
           </div>
           {!isEligible && (
             <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "rgba(212,0,122,0.12)", color: "#D4007A" }}>
@@ -1572,7 +1589,7 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
         {isEligible ? (
           <>
             <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
-              Choose your creator tier. Subscribers pay monthly for your exclusive content (70/30 revenue split, payouts every Tuesday via Meru · USDC · USDT).
+              {p.creatorMonetizeDesc}
             </p>
 
             {/* Tier selector */}
@@ -1605,13 +1622,13 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
               className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all"
               style={{ background: selectedTierConfig.gradient }}
             >
-              {selectedTierConfig.emoji} Start {selectedTierConfig.name} Enrollment
+              {selectedTierConfig.emoji} {p.startEnrollment}
             </button>
           </>
         ) : (
           <>
             <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
-              Meet these requirements to unlock creator monetization:
+              {p.meetRequirementsToUnlock}
             </p>
 
             <div className="mb-3">
@@ -1628,10 +1645,10 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
 
             <div className="space-y-2">
               {([
-                { key: "mediaPosts", label: "Media Posts", icon: "M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25c0 .828.672 1.5 1.5 1.5z" },
-                { key: "totalLikes", label: "Total Likes", icon: "M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" },
-                { key: "followers", label: "Followers", icon: "M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" },
-                { key: "weeklyConsistency", label: "Weekly Posts (4 wks)", icon: "M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" },
+                { key: "mediaPosts", label: p.mediaPosts, icon: "M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25c0 .828.672 1.5 1.5 1.5z" },
+                { key: "totalLikes", label: p.totalLikes, icon: "M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" },
+                { key: "followers", label: p.followers, icon: "M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" },
+                { key: "weeklyConsistency", label: p.weeklyPosts4Weeks, icon: "M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" },
               ] as const).map(({ key, label, icon }) => {
                 const c = criteria[key];
                 const pct = Math.min((c.current / c.required) * 100, 100);
@@ -1653,7 +1670,7 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
                       <div className="flex items-center justify-between mb-0.5">
                         <span className="text-xs text-white/80 truncate">{label}</span>
                         <span className="text-xs font-medium ml-2 flex-shrink-0" style={{ color: c.met ? "#5ED1C4" : "#8E8E93" }}>
-                          {c.met ? "Done" : `${remaining} more`}
+                          {c.met ? p.done : `${remaining} ${p.moreRequired}`}
                         </span>
                       </div>
                       {!c.met && (
@@ -1675,7 +1692,7 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
               className="w-full mt-3 py-2.5 rounded-lg text-sm font-semibold text-white/40 cursor-not-allowed"
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
             >
-              Complete requirements to enroll
+              {p.completeRequirementsToEnroll}
             </button>
           </>
         )}
@@ -1699,6 +1716,8 @@ export default function Profile() {
   const { userId: paramUserId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
 
+  const t = useI18n();
+  const p = t.profile;
   const isOwnProfile = !paramUserId || paramUserId === String(user?.id);
   const targetUserId = paramUserId || String(user?.id || "");
   const { showTutorial, dismissTutorial } = useTutorial("profile");
@@ -1988,7 +2007,7 @@ export default function Profile() {
     const userRole = (user?.role || "").toLowerCase();
     const isAdminRole = userRole === "admin" || userRole === "superadmin";
     if (userTier !== "prime" && !isAdminRole) {
-      setSubscribeError("PRIME subscription required to subscribe to creators");
+      setSubscribeError(p.primeRequiredForCreator);
       setTimeout(() => setSubscribeError(null), 4000);
       return;
     }
@@ -2008,7 +2027,7 @@ export default function Profile() {
       await unsubscribeFromCreator(profile.id || paramUserId!);
       setIsSubscribed(false);
     } catch (err) {
-      setSubscribeError(err instanceof Error ? err.message : "Failed to unsubscribe");
+      setSubscribeError(err instanceof Error ? err.message : p.failedToUnsubscribe);
     }
     setSubscribeLoading(false);
   };
@@ -2031,10 +2050,10 @@ export default function Profile() {
         setSubscribePaymentId(result.paymentId);
         setSubscribeAwaitingPayment(true);
       } else {
-        setSubscribeError(result.error || "Failed to create payment. Please try again.");
+        setSubscribeError(result.error || p.failedToCreatePayment);
       }
     } catch (err) {
-      setSubscribeError(err instanceof Error ? err.message : "Payment error. Please try again.");
+      setSubscribeError(err instanceof Error ? err.message : p.paymentError);
     }
     setSubscribePaymentLoading(false);
   };
@@ -2050,11 +2069,11 @@ export default function Profile() {
         setSubscribeAwaitingPayment(false);
         setSubscribePaymentId(null);
       } else {
-        setSubscribeError("Payment not confirmed yet. Please wait a moment and try again.");
+        setSubscribeError(p.paymentNotConfirmed);
         setTimeout(() => setSubscribeError(null), 4000);
       }
     } catch {
-      setSubscribeError("Could not verify subscription status.");
+      setSubscribeError(p.couldNotVerifyStatus);
       setTimeout(() => setSubscribeError(null), 3000);
     }
   };
@@ -2089,11 +2108,11 @@ export default function Profile() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
           </svg>
         </div>
-        <h1 className="text-xl font-bold text-white mb-2">Sign In Required</h1>
+        <h1 className="text-xl font-bold text-white mb-2">{p.signInRequired}</h1>
         <p className="text-sm mb-6" style={{ color: "#8E8E93" }}>
-          Sign in to view your profile and share with the community.
+          {p.signInPrompt}
         </p>
-        <Button onClick={login}>Sign In</Button>
+        <Button onClick={login}>{p.signIn}</Button>
       </div>
     );
   }
@@ -2141,9 +2160,9 @@ export default function Profile() {
         <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
         </svg>
-        <p className="text-white font-medium mb-1">Profile Not Found</p>
-        <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>{error || "This user doesn't exist."}</p>
-        <Button onClick={() => navigate("/")}>Go Home</Button>
+        <p className="text-white font-medium mb-1">{p.profileNotFound}</p>
+        <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>{error || p.userDoesntExist}</p>
+        <Button onClick={() => navigate("/")}>{p.goHome}</Button>
       </div>
     );
   }
@@ -2206,7 +2225,7 @@ export default function Profile() {
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
           </svg>
-          Back
+          {p.back}
         </button>
       )}
 
@@ -2223,7 +2242,7 @@ export default function Profile() {
               onChange={(e) => handleSearchChange(e.target.value)}
               onFocus={() => { if (searchQuery.trim().length >= 2) setSearchOpen(true); }}
               onKeyDown={(e) => { if (e.key === "Escape") setSearchOpen(false); }}
-              placeholder="Search people..."
+              placeholder={p.searchPeople}
               className="w-full pl-10 pr-10 py-2.5 rounded-xl text-sm text-white placeholder-[#8E8E93] focus:outline-none focus:ring-1 focus:ring-[#D4007A]/50"
               style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}
             />
@@ -2252,7 +2271,7 @@ export default function Profile() {
                   </svg>
                 </div>
               ) : searchResults.length === 0 ? (
-                <p className="text-center text-sm py-6" style={{ color: "#8E8E93" }}>No users found</p>
+                <p className="text-center text-sm py-6" style={{ color: "#8E8E93" }}>{p.noUsersFound}</p>
               ) : (
                 searchResults.map((u) => {
                   const photo = resolvePhotoUrl(u.photo_file_id);
@@ -2332,7 +2351,7 @@ export default function Profile() {
                   disabled={avatarUploading}
                   className="absolute bottom-0 right-0 w-7 h-7 rounded-full flex items-center justify-center border-2 border-[#1C1C1E]"
                   style={{ background: accentGradient }}
-                  title="Change photo"
+                  title={p.changePhoto}
                 >
                   {avatarUploading ? (
                     <svg className="w-3.5 h-3.5 text-white animate-spin" fill="none" viewBox="0 0 24 24">
@@ -2377,19 +2396,19 @@ export default function Profile() {
                       <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                       </svg>
-                      Performer
+                      {p.performer}
                     </span>
                   )}
                   {profile.creatorStatus === "active" && (() => {
                     const tierMap: Record<string, { emoji: string; label: string; color: string }> = {
-                      ice:     { emoji: TIER_CONFIG.ice.emoji,     label: "Ice Creator",     color: TIER_CONFIG.ice.color },
-                      crystal: { emoji: TIER_CONFIG.crystal.emoji, label: "Crystal Creator",  color: TIER_CONFIG.crystal.color },
-                      diamond: { emoji: TIER_CONFIG.diamond.emoji, label: "Diamond Creator",  color: TIER_CONFIG.diamond.color },
+                      ice:     { emoji: TIER_CONFIG.ice.emoji,     label: p.iceCreator,     color: TIER_CONFIG.ice.color },
+                      crystal: { emoji: TIER_CONFIG.crystal.emoji, label: p.crystalCreator,  color: TIER_CONFIG.crystal.color },
+                      diamond: { emoji: TIER_CONFIG.diamond.emoji, label: p.diamondCreator,  color: TIER_CONFIG.diamond.color },
                     };
                     const tier = tierMap[profile.creatorType ?? ""];
                     const badgeColor  = tier ? tier.color  : "#D4007A";
                     const badgeEmoji  = tier ? tier.emoji  : "⭐";
-                    const badgeLabel  = tier ? tier.label  : "Creator";
+                    const badgeLabel  = tier ? tier.label  : p.creator;
                     // Convert hex to rgb for rgba() — only the three tiers + fallback pink need this
                     const hexToRgb = (hex: string) => {
                       const r = parseInt(hex.slice(1, 3), 16);
@@ -2413,7 +2432,7 @@ export default function Profile() {
                 </>
               )}
               {profile.creatorVerified && (
-                <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill={accentColor} aria-label="Verified creator">
+                <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill={accentColor} aria-label={p.verifiedCreator}>
                   <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                 </svg>
               )}
@@ -2429,37 +2448,37 @@ export default function Profile() {
             <div className="flex items-center gap-4 mt-3 flex-wrap">
               <span className="text-sm">
                 <strong className="text-white">{profile.postCount ?? posts.length}</strong>
-                <span className="ml-1" style={{ color: "#8E8E93" }}>Posts</span>
+                <span className="ml-1" style={{ color: "#8E8E93" }}>{p.posts}</span>
               </span>
               <button
                 onClick={() => setShowFollowModal("followers")}
                 className="text-sm hover:underline text-left"
               >
                 <strong className="text-white">{followersCount}</strong>
-                <span className="ml-1" style={{ color: "#8E8E93" }}>Followers</span>
+                <span className="ml-1" style={{ color: "#8E8E93" }}>{p.followers}</span>
               </button>
               <button
                 onClick={() => setShowFollowModal("following")}
                 className="text-sm hover:underline text-left"
               >
                 <strong className="text-white">{followingCount}</strong>
-                <span className="ml-1" style={{ color: "#8E8E93" }}>Following</span>
+                <span className="ml-1" style={{ color: "#8E8E93" }}>{p.following}</span>
               </button>
               {profile.creatorStatus === "active" && (profile.creatorSubscriberCount || 0) > 0 && (
                 <span className="text-sm">
                   <strong className="text-white">{profile.creatorSubscriberCount}</strong>
-                  <span className="ml-1" style={{ color: "#8E8E93" }}>Subscribers</span>
+                  <span className="ml-1" style={{ color: "#8E8E93" }}>{p.subscribers}</span>
                 </span>
               )}
               {profile.creatorStatus === "active" && (() => {
-                const exclusiveCount = posts.filter(p => p.is_exclusive).length;
+                const exclusiveCount = posts.filter(post => post.is_exclusive).length;
                 return exclusiveCount > 0 ? (
                   <span className="text-sm flex items-center gap-1">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true" style={{ color: "#D4007A" }}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                     </svg>
                     <strong className="text-white">{exclusiveCount}</strong>
-                    <span style={{ color: "#8E8E93" }}>Exclusive</span>
+                    <span style={{ color: "#8E8E93" }}>{p.exclusive}</span>
                   </span>
                 ) : null;
               })()}
@@ -2469,13 +2488,13 @@ export default function Profile() {
                     <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                   </svg>
                   <strong className="text-white">{profile.performerData!.averageRating.toFixed(1)}</strong>
-                  <span style={{ color: "#8E8E93" }}>Rating</span>
+                  <span style={{ color: "#8E8E93" }}>{p.rating}</span>
                 </span>
               )}
               {isPerformer && (
                 <span className="text-sm">
                   <strong className="text-white">{profile.performerData!.totalCalls}</strong>
-                  <span className="ml-1" style={{ color: "#8E8E93" }}>Calls</span>
+                  <span className="ml-1" style={{ color: "#8E8E93" }}>{p.calls}</span>
                 </span>
               )}
               {profile.locationText && (
@@ -2494,10 +2513,67 @@ export default function Profile() {
               <svg className="w-3.5 h-3.5 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
               </svg>
-              Joined {formatDate(profile.memberSince)}
+              {p.joined} {formatDate(profile.memberSince)}
             </p>
           </div>
         </div>
+
+        {/* Cristina's profile completion nudge */}
+        {isOwnProfile && (!photoUrl || !profile.dateOfBirth || !profile.city) && !localStorage.getItem("pnp:cristina-profile-nudge-dismissed") && (
+          <div className="mt-4 rounded-xl p-4 relative" style={{ background: "linear-gradient(135deg, rgba(91,200,245,0.08), rgba(0,212,232,0.08))", border: "1px solid rgba(91,200,245,0.25)" }}>
+            <button
+              onClick={() => { localStorage.setItem("pnp:cristina-profile-nudge-dismissed", "1"); setProfile({ ...profile }); }}
+              className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors"
+              aria-label="Dismiss"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+            <div className="flex items-start gap-3">
+              <div className="cristina-avatar-glow rounded-full flex items-center justify-center shrink-0" style={{ width: 40, height: 40, background: "linear-gradient(135deg, #5BC8F5, #00D4E8)" }}>
+                <span style={{ fontSize: 20 }} role="img" aria-label="Cristina">&#x1F9DC;&#x200D;&#x2640;&#xFE0F;</span>
+              </div>
+              <div className="flex-1 min-w-0 pr-4">
+                <p className="text-sm font-semibold" style={{ color: "#5BC8F5" }}>{p.cristinaHeadline}</p>
+                <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.7)" }}>
+                  {p.cristinaIntro}
+                </p>
+                <div className="mt-2 space-y-1.5">
+                  {!photoUrl && (
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0" style={{ background: "rgba(91,200,245,0.2)", color: "#5BC8F5" }}>1</span>
+                      <p className="text-xs" style={{ color: "rgba(255,255,255,0.6)" }}>
+                        <strong className="text-white/80">{p.cristinaUploadPhoto}</strong>{p.cristinaUploadPhotoDesc}
+                      </p>
+                    </div>
+                  )}
+                  {!profile.dateOfBirth && (
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0" style={{ background: "rgba(91,200,245,0.2)", color: "#5BC8F5" }}>{!photoUrl ? "2" : "1"}</span>
+                      <p className="text-xs" style={{ color: "rgba(255,255,255,0.6)" }}>
+                        <strong className="text-white/80">{p.cristinaAddBirthday}</strong>{p.cristinaAddBirthdayDesc}
+                      </p>
+                    </div>
+                  )}
+                  {!profile.city && (
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0" style={{ background: "rgba(91,200,245,0.2)", color: "#5BC8F5" }}>{(!photoUrl ? 1 : 0) + (!profile.dateOfBirth ? 1 : 0) + 1}</span>
+                      <p className="text-xs" style={{ color: "rgba(255,255,255,0.6)" }}>
+                        <strong className="text-white/80">{p.cristinaSetLocation}</strong>{p.cristinaSetLocationDesc}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => { if (!photoUrl) fileInputRef.current?.click(); else setEditOpen(true); }}
+                  className="mt-3 px-4 py-1.5 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-80"
+                  style={{ background: "linear-gradient(135deg, #5BC8F5, #00D4E8)" }}
+                >
+                  {!photoUrl ? p.cristinaUploadPhotoBtn : p.cristinaEditProfileBtn}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Monetize Content — own profile, not yet active */}
         {isOwnProfile && profile.creatorStatus !== "active" && (
@@ -2517,12 +2593,12 @@ export default function Profile() {
               />
               <span className="text-xs font-medium" style={{ color: profile.performerData!.isAvailable ? "#30D158" : "#8E8E93" }}>
                 {profile.performerData!.isAvailable
-                  ? (profile.performerData!.availabilityMessage || "Available for calls")
-                  : "Currently unavailable"}
+                  ? (profile.performerData!.availabilityMessage || p.availableForCalls)
+                  : p.currentlyUnavailable}
               </span>
             </div>
             <span className="text-sm font-bold" style={{ color: "#5ED1C4" }}>
-              ${profile.performerData!.basePrice}/call
+              ${profile.performerData!.basePrice}{p.perCall}
             </span>
           </div>
         )}
@@ -2535,7 +2611,7 @@ export default function Profile() {
                 onClick={() => setEditOpen(true)}
                 className="flex-1 py-2 rounded-lg text-sm font-semibold text-white border border-white/20 hover:border-white/40 transition-colors"
               >
-                Edit Profile
+                {p.editProfile}
               </button>
               {profile.creatorStatus === "active" && (() => {
                 const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
@@ -2545,7 +2621,7 @@ export default function Profile() {
                     className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors"
                     style={{ background: `rgba(${tc.rgb},0.15)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.3)` }}
                   >
-                    {tc.emoji} Creator Dashboard
+                    {tc.emoji} {p.creatorDashboard}
                   </button>
                 );
               })()}
@@ -2554,10 +2630,10 @@ export default function Profile() {
                 className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/90 transition-colors"
                 style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
               >
-                Reset Tutorials
+                {p.resetTutorials}
               </button>
               <Button variant="danger" className="px-4" onClick={logout}>
-                Sign Out
+                {p.signOut}
               </Button>
             </>
           ) : (
@@ -2572,7 +2648,7 @@ export default function Profile() {
                     : { background: accentGradient, color: "#fff" }
                   }
                 >
-                  {followLoading ? "..." : isFollowing ? "Following" : "Follow"}
+                  {followLoading ? "..." : isFollowing ? p.following_verb : p.follow}
                 </button>
               )}
               {followError && (
@@ -2582,7 +2658,7 @@ export default function Profile() {
                 onClick={() => navigate(`/dm/${profile.id || paramUserId}`)}
                 className="flex-1 py-2 rounded-lg text-white text-sm font-semibold border border-white/20 hover:border-white/40 transition-colors"
               >
-                Message
+                {p.message}
               </button>
               {profile.creatorStatus === "active" && isAuthenticated && (() => {
                 const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
@@ -2596,7 +2672,7 @@ export default function Profile() {
                       : { background: tc.gradient, color: "#fff" }
                     }
                   >
-                    {subscribeLoading ? "..." : isSubscribed ? `${tc.emoji} Subscribed` : `${tc.emoji} Subscribe $${profile.creatorPriceUsd || tc.price}/mo`}
+                    {subscribeLoading ? "..." : isSubscribed ? `${tc.emoji} ${p.subscribed}` : `${tc.emoji} ${p.subscribe} $${profile.creatorPriceUsd || tc.price}/mo`}
                   </button>
                 );
               })()}
@@ -2620,7 +2696,7 @@ export default function Profile() {
             {/* Header */}
             <div className="flex items-center justify-between">
               <h2 className="text-base font-semibold text-white">
-                Subscribe to {profile.firstName || profile.username || "Creator"}
+                {p.subscribeTo} {profile.firstName || profile.username || "Creator"}
               </h2>
               <button
                 onClick={() => { setShowSubscribeModal(false); setSubscribeAwaitingPayment(false); setSubscribePaymentId(null); setSubscribeError(null); }}
@@ -2641,8 +2717,8 @@ export default function Profile() {
                 </svg>
               </div>
               <div>
-                <p className="text-sm font-semibold text-white">${profile.creatorPriceUsd || 15}/month</p>
-                <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>Exclusive creator content access</p>
+                <p className="text-sm font-semibold text-white">${profile.creatorPriceUsd || 15}{p.perMonth}</p>
+                <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>{p.exclusiveCreatorAccess}</p>
               </div>
             </div>
 
@@ -2650,19 +2726,19 @@ export default function Profile() {
               <>
                 {/* Provider selector */}
                 <div>
-                  <p className="text-xs font-medium mb-2" style={{ color: "#8E8E93" }}>Payment method</p>
+                  <p className="text-xs font-medium mb-2" style={{ color: "#8E8E93" }}>{p.paymentMethod}</p>
                   <div className="grid grid-cols-2 gap-2">
-                    {(["daimo", "epayco"] as const).map((p) => (
+                    {(["daimo", "epayco"] as const).map((prov) => (
                       <button
-                        key={p}
-                        onClick={() => setSubscribeProvider(p)}
+                        key={prov}
+                        onClick={() => setSubscribeProvider(prov)}
                         className="py-2.5 rounded-lg text-sm font-medium transition-colors border"
-                        style={subscribeProvider === p
+                        style={subscribeProvider === prov
                           ? { background: `rgba(${accentRgb},0.15)`, color: accentColor, borderColor: `rgba(${accentRgb},0.4)` }
                           : { background: "rgba(255,255,255,0.04)", color: "#8E8E93", borderColor: "rgba(255,255,255,0.08)" }
                         }
                       >
-                        {p === "daimo" ? "Crypto (USDC)" : "ePayco (Card)"}
+                        {prov === "daimo" ? p.cryptoUsdc : p.epaycoCard}
                       </button>
                     ))}
                   </div>
@@ -2670,12 +2746,12 @@ export default function Profile() {
 
                 {/* Email input */}
                 <div>
-                  <label className="text-xs font-medium block mb-1.5" style={{ color: "#8E8E93" }}>Email for receipt</label>
+                  <label className="text-xs font-medium block mb-1.5" style={{ color: "#8E8E93" }}>{p.emailForReceipt}</label>
                   <input
                     type="email"
                     value={subscribeEmail}
                     onChange={(e) => { setSubscribeEmail(e.target.value); setSubscribeEmailError(null); }}
-                    placeholder="you@example.com"
+                    placeholder={p.emailPlaceholder}
                     className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none transition-colors"
                     style={{
                       background: "rgba(255,255,255,0.06)",
@@ -2699,7 +2775,7 @@ export default function Profile() {
                   className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-50"
                   style={{ background: gradientBg }}
                 >
-                  {subscribePaymentLoading ? "Opening payment..." : `Pay $${profile.creatorPriceUsd || 15}/mo`}
+                  {subscribePaymentLoading ? p.openingPayment : p.payPerMonth.replace('${price}', String(profile.creatorPriceUsd || 15))}
                 </button>
               </>
             ) : (
@@ -2712,9 +2788,9 @@ export default function Profile() {
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
                   </div>
-                  <p className="text-sm font-medium text-white text-center">Waiting for payment confirmation</p>
+                  <p className="text-sm font-medium text-white text-center">{p.waitingForPaymentConfirmation}</p>
                   <p className="text-xs text-center" style={{ color: "#8E8E93" }}>
-                    Complete your payment in the tab that opened. Once done, tap the button below.
+                    {p.completePaymentInTab}
                   </p>
                 </div>
 
@@ -2727,7 +2803,7 @@ export default function Profile() {
                   className="w-full py-3 rounded-xl text-sm font-semibold text-white border transition-colors"
                   style={{ background: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.12)" }}
                 >
-                  I've completed payment — Check status
+                  {p.iCompletedPayment}
                 </button>
 
                 <button
@@ -2735,7 +2811,7 @@ export default function Profile() {
                   className="text-xs text-center"
                   style={{ color: "#8E8E93" }}
                 >
-                  Go back
+                  {p.goBack}
                 </button>
               </>
             )}
@@ -2756,15 +2832,15 @@ export default function Profile() {
       {isOwnProfile && (
         <div className="glass-card-sm p-5 mt-4">
           <h2 className="text-sm font-semibold text-white mb-4 tracking-wide uppercase opacity-60">
-            App Preferences
+            {p.appPreferences}
           </h2>
 
           {/* Language toggle */}
           <div className="flex items-center justify-between rounded-lg px-3 py-3 mb-3" style={{ background: "rgba(94,209,196,0.06)", border: "1px solid rgba(94,209,196,0.2)" }}>
             <div className="flex-1 min-w-0 mr-3">
-              <p className="text-sm font-medium text-white">Language / Idioma</p>
+              <p className="text-sm font-medium text-white">{p.languageIdioma}</p>
               <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
-                Choose your preferred app language
+                {p.choosePreferredLanguage}
               </p>
             </div>
             <div className="flex items-center rounded-full p-0.5 flex-shrink-0" style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
@@ -2800,9 +2876,9 @@ export default function Profile() {
 
           <div className="flex items-center justify-between rounded-lg px-3 py-3" style={{ background: "rgba(255,180,84,0.06)", border: "1px solid rgba(255,180,84,0.15)" }}>
             <div className="flex-1 min-w-0 mr-3">
-              <p className="text-sm font-medium text-white">Wall of Fame Photo Consent</p>
+              <p className="text-sm font-medium text-white">{p.wallOfFameConsent}</p>
               <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
-                Allow your Wall of Fame photos to appear in the Social Feed on the web app
+                {p.wallOfFameConsentDesc}
               </p>
             </div>
             <button
@@ -2825,9 +2901,9 @@ export default function Profile() {
 
           <div className="flex items-center justify-between rounded-lg px-3 py-3 mt-3" style={{ background: "rgba(212,0,122,0.06)", border: "1px solid rgba(212,0,122,0.15)" }}>
             <div className="flex-1 min-w-0 mr-3">
-              <p className="text-sm font-medium text-white">Content Disclaimer</p>
+              <p className="text-sm font-medium text-white">{p.contentDisclaimer}</p>
               <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
-                I confirm that all items, substances, or materials depicted in my videos are props, simulated, or used solely for entertainment purposes
+                {p.contentDisclaimerDesc}
               </p>
             </div>
             <button
@@ -2863,7 +2939,7 @@ export default function Profile() {
           }`}
           style={activeTab === "posts" ? { borderImage: `linear-gradient(to right, ${accentColor}, ${isPerformer ? "#00D4E8" : "#E69138"}) 1` } : undefined}
         >
-          Posts
+          {p.tabPosts}
         </button>
         {/* Exclusive tab — only shown on active creator profiles */}
         {profile.creatorStatus === "active" && (
@@ -2881,7 +2957,7 @@ export default function Profile() {
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
             </svg>
-            Exclusive
+            {p.tabExclusive}
           </button>
         )}
         <button
@@ -2895,7 +2971,7 @@ export default function Profile() {
           }`}
           style={activeTab === "likes" ? { borderImage: `linear-gradient(to right, ${accentColor}, ${isPerformer ? "#00D4E8" : "#E69138"}) 1` } : undefined}
         >
-          Likes
+          {p.tabLikes}
         </button>
       </div>
 
@@ -2918,11 +2994,11 @@ export default function Profile() {
               <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
               </svg>
-              <p className="text-white font-medium mb-1">No Posts Yet</p>
+              <p className="text-white font-medium mb-1">{p.noPostsYet}</p>
               <p className="text-sm" style={{ color: "#8E8E93" }}>
                 {isOwnProfile
-                  ? "Share your first post with the community!"
-                  : "This user hasn't posted anything yet."}
+                  ? p.shareFirstPost
+                  : p.userHasntPosted}
               </p>
             </div>
           ) : (
@@ -2951,7 +3027,7 @@ export default function Profile() {
                     className="text-sm font-medium hover:text-pnp-accent transition-colors"
                     style={{ color: "#8E8E93" }}
                   >
-                    {loadingMore ? "Loading..." : "Load more posts"}
+                    {loadingMore ? p.loading : p.loadMorePosts}
                   </button>
                 </div>
               )}
@@ -2966,9 +3042,9 @@ export default function Profile() {
           <svg className="w-12 h-12 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#8E8E93" }}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
           </svg>
-          <p className="text-white font-medium mb-1">Liked Posts</p>
+          <p className="text-white font-medium mb-1">{p.likedPosts}</p>
           <p className="text-sm" style={{ color: "#8E8E93" }}>
-            Coming soon
+            {p.comingSoon}
           </p>
         </div>
       )}
@@ -2990,11 +3066,11 @@ export default function Profile() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                 </svg>
               </div>
-              <p className="text-white font-bold mb-1">Exclusive Content</p>
+              <p className="text-white font-bold mb-1">{p.exclusiveContentTitle}</p>
               <p className="text-sm mb-4 leading-relaxed" style={{ color: "#8E8E93" }}>
                 {profile.creatorPriceUsd != null
-                  ? `Subscribe for $${profile.creatorPriceUsd}/mo to unlock all exclusive posts from this creator.`
-                  : "Subscribe to unlock all exclusive posts from this creator."}
+                  ? p.subscribeForPriceToUnlock.replace('${price}', String(profile.creatorPriceUsd))
+                  : p.subscribeToUnlockAll}
               </p>
               {isAuthenticated ? (
                 <button
@@ -3009,10 +3085,10 @@ export default function Profile() {
                   style={{ background: profile.creatorType === "ice" ? "linear-gradient(135deg, #A8D8EA, #73B4D4)" : "linear-gradient(135deg, #D4007A, #E69138)" }}
                   aria-label={`Subscribe for $${profile.creatorPriceUsd || 15}/mo`}
                 >
-                  {subscribeLoading ? "Processing..." : `Subscribe $${profile.creatorPriceUsd || 15}/mo`}
+                  {subscribeLoading ? p.processing : `${p.subscribe} $${profile.creatorPriceUsd || 15}/mo`}
                 </button>
               ) : (
-                <p className="text-xs" style={{ color: "#8E8E93" }}>Sign in to subscribe</p>
+                <p className="text-xs" style={{ color: "#8E8E93" }}>{p.signInToSubscribe}</p>
               )}
             </div>
           )}
@@ -3026,11 +3102,11 @@ export default function Profile() {
                   <svg className="w-12 h-12 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#8E8E93" }}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                   </svg>
-                  <p className="text-white font-medium mb-1">No Exclusive Posts Yet</p>
+                  <p className="text-white font-medium mb-1">{p.noExclusivePostsYet}</p>
                   <p className="text-sm" style={{ color: "#8E8E93" }}>
                     {isOwnProfile
-                      ? "Create your first exclusive post to share with subscribers."
-                      : "This creator hasn't posted any exclusive content yet."}
+                      ? p.createFirstExclusivePost
+                      : p.creatorNoExclusiveYet}
                   </p>
                 </div>
               );

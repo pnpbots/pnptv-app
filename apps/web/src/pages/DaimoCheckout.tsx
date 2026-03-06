@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { DaimoSDKProvider, DaimoModal } from "@daimo/sdk/web";
 import "@daimo/sdk/web/styles.css";
 import "@daimo/sdk/web/theme.css";
+import { useI18n } from "@/lib/i18n";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
@@ -25,13 +26,14 @@ type CheckoutState = "loading" | "ready" | "success" | "error";
 export default function DaimoCheckout() {
   const { paymentId } = useParams<{ paymentId: string }>();
   const navigate = useNavigate();
+  const { checkout: t } = useI18n();
   const [state, setState] = useState<CheckoutState>("loading");
   const [payment, setPayment] = useState<PaymentInfo | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (!paymentId) {
-      setError("No payment ID found.");
+      setError(t.errorNoPaymentId);
       setState("error");
       return;
     }
@@ -42,20 +44,18 @@ export default function DaimoCheckout() {
       .then((res) => res.json())
       .then((data) => {
         if (!data.success) {
-          setError(data.error || "Payment not found or already processed.");
+          setError(data.error || t.errorPaymentNotFound);
           setState("error");
           return;
         }
         const p = data.payment;
         if (p.provider !== "daimo") {
-          setError("This payment is not a crypto payment.");
+          setError(t.errorNotCrypto);
           setState("error");
           return;
         }
         if (!p.daimoSessionId || !p.daimoClientSecret) {
-          setError(
-            "Payment session not ready. Please try again from the bot."
-          );
+          setError(t.errorSessionNotReady);
           setState("error");
           return;
         }
@@ -63,10 +63,10 @@ export default function DaimoCheckout() {
         setState("ready");
       })
       .catch(() => {
-        setError("Could not load payment details. Check your connection.");
+        setError(t.errorCouldNotLoad);
         setState("error");
       });
-  }, [paymentId]);
+  }, [paymentId, t.errorNoPaymentId, t.errorPaymentNotFound, t.errorNotCrypto, t.errorSessionNotReady, t.errorCouldNotLoad]);
 
   const handlePaymentCompleted = useCallback(() => {
     setState("success");
@@ -139,7 +139,7 @@ export default function DaimoCheckout() {
               WebkitTextFillColor: "transparent",
             }}
           >
-            PNPtv!
+            {t.brandName}
           </span>
         </div>
 
@@ -157,7 +157,7 @@ export default function DaimoCheckout() {
               }}
             />
             <p style={{ color: "#8E8E93", fontSize: 14 }}>
-              Loading payment details...
+              {t.loadingPaymentDetails}
             </p>
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
           </div>
@@ -194,7 +194,7 @@ export default function DaimoCheckout() {
                 ${payment.amountUSD.toFixed(2)} USDC
               </div>
               <div style={{ fontSize: 11, color: "#8E8E93", marginTop: 6 }}>
-                Ref: {payment.paymentRef}
+                {t.paymentRef} {payment.paymentRef}
               </div>
             </div>
 
@@ -206,7 +206,7 @@ export default function DaimoCheckout() {
                 marginBottom: 16,
               }}
             >
-              Pay with any crypto wallet, exchange, or stablecoin
+              {t.payWithWallet}
             </p>
 
             {/* Daimo Modal — embedded mode renders inline */}
@@ -250,13 +250,12 @@ export default function DaimoCheckout() {
               </svg>
             </div>
             <p style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
-              Payment Confirmed!
+              {t.paymentConfirmedTitle}
             </p>
             <p
               style={{ fontSize: 13, color: "#8E8E93", marginBottom: 24 }}
             >
-              Your subscription has been activated. Check Telegram for your
-              access credentials.
+              {t.paymentConfirmedBody}
             </p>
             <button
               onClick={() => navigate("/subscribe")}
@@ -272,7 +271,7 @@ export default function DaimoCheckout() {
                 cursor: "pointer",
               }}
             >
-              Go to PNPtv!
+              {t.goToPnptv}
             </button>
           </div>
         )}
@@ -308,7 +307,7 @@ export default function DaimoCheckout() {
               </svg>
             </div>
             <p style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
-              Unable to Process
+              {t.unableToProcess}
             </p>
             <p
               style={{ fontSize: 13, color: "#8E8E93", marginBottom: 24 }}
@@ -329,7 +328,7 @@ export default function DaimoCheckout() {
                 cursor: "pointer",
               }}
             >
-              Close
+              {t.closeBtn}
             </button>
           </div>
         )}
@@ -343,9 +342,9 @@ export default function DaimoCheckout() {
             color: "#555",
           }}
         >
-          <span style={{ color: "#30D158" }}>Secure crypto checkout</span>
-          <span> powered by Daimo Pay</span>
-          <p style={{ marginTop: 4 }}>PNPtv! &copy; 2026</p>
+          <span style={{ color: "#30D158" }}>{t.secureCheckout}</span>
+          <span> {t.poweredBy}</span>
+          <p style={{ marginTop: 4 }}>{t.copyright}</p>
         </div>
       </div>
     </div>

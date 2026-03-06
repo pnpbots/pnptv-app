@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
+import { useI18n } from "@/lib/i18n";
 
 const DISMISS_KEY = "pwa_install_dismissed_until";
 const DISMISS_HOURS = 6; // Re-show after 6 hours if dismissed
@@ -36,6 +37,8 @@ function dismiss() {
 }
 
 export function PWAInstallBanner() {
+  const t = useI18n();
+  const pwa = t.gates.pwa;
   const [show, setShow] = useState(false);
   const [isIOSDevice, setIsIOSDevice] = useState(false);
   const [showIOSSteps, setShowIOSSteps] = useState(false);
@@ -101,18 +104,18 @@ export function PWAInstallBanner() {
         <div className="w-full max-w-sm space-y-6 text-center">
           <img src="/icon-192.png" alt="PNPtv" className="w-20 h-20 rounded-2xl mx-auto shadow-2xl" />
           <div>
-            <h2 className="text-2xl font-bold text-white mb-2">Install PNPtv!</h2>
+            <h2 className="text-2xl font-bold text-white mb-2">{pwa.installTitle}</h2>
             <p className="text-pnp-textSecondary text-sm leading-relaxed">
-              Get the full experience — faster access, push notifications, and no browser chrome. Install it on your home screen in seconds.
+              {pwa.installDescription}
             </p>
           </div>
 
           <div className="space-y-2 text-left">
             {[
-              "Instant access from your home screen",
-              "Push notifications for messages and updates",
-              "Full-screen immersive experience",
-              "Works offline for key features",
+              pwa.featureHomeScreen,
+              pwa.featureNotifications,
+              pwa.featureFullscreen,
+              pwa.featureOffline,
             ].map((f) => (
               <div key={f} className="flex items-center gap-2 text-sm text-white/80">
                 <span className="text-green-400 font-bold text-base">+</span> {f}
@@ -130,13 +133,13 @@ export function PWAInstallBanner() {
               className="w-full py-3.5 rounded-2xl text-base font-bold text-white shadow-lg transition-opacity hover:opacity-90 active:opacity-80"
               style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
             >
-              {isIOSDevice ? "How to Install on iPhone" : "Install App — It's Free"}
+              {isIOSDevice ? pwa.howToInstallIphone : pwa.installApp}
             </button>
             <button
               onClick={handleDismiss}
               className="w-full py-2.5 text-sm text-pnp-textSecondary hover:text-white transition-colors"
             >
-              Continue in browser (not recommended)
+              {pwa.continueInBrowser}
             </button>
           </div>
         </div>
@@ -154,7 +157,7 @@ export function PWAInstallBanner() {
             <div className="flex items-center gap-3">
               <img src="/icon-192.png" alt="PNPtv" className="w-10 h-10 rounded-xl" />
               <div>
-                <p className="font-bold text-white text-sm">Install PNPtv!</p>
+                <p className="font-bold text-white text-sm">{pwa.iosSheetTitle}</p>
                 <p className="text-xs text-pnp-textSecondary">app.pnptv.app</p>
               </div>
             </div>
@@ -166,15 +169,11 @@ export function PWAInstallBanner() {
           </div>
 
           <p className="text-sm text-pnp-textSecondary">
-            Add to your home screen for the full app experience:
+            {pwa.iosSheetSubtitle}
           </p>
 
           <div className="space-y-3">
-            {[
-              <>Tap the <span className="font-bold">Share</span> button in Safari's bottom bar</>,
-              <>Scroll down and tap <span className="font-bold">"Add to Home Screen"</span></>,
-              <>Tap <span className="font-bold">"Add"</span> in the top-right corner</>,
-            ].map((step, i) => (
+            {[pwa.iosStep1, pwa.iosStep2, pwa.iosStep3].map((step, i) => (
               <div key={i} className="flex items-start gap-3">
                 <span className="w-6 h-6 rounded-full bg-[#D4007A] text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
                   {i + 1}
@@ -188,7 +187,7 @@ export function PWAInstallBanner() {
             onClick={handleDismiss}
             className="w-full py-2 text-sm text-pnp-textSecondary hover:text-white transition-colors"
           >
-            Close
+            {pwa.close}
           </button>
         </div>
       </div>
@@ -201,9 +200,9 @@ export function PWAInstallBanner() {
         <div className="flex items-center gap-3">
           <img src="/icon-192.png" alt="PNPtv" className="w-12 h-12 rounded-xl flex-shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="font-bold text-white text-sm leading-tight">Install PNPtv!</p>
+            <p className="font-bold text-white text-sm leading-tight">{pwa.installTitle}</p>
             <p className="text-xs text-pnp-textSecondary mt-0.5 leading-snug">
-              Push notifications, faster access, full-screen experience
+              {pwa.bannerTagline}
             </p>
           </div>
           <button onClick={handleDismiss} className="text-pnp-textSecondary hover:text-white p-1 flex-shrink-0">
@@ -219,13 +218,13 @@ export function PWAInstallBanner() {
             className="flex-1 py-2 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-90 active:opacity-80"
             style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
           >
-            {isIOSDevice ? "How to Install" : "Install App"}
+            {isIOSDevice ? pwa.howToInstallShort : pwa.installAppShort}
           </button>
           <button
             onClick={handleDismiss}
             className="px-4 py-2 rounded-xl text-sm text-pnp-textSecondary hover:text-white bg-pnp-surface hover:bg-pnp-border transition-colors"
           >
-            Not now
+            {pwa.notNow}
           </button>
         </div>
       </div>

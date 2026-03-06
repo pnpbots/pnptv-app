@@ -11,6 +11,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useHangoutSocket } from "@/hooks/useHangoutSocket";
+import { useI18n } from "@/lib/i18n";
 import {
   getHangoutGroups,
   createHangoutGroup,
@@ -61,15 +62,15 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
-function formatDateSeparator(dateStr: string): string {
+function formatDateSeparator(dateStr: string, today: string, yesterday: string): string {
   const date = new Date(dateStr);
   const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const messageDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const diffDays = Math.floor((today.getTime() - messageDay.getTime()) / 86400000);
+  const diffDays = Math.floor((todayDate.getTime() - messageDay.getTime()) / 86400000);
 
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Yesterday";
+  if (diffDays === 0) return today;
+  if (diffDays === 1) return yesterday;
   return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
@@ -187,11 +188,12 @@ const MessageBubble = memo(function MessageBubble({
 // ─── Typing Indicator ───────────────────────────────────────────────────────
 
 function TypingIndicator({ users }: { users: string[] }) {
+  const t = useI18n();
   if (users.length === 0) return null;
   let text: string;
-  if (users.length === 1) text = `${users[0]} is typing`;
-  else if (users.length === 2) text = `${users[0]} and ${users[1]} are typing`;
-  else text = `${users[0]} and ${users.length - 1} others are typing`;
+  if (users.length === 1) text = t.chat.isTyping(users[0]);
+  else if (users.length === 2) text = t.chat.areTyping(users[0], users[1]);
+  else text = t.chat.othersTyping(users[0], users.length - 1);
 
   return (
     <div className="flex items-center gap-1.5 px-4 py-1 text-xs text-pnp-textSecondary animate-fade-in-up">
@@ -208,11 +210,12 @@ function TypingIndicator({ users }: { users: string[] }) {
 // ─── Date Separator ─────────────────────────────────────────────────────────
 
 function DateSeparator({ date }: { date: string }) {
+  const t = useI18n();
   return (
     <div className="flex items-center gap-3 py-2">
       <div className="flex-1 h-px bg-white/10" />
       <span className="text-[10px] font-medium text-pnp-textSecondary uppercase tracking-wider">
-        {formatDateSeparator(date)}
+        {formatDateSeparator(date, t.chat.today, t.chat.yesterday)}
       </span>
       <div className="flex-1 h-px bg-white/10" />
     </div>
@@ -224,6 +227,7 @@ function DateSeparator({ date }: { date: string }) {
 export default function Chat() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const t = useI18n();
   const userRole = user?.role?.toLowerCase();
   const isAdmin = userRole === "admin" || userRole === "superadmin";
   const isPrime = user?.tier?.toLowerCase() === "prime" || isAdmin;
@@ -338,7 +342,7 @@ export default function Chat() {
       setShowCreate(false);
       loadGroups();
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Failed to create group");
+      setCreateError(err instanceof Error ? err.message : t.chat.errorFailedToCreate);
     } finally {
       setCreating(false);
     }
@@ -543,7 +547,7 @@ export default function Chat() {
         );
         setUploadProgress(100);
         // Message will arrive via socket broadcast, no need to manually append
-        if (!data.success) throw new Error("Upload failed");
+        if (!data.success) throw new Error(t.chat.errorUploadFailed);
         clearMedia();
       } else {
         // Text messages go via socket for instant delivery
@@ -552,13 +556,13 @@ export default function Chat() {
     } catch (err) {
       if (!hasMediaFile) setMsgInput(text);
       setUploadError(
-        err instanceof Error ? err.message : "Failed to send message"
+        err instanceof Error ? err.message : t.chat.errorFailedToSend
       );
       setUploadProgress(null);
     } finally {
       setSending(false);
     }
-  }, [sending, activeGroup, msgInput, mediaFile, clearMedia, sendMessage]);
+  }, [sending, activeGroup, msgInput, mediaFile, clearMedia, sendMessage, t.chat]);
 
   // ─── Video call ─────────────────────────────────────────────────────
 
@@ -599,9 +603,9 @@ export default function Chat() {
         setCallId(resolved.callId);
       } else if (data.jaas === null) {
         // JaaS not configured on the server
-        setUploadError("Video calls are not available right now. Please contact support.");
+        setUploadError(t.chat.videoCallsUnavailable);
       } else {
-        setUploadError("Video call URL is invalid. Please contact support.");
+        setUploadError(t.chat.videoCallUrlInvalid);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to start video call";
@@ -623,11 +627,11 @@ export default function Chat() {
   // Show notification when call ends due to creator leaving
   useEffect(() => {
     if (callState.endReason === "creator_left") {
-      setUploadError("Call ended: the host left the call");
+      setUploadError(t.chat.callEndedHostLeft);
       setCallUrl(null);
       setCallId(null);
     }
-  }, [callState.endReason]);
+  }, [callState.endReason, t.chat]);
 
   // Global invite listener — works regardless of which group is active
   useEffect(() => {
@@ -655,7 +659,7 @@ export default function Chat() {
   // ─── Group management ──────────────────────────────────────────────
 
   const handleLeaveGroup = async (gid: number) => {
-    if (!window.confirm("Leave this group?")) return;
+    if (!window.confirm(t.chat.leaveGroupConfirm)) return;
     try {
       await leaveHangoutGroup(gid);
       closeChat();
@@ -665,7 +669,7 @@ export default function Chat() {
   };
 
   const handleDeleteGroup = async (gid: number) => {
-    if (!window.confirm("Permanently delete this group and all its messages?")) return;
+    if (!window.confirm(t.chat.deleteGroupConfirm)) return;
     try {
       await deleteHangoutGroup(gid);
       closeChat();
@@ -730,10 +734,10 @@ export default function Chat() {
               )}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-white truncate">
-                  {inviteNotif.fromName} invited you
+                  {t.chat.callInviteTitle(inviteNotif.fromName)}
                 </p>
                 <p className="text-xs truncate" style={{ color: "#8E8E93" }}>
-                  Join the video call in {inviteNotif.groupName}
+                  {t.chat.callInviteBody(inviteNotif.groupName)}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -746,13 +750,13 @@ export default function Chat() {
                   className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
                   style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
                 >
-                  Join
+                  {t.chat.joinCall}
                 </button>
                 <button
                   onClick={() => setInviteNotif(null)}
                   className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
                   style={{ color: "#8E8E93" }}
-                  aria-label="Dismiss invite"
+                  aria-label={t.chat.dismissInvite}
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -779,7 +783,7 @@ export default function Chat() {
           <button
             onClick={closeChat}
             className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
-            aria-label="Back to group list"
+            aria-label={t.chat.backToGroupList}
           >
             <svg className="w-5 h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
@@ -788,7 +792,7 @@ export default function Chat() {
           <div className="flex-1 min-w-0">
             <h2 className="text-sm font-bold text-pnp-textPrimary truncate">{activeGroup.name}</h2>
             <p className="text-xs text-pnp-textSecondary">
-              {activeGroup.memberCount} members
+              {activeGroup.memberCount} {activeGroup.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}
               {isConnected && (
                 <span className="ml-1.5 inline-flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
@@ -801,8 +805,8 @@ export default function Chat() {
           <button
             onClick={() => setShowOnline((v) => !v)}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-colors hover:bg-white/5"
-            title="Who's online"
-            aria-label="Show online members"
+            title={t.chat.onlineNow}
+            aria-label={t.chat.showOnlineMembers}
           >
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-60" />
@@ -831,7 +835,7 @@ export default function Chat() {
               }}
               className="text-xs px-2 py-1.5 rounded text-pnp-error hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             >
-              {activeGroup.creatorId === user?.dbId ? "Delete" : "Leave"}
+              {activeGroup.creatorId === user?.dbId ? t.chat.deleteGroup : t.chat.leaveGroup}
             </button>
           )}
         </div>
@@ -870,14 +874,14 @@ export default function Chat() {
               {/* Panel header */}
               <div className="flex items-center justify-between px-5 pt-4 pb-3 flex-shrink-0">
                 <div>
-                  <p className="text-sm font-semibold text-white">Online Now</p>
-                  <p className="text-xs" style={{ color: "#8E8E93" }}>{onlineMembers.length} of {activeGroup.memberCount} members</p>
+                  <p className="text-sm font-semibold text-white">{t.chat.onlineNow}</p>
+                  <p className="text-xs" style={{ color: "#8E8E93" }}>{t.chat.onlineOfTotal(onlineMembers.length, activeGroup.memberCount)}</p>
                 </div>
                 <button
                   onClick={() => setShowOnline(false)}
                   className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
                   style={{ color: "#8E8E93" }}
-                  aria-label="Close online panel"
+                  aria-label={t.chat.closeOnlinePanel}
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -887,7 +891,7 @@ export default function Chat() {
               {/* Member list */}
               <div className="overflow-y-auto flex-1 px-4 pb-6 space-y-2">
                 {onlineMembers.length === 0 ? (
-                  <p className="text-center text-sm py-6" style={{ color: "#8E8E93" }}>No other members online right now</p>
+                  <p className="text-center text-sm py-6" style={{ color: "#8E8E93" }}>{t.chat.noOtherMembersOnline}</p>
                 ) : (
                   onlineMembers.map((member) => {
                     const isMe = member.userId === user?.dbId;
@@ -907,11 +911,11 @@ export default function Chat() {
                         {/* Name */}
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-white truncate">
-                            {member.name}{isMe ? " (you)" : ""}
+                            {member.name}{isMe ? ` ${t.chat.you}` : ""}
                           </p>
                           <div className="flex items-center gap-1 mt-0.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                            <span className="text-xs" style={{ color: "#8E8E93" }}>Online</span>
+                            <span className="text-xs" style={{ color: "#8E8E93" }}>{t.chat.online}</span>
                           </div>
                         </div>
                         {/* Invite button — only if call is active and not self */}
@@ -924,7 +928,7 @@ export default function Chat() {
                             className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white flex-shrink-0 transition-all active:scale-95"
                             style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
                           >
-                            Invite
+                            {t.chat.invite}
                           </button>
                         )}
                       </div>
@@ -969,9 +973,9 @@ export default function Chat() {
               <svg className="w-12 h-12 mx-auto mb-3 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
-              <p className="text-pnp-textPrimary font-medium text-sm">No messages yet</p>
+              <p className="text-pnp-textPrimary font-medium text-sm">{t.chat.noMessagesYet}</p>
               <p className="text-xs text-pnp-textSecondary mt-1">
-                Be the first to say something!
+                {t.chat.beFirstToSay}
               </p>
             </div>
           ) : (
@@ -1017,7 +1021,7 @@ export default function Chat() {
             <button
               onClick={() => setUploadError(null)}
               className="ml-auto text-pnp-textSecondary hover:text-pnp-textPrimary"
-              aria-label="Dismiss error"
+              aria-label={t.chat.dismissError}
             >
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1046,7 +1050,7 @@ export default function Chat() {
                 emitTyping();
               }}
               onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-              placeholder={mediaFile ? "Add a caption..." : "Type a message..."}
+              placeholder={mediaFile ? t.chat.addACaption : t.chat.typeAMessage}
               className="flex-1 bg-white/5 rounded-full px-4 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 min-w-0 transition-colors"
               maxLength={2000}
               disabled={sending}
@@ -1059,7 +1063,7 @@ export default function Chat() {
               disabled={!canSend}
               className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
               style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-              aria-label="Send message"
+              aria-label={t.chat.sendMessage}
             >
               {sending ? (
                 <svg className="w-4 h-4 text-white animate-spin" fill="none" viewBox="0 0 24 24">
@@ -1083,8 +1087,8 @@ export default function Chat() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
       <Helmet>
-        <title>Hangouts — PNPtv!</title>
-        <meta name="description" content="Join or create video call rooms and group chats on PNPtv Hangouts." />
+        <title>{t.chat.pageTitle}</title>
+        <meta name="description" content={t.chat.pageDescription} />
       </Helmet>
       {showTutorial && <TutorialOverlay section="hangouts" onDismiss={dismissTutorial} />}
 
@@ -1115,10 +1119,10 @@ export default function Chat() {
             )}
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-white truncate">
-                {inviteNotif.fromName} invited you
+                {t.chat.callInviteTitle(inviteNotif.fromName)}
               </p>
               <p className="text-xs truncate" style={{ color: "#8E8E93" }}>
-                Join the video call in {inviteNotif.groupName}
+                {t.chat.callInviteBody(inviteNotif.groupName)}
               </p>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -1131,13 +1135,13 @@ export default function Chat() {
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
                 style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
               >
-                Join
+                {t.chat.joinCall}
               </button>
               <button
                 onClick={() => setInviteNotif(null)}
                 className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
                 style={{ color: "#8E8E93" }}
-                aria-label="Dismiss invite"
+                aria-label={t.chat.dismissInvite}
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1150,9 +1154,9 @@ export default function Chat() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-pnp-textPrimary">Hangouts</h1>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.chat.hangoutsTitle}</h1>
           <p className="text-sm mt-1 text-pnp-textSecondary">
-            Group chats + video calls
+            {t.chat.hangoutsSubtitle}
           </p>
         </div>
         {isPrime && (
@@ -1160,7 +1164,7 @@ export default function Chat() {
             onClick={() => setShowCreate(!showCreate)}
             className="btn-gradient px-3 py-1.5 rounded-lg text-white text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent active:scale-95 transition-transform"
           >
-            + New Group
+            {t.chat.newGroup}
           </button>
         )}
       </div>
@@ -1168,23 +1172,23 @@ export default function Chat() {
       {/* Create group form */}
       {showCreate && (
         <div className="glass-card-sm p-4 mb-4 animate-fade-in-up">
-          <h3 className="text-sm font-semibold text-pnp-textPrimary mb-1">Create Subgroup</h3>
-          <p className="text-xs text-pnp-textSecondary mb-3">Max 25 members &middot; 3 per month &middot; Inactive groups are auto-deleted after 72h</p>
-          <label className="sr-only" htmlFor="new-group-name">Group name</label>
+          <h3 className="text-sm font-semibold text-pnp-textPrimary mb-1">{t.chat.createSubgroupTitle}</h3>
+          <p className="text-xs text-pnp-textSecondary mb-3">{t.chat.createSubgroupHint}</p>
+          <label className="sr-only" htmlFor="new-group-name">{t.chat.groupNameLabel}</label>
           <input
             id="new-group-name"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            placeholder="Group name..."
+            placeholder={t.chat.groupNamePlaceholder}
             className="w-full bg-white/5 rounded-lg px-3 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 mb-2 transition-colors"
             maxLength={100}
           />
-          <label className="sr-only" htmlFor="new-group-desc">Group description</label>
+          <label className="sr-only" htmlFor="new-group-desc">{t.chat.groupDescriptionLabel}</label>
           <textarea
             id="new-group-desc"
             value={newDesc}
             onChange={(e) => setNewDesc(e.target.value)}
-            placeholder="Description (optional)..."
+            placeholder={t.chat.groupDescriptionPlaceholder}
             className="w-full bg-white/5 rounded-lg px-3 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 mb-3 resize-none transition-colors"
             rows={2}
             maxLength={500}
@@ -1204,7 +1208,7 @@ export default function Chat() {
                 )}
               </svg>
               <span className="text-sm text-pnp-textPrimary">
-                {newIsPublic ? "Anyone can join" : "Approval required to join"}
+                {newIsPublic ? t.chat.anyoneCanJoin : t.chat.approvalRequired}
               </span>
             </div>
             <div className={`w-9 h-5 rounded-full transition-colors relative ${newIsPublic ? "bg-pnp-accent" : "bg-white/20"}`}>
@@ -1219,14 +1223,14 @@ export default function Chat() {
               onClick={() => { setShowCreate(false); setCreateError(null); }}
               className="flex-1 py-2.5 rounded-lg text-sm text-pnp-textSecondary border border-white/10 hover:bg-white/5 active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             >
-              Cancel
+              {t.chat.cancel}
             </button>
             <button
               onClick={handleCreate}
               disabled={!newName.trim() || creating}
               className="flex-1 btn-gradient py-2.5 rounded-lg text-sm text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             >
-              {creating ? "Creating..." : "Create"}
+              {creating ? t.chat.creating : t.chat.create}
             </button>
           </div>
         </div>
@@ -1277,9 +1281,9 @@ export default function Chat() {
           <svg className="w-16 h-16 mx-auto mb-3 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          <p className="text-pnp-textPrimary font-medium mb-1">No groups yet</p>
+          <p className="text-pnp-textPrimary font-medium mb-1">{t.chat.noGroupsYet}</p>
           <p className="text-sm text-pnp-textSecondary">
-            Log in to join the community
+            {t.chat.noGroupsLoginHint}
           </p>
         </div>
       ) : (
@@ -1289,13 +1293,13 @@ export default function Chat() {
           {isFree && (
             <div className="glass-card-sm p-4 mb-2 text-center border border-purple-500/30 bg-purple-900/20">
               <p className="text-sm text-purple-200 mb-2">
-                Become a Member to join hangout rooms
+                {t.chat.freeTierJoinPrompt}
               </p>
               <button
                 onClick={() => navigate("/subscribe")}
                 className="px-4 py-2 rounded-full text-sm font-semibold bg-gradient-to-r from-purple-500 to-pink-500 text-white active:scale-95 transition-transform"
               >
-                Become a Member
+                {t.chat.freeTierJoinButton}
               </button>
             </div>
           )}
@@ -1337,17 +1341,17 @@ export default function Chat() {
                     )}
                     {group.isMain && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary flex-shrink-0">
-                        MAIN
+                        {t.chat.labelMain}
                       </span>
                     )}
                     {group.isWallOfFame && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 text-yellow-300" style={{ background: "rgba(255,215,0,0.15)" }}>
-                        WALL OF FAME
+                        {t.chat.labelWallOfFame}
                       </span>
                     )}
                     {!group.isPublic && !group.isMain && !group.isWallOfFame && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary flex-shrink-0">
-                        PRIVATE
+                        {t.chat.labelPrivate}
                       </span>
                     )}
                     {group.hasActiveCall && (
@@ -1356,13 +1360,13 @@ export default function Chat() {
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pnp-accent opacity-75" />
                           <span className="relative inline-flex rounded-full h-1.5 w-1.5 dot-gradient" />
                         </span>
-                        <span className="text-[10px] text-gradient font-semibold">LIVE</span>
+                        <span className="text-[10px] text-gradient font-semibold">{t.chat.labelLive}</span>
                       </div>
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-xs flex-shrink-0 text-pnp-textSecondary">
-                      {group.memberCount} members
+                      {group.memberCount} {group.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}
                     </span>
                     {group.lastMessage && (
                       <span className="text-xs truncate min-w-0 text-pnp-textSecondary">
@@ -1392,7 +1396,7 @@ export default function Chat() {
           className="flex items-center gap-2 mb-3 group"
         >
           <h2 className="text-sm font-semibold text-pnp-textSecondary group-hover:text-pnp-textPrimary transition-colors">
-            Discover Groups
+            {t.chat.discoverGroups}
           </h2>
           <svg
             className={`w-3.5 h-3.5 text-pnp-textSecondary transition-transform ${showDiscover ? "rotate-180" : ""}`}
@@ -1409,7 +1413,7 @@ export default function Chat() {
                 <div className="h-4 bg-pnp-surface rounded w-40" />
               </div>
             ) : discoverList.length === 0 ? (
-              <p className="text-xs text-pnp-textSecondary px-1">No groups to discover right now.</p>
+              <p className="text-xs text-pnp-textSecondary px-1">{t.chat.noGroupsToDiscover}</p>
             ) : (
               discoverList.map((group) => (
                 <div key={group.id} className="glass-card-sm p-4">
@@ -1425,12 +1429,12 @@ export default function Chat() {
                         <span className="font-semibold text-pnp-textPrimary text-sm truncate">{group.name}</span>
                         {!group.isPublic && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary flex-shrink-0">
-                            PRIVATE
+                            {t.chat.labelPrivate}
                           </span>
                         )}
                       </div>
                       <p className="text-xs text-pnp-textSecondary truncate">
-                        {group.memberCount} members{group.description ? ` \u00b7 ${group.description}` : ""}
+                        {group.memberCount} {group.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}{group.description ? ` \u00b7 ${group.description}` : ""}
                       </p>
                     </div>
                     {isFree ? (
@@ -1438,25 +1442,25 @@ export default function Chat() {
                         onClick={() => navigate("/subscribe")}
                         className="px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 border border-purple-500/50 text-purple-300 hover:bg-purple-500/10 active:scale-95 transition-all"
                       >
-                        Upgrade to Join
+                        {t.chat.freeTierDiscoverButton}
                       </button>
                     ) : group.isPublic ? (
                       <button
                         onClick={() => handleDiscoverJoin(group)}
                         className="btn-gradient px-3 py-1.5 rounded-lg text-white text-xs font-semibold flex-shrink-0 active:scale-95 transition-transform"
                       >
-                        Join
+                        {t.chat.joinButton}
                       </button>
                     ) : group.myRequestStatus === "pending" ? (
                       <span className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-pnp-textSecondary flex-shrink-0">
-                        Requested
+                        {t.chat.requestedStatus}
                       </span>
                     ) : (
                       <button
                         onClick={() => handleDiscoverJoin(group)}
                         className="px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 border border-pnp-accent text-pnp-accent hover:bg-pnp-accent/10 active:scale-95 transition-all"
                       >
-                        Request
+                        {t.chat.requestButton}
                       </button>
                     )}
                   </div>
@@ -1470,7 +1474,7 @@ export default function Chat() {
       {/* Join Request Management (for group creators) */}
       {groups.filter((g) => !g.isPublic && !g.isMain && !g.isWallOfFame && String(g.creatorId) === String(user?.dbId)).length > 0 && (
         <div className="mt-6">
-          <h2 className="text-sm font-semibold text-pnp-textSecondary mb-3">Pending Requests</h2>
+          <h2 className="text-sm font-semibold text-pnp-textSecondary mb-3">{t.chat.pendingRequests}</h2>
           <div className="space-y-2">
             {groups
               .filter((g) => !g.isPublic && !g.isMain && !g.isWallOfFame && String(g.creatorId) === String(user?.dbId))
@@ -1495,7 +1499,7 @@ export default function Chat() {
                   {showRequests === group.id && (
                     <div className="mt-2 space-y-2 animate-fade-in-up">
                       {(joinRequests[group.id] || []).length === 0 ? (
-                        <p className="text-xs text-pnp-textSecondary">No pending requests.</p>
+                        <p className="text-xs text-pnp-textSecondary">{t.chat.noPendingRequests}</p>
                       ) : (
                         (joinRequests[group.id] || []).map((req) => (
                           <div key={req.id} className="flex items-center gap-2 p-2 rounded-lg bg-white/5">
@@ -1516,13 +1520,13 @@ export default function Chat() {
                                 onClick={() => handleRequest(group.id, req.id, "accept")}
                                 className="px-2.5 py-1 rounded text-xs font-semibold text-white bg-green-600 hover:bg-green-500 active:scale-95 transition-all"
                               >
-                                Accept
+                                {t.chat.accept}
                               </button>
                               <button
                                 onClick={() => handleRequest(group.id, req.id, "reject")}
                                 className="px-2.5 py-1 rounded text-xs font-semibold text-pnp-textSecondary bg-white/10 hover:bg-white/20 active:scale-95 transition-all"
                               >
-                                Deny
+                                {t.chat.deny}
                               </button>
                             </div>
                           </div>
@@ -1539,15 +1543,15 @@ export default function Chat() {
       {/* PRIME upsell */}
       {!isPrime && (
         <div className="mt-6 glass-card-sm p-4 text-center">
-          <p className="text-sm text-pnp-textPrimary font-medium mb-1">Want to create your own group?</p>
+          <p className="text-sm text-pnp-textPrimary font-medium mb-1">{t.chat.primeUpsellTitle}</p>
           <p className="text-xs text-pnp-textSecondary mb-3">
-            Upgrade to PRIME to create subgroups with video calls
+            {t.chat.primeUpsellBody}
           </p>
           <button
             onClick={() => navigate("/subscribe")}
             className="btn-gradient px-6 py-2 rounded-lg text-white text-sm font-semibold active:scale-95 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
           >
-            Upgrade to PRIME
+            {t.chat.upgradeToPrime}
           </button>
         </div>
       )}

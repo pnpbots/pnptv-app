@@ -15,59 +15,11 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
+import { useI18n } from "@/lib/i18n";
 
 type Provider = "epayco" | "daimo" | "dash";
 
 const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
-
-const PLAN_FEATURES: Record<string, string[]> = {
-  "member_monthly": [
-    "Hangout group rooms",
-    "Social feed access",
-    "Nearby users discovery",
-  ],
-  "week_pass": [
-    "7 days of full PRIME access",
-    "Exclusive PRIME content",
-    "Nearby Premium features",
-    "Community hangouts",
-  ],
-  "three_months_pass": [
-    "3 months of full PRIME access",
-    "Full PRIME media library access",
-    "Nearby Premium features",
-    "Community hangouts",
-    "Priority support",
-  ],
-  "crystal_pass": [
-    "6 months of full PRIME access",
-    "Unlimited PRIME content + early releases",
-    "Nearby Premium features",
-    "VIP community status",
-    "Priority support",
-  ],
-  "yearly_pass": [
-    "1 year of full PRIME access",
-    "Unlimited PRIME content + exclusives",
-    "Nearby Premium features",
-    "VIP badge + priority support",
-    "Access to exclusive events",
-  ],
-  "lifetime_pass": [
-    "Lifetime PRIME access — pay once",
-    "Everything in Yearly, forever",
-    "Founder badge",
-    "Priority feature requests",
-    "Never pay again",
-  ],
-};
-
-const MEMBER_EXCLUDED = [
-  "No PRIME media access",
-  "No exclusive video content",
-  "No Telegram PRIME channel access",
-  "No VIP badge or priority support",
-];
 
 const RECOMMENDED_PLAN = "yearly_pass";
 
@@ -89,6 +41,58 @@ export default function Subscribe() {
   const navigate = useNavigate();
   const { refreshUser } = useAuth();
   const { showTutorial, dismissTutorial } = useTutorial("subscribe");
+  const t = useI18n();
+  const s = t.subscribe;
+
+  const PLAN_FEATURES: Record<string, string[]> = {
+    "member_monthly": [
+      s.featureMember1,
+      s.featureMember2,
+      s.featureMember3,
+    ],
+    "week_pass": [
+      s.featureWeek1,
+      s.featureWeek2,
+      s.featureWeek3,
+      s.featureWeek4,
+    ],
+    "three_months_pass": [
+      s.featureThreeMonths1,
+      s.featureThreeMonths2,
+      s.featureThreeMonths3,
+      s.featureThreeMonths4,
+      s.featureThreeMonths5,
+    ],
+    "crystal_pass": [
+      s.featureCrystal1,
+      s.featureCrystal2,
+      s.featureCrystal3,
+      s.featureCrystal4,
+      s.featureCrystal5,
+    ],
+    "yearly_pass": [
+      s.featureYearly1,
+      s.featureYearly2,
+      s.featureYearly3,
+      s.featureYearly4,
+      s.featureYearly5,
+    ],
+    "lifetime_pass": [
+      s.featureLifetime1,
+      s.featureLifetime2,
+      s.featureLifetime3,
+      s.featureLifetime4,
+      s.featureLifetime5,
+    ],
+  };
+
+  const MEMBER_EXCLUDED = [
+    s.excludedMember1,
+    s.excludedMember2,
+    s.excludedMember3,
+    s.excludedMember4,
+  ];
+
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -125,10 +129,10 @@ export default function Subscribe() {
           const rec = res.plans.find((p) => p.id === RECOMMENDED_PLAN || p.sku === RECOMMENDED_PLAN);
           setSelectedPlan(rec?.id || res.plans[0].id);
         } else {
-          setError("No plans available");
+          setError(s.noPlansAvailable);
         }
       })
-      .catch((err) => setError(err.message || "Failed to load plans"))
+      .catch((err) => setError(err.message || s.failedToLoadPlans))
       .finally(() => setLoading(false));
 
     getDashAvailable()
@@ -149,7 +153,7 @@ export default function Subscribe() {
       if (cancelled || attempts >= maxAttempts) {
         if (attempts >= maxAttempts) {
           setPollingPaymentId(null);
-          setError("Payment verification timed out. If you completed the payment, your subscription will activate automatically.");
+          setError(s.paymentTimedOut);
         }
         return;
       }
@@ -165,7 +169,7 @@ export default function Subscribe() {
         }
         if (data.status === "failed" || data.status === "refunded") {
           setPollingPaymentId(null);
-          setError(data.message || "Payment was not successful. Please try again.");
+          setError(data.message || s.paymentNotSuccessful);
           return;
         }
         setTimeout(poll, interval);
@@ -200,7 +204,7 @@ export default function Subscribe() {
         }
         if (data.status === "expired" || data.status === "invalid") {
           setDashPolling(false);
-          setError("Dash payment expired or was not received. Please try again.");
+          setError(s.dashExpired);
           return;
         }
         setTimeout(poll, 5000);
@@ -215,7 +219,7 @@ export default function Subscribe() {
   function validateEmail(): boolean {
     const trimmed = email.trim();
     if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) || trimmed.length > 254) {
-      setEmailError("Please enter a valid email address");
+      setEmailError(s.invalidEmail);
       return false;
     }
     setEmailError(null);
@@ -242,11 +246,11 @@ export default function Subscribe() {
         } else {
           const code = (result as { code?: string }).code;
           if (code === "BTCPAY_NOT_CONFIGURED") {
-            setError("Dash payments are not available yet. Please use ePayco or Daimo instead.");
+            setError(s.dashNotConfigured);
           } else if (code === "BTCPAY_UNREACHABLE") {
-            setError("Payment server is temporarily unavailable. Please try again in a few minutes.");
+            setError(s.dashServerUnavailable);
           } else {
-            setError(result.error || "Failed to create Dash invoice");
+            setError(result.error || s.failedToCreateDashInvoice);
           }
         }
       } else {
@@ -257,11 +261,11 @@ export default function Subscribe() {
             setPollingPaymentId(result.paymentId);
           }
         } else {
-          setError(result.error || "Failed to create payment");
+          setError(result.error || s.failedToCreatePayment);
         }
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Payment error";
+      const message = err instanceof Error ? err.message : s.paymentErrorGeneric;
       setError(message);
     } finally {
       setSubmitting(false);
@@ -271,7 +275,7 @@ export default function Subscribe() {
   async function handleMeruActivate() {
     if (!meruCode.trim() || meruSubmitting) return;
     if (!validateEmail()) {
-      setMeruError("Please enter a valid email address above");
+      setMeruError(s.pleaseEnterValidEmailAbove);
       document.getElementById("subscribe-email")?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
@@ -286,10 +290,10 @@ export default function Subscribe() {
         await refreshUser();
         navigate("/welcome");
       } else {
-        setMeruError(result.error || "Activation failed");
+        setMeruError(result.error || s.activationFailed);
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Activation error";
+      const message = err instanceof Error ? err.message : s.activationError;
       setMeruError(message);
     } finally {
       setMeruSubmitting(false);
@@ -323,15 +327,15 @@ export default function Subscribe() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Payment Confirmed!</h2>
+          <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">{s.paymentConfirmed}</h2>
           <p className="text-pnp-textSecondary mb-4 text-sm">
-            Your subscription is now active. Check your email for your invoice and onboarding guide.
+            {s.subscriptionNowActive}
           </p>
           <button
             onClick={() => navigate("/welcome")}
             className="btn-gradient px-6 py-2.5 rounded-xl text-white font-medium"
           >
-            Go to PNPtv!
+            {s.goToPNPtv}
           </button>
         </Card>
       </div>
@@ -350,7 +354,7 @@ export default function Subscribe() {
           </div>
           <p className="text-pnp-textSecondary mb-4">{error}</p>
           <button onClick={() => window.location.reload()} className="btn-gradient px-6 py-2 rounded-xl text-white font-medium">
-            Retry
+            {s.retry}
           </button>
         </Card>
       </div>
@@ -361,14 +365,14 @@ export default function Subscribe() {
     <div className="page-container py-6 px-4 max-w-2xl mx-auto">
       {showTutorial && <TutorialOverlay section="subscribe" onDismiss={dismissTutorial} />}
       <Helmet>
-        <title>Subscribe — PNPtv!</title>
-        <meta name="description" content="Choose your PNPtv plan. Unlock exclusive content, PRIME video access, nearby discovery, and more." />
+        <title>{s.pageTitle}</title>
+        <meta name="description" content={s.pageDescription} />
       </Helmet>
       {/* Header */}
       <div className="text-center mb-6">
-        <h1 className="text-2xl font-bold text-pnp-textPrimary mb-1">Choose Your Plan</h1>
+        <h1 className="text-2xl font-bold text-pnp-textPrimary mb-1">{s.chooseYourPlan}</h1>
         <p className="text-sm text-pnp-textSecondary">
-          Unlock exclusive content and features with PNPTV PRIME
+          {s.subtitle}
         </p>
       </div>
 
@@ -378,7 +382,7 @@ export default function Subscribe() {
           onClick={() => setShowCOP(!showCOP)}
           className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors"
         >
-          Show prices in {showCOP ? "USD" : "COP"}
+          {showCOP ? s.showPricesInUSD : s.showPricesInCOP}
         </button>
       </div>
 
@@ -388,10 +392,10 @@ export default function Subscribe() {
         {plans.some((p) => MEMBER_PLAN_IDS.has(p.id)) && (
           <div className="mb-1">
             <div className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary">
-              Community Member
+              {s.communityMember}
             </div>
             <p className="text-[10px] text-pnp-textSecondary/70 mt-0.5">
-              Social features only — does not include PRIME media or exclusive content
+              {s.communityMemberDesc}
             </p>
           </div>
         )}
@@ -415,7 +419,7 @@ export default function Subscribe() {
                   <span className="font-semibold text-pnp-textPrimary">
                     {plan.display_name || plan.name}
                   </span>
-                  <div className="text-xs text-pnp-textSecondary">Monthly</div>
+                  <div className="text-xs text-pnp-textSecondary">{s.monthly}</div>
                 </div>
                 <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
               </div>
@@ -447,10 +451,10 @@ export default function Subscribe() {
         {plans.some((p) => !MEMBER_PLAN_IDS.has(p.id)) && (
           <div className="mt-4 mb-1">
             <div className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary">
-              PRIME
+              {s.prime}
             </div>
             <p className="text-[10px] text-pnp-textSecondary/70 mt-0.5">
-              Full access — PRIME media, Nearby Premium, hangouts, exclusive content & more
+              {s.primeDesc}
             </p>
           </div>
         )}
@@ -478,7 +482,7 @@ export default function Subscribe() {
                     </span>
                     {isRecommended && (
                       <span className="text-[10px] font-bold uppercase tracking-wider bg-[#FFB454] text-[#1C1C1E] px-2 py-0.5 rounded-full">
-                        Best Value
+                        {s.bestValue}
                       </span>
                     )}
                   </div>
@@ -493,7 +497,7 @@ export default function Subscribe() {
                       {showCOP
                         ? formatPrice(plan.priceCOP / Math.max(1, Math.round((plan.duration_days || plan.duration || 30) / 30)), "COP")
                         : formatPrice(plan.priceUSD / Math.max(1, Math.round((plan.duration_days || plan.duration || 30) / 30)), "USD")
-                      }/mo
+                      }{s.perMonth}
                     </div>
                   )}
                 </div>
@@ -516,17 +520,17 @@ export default function Subscribe() {
       {/* Email address */}
       <div className="mb-6">
         <label htmlFor="subscribe-email" className="text-sm font-medium text-pnp-textPrimary mb-1 block">
-          Email address
+          {s.emailAddress}
         </label>
         <p className="text-xs text-pnp-textSecondary mb-2">
-          We'll send your login credentials and membership info
+          {s.emailDesc}
         </p>
         <input
           id="subscribe-email"
           type="email"
           value={email}
           onChange={(e) => { setEmail(e.target.value); setEmailError(null); }}
-          placeholder="you@example.com"
+          placeholder={s.emailPlaceholder}
           className="w-full rounded-xl px-4 py-2.5 bg-white/5 border border-white/10 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-[#D4007A] transition-colors"
         />
         {emailError && (
@@ -536,7 +540,7 @@ export default function Subscribe() {
 
       {/* Payment method */}
       <div className="mb-6">
-        <h3 className="text-sm font-medium text-pnp-textPrimary mb-3">Payment Method</h3>
+        <h3 className="text-sm font-medium text-pnp-textPrimary mb-3">{s.paymentMethod}</h3>
         <div className="grid grid-cols-3 gap-2">
           <button
             onClick={() => setProvider("epayco")}
@@ -547,8 +551,8 @@ export default function Subscribe() {
             }`}
           >
             <div className="text-lg mb-1">💳</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">Card / PSE</div>
-            <div className="text-[10px] text-pnp-textSecondary">Credit, Debit</div>
+            <div className="text-xs font-medium text-pnp-textPrimary">{s.cardPse}</div>
+            <div className="text-[10px] text-pnp-textSecondary">{s.cardPseDesc}</div>
           </button>
           <button
             onClick={() => setProvider("daimo")}
@@ -559,8 +563,8 @@ export default function Subscribe() {
             }`}
           >
             <div className="text-lg mb-1">🪙</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">USDC</div>
-            <div className="text-[10px] text-pnp-textSecondary">Coinbase, MetaMask</div>
+            <div className="text-xs font-medium text-pnp-textPrimary">{s.usdc}</div>
+            <div className="text-[10px] text-pnp-textSecondary">{s.usdcDesc}</div>
           </button>
           <button
             onClick={() => dashAvailable !== false && setProvider("dash")}
@@ -574,11 +578,11 @@ export default function Subscribe() {
             }`}
           >
             <div className="text-lg mb-1">🥷</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">Dash</div>
-            <div className="text-[10px] text-pnp-textSecondary">{dashAvailable === false ? "Coming soon" : "Anonymous"}</div>
+            <div className="text-xs font-medium text-pnp-textPrimary">{s.dash}</div>
+            <div className="text-[10px] text-pnp-textSecondary">{dashAvailable === false ? s.dashComingSoon : s.dashAnonymous}</div>
             {dashAvailable !== false && (
               <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#008DE4] text-white px-1.5 py-0.5 rounded-full leading-none">
-                ANON
+                {s.dashAnonBadge}
               </span>
             )}
           </button>
@@ -588,22 +592,22 @@ export default function Subscribe() {
         {provider === "dash" && (
           <div className="mt-3 rounded-xl p-3 border border-[#008DE4]/30 bg-[#008DE4]/5 space-y-2">
             <p className="text-xs text-pnp-textSecondary">
-              Pay anonymously with <span className="text-[#008DE4] font-medium">Dash</span> — no credit card, no identity required. You'll get a payment address + QR code to send from any Dash wallet.
+              {s.dashInfoText}
             </p>
             <div className="flex flex-wrap gap-2 text-[10px]">
               <a href="https://www.dash.org/downloads/" target="_blank" rel="noopener noreferrer"
                 className="text-[#008DE4] hover:underline">
-                Get Dash Wallet ↗
+                {s.getDashWallet}
               </a>
               <span className="text-pnp-textSecondary/40">·</span>
               <a href="https://www.kraken.com/learn/buy-dash-coin" target="_blank" rel="noopener noreferrer"
                 className="text-[#008DE4] hover:underline">
-                Buy on Kraken ↗
+                {s.buyOnKraken}
               </a>
               <span className="text-pnp-textSecondary/40">·</span>
               <a href="https://uphold.com/en/assets/crypto/buy-dash" target="_blank" rel="noopener noreferrer"
                 className="text-[#008DE4] hover:underline">
-                Buy on Uphold ↗
+                {s.buyOnUphold}
               </a>
             </div>
           </div>
@@ -616,11 +620,11 @@ export default function Subscribe() {
           <div className="flex items-center gap-2 mb-3">
             <div className="w-2 h-2 rounded-full bg-[#008DE4] animate-pulse" />
             <span className="text-sm font-medium text-pnp-textPrimary">
-              Waiting for Dash payment — {dashInvoice.planName}
+              {s.waitingForDashPayment} {dashInvoice.planName}
             </span>
           </div>
           <p className="text-xs text-pnp-textSecondary mb-3">
-            Complete your payment in the BTCPay checkout page. This page will update automatically once confirmed.
+            {s.dashInvoiceDesc}
           </p>
           <a
             href={dashInvoice.checkoutUrl}
@@ -628,13 +632,13 @@ export default function Subscribe() {
             rel="noopener noreferrer"
             className="block w-full text-center py-2.5 rounded-xl bg-[#008DE4] text-white text-sm font-semibold hover:bg-[#0070b8] transition-colors mb-2"
           >
-            Open Dash Checkout
+            {s.openDashCheckout}
           </a>
           <button
             onClick={() => { setDashInvoice(null); setDashPolling(false); }}
             className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1"
           >
-            Cancel
+            {s.cancel}
           </button>
         </div>
       )}
@@ -643,36 +647,36 @@ export default function Subscribe() {
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-3">
           <div className="flex-1 h-px bg-white/10" />
-          <span className="text-xs text-pnp-textSecondary">or</span>
+          <span className="text-xs text-pnp-textSecondary">{s.or}</span>
           <div className="flex-1 h-px bg-white/10" />
         </div>
 
         {/* Lifetime100 promo */}
         <div className="rounded-xl p-4 border border-[#FFB454]/30 bg-[#FFB454]/5 mb-4">
           <p className="text-sm text-pnp-textPrimary font-medium mb-1">
-            Want the best deal?
+            {s.wantBestDeal}
           </p>
           <p className="text-xs text-pnp-textSecondary mb-3">
-            Get our Lifetime100 promo — one single payment of $100 for lifetime PRIME access. No subscriptions, no renewals, forever yours.
+            {s.lifetime100Desc}
           </p>
           <a
             href="/lifetime100"
             className="inline-block text-xs font-semibold text-[#FFB454] hover:text-[#ffcc80] transition-colors border-b border-[#FFB454]/50"
           >
-            Check out the Lifetime100 deal
+            {s.checkoutLifetime100}
           </a>
         </div>
 
         {/* Meru code */}
         <label className="text-sm font-medium text-pnp-textPrimary mb-2 block">
-          Have a Meru code?
+          {s.haveMeruCode}
         </label>
         <div className="flex gap-2">
           <input
             type="text"
             value={meruCode}
             onChange={(e) => { setMeruCode(e.target.value); setMeruError(null); }}
-            placeholder="Enter your Meru code"
+            placeholder={s.meruCodePlaceholder}
             disabled={meruSubmitting}
             className="flex-1 rounded-xl px-4 py-2.5 bg-white/5 border border-white/10 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-[#D4007A] transition-colors disabled:opacity-50"
           />
@@ -681,12 +685,12 @@ export default function Subscribe() {
             disabled={!meruCode.trim() || meruSubmitting}
             className="btn-gradient px-5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
           >
-            {meruSubmitting ? "Verifying..." : "Activate"}
+            {meruSubmitting ? s.verifying : s.activate}
           </button>
         </div>
         {meruSubmitting && (
           <p className="mt-2 text-xs text-pnp-textSecondary">
-            Verifying payment... this may take a few seconds
+            {s.verifyingPayment}
           </p>
         )}
         {meruError && (
@@ -702,10 +706,10 @@ export default function Subscribe() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
-            <span className="font-medium">Waiting for payment...</span>
+            <span className="font-medium">{s.waitingForPayment}</span>
           </div>
           <p className="text-xs text-pnp-textSecondary">
-            Complete the payment in the checkout window. This page will update automatically.
+            {s.completePaymentInWindow}
           </p>
         </div>
       )}
@@ -729,10 +733,10 @@ export default function Subscribe() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
-            Processing...
+            {s.processingPayment}
           </span>
         ) : (
-          "Subscribe Now"
+          s.subscribeNow
         )}
       </button>
 
@@ -741,7 +745,7 @@ export default function Subscribe() {
         onClick={() => navigate(-1)}
         className="w-full mt-3 py-2 text-sm text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
       >
-        Go Back
+        {s.goBack}
       </button>
     </div>
   );

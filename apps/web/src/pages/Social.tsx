@@ -25,13 +25,14 @@ import {
   type AuthMethods,
   type FeaturedPerformer,
 } from "@/lib/api";
-import { useFeedI18n, translateText } from "@/lib/feedI18n";
+import { useI18n } from "@/lib/i18n";
+import { translateText } from "@/lib/feedI18n";
 
-function timeAgo(dateStr: string): string {
+function timeAgo(dateStr: string, nowLabel: string): string {
   if (!dateStr) return "";
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "now";
+  if (mins < 1) return nowLabel;
   if (mins < 60) return `${mins}m`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h`;
@@ -68,7 +69,7 @@ function PostCard({
   onWofToggle?: (id: number, nowWof: boolean) => void;
   onNavigate: (path: string) => void;
 }) {
-  const t = useFeedI18n(userLang);
+  const { feed: t } = useI18n();
   const [showReplies, setShowReplies] = useState(false);
   const [replies, setReplies] = useState<SocialPostItem[]>([]);
   const [loadingReplies, setLoadingReplies] = useState(false);
@@ -215,19 +216,19 @@ function PostCard({
             {post.author_username && (
               <span className="text-xs" style={{ color: "#8E8E93" }}>@{post.author_username}</span>
             )}
-            <span className="text-xs" style={{ color: "#8E8E93" }}>&middot; {timeAgo(post.created_at)}</span>
+            <span className="text-xs" style={{ color: "#8E8E93" }}>&middot; {timeAgo(post.created_at, t.translating)}</span>
 
             {/* Featured / Promoted badge */}
             {post.is_promoted && (
               <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))", color: "#FFB454" }}>
                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
-                Featured
+                {t.featured}
               </span>
             )}
             {/* Wall of Fame badge */}
             {post.is_wof && (
               <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,180,84,0.15)", color: "#FFB454" }}>
-                Wall of Fame
+                {t.wallOfFame}
               </span>
             )}
             {/* Exclusive badges */}
@@ -506,7 +507,7 @@ function PostCard({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs font-semibold text-white truncate">{reply.author_first_name || reply.author_username}</span>
-                          <span className="text-xs" style={{ color: "#8E8E93" }}>{timeAgo(reply.created_at)}</span>
+                          <span className="text-xs" style={{ color: "#8E8E93" }}>{timeAgo(reply.created_at, t.translating)}</span>
                         </div>
                         <p className="text-xs text-white/80 mt-0.5 whitespace-pre-wrap">{reply.content}</p>
                       </div>
@@ -551,7 +552,7 @@ export default function Social() {
   const navigate = useNavigate();
   const currentUserId = String(user?.id || "");
   const { showTutorial, dismissTutorial } = useTutorial("social");
-  const t = useFeedI18n(user?.language);
+  const { feed: t } = useI18n();
 
   // Tab state
   const [activeTab, setActiveTab] = useState<"all" | "wof" | "following">("all");
@@ -801,8 +802,8 @@ export default function Social() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
       <Helmet>
-        <title>Social Feed — PNPtv!</title>
-        <meta name="description" content="Browse and share posts with the PNPtv community. Like, comment, and connect with members." />
+        <title>{t.socialFeedTitle} — PNPtv!</title>
+        <meta name="description" content={t.socialFeedSubtitle} />
       </Helmet>
       {showTutorial && <TutorialOverlay section="social" onDismiss={dismissTutorial} />}
       {/* Header */}
@@ -897,6 +898,7 @@ export default function Social() {
               onCancel={() => setShowBulkUpload(false)}
             />
           )}
+
           {isActiveCreator && showBulkUpload ? null : (
           <div className="flex gap-3">
             {/* Composer avatar — show user photo */}

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useI18n } from "@/lib/i18n";
 import { getSocket } from "@/lib/socket";
 import {
   getSupportSuggestions,
@@ -37,6 +38,7 @@ interface CristinaWidgetProps {
 export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   const { user } = useAuth();
   const location = useLocation();
+  const { support: t } = useI18n();
   const [isOpen, setIsOpen] = useState(mode === "page");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -230,10 +232,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
           {
             id: `e-${Date.now()}`,
             role: "assistant",
-            content:
-              lang === "es"
-                ? "Lo siento, hubo un error. Por favor intenta de nuevo."
-                : "Sorry, there was an error. Please try again.",
+            content: t.chatError,
             timestamp: Date.now(),
           },
         ]);
@@ -241,7 +240,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
         setIsLoading(false);
       }
     },
-    [isLoading, lang]
+    [isLoading, lang, t.chatError]
   );
 
   const handleNewConversation = useCallback(async () => {
@@ -310,6 +309,16 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
     }
   };
 
+  // Category definitions — labels come from i18n
+  const TICKET_CATEGORIES: { key: TicketCategory; emoji: string; label: string }[] = [
+    { key: "payment", emoji: "💳", label: t.categoryPayment },
+    { key: "account", emoji: "👤", label: t.categoryAccount },
+    { key: "bug", emoji: "🐛", label: t.categoryBug },
+    { key: "feature", emoji: "🚀", label: t.categoryFeature },
+    { key: "technical", emoji: "🛠", label: t.categoryTechnical },
+    { key: "general", emoji: "📋", label: t.categoryGeneral },
+  ];
+
   // FAB button (widget mode only)
   if (mode === "widget" && !isOpen) {
     return (
@@ -320,7 +329,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
           style={{
             background: "linear-gradient(135deg, #5BC8F5, #00D4E8)",
           }}
-          aria-label="Open Cristina AI Support"
+          aria-label={t.openWidgetAriaLabel}
         >
           {/* Pulse ring */}
           <span
@@ -375,9 +384,9 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
         <div className="flex items-center gap-2">
           <span className="text-xl">🧜‍♀️</span>
           <div>
-            <h3 className="text-sm font-semibold text-pnp-textPrimary">Cristina AI</h3>
+            <h3 className="text-sm font-semibold text-pnp-textPrimary">{t.widgetName}</h3>
             <p className="text-[10px] text-pnp-textSecondary">
-              {lang === "es" ? "Soporte PNPtv" : "PNPtv Support"}
+              {t.widgetSubtitle}
             </p>
           </div>
         </div>
@@ -387,7 +396,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
             <button
               onClick={() => { ticket ? setView("ticketView") : setView("ticketForm"); setHasUnreadReply(false); }}
               className="relative p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-              title={lang === "es" ? "Ticket de soporte" : "Support ticket"}
+              title={t.supportTicketTitle}
             >
               <svg
                 className="w-4 h-4 text-gray-400"
@@ -411,7 +420,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
           <button
             onClick={handleNewConversation}
             className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5 transition-colors"
-            title={lang === "es" ? "Nueva conversación" : "New conversation"}
+            title={t.newConversationTitle}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -476,63 +485,17 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
               </svg>
             </button>
             <h3 className="text-white font-semibold text-sm">
-              {lang === "es"
-                ? "Crear Ticket de Soporte"
-                : "Create Support Ticket"}
+              {t.createTicketTitle}
             </h3>
           </div>
 
           {/* Category selection */}
           <div>
             <p className="text-xs text-gray-400 mb-2">
-              {lang === "es" ? "Selecciona una categoría:" : "Select a category:"}
+              {t.selectCategoryLabel}
             </p>
             <div className="grid grid-cols-2 gap-2">
-              {(
-                [
-                  {
-                    key: "payment" as TicketCategory,
-                    emoji: "💳",
-                    en: "Payment",
-                    es: "Pago",
-                  },
-                  {
-                    key: "account" as TicketCategory,
-                    emoji: "👤",
-                    en: "Account",
-                    es: "Cuenta",
-                  },
-                  {
-                    key: "bug" as TicketCategory,
-                    emoji: "🐛",
-                    en: "Bug Report",
-                    es: "Reporte de Bug",
-                  },
-                  {
-                    key: "feature" as TicketCategory,
-                    emoji: "🚀",
-                    en: "Feature",
-                    es: "Sugerencia",
-                  },
-                  {
-                    key: "technical" as TicketCategory,
-                    emoji: "🛠",
-                    en: "Technical",
-                    es: "Técnico",
-                  },
-                  {
-                    key: "general" as TicketCategory,
-                    emoji: "📋",
-                    en: "General",
-                    es: "General",
-                  },
-                ] satisfies {
-                  key: TicketCategory;
-                  emoji: string;
-                  en: string;
-                  es: string;
-                }[]
-              ).map((cat) => (
+              {TICKET_CATEGORIES.map((cat) => (
                 <button
                   key={cat.key}
                   onClick={() => setSelectedCategory(cat.key)}
@@ -542,7 +505,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
                       : "bg-white/5 border border-white/10 text-gray-300 hover:bg-white/10"
                   }`}
                 >
-                  {cat.emoji} {lang === "es" ? cat.es : cat.en}
+                  {cat.emoji} {cat.label}
                 </button>
               ))}
             </div>
@@ -551,18 +514,14 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
           {/* Description */}
           <div>
             <p className="text-xs text-gray-400 mb-2">
-              {lang === "es" ? "Describe tu problema:" : "Describe your issue:"}
+              {t.describeIssueLabel}
             </p>
             <textarea
               value={ticketDescription}
               onChange={(e) =>
                 setTicketDescription(e.target.value.slice(0, 2000))
               }
-              placeholder={
-                lang === "es"
-                  ? "Escribe los detalles aquí..."
-                  : "Write the details here..."
-              }
+              placeholder={t.descriptionPlaceholder}
               className="w-full h-32 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-gray-500 resize-none focus:outline-none focus:border-cyan-500/50"
             />
             <p className="text-xs text-gray-500 mt-1 text-right">
@@ -580,13 +539,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
             }
             className="w-full py-2.5 rounded-lg text-sm font-semibold transition-colors bg-gradient-to-r from-cyan-500 to-teal-500 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:from-cyan-400 hover:to-teal-400"
           >
-            {isSubmittingTicket
-              ? lang === "es"
-                ? "Enviando..."
-                : "Submitting..."
-              : lang === "es"
-              ? "Enviar Ticket"
-              : "Submit Ticket"}
+            {isSubmittingTicket ? t.submittingTicket : t.submitTicketBtn}
           </button>
         </div>
       )}
@@ -617,7 +570,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
               </svg>
             </button>
             <h3 className="text-white font-semibold text-sm">
-              {lang === "es" ? "Ticket de Soporte" : "Support Ticket"}
+              {t.supportTicketViewTitle}
             </h3>
             <span
               className={`ml-auto text-xs px-2 py-0.5 rounded-full ${
@@ -643,7 +596,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
                   <>
                     <span>•</span>
                     <span className="text-green-400">
-                      {lang === "es" ? "Respondido" : "Replied"}
+                      {t.ticketReplied}
                     </span>
                   </>
                 )}
@@ -654,9 +607,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
           {/* Messages */}
           {ticketMessages.length === 0 ? (
             <div className="text-center text-gray-500 text-xs py-8">
-              {lang === "es"
-                ? "Esperando respuesta del equipo de soporte..."
-                : "Waiting for support team response..."}
+              {t.waitingForSupport}
             </div>
           ) : (
             ticketMessages.map((msg) => (
@@ -707,13 +658,10 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
             >
               <div className="flex items-center justify-between">
                 <span className="text-xs text-cyan-300">
-                  📋{" "}
-                  {lang === "es"
-                    ? "Tienes un ticket de soporte abierto"
-                    : "You have an open support ticket"}
+                  📋 {t.openTicketBanner}
                 </span>
                 <span className="text-xs text-cyan-400 font-medium">
-                  {lang === "es" ? "Ver →" : "View →"}
+                  {t.viewTicketLink}
                 </span>
               </div>
             </div>
@@ -725,12 +673,10 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
               <div className="text-center mb-6 mt-4">
                 <span className="text-4xl block mb-2">🧜‍♀️</span>
                 <h4 className="text-sm font-semibold text-pnp-textPrimary mb-1">
-                  {lang === "es" ? "¡Hola! Soy Cristina" : "Hi! I'm Cristina"}
+                  {t.welcomeGreeting}
                 </h4>
                 <p className="text-xs text-pnp-textSecondary">
-                  {lang === "es"
-                    ? "Tu asistente de soporte PNPtv. ¿En qué puedo ayudarte?"
-                    : "Your PNPtv support assistant. How can I help you?"}
+                  {t.welcomeSubtitle}
                 </p>
               </div>
               {/* Suggestion chips */}
@@ -800,9 +746,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
                   />
                 </svg>
                 <span className="text-cyan-300">
-                  {lang === "es"
-                    ? "¿Aún necesitas ayuda? → Crear ticket de soporte"
-                    : "Still need help? → Create a support ticket"}
+                  {t.stillNeedHelp}
                 </span>
               </button>
             </div>
@@ -851,12 +795,8 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
             onChange={(e) => setInput(e.target.value)}
             placeholder={
               view === "ticketView"
-                ? lang === "es"
-                  ? "Responder al ticket..."
-                  : "Reply to ticket..."
-                : lang === "es"
-                ? "Escribe tu mensaje..."
-                : "Type your message..."
+                ? t.inputPlaceholderTicket
+                : t.inputPlaceholderChat
             }
             maxLength={1000}
             disabled={isLoading}

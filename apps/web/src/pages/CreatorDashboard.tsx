@@ -32,6 +32,7 @@ import {
   type CmsContent,
   type CmsShow,
 } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 const ETHEREUM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -67,6 +68,7 @@ function CriterionBar({ label, current, required, met }: { label: string; curren
 export default function CreatorDashboard() {
   const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const { creator: t } = useI18n();
 
   const [eligibility, setEligibility] = useState<CreatorEligibility | null>(null);
   const [dashboard, setDashboard] = useState<(DashboardData & { success: boolean }) | null>(null);
@@ -233,9 +235,9 @@ export default function CreatorDashboard() {
         setCmsContent(cont.content);
         setCmsShows(shows.shows);
       })
-      .catch((err) => setCmsError(err.message || "Failed to load CMS data"))
+      .catch((err) => setCmsError(err.message || t.errorFailedLoadCms))
       .finally(() => setCmsLoading(false));
-  }, [activeTab, dashboard, cmsPerformer]);
+  }, [activeTab, dashboard, cmsPerformer, t.errorFailedLoadCms]);
 
   const handleActivate = () => {
     setActivateError(null);
@@ -245,7 +247,7 @@ export default function CreatorDashboard() {
 
   const handleConfirmActivate = async () => {
     if (!activateTerms) {
-      setActivateError("You must accept the Creator Terms to continue.");
+      setActivateError(t.errorMustAcceptTerms);
       return;
     }
     setActivating(true);
@@ -255,7 +257,7 @@ export default function CreatorDashboard() {
       setShowActivateModal(false);
       await load();
     } catch (err) {
-      setActivateError(err instanceof Error ? err.message : "Activation failed. Please try again.");
+      setActivateError(err instanceof Error ? err.message : t.errorActivationFailed);
     } finally {
       setActivating(false);
     }
@@ -267,7 +269,7 @@ export default function CreatorDashboard() {
     setWithdrawSuccess(null);
     try {
       const res = await requestWithdrawal("bank_transfer");
-      setWithdrawSuccess(`Withdrawal of $${res.data.withdrawal.amountUsd.toFixed(2)} requested successfully`);
+      setWithdrawSuccess(t.withdrawAmount(res.data.withdrawal.amountUsd.toFixed(2)) + " requested successfully");
       await load();
     } catch (err) {
       setWithdrawError(err instanceof Error ? err.message : "Failed to request withdrawal");
@@ -283,40 +285,40 @@ export default function CreatorDashboard() {
     if (payoutMethod === "crypto") {
       const trimmed = walletAddress.trim();
       if (!ETHEREUM_ADDRESS_RE.test(trimmed)) {
-        setWalletError("Invalid address. Must start with 0x followed by exactly 40 hex characters.");
+        setWalletError(t.errorInvalidAddress);
         return;
       }
       setWalletSaving(true);
       try {
         const res = await saveCreatorWallet({ payoutMethod: "crypto", address: trimmed });
         if (res.success) {
-          setWalletSuccess("Crypto wallet saved successfully.");
+          setWalletSuccess(t.walletSavedCrypto);
           setWalletAddress(trimmed.toLowerCase());
         } else {
-          setWalletError(res.error || "Failed to save wallet address.");
+          setWalletError((res as { error?: string }).error || t.errorSaveWallet);
         }
       } catch (err) {
-        setWalletError(err instanceof Error ? err.message : "Failed to save wallet address.");
+        setWalletError(err instanceof Error ? err.message : t.errorSaveWallet);
       } finally {
         setWalletSaving(false);
       }
     } else {
       const meru = meruAccount.trim();
       if (!meru) {
-        setWalletError("Enter your Meru phone number or username.");
+        setWalletError(t.errorMeruEmpty);
         return;
       }
       setWalletSaving(true);
       try {
         const res = await saveCreatorWallet({ payoutMethod: "meru", meruAccount: meru });
         if (res.success) {
-          setWalletSuccess("Meru account saved successfully.");
+          setWalletSuccess(t.walletSavedMeru);
           setMeruAccount(meru);
         } else {
-          setWalletError(res.error || "Failed to save Meru account.");
+          setWalletError((res as { error?: string }).error || t.errorSaveMeru);
         }
       } catch (err) {
-        setWalletError(err instanceof Error ? err.message : "Failed to save Meru account.");
+        setWalletError(err instanceof Error ? err.message : t.errorSaveMeru);
       } finally {
         setWalletSaving(false);
       }
@@ -352,9 +354,9 @@ export default function CreatorDashboard() {
     try {
       const res = await updateCmsProfile(cmsProfileForm);
       setCmsPerformer(res.performer);
-      setCmsProfileMsg("Profile updated!");
+      setCmsProfileMsg(t.profileUpdated);
     } catch (err) {
-      setCmsProfileMsg(err instanceof Error ? err.message : "Save failed");
+      setCmsProfileMsg(err instanceof Error ? err.message : t.profileSaveFailed);
     } finally {
       setCmsProfileSaving(false);
     }
@@ -482,7 +484,7 @@ export default function CreatorDashboard() {
   if (!isAuthenticated) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-16 text-center">
-        <p className="text-white/60">Sign in to access the Creator Dashboard</p>
+        <p className="text-white/60">{t.signInRequired}</p>
       </div>
     );
   }
@@ -513,17 +515,17 @@ export default function CreatorDashboard() {
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
         </svg>
-        Back
+        {t.back}
       </button>
 
-      <h1 className="text-2xl font-bold text-white mb-1">Creator Dashboard</h1>
+      <h1 className="text-2xl font-bold text-white mb-1">{t.dashboardTitle}</h1>
       <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>
-        Earn money by sharing exclusive content with your subscribers
+        {t.dashboardSubtitle}
       </p>
 
       {/* Creator identity hero — shown only for active creators */}
       {isActive && dashboard && (() => {
-        const tierInfo = TIERS.find((t) => t.key === dashboard.creatorType);
+        const tierInfo = TIERS.find((tier) => tier.key === dashboard.creatorType);
         const initials = (user?.displayName || user?.username || "C").charAt(0).toUpperCase();
         return (
           <div className="flex items-center gap-4 mb-6 px-4 py-3 rounded-2xl" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
@@ -572,11 +574,11 @@ export default function CreatorDashboard() {
                 }`}
                 style={activeTab === tab ? { borderImage: "linear-gradient(to right, #D4007A, #E69138) 1" } : undefined}
               >
-                {tab === "overview" ? "Overview"
-                  : tab === "earnings" ? "Earnings"
-                  : tab === "payouts" ? "Payouts"
-                  : tab === "content" ? "Content"
-                  : "Settings"
+                {tab === "overview" ? t.tabOverview
+                  : tab === "earnings" ? t.tabEarnings
+                  : tab === "payouts" ? t.tabPayouts
+                  : tab === "content" ? t.tabContent
+                  : t.tabSettings
                 }
               </button>
             ))}
@@ -588,19 +590,19 @@ export default function CreatorDashboard() {
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="glass-card-sm p-4 text-center">
                   <p className="text-2xl font-bold text-white">{dashboard.subscriberCount}</p>
-                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>Subscribers</p>
+                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>{t.statSubscribers}</p>
                 </div>
                 <div className="glass-card-sm p-4 text-center">
                   <p className="text-2xl font-bold" style={{ color: "#5ED1C4" }}>${dashboard.monthlyEarnings.toFixed(2)}</p>
-                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>This Month</p>
+                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>{t.statThisMonth}</p>
                 </div>
                 <div className="glass-card-sm p-4 text-center">
                   <p className="text-2xl font-bold text-white">${dashboard.totalEarnings.toFixed(2)}</p>
-                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>Total Earnings</p>
+                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>{t.statTotalEarnings}</p>
                 </div>
                 <div className="glass-card-sm p-4 text-center">
                   <p className="text-2xl font-bold text-white">{dashboard.exclusivePostCount}</p>
-                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>Exclusive Posts</p>
+                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>{t.statExclusivePosts}</p>
                 </div>
               </div>
 
@@ -608,14 +610,14 @@ export default function CreatorDashboard() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-white">
-                      {dashboard.creatorType === "full_time" ? "Full-Time Creator"
-                        : dashboard.creatorType === "diamond" ? "💎 Diamond Creator"
-                        : dashboard.creatorType === "crystal" ? "🔮 Crystal Creator"
-                        : dashboard.creatorType === "ice" ? "❄ Ice Creator"
-                        : "Creator"}
+                      {dashboard.creatorType === "full_time" ? t.creatorTypeFullTime
+                        : dashboard.creatorType === "diamond" ? `💎 ${t.creatorTypeDiamond}`
+                        : dashboard.creatorType === "crystal" ? `🔮 ${t.creatorTypeCrystal}`
+                        : dashboard.creatorType === "ice" ? `❄ ${t.creatorTypeIce}`
+                        : t.creatorTypeDefault}
                     </p>
                     <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
-                      ${dashboard.priceUsd.toFixed(2)}/month &middot; 70/30 revenue split
+                      ${dashboard.priceUsd.toFixed(2)}/month &middot; {t.revenueSplit}
                     </p>
                   </div>
                   {dashboard.verified && (
@@ -631,7 +633,7 @@ export default function CreatorDashboard() {
                 <div className="glass-card-sm p-4 mb-4" style={{ borderColor: "rgba(94,209,196,0.3)" }}>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs" style={{ color: "#8E8E93" }}>Available to withdraw</p>
+                      <p className="text-xs" style={{ color: "#8E8E93" }}>{t.availableToWithdraw}</p>
                       <p className="text-xl font-bold" style={{ color: "#5ED1C4" }}>${withdrawable.toFixed(2)}</p>
                     </div>
                     <button
@@ -639,7 +641,7 @@ export default function CreatorDashboard() {
                       className="text-xs font-semibold px-4 py-2 rounded-lg"
                       style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.3)" }}
                     >
-                      Withdraw
+                      {t.withdrawBtn}
                     </button>
                   </div>
                 </div>
@@ -648,16 +650,16 @@ export default function CreatorDashboard() {
               {/* Upgrade to full-time if occasional */}
               {dashboard.creatorType === "occasional" && (
                 <div className="glass-card-sm p-4 mb-4" style={{ borderColor: "rgba(212,0,122,0.2)" }}>
-                  <p className="text-sm font-medium text-white mb-1">Want more?</p>
+                  <p className="text-sm font-medium text-white mb-1">{t.wantMore}</p>
                   <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
-                    Apply as a full-time creator to set your own price, get verified, and appear in featured placements.
+                    {t.wantMoreDesc}
                   </p>
                   <button
                     onClick={() => navigate("/apply")}
                     className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors"
                     style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
                   >
-                    Apply for Full-Time
+                    {t.applyFullTime}
                   </button>
                 </div>
               )}
@@ -674,28 +676,28 @@ export default function CreatorDashboard() {
                       <p className="text-xl font-bold" style={{ color: "#5ED1C4" }}>
                         ${(earnings.summary.total_creator || 0).toFixed(2)}
                       </p>
-                      <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>Your Earnings (70%)</p>
+                      <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>{t.yourEarnings70}</p>
                     </div>
                     <div className="glass-card-sm p-4 text-center">
                       <p className="text-xl font-bold text-white">
                         ${(earnings.summary.total_gross || 0).toFixed(2)}
                       </p>
-                      <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>Gross Revenue</p>
+                      <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>{t.grossRevenue}</p>
                     </div>
                   </div>
 
                   {/* Revenue trends */}
                   {earnings.trends && earnings.trends.length > 0 && (
                     <div className="glass-card-sm p-4">
-                      <p className="text-sm font-semibold text-white mb-3">Monthly Trends</p>
+                      <p className="text-sm font-semibold text-white mb-3">{t.monthlyTrends}</p>
                       <div className="space-y-2">
-                        {earnings.trends.slice(-6).map((t, i) => {
+                        {earnings.trends.slice(-6).map((trend, i) => {
                           const maxAmount = Math.max(...earnings.trends.slice(-6).map(x => x.amount), 1);
-                          const pct = (t.amount / maxAmount) * 100;
+                          const pct = (trend.amount / maxAmount) * 100;
                           return (
                             <div key={i} className="flex items-center gap-3">
                               <span className="text-xs w-16 flex-shrink-0" style={{ color: "#8E8E93" }}>
-                                {new Date(t.month).toLocaleDateString("en-US", { month: "short", year: "2-digit" })}
+                                {new Date(trend.month).toLocaleDateString("en-US", { month: "short", year: "2-digit" })}
                               </span>
                               <div className="flex-1 h-4 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
                                 <div
@@ -703,7 +705,7 @@ export default function CreatorDashboard() {
                                   style={{ width: `${pct}%`, background: "linear-gradient(to right, #D4007A, #E69138)" }}
                                 />
                               </div>
-                              <span className="text-xs font-medium text-white w-16 text-right">${t.amount.toFixed(2)}</span>
+                              <span className="text-xs font-medium text-white w-16 text-right">${trend.amount.toFixed(2)}</span>
                             </div>
                           );
                         })}
@@ -713,7 +715,7 @@ export default function CreatorDashboard() {
                 </>
               ) : (
                 <div className="glass-card-sm p-8 text-center">
-                  <p className="text-white/60 text-sm">No earnings data yet. Start sharing exclusive content to earn!</p>
+                  <p className="text-white/60 text-sm">{t.noEarningsYet}</p>
                 </div>
               )}
             </div>
@@ -724,9 +726,9 @@ export default function CreatorDashboard() {
             <div className="space-y-4">
               {/* Withdraw card */}
               <div className="glass-card-sm p-5" style={{ borderColor: "rgba(94,209,196,0.2)" }}>
-                <p className="text-sm font-semibold text-white mb-1">Request Withdrawal</p>
+                <p className="text-sm font-semibold text-white mb-1">{t.requestWithdrawalTitle}</p>
                 <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
-                  Available balance: <strong style={{ color: "#5ED1C4" }}>${withdrawable.toFixed(2)}</strong>
+                  {t.availableBalance} <strong style={{ color: "#5ED1C4" }}>${withdrawable.toFixed(2)}</strong>
                 </p>
                 {withdrawSuccess && (
                   <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>
@@ -744,15 +746,15 @@ export default function CreatorDashboard() {
                   className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
                   style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)", color: "#000" }}
                 >
-                  {withdrawing ? "Processing..." : withdrawable <= 0 ? "No balance to withdraw" : `Withdraw $${withdrawable.toFixed(2)}`}
+                  {withdrawing ? t.processing : withdrawable <= 0 ? t.noBalance : t.withdrawAmount(withdrawable.toFixed(2))}
                 </button>
               </div>
 
               {/* Withdrawal history */}
               <div className="glass-card-sm p-4">
-                <p className="text-sm font-semibold text-white mb-3">Withdrawal History</p>
+                <p className="text-sm font-semibold text-white mb-3">{t.withdrawalHistoryTitle}</p>
                 {withdrawals.length === 0 ? (
-                  <p className="text-xs text-center py-4" style={{ color: "#8E8E93" }}>No withdrawals yet</p>
+                  <p className="text-xs text-center py-4" style={{ color: "#8E8E93" }}>{t.noWithdrawalsYet}</p>
                 ) : (
                   <div className="space-y-2">
                     {withdrawals.map((w) => (
@@ -786,7 +788,7 @@ export default function CreatorDashboard() {
           {activeTab === "content" && (
             <div className="space-y-4">
               {cmsLoading && (
-                <div className="text-center py-10 text-white/40 text-sm">Loading CMS data...</div>
+                <div className="text-center py-10 text-white/40 text-sm">{t.loadingCmsData}</div>
               )}
               {cmsError && (
                 <div className="px-4 py-3 rounded-lg text-sm text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
@@ -807,7 +809,7 @@ export default function CreatorDashboard() {
                           : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.1)" }
                         }
                       >
-                        {s === "profile" ? "Performer Profile" : s === "content" ? "Content Library" : "Shows"}
+                        {s === "profile" ? t.subNavProfile : s === "content" ? t.subNavContent : t.subNavShows}
                       </button>
                     ))}
                   </div>
@@ -816,7 +818,7 @@ export default function CreatorDashboard() {
                   {cmsContentSection === "profile" && cmsPerformer && (
                     <div className="glass-card-sm p-5 space-y-4">
                       <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-white">Performer Profile</p>
+                        <p className="text-sm font-semibold text-white">{t.performerProfileTitle}</p>
                         <span className="text-xs px-2 py-0.5 rounded-full" style={{
                           background: cmsPerformer.status === "published" ? "rgba(94,209,196,0.15)" : "rgba(255,255,255,0.08)",
                           color: cmsPerformer.status === "published" ? "#5ED1C4" : "#8E8E93",
@@ -827,7 +829,7 @@ export default function CreatorDashboard() {
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-xs text-white/50 mb-1">Display Name</label>
+                          <label className="block text-xs text-white/50 mb-1">{t.fieldDisplayName}</label>
                           <input
                             value={cmsProfileForm.name ?? ""}
                             onChange={(e) => setCmsProfileForm((p) => ({ ...p, name: e.target.value }))}
@@ -835,7 +837,7 @@ export default function CreatorDashboard() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-white/50 mb-1">Availability Message</label>
+                          <label className="block text-xs text-white/50 mb-1">{t.fieldAvailabilityMessage}</label>
                           <input
                             value={cmsProfileForm.availability_message ?? ""}
                             onChange={(e) => setCmsProfileForm((p) => ({ ...p, availability_message: e.target.value }))}
@@ -843,7 +845,7 @@ export default function CreatorDashboard() {
                           />
                         </div>
                         <div className="sm:col-span-2">
-                          <label className="block text-xs text-white/50 mb-1">Short Bio</label>
+                          <label className="block text-xs text-white/50 mb-1">{t.fieldShortBio}</label>
                           <input
                             value={cmsProfileForm.bio_short ?? ""}
                             onChange={(e) => setCmsProfileForm((p) => ({ ...p, bio_short: e.target.value }))}
@@ -851,7 +853,7 @@ export default function CreatorDashboard() {
                           />
                         </div>
                         <div className="sm:col-span-2">
-                          <label className="block text-xs text-white/50 mb-1">Full Bio</label>
+                          <label className="block text-xs text-white/50 mb-1">{t.fieldFullBio}</label>
                           <textarea
                             rows={3}
                             value={cmsProfileForm.bio ?? ""}
@@ -860,7 +862,7 @@ export default function CreatorDashboard() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-white/50 mb-1">Base Price (cents)</label>
+                          <label className="block text-xs text-white/50 mb-1">{t.fieldBasePriceCents}</label>
                           <input
                             type="number"
                             value={cmsProfileForm.base_price_cents ?? ""}
@@ -869,7 +871,7 @@ export default function CreatorDashboard() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-white/50 mb-1">Currency</label>
+                          <label className="block text-xs text-white/50 mb-1">{t.fieldCurrency}</label>
                           <select
                             value={cmsProfileForm.currency ?? "USD"}
                             onChange={(e) => setCmsProfileForm((p) => ({ ...p, currency: e.target.value }))}
@@ -890,16 +892,16 @@ export default function CreatorDashboard() {
                             onChange={(e) => setCmsProfileForm((p) => ({ ...p, is_available: e.target.checked }))}
                             className="rounded"
                           />
-                          Available for bookings
+                          {t.fieldAvailableForBookings}
                         </label>
                         <select
                           value={cmsProfileForm.status ?? "draft"}
                           onChange={(e) => setCmsProfileForm((p) => ({ ...p, status: e.target.value as CmsPerformer["status"] }))}
                           className="ml-auto px-3 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 focus:outline-none"
                         >
-                          <option value="draft">Draft</option>
-                          <option value="published">Published</option>
-                          <option value="archived">Archived</option>
+                          <option value="draft">{t.statusDraft}</option>
+                          <option value="published">{t.statusPublished}</option>
+                          <option value="archived">{t.statusArchived}</option>
                         </select>
                       </div>
 
@@ -915,7 +917,7 @@ export default function CreatorDashboard() {
                         className="px-5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50 transition-colors"
                         style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
                       >
-                        {cmsProfileSaving ? "Saving..." : "Save Profile"}
+                        {cmsProfileSaving ? t.savingProfile : t.saveProfile}
                       </button>
                     </div>
                   )}
@@ -924,19 +926,19 @@ export default function CreatorDashboard() {
                   {cmsContentSection === "content" && (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-white">Content Library ({cmsContent.length})</p>
+                        <p className="text-sm font-semibold text-white">{t.contentLibraryTitle(cmsContent.length)}</p>
                         <button
                           onClick={openContentCreate}
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
                           style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
                         >
-                          + New Item
+                          {t.newItemBtn}
                         </button>
                       </div>
 
                       {cmsContent.length === 0 && (
                         <div className="glass-card-sm p-6 text-center">
-                          <p className="text-sm text-white/40">No content yet. Add your first video, audio, or podcast.</p>
+                          <p className="text-sm text-white/40">{t.noContentYet}</p>
                         </div>
                       )}
 
@@ -949,7 +951,7 @@ export default function CreatorDashboard() {
                                 background: item.status === "published" ? "rgba(94,209,196,0.15)" : "rgba(255,255,255,0.06)",
                                 color: item.status === "published" ? "#5ED1C4" : "#8E8E93",
                               }}>{item.status}</span>
-                              {item.is_premium && <span className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>PRIME</span>}
+                              {item.is_premium && <span className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>{t.primeBadge}</span>}
                             </div>
                             <p className="text-xs text-white/40">
                               {item.type === "video" ? "🎬" : item.type === "audio" ? "🎵" : "🎙"} {item.type}{item.duration_seconds ? ` · ${Math.round(item.duration_seconds / 60)}m` : ""}
@@ -963,10 +965,10 @@ export default function CreatorDashboard() {
                               className="text-xs hover:underline"
                               style={{ color: "#E69138" }}
                             >
-                              Share
+                              {t.shareBtn}
                             </button>
-                            <button onClick={() => openContentEdit(item)} className="text-xs text-pnp-accent hover:underline">Edit</button>
-                            <button onClick={() => handleContentDelete(item.id)} className="text-xs text-red-400 hover:underline">Delete</button>
+                            <button onClick={() => openContentEdit(item)} className="text-xs text-pnp-accent hover:underline">{t.editBtn}</button>
+                            <button onClick={() => handleContentDelete(item.id)} className="text-xs text-red-400 hover:underline">{t.deleteBtn}</button>
                           </div>
                         </div>
                       ))}
@@ -977,19 +979,19 @@ export default function CreatorDashboard() {
                   {cmsContentSection === "shows" && (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-white">Scheduled Shows ({cmsShows.length})</p>
+                        <p className="text-sm font-semibold text-white">{t.scheduledShowsTitle(cmsShows.length)}</p>
                         <button
                           onClick={openShowCreate}
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
                           style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
                         >
-                          + Schedule Show
+                          {t.scheduleShowBtn}
                         </button>
                       </div>
 
                       {cmsShows.length === 0 && (
                         <div className="glass-card-sm p-6 text-center">
-                          <p className="text-sm text-white/40">No shows scheduled. Create your first show!</p>
+                          <p className="text-sm text-white/40">{t.noShowsYet}</p>
                         </div>
                       )}
 
@@ -1002,7 +1004,7 @@ export default function CreatorDashboard() {
                                 background: show.status === "published" ? "rgba(94,209,196,0.15)" : "rgba(255,255,255,0.06)",
                                 color: show.status === "published" ? "#5ED1C4" : "#8E8E93",
                               }}>{show.status}</span>
-                              {show.is_premium && <span className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>PRIME</span>}
+                              {show.is_premium && <span className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>{t.primeBadge}</span>}
                             </div>
                             <p className="text-xs text-white/40">
                               {show.scheduled_at ? new Date(show.scheduled_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
@@ -1017,10 +1019,10 @@ export default function CreatorDashboard() {
                               className="text-xs hover:underline"
                               style={{ color: "#E69138" }}
                             >
-                              Share
+                              {t.shareBtn}
                             </button>
-                            <button onClick={() => openShowEdit(show)} className="text-xs text-pnp-accent hover:underline">Edit</button>
-                            <button onClick={() => handleShowDelete(show.id)} className="text-xs text-red-400 hover:underline">Delete</button>
+                            <button onClick={() => openShowEdit(show)} className="text-xs text-pnp-accent hover:underline">{t.editBtn}</button>
+                            <button onClick={() => handleShowDelete(show.id)} className="text-xs text-red-400 hover:underline">{t.deleteBtn}</button>
                           </div>
                         </div>
                       ))}
@@ -1036,62 +1038,62 @@ export default function CreatorDashboard() {
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}>
               <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}>
                 <div className="flex items-center justify-between">
-                  <p className="text-base font-semibold text-white">{contentModal.mode === "create" ? "New Content" : "Edit Content"}</p>
+                  <p className="text-base font-semibold text-white">{contentModal.mode === "create" ? t.newContentTitle : t.editContentTitle}</p>
                   <button onClick={() => setContentModal(null)} className="text-white/40 hover:text-white text-xl leading-none">&times;</button>
                 </div>
 
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-xs text-white/50 mb-1">Title *</label>
+                    <label className="block text-xs text-white/50 mb-1">{t.fieldTitle}</label>
                     <input value={contentForm.title ?? ""} onChange={(e) => setContentForm((p) => ({ ...p, title: e.target.value }))}
                       className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs text-white/50 mb-1">Type *</label>
+                      <label className="block text-xs text-white/50 mb-1">{t.fieldType}</label>
                       <select value={contentForm.type ?? "video"} onChange={(e) => setContentForm((p) => ({ ...p, type: e.target.value as CmsContent["type"] }))}
                         className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none">
-                        <option value="video">Video</option>
-                        <option value="audio">Audio</option>
-                        <option value="podcast">Podcast</option>
+                        <option value="video">{t.contentTypeVideo}</option>
+                        <option value="audio">{t.contentTypeAudio}</option>
+                        <option value="podcast">{t.contentTypePodcast}</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs text-white/50 mb-1">Status</label>
+                      <label className="block text-xs text-white/50 mb-1">{t.fieldContentStatus}</label>
                       <select value={contentForm.status ?? "draft"} onChange={(e) => setContentForm((p) => ({ ...p, status: e.target.value as CmsContent["status"] }))}
                         className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none">
-                        <option value="draft">Draft</option>
-                        <option value="published">Published</option>
-                        <option value="archived">Archived</option>
+                        <option value="draft">{t.statusDraft}</option>
+                        <option value="published">{t.statusPublished}</option>
+                        <option value="archived">{t.statusArchived}</option>
                       </select>
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs text-white/50 mb-1">Media URL (or upload below)</label>
+                    <label className="block text-xs text-white/50 mb-1">{t.fieldMediaUrl}</label>
                     <input value={contentForm.media_url ?? ""} onChange={(e) => setContentForm((p) => ({ ...p, media_url: e.target.value }))}
-                      placeholder="https://..." className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent" />
+                      placeholder={t.mediaUrlPlaceholder} className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent" />
                   </div>
                   <div>
-                    <label className="block text-xs text-white/50 mb-1">Upload Media File</label>
+                    <label className="block text-xs text-white/50 mb-1">{t.fieldUploadFile}</label>
                     <input type="file" accept="video/*,audio/*" onChange={(e) => setContentUploadFile(e.target.files?.[0] ?? null)}
                       className="w-full text-xs text-white/60 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-white/10 file:text-white/70 hover:file:bg-white/20" />
                     {contentUploadFile && <p className="text-xs text-white/40 mt-1">{contentUploadFile.name}</p>}
                   </div>
                   <div>
-                    <label className="block text-xs text-white/50 mb-1">Description</label>
+                    <label className="block text-xs text-white/50 mb-1">{t.fieldDescription}</label>
                     <textarea rows={2} value={contentForm.description ?? ""} onChange={(e) => setContentForm((p) => ({ ...p, description: e.target.value }))}
                       className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none resize-none" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs text-white/50 mb-1">Duration (sec)</label>
+                      <label className="block text-xs text-white/50 mb-1">{t.fieldDurationSec}</label>
                       <input type="number" value={contentForm.duration_seconds ?? ""} onChange={(e) => setContentForm((p) => ({ ...p, duration_seconds: Number(e.target.value) || null }))}
                         className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none" />
                     </div>
                     <div className="flex items-end pb-2">
                       <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer">
                         <input type="checkbox" checked={!!contentForm.is_premium} onChange={(e) => setContentForm((p) => ({ ...p, is_premium: e.target.checked }))} className="rounded" />
-                        PRIME only
+                        {t.fieldPrimeOnly}
                       </label>
                     </div>
                   </div>
@@ -1107,9 +1109,9 @@ export default function CreatorDashboard() {
                   <button onClick={handleContentSave} disabled={contentSaving || !contentForm.title || !contentForm.type}
                     className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
                     style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
-                    {contentUploadProgress ? "Uploading..." : contentSaving ? "Saving..." : contentModal.mode === "create" ? "Create" : "Save"}
+                    {contentUploadProgress ? t.uploadingMedia : contentSaving ? t.savingContent : contentModal.mode === "create" ? t.createBtn : t.saveBtn}
                   </button>
-                  <button onClick={() => { setContentModal(null); setContentSaveError(null); }} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">Cancel</button>
+                  <button onClick={() => { setContentModal(null); setContentSaveError(null); }} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">{t.cancelBtn}</button>
                 </div>
               </div>
             </div>
@@ -1120,51 +1122,51 @@ export default function CreatorDashboard() {
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}>
               <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}>
                 <div className="flex items-center justify-between">
-                  <p className="text-base font-semibold text-white">{showModal.mode === "create" ? "Schedule Show" : "Edit Show"}</p>
+                  <p className="text-base font-semibold text-white">{showModal.mode === "create" ? t.scheduleShowTitle : t.editShowTitle}</p>
                   <button onClick={() => setShowModal(null)} className="text-white/40 hover:text-white text-xl leading-none">&times;</button>
                 </div>
 
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-xs text-white/50 mb-1">Show Title *</label>
+                    <label className="block text-xs text-white/50 mb-1">{t.fieldShowTitle}</label>
                     <input value={showForm.title ?? ""} onChange={(e) => setShowForm((p) => ({ ...p, title: e.target.value }))}
                       className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs text-white/50 mb-1">Date & Time *</label>
+                      <label className="block text-xs text-white/50 mb-1">{t.fieldDateTime}</label>
                       <input type="datetime-local" value={showForm.scheduled_at ?? ""} onChange={(e) => setShowForm((p) => ({ ...p, scheduled_at: e.target.value }))}
                         className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent" />
                     </div>
                     <div>
-                      <label className="block text-xs text-white/50 mb-1">Duration (min)</label>
+                      <label className="block text-xs text-white/50 mb-1">{t.fieldDurationMin}</label>
                       <input type="number" value={showForm.duration_minutes ?? ""} onChange={(e) => setShowForm((p) => ({ ...p, duration_minutes: Number(e.target.value) || null }))}
                         className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none" />
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs text-white/50 mb-1">Description</label>
+                    <label className="block text-xs text-white/50 mb-1">{t.fieldDescription}</label>
                     <textarea rows={2} value={showForm.description ?? ""} onChange={(e) => setShowForm((p) => ({ ...p, description: e.target.value }))}
                       className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none resize-none" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs text-white/50 mb-1">Category</label>
+                      <label className="block text-xs text-white/50 mb-1">{t.fieldCategory}</label>
                       <input value={showForm.category ?? ""} onChange={(e) => setShowForm((p) => ({ ...p, category: e.target.value }))}
                         className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none" />
                     </div>
                     <div>
-                      <label className="block text-xs text-white/50 mb-1">Status</label>
+                      <label className="block text-xs text-white/50 mb-1">{t.fieldContentStatus}</label>
                       <select value={showForm.status ?? "draft"} onChange={(e) => setShowForm((p) => ({ ...p, status: e.target.value as CmsShow["status"] }))}
                         className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none">
-                        <option value="draft">Draft</option>
-                        <option value="published">Published</option>
+                        <option value="draft">{t.statusDraft}</option>
+                        <option value="published">{t.statusPublished}</option>
                       </select>
                     </div>
                   </div>
                   <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer">
                     <input type="checkbox" checked={!!showForm.is_premium} onChange={(e) => setShowForm((p) => ({ ...p, is_premium: e.target.checked }))} className="rounded" />
-                    PRIME only
+                    {t.fieldPrimeOnly}
                   </label>
                 </div>
 
@@ -1178,9 +1180,9 @@ export default function CreatorDashboard() {
                   <button onClick={handleShowSave} disabled={showSaving || !showForm.title || !showForm.scheduled_at}
                     className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
                     style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
-                    {showSaving ? "Saving..." : showModal.mode === "create" ? "Schedule" : "Save"}
+                    {showSaving ? t.schedulingShow : showModal.mode === "create" ? t.scheduleBtn : t.saveBtn}
                   </button>
-                  <button onClick={() => { setShowModal(null); setShowSaveError(null); }} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">Cancel</button>
+                  <button onClick={() => { setShowModal(null); setShowSaveError(null); }} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">{t.cancelBtn}</button>
                 </div>
               </div>
             </div>
@@ -1192,16 +1194,16 @@ export default function CreatorDashboard() {
 
               {/* Payout Method Card */}
               <div className="glass-card-sm p-5">
-                <p className="text-sm font-semibold text-white mb-1">Payout Method</p>
+                <p className="text-sm font-semibold text-white mb-1">{t.payoutMethodTitle}</p>
                 <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
-                  Choose how you want to receive your monthly payouts.
+                  {t.payoutMethodDesc}
                 </p>
 
                 {/* Method selector */}
                 <div className="flex gap-2 mb-4">
                   {([
-                    { key: "meru", label: "Meru App", icon: "📱" },
-                    { key: "crypto", label: "Crypto", icon: "🔑" },
+                    { key: "meru", label: t.payoutMeruLabel, icon: "📱" },
+                    { key: "crypto", label: t.payoutCryptoLabel, icon: "🔑" },
                   ] as const).map((opt) => (
                     <button
                       key={opt.key}
@@ -1233,7 +1235,7 @@ export default function CreatorDashboard() {
                 ) : payoutMethod === "meru" ? (
                   <div className="mb-3">
                     <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>
-                      Enter your Meru phone number or registered username.
+                      {t.meruInputHint}
                     </p>
                     <input
                       type="text"
@@ -1243,7 +1245,7 @@ export default function CreatorDashboard() {
                         setWalletError(null);
                         setWalletSuccess(null);
                       }}
-                      placeholder="+57 300 000 0000 or @username"
+                      placeholder={t.meruPlaceholder}
                       autoComplete="off"
                       className="w-full px-3 py-2.5 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors"
                     />
@@ -1251,7 +1253,7 @@ export default function CreatorDashboard() {
                 ) : (
                   <div className="mb-3">
                     <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>
-                      Your Ethereum/Daimo wallet address (EVM, 0x...).
+                      {t.cryptoInputHint}
                     </p>
                     <input
                       type="text"
@@ -1261,7 +1263,7 @@ export default function CreatorDashboard() {
                         setWalletError(null);
                         setWalletSuccess(null);
                       }}
-                      placeholder="0x..."
+                      placeholder={t.cryptoPlaceholder}
                       spellCheck={false}
                       autoComplete="off"
                       className="w-full px-3 py-2.5 rounded-lg text-sm font-mono text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors"
@@ -1286,30 +1288,30 @@ export default function CreatorDashboard() {
                   className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
                   style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
                 >
-                  {walletSaving ? "Saving..." : "Save Payout Info"}
+                  {walletSaving ? t.savingWallet : t.savePayoutInfo}
                 </button>
 
                 <p className="mt-4 text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
-                  Payouts are processed on the 1st of each month. Minimum threshold: $1.00 USD.
+                  {t.payoutScheduleNote}
                 </p>
               </div>
 
               {/* Tier milestone info — read-only */}
               {dashboard.creatorType !== "full_time" && (
                 <div className="glass-card-sm p-5">
-                  <p className="text-sm font-semibold text-white mb-1">Creator Tier</p>
+                  <p className="text-sm font-semibold text-white mb-1">{t.creatorTierTitle}</p>
                   <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
-                    Tiers are unlocked automatically as you hit higher milestones. Keep growing to advance.
+                    {t.creatorTierDesc}
                   </p>
                   <div className="flex gap-2">
-                    {TIERS.map((t) => {
-                      const isCurrent = dashboard.creatorType === t.key;
+                    {TIERS.map((tier) => {
+                      const isCurrent = dashboard.creatorType === tier.key;
                       const tierOrder = { ice: 0, crystal: 1, diamond: 2 };
                       const currentOrder = tierOrder[dashboard.creatorType as keyof typeof tierOrder] ?? -1;
-                      const isUnlocked = tierOrder[t.key] <= currentOrder;
+                      const isUnlocked = tierOrder[tier.key] <= currentOrder;
                       return (
                         <div
-                          key={t.key}
+                          key={tier.key}
                           className="flex-1 py-2.5 rounded-lg text-xs font-semibold text-center"
                           style={{
                             background: isCurrent
@@ -1323,9 +1325,9 @@ export default function CreatorDashboard() {
                               : "1px solid rgba(255,255,255,0.08)",
                           }}
                         >
-                          {t.emoji} {t.label}
-                          {isCurrent && <span className="block text-xs font-normal mt-0.5 opacity-80">Current</span>}
-                          {!isCurrent && !isUnlocked && <span className="block text-xs font-normal mt-0.5 opacity-60">Locked</span>}
+                          {tier.emoji} {tier.label}
+                          {isCurrent && <span className="block text-xs font-normal mt-0.5 opacity-80">{t.tierCurrent}</span>}
+                          {!isCurrent && !isUnlocked && <span className="block text-xs font-normal mt-0.5 opacity-60">{t.tierLocked}</span>}
                         </div>
                       );
                     })}
@@ -1340,40 +1342,40 @@ export default function CreatorDashboard() {
       {/* ── Eligible — Activate ── */}
       {isEligible && (
         <div className="glass-card-sm p-5 mb-4" style={{ borderColor: "rgba(94,209,196,0.3)" }}>
-          <p className="text-lg font-bold text-white mb-2">You're eligible!</p>
+          <p className="text-lg font-bold text-white mb-2">{t.eligibleTitle}</p>
           <p className="text-sm text-white/70 mb-4">
-            You meet all the criteria to become a creator. Choose your path:
+            {t.eligibleSubtitle}
           </p>
 
           <div className="space-y-3">
             <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm font-semibold text-white">❄ Ice Creator</span>
-                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>Starting tier</span>
+                <span className="text-sm font-semibold text-white">❄ {t.iceCreatorLabel}</span>
+                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>{t.iceStartingTier}</span>
               </div>
               <p className="text-xs mt-1 mb-3" style={{ color: "#8E8E93" }}>
-                70/30 revenue split. As you grow your audience, you unlock Crystal and Diamond tiers with higher earnings potential.
+                {t.iceDesc}
               </p>
               <button
                 onClick={handleActivate}
                 className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors"
                 style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
               >
-                Activate as Creator
+                {t.activateAsCreatorBtn}
               </button>
             </div>
 
             <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <p className="text-sm font-semibold text-white">Full-Time Creator</p>
+              <p className="text-sm font-semibold text-white">{t.fullTimeCreatorLabel}</p>
               <p className="text-xs mt-1 mb-3" style={{ color: "#8E8E93" }}>
-                Verified badge. Featured placement. Live streams. Interview with Santino required.
+                {t.fullTimeDesc}
               </p>
               <button
                 onClick={() => navigate("/apply")}
                 className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors"
                 style={{ background: "rgba(255,255,255,0.08)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)" }}
               >
-                Apply for Full-Time
+                {t.applyFullTimeBtn}
               </button>
             </div>
           </div>
@@ -1383,12 +1385,12 @@ export default function CreatorDashboard() {
       {/* ── Pending Review ── */}
       {isPending && dashboard?.application && (
         <div className="glass-card-sm p-5 mb-4" style={{ borderColor: "rgba(255,180,84,0.3)" }}>
-          <p className="text-lg font-bold text-white mb-2">Application Under Review</p>
+          <p className="text-lg font-bold text-white mb-2">{t.pendingTitle}</p>
           <div className="space-y-2 text-sm">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full" style={{ background: dashboard.application.call_scheduled ? "#5ED1C4" : "#FFB454" }} />
               <span className="text-white/80">
-                {dashboard.application.call_scheduled ? "Call Scheduled" : "Pending Review"}
+                {dashboard.application.call_scheduled ? t.callScheduled : t.pendingReview}
               </span>
             </div>
             {!dashboard.application.call_scheduled && (
@@ -1399,7 +1401,7 @@ export default function CreatorDashboard() {
                 className="inline-flex items-center gap-1 text-xs font-semibold px-4 py-2 rounded-lg mt-2"
                 style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
               >
-                Book Interview with Santino
+                {t.bookInterviewBtn}
               </a>
             )}
           </div>
@@ -1411,12 +1413,12 @@ export default function CreatorDashboard() {
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}>
           <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}>
             <div className="flex items-center justify-between">
-              <p className="text-base font-semibold text-white">Share to Feed</p>
+              <p className="text-base font-semibold text-white">{t.shareToFeedTitle}</p>
               <button onClick={() => setShareModal(null)} className="text-white/40 hover:text-white text-xl leading-none">&times;</button>
             </div>
 
             <p className="text-xs" style={{ color: "#8E8E93" }}>
-              This will post to your social feed so your followers and the community can see it.
+              {t.shareToFeedDesc}
             </p>
 
             <textarea
@@ -1424,7 +1426,7 @@ export default function CreatorDashboard() {
               value={shareModal.text}
               onChange={(e) => setShareModal({ text: e.target.value })}
               className="w-full px-3 py-2.5 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent resize-none"
-              placeholder="Write your announcement..."
+              placeholder={t.sharePlaceholder}
             />
 
             {shareError && (
@@ -1440,10 +1442,10 @@ export default function CreatorDashboard() {
                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
                 style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
               >
-                {sharePosting ? "Posting…" : "Post to Feed"}
+                {sharePosting ? t.postingToFeed : t.postToFeedBtn}
               </button>
               <button onClick={() => setShareModal(null)} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">
-                Cancel
+                {t.cancelBtn}
               </button>
             </div>
           </div>
@@ -1454,11 +1456,11 @@ export default function CreatorDashboard() {
       {contentDeleteConfirm !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/70">
           <div className="w-full max-w-xs rounded-2xl p-5 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
-            <p className="text-sm font-semibold text-white">Delete this content item?</p>
-            <p className="text-xs" style={{ color: "#8E8E93" }}>This action cannot be undone.</p>
+            <p className="text-sm font-semibold text-white">{t.deleteContentConfirm}</p>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>{t.cannotBeUndone}</p>
             <div className="flex gap-3">
-              <button onClick={() => setContentDeleteConfirm(null)} className="flex-1 py-2 rounded-xl text-sm font-medium" style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}>Cancel</button>
-              <button onClick={() => confirmContentDelete(contentDeleteConfirm)} className="flex-1 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "rgba(239,68,68,0.8)" }}>Delete</button>
+              <button onClick={() => setContentDeleteConfirm(null)} className="flex-1 py-2 rounded-xl text-sm font-medium" style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}>{t.cancelBtn}</button>
+              <button onClick={() => confirmContentDelete(contentDeleteConfirm)} className="flex-1 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "rgba(239,68,68,0.8)" }}>{t.deleteConfirmBtn}</button>
             </div>
           </div>
         </div>
@@ -1468,11 +1470,11 @@ export default function CreatorDashboard() {
       {showDeleteConfirm !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/70">
           <div className="w-full max-w-xs rounded-2xl p-5 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
-            <p className="text-sm font-semibold text-white">Delete this show?</p>
-            <p className="text-xs" style={{ color: "#8E8E93" }}>This action cannot be undone.</p>
+            <p className="text-sm font-semibold text-white">{t.deleteShowConfirm}</p>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>{t.cannotBeUndone}</p>
             <div className="flex gap-3">
-              <button onClick={() => setShowDeleteConfirm(null)} className="flex-1 py-2 rounded-xl text-sm font-medium" style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}>Cancel</button>
-              <button onClick={() => confirmShowDelete(showDeleteConfirm)} className="flex-1 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "rgba(239,68,68,0.8)" }}>Delete</button>
+              <button onClick={() => setShowDeleteConfirm(null)} className="flex-1 py-2 rounded-xl text-sm font-medium" style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}>{t.cancelBtn}</button>
+              <button onClick={() => confirmShowDelete(showDeleteConfirm)} className="flex-1 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "rgba(239,68,68,0.8)" }}>{t.deleteConfirmBtn}</button>
             </div>
           </div>
         </div>
@@ -1482,12 +1484,12 @@ export default function CreatorDashboard() {
       {showActivateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/70">
           <div className="w-full max-w-sm rounded-2xl p-6 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
-            <h2 className="text-lg font-bold text-white">Activate Creator Profile</h2>
+            <h2 className="text-lg font-bold text-white">{t.activateTitle}</h2>
 
             <div className="rounded-xl px-4 py-3" style={{ background: "rgba(94,209,196,0.07)", border: "1px solid rgba(94,209,196,0.2)" }}>
-              <p className="text-sm font-semibold text-white mb-1">❄ Starting at Ice tier</p>
+              <p className="text-sm font-semibold text-white mb-1">❄ {t.activateIceTierLabel}</p>
               <p className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
-                Your tier is a milestone — it advances automatically as you grow your audience and meet higher requirements. Crystal and Diamond unlock greater earnings potential.
+                {t.activateIceTierDesc}
               </p>
             </div>
 
@@ -1500,11 +1502,11 @@ export default function CreatorDashboard() {
                 className="mt-0.5 w-4 h-4 accent-[#D4007A]"
               />
               <span className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
-                I accept the{" "}
+                {t.activateTermsLabel}{" "}
                 <a href="/creator-terms" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: "#D4007A" }}>
-                  Creator Terms & Conditions
+                  {t.activateTermsLink}
                 </a>
-                {" "}and understand the 70/30 revenue split.
+                {" "}{t.activateTermsAnd}
               </span>
             </label>
 
@@ -1519,7 +1521,7 @@ export default function CreatorDashboard() {
                 style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}
                 disabled={activating}
               >
-                Cancel
+                {t.cancelBtn}
               </button>
               <button
                 onClick={handleConfirmActivate}
@@ -1527,7 +1529,7 @@ export default function CreatorDashboard() {
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40"
                 style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
               >
-                {activating ? "Activating…" : "Activate"}
+                {activating ? t.activatingBtn : t.activateBtn}
               </button>
             </div>
           </div>
@@ -1537,10 +1539,10 @@ export default function CreatorDashboard() {
       {/* ── Not Eligible — Progress ── */}
       {!isActive && !isEligible && !isPending && eligibility && (() => {
         const criteria = [
-          { label: "Media posts", ...eligibility.criteria.mediaPosts },
-          { label: "Total likes", ...eligibility.criteria.totalLikes },
-          { label: "Followers", ...eligibility.criteria.followers },
-          { label: "Weekly consistency (4 weeks)", ...eligibility.criteria.weeklyConsistency },
+          { label: t.criteriaMediaPosts, ...eligibility.criteria.mediaPosts },
+          { label: t.criteriaTotalLikes, ...eligibility.criteria.totalLikes },
+          { label: t.criteriaFollowers, ...eligibility.criteria.followers },
+          { label: t.criteriaWeekly, ...eligibility.criteria.weeklyConsistency },
         ];
         const metCount = criteria.filter((c) => c.met).length;
         const totalPct = Math.round(criteria.reduce((acc, c) => acc + Math.min(c.current / c.required, 1), 0) / criteria.length * 100);
@@ -1548,23 +1550,23 @@ export default function CreatorDashboard() {
         return (
           <div className="glass-card-sm p-5 mb-4">
             <div className="flex items-start justify-between mb-1">
-              <p className="text-lg font-bold text-white">Become a Creator</p>
+              <p className="text-lg font-bold text-white">{t.becomeCreatorTitle}</p>
               <span className="text-sm font-bold" style={{ color: totalPct >= 75 ? "#5ED1C4" : "#E69138" }}>{totalPct}%</span>
             </div>
             <p className="text-sm mb-1" style={{ color: "#8E8E93" }}>
-              {metCount === 0 ? "Start building your presence to qualify:" : metCount < criteria.length ? `${metCount}/${criteria.length} criteria met — you're almost there!` : ""}
+              {metCount === 0 ? t.noCriteriaMet : metCount < criteria.length ? t.someCriteriaMet(metCount, criteria.length) : ""}
             </p>
             {closest && !closest.met && (
               <p className="text-xs mb-4 font-medium" style={{ color: "#E69138" }}>
-                Closest: {closest.label} — {closest.required - closest.current} more to go
+                {t.closestHint(closest.label, closest.required - closest.current)}
               </p>
             )}
-            <CriterionBar label="Media posts" {...eligibility.criteria.mediaPosts} />
-            <CriterionBar label="Total likes" {...eligibility.criteria.totalLikes} />
-            <CriterionBar label="Followers" {...eligibility.criteria.followers} />
-            <CriterionBar label="Weekly consistency (4 weeks)" {...eligibility.criteria.weeklyConsistency} />
+            <CriterionBar label={t.criteriaMediaPosts} {...eligibility.criteria.mediaPosts} />
+            <CriterionBar label={t.criteriaTotalLikes} {...eligibility.criteria.totalLikes} />
+            <CriterionBar label={t.criteriaFollowers} {...eligibility.criteria.followers} />
+            <CriterionBar label={t.criteriaWeekly} {...eligibility.criteria.weeklyConsistency} />
             <p className="text-xs mt-4 text-center" style={{ color: "#8E8E93" }}>
-              Post consistently, engage with the community, and grow your followers to unlock creator status.
+              {t.progressFootnote}
             </p>
           </div>
         );

@@ -1,4 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from "react";
+import { getI18n, getLang } from "@/lib/i18n";
 
 interface Props {
   children: ReactNode;
@@ -45,6 +46,8 @@ class ErrorBoundary extends Component<Props, State> {
         return this.props.fallback;
       }
 
+      const e = getI18n(getLang()).gates.error;
+
       return (
         <div
           style={{
@@ -61,10 +64,10 @@ class ErrorBoundary extends Component<Props, State> {
         >
           <div style={{ fontSize: "48px", marginBottom: "16px" }}>⚠️</div>
           <h1 style={{ fontSize: "24px", marginBottom: "8px", color: "#FFB454" }}>
-            Something went wrong
+            {e.title}
           </h1>
           <p style={{ marginBottom: "24px", color: "#8E8E93" }}>
-            We're sorry for the inconvenience. Please try refreshing the page.
+            {e.description}
           </p>
           <button
             onClick={() => window.location.reload()}
@@ -79,7 +82,7 @@ class ErrorBoundary extends Component<Props, State> {
               cursor: "pointer",
             }}
           >
-            Refresh Page
+            {e.refreshPage}
           </button>
         </div>
       );

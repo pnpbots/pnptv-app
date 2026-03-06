@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useI18n } from "@/lib/i18n";
 import { getSubscriptionPlans, getFeaturedPerformers, type SubscriptionPlan, type FeaturedPerformer } from "@/lib/api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -30,27 +31,13 @@ function CrossIcon() {
   );
 }
 
-const COMPARISON_ROWS = [
-  { label: "Social feed", free: true, member: true, prime: true },
-  { label: "Home feed posts", free: true, member: true, prime: true },
-  { label: "Telegram bot access", free: true, member: true, prime: true },
-  { label: "Create a profile", free: true, member: true, prime: true },
-  { label: "Browse member profiles", free: false, member: true, prime: true },
-  { label: "Private hangout rooms", free: false, member: true, prime: true },
-  { label: "Nearby users discovery", free: false, member: true, prime: true },
-  { label: "DMs with any member", free: false, member: true, prime: true },
-  { label: "Exclusive video library", free: false, member: false, prime: true },
-  { label: "Creator-only content", free: false, member: false, prime: true },
-  { label: "Live stream access", free: false, member: false, prime: true },
-  { label: "Priority support", free: false, member: false, prime: true },
-];
-
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function Join() {
   const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const t = useI18n().join;
 
   const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
   const [memberPlan, setMemberPlan] = useState<SubscriptionPlan | null>(null);
@@ -102,23 +89,38 @@ export default function Join() {
     }
   };
 
+  const comparisonRows = [
+    { label: t.comparisonRows[0], free: true, member: true, prime: true },
+    { label: t.comparisonRows[1], free: true, member: true, prime: true },
+    { label: t.comparisonRows[2], free: true, member: true, prime: true },
+    { label: t.comparisonRows[3], free: true, member: true, prime: true },
+    { label: t.comparisonRows[4], free: false, member: true, prime: true },
+    { label: t.comparisonRows[5], free: false, member: true, prime: true },
+    { label: t.comparisonRows[6], free: false, member: true, prime: true },
+    { label: t.comparisonRows[7], free: false, member: true, prime: true },
+    { label: t.comparisonRows[8], free: false, member: false, prime: true },
+    { label: t.comparisonRows[9], free: false, member: false, prime: true },
+    { label: t.comparisonRows[10], free: false, member: false, prime: true },
+    { label: t.comparisonRows[11], free: false, member: false, prime: true },
+  ];
+
   return (
     <>
       <Helmet>
-        <title>Join PNPtv! — The Queer PNP Community</title>
-        <meta name="description" content="Join PNPtv! — the private queer community for party & play. Connect, explore exclusive content, and find your people. Free to join." />
+        <title>{t.pageTitle}</title>
+        <meta name="description" content={t.metaDescription} />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="PNPtv" />
-        <meta property="og:title" content="Join PNPtv! — The Queer PNP Community" />
-        <meta property="og:description" content="4,000+ members. Private hangouts. Exclusive content. Join free or go PRIME." />
+        <meta property="og:title" content={t.pageTitle} />
+        <meta property="og:description" content={t.ogDescription} />
         <meta property="og:image" content="https://app.pnptv.app/og-image.png" />
         <meta property="og:image:width" content="1200" />
         <meta property="og:image:height" content="630" />
         <meta property="og:url" content="https://pnptv.app/login" />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:site" content="@PNPTelevision" />
-        <meta name="twitter:title" content="Join PNPtv! — The Queer PNP Community" />
-        <meta name="twitter:description" content="4,000+ members. Private hangouts. Exclusive content. Join free or go PRIME." />
+        <meta name="twitter:title" content={t.pageTitle} />
+        <meta name="twitter:description" content={t.ogDescription} />
         <meta name="twitter:image" content="https://app.pnptv.app/og-image.png" />
       </Helmet>
 
@@ -134,15 +136,15 @@ export default function Join() {
           <div className="flex gap-2">
             {isAuthenticated ? (
               <button onClick={() => navigate("/social")} className="px-4 py-1.5 rounded-full text-xs font-semibold text-white" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
-                Open App
+                {t.openApp}
               </button>
             ) : (
               <>
                 <button onClick={handleJoinFree} className="px-3 py-1.5 rounded-full text-xs font-semibold text-white/70 border border-white/15 hover:bg-white/5 transition-colors">
-                  Sign In
+                  {t.signIn}
                 </button>
                 <button onClick={handleGetMember} className="px-4 py-1.5 rounded-full text-xs font-semibold text-white" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
-                  Join Now
+                  {t.joinNow}
                 </button>
               </>
             )}
@@ -161,24 +163,24 @@ export default function Join() {
             {/* Badge */}
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full mb-6 text-xs font-semibold" style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.3)", color: "#D4007A" }}>
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-              The private queer PNP community
+              {t.heroBadge}
             </div>
 
             <h1 className="text-4xl sm:text-5xl font-black leading-tight mb-4" style={{ letterSpacing: "-0.02em" }}>
-              Your people are{" "}
+              {t.heroHeadlinePart1}{" "}
               <span style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-                already here.
+                {t.heroHeadlinePart2}
               </span>
             </h1>
 
             <p className="text-base sm:text-lg mb-2" style={{ color: "rgba(255,255,255,0.65)", maxWidth: "480px", margin: "0 auto 8px" }}>
-              PNPtv! is the private digital space for the queer party & play community. Connect, explore, and belong — on your terms.
+              {t.heroBody}
             </p>
 
             {/* Stats */}
             {stats && (
               <p className="text-sm font-medium mb-8" style={{ color: "#5ED1C4" }}>
-                {stats.totalUsers.toLocaleString()}+ members · {stats.newUsersLast30Days.toLocaleString()}+ joined this month
+                {t.heroStatsMembersTemplate.replace("{count}", stats.totalUsers.toLocaleString())} · {t.heroStatsJoinedTemplate.replace("{count}", stats.newUsersLast30Days.toLocaleString())}
               </p>
             )}
             {!stats && <div className="mb-8" />}
@@ -190,19 +192,19 @@ export default function Join() {
                 className="px-8 py-3.5 rounded-xl text-sm font-bold text-white shadow-lg transition-transform active:scale-95"
                 style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", boxShadow: "0 4px 24px rgba(212,0,122,0.35)" }}
               >
-                Get PRIME — $24.99/mo
+                {t.getPrimeCta}
               </button>
               <button
                 onClick={handleJoinFree}
                 className="px-8 py-3.5 rounded-xl text-sm font-bold transition-colors"
                 style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.75)" }}
               >
-                Join Free
+                {t.joinFreeCta}
               </button>
             </div>
 
             <p className="mt-3 text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
-              No credit card required to join free. Cancel anytime.
+              {t.noCreditCard}
             </p>
           </div>
         </div>
@@ -210,25 +212,13 @@ export default function Join() {
         {/* ── What is PNPtv! ── */}
         <div className="max-w-3xl mx-auto px-4 py-12">
           <div className="rounded-2xl p-6 sm:p-8" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
-            <p className="text-xs font-semibold uppercase tracking-widest mb-4" style={{ color: "#D4007A" }}>What is PNPtv!?</p>
+            <p className="text-xs font-semibold uppercase tracking-widest mb-4" style={{ color: "#D4007A" }}>{t.whatIsPnptvLabel}</p>
             <div className="grid sm:grid-cols-3 gap-6">
-              {[
-                {
-                  icon: "🔒",
-                  title: "Private & Safe",
-                  desc: "A verified community — no randos. Every member goes through Telegram-based entry so the space stays real.",
-                },
-                {
-                  icon: "🎬",
-                  title: "Exclusive Content",
-                  desc: "Live shows, videos, and creator content you won't find anywhere else. Made by the community, for the community.",
-                },
-                {
-                  icon: "🌎",
-                  title: "Your People",
-                  desc: "Connect in private hangout rooms, discover nearby members, and DM freely. No algorithms, no judgment.",
-                },
-              ].map((item) => (
+              {([
+                { icon: "🔒", ...t.whatIsCards[0] },
+                { icon: "🎬", ...t.whatIsCards[1] },
+                { icon: "🌎", ...t.whatIsCards[2] },
+              ] as { icon: string; title: string; desc: string }[]).map((item) => (
                 <div key={item.title}>
                   <div className="text-2xl mb-3">{item.icon}</div>
                   <p className="text-sm font-semibold text-white mb-1.5">{item.title}</p>
@@ -242,30 +232,30 @@ export default function Join() {
         {/* ── Tier Comparison ── */}
         <div className="max-w-3xl mx-auto px-4 pb-12">
           <p className="text-center text-xs font-semibold uppercase tracking-widest mb-6" style={{ color: "rgba(255,255,255,0.4)" }}>
-            Compare plans
+            {t.comparePlansLabel}
           </p>
 
           {/* Column headers */}
           <div className="grid grid-cols-4 gap-2 mb-3 px-2">
             <div />
             <div className="text-center">
-              <p className="text-xs font-semibold text-white/50">Free</p>
-              <p className="text-xs text-white/30">$0</p>
+              <p className="text-xs font-semibold text-white/50">{t.colFree}</p>
+              <p className="text-xs text-white/30">{t.colFreePrice}</p>
             </div>
             <div className="text-center">
-              <p className="text-xs font-semibold" style={{ color: "#5ED1C4" }}>Member</p>
-              <p className="text-xs font-bold text-white">$9.99<span className="text-white/40 font-normal">/mo</span></p>
+              <p className="text-xs font-semibold" style={{ color: "#5ED1C4" }}>{t.colMember}</p>
+              <p className="text-xs font-bold text-white">{t.colMemberPrice}<span className="text-white/40 font-normal">{t.colMemberPriceSuffix}</span></p>
             </div>
             <div className="text-center rounded-lg py-1" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(230,145,56,0.15))", border: "1px solid rgba(212,0,122,0.25)" }}>
-              <p className="text-xs font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>PRIME</p>
-              <p className="text-xs font-bold text-white">$24.99<span className="text-white/40 font-normal">/mo</span></p>
+              <p className="text-xs font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{t.colPrime}</p>
+              <p className="text-xs font-bold text-white">{t.colPrimePrice}<span className="text-white/40 font-normal">{t.colPrimePriceSuffix}</span></p>
             </div>
           </div>
 
           {/* Rows */}
           <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
-            {COMPARISON_ROWS.map((row, i) => (
-              <div key={row.label} className="grid grid-cols-4 gap-2 px-4 py-3 items-center" style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.02)" : "transparent", borderBottom: i < COMPARISON_ROWS.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
+            {comparisonRows.map((row, i) => (
+              <div key={row.label} className="grid grid-cols-4 gap-2 px-4 py-3 items-center" style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.02)" : "transparent", borderBottom: i < comparisonRows.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
                 <p className="text-xs text-white/70 col-span-1">{row.label}</p>
                 <div className="flex justify-center">{row.free ? <CheckIcon color="rgba(255,255,255,0.4)" /> : <CrossIcon />}</div>
                 <div className="flex justify-center">{row.member ? <CheckIcon color="#5ED1C4" /> : <CrossIcon />}</div>
@@ -278,17 +268,17 @@ export default function Join() {
         {/* ── Pricing Cards ── */}
         <div className="max-w-3xl mx-auto px-4 pb-12">
           <p className="text-center text-xs font-semibold uppercase tracking-widest mb-6" style={{ color: "rgba(255,255,255,0.4)" }}>
-            Choose your plan
+            {t.choosePlanLabel}
           </p>
 
           <div className="grid sm:grid-cols-3 gap-4">
             {/* Free Card */}
             <div className="rounded-2xl p-5 flex flex-col" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <p className="text-xs font-semibold text-white/50 mb-1">Free</p>
-              <p className="text-3xl font-black text-white mb-1">$0</p>
-              <p className="text-xs text-white/40 mb-4">forever</p>
+              <p className="text-xs font-semibold text-white/50 mb-1">{t.freePlanName}</p>
+              <p className="text-3xl font-black text-white mb-1">{t.freePlanPrice}</p>
+              <p className="text-xs text-white/40 mb-4">{t.freePlanPeriod}</p>
               <ul className="space-y-2 flex-1 mb-5">
-                {["Create your profile", "Browse the social feed", "Telegram bot access", "Basic community access"].map((f) => (
+                {(t.freePlanFeatures as readonly string[]).map((f) => (
                   <li key={f} className="flex items-center gap-2 text-xs text-white/60">
                     <CheckIcon color="rgba(255,255,255,0.35)" />
                     {f}
@@ -300,20 +290,20 @@ export default function Join() {
                 className="w-full py-2.5 rounded-xl text-sm font-semibold text-white/60 transition-colors hover:text-white"
                 style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
               >
-                Join Free
+                {t.freePlanCta}
               </button>
             </div>
 
             {/* Member Card */}
             <div className="rounded-2xl p-5 flex flex-col" style={{ background: "rgba(94,209,196,0.05)", border: "1px solid rgba(94,209,196,0.25)" }}>
-              <p className="text-xs font-semibold mb-1" style={{ color: "#5ED1C4" }}>Member</p>
+              <p className="text-xs font-semibold mb-1" style={{ color: "#5ED1C4" }}>{t.memberPlanName}</p>
               <div className="flex items-baseline gap-1 mb-1">
-                <p className="text-3xl font-black text-white">$9.99</p>
-                <p className="text-xs text-white/40">/mo</p>
+                <p className="text-3xl font-black text-white">{t.memberPlanPrice}</p>
+                <p className="text-xs text-white/40">{t.memberPlanPriceSuffix}</p>
               </div>
-              <p className="text-xs text-white/40 mb-4">billed monthly</p>
+              <p className="text-xs text-white/40 mb-4">{t.memberPlanPeriod}</p>
               <ul className="space-y-2 flex-1 mb-5">
-                {["Everything in Free", "Private hangout rooms", "Browse all member profiles", "Nearby users discovery", "Unlimited DMs"].map((f) => (
+                {(t.memberPlanFeatures as readonly string[]).map((f) => (
                   <li key={f} className="flex items-center gap-2 text-xs text-white/70">
                     <CheckIcon color="#5ED1C4" />
                     {f}
@@ -325,7 +315,7 @@ export default function Join() {
                 className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-colors"
                 style={{ background: "rgba(94,209,196,0.15)", border: "1px solid rgba(94,209,196,0.4)", color: "#5ED1C4" }}
               >
-                Get Member
+                {t.memberPlanCta}
               </button>
             </div>
 
@@ -333,17 +323,17 @@ export default function Join() {
             <div className="rounded-2xl p-5 flex flex-col relative overflow-hidden" style={{ background: "rgba(212,0,122,0.06)", border: "1px solid rgba(212,0,122,0.35)" }}>
               {/* Recommended badge */}
               <div className="absolute top-0 right-0 px-3 py-1 text-xs font-bold text-white rounded-bl-xl rounded-tr-xl" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
-                BEST VALUE
+                {t.primePlanBestValue}
               </div>
 
-              <p className="text-xs font-bold mb-1" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>PRIME</p>
+              <p className="text-xs font-bold mb-1" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{t.primePlanName}</p>
               <div className="flex items-baseline gap-1 mb-1">
-                <p className="text-3xl font-black text-white">$24.99</p>
-                <p className="text-xs text-white/40">/mo</p>
+                <p className="text-3xl font-black text-white">{t.primePlanPrice}</p>
+                <p className="text-xs text-white/40">{t.primePlanPriceSuffix}</p>
               </div>
-              <p className="text-xs text-white/40 mb-4">billed monthly · cancel anytime</p>
+              <p className="text-xs text-white/40 mb-4">{t.primePlanPeriod}</p>
               <ul className="space-y-2 flex-1 mb-5">
-                {["Everything in Member", "Exclusive video library", "Creator-only content", "Live stream access", "Priority support", "VIP community status"].map((f) => (
+                {(t.primePlanFeatures as readonly string[]).map((f) => (
                   <li key={f} className="flex items-center gap-2 text-xs text-white/80">
                     <CheckIcon color="#D4007A" />
                     {f}
@@ -355,7 +345,7 @@ export default function Join() {
                 className="w-full py-2.5 rounded-xl text-sm font-bold text-white transition-transform active:scale-95"
                 style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", boxShadow: "0 4px 20px rgba(212,0,122,0.3)" }}
               >
-                Get PRIME
+                {t.primePlanCta}
               </button>
             </div>
           </div>
@@ -363,11 +353,11 @@ export default function Join() {
           {/* Longer plans teaser */}
           <div className="mt-4 rounded-xl p-4 flex items-center justify-between" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
             <div>
-              <p className="text-xs font-semibold text-white/70">Save more with longer plans</p>
-              <p className="text-xs text-white/35 mt-0.5">Crystal PRIME (6mo) · Diamond PRIME (1yr) · Lifetime PRIME</p>
+              <p className="text-xs font-semibold text-white/70">{t.longerPlansTitle}</p>
+              <p className="text-xs text-white/35 mt-0.5">{t.longerPlansDesc}</p>
             </div>
             <button onClick={handleGetPrime} className="text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0" style={{ color: "#D4007A", background: "rgba(212,0,122,0.1)", border: "1px solid rgba(212,0,122,0.2)" }}>
-              See all
+              {t.longerPlansSeeAll}
             </button>
           </div>
         </div>
@@ -376,7 +366,7 @@ export default function Join() {
         {performers.length > 0 && (
           <div className="max-w-3xl mx-auto px-4 pb-12">
             <p className="text-center text-xs font-semibold uppercase tracking-widest mb-6" style={{ color: "rgba(255,255,255,0.4)" }}>
-              Meet the creators
+              {t.meetCreatorsLabel}
             </p>
             <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-none">
               {performers.map((p) => (
@@ -398,11 +388,11 @@ export default function Join() {
         {/* ── Testimonial / Trust ── */}
         <div className="max-w-3xl mx-auto px-4 pb-12">
           <div className="grid sm:grid-cols-3 gap-4">
-            {[
-              { stat: "4,400+", label: "Members worldwide", icon: "🌍" },
-              { stat: "1,200+", label: "Joined this month", icon: "🔥" },
-              { stat: "100%", label: "Private & verified", icon: "🔒" },
-            ].map((item) => (
+            {([
+              { icon: "🌍", ...t.stats[0] },
+              { icon: "🔥", ...t.stats[1] },
+              { icon: "🔒", ...t.stats[2] },
+            ] as { icon: string; stat: string; label: string }[]).map((item) => (
               <div key={item.stat} className="rounded-2xl p-5 text-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
                 <div className="text-2xl mb-2">{item.icon}</div>
                 <p className="text-2xl font-black text-white">{item.stat}</p>
@@ -417,13 +407,13 @@ export default function Join() {
           <div className="absolute inset-0 pointer-events-none" style={{ background: "linear-gradient(to bottom, transparent, rgba(212,0,122,0.07))" }} />
           <div className="relative max-w-xl mx-auto px-4 py-16 text-center">
             <h2 className="text-2xl sm:text-3xl font-black mb-3" style={{ letterSpacing: "-0.02em" }}>
-              Ready to{" "}
+              {t.bottomCtaHeadlinePart1}{" "}
               <span style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-                find your people?
+                {t.bottomCtaHeadlinePart2}
               </span>
             </h2>
             <p className="text-sm mb-8" style={{ color: "rgba(255,255,255,0.5)" }}>
-              Start free. Upgrade whenever you want. Cancel anytime.
+              {t.bottomCtaBody}
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <button
@@ -431,14 +421,14 @@ export default function Join() {
                 className="px-8 py-3.5 rounded-xl text-sm font-bold text-white transition-transform active:scale-95"
                 style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", boxShadow: "0 4px 24px rgba(212,0,122,0.35)" }}
               >
-                Get PRIME — $24.99/mo
+                {t.getPrimeCta}
               </button>
               <button
                 onClick={handleJoinFree}
                 className="px-8 py-3.5 rounded-xl text-sm font-bold transition-colors"
                 style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.75)" }}
               >
-                Join Free
+                {t.joinFreeCta}
               </button>
             </div>
           </div>
@@ -447,14 +437,14 @@ export default function Join() {
         {/* ── Footer ── */}
         <div className="border-t px-4 py-6 text-center" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
           <p className="text-xs" style={{ color: "rgba(255,255,255,0.25)" }}>
-            &copy; {new Date().getFullYear()} PNPtv! · For adults 18+ only
+            &copy; {new Date().getFullYear()} PNPtv! · {t.footerAdults}
           </p>
           <p className="text-xs mt-2 flex items-center justify-center gap-2 flex-wrap" style={{ color: "rgba(255,255,255,0.25)" }}>
-            <button onClick={() => navigate("/terms")} className="underline hover:text-white/50 transition-colors" style={{ color: "#D4007A" }}>Terms of Service</button>
+            <button onClick={() => navigate("/terms")} className="underline hover:text-white/50 transition-colors" style={{ color: "#D4007A" }}>{t.footerTerms}</button>
             <span>·</span>
-            <button onClick={() => navigate("/privacy")} className="underline hover:text-white/50 transition-colors" style={{ color: "#D4007A" }}>Privacy Policy</button>
+            <button onClick={() => navigate("/privacy")} className="underline hover:text-white/50 transition-colors" style={{ color: "#D4007A" }}>{t.footerPrivacy}</button>
             <span>·</span>
-            <button onClick={() => navigate("/support")} className="underline hover:text-white/50 transition-colors" style={{ color: "#D4007A" }}>Support</button>
+            <button onClick={() => navigate("/support")} className="underline hover:text-white/50 transition-colors" style={{ color: "#D4007A" }}>{t.footerSupport}</button>
           </p>
         </div>
 

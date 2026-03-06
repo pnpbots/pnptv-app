@@ -8,21 +8,23 @@ import { CristinaWidget } from "@/components/CristinaWidget";
 import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
 import { getMessageThreads } from "@/lib/api";
-
-const sidebarLinks = [
-  { to: "/", label: "Home", end: true },
-  { to: "/chat", label: "Hangouts" },
-  { to: "/media", label: "PRIME" },
-  { to: "/live", label: "Live" },
-  { to: "/booking", label: "Nearby" },
-  { to: "/dm", label: "Messages" },
-];
+import { useI18n } from "@/lib/i18n";
 
 export function Layout() {
   const { isAuthenticated, isAdmin, user, isLoading } = useAuth();
   const { isTelegram } = useTelegram();
   const navigate = useNavigate();
+  const t = useI18n();
   const [dmUnread, setDmUnread] = useState(0);
+
+  const sidebarLinks = [
+    { to: "/", label: t.nav.home, end: true },
+    { to: "/chat", label: t.nav.hangouts },
+    { to: "/media", label: t.nav.prime },
+    { to: "/live", label: t.nav.live },
+    { to: "/booking", label: t.nav.nearby },
+    { to: "/dm", label: t.nav.messages },
+  ];
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -96,7 +98,7 @@ export function Layout() {
                 }`
               }
             >
-              Admin
+              {t.nav.admin}
             </NavLink>
           )}
         </nav>
@@ -108,10 +110,10 @@ export function Layout() {
               className="flex items-center gap-3 w-full px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors"
             >
               <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
-                {(user?.displayName || "U")[0].toUpperCase()}
+                {(user?.displayName || t.nav.user)[0].toUpperCase()}
               </div>
               <span className="text-sm text-pnp-textSecondary truncate">
-                {user?.displayName || "User"}
+                {user?.displayName || t.nav.user}
               </span>
             </button>
           )}
@@ -139,7 +141,7 @@ export function Layout() {
             className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
             style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
           >
-            {(user?.displayName || "U")[0].toUpperCase()}
+            {(user?.displayName || t.nav.user)[0].toUpperCase()}
           </button>
         </div>
       </header>

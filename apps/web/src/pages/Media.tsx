@@ -6,6 +6,7 @@ import { useDirectus } from "@/hooks/useDirectus";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useAuth } from "@/hooks/useAuth";
+import { useI18n } from "@/lib/i18n";
 import { type Content, type Performer, getAssetUrl } from "@/lib/directus";
 
 function formatDuration(seconds: number | null): string {
@@ -35,6 +36,7 @@ const PlayIcon = () => (
 export default function Media() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { media: t } = useI18n();
   const tier = (user?.tier || "free").toLowerCase();
   const isPrime = tier === "prime";
   const isMember = tier === "member";
@@ -78,8 +80,8 @@ export default function Media() {
   return (
     <div className="page-container">
       <Helmet>
-        <title>PRIME Media — PNPtv!</title>
-        <meta name="description" content="Exclusive PRIME video collection. Watch premium content from top PNPtv creators." />
+        <title>{t.pageTitle}</title>
+        <meta name="description" content={t.pageDescription} />
       </Helmet>
       {showTutorial && <TutorialOverlay section="prime" onDismiss={dismissTutorial} />}
 
@@ -98,26 +100,26 @@ export default function Media() {
             </span>
             {CROWN}
             {isMember && (
-              <span className="text-xs font-semibold" style={{ color: "#FFB454" }}>You're a Member — one step away!</span>
+              <span className="text-xs font-semibold" style={{ color: "#FFB454" }}>{t.memberBadge}</span>
             )}
           </div>
 
           <h2 className="text-xl font-bold text-white mb-1">
-            {isMember ? "Upgrade to PRIME" : "Unlock Full Access"}
+            {isMember ? t.upgradeTitle : t.unlockTitle}
           </h2>
           <p className="text-sm mb-4" style={{ color: "rgba(255,255,255,0.7)" }}>
             {isMember
-              ? "Your Member plan doesn't include the video library. Upgrade now and get everything."
-              : `${videos.length > 0 ? `${videos.length} exclusive videos` : "Exclusive videos"}, live streams, and raw content — all locked behind PRIME.`}
+              ? t.upgradeSubtitle
+              : t.unlockSubtitle(videos.length)}
           </p>
 
           <ul className="space-y-1.5 mb-5">
             {[
-              "Unlimited access to the full video library",
-              "HD streams & raw creator content",
-              "Private live rooms & call access",
-              "Priority community features",
-              isMember ? "Everything in your current Member plan" : "Cancel anytime, no questions asked",
+              t.benefitLibrary,
+              t.benefitHd,
+              t.benefitLive,
+              t.benefitCommunity,
+              isMember ? t.benefitMemberBonus : t.benefitCancel,
             ].map((benefit) => (
               <li key={benefit} className="flex items-center gap-2 text-xs" style={{ color: "rgba(255,255,255,0.85)" }}>
                 <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor" style={{ color: "#34D399" }}>
@@ -134,11 +136,11 @@ export default function Media() {
               className="px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-90 active:scale-95"
               style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
             >
-              {isMember ? "Upgrade to PRIME →" : "Start PRIME Trial — $14.99/wk →"}
+              {isMember ? t.upgradeCta : t.trialCta}
             </button>
             {!isMember && (
               <p className="text-xs self-center" style={{ color: "rgba(255,255,255,0.5)" }}>
-                Monthly from $24.99 · Lifetime available
+                {t.pricingHint}
               </p>
             )}
           </div>
@@ -149,15 +151,15 @@ export default function Media() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold text-pnp-textPrimary">PRIME</h1>
+            <h1 className="text-lg font-bold text-pnp-textPrimary">{t.headerTitle}</h1>
             <span className="text-pnp-accent">{CROWN}</span>
           </div>
           <p className="text-sm text-pnp-textSecondary mt-0.5">
-            Exclusive video collection
+            {t.headerSubtitle}
           </p>
         </div>
         {!isLoading && videos.length > 0 && (
-          <Badge variant="accent">{videos.length} videos</Badge>
+          <Badge variant="accent">{t.videosCount(videos.length)}</Badge>
         )}
       </div>
 
@@ -181,7 +183,7 @@ export default function Media() {
                 {activeVideo.series && (
                   <p className="text-xs text-pnp-accent mt-0.5">
                     {activeVideo.series}
-                    {activeVideo.episode_number ? ` · Ep ${activeVideo.episode_number}` : ""}
+                    {activeVideo.episode_number ? ` · ${t.episodePrefix} ${activeVideo.episode_number}` : ""}
                   </p>
                 )}
                 {performerName(activeVideo.performer) && (
@@ -193,7 +195,7 @@ export default function Media() {
               <button
                 onClick={() => setActiveVideo(null)}
                 className="flex-shrink-0 p-1.5 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-border transition-colors"
-                aria-label="Close player"
+                aria-label={t.closePlayer}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -220,7 +222,7 @@ export default function Media() {
                 : "bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/50"
             }`}
           >
-            All
+            {t.allSeries}
           </button>
           {seriesList.map((s) => (
             <button
@@ -249,7 +251,7 @@ export default function Media() {
         <Card className="text-center py-8">
           <p className="text-pnp-error mb-2">{error}</p>
           <p className="text-sm text-pnp-textSecondary">
-            Video service is temporarily unavailable. Please try again later.
+            {t.loadingError}
           </p>
         </Card>
       ) : filteredVideos.length === 0 ? (
@@ -267,9 +269,9 @@ export default function Media() {
               d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
             />
           </svg>
-          <p className="text-pnp-textSecondary font-medium">No videos yet</p>
+          <p className="text-pnp-textSecondary font-medium">{t.noVideos}</p>
           <p className="text-xs text-pnp-textSecondary mt-1">
-            New content is added regularly. Check back soon!
+            {t.noVideosHint}
           </p>
         </Card>
       ) : (
@@ -341,7 +343,7 @@ export default function Media() {
                   {isActive && (
                     <div className="absolute inset-0 flex items-center justify-center bg-pnp-accent/20">
                       <div className="bg-pnp-accent text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
-                        PLAYING
+                        {t.playingBadge}
                       </div>
                     </div>
                   )}
@@ -356,7 +358,7 @@ export default function Media() {
                   {/* Episode number */}
                   {video.episode_number && (
                     <span className="absolute top-1 left-1 bg-pnp-accent/90 text-white text-[10px] px-1.5 py-0.5 rounded font-semibold">
-                      Ep {video.episode_number}
+                      {t.episodePrefix} {video.episode_number}
                     </span>
                   )}
                 </div>
@@ -394,10 +396,10 @@ export default function Media() {
           >
             <div className="min-w-0">
               <p className="text-xs font-bold text-white truncate">
-                {videos.length} videos locked
+                {t.videosLocked(videos.length)}
               </p>
               <p className="text-[10px] truncate" style={{ color: "rgba(255,255,255,0.5)" }}>
-                {isMember ? "Upgrade to PRIME to watch" : "Trial from $14.99 · Cancel anytime"}
+                {isMember ? t.upgradeToWatch : t.trialFromHint}
               </p>
             </div>
             <button
@@ -405,7 +407,7 @@ export default function Media() {
               className="flex-shrink-0 px-4 py-2 rounded-xl text-xs font-bold text-white transition-opacity hover:opacity-90 active:scale-95 whitespace-nowrap"
               style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
             >
-              {isMember ? "Upgrade" : "Get PRIME"}
+              {isMember ? t.upgradeBannerCta : t.getPrimeCta}
             </button>
           </div>
         </div>

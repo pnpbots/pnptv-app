@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { Button, Card, Input } from "@pnptv/ui-kit";
+import { useI18n } from "@/lib/i18n";
 import {
   getApplicationStatus,
   uploadApplicationProfilePhoto,
@@ -54,23 +55,14 @@ const INITIAL_DATA: WizardData = {
   termsAgreed: false,
 };
 
-const STEPS = [
-  "Choose Type",
-  "Basic Info",
-  "Legal Info",
-  "Agreement",
-  "Schedule Call",
-  "Confirmation",
-];
-
 const CAL_EMBED_URL = "https://booking.pnptv.app/santino/model-interview?embed=true";
 const CAL_LINK_URL = "https://booking.pnptv.app/santino/model-interview";
 
-function ProgressBar({ step }: { step: number }) {
+function ProgressBar({ step, labels }: { step: number; labels: string[] }) {
   return (
     <div className="mb-8">
       <div className="flex items-center justify-between mb-2">
-        {STEPS.map((label, i) => {
+        {labels.map((label, i) => {
           const stepNum = i + 1;
           const isActive = stepNum === step;
           const isDone = stepNum < step;
@@ -101,7 +93,7 @@ function ProgressBar({ step }: { step: number }) {
       <div className="h-1 bg-pnp-border rounded-full overflow-hidden">
         <div
           className="h-full bg-pnp-accent rounded-full transition-all duration-300"
-          style={{ width: `${((step - 1) / (STEPS.length - 1)) * 100}%` }}
+          style={{ width: `${((step - 1) / (labels.length - 1)) * 100}%` }}
         />
       </div>
     </div>
@@ -162,6 +154,8 @@ function FileUploadBox({
 
 // Existing application status card
 function StatusCard({ app }: { app: ModelApplication }) {
+  const { apply: t } = useI18n();
+
   const statusColors: Record<string, string> = {
     pending: "text-yellow-400",
     approved: "text-green-400",
@@ -170,60 +164,60 @@ function StatusCard({ app }: { app: ModelApplication }) {
   };
 
   const statusLabels: Record<string, string> = {
-    pending: "Under Review",
-    approved: "Approved",
-    rejected: "Not Approved",
-    withdrawn: "Withdrawn",
+    pending: t.statusPending,
+    approved: t.statusApproved,
+    rejected: t.statusRejected,
+    withdrawn: t.statusWithdrawn,
   };
 
   return (
     <div className="max-w-lg mx-auto">
       <Card className="text-center">
         <h2 className="text-xl font-bold text-pnp-textPrimary mb-4">
-          Your Application
+          {t.existingApplicationTitle}
         </h2>
         <div className="space-y-3 text-sm">
           <div className="flex justify-between">
-            <span className="text-pnp-textSecondary">Stage Name</span>
+            <span className="text-pnp-textSecondary">{t.stageNameFieldLabel}</span>
             <span className="text-pnp-textPrimary font-medium">{app.stage_name}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-pnp-textSecondary">Type</span>
+            <span className="text-pnp-textSecondary">{t.typeLabel}</span>
             <span className="text-pnp-textPrimary">
               {app.application_type === "both"
-                ? "Live + Content Creator"
+                ? t.typeLabelBoth
                 : app.application_type === "live"
-                  ? "Live Performer"
-                  : "Content Creator"}
+                  ? t.typeLabelLive
+                  : t.typeLabelContent}
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-pnp-textSecondary">Status</span>
+            <span className="text-pnp-textSecondary">{t.statusLabel}</span>
             <span className={`font-semibold ${statusColors[app.status] || ""}`}>
               {statusLabels[app.status] || app.status}
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-pnp-textSecondary">Submitted</span>
+            <span className="text-pnp-textSecondary">{t.submittedLabel}</span>
             <span className="text-pnp-textPrimary">
               {new Date(app.created_at).toLocaleDateString()}
             </span>
           </div>
           {app.call_scheduled && (
             <div className="flex justify-between">
-              <span className="text-pnp-textSecondary">Call Scheduled</span>
-              <span className="text-green-400">Yes</span>
+              <span className="text-pnp-textSecondary">{t.callScheduledLabel}</span>
+              <span className="text-green-400">{t.callScheduledYes}</span>
             </div>
           )}
         </div>
         {app.status === "pending" && (
           <p className="mt-4 text-xs text-pnp-textSecondary">
-            Your application is being reviewed. We'll reach out via Telegram once a decision is made.
+            {t.pendingNote}
           </p>
         )}
         {app.status === "approved" && (
           <p className="mt-4 text-xs text-green-400">
-            Congratulations! You've been approved. Check your Telegram for next steps.
+            {t.approvedNote}
           </p>
         )}
       </Card>
@@ -233,6 +227,7 @@ function StatusCard({ app }: { app: ModelApplication }) {
 
 export default function Apply() {
   const navigate = useNavigate();
+  const { apply: t } = useI18n();
   const [step, setStep] = useState(1);
   const [data, setData] = useState<WizardData>(INITIAL_DATA);
   const [loading, setLoading] = useState(true);
@@ -240,6 +235,15 @@ export default function Apply() {
   const [error, setError] = useState<string | null>(null);
   const [existingApp, setExistingApp] = useState<ModelApplication | null>(null);
   const [appId, setAppId] = useState<string | null>(null);
+
+  const STEPS = [
+    t.stepChooseType,
+    t.stepBasicInfo,
+    t.stepLegalInfo,
+    t.stepAgreement,
+    t.stepScheduleCall,
+    t.stepConfirmation,
+  ];
 
   // Check for existing application on mount
   useEffect(() => {
@@ -267,7 +271,7 @@ export default function Apply() {
   // Step 2: upload profile photo on continue
   async function handleStep2Continue() {
     if (!data.stageName.trim()) {
-      setError("Stage name is required");
+      setError(t.errorStageName);
       return;
     }
     if (data.profilePhotoFile) {
@@ -276,7 +280,7 @@ export default function Apply() {
         const res = await uploadApplicationProfilePhoto(data.profilePhotoFile);
         update({ profilePhotoUrl: res.photoUrl, profilePhotoFile: null });
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Failed to upload photo");
+        setError(err instanceof Error ? err.message : t.errorPhotoUpload);
         setSubmitting(false);
         return;
       }
@@ -287,10 +291,10 @@ export default function Apply() {
 
   // Step 3: upload ID documents on continue
   async function handleStep3Continue() {
-    if (!data.legalFullName.trim()) { setError("Legal full name is required"); return; }
-    if (!data.dateOfBirth) { setError("Date of birth is required"); return; }
-    if (!data.country.trim()) { setError("Country is required"); return; }
-    if (!data.cityState.trim()) { setError("City/State is required"); return; }
+    if (!data.legalFullName.trim()) { setError(t.errorLegalName); return; }
+    if (!data.dateOfBirth) { setError(t.errorDob); return; }
+    if (!data.country.trim()) { setError(t.errorCountry); return; }
+    if (!data.cityState.trim()) { setError(t.errorCityState); return; }
 
     // Validate age
     const dob = new Date(data.dateOfBirth);
@@ -298,10 +302,10 @@ export default function Apply() {
     let age = today.getFullYear() - dob.getFullYear();
     const m = today.getMonth() - dob.getMonth();
     if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
-    if (age < 18) { setError("You must be at least 18 years old"); return; }
+    if (age < 18) { setError(t.errorAge); return; }
 
-    if (!data.idFrontFile && !data.idFrontUrl) { setError("ID front photo is required"); return; }
-    if (!data.idBackFile && !data.idBackUrl) { setError("ID back photo is required"); return; }
+    if (!data.idFrontFile && !data.idFrontUrl) { setError(t.errorIdFront); return; }
+    if (!data.idBackFile && !data.idBackUrl) { setError(t.errorIdBack); return; }
 
     if (data.idFrontFile && data.idBackFile) {
       setSubmitting(true);
@@ -309,7 +313,7 @@ export default function Apply() {
         const res = await uploadApplicationIdDocuments(data.idFrontFile, data.idBackFile);
         update({ idFrontUrl: res.idFrontUrl, idBackUrl: res.idBackUrl, idFrontFile: null, idBackFile: null });
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Failed to upload ID documents");
+        setError(err instanceof Error ? err.message : t.errorIdUpload);
         setSubmitting(false);
         return;
       }
@@ -321,7 +325,7 @@ export default function Apply() {
   // Step 4: submit application
   async function handleSubmit() {
     if (!data.termsAgreed) {
-      setError("You must agree to the creator terms");
+      setError(t.errorTerms);
       return;
     }
     setSubmitting(true);
@@ -347,7 +351,7 @@ export default function Apply() {
       setAppId(res.application.id);
       goNext();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to submit application");
+      setError(err instanceof Error ? err.message : t.errorSubmit);
     } finally {
       setSubmitting(false);
     }
@@ -383,7 +387,7 @@ export default function Apply() {
     return (
       <div className="max-w-2xl mx-auto px-4 py-8">
         <h1 className="text-2xl font-bold text-pnp-textPrimary mb-6">
-          Become a Model
+          {t.pageHeading}
         </h1>
         <StatusCard app={existingApp} />
       </div>
@@ -393,17 +397,17 @@ export default function Apply() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
       <Helmet>
-        <title>Become a Creator — PNPtv!</title>
-        <meta name="description" content="Apply to become a live performer or content creator on PNPtv. Stream live, upload exclusive content, and earn." />
+        <title>{t.pageTitle}</title>
+        <meta name="description" content={t.pageDescription} />
       </Helmet>
       <h1 className="text-2xl font-bold text-pnp-textPrimary mb-2">
-        Become a Model
+        {t.pageHeading}
       </h1>
       <p className="text-sm text-pnp-textSecondary mb-6">
-        Apply to become a Live Performer or Content Creator on PNPtv.
+        {t.pageSubtitle}
       </p>
 
-      <ProgressBar step={step} />
+      <ProgressBar step={step} labels={STEPS} />
 
       {error && (
         <div className="mb-4 p-3 rounded-lg bg-pnp-error/10 border border-pnp-error/30 text-pnp-error text-sm">
@@ -415,13 +419,13 @@ export default function Apply() {
       {step === 1 && (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-pnp-textPrimary">
-            What would you like to do?
+            {t.step1Heading}
           </h2>
           <div className="grid gap-3">
             {([
-              { value: "live" as AppType, title: "Live Performer", desc: "Stream live shows and interact with viewers in real-time" },
-              { value: "content_creator" as AppType, title: "Content Creator", desc: "Upload and sell exclusive photos, videos, and other content" },
-              { value: "both" as AppType, title: "Both", desc: "Stream live AND create exclusive content" },
+              { value: "live" as AppType, title: t.typeLiveTitle, desc: t.typeLiveDesc },
+              { value: "content_creator" as AppType, title: t.typeCreatorTitle, desc: t.typeCreatorDesc },
+              { value: "both" as AppType, title: t.typeBothTitle, desc: t.typeBothDesc },
             ]).map((opt) => (
               <Card
                 key={opt.value}
@@ -454,7 +458,7 @@ export default function Apply() {
               onClick={goNext}
               disabled={!data.applicationType}
             >
-              Continue
+              {t.continueBtn}
             </Button>
           </div>
         </div>
@@ -464,45 +468,45 @@ export default function Apply() {
       {step === 2 && (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-pnp-textPrimary">
-            Your Stage Identity
+            {t.step2Heading}
           </h2>
           <Input
-            label="Stage Name *"
-            placeholder="Your performer name"
+            label={t.stageNameLabel}
+            placeholder={t.stageNamePlaceholder}
             value={data.stageName}
             onChange={(e) => update({ stageName: e.target.value })}
           />
           <div className="space-y-1">
-            <label className="block text-sm text-pnp-textSecondary">Bio</label>
+            <label className="block text-sm text-pnp-textSecondary">{t.bioLabel}</label>
             <textarea
               className="w-full rounded-lg bg-pnp-surface border border-pnp-border px-3 py-2 text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent focus:border-transparent transition-colors min-h-[80px] resize-y"
-              placeholder="Tell us about yourself..."
+              placeholder={t.bioPLaceholder}
               value={data.bio}
               onChange={(e) => update({ bio: e.target.value })}
             />
           </div>
           <Input
-            label="Instagram"
-            placeholder="@yourhandle"
+            label={t.instagramLabel}
+            placeholder={t.handlePlaceholder}
             value={data.instagramHandle}
             onChange={(e) => update({ instagramHandle: e.target.value })}
           />
           <Input
-            label="X (Twitter)"
-            placeholder="@yourhandle"
+            label={t.twitterLabel}
+            placeholder={t.handlePlaceholder}
             value={data.twitterHandle}
             onChange={(e) => update({ twitterHandle: e.target.value })}
           />
           <Input
-            label="OnlyFans URL"
-            placeholder="https://onlyfans.com/..."
+            label={t.onlyfansLabel}
+            placeholder={t.onlyfansPlaceholder}
             value={data.onlyfansUrl}
             onChange={(e) => update({ onlyfansUrl: e.target.value })}
           />
           <div>
-            <label className="block text-sm text-pnp-textSecondary mb-1">Profile Photo</label>
+            <label className="block text-sm text-pnp-textSecondary mb-1">{t.profilePhotoLabel}</label>
             <FileUploadBox
-              label="Tap to upload a profile photo"
+              label={t.profilePhotoUploadLabel}
               file={data.profilePhotoFile}
               previewUrl={data.profilePhotoUrl}
               onSelect={(f) => update({ profilePhotoFile: f })}
@@ -510,10 +514,10 @@ export default function Apply() {
           </div>
           <div className="flex justify-between pt-4">
             <Button variant="secondary" onClick={goBack}>
-              Back
+              {t.backBtn}
             </Button>
             <Button onClick={handleStep2Continue} loading={submitting}>
-              Continue
+              {t.continueBtn}
             </Button>
           </div>
         </div>
@@ -523,49 +527,49 @@ export default function Apply() {
       {step === 3 && (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-pnp-textPrimary">
-            Legal Information
+            {t.step3Heading}
           </h2>
           <p className="text-xs text-pnp-textSecondary">
-            Required for 18 U.S.C. 2257 compliance. Your personal information is encrypted and kept confidential.
+            {t.legalDisclaimer}
           </p>
           <Input
-            label="Full Legal Name *"
-            placeholder="As it appears on your government ID"
+            label={t.legalNameLabel}
+            placeholder={t.legalNamePlaceholder}
             value={data.legalFullName}
             onChange={(e) => update({ legalFullName: e.target.value })}
           />
           <Input
-            label="Date of Birth *"
+            label={t.dobLabel}
             type="date"
             value={data.dateOfBirth}
             onChange={(e) => update({ dateOfBirth: e.target.value })}
           />
           <Input
-            label="Country *"
-            placeholder="Country of residence"
+            label={t.countryLabel}
+            placeholder={t.countryPlaceholder}
             value={data.country}
             onChange={(e) => update({ country: e.target.value })}
           />
           <Input
-            label="City / State *"
-            placeholder="City, State/Province"
+            label={t.cityStateLabel}
+            placeholder={t.cityStatePlaceholder}
             value={data.cityState}
             onChange={(e) => update({ cityState: e.target.value })}
           />
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm text-pnp-textSecondary mb-1">ID Front *</label>
+              <label className="block text-sm text-pnp-textSecondary mb-1">{t.idFrontLabel}</label>
               <FileUploadBox
-                label="Front of ID"
+                label={t.idFrontUploadLabel}
                 file={data.idFrontFile}
                 previewUrl={data.idFrontUrl}
                 onSelect={(f) => update({ idFrontFile: f })}
               />
             </div>
             <div>
-              <label className="block text-sm text-pnp-textSecondary mb-1">ID Back *</label>
+              <label className="block text-sm text-pnp-textSecondary mb-1">{t.idBackLabel}</label>
               <FileUploadBox
-                label="Back of ID"
+                label={t.idBackUploadLabel}
                 file={data.idBackFile}
                 previewUrl={data.idBackUrl}
                 onSelect={(f) => update({ idBackFile: f })}
@@ -574,10 +578,10 @@ export default function Apply() {
           </div>
           <div className="flex justify-between pt-4">
             <Button variant="secondary" onClick={goBack}>
-              Back
+              {t.backBtn}
             </Button>
             <Button onClick={handleStep3Continue} loading={submitting}>
-              Continue
+              {t.continueBtn}
             </Button>
           </div>
         </div>
@@ -587,24 +591,24 @@ export default function Apply() {
       {step === 4 && (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-pnp-textPrimary">
-            Creator Terms & Agreement
+            {t.step4Heading}
           </h2>
           <div className="max-h-64 overflow-y-auto rounded-lg bg-pnp-background border border-pnp-border p-4 text-xs text-pnp-textSecondary space-y-3 leading-relaxed">
-            <p className="font-semibold text-pnp-textPrimary text-sm">PNPtv Creator Agreement v1.0</p>
+            <p className="font-semibold text-pnp-textPrimary text-sm">{t.agreementTitle}</p>
 
-            <p><strong>1. Revenue Split.</strong> Creators receive 70% of net revenue generated from their content and live streams. PNPtv retains 30% as a platform fee. Payouts are processed monthly for balances exceeding $50 USD.</p>
+            <p><strong>{t.agreementSection1Title}</strong> {t.agreementSection1}</p>
 
-            <p><strong>2. Content Ownership.</strong> You retain all ownership rights to your content. By uploading, you grant PNPtv a non-exclusive, worldwide license to host, display, and distribute your content on the platform.</p>
+            <p><strong>{t.agreementSection2Title}</strong> {t.agreementSection2}</p>
 
-            <p><strong>3. Content Policy.</strong> All content must comply with applicable laws. Prohibited content includes: content involving minors, non-consensual acts, bestiality, or any illegal activity. PNPtv reserves the right to remove content at its sole discretion.</p>
+            <p><strong>{t.agreementSection3Title}</strong> {t.agreementSection3}</p>
 
-            <p><strong>4. 18 U.S.C. 2257 Compliance.</strong> You certify that you are at least 18 years of age and that all persons depicted in your content are at least 18 years of age. You agree to maintain records as required by federal law.</p>
+            <p><strong>{t.agreementSection4Title}</strong> {t.agreementSection4}</p>
 
-            <p><strong>5. Tax Responsibility.</strong> You are responsible for reporting and paying all taxes on income earned through PNPtv. PNPtv may issue 1099 forms (US) or equivalent documentation as required by law.</p>
+            <p><strong>{t.agreementSection5Title}</strong> {t.agreementSection5}</p>
 
-            <p><strong>6. Termination.</strong> Either party may terminate this agreement at any time. Upon termination, your content will be removed within 30 days and any outstanding balance will be paid out.</p>
+            <p><strong>{t.agreementSection6Title}</strong> {t.agreementSection6}</p>
 
-            <p><strong>7. Governing Law.</strong> This agreement is governed by the laws of the State of California, USA.</p>
+            <p><strong>{t.agreementSection7Title}</strong> {t.agreementSection7}</p>
           </div>
           <label className="flex items-start gap-3 cursor-pointer">
             <input
@@ -614,19 +618,19 @@ export default function Apply() {
               className="mt-1 w-4 h-4 rounded border-pnp-border text-pnp-accent focus:ring-pnp-accent bg-pnp-surface"
             />
             <span className="text-sm text-pnp-textPrimary">
-              I have read and agree to the PNPtv Creator Agreement. I confirm I am at least 18 years old and all information provided is accurate.
+              {t.termsCheckboxLabel}
             </span>
           </label>
           <div className="flex justify-between pt-4">
             <Button variant="secondary" onClick={goBack}>
-              Back
+              {t.backBtn}
             </Button>
             <Button
               onClick={handleSubmit}
               loading={submitting}
               disabled={!data.termsAgreed}
             >
-              Submit Application
+              {t.submitApplicationBtn}
             </Button>
           </div>
         </div>
@@ -636,36 +640,36 @@ export default function Apply() {
       {step === 5 && (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-pnp-textPrimary">
-            Schedule Your Onboarding Call
+            {t.step5Heading}
           </h2>
           <p className="text-sm text-pnp-textSecondary">
-            Book a short video call with Santino to complete your onboarding. This helps us verify your identity and walk you through the platform.
+            {t.step5Subtitle}
           </p>
           <div className="rounded-xl border border-pnp-border overflow-hidden bg-white">
             <iframe
               src={CAL_EMBED_URL}
               className="w-full border-0"
               style={{ minHeight: "600px" }}
-              title="Schedule onboarding call"
+              title={t.calendarIframeTitle}
             />
           </div>
           <p className="text-xs text-pnp-textSecondary text-center">
-            Calendar not loading?{" "}
+            {t.calendarNotLoading}{" "}
             <a
               href={CAL_LINK_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="text-pnp-accent hover:underline"
             >
-              Open in a new tab
+              {t.openInNewTab}
             </a>
           </p>
           <div className="flex justify-between pt-4">
             <Button variant="ghost" onClick={goNext}>
-              Skip for now
+              {t.skipForNow}
             </Button>
             <Button onClick={handleMarkScheduled} loading={submitting}>
-              I Scheduled My Call
+              {t.scheduledCallBtn}
             </Button>
           </div>
         </div>
@@ -680,23 +684,23 @@ export default function Apply() {
             </svg>
           </div>
           <h2 className="text-xl font-bold text-pnp-textPrimary">
-            Application Submitted!
+            {t.applicationSubmittedTitle}
           </h2>
           <p className="text-sm text-pnp-textSecondary max-w-md mx-auto">
-            Thank you for applying to become a creator on PNPtv. Our team will review your application and reach out to you via Telegram within 1-3 business days.
+            {t.applicationSubmittedBody}
           </p>
           <div className="bg-pnp-surface rounded-lg p-4 text-left max-w-sm mx-auto space-y-2 text-sm">
-            <p className="font-semibold text-pnp-textPrimary">What happens next?</p>
+            <p className="font-semibold text-pnp-textPrimary">{t.whatsNextTitle}</p>
             <ol className="list-decimal list-inside space-y-1 text-pnp-textSecondary">
-              <li>Our team reviews your application</li>
-              <li>We verify your identity documents</li>
-              <li>You'll get a Telegram notification with the result</li>
-              <li>If approved, your creator dashboard unlocks</li>
+              <li>{t.whatsNextStep1}</li>
+              <li>{t.whatsNextStep2}</li>
+              <li>{t.whatsNextStep3}</li>
+              <li>{t.whatsNextStep4}</li>
             </ol>
           </div>
           <div className="pt-4">
             <Button onClick={() => navigate("/")}>
-              Back to Home
+              {t.backToHome}
             </Button>
           </div>
         </div>

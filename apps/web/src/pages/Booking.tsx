@@ -5,6 +5,7 @@ import { Badge, Button } from "@pnptv/ui-kit";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useAuth } from "@/hooks/useAuth";
+import { useI18n } from "@/lib/i18n";
 import {
   updateNearbyLocation,
   searchNearby,
@@ -91,23 +92,6 @@ function isValidPhotoUrl(url: string | null | undefined): url is string {
   return !!url && (url.startsWith("/") || url.startsWith("http"));
 }
 
-function formatUserDist(u: NearbyUser): string {
-  if (u.distance_m !== undefined && u.distance_m < 1000) {
-    return `${Math.round(u.distance_m)}m away`;
-  }
-  if (u.distance_km !== undefined) {
-    return `${u.distance_km.toFixed(1)}km away`;
-  }
-  return "nearby";
-}
-
-function formatPlaceDist(p: NearbyPlace): string {
-  if (p.distance < 1) {
-    return `${Math.round(p.distance * 1000)}m away`;
-  }
-  return `${p.distance.toFixed(1)}km away`;
-}
-
 // ─── Detail sheet for tapped items ──────────────────────────────────────────
 
 interface UserDetailSheetProps {
@@ -117,7 +101,19 @@ interface UserDetailSheetProps {
 }
 
 function UserDetailSheet({ user, onClose, onNavigate }: UserDetailSheetProps) {
+  const t = useI18n();
   const displayName = user.name || user.username || `User #${user.user_id}`;
+
+  function formatUserDist(u: NearbyUser): string {
+    if (u.distance_m !== undefined && u.distance_m < 1000) {
+      return t.booking.metersAway(Math.round(u.distance_m));
+    }
+    if (u.distance_km !== undefined) {
+      return t.booking.kmAway(u.distance_km.toFixed(1));
+    }
+    return t.booking.nearbyFallback;
+  }
+
   return (
     <div className="absolute inset-x-0 bottom-0 z-[1100] animate-slide-up">
       <div
@@ -165,13 +161,13 @@ function UserDetailSheet({ user, onClose, onNavigate }: UserDetailSheetProps) {
               className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white active:scale-[0.98] transition-transform"
               style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
             >
-              View Profile
+              {t.booking.viewProfile}
             </button>
             <button
               onClick={onClose}
               className="px-4 py-2.5 rounded-xl text-sm text-pnp-textSecondary border border-white/10 hover:bg-white/5 active:scale-[0.98] transition-all"
             >
-              Close
+              {t.booking.close}
             </button>
           </div>
         </div>
@@ -186,6 +182,15 @@ interface PlaceDetailSheetProps {
 }
 
 function PlaceDetailSheet({ place, onClose }: PlaceDetailSheetProps) {
+  const t = useI18n();
+
+  function formatPlaceDist(p: NearbyPlace): string {
+    if (p.distance < 1) {
+      return t.booking.metersAway(Math.round(p.distance * 1000));
+    }
+    return t.booking.kmAway(p.distance.toFixed(1));
+  }
+
   return (
     <div className="absolute inset-x-0 bottom-0 z-[1100] animate-slide-up">
       <div
@@ -259,7 +264,7 @@ function PlaceDetailSheet({ place, onClose }: PlaceDetailSheetProps) {
                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white text-center active:scale-[0.98] transition-transform"
                 style={{ background: "linear-gradient(135deg, #34C85A, #2EA04A)" }}
               >
-                Visit Website
+                {t.booking.visitWebsite}
               </a>
             )}
             {place.instagram && (
@@ -288,7 +293,7 @@ function PlaceDetailSheet({ place, onClose }: PlaceDetailSheetProps) {
               onClick={onClose}
               className="px-4 py-2.5 rounded-xl text-sm text-pnp-textSecondary border border-white/10 hover:bg-white/5 active:scale-[0.98] transition-all"
             >
-              Close
+              {t.booking.close}
             </button>
           </div>
         </div>
@@ -300,6 +305,7 @@ function PlaceDetailSheet({ place, onClose }: PlaceDetailSheetProps) {
 // ─── Free-tier count card ────────────────────────────────────────────────────
 
 function NearbyCountCard({ count }: { count: number }) {
+  const t = useI18n();
   return (
     <div className="page-container flex flex-col items-center justify-center min-h-[60vh] px-6">
       <div
@@ -316,10 +322,10 @@ function NearbyCountCard({ count }: { count: number }) {
         {count > 0 ? count : "0"}
       </p>
       <p className="text-base text-pnp-textSecondary mb-1">
-        {count === 1 ? "person" : "people"} near you
+        {count === 1 ? t.booking.personSingular : t.booking.personPlural} {t.booking.nearYou}
       </p>
       <p className="text-sm text-pnp-textSecondary mb-8 text-center max-w-xs">
-        Upgrade to see who's nearby, browse profiles, and discover PNP spots on the map.
+        {t.booking.freeUpgradeBody}
       </p>
 
       <Link
@@ -327,7 +333,7 @@ function NearbyCountCard({ count }: { count: number }) {
         className="inline-block px-6 py-3 rounded-full text-base font-semibold text-white"
         style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
       >
-        Upgrade to see the map
+        {t.booking.upgradeToSeeMap}
       </Link>
     </div>
   );
@@ -336,13 +342,14 @@ function NearbyCountCard({ count }: { count: number }) {
 // ─── Member-tier blurred profile list ────────────────────────────────────────
 
 function MemberNearbyList({ users }: { users: NearbyUser[] }) {
+  const t = useI18n();
   return (
     <div className="page-container px-4 py-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-pnp-textPrimary">Nearby</h1>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.booking.nearbyTitle}</h1>
           <p className="text-sm text-pnp-textSecondary mt-1">
-            {users.length} {users.length === 1 ? "person" : "people"} nearby
+            {t.booking.nearbyCount(users.length, users.length === 1 ? t.booking.personSingular : t.booking.personPlural)}
           </p>
         </div>
         <Link
@@ -350,7 +357,7 @@ function MemberNearbyList({ users }: { users: NearbyUser[] }) {
           className="text-xs px-3 py-1.5 rounded-full font-semibold text-white flex-shrink-0"
           style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
         >
-          Upgrade to PRIME
+          {t.booking.upgradeToPrime}
         </Link>
       </div>
 
@@ -365,19 +372,19 @@ function MemberNearbyList({ users }: { users: NearbyUser[] }) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
           <p className="text-sm text-pnp-textSecondary">
-            Upgrade to{" "}
+            {t.booking.upgradePrimePrompt}{" "}
             <Link to="/subscribe" className="font-semibold" style={{ color: "#FFB454" }}>
               PRIME
             </Link>{" "}
-            for the full map with exact distances
+            {t.booking.upgradePrimeBody}
           </p>
         </div>
       </div>
 
       {users.length === 0 ? (
         <div className="glass-card-sm p-8 text-center">
-          <p className="text-pnp-textPrimary font-medium mb-1">Nobody nearby yet</p>
-          <p className="text-sm text-pnp-textSecondary">Check back later or expand your search area</p>
+          <p className="text-pnp-textPrimary font-medium mb-1">{t.booking.nobodyNearbyYet}</p>
+          <p className="text-sm text-pnp-textSecondary">{t.booking.nobodyNearbyHint}</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -412,7 +419,7 @@ function MemberNearbyList({ users }: { users: NearbyUser[] }) {
                     className="text-xs text-pnp-textSecondary"
                     style={{ filter: "blur(4px)", userSelect: "none" }}
                   >
-                    {u.accuracy_estimate || "nearby"}
+                    {u.accuracy_estimate || t.booking.nearbyFallback}
                   </p>
                 </div>
 
@@ -434,19 +441,20 @@ function MemberNearbyList({ users }: { users: NearbyUser[] }) {
 
 // ─── Submit Place Modal ──────────────────────────────────────────────────────
 
-const PLACE_CATEGORIES = [
-  { id: 1,  name: "Wellness",             emoji: "🧘" },
-  { id: 2,  name: "Cruising Spots",       emoji: "🌙" },
-  { id: 3,  name: "+18 Businesses",       emoji: "🔞" },
-  { id: 4,  name: "PNP Friendly",         emoji: "💨" },
-  { id: 5,  name: "Help Centers",         emoji: "🏥" },
-  { id: 6,  name: "Saunas & Bath Houses", emoji: "🧖" },
-  { id: 7,  name: "Bars & Clubs",         emoji: "🍸" },
-  { id: 8,  name: "Community Businesses", emoji: "🏪" },
-  { id: 25, name: "Hotels & Lodging",     emoji: "🏨" },
+const PLACE_CATEGORIES_IDS = [
+  { id: 1,  key: "categoryWellness" as const,           emoji: "🧘" },
+  { id: 2,  key: "categoryCruisingSpots" as const,      emoji: "🌙" },
+  { id: 3,  key: "categoryAdultBusinesses" as const,    emoji: "🔞" },
+  { id: 4,  key: "categoryPnpFriendly" as const,        emoji: "💨" },
+  { id: 5,  key: "categoryHelpCenters" as const,        emoji: "🏥" },
+  { id: 6,  key: "categorySaunas" as const,             emoji: "🧖" },
+  { id: 7,  key: "categoryBarsClubs" as const,          emoji: "🍸" },
+  { id: 8,  key: "categoryCommunityBusinesses" as const,emoji: "🏪" },
+  { id: 25, key: "categoryHotelsLodging" as const,      emoji: "🏨" },
 ];
 
 function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: number } | null; onClose: () => void }) {
+  const t = useI18n();
   const [form, setForm] = React.useState<SubmitPlacePayload>({
     name: "", placeType: "establishment",
     lat: myPos?.lat, lng: myPos?.lng,
@@ -459,10 +467,10 @@ function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: numbe
     setForm(f => ({ ...f, [k]: v }));
 
   const submit = async () => {
-    if (!form.name.trim()) { setErr("Name is required"); return; }
+    if (!form.name.trim()) { setErr(t.booking.errorNameRequired); return; }
     if (form.lat !== undefined && form.lng !== undefined) {
       if (form.lat < -90 || form.lat > 90 || form.lng < -180 || form.lng > 180) {
-        setErr("Invalid coordinates"); return;
+        setErr(t.booking.errorInvalidCoordinates); return;
       }
     }
     setLoading(true); setErr(null);
@@ -470,7 +478,7 @@ function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: numbe
       await submitNearbyPlace(form);
       setDone(true);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to submit");
+      setErr(e instanceof Error ? e.message : t.booking.errorFailedToSubmit);
     } finally {
       setLoading(false);
     }
@@ -484,7 +492,7 @@ function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: numbe
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-bold text-pnp-textPrimary">Add a Place</h2>
+          <h2 className="text-base font-bold text-pnp-textPrimary">{t.booking.addAPlace}</h2>
           <button onClick={onClose} className="text-pnp-textSecondary hover:text-pnp-textPrimary">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
@@ -492,14 +500,14 @@ function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: numbe
         {done ? (
           <div className="text-center py-6">
             <div className="text-3xl mb-3">📍</div>
-            <p className="text-pnp-textPrimary font-semibold mb-1">Thanks!</p>
-            <p className="text-sm text-pnp-textSecondary mb-4">Your place has been submitted for review. We'll approve it within 24h.</p>
-            <button onClick={onClose} className="px-4 py-2 rounded-lg bg-pnp-accent text-white text-sm">Close</button>
+            <p className="text-pnp-textPrimary font-semibold mb-1">{t.booking.submitThanksTitle}</p>
+            <p className="text-sm text-pnp-textSecondary mb-4">{t.booking.submitThanksBody}</p>
+            <button onClick={onClose} className="px-4 py-2 rounded-lg bg-pnp-accent text-white text-sm">{t.booking.close}</button>
           </div>
         ) : (
           <div className="space-y-3">
             <input
-              placeholder="Place name *"
+              placeholder={t.booking.placeName}
               value={form.name}
               onChange={e => set("name", e.target.value)}
               className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
@@ -509,33 +517,33 @@ function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: numbe
               onChange={e => set("categoryId", e.target.value ? Number(e.target.value) : undefined)}
               className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
             >
-              <option value="">Select category</option>
-              {PLACE_CATEGORIES.map(c => (
-                <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>
+              <option value="">{t.booking.selectCategory}</option>
+              {PLACE_CATEGORIES_IDS.map(c => (
+                <option key={c.id} value={c.id}>{c.emoji} {t.booking[c.key]}</option>
               ))}
             </select>
             <input
-              placeholder="Address"
+              placeholder={t.booking.address}
               value={form.address ?? ""}
               onChange={e => set("address", e.target.value)}
               className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
             />
             <div className="flex gap-2">
               <input
-                placeholder="City"
+                placeholder={t.booking.city}
                 value={form.city ?? ""}
                 onChange={e => set("city", e.target.value)}
                 className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
               />
               <input
-                placeholder="Country"
+                placeholder={t.booking.country}
                 value={form.country ?? ""}
                 onChange={e => set("country", e.target.value)}
                 className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
               />
             </div>
             <textarea
-              placeholder="Description (optional)"
+              placeholder={t.booking.descriptionOptional}
               value={form.description ?? ""}
               onChange={e => set("description", e.target.value)}
               rows={2}
@@ -543,13 +551,13 @@ function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: numbe
             />
             <div className="flex gap-2">
               <input
-                placeholder="Instagram (optional)"
+                placeholder={t.booking.instagramOptional}
                 value={form.instagram ?? ""}
                 onChange={e => set("instagram", e.target.value)}
                 className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
               />
               <input
-                placeholder="Website (optional)"
+                placeholder={t.booking.websiteOptional}
                 value={form.website ?? ""}
                 onChange={e => set("website", e.target.value)}
                 className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
@@ -561,7 +569,7 @@ function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: numbe
               disabled={loading}
               className="w-full py-2.5 rounded-xl bg-pnp-accent text-white text-sm font-semibold hover:bg-pnp-accent/80 disabled:opacity-40 transition-colors"
             >
-              {loading ? "Submitting..." : "Submit for Review"}
+              {loading ? t.booking.submitting : t.booking.submitForReview}
             </button>
           </div>
         )}
@@ -577,6 +585,7 @@ type PageState = "loading" | "denied" | "ready";
 export default function Booking() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const t = useI18n();
   const { showTutorial, dismissTutorial } = useTutorial("nearby");
 
   const userTier = user?.tier?.toLowerCase() ?? "free";
@@ -784,9 +793,9 @@ export default function Booking() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
         </div>
-        <p className="text-pnp-textPrimary font-medium">Finding your location...</p>
+        <p className="text-pnp-textPrimary font-medium">{t.booking.findingLocation}</p>
         <p className="text-sm text-pnp-textSecondary mt-1">
-          Grant location access to discover nearby users
+          {t.booking.grantLocationAccess}
         </p>
       </div>
     );
@@ -799,9 +808,9 @@ export default function Booking() {
         <svg className="w-16 h-16 text-pnp-textSecondary mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
         </svg>
-        <p className="text-pnp-textPrimary font-medium text-lg mb-2">Location Access Needed</p>
+        <p className="text-pnp-textPrimary font-medium text-lg mb-2">{t.booking.locationAccessNeeded}</p>
         <p className="text-sm text-pnp-textSecondary text-center max-w-xs mb-6">
-          Enable location permissions in your browser or device settings to discover nearby users.
+          {t.booking.locationAccessBody}
         </p>
         <Button
           variant="primary"
@@ -817,7 +826,7 @@ export default function Booking() {
             );
           }}
         >
-          Try Again
+          {t.booking.tryAgain}
         </Button>
       </div>
     );
@@ -827,8 +836,8 @@ export default function Booking() {
   return (
     <div className="page-container !p-0 relative" style={{ height: "calc(100vh - 8rem)" }}>
       <Helmet>
-        <title>Nearby — PNPtv!</title>
-        <meta name="description" content="Discover PNPtv members and venues near you. See who's around on the interactive map." />
+        <title>{t.booking.pageTitle}</title>
+        <meta name="description" content={t.booking.pageDescription} />
       </Helmet>
       {showTutorial && <TutorialOverlay section="nearby" onDismiss={dismissTutorial} />}
       {/* Map */}
@@ -912,7 +921,7 @@ export default function Booking() {
       <div className="absolute top-0 left-0 right-0 z-[1000] pointer-events-none">
         <div className="flex items-center justify-between px-4 pt-3 pb-2">
           <div className="pointer-events-auto bg-pnp-surface/80 backdrop-blur-md rounded-xl px-3 py-1.5 border border-white/5">
-            <h1 className="text-sm font-bold text-pnp-textPrimary">Nearby</h1>
+            <h1 className="text-sm font-bold text-pnp-textPrimary">{t.booking.nearby}</h1>
           </div>
           <div className="pointer-events-auto flex items-center gap-2">
             {isSearching && (
@@ -922,26 +931,26 @@ export default function Booking() {
             {locationStatus === "online" ? (
               <div className="flex items-center gap-1 bg-green-500/20 border border-green-500/30 rounded-full px-2 py-0.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                <span className="text-[10px] text-green-400 font-medium">Online</span>
+                <span className="text-[10px] text-green-400 font-medium">{t.booking.locationOnline}</span>
               </div>
             ) : myPos ? (
               <div className="flex items-center gap-1 bg-pnp-surface/80 border border-white/10 rounded-full px-2 py-0.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
                 <span className="text-[10px] text-pnp-textSecondary font-medium">
                   {lastPosSavedAt
-                    ? `Last seen ${Math.round((Date.now() - lastPosSavedAt) / 60000)}m ago`
-                    : "Last known"}
+                    ? `${t.booking.locationLastSeen} ${t.booking.minutesAgo(Math.round((Date.now() - lastPosSavedAt) / 60000))}`
+                    : t.booking.locationLastKnown}
                 </span>
               </div>
             ) : null}
             {showUsers && (
               <Badge variant="accent">
-                {nearbyUsers.length} {nearbyUsers.length === 1 ? "user" : "users"}
+                {nearbyUsers.length} {nearbyUsers.length === 1 ? t.booking.userSingular : t.booking.userPlural}
               </Badge>
             )}
             {showPlaces && nearbyPlaces.length > 0 && (
               <Badge variant="default">
-                {nearbyPlaces.length} {nearbyPlaces.length === 1 ? "place" : "places"}
+                {nearbyPlaces.length} {nearbyPlaces.length === 1 ? t.booking.placeSingular : t.booking.placePlural}
               </Badge>
             )}
           </div>
@@ -952,10 +961,10 @@ export default function Booking() {
           <div className="pointer-events-auto inline-flex gap-1 bg-pnp-surface/80 backdrop-blur-md rounded-xl p-1 border border-white/5">
             {(
               [
-                { key: "all", label: "All" },
-                { key: "users", label: "Users" },
-                { key: "places", label: "Places" },
-              ] as const
+                { key: "all" as const,    label: t.booking.filterAll },
+                { key: "users" as const,  label: t.booking.filterUsers },
+                { key: "places" as const, label: t.booking.filterPlaces },
+              ]
             ).map((seg) => (
               <button
                 key={seg.key}
@@ -985,7 +994,7 @@ export default function Booking() {
         <button
           onClick={() => setSubmitPlaceOpen(true)}
           className="absolute bottom-32 right-4 z-[1001] w-11 h-11 rounded-full bg-pnp-accent text-white flex items-center justify-center shadow-lg hover:bg-pnp-accent/80 active:scale-95 transition-all"
-          title="Add a place"
+          title={t.booking.addPlace}
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -1035,8 +1044,8 @@ export default function Booking() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
                   </svg>
                   <div>
-                    <p className="text-sm font-medium text-pnp-textPrimary">Nothing nearby yet</p>
-                    <p className="text-xs text-pnp-textSecondary">Try increasing the search radius</p>
+                    <p className="text-sm font-medium text-pnp-textPrimary">{t.booking.nothingNearbyYet}</p>
+                    <p className="text-xs text-pnp-textSecondary">{t.booking.tryIncreasingRadius}</p>
                   </div>
                 </div>
               </div>
@@ -1057,7 +1066,7 @@ export default function Booking() {
                     }`}
                     style={radius === r ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
                   >
-                    {r}km
+                    {t.booking.radiusKm(r)}
                   </button>
                 ))}
               </div>
@@ -1071,7 +1080,7 @@ export default function Booking() {
                     : "bg-pnp-surface/80 border-white/5 text-pnp-textSecondary"
                 }`}
                 style={incognito ? { background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))", borderColor: "rgba(212,0,122,0.4)" } : undefined}
-                title={incognito ? "Incognito ON — your location is hidden" : "Incognito OFF — you are visible"}
+                title={incognito ? t.booking.incognitoOn : t.booking.incognitoOff}
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   {incognito ? (
