@@ -2059,6 +2059,7 @@ export default function Profile() {
   const [contentDisclaimerSaving, setContentDisclaimerSaving] = useState(false);
   const [lang, setLang] = useState<"en" | "es">("en");
   const [langSaving, setLangSaving] = useState(false);
+  const [langError, setLangError] = useState<string | null>(null);
 
   // Follow state
   const [isFollowing, setIsFollowing] = useState(false);
@@ -2252,13 +2253,17 @@ export default function Profile() {
 
   const handleLanguageChange = async (newLang: "en" | "es") => {
     if (newLang === lang || langSaving) return;
+    const prevLang = lang;
     setLangSaving(true);
+    setLangError(null);
+    setLang(newLang);
     try {
       await updateLanguage(newLang);
-      setLang(newLang);
       await refreshUser();
-    } catch {
-      // Revert on failure
+    } catch (err) {
+      setLang(prevLang);
+      setLangError(err instanceof Error ? err.message : "Failed to update language");
+      setTimeout(() => setLangError(null), 4000);
     } finally {
       setLangSaving(false);
     }
@@ -3127,6 +3132,9 @@ export default function Profile() {
               </button>
             </div>
           </div>
+          {langError && (
+            <p className="text-xs mt-1" style={{ color: "#FF6B6B" }}>{langError}</p>
+          )}
 
           <div className="flex items-center justify-between rounded-lg px-3 py-3" style={{ background: "rgba(255,180,84,0.06)", border: "1px solid rgba(255,180,84,0.15)" }}>
             <div className="flex-1 min-w-0 mr-3">

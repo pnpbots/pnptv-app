@@ -1557,9 +1557,10 @@ const updateProfile = async (req, res) => {
       logger.warn(`Cache invalidation failed for user ${user.id}:`, cacheErr.message);
     }
 
-    // Refresh session name fields if changed
+    // Refresh session fields if changed
     if (req.body.firstName !== undefined) req.session.user.firstName = req.body.firstName || req.session.user.firstName;
     if (req.body.lastName  !== undefined) req.session.user.lastName  = req.body.lastName  || null;
+    if (req.body.language  !== undefined) req.session.user.language  = req.body.language;
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );
