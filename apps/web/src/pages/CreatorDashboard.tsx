@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import {
   getCreatorEligibility,
   getCreatorDashboard,
+  activateCreator,
   getModelEarnings,
   getWithdrawableAmount,
   requestWithdrawal,
@@ -88,6 +89,13 @@ export default function CreatorDashboard() {
   const [walletSaving, setWalletSaving] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [walletSuccess, setWalletSuccess] = useState<string | null>(null);
+
+  // Activation modal state (eligible → active)
+  const [showActivateModal, setShowActivateModal] = useState(false);
+  const [activateTier, setActivateTier] = useState<"ice" | "crystal" | "diamond">("diamond");
+  const [activateTerms, setActivateTerms] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const [activateError, setActivateError] = useState<string | null>(null);
 
   // Settings tab — tier change
   const [selectedTier, setSelectedTier] = useState<"ice" | "crystal" | "diamond" | null>(null);
@@ -218,7 +226,27 @@ export default function CreatorDashboard() {
   }, [activeTab, dashboard, cmsPerformer]);
 
   const handleActivate = () => {
-    navigate("/profile");
+    setActivateError(null);
+    setActivateTerms(false);
+    setShowActivateModal(true);
+  };
+
+  const handleConfirmActivate = async () => {
+    if (!activateTerms) {
+      setActivateError("You must accept the Creator Terms to continue.");
+      return;
+    }
+    setActivating(true);
+    setActivateError(null);
+    try {
+      await activateCreator(activateTier, true);
+      setShowActivateModal(false);
+      await load();
+    } catch (err) {
+      setActivateError(err instanceof Error ? err.message : "Activation failed. Please try again.");
+    } finally {
+      setActivating(false);
+    }
   };
 
   const handleWithdraw = async () => {
@@ -1297,6 +1325,78 @@ export default function CreatorDashboard() {
                 Book Interview with Santino
               </a>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Activation Modal ── */}
+      {showActivateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/70">
+          <div className="w-full max-w-sm rounded-2xl p-6 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
+            <h2 className="text-lg font-bold text-white">Activate Creator Profile</h2>
+
+            <p className="text-sm" style={{ color: "#8E8E93" }}>
+              Choose your subscription tier. Subscribers pay this monthly to access your exclusive content.
+            </p>
+
+            {/* Tier picker */}
+            <div className="space-y-2">
+              {TIERS.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setActivateTier(t.key)}
+                  className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all"
+                  style={{
+                    background: activateTier === t.key ? "rgba(212,0,122,0.15)" : "rgba(255,255,255,0.04)",
+                    border: `1px solid ${activateTier === t.key ? "#D4007A" : "rgba(255,255,255,0.08)"}`,
+                    color: "#fff",
+                  }}
+                >
+                  <span>{t.emoji} {t.label}</span>
+                  <span style={{ color: activateTier === t.key ? "#E69138" : "#8E8E93" }}>${t.price}/mo</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Terms */}
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={activateTerms}
+                onChange={(e) => { setActivateTerms(e.target.checked); setActivateError(null); }}
+                className="mt-0.5 w-4 h-4 accent-[#D4007A]"
+              />
+              <span className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+                I accept the{" "}
+                <a href="/creator-terms" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: "#D4007A" }}>
+                  Creator Terms & Conditions
+                </a>
+                {" "}and understand the 70/30 revenue split.
+              </span>
+            </label>
+
+            {activateError && (
+              <p className="text-xs text-red-400">{activateError}</p>
+            )}
+
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => setShowActivateModal(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium"
+                style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}
+                disabled={activating}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmActivate}
+                disabled={activating || !activateTerms}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                {activating ? "Activating…" : "Activate"}
+              </button>
+            </div>
           </div>
         </div>
       )}
