@@ -33,14 +33,19 @@
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#121212" />
 
-    <!-- Fonts -->
+    <!-- Fonts — non-blocking -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link href="https://fonts.cdnfonts.com/css/ethnocentric" rel="stylesheet" />
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+    <link href="https://fonts.cdnfonts.com/css/ethnocentric" rel="stylesheet" media="print" onload="this.media='all'" />
+    <noscript>
+      <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+      <link href="https://fonts.cdnfonts.com/css/ethnocentric" rel="stylesheet" />
+    </noscript>
 
-    <!-- Telegram Web App SDK -->
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Telegram Web App SDK — async to avoid blocking render -->
+    <script src="https://telegram.org/js/telegram-web-app.js" async></script>
 
     <!-- Structured Data -->
     <script type="application/ld+json">

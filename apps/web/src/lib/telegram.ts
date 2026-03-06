@@ -65,3 +65,27 @@ export function getTelegramWebApp(): TelegramWebApp | null {
 export function isTelegramContext(): boolean {
   return !!window.Telegram?.WebApp?.initData;
 }
+
+/** Wait for the Telegram SDK to load (async script). Resolves immediately if not in Telegram. */
+export function waitForTelegramSdk(timeoutMs = 3000): Promise<void> {
+  // Quick check: if SDK already loaded or we're clearly not in Telegram
+  if (window.Telegram?.WebApp) return Promise.resolve();
+  // Detect Telegram context from URL before SDK loads
+  const hash = window.location.hash || "";
+  const search = window.location.search || "";
+  if (!hash.includes("tgWebAppData") && !search.includes("tgWebAppData")) {
+    return Promise.resolve();
+  }
+  // Wait for SDK to appear
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const check = () => {
+      if (window.Telegram?.WebApp || Date.now() - start > timeoutMs) {
+        resolve();
+      } else {
+        setTimeout(check, 50);
+      }
+    };
+    check();
+  });
+}

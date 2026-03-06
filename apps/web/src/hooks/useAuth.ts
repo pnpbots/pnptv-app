@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 import { User } from "oidc-client-ts";
 import { getUser, login as oidcLogin, logout as oidcLogout, getAccessToken, userManager } from "@/lib/auth";
-import { isTelegramContext, getTelegramWebApp } from "@/lib/telegram";
+import { isTelegramContext, getTelegramWebApp, waitForTelegramSdk } from "@/lib/telegram";
 import { telegramAuth, checkAuthStatus, apiLogout, type TelegramAuthResponse } from "@/lib/api";
 import React from "react";
 
@@ -77,6 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const init = async () => {
       try {
+        await waitForTelegramSdk();
         if (isTelegramContext()) {
           // Telegram Mini App: authenticate via bot API
           setMode("telegram");
