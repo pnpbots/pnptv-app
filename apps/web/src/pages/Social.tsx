@@ -45,51 +45,7 @@ function isValidPhotoUrl(photo: string | null | undefined): photo is string {
   return !!photo && (photo.startsWith("/") || photo.startsWith("http"));
 }
 
-// ── Bluesky SVG Icon ─────────────────────────────────────────────────────────
 
-function BlueskySvg({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 360 320" fill="currentColor" aria-hidden="true">
-      <path d="M180 142c-16.3-31.7-60.7-90.8-102-120C38.5-2.9 27.2 1 18.8 1 8.3 1 0 7.8 0 25.4 0 39 6.6 116.7 10.3 132.9 23 187.7 74.3 207 122.7 202c-71 10.5-133.3 41-67.3 147.9 51.7 81.4 103.3 27.8 127.2 0 24-27.9 53.7-87.3 53.7-87.3s29.7 59.4 53.7 87.3c23.9 27.8 75.5 81.4 127.2 0 66-106.9 3.7-137.4-67.3-147.9 48.4 5 99.7-14.3 112.4-69.1 3.7-16.2 10.3-93.9 10.3-107.5C360 7.8 351.7 1 341.2 1c-8.4 0-19.7-3.9-59.2 21C240.7 51.2 196.3 110.3 180 142z" />
-    </svg>
-  );
-}
-
-/** Small inline Bluesky badge shown on cross-posted/sourced posts */
-function BlueskyBadge({
-  uri,
-  label = "Bluesky",
-}: {
-  uri?: string | null;
-  label?: string;
-}) {
-  const href = uri
-    ? `https://bsky.app/profile/${uri.split("/")[2]}/post/${uri.split("/").pop()}`
-    : undefined;
-
-  const inner = (
-    <span className="badge-bluesky inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full">
-      <BlueskySvg className="w-2.5 h-2.5 flex-shrink-0" />
-      {label}
-    </span>
-  );
-
-  if (href) {
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="View on Bluesky"
-        className="hover:opacity-80 transition-opacity"
-      >
-        {inner}
-      </a>
-    );
-  }
-
-  return inner;
-}
 
 // ── Post Card ────────────────────────────────────────────────────────────────
 
@@ -261,14 +217,6 @@ function PostCard({
             )}
             <span className="text-xs" style={{ color: "#8E8E93" }}>&middot; {timeAgo(post.created_at)}</span>
 
-            {/* Bluesky cross-posted badge */}
-            {post.bluesky_uri && (
-              <BlueskyBadge uri={post.bluesky_uri} label="Bluesky" />
-            )}
-            {/* Bluesky-sourced post badge (imported from BSky) */}
-            {post.source === "bluesky" && !post.bluesky_uri && (
-              <BlueskyBadge label="From Bluesky" />
-            )}
             {/* Featured / Promoted badge */}
             {post.is_promoted && (
               <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))", color: "#FFB454" }}>
@@ -639,16 +587,11 @@ export default function Social() {
       .catch(() => { /* non-critical */ });
   }, []);
 
-  // Bluesky linked state — checked once when component mounts
-  const [blueskyLinked, setBlueskyLinked] = useState(false);
-
   useEffect(() => {
     if (!isAuthenticated) return;
     checkAuthStatus()
       .then((status) => {
         if (status.authenticated && status.user) {
-          const methods = status.user.auth_methods as AuthMethods | undefined;
-          setBlueskyLinked(!!methods?.atproto);
           setIsActiveCreator(
             status.user.creator_status === "active" ||
             status.user.role === "model" ||
@@ -668,8 +611,6 @@ export default function Social() {
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [isPosting, setIsPosting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
-  const [crossPostBluesky, setCrossPostBluesky] = useState(false);
-  const [showBlueskyWarning, setShowBlueskyWarning] = useState(false);
   const [isExclusive, setIsExclusive] = useState(false);
   const [isShareable, setIsShareable] = useState(true);
   const [isActiveCreator, setIsActiveCreator] = useState(false);
@@ -834,7 +775,7 @@ export default function Social() {
       const res = await createSocialPost(
         text.trim(),
         mediaFile || undefined,
-        crossPostBluesky,
+        false,
         isExclusive,
         isShareable
       );
@@ -843,7 +784,6 @@ export default function Social() {
       }
       setText("");
       clearMedia();
-      setCrossPostBluesky(false);
       setIsExclusive(false);
       setIsShareable(true);
     } catch (err: unknown) {
@@ -851,21 +791,12 @@ export default function Social() {
     } finally {
       setIsPosting(false);
     }
-  }, [text, mediaFile, isPosting, clearMedia, crossPostBluesky, isExclusive, isShareable]);
+  }, [text, mediaFile, isPosting, clearMedia, isExclusive, isShareable]);
 
   const handlePost = useCallback(() => {
     if (!text.trim() || isPosting) return;
-    if (crossPostBluesky) {
-      setShowBlueskyWarning(true);
-      return;
-    }
     submitPost();
-  }, [text, isPosting, crossPostBluesky, submitPost]);
-
-  const confirmCrossPost = useCallback(() => {
-    setShowBlueskyWarning(false);
-    submitPost();
-  }, [submitPost]);
+  }, [text, isPosting, submitPost]);
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
@@ -1103,42 +1034,6 @@ export default function Social() {
                       <span
                         className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform duration-200"
                         style={{ transform: isExclusive ? "translateX(18px)" : "translateX(2px)" }}
-                      />
-                    </button>
-                  </div>
-                )}
-
-                {/* Bluesky cross-post toggle — only shown when Bluesky is linked */}
-                {blueskyLinked && (
-                  <div className="flex items-center justify-between rounded-lg px-3 py-2.5" style={{ background: "rgba(0,133,255,0.06)", border: "1px solid rgba(0,133,255,0.2)" }}>
-                    <label
-                      htmlFor="crosspost-bluesky-toggle"
-                      className="flex items-center gap-2 cursor-pointer select-none flex-1"
-                    >
-                      <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 360 320" fill="currentColor" aria-hidden="true" style={{ color: "#0085FF" }}>
-                        <path d="M180 142c-16.3-31.7-60.7-90.8-102-120C38.5-2.9 27.2 1 18.8 1 8.3 1 0 7.8 0 25.4 0 39 6.6 116.7 10.3 132.9 23 187.7 74.3 207 122.7 202c-71 10.5-133.3 41-67.3 147.9 51.7 81.4 103.3 27.8 127.2 0 24-27.9 53.7-87.3 53.7-87.3s29.7 59.4 53.7 87.3c23.9 27.8 75.5 81.4 127.2 0 66-106.9 3.7-137.4-67.3-147.9 48.4 5 99.7-14.3 112.4-69.1 3.7-16.2 10.3-93.9 10.3-107.5C360 7.8 351.7 1 341.2 1c-8.4 0-19.7-3.9-59.2 21C240.7 51.2 196.3 110.3 180 142z" />
-                      </svg>
-                      <span className="text-xs font-medium" style={{ color: crossPostBluesky ? "#0085FF" : "#8E8E93" }}>
-                        {t.alsoPostBluesky}
-                      </span>
-                    </label>
-                    {/* Toggle switch */}
-                    <button
-                      id="crosspost-bluesky-toggle"
-                      role="switch"
-                      aria-checked={crossPostBluesky}
-                      aria-label="Cross-post to Bluesky"
-                      onClick={() => setCrossPostBluesky((v) => !v)}
-                      disabled={isPosting}
-                      className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-                      style={{
-                        background: crossPostBluesky ? "#0085FF" : "rgba(255,255,255,0.15)",
-                        outlineOffset: "2px",
-                      }}
-                    >
-                      <span
-                        className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform duration-200"
-                        style={{ transform: crossPostBluesky ? "translateX(18px)" : "translateX(2px)" }}
                       />
                     </button>
                   </div>
@@ -1430,43 +1325,6 @@ export default function Social() {
         </div>
       ))}
 
-      {/* Bluesky cross-post confirmation modal */}
-      <Modal
-        open={showBlueskyWarning}
-        onClose={() => setShowBlueskyWarning(false)}
-      >
-        <div className="flex flex-col items-center text-center">
-          <div
-            className="w-12 h-12 rounded-full flex items-center justify-center mb-4"
-            style={{ background: "rgba(0,133,255,0.12)", color: "#0085FF" }}
-          >
-            <BlueskySvg className="w-6 h-6" />
-          </div>
-          <h3 className="text-lg font-semibold text-white mb-2">
-            Post to Bluesky?
-          </h3>
-          <p className="text-sm mb-6" style={{ color: "#8E8E93" }}>
-            This post will be publicly visible on the Bluesky network, not just
-            on PNPtv. Anyone on Bluesky will be able to see it.
-          </p>
-          <div className="flex gap-3 w-full">
-            <button
-              onClick={() => setShowBlueskyWarning(false)}
-              className="flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold border border-white/10 hover:bg-white/5 transition-colors"
-              style={{ color: "#8E8E93" }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={confirmCrossPost}
-              className="flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold text-white transition-colors"
-              style={{ background: "#0085FF" }}
-            >
-              Post to Both
-            </button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }
