@@ -37,8 +37,11 @@ const strings = {
     upgradeBannerCta: "Upgrade",
     getPrimeCta: "Get PRIME",
 
-    // Series filter
+    // Category filter
     allSeries: "All",
+    categoryClouding: "Clouding",
+    categorySlamming: "Slamming",
+    categoryLiveShow: "Live Show",
 
     // Video card
     playingBadge: "PLAYING",
@@ -85,6 +88,9 @@ const strings = {
     getPrimeCta: "Obtener PRIME",
 
     allSeries: "Todos",
+    categoryClouding: "Clouding",
+    categorySlamming: "Slamming",
+    categoryLiveShow: "Live Show",
 
     playingBadge: "REPRODUCIENDO",
     episodePrefix: "Ep",

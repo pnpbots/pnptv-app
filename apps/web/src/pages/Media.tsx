@@ -59,14 +59,14 @@ export default function Media() {
   const [activeSeries, setActiveSeries] = useState<string>("all");
   const { showTutorial, dismissTutorial } = useTutorial("prime");
 
-  // Derive unique series from data
-  const seriesList = useMemo(() => {
-    const names = new Set<string>();
-    videos.forEach((v) => { if (v.series) names.add(v.series); });
-    return Array.from(names).sort();
-  }, [videos]);
+  // Fixed categories
+  const CATEGORIES = [
+    { key: "Clouding", label: t.categoryClouding },
+    { key: "Slamming", label: t.categorySlamming },
+    { key: "Live Show", label: t.categoryLiveShow },
+  ];
 
-  // Filter videos by selected series
+  // Filter videos by selected category (matches series field)
   const filteredVideos = useMemo(() => {
     if (activeSeries === "all") return videos;
     return videos.filter((v) => v.series === activeSeries);
@@ -211,8 +211,8 @@ export default function Media() {
         </div>
       )}
 
-      {/* Series tabs */}
-      {!isLoading && seriesList.length > 0 && (
+      {/* Category tabs */}
+      {!isLoading && (
         <div className="flex gap-2 overflow-x-auto pb-2 mb-4 scrollbar-none">
           <button
             onClick={() => setActiveSeries("all")}
@@ -224,17 +224,17 @@ export default function Media() {
           >
             {t.allSeries}
           </button>
-          {seriesList.map((s) => (
+          {CATEGORIES.map((cat) => (
             <button
-              key={s}
-              onClick={() => setActiveSeries(s)}
+              key={cat.key}
+              onClick={() => setActiveSeries(cat.key)}
               className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                activeSeries === s
+                activeSeries === cat.key
                   ? "bg-pnp-accent text-white"
                   : "bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/50"
               }`}
             >
-              {s}
+              {cat.label}
             </button>
           ))}
         </div>
@@ -370,7 +370,7 @@ export default function Media() {
                   </p>
                   {video.series && activeSeries === "all" && (
                     <p className="text-[10px] text-pnp-accent truncate mt-0.5">
-                      {video.series}
+                      {CATEGORIES.find(c => c.key === video.series)?.label || video.series}
                     </p>
                   )}
                   {performerName(video.performer) && (
