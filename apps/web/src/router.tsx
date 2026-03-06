@@ -1,5 +1,5 @@
 import React, { lazy } from "react";
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { AdminLayout } from "@/components/admin/AdminLayout";
 import { ModuleLoader } from "@/components/ModuleLoader";
@@ -309,6 +309,10 @@ export const router = createBrowserRouter([
         ),
       },
     ],
+  },
+  {
+    path: "/login",
+    element: <Navigate to="/" replace />,
   },
   {
     path: "/join",
