@@ -344,7 +344,11 @@ const startBot = async () => {
       return next();
     });
 
-    // FIX: Register /admin command early using admin handler directly  
+    // Mono — personal AI business assistant (admin-only)
+    const { registerMonoHandlers } = require('../handlers/admin/monoHandler');
+    registerMonoHandlers(bot);
+
+    // FIX: Register /admin command early using admin handler directly
     bot.command('admin', async (ctx) => {
       logger.info('[ADMIN-EARLY] /admin command received');
       try {
@@ -819,6 +823,7 @@ const startBot = async () => {
       const commands = [
         { command: 'start', description: 'Start the bot and select your language' },
         { command: 'admin', description: 'Open admin panel (admin only)' },
+        { command: 'mono', description: 'Ask Mono — AI business assistant (admin only)' },
         { command: 'stats', description: 'View real-time statistics (admin only)' },
         { command: 'viewas', description: 'Preview as different user type (admin only)' },
         { command: 'support', description: 'Get help and support' },

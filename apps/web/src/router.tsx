@@ -37,6 +37,7 @@ const NearbyPlaces = lazy(() => import("@/pages/admin/NearbyPlaces"));
 const CanvaIntegration = lazy(() => import("@/pages/admin/CanvaIntegration"));
 const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
 const AdminDemographics = lazy(() => import("@/pages/admin/AdminDemographics"));
+const Mono = lazy(() => import("@/pages/admin/Mono"));
 
 export const router = createBrowserRouter([
   {
@@ -296,6 +297,14 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <AdminDemographics />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "mono",
+        element: (
+          <ModuleLoader>
+            <Mono />
           </ModuleLoader>
         ),
       },

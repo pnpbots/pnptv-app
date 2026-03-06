@@ -2742,3 +2742,12 @@ export function chatWithGrokManager(message: string): Promise<{ success: boolean
 export function resetGrokManagerChat(): Promise<{ success: boolean; reset: boolean }> {
   return request("/api/webapp/admin/grok/manager-chat", { method: "POST", body: { message: "_reset_", reset: true } });
 }
+
+// Mono — personal AI business assistant
+export function chatWithMono(message: string): Promise<{ success: boolean; message: string }> {
+  return request("/api/webapp/admin/mono/chat", { method: "POST", body: { message } });
+}
+
+export function resetMonoChat(): Promise<{ success: boolean }> {
+  return request("/api/webapp/admin/mono/chat", { method: "POST", body: { message: "_reset_", reset: true } });
+}

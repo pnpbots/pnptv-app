@@ -2708,6 +2708,22 @@ Today: ${new Date().toISOString().split('T')[0]} UTC`;
   res.json({ success: true, message: replyText });
 }));
 
+// Mono — personal AI business assistant
+app.post('/api/webapp/admin/mono/chat', adminGuard, asyncHandler(async (req, res) => {
+  const { chatWithMono } = require('../services/monoService');
+  const { message, reset } = req.body;
+  const historyKey = String(req.session?.user?.id || 'admin');
+  if (reset) {
+    await chatWithMono({ message: '_reset_', historyKey, reset: true });
+    return res.json({ success: true, reset: true });
+  }
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ success: false, error: 'Message required' });
+  }
+  const reply = await chatWithMono({ message, historyKey });
+  res.json({ success: true, message: reply });
+}));
+
 // Plan management
 app.get('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminController.listPlans));
 app.post('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminController.createPlan));
