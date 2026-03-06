@@ -115,6 +115,7 @@ const CanvaExportScheduler = require('./schedulers/canvaExportScheduler');
 const { initializeWorker: initializePrivateCallsWorker } = require('../../workers/privateCallsWorker');
 const PNPLiveWorker = require('../../workers/pnpLiveWorker');
 const cristinaTicketWorker = require('../services/cristinaTicketWorker');
+const CristinaOnboardingReminders = require('../services/cristinaOnboardingReminders');
 const { startCronJobs } = require('../../../../scripts/cron');
 // Models for cache prewarming
 // Support model for ticket tracking
@@ -820,6 +821,20 @@ const startBot = async () => {
       logger.info('✓ Cristina ticket worker initialized');
     } catch (error) {
       logger.warn(`Cristina ticket worker initialization failed: ${error.message}`);
+    }
+
+    // Initialize Cristina onboarding reminders (every 30 min)
+    try {
+      setInterval(() => CristinaOnboardingReminders.process().catch(err =>
+        logger.error('Cristina onboarding reminders error:', err)
+      ), 30 * 60 * 1000);
+      // Run once on startup after a short delay
+      setTimeout(() => CristinaOnboardingReminders.process().catch(err =>
+        logger.error('Cristina onboarding reminders error:', err)
+      ), 10 * 1000);
+      logger.info('✓ Cristina onboarding reminders scheduled (30min interval)');
+    } catch (error) {
+      logger.warn(`Cristina onboarding reminders setup failed: ${error.message}`);
     }
 
     // Register commands with Telegram
