@@ -150,34 +150,24 @@ const handleTelegramAuth = async (req, res) => {
 
     let user = userQuery.rows[0];
 
-    // Check for subscription migration: if user has 'free' status but should have 'active' from bot usage
-    // This happens when users first used the bot, then access the webapp
+    // Check for subscription migration: if user has 'free' status but should have 'active'
+    // Check against plan_expiry on the users table directly (legacy subscriptions table no longer exists)
     if (user.subscription_status === 'free') {
       try {
-        // Check if user has an active subscription in subscriptions (bot-originated)
         const subQuery = await query(
-          `SELECT status, expires_at
-           FROM subscriptions
-           WHERE user_id = $1 AND status = 'active'
-           ORDER BY created_at DESC
-           LIMIT 1`,
-          [user.telegram]
+          `SELECT plan_expiry, plan_id
+           FROM users
+           WHERE id = $1 AND plan_expiry > NOW()`,
+          [user.id]
         );
 
-        if (subQuery.rows.length > 0) {
-          const sub = subQuery.rows[0];
-          const now = new Date();
-          const expiresAt = sub.expires_at ? new Date(sub.expires_at) : null;
-
-          // Only migrate if subscription is still active (not expired)
-          if (!expiresAt || expiresAt > now) {
-            logger.info(`Migrating active subscription for user ${user.telegram}`);
-            await query(
-              `UPDATE users SET subscription_status = 'active' WHERE id = $1`,
-              [user.id]
-            );
-            user.subscription_status = 'active'; // Update local object
-          }
+        if (subQuery.rows.length > 0 && subQuery.rows[0].plan_expiry) {
+          logger.info(`Migrating active subscription for user ${user.id} (plan_expiry still valid)`);
+          await query(
+            `UPDATE users SET subscription_status = 'active' WHERE id = $1`,
+            [user.id]
+          );
+          user.subscription_status = 'active';
         }
       } catch (migrationError) {
         logger.warn('Subscription migration check failed (non-blocking):', migrationError);

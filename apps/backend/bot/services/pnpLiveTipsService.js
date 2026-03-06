@@ -139,11 +139,10 @@ class PNPLiveTipsService {
 
       const result = await query(
         `SELECT t.*,
-                COALESCE(p.display_name, m.name, 'Performer') as model_name,
+                COALESCE(p.display_name, 'Performer') as model_name,
                 u.username as user_username
          FROM pnp_tips t
          LEFT JOIN performers p ON p.id::text = t.performer_id
-         LEFT JOIN pnp_models m ON t.model_id = m.id
          LEFT JOIN users u ON t.user_id = u.id
          WHERE t.created_at >= $1
          ORDER BY t.created_at DESC
@@ -167,10 +166,9 @@ class PNPLiveTipsService {
   static async getTipsByUser(userId, limit = 10) {
     try {
       const result = await query(
-        `SELECT t.*, COALESCE(p.display_name, m.name, 'Performer') as model_name
+        `SELECT t.*, COALESCE(p.display_name, 'Performer') as model_name
          FROM pnp_tips t
          LEFT JOIN performers p ON p.id::text = t.performer_id
-         LEFT JOIN pnp_models m ON t.model_id = m.id
          WHERE t.user_id = $1
          ORDER BY t.created_at DESC
          LIMIT $2`,
@@ -192,10 +190,9 @@ class PNPLiveTipsService {
   static async getTipById(tipId) {
     try {
       const result = await query(
-        `SELECT t.*, COALESCE(p.display_name, m.name, 'Performer') as model_name, u.username as user_username
+        `SELECT t.*, COALESCE(p.display_name, 'Performer') as model_name, u.username as user_username
          FROM pnp_tips t
          LEFT JOIN performers p ON p.id::text = t.performer_id
-         LEFT JOIN pnp_models m ON t.model_id = m.id
          LEFT JOIN users u ON t.user_id = u.id
          WHERE t.id = $1`,
         [tipId]

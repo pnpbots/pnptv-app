@@ -3049,7 +3049,8 @@ app.get('/api/webapp/nearby/places/fallback', asyncHandler(async (req, res) => {
   const lng = parseFloat(req.query.lng);
   if (isNaN(lat) || isNaN(lng)) return res.status(400).json({ error: 'lat/lng required' });
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return res.status(400).json({ error: 'Invalid coordinates' });
-  const { rows } = await query(`
+  const pool = getPool();
+  const { rows } = await pool.query(`
     SELECT id, name, description, address, city, country, place_type,
            location_lat, location_lng, category_id,
            ST_Distance(
@@ -3086,7 +3087,8 @@ app.post('/api/webapp/nearby/places/submit', asyncHandler(async (req, res) => {
   const VALID_PLACE_TYPES = ['establishment', 'cruising', 'sauna', 'bar', 'community', 'hotel', 'help_center', 'wellness', 'club', 'bath_house'];
   if (!VALID_PLACE_TYPES.includes(placeType)) return res.status(400).json({ error: 'Invalid place type' });
   if (website && !/^https?:\/\//i.test(website.trim())) return res.status(400).json({ error: 'Website must start with http:// or https://' });
-  await query(`
+  const pool = getPool();
+  await pool.query(`
     INSERT INTO nearby_place_submissions
       (submitted_by_user_id, name, description, address, city, country,
        category_id, place_type, location_lat, location_lng, phone, website, instagram)
