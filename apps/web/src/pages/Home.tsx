@@ -116,51 +116,92 @@ export default function Home() {
         <meta name="description" content="Your PNPtv feed. Browse announcements, featured performers, and community posts." />
       </Helmet>
       {showTutorial && <TutorialOverlay section="home" onDismiss={dismissTutorial} />}
-      {/* User greeting */}
-      <div className="glass-card p-6 mb-6 animate-fade-in-up">
-        <h1 className="text-xl font-bold text-white">
-          High <span role="img" aria-label="wind">🌬️</span>{" "}
-          <span className="text-gradient">@{username}</span>
-        </h1>
-        <p className="text-sm mt-2" style={{ color: "#8E8E93" }}>
-          PNP Content. Live Video Rooms. Raw Podcasts.
-        </p>
-        <p className="text-sm mt-1" style={{ color: "#8E8E93" }}>
-          You are a{" "}
-          <span className="font-semibold text-white capitalize">{tier}</span>{" "}
-          member.
-        </p>
+
+      {/* Hero — greeting + tier badge */}
+      <div className="glass-card-sm p-5 mb-4 animate-fade-in-up">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg font-bold text-white">
+              High <span role="img" aria-label="wind">🌬️</span>{" "}
+              <span className="text-gradient">@{username}</span>
+            </h1>
+            <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>
+              PNP Content. Live Video Rooms. Raw Podcasts.
+            </p>
+          </div>
+          <span
+            className="flex-shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider"
+            style={
+              tier.toLowerCase() === "prime"
+                ? { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }
+                : { background: "rgba(255,255,255,0.06)", color: "#555" }
+            }
+          >
+            {tier}
+          </span>
+        </div>
       </div>
+
+      {/* PRIME upgrade CTA — neon yellow, standalone */}
+      {tier.toLowerCase() !== "prime" && (
+        <button
+          onClick={() => navigate("/subscribe")}
+          className="w-full mb-4 group"
+        >
+          <div
+            className="rounded-2xl p-4 flex items-center gap-3 transition-all"
+            style={{
+              background: "rgba(229,255,0,0.06)",
+              border: "1px solid rgba(229,255,0,0.15)",
+              boxShadow: "0 0 20px rgba(229,255,0,0.04)",
+            }}
+          >
+            <div
+              className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{ background: "rgba(229,255,0,0.12)" }}
+            >
+              <svg className="w-4 h-4" style={{ color: "#E5FF00" }} fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+              </svg>
+            </div>
+            <div className="flex-1 text-left">
+              <p className="font-semibold text-sm" style={{ color: "#E5FF00" }}>
+                {tier.toLowerCase() === "member" ? "Upgrade to PRIME" : "Unlock PRIME"}
+              </p>
+              <p className="text-[11px] mt-0.5" style={{ color: "rgba(229,255,0,0.4)" }}>
+                DMs, video calls, exclusive content & more
+              </p>
+            </div>
+            <svg className="w-4 h-4 flex-shrink-0 group-hover:translate-x-0.5 transition-transform" style={{ color: "rgba(229,255,0,0.3)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+        </button>
+      )}
 
       {/* Announcements */}
       {announcements.length > 0 && (
-        <div className="mb-6 space-y-3">
+        <div className="mb-4 space-y-2">
           {announcements.map((ann) => (
             <div
               key={ann.id}
-              className="glass-card-sm p-4 border-l-gradient"
+              className="glass-card-sm p-3.5"
+              style={{ borderLeft: "3px solid rgba(212,0,122,0.4)" }}
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    {ann.is_pinned && (
-                      <span className="text-xs px-1.5 py-0.5 rounded badge-gradient badge-gradient-text font-medium">
-                        PINNED
-                      </span>
-                    )}
-                    <span
-                      className="text-xs uppercase font-medium"
-                      style={{ color: "#8E8E93" }}
-                    >
-                      {ann.type}
-                    </span>
-                  </div>
-                  <h3 className="text-sm font-semibold text-white">{ann.title}</h3>
-                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>
-                    {ann.body}
-                  </p>
-                </div>
+              <div className="flex items-center gap-2 mb-1">
+                {ann.is_pinned && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>
+                    PINNED
+                  </span>
+                )}
+                <span className="text-[10px] uppercase font-medium" style={{ color: "#555" }}>
+                  {ann.type}
+                </span>
               </div>
+              <h3 className="text-sm font-semibold text-white">{ann.title}</h3>
+              <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                {ann.body}
+              </p>
             </div>
           ))}
         </div>
@@ -168,28 +209,28 @@ export default function Home() {
 
       {/* Featured Performers */}
       {performers.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-lg font-semibold text-white mb-3">Featured</h2>
-          <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide">
+        <div className="mb-5">
+          <h2 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3">Featured</h2>
+          <div className="flex gap-2.5 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide">
             {performers.map((p) => {
               const profilePath = p.userId ? `/profile/${p.userId}` : "#";
               return (
                 <div
                   key={p.id}
-                  className="glass-card-sm p-3 flex-shrink-0 w-28 text-center cursor-pointer"
+                  className="glass-card-sm p-3 flex-shrink-0 w-24 text-center cursor-pointer hover:border-white/15 transition-colors"
                   onClick={() => p.userId && navigate(profilePath)}
                 >
                   <img
                     src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
                     alt={p.displayName}
-                    className="w-14 h-14 rounded-full mx-auto mb-2 object-cover"
+                    className="w-12 h-12 rounded-full mx-auto mb-1.5 object-cover"
                     onError={(e) => {
                       (e.target as HTMLImageElement).src = "/default-performer.svg";
                     }}
                   />
-                  <p className="text-xs font-medium text-white truncate">{p.displayName}</p>
+                  <p className="text-[11px] font-medium text-white truncate">{p.displayName}</p>
                   {p.isAvailable && (
-                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "#5ED1C4" }}>
+                    <p className="text-[10px] truncate" style={{ color: "#5ED1C4" }}>
                       Available
                     </p>
                   )}
@@ -198,16 +239,6 @@ export default function Home() {
             })}
           </div>
         </div>
-      )}
-
-      {/* Subscribe CTA */}
-      {tier.toLowerCase() !== "prime" && (
-        <button
-          onClick={() => navigate("/subscribe")}
-          className="btn-gradient w-full py-3 px-6 rounded-xl text-white font-semibold text-sm mb-6 font-display tracking-wider whitespace-nowrap"
-        >
-          {tier.toLowerCase() === "member" ? "Upgrade to PRIME" : "Subscribe to PNPTv!"}
-        </button>
       )}
 
       {/* Create post — navigates to Social page */}
