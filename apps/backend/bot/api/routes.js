@@ -3697,7 +3697,7 @@ app.post('/api/proxy/live/tips', tipLimiter, asyncHandler(async (req, res) => {
         const socketSingleton = require('../services/socketSingleton');
         const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
         if (io && tipInfo) {
-          io.emit('live:tip', {
+          const tipPayload = {
             id: tipInfo.id,
             amount: parseFloat(tipInfo.amount),
             username: tipInfo.user_username || 'Anonymous',
@@ -3705,7 +3705,9 @@ app.post('/api/proxy/live/tips', tipLimiter, asyncHandler(async (req, res) => {
             message: tipInfo.message || '',
             createdAt: tipInfo.created_at,
             paymentMethod: 'tokens',
-          });
+          };
+          // Emit to the specific performer's live room; all viewers in that room receive it
+          io.to(`live:${String(performerId)}`).emit('live:tip', tipPayload);
           // Notify sender of new balance
           const socketId = req.session?.socketId;
           if (socketId) {
@@ -3863,7 +3865,8 @@ app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (re
         const socketSingleton = require('../services/socketSingleton');
         const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
         if (io && tipInfo) {
-          io.emit('live:tip', {
+          // Emit to the specific performer's live room; all viewers in that room receive it
+          io.to(`live:${String(tipInfo.performer_id)}`).emit('live:tip', {
             id: tipInfo.id,
             amount: parseFloat(tipInfo.amount),
             username: tipInfo.user_username || 'Anonymous',

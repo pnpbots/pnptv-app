@@ -228,6 +228,11 @@ class StreamingService {
      */
     static async endStream(streamId, hostId) {
         try {
+            const stream = await LiveStreamModel.getById(streamId);
+            if (!stream) {
+                throw new Error('Stream not found');
+            }
+
             await LiveStreamModel.endStream(streamId, hostId);
 
             logger.info('Stream ended', { streamId, hostId });
@@ -325,6 +330,11 @@ class StreamingService {
      */
     static async startStream(streamId, hostId) {
         try {
+            const stream = await LiveStreamModel.getById(streamId);
+            if (!stream) {
+                throw new Error('Stream not found');
+            }
+
             await LiveStreamModel.startStream(streamId, hostId);
 
             logger.info('Stream started', { streamId, hostId });

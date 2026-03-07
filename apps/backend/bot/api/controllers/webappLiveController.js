@@ -99,8 +99,9 @@ const getRtmpKey = async (req, res) => {
     const redisKey = `rtmp:streamkey:${user.id}`;
     let streamKey = await redis.get(redisKey);
     if (!streamKey) {
-      streamKey = crypto.randomBytes(20).toString('hex'); // 40-char random hex key
-      await redis.set(redisKey, streamKey); // no TTL — permanent until rotated
+      const newKey = crypto.randomBytes(20).toString('hex'); // 40-char random hex key
+      const wasSet = await redis.set(redisKey, newKey, 'NX'); // atomic set-if-not-exists
+      streamKey = wasSet ? newKey : await redis.get(redisKey); // re-read if lost the race
     }
 
     const publicHost = restreamerPublicUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');

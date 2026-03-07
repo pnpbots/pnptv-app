@@ -134,8 +134,7 @@ export default function Live() {
 
   useEffect(() => {
     setIsLoading(true);
-    loadStreams();
-    setIsLoading(false);
+    loadStreams().finally(() => setIsLoading(false));
     const interval = setInterval(loadStreams, 30000);
     return () => clearInterval(interval);
   }, [loadStreams]);
@@ -151,7 +150,7 @@ export default function Live() {
           setSelectedPerformer(p[0]);
         }
       })
-      .catch(() => {})
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load performers"))
       .finally(() => setPerformersLoading(false));
   }, []);
 
@@ -190,8 +189,16 @@ export default function Live() {
   // Push socket-confirmed tips to front of recentTips
   useEffect(() => {
     if (!latestTip) return;
+    const mapped: RecentTip = {
+      id: latestTip.id,
+      amount: latestTip.amount,
+      user_username: latestTip.username,
+      model_name: latestTip.performerName,
+      created_at: latestTip.createdAt,
+      payment_status: "completed",
+    };
     setRecentTips((prev) => {
-      const next = [latestTip as unknown as RecentTip, ...prev.filter((t) => t.id !== (latestTip as unknown as RecentTip).id)].slice(0, 5);
+      const next = [mapped, ...prev.filter((t) => t.id !== mapped.id)].slice(0, 5);
       return next;
     });
   }, [latestTip]);
