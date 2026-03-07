@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Card, Skeleton, Button } from "@pnptv/ui-kit";
@@ -9,17 +9,15 @@ import { useLiveSocket } from "@/hooks/useLiveSocket";
 import { useI18n } from "@/lib/i18n";
 import {
   getAllPerformers,
-  getRecentTips,
-  sendTip,
+  getLiveStreams,
   getRtmpKey,
   getWalletBalance,
   getTokenPackages,
   buyTokens,
   linkDPNS,
   getWalletHistory,
-  TIP_AMOUNTS,
   type FeaturedPerformer,
-  type RecentTip,
+  type LiveStream,
   type TokenPackage,
   type TokenPurchase,
 } from "@/lib/api";
@@ -48,19 +46,11 @@ export default function Live() {
   const navigate = useNavigate();
   const { showTutorial, dismissTutorial } = useTutorial("live");
 
-  // Performers
+  // Performers & streams
   const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
   const [performersLoading, setPerformersLoading] = useState(true);
+  const [liveStreams, setLiveStreams] = useState<LiveStream[]>([]);
 
-  // Tips
-  const [recentTips, setRecentTips] = useState<RecentTip[]>([]);
-  const [selectedPerformer, setSelectedPerformer] = useState<FeaturedPerformer | null>(null);
-  const [tipMessage, setTipMessage] = useState("");
-  const [showTipMessage, setShowTipMessage] = useState(false);
-  const [tipping, setTipping] = useState(false);
-  const [tipError, setTipError] = useState<string | null>(null);
-  const [tipSuccess, setTipSuccess] = useState<string | null>(null);
-  const [tipPaymentTab, setTipPaymentTab] = useState<"daimo" | "tokens">("tokens");
 
   // Dash token wallet
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
@@ -89,25 +79,29 @@ export default function Live() {
   const [goLiveError, setGoLiveError] = useState<string | null>(null);
   const [showStreamKey, setShowStreamKey] = useState(false);
 
-  // Socket (null stream — connected only for wallet/tip push events)
+  // Socket (null stream — connected only for wallet push events)
   const {
-    latestTip,
     walletBalance: socketBalance,
   } = useLiveSocket(null);
 
-  // Load performers
+  // Load performers + streams
   useEffect(() => {
     setPerformersLoading(true);
-    getAllPerformers()
-      .then((data) => {
-        const p = data.performers || [];
-        setPerformers(p);
-        if (p.length > 0 && !selectedPerformer) {
-          setSelectedPerformer(p[0]);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setPerformersLoading(false));
+    Promise.all([
+      getAllPerformers().catch(() => ({ performers: [] })),
+      getLiveStreams().catch(() => ({ streams: [] })),
+    ]).then(([perfData, streamData]) => {
+      setPerformers(perfData.performers || []);
+      setLiveStreams((streamData.streams || []).filter((s: LiveStream) => s.isLive));
+    }).finally(() => setPerformersLoading(false));
+
+    // Refresh streams periodically
+    const interval = setInterval(() => {
+      getLiveStreams()
+        .then((data) => setLiveStreams((data.streams || []).filter((s: LiveStream) => s.isLive)))
+        .catch(() => {});
+    }, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   // Load wallet balance + packages when authenticated
@@ -128,68 +122,6 @@ export default function Live() {
   useEffect(() => {
     if (socketBalance !== null) setTokenBalance(socketBalance);
   }, [socketBalance]);
-
-  // Load recent tips
-  const loadTips = useCallback(() => {
-    getRecentTips(5)
-      .then((data) => setRecentTips(data.tips || []))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    loadTips();
-    const interval = setInterval(loadTips, 15000);
-    return () => clearInterval(interval);
-  }, [loadTips]);
-
-  // Push socket-confirmed tips to front of recentTips
-  useEffect(() => {
-    if (!latestTip) return;
-    const mapped: RecentTip = {
-      id: latestTip.id,
-      amount: latestTip.amount,
-      user_username: latestTip.username,
-      model_name: latestTip.performerName,
-      created_at: latestTip.createdAt,
-      payment_status: "completed",
-    };
-    setRecentTips((prev) => {
-      const next = [mapped, ...prev.filter((t) => t.id !== mapped.id)].slice(0, 5);
-      return next;
-    });
-  }, [latestTip]);
-
-  const handleTip = async (amount: number) => {
-    if (!isAuthenticated) { login(); return; }
-    if (!selectedPerformer) { setTipError(t.live.selectPerformerError); return; }
-    if (tipPaymentTab === "tokens" && tokenBalance !== null && tokenBalance < amount) {
-      setTipError(t.live.insufficientTokens(tokenBalance));
-      setShowBuyModal(true);
-      return;
-    }
-    setTipping(true);
-    setTipError(null);
-    setTipSuccess(null);
-    try {
-      const result = await sendTip(selectedPerformer.id, amount, tipMessage || undefined, tipPaymentTab);
-      if (tipPaymentTab === "tokens") {
-        if (result.newBalance !== undefined) setTokenBalance(result.newBalance);
-        setTipSuccess(t.live.tokensSentSuccess(amount, selectedPerformer.displayName));
-      } else if (result.paymentUrl) {
-        window.open(result.paymentUrl, "_blank", "noopener,width=500,height=700");
-        setTipSuccess(t.live.paymentWindowOpened(amount));
-      } else {
-        setTipSuccess(t.live.tipSubmitted(amount));
-      }
-      setTipMessage("");
-      setShowTipMessage(false);
-      setTimeout(loadTips, 3000);
-    } catch (err: unknown) {
-      setTipError(err instanceof Error ? err.message : t.live.errorFailedToSendTip);
-    } finally {
-      setTipping(false);
-    }
-  };
 
   const handleBuyTokens = async (pkg: TokenPackage) => {
     setBuyingPackage(pkg.id);
@@ -263,14 +195,19 @@ export default function Live() {
     handleLoadWalletHistory();
   };
 
-  const formatTimeAgo = (dateStr: string) => {
-    const diff = Date.now() - new Date(dateStr).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return t.live.justNow;
-    if (mins < 60) return t.live.minutesAgo(mins);
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return t.live.hoursAgo(hours);
-    return t.live.daysAgo(Math.floor(hours / 24));
+  // Match a performer to their live stream by checking if the stream name
+  // contains the performer's display name or slug (case-insensitive)
+  const findLiveStream = (p: FeaturedPerformer): LiveStream | undefined => {
+    const name = p.displayName.toLowerCase().split(/[^a-z]/)[0]; // first word, e.g. "lex" from "Lex! Slam!"
+    const slug = p.slug?.toLowerCase();
+    return liveStreams.find((s) => {
+      const sName = s.name.toLowerCase();
+      const sId = s.id.toLowerCase();
+      return (
+        (name && (sName.includes(name) || sId.includes(name))) ||
+        (slug && (sName.includes(slug) || sId.includes(slug)))
+      );
+    });
   };
 
   return (
@@ -309,126 +246,54 @@ export default function Live() {
         </div>
       ) : performers.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
-          {performers.map((p) => (
-            <div
-              key={p.id}
-              className="rounded-xl border border-pnp-border bg-pnp-surface p-3 flex flex-col items-center text-center"
-            >
-              <img
-                src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
-                alt={p.displayName}
-                className="w-20 h-20 rounded-full object-cover mb-2 border-2 border-pnp-border"
-                onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
-              />
-              <span className="text-sm font-medium text-pnp-textPrimary truncate max-w-full">{p.displayName}</span>
-              {p.isFeatured && (
-                <span className="text-[10px] mt-0.5 font-semibold" style={{ color: "#5ED1C4" }}>{t.live.performerFeatured}</span>
-              )}
-              <div className="mt-2 w-full flex gap-1.5">
-                <button
-                  onClick={() => navigate(`/live/${p.id}`)}
-                  className="flex-1 py-1.5 rounded-lg font-semibold text-xs text-pnp-textPrimary bg-pnp-surface border border-pnp-border hover:border-pnp-accent/40 active:scale-95 transition-all"
-                >
-                  Watch
-                </button>
+          {performers.map((p) => {
+            const stream = findLiveStream(p);
+            const isLive = !!stream;
+            return (
+              <div
+                key={p.id}
+                className={`rounded-xl border bg-pnp-surface p-3 flex flex-col items-center text-center ${isLive ? "border-red-500/50 ring-1 ring-red-500/20" : "border-pnp-border"}`}
+              >
+                <div className="relative">
+                  <img
+                    src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
+                    alt={p.displayName}
+                    className={`w-20 h-20 rounded-full object-cover mb-2 border-2 ${isLive ? "border-red-500" : "border-pnp-border"}`}
+                    onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
+                  />
+                  {isLive && (
+                    <span className="absolute -top-1 -right-1 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                      LIVE
+                    </span>
+                  )}
+                </div>
+                <span className="text-sm font-medium text-pnp-textPrimary truncate max-w-full">{p.displayName}</span>
+                {p.isFeatured && (
+                  <span className="text-[10px] mt-0.5 font-semibold" style={{ color: "#5ED1C4" }}>{t.live.performerFeatured}</span>
+                )}
                 <button
                   onClick={() => {
-                    setSelectedPerformer(p);
-                    handleTip(TIP_AMOUNTS[0]);
+                    if (isLive && stream) {
+                      navigate(`/live/${stream.id}`);
+                    } else if (p.userId) {
+                      navigate(`/profile/${p.userId}`);
+                    }
                   }}
-                  disabled={tipping}
-                  className="flex-1 py-1.5 rounded-lg font-semibold text-xs text-white btn-gradient active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  className={`mt-2 w-full py-1.5 rounded-lg font-semibold text-xs active:scale-95 transition-all ${
+                    isLive
+                      ? "text-white bg-red-500 hover:bg-red-600"
+                      : "text-pnp-textPrimary bg-pnp-surface border border-pnp-border hover:border-pnp-accent/40"
+                  }`}
                 >
-                  {tipPaymentTab === "tokens" ? `${TIP_AMOUNTS[0]}T` : `$${TIP_AMOUNTS[0]}`}
+                  {isLive ? "Watch Live" : (t.live.viewProfile || "View Profile")}
                 </button>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <p className="text-sm text-pnp-textSecondary text-center py-8">{t.live.noStreamsAvailable}</p>
-      )}
-
-      {/* ── Tip Panel (shown when a performer is selected) ── */}
-      {selectedPerformer && (
-        <Card className="mb-3">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-medium text-pnp-textPrimary">{t.live.sendATip}</h3>
-            <span className="text-[10px] text-gradient">{t.live.tipTo(selectedPerformer.displayName)}</span>
-          </div>
-
-          {isAuthenticated && (
-            <div className="flex gap-1 mb-2 p-1 bg-pnp-surface rounded-lg">
-              <button
-                onClick={() => setTipPaymentTab("tokens")}
-                className={`flex-1 py-1 rounded-md text-[10px] font-semibold transition-colors ${
-                  tipPaymentTab === "tokens" ? "text-white btn-gradient" : "text-pnp-textSecondary"
-                }`}
-              >
-                {t.live.tabTokens} {tokenBalance !== null && `(${tokenBalance})`}
-              </button>
-              <button
-                onClick={() => setTipPaymentTab("daimo")}
-                className={`flex-1 py-1 rounded-md text-[10px] font-semibold transition-colors ${
-                  tipPaymentTab === "daimo" ? "text-white btn-gradient" : "text-pnp-textSecondary"
-                }`}
-              >
-                {t.live.tabDaimoCrypto}
-              </button>
-            </div>
-          )}
-
-          <div className="flex gap-2 flex-wrap">
-            {TIP_AMOUNTS.map((amount) => (
-              <button
-                key={amount}
-                onClick={() => handleTip(amount)}
-                disabled={tipping}
-                className="flex-1 min-w-[56px] py-2 rounded-lg font-semibold text-sm transition-all text-white active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed btn-gradient"
-              >
-                {tipPaymentTab === "tokens" ? `${amount}T` : `$${amount}`}
-              </button>
-            ))}
-          </div>
-
-          <button
-            onClick={() => setShowTipMessage(!showTipMessage)}
-            className="text-[10px] text-pnp-textSecondary mt-2 hover:text-pnp-accent transition-colors"
-          >
-            {showTipMessage ? t.live.hideMessage : t.live.addAMessage}
-          </button>
-          {showTipMessage && (
-            <input
-              type="text"
-              placeholder={t.live.tipMessagePlaceholder}
-              value={tipMessage}
-              onChange={(e) => setTipMessage(e.target.value)}
-              maxLength={200}
-              className="w-full mt-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
-            />
-          )}
-          {tipError && <p className="text-[10px] text-pnp-error mt-1">{tipError}</p>}
-          {tipSuccess && <p className="text-[10px] mt-1 text-gradient">{tipSuccess}</p>}
-          {!isAuthenticated && (
-            <p className="text-[10px] text-pnp-textSecondary mt-2">{t.live.loginToTip}</p>
-          )}
-        </Card>
-      )}
-
-      {/* ── Recent Tips Ticker ── */}
-      {recentTips.length > 0 && (
-        <div className="mb-3">
-          <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-            {recentTips.map((tip) => (
-              <div key={tip.id} className="flex-shrink-0 px-2.5 py-1 rounded-full bg-pnp-surface border border-pnp-border text-[10px]">
-                <span className="text-gradient font-medium">${tip.amount}</span>
-                <span className="text-pnp-textSecondary mx-1">{t.live.recentTipBy}</span>
-                <span className="text-pnp-textPrimary">@{tip.user_username}</span>
-                <span className="text-pnp-textSecondary/50 ml-1">{formatTimeAgo(tip.created_at)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
       )}
 
       {/* ── Wallet ── */}
