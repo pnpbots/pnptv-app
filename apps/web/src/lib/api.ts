@@ -403,6 +403,13 @@ export function getRtmpKey(): Promise<{
   return request("/api/webapp/live/rtmp-key");
 }
 
+export function getMyChannel(): Promise<{
+  success: boolean;
+  channel: { ref: string; streamKey: string; rtmpUrl: string } | null;
+}> {
+  return request("/api/webapp/live/my-channel");
+}
+
 // Profile
 export interface UserProfile {
   id: string;
@@ -2401,7 +2408,7 @@ export function startXOAuth(adminId?: number, adminUsername?: string): Promise<{
   if (adminId) params.set("admin_id", String(adminId));
   if (adminUsername) params.set("admin_username", adminUsername);
   const qs = params.toString();
-  return request(`/api/admin/x/oauth/start${qs ? `?${qs}` : ""}`);
+  return request(`/api/admin/x/oauth/login${qs ? `?${qs}` : ""}`);
 }
 
 // ============================================================================
@@ -2905,4 +2912,49 @@ export function revokeGamificationBadge(
 
 export function awardMeCuidoToAllCreators(): Promise<{ success: boolean; awarded: number; total: number }> {
   return request("/api/webapp/gamification/award-creators-mecuido", { method: "POST" });
+}
+
+// ============================================================================
+// Stream Overlay Admin API
+// ============================================================================
+
+export interface StreamOverlay {
+  id: string;
+  channel_ref: string;
+  logo_url: string | null;
+  logo_position: string;
+  logo_size: number;
+  logo_opacity: number;
+  banner_text: string | null;
+  banner_position: string;
+  banner_bg_color: string;
+  banner_text_color: string;
+  banner_style: string;
+  is_active: boolean;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+export function getStreamOverlays(): Promise<{ success: boolean; overlays: StreamOverlay[] }> {
+  return request("/api/webapp/admin/stream-overlays");
+}
+
+export function getStreamOverlay(channelRef: string): Promise<{ success: boolean; overlay: StreamOverlay }> {
+  return request(`/api/webapp/admin/stream-overlays/${encodeURIComponent(channelRef)}`);
+}
+
+export function updateStreamOverlay(
+  channelRef: string,
+  data: Partial<StreamOverlay>
+): Promise<{ success: boolean; overlay: StreamOverlay }> {
+  return request(`/api/webapp/admin/stream-overlays/${encodeURIComponent(channelRef)}`, {
+    method: "PUT",
+    body: data,
+  });
+}
+
+export function getStreamOverlayPublic(
+  channelRef: string
+): Promise<{ success: boolean; overlay: StreamOverlay | null }> {
+  return request(`/api/proxy/live/overlay/${encodeURIComponent(channelRef)}`);
 }

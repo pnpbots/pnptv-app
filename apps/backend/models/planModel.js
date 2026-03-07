@@ -48,12 +48,20 @@ class Plan {
   }
 
   /**
-   * Get plans for admin management (includes promotional plans)
+   * Get plans for admin management (includes inactive + promotional plans)
    * @returns {Promise<Array>} All plans available to admins
    */
   static async getAdminPlans() {
-    const plans = await this.getAll();
-    return this.mergePlans(plans, this.getPromotionalPlans());
+    try {
+      const result = await query(
+        `SELECT * FROM ${this.TABLE} ORDER BY price ASC`
+      );
+      const plans = result.rows.map((row) => this.mapRowToPlan(row));
+      return this.mergePlans(plans, this.getPromotionalPlans());
+    } catch (error) {
+      logger.error('Error getting admin plans:', error);
+      return this.getPromotionalPlans();
+    }
   }
 
   /**
@@ -253,14 +261,14 @@ class Plan {
    * @returns {Promise<boolean>} Success status
    */
   static async delete(planId) {
-    await query(`DELETE FROM ${this.TABLE} WHERE id = $1`, [planId]);
+    const result = await query(`DELETE FROM ${this.TABLE} WHERE id = $1`, [planId]);
 
     // Invalidate cache
     await cache.del(`plan:${planId}`);
     await cache.del('plans:all');
 
-    logger.info('Plan deleted', { planId });
-    return true;
+    logger.info('Plan deleted', { planId, found: result.rowCount > 0 });
+    return result.rowCount > 0;
   }
 
   /**

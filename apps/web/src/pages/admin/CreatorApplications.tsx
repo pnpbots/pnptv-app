@@ -30,6 +30,8 @@ const TYPE_LABELS: Record<string, string> = {
   ice: "Ice",
   crystal: "Crystal",
   diamond: "Diamond",
+  occasional: "Occasional",
+  full_time: "Full Time",
 };
 
 const ENROLLMENT_TIER_COLORS: Record<

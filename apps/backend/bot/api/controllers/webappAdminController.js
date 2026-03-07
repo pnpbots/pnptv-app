@@ -225,7 +225,7 @@ const banUser = async (req, res) => {
     const { ban, reason = '' } = req.body;
 
     const newTier = ban ? 'banned' : 'free';
-    const newStatus = ban ? 'cancelled' : 'free';
+    const newStatus = ban ? 'churned' : 'free';
     await query(
       'UPDATE users SET tier = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3',
       [newTier, newStatus, userId]
@@ -710,8 +710,8 @@ const getDemographics = async (req, res) => {
         COUNT(CASE WHEN last_active >= NOW() - INTERVAL '90 days' THEN 1 END) as active_90d,
         COUNT(CASE WHEN created_at >= NOW() - INTERVAL '7 days' THEN 1 END) as new_7d,
         COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' THEN 1 END) as new_30d,
-        COUNT(CASE WHEN date_of_birth IS NOT NULL THEN 1 END) as age_verified,
-        COUNT(CASE WHEN creator_terms_accepted_at IS NOT NULL THEN 1 END) as terms_accepted,
+        COUNT(CASE WHEN age_verified = true THEN 1 END) as age_verified,
+        COUNT(CASE WHEN terms_accepted = true THEN 1 END) as terms_accepted,
         COUNT(CASE WHEN location_lat IS NOT NULL THEN 1 END) as with_location,
         COUNT(CASE WHEN bio IS NOT NULL AND bio != '' THEN 1 END) as with_bio,
         COUNT(CASE WHEN photo_file_id IS NOT NULL THEN 1 END) as with_photo,

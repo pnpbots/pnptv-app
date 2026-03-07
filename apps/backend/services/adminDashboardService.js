@@ -94,7 +94,7 @@ class AdminDashboardService {
         WHERE status = 'completed'
           AND payment_date >= NOW() - INTERVAL '30 days'
         GROUP BY DATE_TRUNC('day', payment_date)
-        ORDER BY payment_day DESC
+        ORDER BY payment_day ASC
       `);
 
       const totalResult = await query(`
