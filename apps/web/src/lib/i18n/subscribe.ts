@@ -26,7 +26,7 @@ const strings = {
     // ── Plan badge ────────────────────────────────────────────────────────────
     bestValue: "Best Value",
 
-    // ── Plan features — member_monthly ────────────────────────────────────────
+    // ── Plan features — member-monthly ─────────────────────────────────────────
     featureMember1: "Hangout group rooms",
     featureMember2: "Social feed access",
     featureMember3: "Nearby users discovery",
@@ -169,7 +169,7 @@ const strings = {
     // ── Plan badge ────────────────────────────────────────────────────────────
     bestValue: "Mejor precio",
 
-    // ── Plan features — member_monthly ────────────────────────────────────────
+    // ── Plan features — member-monthly ─────────────────────────────────────────
     featureMember1: "Salas de grupo Hangout",
     featureMember2: "Acceso al feed social",
     featureMember3: "Descubrimiento de usuarios cercanos",

@@ -289,7 +289,7 @@ class Plan {
   static getDefaultPlans() {
     return [
       {
-        id: 'member_monthly',
+        id: 'member-monthly',
         sku: 'EASYBOTS-PNP-M30',
         display_name: 'PNP MEMBER',
         name: 'PNP Member',
@@ -421,7 +421,7 @@ class Plan {
         active: true,
       },
       {
-        id: 'lifetime_pass',
+        id: 'lifetime-pass',
         sku: 'EASYBOTS-PNP-000',
         display_name: 'LIFETIME PASS',
         name: 'Lifetime Pass',
@@ -451,7 +451,7 @@ class Plan {
         active: true,
       },
       {
-        id: 'lifetime100_promo',
+        id: 'lifetime100-promo',
         sku: 'EASYBOTS-PNP-100',
         display_name: 'LIFETIME100 PROMO',
         name: 'Lifetime100 Promo',

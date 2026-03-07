@@ -44,7 +44,7 @@ const START_FROM = (() => {
 })();
 
 const DELAY_MS = parseInt(process.env.BULK_DELAY_MS || '5000', 10);
-const MEMBER_PLAN_IDS = new Set(['member_monthly']);
+const MEMBER_PLAN_IDS = new Set(['member-monthly']);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

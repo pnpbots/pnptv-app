@@ -206,7 +206,7 @@ const registerPaymentHandlers = (bot) => {
       planHeader += `${t('paymentFooter', lang)}`;
 
       // Check if this is the lifetime100 promo - exclude ePayco and Daimo
-      const isLifetime100Promo = plan.id === 'lifetime100_promo' || plan.sku === 'EASYBOTS-PNP-100';
+      const isLifetime100Promo = plan.id === 'lifetime100-promo' || plan.sku === 'EASYBOTS-PNP-100';
 
       const paymentButtons = [];
       

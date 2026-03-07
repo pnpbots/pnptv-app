@@ -85,6 +85,8 @@ const requirePageAuth = (req, res, next) => {
 // Soft & Tier Authentication Middleware
 // ==========================================
 
+const { requireTier, isMemberOrAbove, isAdmin: isAdminTier } = require('../services/accessService');
+
 /**
  * Thin session auth — returns 401 JSON if user is not authenticated.
  * Use this before multer on upload routes to reject unauthenticated
@@ -108,47 +110,9 @@ const softAuth = (req, res, next) => {
   next();
 };
 
-/**
- * Tier gate — requires active or prime subscription
- */
-const requirePrimeTier = (req, res, next) => {
-  const user = req.session?.user;
-  if (!user) {
-    return res.status(401).json({ success: false, error: 'Authentication required', code: 'AUTH_REQUIRED' });
-  }
-  const tier = (user.tier || 'free').toLowerCase();
-  const role = user.role || '';
-  if (tier === 'prime' || role === 'admin' || role === 'superadmin') {
-    return next();
-  }
-  return res.status(403).json({
-    success: false,
-    error: 'Prime subscription required',
-    code: 'PRIME_REQUIRED',
-    upgradeUrl: '/subscribe',
-  });
-};
-
-/**
- * Tier gate — requires member or prime subscription
- */
-const requireMemberTier = (req, res, next) => {
-  const user = req.session?.user;
-  if (!user) {
-    return res.status(401).json({ success: false, error: 'Authentication required', code: 'AUTH_REQUIRED' });
-  }
-  const tier = (user.tier || 'free').toLowerCase();
-  const role = user.role || '';
-  if (tier === 'member' || tier === 'prime' || role === 'admin' || role === 'superadmin') {
-    return next();
-  }
-  return res.status(403).json({
-    success: false,
-    error: 'Member subscription required',
-    code: 'MEMBER_REQUIRED',
-    upgradeUrl: '/subscribe',
-  });
-};
+// Tier gates — sourced from centralized accessService
+const requirePrimeTier = requireTier('PRIME');
+const requireMemberTier = requireTier('member');
 
 /**
  * DM rate limit for free tier users — uses Redis daily counter
@@ -158,10 +122,8 @@ const requireFreeTierDmLimit = async (req, res, next) => {
   if (!user) {
     return res.status(401).json({ success: false, error: 'Authentication required', code: 'AUTH_REQUIRED' });
   }
-  const tier = (user.tier || 'free').toLowerCase();
-  const role = user.role || '';
   // Member, prime, and admin bypass
-  if (tier === 'member' || tier === 'prime' || role === 'admin' || role === 'superadmin') {
+  if (isMemberOrAbove(user.tier) || isAdminTier(user)) {
     return next();
   }
   try {
@@ -2174,6 +2136,20 @@ app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLive
 app.get('/api/webapp/admin/live/channels', requireSessionAuth, asyncHandler(webappLiveController.listChannels));
 app.post('/api/webapp/admin/live/assign-channel', requireSessionAuth, asyncHandler(webappLiveController.assignChannel));
 
+// Stream Bridge: browser → RTMP via WebSocket+FFmpeg
+const streamBridgeController = require('./controllers/streamBridgeController');
+app.get('/api/webapp/live/my-channel', requireSessionAuth, asyncHandler(streamBridgeController.getMyChannel));
+
+// Stream Overlay Management (admin CRUD + public viewer endpoint)
+// Socket.IO access uses socketSingleton.get() directly inside the controller —
+// no wiring step needed here.
+const streamOverlayController = require('./controllers/streamOverlayController');
+app.get('/api/webapp/admin/stream-overlays', requireSessionAuth, asyncHandler(streamOverlayController.listOverlays));
+app.get('/api/webapp/admin/stream-overlays/:channelRef', requireSessionAuth, asyncHandler(streamOverlayController.getOverlay));
+app.put('/api/webapp/admin/stream-overlays/:channelRef', requireSessionAuth, asyncHandler(streamOverlayController.updateOverlay));
+// Public overlay endpoint — no auth, short cache, used by the frontend LivePlayer
+app.get('/api/proxy/live/overlay/:channelRef', asyncHandler(streamOverlayController.getPublicOverlay));
+
 // Web App Support Chat (Cristina AI)
 const supportController = require('./controllers/supportController');
 const supportChatLimiter = rateLimit({
@@ -2362,7 +2338,7 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
   const UserModel = require('../../models/userModel');
   await UserModel.updateSubscription(userId, {
     status: 'active',
-    planId: 'lifetime_pass',
+    planId: 'lifetime-pass',
     expiry: null,
   });
 
@@ -2387,7 +2363,7 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
       paymentMethod: 'meru',
       amount: 50,
       currency: 'USD',
-      planId: 'lifetime_pass',
+      planId: 'lifetime-pass',
       planName: 'Lifetime Pass',
       product: 'lifetime-pass',
       paymentReference: meruCode,
@@ -2416,7 +2392,7 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
   // 7. Telegram DM with PRIME invite link (async fire-and-forget)
   PaymentService.sendPaymentConfirmationNotification({
     userId,
-    plan: { id: 'lifetime_pass', name: 'Lifetime Pass', display_name: 'Lifetime Pass' },
+    plan: { id: 'lifetime-pass', name: 'Lifetime Pass', display_name: 'Lifetime Pass' },
     transactionId: meruCode,
     amount: 50,
     expiryDate: null,
@@ -2490,7 +2466,7 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
     ...req.session.user,
     tier: 'PRIME',
     subscription_status: 'active',
-    plan_id: 'lifetime_pass',
+    plan_id: 'lifetime-pass',
   };
 
   logger.info('Meru lifetime pass activated via webapp', { userId, code: meruCode });
@@ -3238,6 +3214,7 @@ app.get('/api/proxy/media/stream/:songId', asyncHandler(async (req, res) => {
 
 // --- Restreamer Live Proxy ---
 app.get('/api/proxy/live/streams', asyncHandler(async (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   try {
     const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
     // Use undefined-check: a deliberately empty password string must still be passed to login.
@@ -3679,6 +3656,8 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
 }));
 
 app.get('/api/performers', asyncHandler(async (req, res) => {
+  // Live status changes frequently — prevent browser from caching stale isLive values.
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   try {
     const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
     const restreamerPublicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');

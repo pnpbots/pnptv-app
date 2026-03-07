@@ -394,19 +394,19 @@ class StreamingService {
     static getUserPlanTier(user) {
         const planTierMap = {
             // Current DB plan IDs
-            'member_monthly':    'Member',
+            'member-monthly':    'Member',
             'week-trial-pass':   'Prime',
             'monthly-pass':      'Prime',
             'crystal-pass':      'Prime',
             'diamond-pass':      'Prime',
             'lifetime-pass':     'Prime',
-            'lifetime100_promo': 'Prime',
+            'lifetime100-promo': 'Prime',
             // Legacy IDs (fallback)
             'week_pass':         'Prime',
             'three_months_pass': 'Prime',
             'crystal_pass':      'Prime',
             'yearly_pass':       'Prime',
-            'lifetime_pass':     'Prime',
+            'lifetime-pass':     'Prime',
         };
 
         return planTierMap[user.planId] || 'Basic';

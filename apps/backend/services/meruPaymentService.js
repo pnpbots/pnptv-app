@@ -1,36 +1,55 @@
-const axios = require('axios');
 const logger = require('../utils/logger');
+const https = require('https');
 
 /**
- * MeruPaymentService - Verifies Meru payments via HTTP fetch
- * Checks page content for paid/expired patterns without needing a headless browser
+ * MeruPaymentService - Verifies Meru payments via __NEXT_DATA__ JSON parsing
+ * Meru is a Next.js SPA that embeds payment state in server-rendered props.
+ * We parse the JSON to check status === 'PAID' and paidAt !== null.
  */
 class MeruPaymentService {
   constructor() {
-    // Simple rate limiting: track recent verifications per code
-    this._recentChecks = new Map(); // code -> timestamp
-    this.RATE_LIMIT_MS = 10000; // 10 seconds between checks for same code
+    this._recentChecks = new Map();
+    this.RATE_LIMIT_MS = 10000;
   }
 
   /**
-   * Verifies if a Meru payment link has been paid
+   * Fetch page HTML via native https (no axios dependency needed)
+   */
+  _fetchPage(url) {
+    return new Promise((resolve, reject) => {
+      const req = https.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; PNPtv/2.0)',
+        },
+        timeout: 15000,
+      }, (res) => {
+        // Follow redirects
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return this._fetchPage(res.headers.location).then(resolve).catch(reject);
+        }
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => resolve({ statusCode: res.statusCode, body: data }));
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
+    });
+  }
+
+  /**
+   * Verifies if a Meru payment link has been paid by parsing __NEXT_DATA__ props
    * @param {string} meruCode - The link code (e.g. "abc123xyz")
-   * @param {string} userLanguage - User language ('es' or 'en')
-   * @returns {Promise<{isPaid: boolean, message: string}>}
+   * @param {string} userLanguage - User language ('es' or 'en') — unused now but kept for API compat
+   * @returns {Promise<{isPaid: boolean, message: string, meruStatus?: string, paidAt?: string}>}
    */
   async verifyPayment(meruCode, userLanguage = 'es') {
-    // Rate limiting: prevent rapid repeated checks for same code
     const lastCheck = this._recentChecks.get(meruCode);
     if (lastCheck && Date.now() - lastCheck < this.RATE_LIMIT_MS) {
       logger.warn(`Rate limited: Meru code ${meruCode} checked too recently`);
-      return {
-        isPaid: false,
-        message: 'Please wait a few seconds before checking again',
-      };
+      return { isPaid: false, message: 'Please wait a few seconds before checking again' };
     }
     this._recentChecks.set(meruCode, Date.now());
 
-    // Clean up old entries periodically
     if (this._recentChecks.size > 100) {
       const cutoff = Date.now() - this.RATE_LIMIT_MS;
       for (const [code, ts] of this._recentChecks) {
@@ -42,53 +61,55 @@ class MeruPaymentService {
       const meruUrl = `https://pay.getmeru.com/${meruCode}`;
       logger.info(`Verifying Meru payment link: ${meruUrl}`);
 
-      const response = await axios.get(meruUrl, {
-        timeout: 15000,
-        headers: {
-          'Accept-Language': userLanguage === 'en'
-            ? 'en-US,en;q=0.9,es;q=0.8'
-            : 'es-ES,es;q=0.9,en;q=0.8',
-          'User-Agent': 'Mozilla/5.0 (compatible; PNPtv/2.0)',
-        },
-        maxRedirects: 5,
-      });
-
-      const pageContent = typeof response.data === 'string' ? response.data : '';
+      const { statusCode, body } = await this._fetchPage(meruUrl);
 
       logger.info(`Meru page loaded for code ${meruCode}`, {
-        contentLength: pageContent.length,
-        status: response.status,
+        contentLength: body.length,
+        status: statusCode,
       });
 
-      // Detect if already paid — check both languages
-      const paidPatterns = [
-        'El enlace de pago ha caducado o ya ha sido pagado',
-        'El link de pago ha caducado',
-        'ya ha sido pagado',
-        'Payment link expired or already paid',
-        'payment link has expired',
-        'already paid',
-        'expired',
-      ];
+      // Extract __NEXT_DATA__ JSON from the page
+      const nextDataMatch = body.match(/__NEXT_DATA__[^>]*>(.*?)<\/script>/s);
+      if (!nextDataMatch) {
+        logger.error(`Could not find __NEXT_DATA__ in Meru page for ${meruCode}`);
+        return { isPaid: false, message: 'Could not parse Meru page — __NEXT_DATA__ not found' };
+      }
 
-      const isPaid = paidPatterns.some(
-        (pattern) => pageContent.toLowerCase().includes(pattern.toLowerCase())
-      );
+      let nextData;
+      try {
+        nextData = JSON.parse(nextDataMatch[1]);
+      } catch (parseErr) {
+        logger.error(`Failed to parse __NEXT_DATA__ JSON for ${meruCode}:`, parseErr.message);
+        return { isPaid: false, message: 'Could not parse Meru page data' };
+      }
 
-      logger.info(`Payment verification for ${meruCode}: isPaid=${isPaid}`);
+      const paymentLink = nextData?.props?.pageProps?.paymentLink;
+      if (!paymentLink) {
+        logger.warn(`No paymentLink in __NEXT_DATA__ for ${meruCode} — link may not exist`);
+        return { isPaid: false, message: 'Payment link not found on Meru' };
+      }
+
+      const meruStatus = paymentLink.status; // "CREATED", "PAID", "EXPIRED", etc.
+      const paidAt = paymentLink.paidAt;
+      const isPaid = meruStatus === 'PAID' && paidAt !== null;
+
+      logger.info(`Meru payment verification for ${meruCode}`, {
+        meruStatus,
+        paidAt,
+        isPaid,
+      });
 
       return {
         isPaid,
         message: isPaid
-          ? 'Payment link already used or expired'
-          : 'Payment link is still active',
+          ? `Payment confirmed (paid at ${paidAt})`
+          : `Payment not completed (status: ${meruStatus})`,
+        meruStatus,
+        paidAt,
       };
     } catch (error) {
       logger.error(`Error verifying Meru payment for ${meruCode}:`, error.message);
-      return {
-        isPaid: false,
-        message: `Error checking payment: ${error.message}`,
-      };
+      return { isPaid: false, message: `Error checking payment: ${error.message}` };
     }
   }
 }

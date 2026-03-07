@@ -404,7 +404,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
     try {
       logger.info('Starting comprehensive membership status sync...');
 
-      // Step 1a: Activate member-tier users (member_monthly plan with valid expiry)
+      // Step 1a: Activate member-tier users (member-monthly plan with valid expiry)
       const activateMemberResult = await query(`
         UPDATE users
         SET subscription_status = 'active',
@@ -412,7 +412,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
             updated_at = NOW()
         WHERE plan_expiry IS NOT NULL
           AND plan_expiry > NOW()
-          AND plan_id = 'member_monthly'
+          AND plan_id = 'member-monthly'
           AND (subscription_status != 'active' OR tier != 'member')
         RETURNING id, username
       `);
@@ -429,7 +429,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
             updated_at = NOW()
         WHERE plan_expiry IS NOT NULL
           AND plan_expiry > NOW()
-          AND (plan_id IS NULL OR plan_id != 'member_monthly')
+          AND (plan_id IS NULL OR plan_id != 'member-monthly')
           AND (subscription_status != 'active' OR tier != 'PRIME')
         RETURNING id, username
       `);

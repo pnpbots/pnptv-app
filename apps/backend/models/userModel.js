@@ -5,28 +5,19 @@ const performanceMonitor = require('../utils/performanceMonitor');
 
 const TABLE = 'users';
 
-/**
- * Canonical tier values — single source of truth
- */
-const TIER = Object.freeze({
-  FREE: 'free',
-  MEMBER: 'member',
-  PRIME: 'PRIME',
-  BANNED: 'banned',
-});
+// Tier constants and helpers — re-exported from the canonical source of truth.
+const {
+  TIER,
+  TIER_LEVEL,
+  isPrime: _isPrime,
+  isBanned: _isBanned,
+  hasMinTier,
+  isMemberOrAbove: _isMemberOrAbove,
+} = require('../bot/services/accessService');
 
-/** Tier hierarchy for access checks */
-const TIER_LEVEL = Object.freeze({
-  [TIER.BANNED]: -1,
-  [TIER.FREE]: 0,
-  [TIER.MEMBER]: 1,
-  [TIER.PRIME]: 2,
-});
-
-const isPrimeTier = (tier) => tier === TIER.PRIME;
-const isBannedTier = (tier) => tier === TIER.BANNED;
-const hasMinimumTier = (userTier, requiredTier) =>
-  (TIER_LEVEL[userTier] ?? -1) >= (TIER_LEVEL[requiredTier] ?? 0);
+const isPrimeTier = (tier) => _isPrime(tier);
+const isBannedTier = (tier) => _isBanned(tier);
+const hasMinimumTier = (userTier, requiredTier) => hasMinTier(userTier, requiredTier);
 
 const FREE_DAILY_MESSAGE_LIMIT_DEFAULT = 3;
 const FREE_DAILY_MESSAGE_LIMIT_AFTER_14_DAYS = 1;
@@ -44,10 +35,7 @@ const getFreeTierMessageLimit = (user) => {
   return FREE_DAILY_MESSAGE_LIMIT_DEFAULT;
 };
 
-const isMemberOrAbove = (tier) => {
-  const t = (tier || 'free').toLowerCase();
-  return t === 'member' || t === 'prime';
-};
+const isMemberOrAbove = _isMemberOrAbove;
 
 /**
  * User Model - Handles all user data operations with PostgreSQL
@@ -493,7 +481,7 @@ class UserModel {
   }
 
   /** Plan IDs that grant the member tier (not PRIME) */
-  static MEMBER_PLAN_IDS = new Set(['member_monthly']);
+  static MEMBER_PLAN_IDS = new Set(['member-monthly']);
 
   /**
    * Update user subscription

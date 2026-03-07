@@ -150,9 +150,9 @@ const handleTelegramAuth = async (req, res) => {
 
     let user = userQuery.rows[0];
 
-    // Check for subscription migration: if user has 'free' status but should have 'active'
-    // Check against plan_expiry on the users table directly (legacy subscriptions table no longer exists)
-    if (user.subscription_status === 'free') {
+    // Check for subscription migration: if user has 'free' tier but should have 'active'
+    // tier is the source of truth for access control; subscription_status tracks lifecycle
+    if (user.tier === 'free' || !user.tier) {
       try {
         const subQuery = await query(
           `SELECT plan_expiry, plan_id
@@ -164,9 +164,10 @@ const handleTelegramAuth = async (req, res) => {
         if (subQuery.rows.length > 0 && subQuery.rows[0].plan_expiry) {
           logger.info(`Migrating active subscription for user ${user.id} (plan_expiry still valid)`);
           await query(
-            `UPDATE users SET subscription_status = 'active' WHERE id = $1`,
+            `UPDATE users SET tier = 'PRIME', subscription_status = 'active' WHERE id = $1`,
             [user.id]
           );
+          user.tier = 'PRIME';
           user.subscription_status = 'active';
         }
       } catch (migrationError) {

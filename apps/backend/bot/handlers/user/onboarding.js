@@ -654,7 +654,7 @@ const registerOnboardingHandlers = (bot) => {
         if (paymentCheck.isPaid) {
           // Payment confirmed, activate PRIME
           const userId = ctx.from.id;
-          const planId = 'lifetime_pass'; // Assuming this is the plan ID for Lifetime Pass
+          const planId = 'lifetime-pass'; // Assuming this is the plan ID for Lifetime Pass
           const product = 'lifetime-pass';
 
           const activated = await activateMembership({
@@ -700,7 +700,7 @@ const registerOnboardingHandlers = (bot) => {
               paymentMethod: 'meru',
               amount: 50,  // Standard lifetime pass price
               currency: 'USD',
-              planId: 'lifetime_pass',
+              planId: 'lifetime-pass',
               planName: 'Lifetime Pass',
               product: product || 'lifetime-pass',
               paymentReference: matchingLinkCode,  // Meru link code is the payment reference
@@ -1217,7 +1217,7 @@ If the problem persists, contact support: /support`;
     // ═══════════════════════════════════════════════════════════════
     logger.info('🔵 PASO 5️⃣: Activando membresía', { userId });
 
-    const planId = 'lifetime_pass';
+    const planId = 'lifetime-pass';
     const product = 'lifetime-pass';
 
     // Marcar código como usado en BD
@@ -1257,7 +1257,7 @@ If the problem persists, contact support: /support`;
         paymentMethod: 'meru',
         amount: 50,
         currency: 'USD',
-        planId: 'lifetime_pass',
+        planId: 'lifetime-pass',
         planName: 'Lifetime Pass',
         product: product,
         paymentReference: meruCode,

@@ -10,7 +10,7 @@
 
 const EPAYCO_SUBSCRIPTION_PLANS = {
   // PNP MEMBER - PNPMEMBER030 - $9.99 USD (monthly)
-  member_monthly: 'PNPMEMBER030',
+  'member-monthly': 'PNPMEMBER030',
 
   // PRIME Trial - 007PASS - $14.99 USD (7 days)
   'week-trial-pass': '007PASS',

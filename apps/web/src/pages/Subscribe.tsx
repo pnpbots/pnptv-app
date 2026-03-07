@@ -19,7 +19,7 @@ import { useI18n } from "@/lib/i18n";
 
 type Provider = "epayco" | "daimo" | "dash";
 
-const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
+const MEMBER_PLAN_IDS = new Set(["member-monthly"]);
 
 const RECOMMENDED_PLAN = "yearly_pass";
 
@@ -45,7 +45,7 @@ export default function Subscribe() {
   const s = t.subscribe;
 
   const PLAN_FEATURES: Record<string, string[]> = {
-    "member_monthly": [
+    "member-monthly": [
       s.featureMember1,
       s.featureMember2,
       s.featureMember3,

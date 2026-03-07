@@ -153,7 +153,7 @@ const registerActivationHandlers = (bot) => {
         return;
       }
 
-      const planId = 'lifetime_pass';
+      const planId = 'lifetime-pass';
       const successMessage = MessageTemplates.buildLifetimePassMessage(lang);
 
       const activated = await activateMembership({
@@ -371,7 +371,7 @@ const registerActivationHandlers = (bot) => {
       const activated = await activateMembership({
         ctx,
         userId: targetUserId,
-        planId: 'lifetime100_promo',
+        planId: 'lifetime100-promo',
         product,
         successMessage,
       });
@@ -398,7 +398,7 @@ const registerActivationHandlers = (bot) => {
           paymentMethod: 'lifetime100',
           amount: 100,  // Standard lifetime100 price
           currency: 'USD',
-          planId: 'lifetime100_promo',
+          planId: 'lifetime100-promo',
           planName: 'Lifetime100 Promo',
           product: product || 'lifetime100-promo',
           paymentReference: code,  // Activation code is the payment reference

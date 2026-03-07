@@ -58,7 +58,7 @@ export default function Join() {
     });
     getSubscriptionPlans().catch(() => null).then((res) => {
       if (res?.plans) {
-        setMemberPlan(res.plans.find((p: SubscriptionPlan) => p.id === "member_monthly") ?? null);
+        setMemberPlan(res.plans.find((p: SubscriptionPlan) => p.id === "member-monthly") ?? null);
         setPrimePlan(res.plans.find((p: SubscriptionPlan) => p.id === "monthly-pass") ?? null);
       }
     });

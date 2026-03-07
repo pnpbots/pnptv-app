@@ -144,24 +144,24 @@ const registerSupportRoutingHandlers = (bot) => {
       }
 
       let durationDays = 30;
-      let planId = 'monthly_pass';
+      let planId = 'monthly-pass';
       let planName = 'Monthly Pass (30 días)';
       let isLifetime = false;
 
       if (planOrDays) {
         const input = planOrDays.toLowerCase();
         const planMappings = {
-          lifetime: { planId: 'lifetime_pass', planName: 'Lifetime Pass', days: 36500, isLifetime: true },
-          lifetime_pass: { planId: 'lifetime_pass', planName: 'Lifetime Pass', days: 36500, isLifetime: true },
-          forever: { planId: 'lifetime_pass', planName: 'Lifetime Pass', days: 36500, isLifetime: true },
+          lifetime: { planId: 'lifetime-pass', planName: 'Lifetime Pass', days: 36500, isLifetime: true },
+          lifetime_pass: { planId: 'lifetime-pass', planName: 'Lifetime Pass', days: 36500, isLifetime: true },
+          forever: { planId: 'lifetime-pass', planName: 'Lifetime Pass', days: 36500, isLifetime: true },
           week: { planId: 'week_pass', planName: 'Week Pass (7 días)', days: 7 },
           week_pass: { planId: 'week_pass', planName: 'Week Pass (7 días)', days: 7 },
           weekly: { planId: 'week_pass', planName: 'Week Pass (7 días)', days: 7 },
           semanal: { planId: 'week_pass', planName: 'Week Pass (7 días)', days: 7 },
-          month: { planId: 'monthly_pass', planName: 'Monthly Pass (30 días)', days: 30 },
-          monthly: { planId: 'monthly_pass', planName: 'Monthly Pass (30 días)', days: 30 },
-          monthly_pass: { planId: 'monthly_pass', planName: 'Monthly Pass (30 días)', days: 30 },
-          mensual: { planId: 'monthly_pass', planName: 'Monthly Pass (30 días)', days: 30 },
+          month: { planId: 'monthly-pass', planName: 'Monthly Pass (30 días)', days: 30 },
+          monthly: { planId: 'monthly-pass', planName: 'Monthly Pass (30 días)', days: 30 },
+          monthly_pass: { planId: 'monthly-pass', planName: 'Monthly Pass (30 días)', days: 30 },
+          mensual: { planId: 'monthly-pass', planName: 'Monthly Pass (30 días)', days: 30 },
           crystal: { planId: 'crystal_pass', planName: 'Crystal Pass (120 días)', days: 120 },
           crystal_pass: { planId: 'crystal_pass', planName: 'Crystal Pass (120 días)', days: 120 },
           year: { planId: 'yearly_pass', planName: 'Yearly Pass (365 días)', days: 365 },
@@ -176,7 +176,7 @@ const registerSupportRoutingHandlers = (bot) => {
             planId = 'week_pass';
             planName = 'Week Pass (7 días)';
           } else if (durationDays === 30) {
-            planId = 'monthly_pass';
+            planId = 'monthly-pass';
             planName = 'Monthly Pass (30 días)';
           } else if (durationDays === 120) {
             planId = 'crystal_pass';
@@ -185,7 +185,7 @@ const registerSupportRoutingHandlers = (bot) => {
             planId = 'yearly_pass';
             planName = 'Yearly Pass (365 días)';
           } else if (durationDays >= 36500) {
-            planId = 'lifetime_pass';
+            planId = 'lifetime-pass';
             planName = 'Lifetime Pass';
             isLifetime = true;
           } else {
