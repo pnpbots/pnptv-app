@@ -1,14 +1,13 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
-import { LivePlayer } from "@/components/LivePlayer";
-import { Card, Badge, Skeleton, Button } from "@pnptv/ui-kit";
+import { Card, Skeleton, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 import { useI18n } from "@/lib/i18n";
 import {
-  getLiveStreams,
   getAllPerformers,
   getRecentTips,
   sendTip,
@@ -19,7 +18,6 @@ import {
   linkDPNS,
   getWalletHistory,
   TIP_AMOUNTS,
-  type LiveStream,
   type FeaturedPerformer,
   type RecentTip,
   type TokenPackage,
@@ -47,12 +45,8 @@ export default function Live() {
   const { isAuthenticated, login, user } = useAuth();
   const t = useI18n();
   const isCreator = isAuthenticated && (user?.role === "admin" || user?.role === "superadmin" || user?.role === "creator");
+  const navigate = useNavigate();
   const { showTutorial, dismissTutorial } = useTutorial("live");
-
-  const [streams, setStreams] = useState<LiveStream[]>([]);
-  const [activeStream, setActiveStream] = useState<LiveStream | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   // Performers
   const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
@@ -88,9 +82,6 @@ export default function Live() {
   const [showBooking, setShowBooking] = useState(false);
   const [bookingLoaded, setBookingLoaded] = useState(false);
 
-  // Chat toggle
-  const [showChat, setShowChat] = useState(true);
-
   // Go Live
   const [showGoLive, setShowGoLive] = useState(false);
   const [rtmpInfo, setRtmpInfo] = useState<{ rtmpUrl: string; streamKey: string } | null>(null);
@@ -98,48 +89,11 @@ export default function Live() {
   const [goLiveError, setGoLiveError] = useState<string | null>(null);
   const [showStreamKey, setShowStreamKey] = useState(false);
 
-  // Live chat
-  const [chatInput, setChatInput] = useState("");
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  // Socket
+  // Socket (null stream — connected only for wallet/tip push events)
   const {
-    messages: chatMessages,
-    viewerCount,
-    isConnected: chatConnected,
-    sendMessage,
     latestTip,
     walletBalance: socketBalance,
-    socketError,
-  } = useLiveSocket(activeStream?.id ?? null);
-
-  // Load streams + auto-refresh every 30s
-  const loadStreams = useCallback(() => {
-    return getLiveStreams()
-      .then((data) => {
-        const liveStreams = data.streams || [];
-        setStreams(liveStreams);
-        setActiveStream((prev) => {
-          // Keep selection if stream still exists; pick first live stream otherwise
-          if (prev) {
-            const still = liveStreams.find((s) => s.id === prev.id);
-            if (still) return still;
-          }
-          const live = liveStreams.find((s) => s.isLive);
-          if (live) return live;
-          return liveStreams.length > 0 ? liveStreams[0] : null;
-        });
-        setError(null);
-      })
-      .catch((err) => setError(err.message));
-  }, []);
-
-  useEffect(() => {
-    setIsLoading(true);
-    loadStreams().finally(() => setIsLoading(false));
-    const interval = setInterval(loadStreams, 30000);
-    return () => clearInterval(interval);
-  }, [loadStreams]);
+  } = useLiveSocket(null);
 
   // Load performers
   useEffect(() => {
@@ -152,7 +106,7 @@ export default function Live() {
           setSelectedPerformer(p[0]);
         }
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load performers"))
+      .catch(() => {})
       .finally(() => setPerformersLoading(false));
   }, []);
 
@@ -204,11 +158,6 @@ export default function Live() {
       return next;
     });
   }, [latestTip]);
-
-  // Auto-scroll chat to bottom
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages]);
 
   const handleTip = async (amount: number) => {
     if (!isAuthenticated) { login(); return; }
@@ -332,299 +281,143 @@ export default function Live() {
       </Helmet>
       {showTutorial && <TutorialOverlay section="live" onDismiss={dismissTutorial} />}
 
-      {/* ── Hero Stream Section ── */}
-      <div className="relative -mx-4 -mt-6 sm:-mx-6 sm:-mt-6">
-        {/* Player area */}
-        {isLoading ? (
-          <Skeleton className="w-full aspect-video" />
-        ) : activeStream ? (
-          <div className="relative">
-            <LivePlayer src={activeStream.hlsUrl} className="rounded-none" />
-
-            {/* Overlay controls on top of player */}
-            <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
-              {isCreator && (
-                <button
-                  onClick={handleGoLive}
-                  disabled={goLiveLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-black/60 backdrop-blur-sm border border-white/10 hover:bg-black/80 disabled:opacity-50 transition-all"
-                >
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                  {goLiveLoading ? t.live.goLiveLoading : t.live.goLive}
-                </button>
-              )}
-              <button
-                onClick={loadStreams}
-                className="p-1.5 rounded-lg bg-black/60 backdrop-blur-sm border border-white/10 text-white/70 hover:text-white transition-colors"
-                title={t.live.refreshStreams}
-                aria-label={t.live.refreshStreams}
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Bottom info bar overlaid on player */}
-            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-4 pb-3 pt-10">
-              <div className="flex items-center gap-2 flex-wrap">
-                {activeStream.isLive && (
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                    <span className="text-xs font-semibold text-white">{t.live.statusLive}</span>
-                  </span>
-                )}
-                {viewerCount > 0 && (
-                  <span className="flex items-center gap-1 text-xs text-white/70">
-                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
-                    </svg>
-                    {t.live.watching(viewerCount)}
-                  </span>
-                )}
-                <span className="text-sm text-white font-medium">{activeStream.name}</span>
-              </div>
-              {activeStream.description && (
-                <p className="text-xs text-white/60 mt-1">{activeStream.description}</p>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="relative w-full aspect-video bg-gradient-to-br from-pnp-surface via-black to-pnp-surface">
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <svg className="w-12 h-12 text-white/20 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-              <p className="text-white/40 text-sm font-medium">{t.live.noStreamsAvailable}</p>
-              <p className="text-white/25 text-xs mt-1">{t.live.noStreamsHint}</p>
-            </div>
-
-            {/* Overlay controls */}
-            <div className="absolute top-3 right-3 flex items-center gap-2">
-              {isCreator && (
-                <button
-                  onClick={handleGoLive}
-                  disabled={goLiveLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-gradient disabled:opacity-50 transition-all"
-                >
-                  <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                  {goLiveLoading ? t.live.goLiveLoading : t.live.goLive}
-                </button>
-              )}
-              <button
-                onClick={loadStreams}
-                className="p-1.5 rounded-lg bg-black/40 text-white/50 hover:text-white transition-colors"
-                title={t.live.refreshStreams}
-                aria-label={t.live.refreshStreams}
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Featured performers carousel at bottom of offline hero */}
-            {performers.length > 0 && (
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-4 pb-3 pt-8">
-                <div className="flex gap-3 overflow-x-auto pb-1">
-                  {performers.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => setSelectedPerformer(p)}
-                      className="flex flex-col items-center flex-shrink-0 group"
-                    >
-                      <div className={`w-12 h-12 rounded-full overflow-hidden border-2 transition-colors ${selectedPerformer?.id === p.id ? "border-pnp-accent" : "border-white/20 group-hover:border-white/40"}`}>
-                        <img
-                          src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
-                          alt={p.displayName}
-                          className="w-full h-full object-cover"
-                          onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
-                        />
-                      </div>
-                      <span className="text-[10px] text-white/70 mt-1 max-w-[60px] truncate">{p.displayName}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-        {goLiveError && (
-          <p className="text-[10px] text-pnp-error text-center mt-1 px-4">{goLiveError}</p>
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h1 className="text-lg font-bold text-pnp-textPrimary">{t.live.liveTitle}</h1>
+          <p className="text-xs text-pnp-textSecondary mt-0.5">{t.live.liveSubtitle}</p>
+        </div>
+        {isCreator && (
+          <button
+            onClick={handleGoLive}
+            disabled={goLiveLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-gradient disabled:opacity-50 transition-all"
+          >
+            <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+            {goLiveLoading ? t.live.goLiveLoading : t.live.goLive}
+          </button>
         )}
       </div>
+      {goLiveError && (
+        <p className="text-[10px] text-pnp-error mb-2">{goLiveError}</p>
+      )}
 
-      {/* ── Performer selector + Tip bar (compact, right below stream) ── */}
-      <div className="mt-3">
-        {/* Performer pills */}
-        {performers.length > 0 && (
-          <div className="flex gap-2 mb-2 overflow-x-auto pb-1 -mx-1 px-1">
-            {performers.map((p) => (
+      {/* ── Performer Grid ── */}
+      {performersLoading ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
+          {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-44 rounded-xl" />)}
+        </div>
+      ) : performers.length > 0 ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
+          {performers.map((p) => (
+            <div
+              key={p.id}
+              className="rounded-xl border border-pnp-border bg-pnp-surface p-3 flex flex-col items-center text-center"
+            >
+              <img
+                src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
+                alt={p.displayName}
+                className="w-20 h-20 rounded-full object-cover mb-2 border-2 border-pnp-border"
+                onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
+              />
+              <span className="text-sm font-medium text-pnp-textPrimary truncate max-w-full">{p.displayName}</span>
+              {p.isFeatured && (
+                <span className="text-[10px] mt-0.5 font-semibold" style={{ color: "#5ED1C4" }}>{t.live.performerFeatured}</span>
+              )}
+              <div className="mt-2 w-full flex gap-1.5">
+                <button
+                  onClick={() => navigate(`/live/${p.id}`)}
+                  className="flex-1 py-1.5 rounded-lg font-semibold text-xs text-pnp-textPrimary bg-pnp-surface border border-pnp-border hover:border-pnp-accent/40 active:scale-95 transition-all"
+                >
+                  Watch
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectedPerformer(p);
+                    handleTip(TIP_AMOUNTS[0]);
+                  }}
+                  disabled={tipping}
+                  className="flex-1 py-1.5 rounded-lg font-semibold text-xs text-white btn-gradient active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  {tipPaymentTab === "tokens" ? `${TIP_AMOUNTS[0]}T` : `$${TIP_AMOUNTS[0]}`}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-pnp-textSecondary text-center py-8">{t.live.noStreamsAvailable}</p>
+      )}
+
+      {/* ── Tip Panel (shown when a performer is selected) ── */}
+      {selectedPerformer && (
+        <Card className="mb-3">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-medium text-pnp-textPrimary">{t.live.sendATip}</h3>
+            <span className="text-[10px] text-gradient">{t.live.tipTo(selectedPerformer.displayName)}</span>
+          </div>
+
+          {isAuthenticated && (
+            <div className="flex gap-1 mb-2 p-1 bg-pnp-surface rounded-lg">
               <button
-                key={p.id}
-                onClick={() => setSelectedPerformer(p)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs whitespace-nowrap transition-colors ${
-                  selectedPerformer?.id === p.id
-                    ? "badge-gradient text-white"
-                    : "bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/40"
+                onClick={() => setTipPaymentTab("tokens")}
+                className={`flex-1 py-1 rounded-md text-[10px] font-semibold transition-colors ${
+                  tipPaymentTab === "tokens" ? "text-white btn-gradient" : "text-pnp-textSecondary"
                 }`}
               >
-                {isValidPhotoUrl(p.photoUrl) ? (
-                  <img
-                    src={p.photoUrl}
-                    alt={`${p.displayName}'s avatar`}
-                    className="w-4 h-4 rounded-full object-cover"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                  />
-                ) : (
-                  <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
-                    {p.displayName.charAt(0)}
-                  </span>
-                )}
-                {p.displayName}
+                {t.live.tabTokens} {tokenBalance !== null && `(${tokenBalance})`}
               </button>
-            ))}
-          </div>
-        )}
+              <button
+                onClick={() => setTipPaymentTab("daimo")}
+                className={`flex-1 py-1 rounded-md text-[10px] font-semibold transition-colors ${
+                  tipPaymentTab === "daimo" ? "text-white btn-gradient" : "text-pnp-textSecondary"
+                }`}
+              >
+                {t.live.tabDaimoCrypto}
+              </button>
+            </div>
+          )}
 
-        {/* Tip buttons — always visible, compact */}
-        <div className="flex items-center gap-2">
-          <div className="flex gap-1.5 flex-1 overflow-x-auto">
+          <div className="flex gap-2 flex-wrap">
             {TIP_AMOUNTS.map((amount) => (
               <button
                 key={amount}
                 onClick={() => handleTip(amount)}
                 disabled={tipping}
-                className="px-3 py-1.5 rounded-lg font-semibold text-xs transition-all text-white active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed btn-gradient whitespace-nowrap"
+                className="flex-1 min-w-[56px] py-2 rounded-lg font-semibold text-sm transition-all text-white active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed btn-gradient"
               >
                 {tipPaymentTab === "tokens" ? `${amount}T` : `$${amount}`}
               </button>
             ))}
           </div>
-          {/* Payment method toggle */}
-          {isAuthenticated && (
-            <button
-              onClick={() => setTipPaymentTab(tipPaymentTab === "tokens" ? "daimo" : "tokens")}
-              className="flex-shrink-0 px-2 py-1.5 rounded-lg text-[10px] font-medium bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/40 transition-colors"
-              title={tipPaymentTab === "tokens" ? t.live.tabDaimoCrypto : t.live.tabTokens}
-            >
-              {tipPaymentTab === "tokens" ? "T" : "$"}
-            </button>
+
+          <button
+            onClick={() => setShowTipMessage(!showTipMessage)}
+            className="text-[10px] text-pnp-textSecondary mt-2 hover:text-pnp-accent transition-colors"
+          >
+            {showTipMessage ? t.live.hideMessage : t.live.addAMessage}
+          </button>
+          {showTipMessage && (
+            <input
+              type="text"
+              placeholder={t.live.tipMessagePlaceholder}
+              value={tipMessage}
+              onChange={(e) => setTipMessage(e.target.value)}
+              maxLength={200}
+              className="w-full mt-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+            />
           )}
-          {/* Chat toggle */}
-          {activeStream && (
-            <button
-              onClick={() => setShowChat(!showChat)}
-              className={`flex-shrink-0 p-1.5 rounded-lg border transition-colors ${showChat ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/40"}`}
-              title={t.live.liveChatTitle}
-              aria-label={t.live.liveChatTitle}
-              aria-pressed={showChat}
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
-            </button>
-          )}
-        </div>
-        {selectedPerformer && (
-          <p className="text-[10px] text-gradient mt-1">{t.live.tipTo(selectedPerformer.displayName)}</p>
-        )}
-        {tipError && <p className="text-[10px] text-pnp-error mt-1">{tipError}</p>}
-        {tipSuccess && <p className="text-[10px] mt-1 text-gradient">{tipSuccess}</p>}
-        {!isAuthenticated && (
-          <p className="text-[10px] text-pnp-textSecondary mt-1">{t.live.loginToTip}</p>
-        )}
-
-        {/* Tip message input (expandable) */}
-        <button
-          onClick={() => setShowTipMessage(!showTipMessage)}
-          className="text-[10px] text-pnp-textSecondary mt-1 hover:text-pnp-accent transition-colors"
-        >
-          {showTipMessage ? t.live.hideMessage : t.live.addAMessage}
-        </button>
-        {showTipMessage && (
-          <input
-            type="text"
-            placeholder={t.live.tipMessagePlaceholder}
-            value={tipMessage}
-            onChange={(e) => setTipMessage(e.target.value)}
-            maxLength={200}
-            className="w-full mt-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
-          />
-        )}
-      </div>
-
-      {/* ── Live Chat (collapsible) ── */}
-      {activeStream && showChat && (
-        <Card className="mt-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <h3 className="text-xs font-medium text-pnp-textPrimary">{t.live.liveChatTitle}</h3>
-              <span className={`flex items-center gap-1 text-[10px] ${chatConnected ? "text-pnp-textSecondary" : "text-pnp-textSecondary/50"}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${chatConnected ? "bg-green-500" : "bg-pnp-textSecondary/30"}`} />
-                {chatConnected ? t.live.chatConnected : t.live.chatConnecting}
-              </span>
-            </div>
-            {socketError && <span className="text-[10px] text-pnp-error">{socketError}</span>}
-          </div>
-
-          <div className="h-36 overflow-y-auto space-y-1 mb-2 pr-1" style={{ scrollbarWidth: "thin" }}>
-            {chatMessages.length === 0 ? (
-              <p className="text-[10px] text-pnp-textSecondary text-center py-4">
-                {chatConnected ? t.live.chatBeFirstToSay : t.live.chatConnectingToChat}
-              </p>
-            ) : (
-              chatMessages.map((msg) => (
-                <div key={msg.id} className="text-xs">
-                  <span className="font-medium text-gradient">@{msg.username}</span>
-                  <span className="text-pnp-textSecondary mx-1">·</span>
-                  <span className="text-pnp-textPrimary">{msg.content}</span>
-                </div>
-              ))
-            )}
-            <div ref={chatEndRef} />
-          </div>
-
-          {isAuthenticated ? (
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder={t.live.saySomething}
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && chatInput.trim()) {
-                    sendMessage(chatInput.trim());
-                    setChatInput("");
-                  }
-                }}
-                maxLength={500}
-                className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
-              />
-              <button
-                onClick={() => {
-                  if (chatInput.trim()) {
-                    sendMessage(chatInput.trim());
-                    setChatInput("");
-                  }
-                }}
-                className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium"
-                aria-label={t.live.sendChatMessage}
-              >
-                {t.live.send}
-              </button>
-            </div>
-          ) : (
-            <button onClick={login} className="text-xs text-pnp-accent hover:underline">
-              {t.live.loginToChat}
-            </button>
+          {tipError && <p className="text-[10px] text-pnp-error mt-1">{tipError}</p>}
+          {tipSuccess && <p className="text-[10px] mt-1 text-gradient">{tipSuccess}</p>}
+          {!isAuthenticated && (
+            <p className="text-[10px] text-pnp-textSecondary mt-2">{t.live.loginToTip}</p>
           )}
         </Card>
       )}
 
       {/* ── Recent Tips Ticker ── */}
       {recentTips.length > 0 && (
-        <div className="mt-3 mb-4">
+        <div className="mb-3">
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
             {recentTips.map((tip) => (
               <div key={tip.id} className="flex-shrink-0 px-2.5 py-1 rounded-full bg-pnp-surface border border-pnp-border text-[10px]">
@@ -638,9 +431,9 @@ export default function Live() {
         </div>
       )}
 
-      {/* ── Wallet (compact) ── */}
+      {/* ── Wallet ── */}
       {isAuthenticated && (
-        <div className="flex items-center justify-between py-2 border-t border-white/5 mt-2">
+        <div className="flex items-center justify-between py-2 border-t border-white/5">
           <div className="flex items-center gap-2">
             <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>
               <svg viewBox="0 0 24 24" className="w-3 h-3 fill-white">
@@ -650,9 +443,7 @@ export default function Live() {
             <span className="text-xs font-semibold text-pnp-textPrimary">
               {tokenBalance === null ? "—" : `${tokenBalance} ${t.live.tokens}`}
             </span>
-            {dpnsHandle && (
-              <span className="text-[10px] text-pnp-textSecondary">@{dpnsHandle}</span>
-            )}
+            {dpnsHandle && <span className="text-[10px] text-pnp-textSecondary">@{dpnsHandle}</span>}
           </div>
           <div className="flex items-center gap-2">
             {!dpnsHandle && (
@@ -682,68 +473,6 @@ export default function Live() {
             {dpnsSaving ? t.live.saving : t.live.save}
           </button>
         </div>
-      )}
-
-      {/* ── Stream list (if multiple) ── */}
-      {streams.length > 1 && (
-        <div className="mt-3">
-          <h2 className="text-xs font-medium text-pnp-textSecondary uppercase tracking-wider mb-2">{t.live.allStreams}</h2>
-          <div className="space-y-1.5 mb-4">
-            {streams.map((stream) => (
-              <button
-                key={stream.id}
-                onClick={() => setActiveStream(stream)}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg border transition-colors ${activeStream?.id === stream.id ? "border-pnp-accent bg-pnp-accent/5" : "border-pnp-border bg-pnp-surface hover:border-pnp-accent/30"}`}
-              >
-                <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${stream.isLive ? "bg-red-500 animate-pulse" : "bg-pnp-textSecondary/30"}`} />
-                <span className="text-sm text-pnp-textPrimary font-medium flex-1 text-left truncate">{stream.name}</span>
-                <span className={`text-[10px] font-semibold ${stream.isLive ? "text-red-400" : "text-pnp-textSecondary"}`}>
-                  {stream.isLive ? t.live.statusLive : t.live.statusOffline}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── Performers Grid ── */}
-      {!performersLoading && performers.length > 0 && (
-        <div className="mt-3">
-          <h2 className="text-xs font-medium text-pnp-textSecondary uppercase tracking-wider mb-2">{t.live.performers}</h2>
-          <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
-            {performers.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setSelectedPerformer(p)}
-                className={`flex flex-col items-center flex-shrink-0 p-2 rounded-xl border transition-colors min-w-[80px] ${selectedPerformer?.id === p.id ? "border-pnp-accent bg-pnp-accent/5" : "border-pnp-border bg-pnp-surface hover:border-pnp-accent/30"}`}
-              >
-                <img
-                  src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
-                  alt={p.displayName}
-                  className="w-12 h-12 rounded-full object-cover mb-1.5"
-                  onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
-                />
-                <span className="text-xs font-medium text-pnp-textPrimary truncate max-w-[70px]">{p.displayName}</span>
-                {p.isFeatured && (
-                  <span className="text-[9px] mt-0.5" style={{ color: "#5ED1C4" }}>{t.live.performerFeatured}</span>
-                )}
-                {selectedPerformer?.id === p.id && (
-                  <span className="text-[9px] mt-0.5 text-gradient font-medium">{t.live.performerTipping}</span>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {performersLoading && (
-        <div className="flex gap-3 mt-3">
-          {[1, 2, 3].map((i) => <Skeleton key={i} className="w-20 h-24 rounded-xl flex-shrink-0" />)}
-        </div>
-      )}
-
-      {error && (
-        <p className="text-xs text-pnp-textSecondary mt-4">{t.live.streamServiceUnavailable}</p>
       )}
 
       {/* Book a Session */}

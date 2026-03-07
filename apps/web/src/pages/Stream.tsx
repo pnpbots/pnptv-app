@@ -1,0 +1,293 @@
+import React, { useState, useEffect, useCallback } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { Helmet } from "react-helmet-async";
+import { Card, Skeleton } from "@pnptv/ui-kit";
+import { useAuth } from "@/hooks/useAuth";
+import { useLiveSocket } from "@/hooks/useLiveSocket";
+import { useI18n } from "@/lib/i18n";
+import { LivePlayer } from "@/components/LivePlayer";
+import {
+  getLiveStreams,
+  sendTip,
+  TIP_AMOUNTS,
+  type LiveStream,
+  type RecentTip,
+  getRecentTips,
+} from "@/lib/api";
+
+export default function Stream() {
+  const { streamId } = useParams<{ streamId: string }>();
+  const navigate = useNavigate();
+  const { t } = useI18n();
+  const { isAuthenticated, login } = useAuth();
+
+  const [stream, setStream] = useState<LiveStream | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Chat & tips
+  const [chatInput, setChatInput] = useState("");
+  const [tipPaymentTab, setTipPaymentTab] = useState<"tokens" | "daimo">("tokens");
+  const [tipping, setTipping] = useState(false);
+  const [tipError, setTipError] = useState<string | null>(null);
+  const [tipSuccess, setTipSuccess] = useState<string | null>(null);
+  const [recentTips, setRecentTips] = useState<RecentTip[]>([]);
+
+  const {
+    messages: chatMessages,
+    viewerCount,
+    isConnected: chatConnected,
+    sendMessage,
+    latestTip,
+    socketError,
+  } = useLiveSocket(streamId || null);
+
+  // Load stream info
+  const loadStream = useCallback(() => {
+    if (!streamId) return Promise.resolve();
+    return getLiveStreams()
+      .then((data) => {
+        const found = (data.streams || []).find((s) => s.id === streamId);
+        if (found) {
+          setStream(found);
+          setError(null);
+        } else {
+          setError("Stream not found");
+        }
+      })
+      .catch((err) => setError(err.message));
+  }, [streamId]);
+
+  useEffect(() => {
+    setLoading(true);
+    loadStream().finally(() => setLoading(false));
+    const interval = setInterval(loadStream, 30000);
+    return () => clearInterval(interval);
+  }, [loadStream]);
+
+  // Load recent tips
+  const loadTips = useCallback(() => {
+    getRecentTips()
+      .then((data) => setRecentTips((data.tips || []).slice(0, 5)))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadTips();
+    const interval = setInterval(loadTips, 15000);
+    return () => clearInterval(interval);
+  }, [loadTips]);
+
+  // Socket tip → recent tips
+  useEffect(() => {
+    if (!latestTip) return;
+    const mapped: RecentTip = {
+      id: latestTip.id,
+      amount: latestTip.amount,
+      user_username: latestTip.username,
+      model_name: latestTip.performerName,
+      created_at: latestTip.createdAt,
+      payment_status: "completed",
+    };
+    setRecentTips((prev) => [mapped, ...prev.filter((t) => t.id !== mapped.id)].slice(0, 5));
+  }, [latestTip]);
+
+  const handleTip = async (amount: number) => {
+    if (!isAuthenticated) { login(); return; }
+    setTipping(true);
+    setTipError(null);
+    setTipSuccess(null);
+    try {
+      await sendTip({ amount, performerId: streamId || "", paymentMethod: tipPaymentTab });
+      setTipSuccess(`${amount}T sent!`);
+      setTimeout(() => setTipSuccess(null), 3000);
+    } catch (err) {
+      setTipError(err instanceof Error ? err.message : "Tip failed");
+    } finally {
+      setTipping(false);
+    }
+  };
+
+  const chatEndRef = React.useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
+  const formatTimeAgo = (dateStr: string) => {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "now";
+    if (mins < 60) return `${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h`;
+    return `${Math.floor(hrs / 24)}d`;
+  };
+
+  if (loading) {
+    return (
+      <div className="page-container">
+        <Skeleton className="w-full rounded-xl" style={{ aspectRatio: "16/9" }} />
+        <Skeleton className="h-10 mt-3 rounded-lg" />
+        <Skeleton className="h-40 mt-3 rounded-xl" />
+      </div>
+    );
+  }
+
+  if (error || !stream) {
+    return (
+      <div className="page-container text-center py-20">
+        <p className="text-pnp-textSecondary mb-4">{error || "Stream not found"}</p>
+        <button onClick={() => navigate("/live")} className="text-sm text-pnp-accent hover:underline">
+          Back to Live
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page-container space-y-3">
+      <Helmet>
+        <title>{stream.name} — PNPtv Live</title>
+        <meta name="description" content={stream.description || `Watch ${stream.name} live on PNPtv`} />
+      </Helmet>
+
+      {/* Back link */}
+      <button onClick={() => navigate("/live")} className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors">
+        ← Back to Live
+      </button>
+
+      {/* Video Player */}
+      <div className="relative -mx-4 sm:-mx-6">
+        <LivePlayer src={stream.hlsUrl} title={stream.name} />
+        {/* Overlay */}
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-4 pb-3 pt-10">
+          <div className="flex items-center gap-2 flex-wrap">
+            {stream.isLive && (
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-xs font-semibold text-white">LIVE</span>
+              </span>
+            )}
+            {viewerCount > 0 && (
+              <span className="flex items-center gap-1 text-xs text-white/70">
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
+                </svg>
+                {viewerCount} watching
+              </span>
+            )}
+            <span className="text-sm text-white font-medium">{stream.name}</span>
+          </div>
+          {stream.description && (
+            <p className="text-xs text-white/60 mt-1">{stream.description}</p>
+          )}
+        </div>
+      </div>
+
+      {/* Tip bar */}
+      <div className="flex items-center gap-2">
+        <div className="flex gap-1.5 flex-1 overflow-x-auto">
+          {TIP_AMOUNTS.map((amount) => (
+            <button
+              key={amount}
+              onClick={() => handleTip(amount)}
+              disabled={tipping}
+              className="px-3 py-1.5 rounded-lg font-semibold text-xs transition-all text-white active:scale-95 disabled:opacity-50 btn-gradient whitespace-nowrap"
+            >
+              {tipPaymentTab === "tokens" ? `${amount}T` : `$${amount}`}
+            </button>
+          ))}
+        </div>
+        {isAuthenticated && (
+          <button
+            onClick={() => setTipPaymentTab(tipPaymentTab === "tokens" ? "daimo" : "tokens")}
+            className="flex-shrink-0 px-2 py-1.5 rounded-lg text-[10px] font-medium bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/40 transition-colors"
+          >
+            {tipPaymentTab === "tokens" ? "T" : "$"}
+          </button>
+        )}
+      </div>
+      {tipError && <p className="text-[10px] text-pnp-error">{tipError}</p>}
+      {tipSuccess && <p className="text-[10px] text-gradient">{tipSuccess}</p>}
+
+      {/* Recent tips */}
+      {recentTips.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+          {recentTips.map((tip) => (
+            <div key={tip.id} className="flex-shrink-0 px-2.5 py-1 rounded-full bg-pnp-surface border border-pnp-border text-[10px]">
+              <span className="text-gradient font-medium">${tip.amount}</span>
+              <span className="text-pnp-textSecondary mx-1">by</span>
+              <span className="text-pnp-textPrimary">@{tip.user_username}</span>
+              <span className="text-pnp-textSecondary/50 ml-1">{formatTimeAgo(tip.created_at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Live Chat */}
+      <Card>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-medium text-pnp-textPrimary">Live Chat</h3>
+            <span className={`flex items-center gap-1 text-[10px] ${chatConnected ? "text-pnp-textSecondary" : "text-pnp-textSecondary/50"}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${chatConnected ? "bg-green-500" : "bg-pnp-textSecondary/30"}`} />
+              {chatConnected ? "Connected" : "Connecting..."}
+            </span>
+          </div>
+          {socketError && <span className="text-[10px] text-pnp-error">{socketError}</span>}
+        </div>
+
+        <div className="h-48 overflow-y-auto space-y-1 mb-2 pr-1" style={{ scrollbarWidth: "thin" }}>
+          {chatMessages.length === 0 ? (
+            <p className="text-[10px] text-pnp-textSecondary text-center py-4">
+              {chatConnected ? "Be the first to say something!" : "Connecting to chat..."}
+            </p>
+          ) : (
+            chatMessages.map((msg) => (
+              <div key={msg.id} className="text-xs">
+                <span className="font-medium text-gradient">@{msg.username}</span>
+                <span className="text-pnp-textSecondary mx-1">·</span>
+                <span className="text-pnp-textPrimary">{msg.content}</span>
+              </div>
+            ))
+          )}
+          <div ref={chatEndRef} />
+        </div>
+
+        {isAuthenticated ? (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Type a message..."
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && chatInput.trim()) {
+                  sendMessage(chatInput.trim());
+                  setChatInput("");
+                }
+              }}
+              maxLength={500}
+              className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+            />
+            <button
+              onClick={() => {
+                if (chatInput.trim()) {
+                  sendMessage(chatInput.trim());
+                  setChatInput("");
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium"
+            >
+              Send
+            </button>
+          </div>
+        ) : (
+          <button onClick={login} className="text-xs text-pnp-accent hover:underline">
+            Log in to chat
+          </button>
+        )}
+      </Card>
+    </div>
+  );
+}

@@ -228,6 +228,8 @@ class MembershipCleanupService {
         WHERE subscription_status = 'active'
         AND plan_expiry IS NOT NULL
         AND plan_expiry <= NOW()
+        AND plan_id NOT ILIKE '%lifetime%'
+        AND plan_id NOT ILIKE '%life-time%'
       `);
 
       logger.info(`Found ${expiredActiveUsers.rows.length} users with expired 'active' subscriptions`);

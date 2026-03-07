@@ -378,6 +378,8 @@ export default function Home() {
                           <video
                             src={post.media_url}
                             controls
+                            playsInline
+                            muted
                             className="w-full max-h-48 rounded-lg object-cover"
                             preload="metadata"
                             onError={(e) => { (e.target as HTMLVideoElement).parentElement!.style.display = "none"; }}

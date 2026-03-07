@@ -706,7 +706,7 @@ export default function Chat() {
     const showCallBanner = !callUrl && callState.isActive;
 
     return (
-      <div className="relative flex flex-col" style={{ height: "calc(100vh - 5rem)" }}>
+      <div className="relative flex flex-col" style={{ height: "calc(100dvh - 5rem)" }}>
         {/* Incoming call invite toast */}
         {inviteNotif && (
           <div

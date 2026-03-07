@@ -834,7 +834,7 @@ export default function Booking() {
 
   // ─── Map ready state ────────────────────────────────────────────
   return (
-    <div className="page-container !p-0 relative" style={{ height: "calc(100vh - 8rem)" }}>
+    <div className="page-container !p-0 relative" style={{ height: "calc(100dvh - 8rem)" }}>
       <Helmet>
         <title>{t.booking.pageTitle}</title>
         <meta name="description" content={t.booking.pageDescription} />

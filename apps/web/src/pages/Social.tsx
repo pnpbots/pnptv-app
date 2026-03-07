@@ -383,6 +383,8 @@ function PostCard({
                     <video
                       src={post.media_url}
                       controls
+                      playsInline
+                      muted
                       className="w-full max-h-80 rounded-lg object-cover"
                       preload="metadata"
                       onError={(e) => { (e.target as HTMLVideoElement).parentElement!.style.display = "none"; }}
@@ -932,7 +934,7 @@ export default function Social() {
               {mediaPreview && (
                 <div className="relative mb-3 inline-block">
                   {mediaFile && mediaFile.type.startsWith("video/") ? (
-                    <video src={mediaPreview} className="max-h-48 rounded-lg object-cover" muted />
+                    <video src={mediaPreview} className="max-h-48 rounded-lg object-cover" muted playsInline />
                   ) : (
                     <img src={mediaPreview} alt="Preview" className="max-h-48 rounded-lg object-cover" />
                   )}

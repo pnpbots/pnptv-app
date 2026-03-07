@@ -162,6 +162,14 @@
     border: 1px solid rgba(0, 133, 255, 0.3);
     color: #0085FF;
   }
+
+  .safe-area-bottom {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  .pb-safe {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
 }
 
 @keyframes fadeInUp {

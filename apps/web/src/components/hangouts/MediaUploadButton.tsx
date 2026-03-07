@@ -2,7 +2,7 @@ import React, { useRef, useCallback } from "react";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const ACCEPTED_TYPES = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm";
+const ACCEPTED_TYPES = "image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,video/mp4,video/webm";
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ export function MediaUploadButton({
       // Validate type
       const validTypes = ACCEPTED_TYPES.split(",");
       if (!validTypes.includes(file.type)) {
-        onError("Unsupported file type. Use JPG, PNG, WebP, GIF, MP4, or WebM.");
+        onError("Unsupported file type. Use JPG, PNG, WebP, GIF, HEIC, MP4, or WebM.");
         return;
       }
 

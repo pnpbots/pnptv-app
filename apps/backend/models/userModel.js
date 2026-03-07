@@ -623,7 +623,7 @@ class UserModel {
   static async getExpiredSubscriptions() {
     try {
       const result = await query(
-        `SELECT * FROM ${TABLE} WHERE subscription_status = 'active' AND plan_expiry <= NOW()`
+        `SELECT * FROM ${TABLE} WHERE subscription_status = 'active' AND plan_expiry IS NOT NULL AND plan_expiry <= NOW() AND plan_id NOT ILIKE '%lifetime%' AND plan_id NOT ILIKE '%life-time%'`
       );
       return result.rows.map((row) => this.mapRowToUser(row));
     } catch (error) {

@@ -34,7 +34,7 @@ function timeAgo(dateStr: string, nowLabel: string): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
-const ACCEPTED_TYPES = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm";
+const ACCEPTED_TYPES = "image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,video/mp4,video/webm";
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
 function isVideoFile(file: File): boolean {
@@ -631,6 +631,8 @@ function Conversation({
         "image/png",
         "image/webp",
         "image/gif",
+        "image/heic",
+        "image/heif",
         "video/mp4",
         "video/webm",
       ]);
@@ -733,7 +735,7 @@ function Conversation({
   const partnerInitial = (partnerName || "U")[0].toUpperCase();
 
   return (
-    <div className="flex flex-col" style={{ height: "calc(100vh - 5rem)" }}>
+    <div className="flex flex-col" style={{ height: "calc(100dvh - 5rem)" }}>
       {/* Lightbox */}
       {lightboxSrc && (
         <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />

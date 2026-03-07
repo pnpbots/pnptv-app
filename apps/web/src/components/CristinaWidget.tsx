@@ -366,7 +366,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
     <div
       className={
         mode === "page"
-          ? "flex flex-col h-[calc(100vh-12rem)] max-h-[800px] glass-card-sm rounded-2xl overflow-hidden"
+          ? "flex flex-col h-[calc(100dvh-12rem)] max-h-[800px] glass-card-sm rounded-2xl overflow-hidden"
           : "fixed z-[42] flex flex-col overflow-hidden shadow-2xl " +
             "inset-0 w-full h-full " +
             "sm:inset-auto sm:bottom-24 sm:right-4 sm:w-[400px] sm:h-[600px] sm:rounded-2xl"

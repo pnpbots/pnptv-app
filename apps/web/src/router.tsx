@@ -9,6 +9,7 @@ import { PrimeGate } from "@/components/PrimeGate";
 const Home = lazy(() => import("@/pages/Home"));
 const Media = lazy(() => import("@/pages/Media"));
 const Live = lazy(() => import("@/pages/Live"));
+const Stream = lazy(() => import("@/pages/Stream"));
 const Booking = lazy(() => import("@/pages/Booking"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const Social = lazy(() => import("@/pages/Social"));
@@ -72,6 +73,16 @@ export const router = createBrowserRouter([
           <ModuleLoader>
             <VerificationGate>
               <Live />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "live/:streamId",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <Stream />
             </VerificationGate>
           </ModuleLoader>
         ),

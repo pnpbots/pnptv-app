@@ -49,8 +49,8 @@ export function BulkVideoUpload({
         setGlobalError(`Maximum ${MAX_FILES} videos at a time.`);
         break;
       }
-      if (!f.type.match(/^video\/(mp4|webm)$/)) {
-        setGlobalError(`"${f.name}" is not an mp4/webm file and was skipped.`);
+      if (!f.type.match(/^video\/(mp4|webm|quicktime)$/)) {
+        setGlobalError(`"${f.name}" is not an mp4/webm/mov file and was skipped.`);
         continue;
       }
       if (f.size > MAX_SIZE_BYTES) {
@@ -174,13 +174,13 @@ export function BulkVideoUpload({
           <p className="text-sm font-medium text-white/60">
             Drop videos here or click to browse
           </p>
-          <p className="text-xs text-white/30">mp4 / webm &bull; max 200 MB each &bull; up to {MAX_FILES} files</p>
+          <p className="text-xs text-white/30">mp4 / webm / mov &bull; max 200 MB each &bull; up to {MAX_FILES} files</p>
         </div>
       )}
       <input
         ref={fileInputRef}
         type="file"
-        accept="video/mp4,video/webm"
+        accept="video/mp4,video/webm,video/quicktime"
         multiple
         className="hidden"
         onChange={handleFileInputChange}
