@@ -3048,10 +3048,11 @@ app.get('/api/webapp/nearby/places/fallback', asyncHandler(async (req, res) => {
   const { rows } = await pool.query(`
     SELECT id, name, description, address, city, country, place_type,
            location_lat, location_lng, category_id,
-           ST_Distance(
-             ST_SetSRID(ST_Point($2, $1), 4326)::geography,
-             ST_SetSRID(ST_Point(location_lng, location_lat), 4326)::geography
-           ) / 1000 AS dist_km
+           (6371 * acos(
+             cos(radians($1)) * cos(radians(location_lat)) *
+             cos(radians(location_lng) - radians($2)) +
+             sin(radians($1)) * sin(radians(location_lat))
+           )) AS dist_km
     FROM nearby_places
     WHERE status = 'approved'
       AND location_lat IS NOT NULL AND location_lng IS NOT NULL
