@@ -3568,12 +3568,15 @@ app.get('/api/proxy/hangouts/my-rooms', asyncHandler(async (req, res) => {
 // --- Performers (Directus CMS-backed) ---
 const PerformerModel = require('../../models/performerModel'); // still used by tips endpoint
 
-const mapDirectusPerformer = (p) => ({
+const mapDirectusPerformer = (p, userPhotoMap) => ({
   id: String(p.id),
   userId: p.pnptv_id || null,
+  slug: p.slug || null,
   displayName: p.name,
   bio: p.bio || null,
-  photoUrl: p.photo ? `https://cms.pnptv.app/assets/${p.photo}` : null,
+  photoUrl: p.photo
+    ? `https://cms.pnptv.app/assets/${p.photo}`
+    : (p.pnptv_id && userPhotoMap?.get(String(p.pnptv_id))) || null,
   isFeatured: p.is_featured || false,
   isAvailable: p.is_available !== false,
   basePrice: p.base_price_cents ? p.base_price_cents / 100 : 100,
@@ -3582,6 +3585,30 @@ const mapDirectusPerformer = (p) => ({
 });
 
 const DIRECTUS_PERFORMER_FIELDS = ['id', 'name', 'slug', 'bio', 'photo', 'is_featured', 'is_available', 'base_price_cents', 'pnptv_id'];
+
+// Fetch profile pics from users table for performers missing Directus photos
+async function fetchPerformerPhotos(performers) {
+  const idsWithoutPhoto = performers
+    .filter(p => !p.photo && p.pnptv_id)
+    .map(p => String(p.pnptv_id));
+  if (!idsWithoutPhoto.length) return new Map();
+  try {
+    const placeholders = idsWithoutPhoto.map((_, i) => `$${i + 1}`).join(',');
+    const { rows } = await getPool().query(
+      `SELECT id::text, photo_file_id FROM users WHERE id::text IN (${placeholders}) AND photo_file_id IS NOT NULL`,
+      idsWithoutPhoto
+    );
+    const map = new Map();
+    for (const r of rows) {
+      const photo = r.photo_file_id;
+      if (photo) map.set(r.id, photo.startsWith('/') ? photo : `/${photo}`);
+    }
+    return map;
+  } catch (err) {
+    logger.warn(`fetchPerformerPhotos failed: ${err.message}`);
+    return new Map();
+  }
+}
 
 app.get('/api/performers/featured', asyncHandler(async (req, res) => {
   try {
@@ -3595,7 +3622,9 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
       },
       timeout: 10000,
     });
-    res.json({ success: true, performers: (resp.data?.data || []).map(mapDirectusPerformer) });
+    const raw = resp.data?.data || [];
+    const photoMap = await fetchPerformerPhotos(raw);
+    res.json({ success: true, performers: raw.map(p => mapDirectusPerformer(p, photoMap)) });
   } catch (error) {
     logger.error(`Performers featured error: ${error.message}`);
     res.json({ success: true, performers: [] });
@@ -3613,7 +3642,9 @@ app.get('/api/performers', asyncHandler(async (req, res) => {
       },
       timeout: 10000,
     });
-    res.json({ success: true, performers: (resp.data?.data || []).map(mapDirectusPerformer) });
+    const raw = resp.data?.data || [];
+    const photoMap = await fetchPerformerPhotos(raw);
+    res.json({ success: true, performers: raw.map(p => mapDirectusPerformer(p, photoMap)) });
   } catch (error) {
     logger.error(`Performers all error: ${error.message}`);
     res.json({ success: true, performers: [] });
