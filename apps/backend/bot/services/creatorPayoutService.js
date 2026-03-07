@@ -445,8 +445,7 @@ class CreatorPayoutService {
       UPDATE creator_subscriptions
       SET
         expires_at = expires_at + INTERVAL '30 days',
-        payment_id = $1,
-        updated_at = NOW()
+        payment_id = $1
       WHERE id    = $2
         AND status = 'active'
     `, [newPaymentId, subscription_id]);
@@ -502,8 +501,7 @@ class CreatorPayoutService {
         SET
           status       = 'cancelled',
           cancelled_at = NOW(),
-          auto_renew   = false,
-          updated_at   = NOW()
+          auto_renew   = false
         WHERE id     = $1
           AND status = 'active'
       `, [subscription_id]);

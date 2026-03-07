@@ -647,8 +647,8 @@ export default function CreatorDashboard() {
                 </div>
               )}
 
-              {/* Upgrade to full-time if occasional */}
-              {dashboard.creatorType === "occasional" && (
+              {/* Upgrade to full-time if on a tier (ice/crystal/diamond) */}
+              {dashboard.creatorType && !["full_time", ""].includes(dashboard.creatorType) && (
                 <div className="glass-card-sm p-4 mb-4" style={{ borderColor: "rgba(212,0,122,0.2)" }}>
                   <p className="text-sm font-medium text-white mb-1">{t.wantMore}</p>
                   <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>

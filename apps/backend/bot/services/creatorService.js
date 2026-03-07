@@ -494,12 +494,12 @@ class CreatorService {
       const postCreatorId = p.author_id || p.user_id;
 
       // Owner sees their own posts
-      if (postCreatorId === viewerId) {
+      if (String(postCreatorId) === String(viewerId)) {
         return { ...p, exclusive_status: 'unlocked' };
       }
 
       // Subscribed
-      if (subscribedCreatorIds.has(postCreatorId)) {
+      if (subscribedCreatorIds.has(String(postCreatorId))) {
         return { ...p, exclusive_status: 'unlocked' };
       }
 
