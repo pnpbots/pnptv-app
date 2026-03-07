@@ -8,6 +8,7 @@ import React, {
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useTier } from "@/hooks/useTier";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useHangoutSocket } from "@/hooks/useHangoutSocket";
@@ -260,13 +261,9 @@ function DateSeparator({ date }: { date: string }) {
 
 export default function Chat() {
   const { user } = useAuth();
+  const { isPrime, isMember, isFree, isAdmin } = useTier();
   const navigate = useNavigate();
   const t = useI18n();
-  const userRole = user?.role?.toLowerCase();
-  const isAdmin = userRole === "admin" || userRole === "superadmin";
-  const isPrime = user?.tier?.toLowerCase() === "prime" || isAdmin;
-  const isMember = user?.tier?.toLowerCase() === "member" || isPrime;
-  const isFree = !isMember;
   const { showTutorial, dismissTutorial } = useTutorial("hangouts");
 
   // Group list state

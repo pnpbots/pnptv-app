@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useTier } from "@/hooks/useTier";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useDirectus } from "@/hooks/useDirectus";
@@ -107,7 +108,7 @@ export default function Home() {
   }, [translatingId, translatedPosts, user?.language]);
 
   const username = user?.username || user?.displayName || "user";
-  const tier = user?.tier || "free";
+  const { tier, isPrime, isMember } = useTier();
   const { showTutorial, dismissTutorial } = useTutorial("home");
 
   return (
@@ -133,7 +134,7 @@ export default function Home() {
           <span
             className="flex-shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider"
             style={
-              tier.toLowerCase() === "prime"
+              isPrime
                 ? { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }
                 : { background: "rgba(255,255,255,0.06)", color: "#555" }
             }
@@ -144,7 +145,7 @@ export default function Home() {
       </div>
 
       {/* PRIME upgrade CTA — neon yellow, standalone */}
-      {tier.toLowerCase() !== "prime" && (
+      {!isPrime && (
         <button
           onClick={() => navigate("/subscribe")}
           className="w-full mb-4 group"
@@ -167,7 +168,7 @@ export default function Home() {
             </div>
             <div className="flex-1 text-left">
               <p className="font-semibold text-sm" style={{ color: "#E5FF00" }}>
-                {tier.toLowerCase() === "member" ? "Upgrade to PRIME" : "Unlock PRIME"}
+                {isMember ? "Upgrade to PRIME" : "Unlock PRIME"}
               </p>
               <p className="text-[11px] mt-0.5" style={{ color: "rgba(229,255,0,0.4)" }}>
                 DMs, video calls, exclusive content & more

@@ -7,6 +7,7 @@ const VideoCallModel = require('../../../models/videoCallModel');
 const { buildJitsiHangoutsUrl } = require('../../utils/jitsiHangoutsWebApp');
 const jaasService = require('../../services/jaasService');
 const NotificationEmitter = require('../../services/notificationEmitter');
+const { hasAccess } = require('../../services/accessService');
 // Check if a photo path is a valid web URL (not a Telegram file ID)
 const isValidPhotoUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
 
@@ -126,8 +127,7 @@ const createGroup = async (req, res) => {
 
   try {
     // PRIME check
-    const isPrime = await userService.isPremium(user.id);
-    if (!isPrime) {
+    if (!hasAccess(user, 'PRIME')) {
       return res.status(403).json({ error: 'Only PRIME members can create subgroups' });
     }
 

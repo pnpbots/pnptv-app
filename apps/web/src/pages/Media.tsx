@@ -5,7 +5,7 @@ import { Card, Skeleton, Badge } from "@pnptv/ui-kit";
 import { useDirectus } from "@/hooks/useDirectus";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
-import { useAuth } from "@/hooks/useAuth";
+import { useTier } from "@/hooks/useTier";
 import { useI18n } from "@/lib/i18n";
 import { type Content, type Performer, getAssetUrl } from "@/lib/directus";
 
@@ -34,12 +34,9 @@ const PlayIcon = () => (
 );
 
 export default function Media() {
-  const { user } = useAuth();
+  const { isPrime, isMember } = useTier();
   const navigate = useNavigate();
   const { media: t } = useI18n();
-  const tier = (user?.tier || "free").toLowerCase();
-  const isPrime = tier === "prime";
-  const isMember = tier === "member";
 
   const { data: videos, isLoading, error } = useDirectus<Content>({
     collection: "content",

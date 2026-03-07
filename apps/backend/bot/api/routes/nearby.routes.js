@@ -15,6 +15,7 @@ const router = express.Router();
 
 const NearbyController = require('../controllers/nearbyController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireTier } = require('../../services/accessService');
 const redisGeoService = require('../../../services/redisGeoService');
 const { getRedis } = require('../../../config/redis');
 
@@ -36,18 +37,8 @@ initializeGeoService();
 // Middleware
 router.use(authenticateUser);
 
-// Tier gate — only prime users can access Nearby
-const requirePrimeTier = (req, res, next) => {
-  const tier = req.user?.tier || 'free';
-  if (tier.toLowerCase() !== 'prime') {
-    return res.status(403).json({
-      error: 'Prime subscription required',
-      code: 'PRIME_REQUIRED'
-    });
-  }
-  next();
-};
-router.use(requirePrimeTier);
+// Tier gate — only prime users (or admins) can access Nearby
+router.use(requireTier('PRIME'));
 
 // Update user location
 router.post('/update-location', (req, res) => {

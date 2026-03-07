@@ -1,6 +1,7 @@
 const logger = require('../../../utils/logger');
 const CreatorService = require('../../services/creatorService');
 const { query } = require('../../../config/postgres');
+const { hasAccess } = require('../../services/accessService');
 
 // GET /api/webapp/creator/eligibility
 const getEligibility = async (req, res) => {
@@ -97,9 +98,7 @@ const getSubscriptionStatus = async (req, res) => {
 
 // POST /api/webapp/creator/:creatorId/subscribe
 const subscribeToCreator = async (req, res) => {
-  const userTier = (req.user.tier || '').toLowerCase();
-  const isAdminRole = req.user.role === 'admin' || req.user.role === 'superadmin';
-  if (userTier !== 'prime' && !isAdminRole) {
+  if (!hasAccess(req.user, 'PRIME')) {
     return res.status(403).json({ error: 'PRIME subscription required to subscribe to creators' });
   }
   try {

@@ -4,7 +4,7 @@ import { Layout } from "@/components/Layout";
 import { AdminLayout } from "@/components/admin/AdminLayout";
 import { ModuleLoader } from "@/components/ModuleLoader";
 import { VerificationGate } from "@/components/VerificationGate";
-import { PrimeGate } from "@/components/PrimeGate";
+import { TierGate } from "@/components/TierGate";
 
 const Home = lazy(() => import("@/pages/Home"));
 const Media = lazy(() => import("@/pages/Media"));
@@ -23,6 +23,7 @@ const Support = lazy(() => import("@/pages/Support"));
 const Apply = lazy(() => import("@/pages/Apply"));
 const Welcome = lazy(() => import("@/pages/Welcome"));
 const Join = lazy(() => import("@/pages/Join"));
+const BecomeModel = lazy(() => import("@/pages/BecomeModel"));
 const CmsPage = lazy(() => import("@/pages/CmsPage"));
 
 // Admin pages
@@ -41,6 +42,7 @@ const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
 const AdminDemographics = lazy(() => import("@/pages/admin/AdminDemographics"));
 const Mono = lazy(() => import("@/pages/admin/Mono"));
 const Gamification = lazy(() => import("@/pages/admin/Gamification"));
+const StreamManagement = lazy(() => import("@/pages/admin/StreamManagement"));
 
 export const router = createBrowserRouter([
   {
@@ -60,9 +62,9 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <VerificationGate>
-              <PrimeGate>
+              <TierGate required="prime">
                 <Media />
-              </PrimeGate>
+              </TierGate>
             </VerificationGate>
           </ModuleLoader>
         ),
@@ -190,6 +192,14 @@ export const router = createBrowserRouter([
             <VerificationGate>
               <Apply />
             </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "become-a-model",
+        element: (
+          <ModuleLoader>
+            <BecomeModel />
           </ModuleLoader>
         ),
       },
@@ -326,6 +336,14 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <Gamification />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "streams",
+        element: (
+          <ModuleLoader>
+            <StreamManagement />
           </ModuleLoader>
         ),
       },

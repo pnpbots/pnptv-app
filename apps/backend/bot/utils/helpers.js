@@ -1,5 +1,6 @@
 const logger = require('../../utils/logger');
 const { t } = require('../../utils/i18n');
+const accessService = require('../services/accessService');
 
 // Admin IDs from environment for pre-launch testing
 const getAdminIds = () => {
@@ -45,25 +46,14 @@ const normalizeSubscriptionStatus = (status) => {
  * @param {Object} user - User object
  * @returns {boolean} True if user has PRIME tier
  */
-const isPrimeUser = (user) => {
-  if (!user) return false;
-  return (user.tier || '').toLowerCase() === 'prime';
-};
+const isPrimeUser = (user) => accessService.isPrime(user?.tier);
 
 /**
  * Check if user is banned
  * @param {Object} user - User object
  * @returns {boolean} True if user has banned tier
  */
-const isBannedUser = (user) => {
-  if (!user) return false;
-  return user.tier === 'banned';
-};
-
-/**
- * Tier hierarchy for access control
- */
-const TIER_HIERARCHY = { free: 0, member: 1, prime: 2, PRIME: 2 };
+const isBannedUser = (user) => accessService.isBanned(user?.tier);
 
 /**
  * Check if user's tier meets the minimum required tier
@@ -72,8 +62,8 @@ const TIER_HIERARCHY = { free: 0, member: 1, prime: 2, PRIME: 2 };
  * @returns {boolean} True if user tier >= required tier
  */
 const hasTierAccess = (user, requiredTier) => {
-  if (!user || user.tier === 'banned') return false;
-  return (TIER_HIERARCHY[user.tier] ?? -1) >= (TIER_HIERARCHY[requiredTier] ?? 0);
+  if (!user || accessService.isBanned(user.tier)) return false;
+  return accessService.hasMinTier(user.tier, requiredTier);
 };
 
 /**
@@ -84,18 +74,11 @@ const hasTierAccess = (user, requiredTier) => {
  * @returns {boolean} True if user has full access
  */
 const hasFullAccess = (user, userId) => {
-  // Admins always have full access (pre-launch testing)
+  // Env-based admin IDs always have full access (pre-launch testing)
   if (userId && isAdminUser(userId)) {
     return true;
   }
-
-  // Check user object for admin role
-  if (user?.role === 'admin' || user?.role === 'superadmin') {
-    return true;
-  }
-
-  // Otherwise check PRIME status
-  return isPrimeUser(user);
+  return accessService.hasAccess(user, 'PRIME');
 };
 
 /**
@@ -310,11 +293,7 @@ const safeAnswerCbQuery = async (ctx, text = '', showAlert = false) => {
  * @param {Object} user - User object
  * @returns {boolean} True if user has member or PRIME tier
  */
-const isMemberUser = (user) => {
-  if (!user) return false;
-  const tier = (user.tier || '').toLowerCase();
-  return tier === 'member' || tier === 'prime';
-};
+const isMemberUser = (user) => accessService.isMemberOrAbove(user?.tier);
 
 module.exports = {
   getLanguage,

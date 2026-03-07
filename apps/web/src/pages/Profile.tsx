@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "@/hooks/useAuth";
+import { useTier } from "@/hooks/useTier";
 import { useI18n } from "@/lib/i18n";
 import { useTutorial, resetAllTutorials } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
@@ -1714,6 +1715,7 @@ function MonetizeContentCard({ creatorStatus, onActivated }: { creatorStatus?: s
 
 export default function Profile() {
   const { isAuthenticated, user, login, logout, refreshUser } = useAuth();
+  const { isPrime: currentUserIsPrime } = useTier();
   const { userId: paramUserId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
 
@@ -2029,10 +2031,7 @@ export default function Profile() {
       handleUnsubscribe();
       return;
     }
-    const userTier = (user?.tier || "").toLowerCase();
-    const userRole = (user?.role || "").toLowerCase();
-    const isAdminRole = userRole === "admin" || userRole === "superadmin";
-    if (userTier !== "prime" && !isAdminRole) {
+    if (!currentUserIsPrime) {
       setSubscribeError(p.primeRequiredForCreator);
       setTimeout(() => setSubscribeError(null), 4000);
       return;

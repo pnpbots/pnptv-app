@@ -5,6 +5,7 @@ import { Badge, Button } from "@pnptv/ui-kit";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useAuth } from "@/hooks/useAuth";
+import { useTier } from "@/hooks/useTier";
 import { useI18n } from "@/lib/i18n";
 import {
   updateNearbyLocation,
@@ -585,14 +586,9 @@ type PageState = "loading" | "denied" | "ready";
 export default function Booking() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { isPrime, isFree } = useTier();
   const t = useI18n();
   const { showTutorial, dismissTutorial } = useTutorial("nearby");
-
-  const userTier = user?.tier?.toLowerCase() ?? "free";
-  const userRole = user?.role?.toLowerCase();
-  const isAdmin = userRole === "admin" || userRole === "superadmin";
-  const isFree = (userTier === "free" || !user?.tier) && !isAdmin;
-  const isPrime = userTier === "prime" || isAdmin;
 
   const [pageState, setPageState] = useState<PageState>("loading");
   const [locationStatus, setLocationStatus] = useState<"online" | "offline">("offline");
