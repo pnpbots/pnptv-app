@@ -224,7 +224,7 @@ class PNPLiveNotificationService {
         { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
       );
 
-      const earnings = booking.model_earnings || (booking.price_usd * 0.7);
+      const earnings = booking.model_earnings || (booking.price_usd * 0.6);
 
       const message = lang === 'es'
         ? `💃 *¡Nueva Reserva!*\n\n` +

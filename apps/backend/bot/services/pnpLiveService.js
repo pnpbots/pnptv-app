@@ -21,8 +21,8 @@ class PNPLiveService {
     90: 250    // 90 minutes: $250 (includes extra model)
   };
 
-  // Default commission for models (70% to model, 30% platform)
-  static DEFAULT_COMMISSION = 70;
+  // Default commission for models
+  static DEFAULT_COMMISSION = 60;
 
   /**
    * Get model-specific pricing or default (with caching)
@@ -592,7 +592,7 @@ class PNPLiveService {
             booking.model_id,
             bookingId,
             booking.price_usd,
-            70, // Default, could be retrieved from model
+            60, // Default commission
             booking.model_earnings,
             booking.platform_fee || (booking.price_usd - booking.model_earnings)
           ]
