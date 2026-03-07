@@ -72,18 +72,7 @@ export default function HangoutModeration() {
     }
   };
 
-  const participantFraction = (hangout: AdminHangout): string => {
-    const cur = hangout.currentParticipants ?? 0;
-    const max = hangout.maxParticipants ?? 0;
-    return `${cur} / ${max}`;
-  };
-
-  const participantPct = (hangout: AdminHangout): number => {
-    const cur = hangout.currentParticipants ?? 0;
-    const max = hangout.maxParticipants ?? 0;
-    if (!max) return 0;
-    return Math.min((cur / max) * 100, 100);
-  };
+  const memberCount = (hangout: AdminHangout): number => hangout.currentParticipants ?? 0;
 
   return (
     <div className="page-container space-y-4">
@@ -145,23 +134,10 @@ export default function HangoutModeration() {
                 </Badge>
               </div>
 
-              {/* Participant bar */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-1.5 text-xs text-pnp-textSecondary">
-                    <UsersIcon />
-                    <span>{participantFraction(hangout)} participants</span>
-                  </div>
-                  <span className="text-xs text-pnp-textSecondary">
-                    {participantPct(hangout).toFixed(0)}% full
-                  </span>
-                </div>
-                <div className="w-full bg-pnp-border rounded-full h-1.5">
-                  <div
-                    className="bg-pnp-accent h-1.5 rounded-full transition-all"
-                    style={{ width: `${participantPct(hangout)}%` }}
-                  />
-                </div>
+              {/* Member count */}
+              <div className="flex items-center gap-1.5 text-xs text-pnp-textSecondary">
+                <UsersIcon />
+                <span>{memberCount(hangout).toLocaleString()} members</span>
               </div>
 
               {/* Footer */}
@@ -174,7 +150,7 @@ export default function HangoutModeration() {
                   onClick={() => setEndTarget(hangout)}
                   className="px-3 py-1.5 text-xs rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors font-medium"
                 >
-                  End Hangout
+                  Delete Group
                 </button>
               </div>
             </div>
@@ -184,9 +160,9 @@ export default function HangoutModeration() {
 
       <ConfirmModal
         open={!!endTarget}
-        title="End Hangout"
-        message={`Are you sure you want to end the hangout "${endTarget?.title ?? ""}"? All ${endTarget?.currentParticipants ?? 0} participant(s) will be disconnected immediately.`}
-        confirmLabel="End Hangout"
+        title="Delete Group"
+        message={`Are you sure you want to delete "${endTarget?.title ?? ""}"? All ${endTarget?.currentParticipants ?? 0} member(s) will be removed.`}
+        confirmLabel="Delete Group"
         variant="danger"
         onConfirm={handleEnd}
         onCancel={() => setEndTarget(null)}

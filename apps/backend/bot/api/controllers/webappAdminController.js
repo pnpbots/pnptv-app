@@ -306,22 +306,30 @@ const deletePost = async (req, res) => {
 
 /**
  * GET /api/webapp/admin/hangouts
- * List active hangout rooms
+ * List all hangout groups with member counts and creator info
  */
 const listHangouts = async (req, res) => {
   const user = req.user;
 
   try {
-    const calls = await VideoCallModel.getAllPublic();
-    const hangouts = calls.map(call => ({
-      id: call.id,
-      title: call.title,
-      creatorId: call.creatorId,
-      creatorName: call.creatorName,
-      currentParticipants: call.currentParticipants,
-      maxParticipants: call.maxParticipants,
-      isPublic: call.isPublic,
-      createdAt: call.createdAt,
+    const result = await query(`
+      SELECT g.id, g.name, g.creator_id, g.is_public, g.created_at,
+             u.first_name AS creator_first_name, u.username AS creator_username,
+             (SELECT count(*) FROM hangout_group_members m WHERE m.group_id = g.id) AS member_count
+      FROM hangout_groups g
+      LEFT JOIN users u ON u.id::text = g.creator_id::text
+      ORDER BY g.created_at DESC
+    `);
+
+    const hangouts = result.rows.map(row => ({
+      id: row.id,
+      title: row.name || 'Untitled Room',
+      creatorId: row.creator_id,
+      creatorName: row.creator_first_name || row.creator_username || 'System',
+      currentParticipants: parseInt(row.member_count, 10) || 0,
+      maxParticipants: 0,
+      isPublic: row.is_public,
+      createdAt: row.created_at,
     }));
 
     logger.info('Admin listed hangouts', { adminId: user.id, count: hangouts.length });
@@ -334,20 +342,21 @@ const listHangouts = async (req, res) => {
 
 /**
  * DELETE /api/webapp/admin/hangouts/:id
- * End/delete a hangout room
+ * Delete a hangout group and its members
  */
 const endHangout = async (req, res) => {
   const user = req.user;
 
   try {
-    const { id: callId } = req.params;
+    const { id } = req.params;
 
-    await query('UPDATE video_calls SET is_active = false, ended_at = NOW() WHERE id = $1', [callId]);
+    await query('DELETE FROM hangout_group_members WHERE group_id = $1', [id]);
+    await query('DELETE FROM hangout_groups WHERE id = $1', [id]);
 
-    logger.info('Admin ended hangout', { adminId: user.id, callId });
-    return res.json({ success: true, message: 'Hangout ended' });
+    logger.info('Admin deleted hangout group', { adminId: user.id, groupId: id });
+    return res.json({ success: true, message: 'Hangout group deleted' });
   } catch (error) {
-    logger.error('Error ending hangout:', error);
+    logger.error('Error deleting hangout group:', error);
     return res.status(500).json({ error: error.message });
   }
 };
