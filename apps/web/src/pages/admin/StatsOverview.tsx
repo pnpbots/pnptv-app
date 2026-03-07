@@ -317,7 +317,7 @@ export default function StatsOverview() {
           data={stats?.topPaymentMethods ?? []}
           loading={loading && !stats}
           emptyMessage="No payment method data"
-          getRowId={(row) => row.method}
+          getRowId={(row, idx) => row.method ?? `method-${idx}`}
         />
       </div>
 
@@ -331,7 +331,9 @@ export default function StatsOverview() {
           data={stats?.recentTransactions ?? []}
           loading={loading && !stats}
           emptyMessage="No recent transactions"
-          getRowId={(row) => `${row.date}-${row.userId}-${row.amount}-${row.status}`}
+          getRowId={(row, idx) =>
+            `${row.date ?? ""}-${row.userId ?? ""}-${row.amount ?? 0}-${row.status ?? ""}-${idx}`
+          }
         />
       </div>
 

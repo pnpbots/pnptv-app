@@ -91,8 +91,8 @@ export default function CanvaIntegration() {
     try {
       const res = await getAdminCanvaStats();
       setStats(res.stats);
-    } catch {
-      /* ignore */
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load Canva stats");
     }
   }, []);
 

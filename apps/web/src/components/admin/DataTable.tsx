@@ -17,7 +17,7 @@ interface DataTableProps<T> {
   selectedIds?: Set<string>;
   onSelectToggle?: (id: string) => void;
   onSelectAll?: () => void;
-  getRowId?: (row: T) => string;
+  getRowId?: (row: T, idx: number) => string;
 }
 
 function SkeletonRow({ cols }: { cols: number }) {
@@ -44,7 +44,7 @@ export function DataTable<T>({
   onSelectAll,
   getRowId,
 }: DataTableProps<T>) {
-  const allSelected = data.length > 0 && selectedIds && getRowId && data.every((r) => selectedIds.has(getRowId(r)));
+  const allSelected = data.length > 0 && selectedIds && getRowId && data.every((r, i) => selectedIds.has(getRowId(r, i)));
 
   return (
     <div className="overflow-x-auto rounded-xl border border-pnp-border">
@@ -83,7 +83,7 @@ export function DataTable<T>({
                 </tr>
               )
               : data.map((row, idx) => {
-                  const rowId = getRowId ? getRowId(row) : String(idx);
+                  const rowId = getRowId ? getRowId(row, idx) : String(idx);
                   return (
                     <tr
                       key={rowId}

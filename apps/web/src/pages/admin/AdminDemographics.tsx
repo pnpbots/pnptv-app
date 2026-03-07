@@ -272,7 +272,7 @@ export default function AdminDemographics() {
               { label: "Has Bio", count: data.activity.withBio },
               { label: "Has Photo", count: data.activity.withPhoto },
               { label: "Has Location", count: data.activity.withLocation },
-              { label: "Terms Accepted", count: total - Math.max(0, total - data.activity.ageVerified) },
+              { label: "Terms Accepted", count: data.activity.termsAccepted ?? 0 },
               { label: "Age Verified", count: data.activity.ageVerified },
             ].map((item) => (
               <div key={item.label} className="flex items-center gap-3 mb-2">

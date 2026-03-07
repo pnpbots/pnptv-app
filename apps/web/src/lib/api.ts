@@ -2496,7 +2496,7 @@ export interface AdminDemographics {
   subscriptionTypes: { label: string; count: number }[];
   activity: {
     total: number; active1d: number; active7d: number; active30d: number; active90d: number;
-    new7d: number; new30d: number; ageVerified: number; withBio: number; withPhoto: number;
+    new7d: number; new30d: number; ageVerified: number; termsAccepted: number; withBio: number; withPhoto: number;
     withLocation: number; avgXp: number;
   };
   xpBuckets: { label: string; count: number }[];
