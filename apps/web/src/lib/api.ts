@@ -1606,6 +1606,7 @@ export function addTicketMessage(
 export interface FeaturedPerformer {
   id: string;
   userId: string | null;
+  slug: string | null;
   displayName: string;
   bio: string | null;
   photoUrl: string | null;
@@ -1614,6 +1615,10 @@ export interface FeaturedPerformer {
   basePrice: number;
   totalCalls: number;
   averageRating: number;
+  /** Set by the backend when the performer is currently streaming via Restreamer. */
+  isLive?: boolean;
+  /** Direct HLS playback URL, populated when isLive is true. */
+  hlsUrl?: string | null;
 }
 
 export function getFeaturedPerformers(): Promise<{

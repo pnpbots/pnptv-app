@@ -1,6 +1,5 @@
-const crypto = require('crypto');
 const logger = require('../../../utils/logger');
-const { getRedis } = require('../../../config/redis');
+const { getPool } = require('../../../config/postgres');
 const axios = require('axios');
 
 const authGuard = (req, res) => {
@@ -10,56 +9,95 @@ const authGuard = (req, res) => {
 };
 
 /**
- * Sanitize a Restreamer reference ID before embedding it in an HLS URL.
- * Only alphanumeric characters, hyphens, underscores, and dots are allowed.
- * This prevents path-traversal (../) or query-injection if Restreamer ever
- * returns a crafted process reference.
+ * Authenticate with the Restreamer API and return a Bearer token.
+ * Returns null if credentials are not configured or login fails (non-fatal).
+ *
+ * @param {string} restreamerUrl - Internal Restreamer base URL (e.g. http://restreamer:8080)
+ * @returns {Promise<string|null>}
  */
-function sanitizeRefId(refId) {
-  if (typeof refId !== 'string') return null;
-  // Strip everything except the safe character set
-  const clean = refId.replace(/[^a-zA-Z0-9\-_.]/g, '');
-  // Reject if nothing remained or if the result looks like a traversal attempt
-  if (!clean || clean.includes('..')) return null;
-  return clean;
+async function getRestreamerToken(restreamerUrl) {
+  const user = process.env.RESTREAMER_USER;
+  const pass = process.env.RESTREAMER_PASSWORD;
+  // Use strict undefined check — empty-string credentials are still valid and must be sent.
+  if (user === undefined || pass === undefined) return null;
+  try {
+    const resp = await axios.post(`${restreamerUrl}/api/login`, {
+      username: user,
+      password: pass,
+    }, { timeout: 5000 });
+    return resp.data?.access_token ?? null;
+  } catch (err) {
+    logger.warn(`Restreamer login failed: ${err.message}`);
+    return null;
+  }
 }
 
-// GET /api/webapp/live/streams
-// Proxies to Restreamer API and returns active HLS streams.
-const listStreams = async (req, res) => {
-  const user = authGuard(req, res); if (!user) return;
-
-  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
-  const restreamerUser = process.env.RESTREAMER_USER;
-  const restreamerPass = process.env.RESTREAMER_PASSWORD;
-
+/**
+ * Fetch all ingest processes from Restreamer.
+ * Returns an empty array on failure (non-fatal).
+ *
+ * @param {string} restreamerUrl
+ * @param {string|null} token
+ * @returns {Promise<Array>}
+ */
+async function fetchRestreamerProcesses(restreamerUrl, token) {
   try {
-    let token = null;
-    // Use undefined-check instead of truthiness: an empty-string password is still a valid
-    // credential and must be sent. The old `if (restreamerUser && restreamerPass)` guard
-    // would silently skip login when RESTREAMER_PASSWORD='', leaving all requests unauthenticated.
-    if (restreamerUser !== undefined && restreamerPass !== undefined) {
-      try {
-        const loginResp = await axios.post(`${restreamerUrl}/api/login`, {
-          username: restreamerUser,
-          password: restreamerPass,
-        }, { timeout: 5000 });
-        token = loginResp.data?.access_token;
-      } catch (loginErr) {
-        logger.warn(`listStreams: Restreamer login failed, trying without auth: ${loginErr.message}`);
-      }
-    }
-
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
     const resp = await axios.get(`${restreamerUrl}/api/v3/process`, {
       headers,
       timeout: 10000,
     });
+    return (resp.data || []).filter(p => p.id?.startsWith('restreamer-ui:ingest:'));
+  } catch (err) {
+    logger.warn(`Restreamer process fetch failed: ${err.message}`);
+    return [];
+  }
+}
 
-    const publicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
-    const processes = resp.data || [];
+/**
+ * Extract the RTMP stream name from a Restreamer process config input address.
+ * The input address format is: {rtmp,name=<streamName>} or {rtmp,name=<streamName>,timeout=10}
+ * Returns null if the address does not match this pattern.
+ *
+ * @param {string|undefined} address - e.g. '{rtmp,name=frank}'
+ * @returns {string|null}
+ */
+function extractRtmpName(address) {
+  if (typeof address !== 'string') return null;
+  const match = address.match(/\{rtmp[^}]*,name=([^,}]+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Sanitize a Restreamer reference slug before embedding it in an HLS URL.
+ * Only alphanumeric characters, hyphens, underscores, and dots are allowed.
+ * Rejects empty strings and path-traversal patterns.
+ *
+ * @param {string|any} refId
+ * @returns {string|null}
+ */
+function sanitizeRefId(refId) {
+  if (typeof refId !== 'string') return null;
+  const clean = refId.replace(/[^a-zA-Z0-9\-_.]/g, '');
+  if (!clean || clean.includes('..')) return null;
+  return clean;
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/webapp/live/streams
+// Proxies to Restreamer API and returns active HLS streams.
+// ---------------------------------------------------------------------------
+const listStreams = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+
+  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
+  const publicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
+
+  try {
+    const token = await getRestreamerToken(restreamerUrl);
+    const processes = await fetchRestreamerProcesses(restreamerUrl, token);
+
     const streams = processes
-      .filter((p) => p.id?.startsWith('restreamer-ui:ingest:'))
       .map((p) => {
         const rawRefId = p.reference || p.id;
         const refId = sanitizeRefId(rawRefId);
@@ -84,63 +122,204 @@ const listStreams = async (req, res) => {
   }
 };
 
+// ---------------------------------------------------------------------------
 // GET /api/webapp/live/rtmp-key
-// Returns the RTMP ingest URL and a per-user stream key for creators/admins.
-// The stream key is generated once per user and stored permanently in Redis.
+// Returns the RTMP ingest URL and stream name for the user's assigned channel.
+//
+// The stream name is the RTMP input name from the Restreamer process config
+// (e.g. "frank" for a channel with address "{rtmp,name=frank}"). This is what
+// the user enters as the "Stream Key" in OBS.
+//
+// A user must have a Restreamer channel assigned to them (users.live_channel)
+// by an admin before they can stream. If no channel is assigned, 404 is returned.
+// ---------------------------------------------------------------------------
 const getRtmpKey = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
 
-  if (user.role !== 'admin' && user.role !== 'superadmin' && user.role !== 'creator') {
-    return res.status(403).json({ success: false, error: 'Creator or admin role required' });
-  }
-
-  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
-  const restreamerPublicUrl = process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app';
-
-  // Use undefined-check: RESTREAMER_PASSWORD may legitimately be an empty string.
-  // The old falsy-check (!process.env.RESTREAMER_PASSWORD) incorrectly returned 503
-  // when the variable was set but blank.
   if (process.env.RESTREAMER_USER === undefined || process.env.RESTREAMER_PASSWORD === undefined) {
     return res.status(503).json({ success: false, error: 'Live streaming not configured' });
   }
 
+  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
+  const restreamerPublicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
+
   try {
-    // Authenticate with Restreamer to verify it's reachable
-    const loginResp = await fetch(`${restreamerUrl}/api/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: process.env.RESTREAMER_USER,
-        password: process.env.RESTREAMER_PASSWORD,
-      }),
-    });
+    // Look up the user's assigned Restreamer channel slug from the database.
+    const { rows } = await getPool().query(
+      'SELECT live_channel FROM users WHERE id = $1',
+      [user.id]
+    );
+    const channelRef = rows[0]?.live_channel;
 
-    if (!loginResp.ok) {
-      logger.error('Restreamer login failed for rtmp-key', { status: loginResp.status });
-      return res.status(503).json({ success: false, error: 'Live streaming not available' });
+    if (!channelRef) {
+      return res.status(404).json({
+        success: false,
+        error: 'No streaming channel assigned to your account. Contact an admin to get a channel assigned.',
+      });
     }
 
-    // Cryptographically random stream key, cached per user in Redis.
-    // Generated once and persists until the user explicitly rotates it.
-    const redis = getRedis();
-    const redisKey = `rtmp:streamkey:${user.id}`;
-    let streamKey = await redis.get(redisKey);
-    if (!streamKey) {
-      const newKey = crypto.randomBytes(20).toString('hex'); // 40-char random hex key
-      const wasSet = await redis.set(redisKey, newKey, 'NX'); // atomic set-if-not-exists
-      streamKey = wasSet ? newKey : await redis.get(redisKey); // re-read if lost the race
+    // Fetch the process config from Restreamer to extract the RTMP stream name.
+    const token = await getRestreamerToken(restreamerUrl);
+    const processes = await fetchRestreamerProcesses(restreamerUrl, token);
+    const proc = processes.find(p => p.reference === channelRef);
+
+    if (!proc) {
+      logger.warn(`getRtmpKey: user ${user.id} assigned channel '${channelRef}' not found in Restreamer`);
+      return res.status(503).json({
+        success: false,
+        error: 'Your assigned streaming channel is not available. Try again later.',
+      });
     }
 
-    const publicHost = restreamerPublicUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    // Note: RTMPS (rtmps://) requires TLS termination at the Restreamer level on port 443.
-    // Configure infrastructure accordingly to upgrade from plain RTMP.
+    const inputAddress = proc.config?.input?.[0]?.address;
+    const streamName = extractRtmpName(inputAddress);
+
+    if (!streamName) {
+      logger.error(`getRtmpKey: cannot extract RTMP name from channel '${channelRef}' address '${inputAddress}'`);
+      return res.status(500).json({ success: false, error: 'Streaming channel misconfigured' });
+    }
+
+    // The RTMP ingest app name is configured in Restreamer as '/live' (config.json rtmp.app).
+    const publicHost = restreamerPublicUrl.replace(/^https?:\/\//, '');
     const rtmpUrl = `rtmp://${publicHost}/live`;
 
-    return res.json({ success: true, rtmpUrl, streamKey });
+    // The HLS output URL for this channel, derived from the output address.
+    // Output address format: {memfs}/<ref>.m3u8
+    const safeRef = sanitizeRefId(channelRef);
+    const hlsUrl = safeRef ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8` : null;
+
+    return res.json({
+      success: true,
+      rtmpUrl,
+      streamKey: streamName,    // What the user enters in OBS as "Stream Key"
+      channelRef,               // The Restreamer channel slug (e.g. 'pnptv-frank')
+      hlsUrl,                   // The HLS playback URL for this channel
+      isLive: proc.state?.exec === 'running',
+    });
   } catch (err) {
     logger.error('getRtmpKey error', err);
     return res.status(500).json({ success: false, error: 'Failed to retrieve stream key' });
   }
 };
 
-module.exports = { listStreams, getRtmpKey };
+// ---------------------------------------------------------------------------
+// POST /api/webapp/admin/live/assign-channel
+// Admin-only: assign a Restreamer channel to a user (or unassign by passing null).
+//
+// Body: { userId: number, channelRef: string|null }
+//   channelRef: the Restreamer process reference slug (e.g. 'pnptv-frank'), or null to unassign.
+// ---------------------------------------------------------------------------
+const assignChannel = async (req, res) => {
+  const admin = req.session?.user;
+  if (!admin || admin.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  const { userId, channelRef } = req.body;
+
+  if (!userId || typeof userId !== 'number' && typeof userId !== 'string') {
+    return res.status(400).json({ error: 'userId is required' });
+  }
+  if (channelRef !== null && typeof channelRef !== 'string') {
+    return res.status(400).json({ error: 'channelRef must be a string or null' });
+  }
+  if (channelRef && !/^[a-zA-Z0-9\-_]+$/.test(channelRef)) {
+    return res.status(400).json({ error: 'channelRef contains invalid characters' });
+  }
+
+  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
+
+  try {
+    // Validate that the channel exists in Restreamer (unless unassigning).
+    if (channelRef) {
+      const token = await getRestreamerToken(restreamerUrl);
+      const processes = await fetchRestreamerProcesses(restreamerUrl, token);
+      const exists = processes.some(p => p.reference === channelRef);
+      if (!exists) {
+        return res.status(404).json({
+          error: `Channel '${channelRef}' does not exist in Restreamer. Available channels: ${processes.map(p => p.reference).join(', ')}`,
+        });
+      }
+    }
+
+    const { rows } = await getPool().query(
+      `UPDATE users SET live_channel = $1 WHERE id = $2
+       RETURNING id, username, live_channel`,
+      [channelRef || null, userId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    logger.info(`Admin ${admin.id} assigned channel '${channelRef ?? '(none)'}' to user ${userId}`);
+    return res.json({ success: true, user: rows[0] });
+  } catch (err) {
+    if (err.code === '23505') {
+      // Unique constraint violation: channel already assigned to another user.
+      return res.status(409).json({
+        error: `Channel '${channelRef}' is already assigned to another user`,
+      });
+    }
+    logger.error('assignChannel error', err);
+    return res.status(500).json({ error: 'Failed to assign channel' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// GET /api/webapp/admin/live/channels
+// Admin-only: list all Restreamer channels and their assigned users.
+// ---------------------------------------------------------------------------
+const listChannels = async (req, res) => {
+  const admin = req.session?.user;
+  if (!admin || admin.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
+  const publicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
+
+  try {
+    const [token, userRows] = await Promise.all([
+      getRestreamerToken(restreamerUrl),
+      getPool().query(
+        `SELECT id, username, first_name, last_name, live_channel
+         FROM users
+         WHERE live_channel IS NOT NULL`
+      ),
+    ]);
+
+    const processes = await fetchRestreamerProcesses(restreamerUrl, token);
+
+    // Build a map of channelRef -> assigned user
+    const channelToUser = {};
+    for (const row of userRows.rows) {
+      channelToUser[row.live_channel] = {
+        id: row.id,
+        username: row.username,
+        displayName: [row.first_name, row.last_name].filter(Boolean).join(' ') || row.username,
+      };
+    }
+
+    const channels = processes.map(p => {
+      const ref = p.reference || '';
+      const safeRef = sanitizeRefId(ref);
+      const inputAddress = p.config?.input?.[0]?.address;
+      return {
+        id: p.id,
+        reference: ref,
+        rtmpName: extractRtmpName(inputAddress),
+        hlsUrl: safeRef ? `${publicUrl}/memfs/${safeRef}.m3u8` : null,
+        isLive: p.state?.exec === 'running',
+        assignedUser: channelToUser[ref] || null,
+      };
+    });
+
+    return res.json({ success: true, channels });
+  } catch (err) {
+    logger.error('listChannels error', err);
+    return res.status(500).json({ error: 'Failed to list channels' });
+  }
+};
+
+module.exports = { listStreams, getRtmpKey, assignChannel, listChannels };

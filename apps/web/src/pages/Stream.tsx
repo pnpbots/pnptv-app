@@ -8,6 +8,7 @@ import { useI18n } from "@/lib/i18n";
 import { LivePlayer } from "@/components/LivePlayer";
 import {
   getLiveStreams,
+  getAllPerformers,
   sendTip,
   TIP_AMOUNTS,
   type LiveStream,
@@ -18,7 +19,7 @@ import {
 export default function Stream() {
   const { streamId } = useParams<{ streamId: string }>();
   const navigate = useNavigate();
-  const { t } = useI18n();
+  useI18n(); // load hook for language context; all strings in this page are hardcoded English
   const { isAuthenticated, login } = useAuth();
 
   const [stream, setStream] = useState<LiveStream | null>(null);
@@ -42,20 +43,45 @@ export default function Stream() {
     socketError,
   } = useLiveSocket(streamId || null);
 
-  // Load stream info
+  // Load stream info.
+  // streamId may be a Restreamer process ID (navigated from Community Live section)
+  // or a performer ID like "live-42" / "db-42" (navigated from the performer grid
+  // when the backend injects isLive + hlsUrl directly on the performer object).
   const loadStream = useCallback(() => {
     if (!streamId) return Promise.resolve();
     return getLiveStreams()
-      .then((data) => {
+      .then(async (data) => {
         const found = (data.streams || []).find((s) => s.id === streamId);
         if (found) {
           setStream(found);
           setError(null);
-        } else {
+          return;
+        }
+        // Not found in the Restreamer stream list — try resolving via the performers
+        // endpoint, which injects live users with their own isLive/hlsUrl fields.
+        try {
+          const perfData = await getAllPerformers();
+          const performer = (perfData.performers || []).find(
+            (p) => p.id === streamId || (p.userId && String(p.userId) === streamId)
+          );
+          if (performer && performer.isLive && performer.hlsUrl) {
+            const syntheticStream: LiveStream = {
+              id: performer.id,
+              name: performer.displayName,
+              description: performer.bio || "",
+              hlsUrl: performer.hlsUrl,
+              isLive: true,
+            };
+            setStream(syntheticStream);
+            setError(null);
+          } else {
+            setError("Stream not found");
+          }
+        } catch {
           setError("Stream not found");
         }
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load stream"));
   }, [streamId]);
 
   useEffect(() => {

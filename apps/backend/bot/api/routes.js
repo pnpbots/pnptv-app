@@ -2170,6 +2170,9 @@ app.delete('/api/webapp/hangouts/:callId', requireSessionAuth, asyncHandler(weba
 const webappLiveController = require('./controllers/webappLiveController');
 app.get('/api/webapp/live/streams', requireSessionAuth, asyncHandler(webappLiveController.listStreams));
 app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLiveController.getRtmpKey));
+// Admin: manage Restreamer channel assignments
+app.get('/api/webapp/admin/live/channels', requireSessionAuth, asyncHandler(webappLiveController.listChannels));
+app.post('/api/webapp/admin/live/assign-channel', requireSessionAuth, asyncHandler(webappLiveController.assignChannel));
 
 // Web App Support Chat (Cristina AI)
 const supportController = require('./controllers/supportController');
@@ -3612,19 +3615,63 @@ async function fetchPerformerPhotos(performers) {
 
 app.get('/api/performers/featured', asyncHandler(async (req, res) => {
   try {
-    const resp = await axios.get(`${DIRECTUS_INTERNAL_URL}/items/performers`, {
-      params: {
-        'filter[status][_eq]': 'published',
-        'filter[is_featured][_eq]': true,
-        'fields[]': DIRECTUS_PERFORMER_FIELDS,
-        sort: 'name',
-        limit: 20,
-      },
-      timeout: 10000,
-    });
-    const raw = resp.data?.data || [];
-    const photoMap = await fetchPerformerPhotos(raw);
-    res.json({ success: true, performers: raw.map(p => mapDirectusPerformer(p, photoMap)) });
+    // Fetch featured from Directus + active creators from DB
+    const [directusResult, dbResult] = await Promise.allSettled([
+      axios.get(`${DIRECTUS_INTERNAL_URL}/items/performers`, {
+        params: {
+          'filter[status][_eq]': 'published',
+          'filter[is_featured][_eq]': true,
+          'fields[]': DIRECTUS_PERFORMER_FIELDS,
+          sort: 'name',
+          limit: 20,
+        },
+        timeout: 10000,
+      }),
+      getPool().query(
+        `SELECT id, username, first_name, last_name, photo_file_id, bio,
+                creator_type, creator_status, creator_price_usd
+         FROM users
+         WHERE creator_status = 'active'
+         ORDER BY creator_subscriber_count DESC NULLS LAST
+         LIMIT 20`
+      ),
+    ]);
+
+    const directusPerformers = directusResult.status === 'fulfilled'
+      ? (directusResult.value.data?.data || [])
+      : [];
+    const dbCreators = dbResult.status === 'fulfilled'
+      ? (dbResult.value.rows || [])
+      : [];
+
+    const photoMap = await fetchPerformerPhotos(directusPerformers);
+    const mapped = directusPerformers.map(p => mapDirectusPerformer(p, photoMap));
+
+    const coveredUserIds = new Set(
+      directusPerformers.filter(p => p.pnptv_id).map(p => String(p.pnptv_id))
+    );
+
+    for (const c of dbCreators) {
+      if (coveredUserIds.has(String(c.id))) continue;
+      const photo = c.photo_file_id
+        ? (c.photo_file_id.startsWith('/') ? c.photo_file_id : `/${c.photo_file_id}`)
+        : null;
+      mapped.push({
+        id: `db-${c.id}`,
+        userId: c.id,
+        slug: c.username || null,
+        displayName: [c.first_name, c.last_name].filter(Boolean).join(' ') || c.username || `Creator ${c.id}`,
+        bio: c.bio || null,
+        photoUrl: photo,
+        isFeatured: false,
+        isAvailable: true,
+        basePrice: c.creator_price_usd || 100,
+        totalCalls: 0,
+        averageRating: 0,
+      });
+    }
+
+    res.json({ success: true, performers: mapped });
   } catch (error) {
     logger.error(`Performers featured error: ${error.message}`);
     res.json({ success: true, performers: [] });
@@ -3633,18 +3680,173 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
 
 app.get('/api/performers', asyncHandler(async (req, res) => {
   try {
-    const resp = await axios.get(`${DIRECTUS_INTERNAL_URL}/items/performers`, {
-      params: {
-        'filter[status][_eq]': 'published',
-        'fields[]': DIRECTUS_PERFORMER_FIELDS,
-        sort: 'name',
-        limit: 50,
-      },
-      timeout: 10000,
-    });
-    const raw = resp.data?.data || [];
-    const photoMap = await fetchPerformerPhotos(raw);
-    res.json({ success: true, performers: raw.map(p => mapDirectusPerformer(p, photoMap)) });
+    const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
+    const restreamerPublicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
+
+    // Fetch from Directus CMS, active creators in DB, and live Restreamer streams — all in parallel
+    const [directusResult, dbResult, streamsResult] = await Promise.allSettled([
+      axios.get(`${DIRECTUS_INTERNAL_URL}/items/performers`, {
+        params: {
+          'filter[status][_eq]': 'published',
+          'fields[]': DIRECTUS_PERFORMER_FIELDS,
+          sort: 'name',
+          limit: 50,
+        },
+        timeout: 10000,
+      }),
+      getPool().query(
+        `SELECT id, username, first_name, last_name, photo_file_id, bio,
+                creator_type, creator_status, creator_price_usd
+         FROM users
+         WHERE creator_status = 'active'
+         ORDER BY first_name ASC
+         LIMIT 100`
+      ),
+      // Fetch live streams from Restreamer (best-effort — failures are non-fatal).
+      // Only returns processes that are actively running (state.exec === 'running').
+      (async () => {
+        if (process.env.RESTREAMER_USER === undefined || process.env.RESTREAMER_PASSWORD === undefined) return [];
+        try {
+          // Use strict undefined-check: empty-string password is valid and must be sent.
+          let token = null;
+          try {
+            const loginResp = await axios.post(`${restreamerUrl}/api/login`, {
+              username: process.env.RESTREAMER_USER,
+              password: process.env.RESTREAMER_PASSWORD,
+            }, { timeout: 5000 });
+            token = loginResp.data?.access_token ?? null;
+          } catch (loginErr) {
+            logger.warn(`performers: Restreamer login failed (non-fatal): ${loginErr.message}`);
+          }
+          const headers = token ? { Authorization: `Bearer ${token}` } : {};
+          const procResp = await axios.get(`${restreamerUrl}/api/v3/process`, {
+            headers,
+            timeout: 8000,
+          });
+          return (procResp.data || []).filter(p =>
+            p.id?.startsWith('restreamer-ui:ingest:') && p.state?.exec === 'running'
+          );
+        } catch (e) {
+          logger.warn(`performers: Restreamer fetch failed (non-fatal): ${e.message}`);
+          return [];
+        }
+      })(),
+    ]);
+
+    const directusPerformers = directusResult.status === 'fulfilled'
+      ? (directusResult.value.data?.data || [])
+      : [];
+    const dbCreators = dbResult.status === 'fulfilled'
+      ? (dbResult.value.rows || [])
+      : [];
+    const liveProcesses = streamsResult.status === 'fulfilled'
+      ? (streamsResult.value || [])
+      : [];
+
+    // Map Directus performers
+    const photoMap = await fetchPerformerPhotos(directusPerformers);
+    const mapped = directusPerformers.map(p => mapDirectusPerformer(p, photoMap));
+
+    // Track which DB user IDs are already covered by Directus performers
+    const coveredUserIds = new Set(
+      directusPerformers.filter(p => p.pnptv_id).map(p => String(p.pnptv_id))
+    );
+
+    // Add active creators from DB that aren't already in Directus
+    for (const c of dbCreators) {
+      if (coveredUserIds.has(String(c.id))) continue;
+      const photo = c.photo_file_id
+        ? (c.photo_file_id.startsWith('/') ? c.photo_file_id : `/${c.photo_file_id}`)
+        : null;
+      mapped.push({
+        id: `db-${c.id}`,
+        userId: c.id,
+        slug: c.username || null,
+        displayName: [c.first_name, c.last_name].filter(Boolean).join(' ') || c.username || `Creator ${c.id}`,
+        bio: c.bio || null,
+        photoUrl: photo,
+        isFeatured: false,
+        isAvailable: true,
+        basePrice: c.creator_price_usd || 100,
+        totalCalls: 0,
+        averageRating: 0,
+      });
+    }
+
+    // --- Inject currently-live users ---
+    // Each Restreamer process has a 'reference' slug (e.g. 'pnptv-frank') that is set
+    // when the channel is created via the Restreamer UI. Users are assigned a channel
+    // via the users.live_channel column. We join the running processes against the DB
+    // to resolve which user owns each active channel — no Redis hex lookup needed.
+    if (liveProcesses.length > 0) {
+      try {
+        // Collect the reference slugs of all currently-running processes.
+        const liveRefs = liveProcesses
+          .map(p => (typeof p.reference === 'string' && p.reference) ? p.reference : null)
+          .filter(Boolean);
+
+        if (liveRefs.length > 0) {
+          // Single DB query: find all users whose assigned channel is currently live.
+          const placeholders = liveRefs.map((_, i) => `$${i + 1}`).join(',');
+          const { rows: channelUsers } = await getPool().query(
+            `SELECT id, username, first_name, last_name, photo_file_id, bio, live_channel
+             FROM users
+             WHERE live_channel IN (${placeholders})`,
+            liveRefs
+          );
+
+          for (const u of channelUsers) {
+            const channelRef = u.live_channel;
+
+            // Sanitize reference before embedding in URL (prevent path traversal).
+            const safeRef = typeof channelRef === 'string'
+              ? channelRef.replace(/[^a-zA-Z0-9\-_.]/g, '')
+              : null;
+            const hlsUrl = safeRef && !safeRef.includes('..')
+              ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8`
+              : null;
+
+            const uid = String(u.id);
+
+            if (coveredUserIds.has(uid)) {
+              // User is already in the performers/creators list — mark them live.
+              for (const entry of mapped) {
+                if (entry.userId && String(entry.userId) === uid) {
+                  entry.isLive = true;
+                  if (hlsUrl) entry.hlsUrl = hlsUrl;
+                  break;
+                }
+              }
+            } else {
+              // User has a live stream but is not yet in the performers list — inject them.
+              const photo = u.photo_file_id
+                ? (u.photo_file_id.startsWith('/') ? u.photo_file_id : `/${u.photo_file_id}`)
+                : null;
+              mapped.push({
+                id: `live-${u.id}`,
+                userId: u.id,
+                slug: u.username || null,
+                displayName: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.username || `User ${u.id}`,
+                bio: u.bio || null,
+                photoUrl: photo,
+                isFeatured: false,
+                isAvailable: true,
+                isLive: true,
+                hlsUrl,
+                basePrice: 0,
+                totalCalls: 0,
+                averageRating: 0,
+              });
+              coveredUserIds.add(uid);
+            }
+          }
+        }
+      } catch (liveErr) {
+        logger.warn(`performers: live-user injection failed (non-fatal): ${liveErr.message}`);
+      }
+    }
+
+    res.json({ success: true, performers: mapped });
   } catch (error) {
     logger.error(`Performers all error: ${error.message}`);
     res.json({ success: true, performers: [] });

@@ -40,9 +40,8 @@ function isValidPhotoUrl(photo: string | null | undefined): photo is string {
 }
 
 export default function Live() {
-  const { isAuthenticated, login, user } = useAuth();
+  const { isAuthenticated, login } = useAuth();
   const t = useI18n();
-  const isCreator = isAuthenticated && (user?.role === "admin" || user?.role === "superadmin" || user?.role === "creator");
   const navigate = useNavigate();
   const { showTutorial, dismissTutorial } = useTutorial("live");
 
@@ -195,15 +194,16 @@ export default function Live() {
     handleLoadWalletHistory();
   };
 
-  // Match a performer to their live stream by checking if the stream name
-  // contains the performer's display name or slug (case-insensitive)
+  // Match a performer to their live stream by userId, display name, or slug
   const findLiveStream = (p: FeaturedPerformer): LiveStream | undefined => {
-    const name = p.displayName.toLowerCase().split(/[^a-z]/)[0]; // first word, e.g. "lex" from "Lex! Slam!"
+    const name = p.displayName.toLowerCase().split(/[^a-z]/)[0];
     const slug = p.slug?.toLowerCase();
+    const userId = p.userId ? String(p.userId) : null;
     return liveStreams.find((s) => {
       const sName = s.name.toLowerCase();
       const sId = s.id.toLowerCase();
       return (
+        (userId && (sId.includes(userId) || sName.includes(userId))) ||
         (name && (sName.includes(name) || sId.includes(name))) ||
         (slug && (sName.includes(slug) || sId.includes(slug)))
       );
@@ -224,7 +224,7 @@ export default function Live() {
           <h1 className="text-lg font-bold text-pnp-textPrimary">{t.live.liveTitle}</h1>
           <p className="text-xs text-pnp-textSecondary mt-0.5">{t.live.liveSubtitle}</p>
         </div>
-        {isCreator && (
+        {isAuthenticated && (
           <button
             onClick={handleGoLive}
             disabled={goLiveLoading}
@@ -247,8 +247,18 @@ export default function Live() {
       ) : performers.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
           {performers.map((p) => {
+            // Use the backend-supplied isLive flag first (set when the performer
+            // is actively streaming via Restreamer). Fall back to matching by name
+            // or userId against the separately-fetched liveStreams list.
             const stream = findLiveStream(p);
-            const isLive = !!stream;
+            const isLive = p.isLive === true || !!stream;
+            // Prefer the direct hlsUrl from the performer object; fall back to
+            // the matched stream's id for the /live/:streamId route.
+            const watchUrl = p.hlsUrl
+              ? `/live/${encodeURIComponent(p.id)}`
+              : stream
+              ? `/live/${encodeURIComponent(stream.id)}`
+              : null;
             return (
               <div
                 key={p.id}
@@ -274,8 +284,8 @@ export default function Live() {
                 )}
                 <button
                   onClick={() => {
-                    if (isLive && stream) {
-                      navigate(`/live/${stream.id}`);
+                    if (isLive && watchUrl) {
+                      navigate(watchUrl);
                     } else if (p.userId) {
                       navigate(`/profile/${p.userId}`);
                     }
@@ -292,9 +302,66 @@ export default function Live() {
             );
           })}
         </div>
-      ) : (
-        <p className="text-sm text-pnp-textSecondary text-center py-8">{t.live.noStreamsAvailable}</p>
-      )}
+      ) : null}
+
+      {/* ── Community Live — streams not matched to any performer ── */}
+      {(() => {
+        // A stream is "matched" if a performer card already shows it — either via
+        // findLiveStream() name/id match, or because the performer's own hlsUrl
+        // points to it (backend-injected live users).
+        const matchedStreamIds = new Set(
+          performers.map((p) => findLiveStream(p)?.id).filter(Boolean)
+        );
+        // Additionally exclude streams whose hlsUrl is already represented by a
+        // performer that has isLive: true — those users appear in the performer grid.
+        const livePerformerIds = new Set(
+          performers.filter((p) => p.isLive).map((p) => String(p.userId)).filter(Boolean)
+        );
+        const communityStreams = liveStreams.filter(
+          (s) => !matchedStreamIds.has(s.id) && !livePerformerIds.has(s.id)
+        );
+        if (!performersLoading && communityStreams.length === 0 && performers.length === 0) {
+          return (
+            <p className="text-sm text-pnp-textSecondary text-center py-8">{t.live.noStreamsAvailable}</p>
+          );
+        }
+        if (communityStreams.length === 0) return null;
+        return (
+          <div className="mb-4">
+            <h2 className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider mb-2">Community Live</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {communityStreams.map((s) => (
+                <div
+                  key={s.id}
+                  className="rounded-xl border border-red-500/50 ring-1 ring-red-500/20 bg-pnp-surface p-3 flex flex-col items-center text-center"
+                >
+                  <div className="relative">
+                    <div className="w-20 h-20 rounded-full mb-2 border-2 border-red-500 bg-pnp-border flex items-center justify-center">
+                      <svg className="w-8 h-8 text-red-500/70" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z" />
+                      </svg>
+                    </div>
+                    <span className="absolute -top-1 -right-1 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                      LIVE
+                    </span>
+                  </div>
+                  <span className="text-sm font-medium text-pnp-textPrimary truncate max-w-full">{s.name}</span>
+                  {s.description ? (
+                    <span className="text-[10px] text-pnp-textSecondary mt-0.5 line-clamp-1">{s.description}</span>
+                  ) : null}
+                  <button
+                    onClick={() => navigate(`/live/${encodeURIComponent(s.id)}`)}
+                    className="mt-2 w-full py-1.5 rounded-lg font-semibold text-xs active:scale-95 transition-all text-white bg-red-500 hover:bg-red-600"
+                  >
+                    Watch Live
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Wallet ── */}
       {isAuthenticated && (
