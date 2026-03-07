@@ -355,14 +355,21 @@ class PNPLiveNotificationService {
 
       const stars = '⭐'.repeat(rating);
 
+      // Escape user-supplied comment so it cannot break Telegram Markdown parsing.
+      // Replace backticks, asterisks, underscores, and square brackets that have
+      // special meaning in Telegram's legacy Markdown mode.
+      const safeComment = comment
+        ? comment.replace(/[`*_[\]]/g, '\\$&').slice(0, 500)
+        : '';
+
       const message = lang === 'es'
         ? `🌟 *Nuevo Feedback*\n\n` +
           `Calificación: ${stars}\n` +
-          (comment ? `💬 "${comment}"\n\n` : '\n') +
+          (safeComment ? `💬 "${safeComment}"\n\n` : '\n') +
           `¡Gracias por tu excelente servicio!`
         : `🌟 *New Feedback*\n\n` +
           `Rating: ${stars}\n` +
-          (comment ? `💬 "${comment}"\n\n` : '\n') +
+          (safeComment ? `💬 "${safeComment}"\n\n` : '\n') +
           `Thanks for your excellent service!`;
 
       return await this.sendMessage(modelTelegramId, message);
@@ -446,7 +453,13 @@ class PNPLiveNotificationService {
    */
   static async markNotificationSent(bookingId, notificationType) {
     try {
-      const column = notificationType === '1h' ? 'reminder_1h_sent' : 'reminder_5m_sent';
+      // Column name is derived from an allowlist — never interpolate user-supplied input
+      const ALLOWED_NOTIFICATION_TYPES = { '1h': 'reminder_1h_sent', '5m': 'reminder_5m_sent' };
+      const column = ALLOWED_NOTIFICATION_TYPES[notificationType];
+      if (!column) {
+        logger.error('markNotificationSent: invalid notificationType rejected', { notificationType });
+        return;
+      }
       await query(
         `UPDATE pnp_bookings SET ${column} = TRUE, updated_at = NOW() WHERE id = $1`,
         [bookingId]

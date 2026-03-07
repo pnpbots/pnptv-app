@@ -12,6 +12,14 @@
   body {
     @apply bg-pnp-background text-pnp-textPrimary;
     font-family: "Roboto Mono", monospace;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Allow text selection in inputs and textareas */
+  input, textarea, [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
   }
 
   h1, h2, h3 {
@@ -38,7 +46,7 @@
 
 @layer components {
   .page-container {
-    @apply max-w-7xl mx-auto px-4 sm:px-6 py-6;
+    @apply max-w-7xl mx-auto px-4 sm:px-6 py-6 overflow-x-hidden;
   }
 
   .embed-frame {

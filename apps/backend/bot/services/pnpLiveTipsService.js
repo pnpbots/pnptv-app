@@ -145,6 +145,7 @@ class PNPLiveTipsService {
          LEFT JOIN performers p ON p.id::text = t.performer_id
          LEFT JOIN users u ON t.user_id = u.id
          WHERE t.created_at >= $1
+           AND t.payment_status = 'completed'
          ORDER BY t.created_at DESC
          LIMIT $2`,
         [startDate, limit]

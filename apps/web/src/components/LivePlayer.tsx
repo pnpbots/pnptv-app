@@ -6,9 +6,10 @@ interface LivePlayerProps {
   src: string;
   title?: string;
   poster?: string;
+  className?: string;
 }
 
-export function LivePlayer({ src, title, poster }: LivePlayerProps) {
+export function LivePlayer({ src, title, poster, className = "" }: LivePlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<"loading" | "live" | "offline" | "error">("loading");
 
@@ -67,7 +68,7 @@ export function LivePlayer({ src, title, poster }: LivePlayerProps) {
 
   if (status === "loading") {
     return (
-      <div className="relative aspect-video rounded-xl overflow-hidden">
+      <div className={`relative aspect-video overflow-hidden rounded-xl ${className}`}>
         <Skeleton className="w-full h-full" />
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="w-10 h-10 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
@@ -78,7 +79,7 @@ export function LivePlayer({ src, title, poster }: LivePlayerProps) {
 
   if (status === "offline") {
     return (
-      <div className="relative aspect-video rounded-xl overflow-hidden bg-pnp-surface border border-pnp-border flex items-center justify-center">
+      <div className={`relative aspect-video overflow-hidden rounded-xl bg-pnp-surface border border-pnp-border flex items-center justify-center ${className}`}>
         <div className="text-center">
           <svg className="w-16 h-16 text-pnp-textSecondary mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -91,7 +92,7 @@ export function LivePlayer({ src, title, poster }: LivePlayerProps) {
   }
 
   return (
-    <div className="relative aspect-video rounded-xl overflow-hidden bg-black">
+    <div className={`relative aspect-video overflow-hidden rounded-xl bg-black ${className}`}>
       {/* Fix #15: muted allows autoplay to succeed in all browsers.
            User can unmute via the native controls. */}
       <video

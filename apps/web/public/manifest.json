@@ -3,10 +3,19 @@
   "short_name": "PNPtv",
   "description": "Private social platform for gay men into the party and play lifestyle. Live video rooms, creator channels, nearby discovery, and premium adult content.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#121212",
   "theme_color": "#121212",
   "categories": ["social", "entertainment"],
+  "permissions": [
+    "geolocation",
+    "notifications",
+    "camera",
+    "microphone",
+    "clipboard-write"
+  ],
   "icons": [
     {
       "src": "/icon-192.png",
@@ -24,5 +33,16 @@
       "type": "image/png",
       "purpose": "maskable"
     }
-  ]
+  ],
+  "screenshots": [
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "wide"
+    }
+  ],
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  }
 }

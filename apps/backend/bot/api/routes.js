@@ -2168,7 +2168,7 @@ app.delete('/api/webapp/hangouts/:callId', requireSessionAuth, asyncHandler(weba
 
 // Web App Live Streaming Routes
 const webappLiveController = require('./controllers/webappLiveController');
-app.get('/api/webapp/live/streams', asyncHandler(webappLiveController.listStreams));
+app.get('/api/webapp/live/streams', requireSessionAuth, asyncHandler(webappLiveController.listStreams));
 app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLiveController.getRtmpKey));
 
 // Web App Support Chat (Cristina AI)
@@ -3236,11 +3236,15 @@ app.get('/api/proxy/media/stream/:songId', asyncHandler(async (req, res) => {
 app.get('/api/proxy/live/streams', asyncHandler(async (req, res) => {
   try {
     const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
-    const restreamerUser = process.env.RESTREAMER_USER || 'admin';
-    const restreamerPass = process.env.RESTREAMER_PASSWORD || '';
+    // Use undefined-check: a deliberately empty password string must still be passed to login.
+    // The || '' fallback would make an empty RESTREAMER_PASSWORD falsy, skipping auth entirely
+    // and causing Restreamer to reject the unauthenticated /api/v3/process request with a 401,
+    // which surfaces as an empty streams list with no error logged.
+    const restreamerUser = process.env.RESTREAMER_USER !== undefined ? process.env.RESTREAMER_USER : 'admin';
+    const restreamerPass = process.env.RESTREAMER_PASSWORD !== undefined ? process.env.RESTREAMER_PASSWORD : null;
 
     let token = null;
-    if (restreamerUser && restreamerPass) {
+    if (restreamerUser && restreamerPass !== null) {
       try {
         const loginResp = await axios.post(`${restreamerUrl}/api/login`, {
           username: restreamerUser,
@@ -3258,12 +3262,22 @@ app.get('/api/proxy/live/streams', asyncHandler(async (req, res) => {
       timeout: 10000,
     });
 
-    const publicUrl = process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app';
+    // Strip trailing slash to prevent double-slash in HLS URLs (e.g. https://live.pnptv.app//memfs/...)
+    const publicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
     const processes = resp.data || [];
     const streams = processes
       .filter((p) => p.id?.startsWith('restreamer-ui:ingest:'))
       .map((p) => {
-        const refId = p.reference || p.id;
+        const rawRefId = p.reference || p.id;
+        // Allowlist: only alphanumeric, hyphens, underscores, and dots.
+        // Prevents path-traversal or query injection if Restreamer returns a crafted ID.
+        const refId = typeof rawRefId === 'string'
+          ? rawRefId.replace(/[^a-zA-Z0-9\-_.]/g, '')
+          : null;
+        if (!refId || refId.includes('..')) {
+          logger.warn('proxy listStreams: rejected process with unsafe reference ID', { rawRefId });
+          return null;
+        }
         return {
           id: p.id,
           name: p.metadata?.['restreamer-ui']?.meta?.name || 'Live Stream',
@@ -3271,7 +3285,8 @@ app.get('/api/proxy/live/streams', asyncHandler(async (req, res) => {
           hlsUrl: `${publicUrl}/memfs/${refId}.m3u8`,
           isLive: p.state?.exec === 'running',
         };
-      });
+      })
+      .filter(Boolean);
 
     res.json({ success: true, streams });
   } catch (error) {
@@ -3607,24 +3622,29 @@ app.get('/api/performers', asyncHandler(async (req, res) => {
 // --- Live Tips Proxy (PNP Live tipping system) ---
 const PNPLiveTipsService = require('../services/pnpLiveTipsService');
 
-// GET /api/proxy/live/performers — List performers from Directus
+// GET /api/proxy/live/performers — List performers from Directus for tip picker
 app.get('/api/proxy/live/performers', asyncHandler(async (req, res) => {
   try {
     const resp = await axios.get(`${DIRECTUS_INTERNAL_URL}/items/performers`, {
       params: {
         'filter[status][_eq]': 'published',
-        'fields[]': ['id', 'name', 'slug', 'bio', 'photo', 'categories'],
-        sort: 'name',
+        // is_featured and is_available were missing — tip picker needs both to display correctly
+        'fields[]': ['id', 'name', 'slug', 'bio', 'photo', 'is_featured', 'is_available', 'categories'],
+        sort: '-is_featured,name',
         limit: 50,
       },
       timeout: 10000,
     });
     const performers = (resp.data?.data || []).map(p => ({
-      id: p.id,
+      id: String(p.id),
       name: p.name,
       slug: p.slug,
       bio: p.bio || '',
       photo: p.photo ? `https://cms.pnptv.app/assets/${p.photo}` : null,
+      // is_featured and is_available were absent from response — featured performers
+      // were indistinguishable from regular ones, and unavailable performers were shown
+      isFeatured: p.is_featured || false,
+      isAvailable: p.is_available !== false,
       categories: p.categories || [],
     }));
     res.json({ success: true, performers });
@@ -3773,8 +3793,8 @@ app.post('/api/proxy/live/tips', tipLimiter, asyncHandler(async (req, res) => {
   }
 }));
 
-// GET /api/proxy/live/tips/recent — Recent completed tips
-app.get('/api/proxy/live/tips/recent', asyncHandler(async (req, res) => {
+// GET /api/proxy/live/tips/recent — Recent completed tips (auth required)
+app.get('/api/proxy/live/tips/recent', requireSessionAuth, asyncHandler(async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
     const tips = await PNPLiveTipsService.getRecentTips(limit, 30);

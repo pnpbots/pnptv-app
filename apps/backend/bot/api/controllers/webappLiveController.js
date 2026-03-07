@@ -9,6 +9,21 @@ const authGuard = (req, res) => {
   return user;
 };
 
+/**
+ * Sanitize a Restreamer reference ID before embedding it in an HLS URL.
+ * Only alphanumeric characters, hyphens, underscores, and dots are allowed.
+ * This prevents path-traversal (../) or query-injection if Restreamer ever
+ * returns a crafted process reference.
+ */
+function sanitizeRefId(refId) {
+  if (typeof refId !== 'string') return null;
+  // Strip everything except the safe character set
+  const clean = refId.replace(/[^a-zA-Z0-9\-_.]/g, '');
+  // Reject if nothing remained or if the result looks like a traversal attempt
+  if (!clean || clean.includes('..')) return null;
+  return clean;
+}
+
 // GET /api/webapp/live/streams
 // Proxies to Restreamer API and returns active HLS streams.
 const listStreams = async (req, res) => {
@@ -20,7 +35,10 @@ const listStreams = async (req, res) => {
 
   try {
     let token = null;
-    if (restreamerUser && restreamerPass) {
+    // Use undefined-check instead of truthiness: an empty-string password is still a valid
+    // credential and must be sent. The old `if (restreamerUser && restreamerPass)` guard
+    // would silently skip login when RESTREAMER_PASSWORD='', leaving all requests unauthenticated.
+    if (restreamerUser !== undefined && restreamerPass !== undefined) {
       try {
         const loginResp = await axios.post(`${restreamerUrl}/api/login`, {
           username: restreamerUser,
@@ -43,7 +61,12 @@ const listStreams = async (req, res) => {
     const streams = processes
       .filter((p) => p.id?.startsWith('restreamer-ui:ingest:'))
       .map((p) => {
-        const refId = p.reference || p.id;
+        const rawRefId = p.reference || p.id;
+        const refId = sanitizeRefId(rawRefId);
+        if (!refId) {
+          logger.warn('listStreams: rejected process with unsafe reference ID', { rawRefId });
+          return null;
+        }
         return {
           id: p.id,
           name: p.metadata?.['restreamer-ui']?.meta?.name || 'Live Stream',
@@ -51,7 +74,8 @@ const listStreams = async (req, res) => {
           hlsUrl: `${publicUrl}/memfs/${refId}.m3u8`,
           isLive: p.state?.exec === 'running',
         };
-      });
+      })
+      .filter(Boolean);
 
     return res.json({ success: true, streams });
   } catch (err) {
@@ -73,7 +97,10 @@ const getRtmpKey = async (req, res) => {
   const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
   const restreamerPublicUrl = process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app';
 
-  if (!process.env.RESTREAMER_USER || !process.env.RESTREAMER_PASSWORD) {
+  // Use undefined-check: RESTREAMER_PASSWORD may legitimately be an empty string.
+  // The old falsy-check (!process.env.RESTREAMER_PASSWORD) incorrectly returned 503
+  // when the variable was set but blank.
+  if (process.env.RESTREAMER_USER === undefined || process.env.RESTREAMER_PASSWORD === undefined) {
     return res.status(503).json({ success: false, error: 'Live streaming not configured' });
   }
 

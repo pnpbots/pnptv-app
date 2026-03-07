@@ -88,6 +88,9 @@ export default function Live() {
   const [showBooking, setShowBooking] = useState(false);
   const [bookingLoaded, setBookingLoaded] = useState(false);
 
+  // Chat toggle
+  const [showChat, setShowChat] = useState(true);
+
   // Go Live
   const [showGoLive, setShowGoLive] = useState(false);
   const [rtmpInfo, setRtmpInfo] = useState<{ rtmpUrl: string; streamKey: string } | null>(null);
@@ -107,7 +110,6 @@ export default function Live() {
     sendMessage,
     latestTip,
     walletBalance: socketBalance,
-    setWalletBalance: setSocketBalance,
     socketError,
   } = useLiveSocket(activeStream?.id ?? null);
 
@@ -330,193 +332,133 @@ export default function Live() {
       </Helmet>
       {showTutorial && <TutorialOverlay section="live" onDismiss={dismissTutorial} />}
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-lg font-bold text-pnp-textPrimary">{t.live.liveTitle}</h1>
-          <p className="text-sm text-pnp-textSecondary mt-1">
-            {t.live.liveSubtitle}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {isCreator && (
-            <div className="flex flex-col items-end gap-1">
-              <button
-                onClick={handleGoLive}
-                disabled={goLiveLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-gradient disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-              >
-                <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                {goLiveLoading ? t.live.goLiveLoading : t.live.goLive}
-              </button>
-              {goLiveError && (
-                <p className="text-[10px] text-pnp-error text-right max-w-[160px]">{goLiveError}</p>
-              )}
-            </div>
-          )}
-          <Badge variant="error">{t.live.statusLive}</Badge>
-        </div>
-      </div>
+      {/* ── Hero Stream Section ── */}
+      <div className="relative -mx-4 -mt-6 sm:-mx-6 sm:-mt-6">
+        {/* Player area */}
+        {isLoading ? (
+          <Skeleton className="w-full aspect-video" />
+        ) : activeStream ? (
+          <div className="relative">
+            <LivePlayer src={activeStream.hlsUrl} className="rounded-none" />
 
-      {/* Main Player */}
-      {isLoading ? (
-        <Skeleton className="aspect-video rounded-xl mb-4" />
-      ) : activeStream ? (
-        <div className="mb-4">
-          <LivePlayer src={activeStream.hlsUrl} title={activeStream.name} />
-          <div className="flex items-center gap-2 mt-2 flex-wrap">
-            {activeStream.isLive && (
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full dot-gradient animate-pulse" />
-                <span className="text-xs font-medium text-gradient">{t.live.statusLive}</span>
-              </span>
-            )}
-            {viewerCount > 0 && (
-              <span className="flex items-center gap-1 text-xs text-pnp-textSecondary">
-                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
-                </svg>
-                {t.live.watching(viewerCount)}
-              </span>
-            )}
-            <span className="text-sm text-pnp-textPrimary font-medium">{activeStream.name}</span>
-            {/* Refresh button */}
-            <button
-              onClick={loadStreams}
-              className="ml-auto text-pnp-textSecondary hover:text-pnp-accent transition-colors"
-              title={t.live.refreshStreams}
-              aria-label={t.live.refreshStreams}
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            </button>
-          </div>
-          {activeStream.description && (
-            <p className="text-sm text-pnp-textSecondary mt-1">{activeStream.description}</p>
-          )}
-        </div>
-      ) : (
-        <Card className="text-center py-12 mb-4">
-          <svg className="w-16 h-16 text-pnp-textSecondary mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-          <p className="text-pnp-textPrimary font-medium mb-1">{t.live.noStreamsAvailable}</p>
-          <p className="text-sm text-pnp-textSecondary mb-3">{t.live.noStreamsHint}</p>
-          <button
-            onClick={loadStreams}
-            className="text-xs text-pnp-accent hover:underline"
-          >
-            {t.live.refresh}
-          </button>
-        </Card>
-      )}
-
-      {/* Dash Token Wallet Widget */}
-      {isAuthenticated && (
-        <Card className="mb-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>
-                <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white">
-                  <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
-                </svg>
-              </div>
-              <div>
-                <p className="text-xs text-pnp-textSecondary">{t.live.tokenBalance}</p>
-                <p className="text-base font-bold text-pnp-textPrimary">
-                  {tokenBalance === null ? "—" : `${tokenBalance} ${t.live.tokens}`}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {dpnsHandle ? (
-                <span className="text-xs text-pnp-textSecondary px-2 py-1 bg-pnp-surface rounded-full border border-pnp-border">
-                  @{dpnsHandle}
-                </span>
-              ) : (
+            {/* Overlay controls on top of player */}
+            <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
+              {isCreator && (
                 <button
-                  onClick={() => setShowDpnsInput(!showDpnsInput)}
-                  className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors"
+                  onClick={handleGoLive}
+                  disabled={goLiveLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-black/60 backdrop-blur-sm border border-white/10 hover:bg-black/80 disabled:opacity-50 transition-all"
                 >
-                  {t.live.linkDpns}
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  {goLiveLoading ? t.live.goLiveLoading : t.live.goLive}
                 </button>
               )}
               <button
-                onClick={openWalletHistory}
-                className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors"
-                title={t.live.viewPurchaseHistory}
+                onClick={loadStreams}
+                className="p-1.5 rounded-lg bg-black/60 backdrop-blur-sm border border-white/10 text-white/70 hover:text-white transition-colors"
+                title={t.live.refreshStreams}
+                aria-label={t.live.refreshStreams}
               >
-                {t.live.history}
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
               </button>
-              <button
-                onClick={() => { setBuyError(null); setShowBuyModal(true); }}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-gradient"
-              >
-                {t.live.buyTokens}
-              </button>
+            </div>
+
+            {/* Bottom info bar overlaid on player */}
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-4 pb-3 pt-10">
+              <div className="flex items-center gap-2 flex-wrap">
+                {activeStream.isLive && (
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                    <span className="text-xs font-semibold text-white">{t.live.statusLive}</span>
+                  </span>
+                )}
+                {viewerCount > 0 && (
+                  <span className="flex items-center gap-1 text-xs text-white/70">
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
+                    </svg>
+                    {t.live.watching(viewerCount)}
+                  </span>
+                )}
+                <span className="text-sm text-white font-medium">{activeStream.name}</span>
+              </div>
+              {activeStream.description && (
+                <p className="text-xs text-white/60 mt-1">{activeStream.description}</p>
+              )}
             </div>
           </div>
+        ) : (
+          <div className="relative w-full aspect-video bg-gradient-to-br from-pnp-surface via-black to-pnp-surface">
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <svg className="w-12 h-12 text-white/20 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              <p className="text-white/40 text-sm font-medium">{t.live.noStreamsAvailable}</p>
+              <p className="text-white/25 text-xs mt-1">{t.live.noStreamsHint}</p>
+            </div>
 
-          {showDpnsInput && (
-            <div className="flex gap-2 mt-3">
-              <input
-                type="text"
-                placeholder={t.live.dpnsPlaceholder}
-                value={dpnsInput}
-                onChange={(e) => setDpnsInput(e.target.value)}
-                className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
-              />
+            {/* Overlay controls */}
+            <div className="absolute top-3 right-3 flex items-center gap-2">
+              {isCreator && (
+                <button
+                  onClick={handleGoLive}
+                  disabled={goLiveLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-gradient disabled:opacity-50 transition-all"
+                >
+                  <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                  {goLiveLoading ? t.live.goLiveLoading : t.live.goLive}
+                </button>
+              )}
               <button
-                onClick={handleSaveDpns}
-                disabled={dpnsSaving}
-                className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium disabled:opacity-50"
+                onClick={loadStreams}
+                className="p-1.5 rounded-lg bg-black/40 text-white/50 hover:text-white transition-colors"
+                title={t.live.refreshStreams}
+                aria-label={t.live.refreshStreams}
               >
-                {dpnsSaving ? t.live.saving : t.live.save}
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
               </button>
             </div>
-          )}
-        </Card>
-      )}
 
-      {/* Tip Bar */}
-      <Card className="mb-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-pnp-textPrimary">{t.live.sendATip}</h3>
-          {selectedPerformer && (
-            <span className="text-xs text-gradient">{t.live.tipTo(selectedPerformer.displayName)}</span>
-          )}
-        </div>
-
-        {/* Payment method tabs */}
-        {isAuthenticated && (
-          <div className="flex gap-1 mb-3 p-1 bg-pnp-surface rounded-lg">
-            <button
-              onClick={() => setTipPaymentTab("tokens")}
-              className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${
-                tipPaymentTab === "tokens"
-                  ? "text-white btn-gradient"
-                  : "text-pnp-textSecondary hover:text-pnp-textPrimary"
-              }`}
-            >
-              {t.live.tabTokens} {tokenBalance !== null && `(${tokenBalance})`}
-            </button>
-            <button
-              onClick={() => setTipPaymentTab("daimo")}
-              className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${
-                tipPaymentTab === "daimo"
-                  ? "text-white btn-gradient"
-                  : "text-pnp-textSecondary hover:text-pnp-textPrimary"
-              }`}
-            >
-              {t.live.tabDaimoCrypto}
-            </button>
+            {/* Featured performers carousel at bottom of offline hero */}
+            {performers.length > 0 && (
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-4 pb-3 pt-8">
+                <div className="flex gap-3 overflow-x-auto pb-1">
+                  {performers.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setSelectedPerformer(p)}
+                      className="flex flex-col items-center flex-shrink-0 group"
+                    >
+                      <div className={`w-12 h-12 rounded-full overflow-hidden border-2 transition-colors ${selectedPerformer?.id === p.id ? "border-pnp-accent" : "border-white/20 group-hover:border-white/40"}`}>
+                        <img
+                          src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
+                          alt={p.displayName}
+                          className="w-full h-full object-cover"
+                          onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-white/70 mt-1 max-w-[60px] truncate">{p.displayName}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
+        {goLiveError && (
+          <p className="text-[10px] text-pnp-error text-center mt-1 px-4">{goLiveError}</p>
+        )}
+      </div>
 
-        {/* Performer selector — shown with 1 or more performers */}
+      {/* ── Performer selector + Tip bar (compact, right below stream) ── */}
+      <div className="mt-3">
+        {/* Performer pills */}
         {performers.length > 0 && (
-          <div className="flex gap-2 mb-3 overflow-x-auto pb-1 -mx-1 px-1">
+          <div className="flex gap-2 mb-2 overflow-x-auto pb-1 -mx-1 px-1">
             {performers.map((p) => (
               <button
                 key={p.id}
@@ -532,9 +474,7 @@ export default function Live() {
                     src={p.photoUrl}
                     alt={`${p.displayName}'s avatar`}
                     className="w-4 h-4 rounded-full object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                    }}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                   />
                 ) : (
                   <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
@@ -547,33 +487,61 @@ export default function Live() {
           </div>
         )}
 
-        {/* Tip amount buttons */}
-        <div className="flex gap-2 flex-wrap">
-          {TIP_AMOUNTS.map((amount) => (
+        {/* Tip buttons — always visible, compact */}
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1.5 flex-1 overflow-x-auto">
+            {TIP_AMOUNTS.map((amount) => (
+              <button
+                key={amount}
+                onClick={() => handleTip(amount)}
+                disabled={tipping}
+                className="px-3 py-1.5 rounded-lg font-semibold text-xs transition-all text-white active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed btn-gradient whitespace-nowrap"
+              >
+                {tipPaymentTab === "tokens" ? `${amount}T` : `$${amount}`}
+              </button>
+            ))}
+          </div>
+          {/* Payment method toggle */}
+          {isAuthenticated && (
             <button
-              key={amount}
-              onClick={() => handleTip(amount)}
-              disabled={tipping}
-              className="flex-1 min-w-[56px] py-2 rounded-lg font-semibold text-sm transition-all text-white active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed btn-gradient"
+              onClick={() => setTipPaymentTab(tipPaymentTab === "tokens" ? "daimo" : "tokens")}
+              className="flex-shrink-0 px-2 py-1.5 rounded-lg text-[10px] font-medium bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/40 transition-colors"
+              title={tipPaymentTab === "tokens" ? t.live.tabDaimoCrypto : t.live.tabTokens}
             >
-              {tipPaymentTab === "tokens" ? `${amount}T` : `$${amount}`}
+              {tipPaymentTab === "tokens" ? "T" : "$"}
             </button>
-          ))}
+          )}
+          {/* Chat toggle */}
+          {activeStream && (
+            <button
+              onClick={() => setShowChat(!showChat)}
+              className={`flex-shrink-0 p-1.5 rounded-lg border transition-colors ${showChat ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/40"}`}
+              title={t.live.liveChatTitle}
+              aria-label={t.live.liveChatTitle}
+              aria-pressed={showChat}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </button>
+          )}
         </div>
-
-        {tipPaymentTab === "tokens" && isAuthenticated && (
-          <p className="text-[10px] text-pnp-textSecondary mt-1.5">
-            {t.live.tokenInstantNote}
-          </p>
+        {selectedPerformer && (
+          <p className="text-[10px] text-gradient mt-1">{t.live.tipTo(selectedPerformer.displayName)}</p>
+        )}
+        {tipError && <p className="text-[10px] text-pnp-error mt-1">{tipError}</p>}
+        {tipSuccess && <p className="text-[10px] mt-1 text-gradient">{tipSuccess}</p>}
+        {!isAuthenticated && (
+          <p className="text-[10px] text-pnp-textSecondary mt-1">{t.live.loginToTip}</p>
         )}
 
+        {/* Tip message input (expandable) */}
         <button
           onClick={() => setShowTipMessage(!showTipMessage)}
-          className="text-xs text-pnp-textSecondary mt-2 hover:text-pnp-accent transition-colors"
+          className="text-[10px] text-pnp-textSecondary mt-1 hover:text-pnp-accent transition-colors"
         >
           {showTipMessage ? t.live.hideMessage : t.live.addAMessage}
         </button>
-
         {showTipMessage && (
           <input
             type="text"
@@ -581,36 +549,28 @@ export default function Live() {
             value={tipMessage}
             onChange={(e) => setTipMessage(e.target.value)}
             maxLength={200}
-            className="w-full mt-2 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-2 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+            className="w-full mt-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
           />
         )}
+      </div>
 
-        {tipError && <p className="text-xs text-pnp-error mt-2">{tipError}</p>}
-        {tipSuccess && <p className="text-xs mt-2 text-gradient">{tipSuccess}</p>}
-        {!isAuthenticated && (
-          <p className="text-xs text-pnp-textSecondary mt-2">{t.live.loginToTip}</p>
-        )}
-      </Card>
-
-      {/* Live Chat — shown whenever there's an active stream (live or not) */}
-      {activeStream && (
-        <Card className="mb-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-medium text-pnp-textPrimary">{t.live.liveChatTitle}</h3>
+      {/* ── Live Chat (collapsible) ── */}
+      {activeStream && showChat && (
+        <Card className="mt-3">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              {socketError && (
-                <span className="text-[10px] text-pnp-error">{socketError}</span>
-              )}
-              <span className={`flex items-center gap-1 text-xs ${chatConnected ? "text-pnp-textSecondary" : "text-pnp-textSecondary/50"}`}>
+              <h3 className="text-xs font-medium text-pnp-textPrimary">{t.live.liveChatTitle}</h3>
+              <span className={`flex items-center gap-1 text-[10px] ${chatConnected ? "text-pnp-textSecondary" : "text-pnp-textSecondary/50"}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${chatConnected ? "bg-green-500" : "bg-pnp-textSecondary/30"}`} />
                 {chatConnected ? t.live.chatConnected : t.live.chatConnecting}
               </span>
             </div>
+            {socketError && <span className="text-[10px] text-pnp-error">{socketError}</span>}
           </div>
 
-          <div className="h-44 overflow-y-auto space-y-1.5 mb-3 pr-1" style={{ scrollbarWidth: "thin" }}>
+          <div className="h-36 overflow-y-auto space-y-1 mb-2 pr-1" style={{ scrollbarWidth: "thin" }}>
             {chatMessages.length === 0 ? (
-              <p className="text-xs text-pnp-textSecondary text-center py-4">
+              <p className="text-[10px] text-pnp-textSecondary text-center py-4">
                 {chatConnected ? t.live.chatBeFirstToSay : t.live.chatConnectingToChat}
               </p>
             ) : (
@@ -639,7 +599,7 @@ export default function Live() {
                   }
                 }}
                 maxLength={500}
-                className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-2 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+                className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
               />
               <button
                 onClick={() => {
@@ -648,110 +608,137 @@ export default function Live() {
                     setChatInput("");
                   }
                 }}
-                className="px-3 py-2 rounded-lg btn-gradient text-white text-sm font-medium"
+                className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium"
                 aria-label={t.live.sendChatMessage}
               >
                 {t.live.send}
               </button>
             </div>
           ) : (
-            <button
-              onClick={login}
-              className="text-xs text-pnp-accent hover:underline"
-            >
+            <button onClick={login} className="text-xs text-pnp-accent hover:underline">
               {t.live.loginToChat}
             </button>
           )}
         </Card>
       )}
 
-      {/* Recent Tips Ticker */}
+      {/* ── Recent Tips Ticker ── */}
       {recentTips.length > 0 && (
-        <div className="mb-6">
-          <h3 className="text-xs font-medium text-pnp-textSecondary uppercase tracking-wider mb-2">{t.live.recentTipsTitle}</h3>
+        <div className="mt-3 mb-4">
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
             {recentTips.map((tip) => (
-              <div key={tip.id} className="flex-shrink-0 px-3 py-1.5 rounded-full bg-pnp-surface border border-pnp-border text-xs">
+              <div key={tip.id} className="flex-shrink-0 px-2.5 py-1 rounded-full bg-pnp-surface border border-pnp-border text-[10px]">
                 <span className="text-gradient font-medium">${tip.amount}</span>
                 <span className="text-pnp-textSecondary mx-1">{t.live.recentTipBy}</span>
                 <span className="text-pnp-textPrimary">@{tip.user_username}</span>
-                <span className="text-pnp-textSecondary ml-1">{t.live.recentTipTo} {tip.model_name}</span>
-                <span className="text-pnp-textSecondary/50 ml-1.5">{formatTimeAgo(tip.created_at)}</span>
+                <span className="text-pnp-textSecondary/50 ml-1">{formatTimeAgo(tip.created_at)}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Stream list (if multiple) */}
-      {streams.length > 1 && (
-        <>
-          <h2 className="text-sm font-medium text-pnp-textSecondary uppercase tracking-wider mb-3">{t.live.allStreams}</h2>
-          <div className="space-y-2 mb-6">
-            {streams.map((stream) => (
-              <Card
-                key={stream.id}
-                onClick={() => setActiveStream(stream)}
-                hover
-                className={activeStream?.id === stream.id ? "border-pnp-accent" : ""}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full ${stream.isLive ? "bg-pnp-error animate-pulse" : "bg-pnp-textSecondary"}`} />
-                  <div className="flex-1">
-                    <p className="font-medium text-pnp-textPrimary">{stream.name}</p>
-                    {stream.description && (
-                      <p className="text-sm text-pnp-textSecondary truncate">{stream.description}</p>
-                    )}
-                  </div>
-                  <Badge variant={stream.isLive ? "error" : "default"}>
-                    {stream.isLive ? t.live.statusLive : t.live.statusOffline}
-                  </Badge>
-                </div>
-              </Card>
-            ))}
+      {/* ── Wallet (compact) ── */}
+      {isAuthenticated && (
+        <div className="flex items-center justify-between py-2 border-t border-white/5 mt-2">
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>
+              <svg viewBox="0 0 24 24" className="w-3 h-3 fill-white">
+                <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
+              </svg>
+            </div>
+            <span className="text-xs font-semibold text-pnp-textPrimary">
+              {tokenBalance === null ? "—" : `${tokenBalance} ${t.live.tokens}`}
+            </span>
+            {dpnsHandle && (
+              <span className="text-[10px] text-pnp-textSecondary">@{dpnsHandle}</span>
+            )}
           </div>
-        </>
+          <div className="flex items-center gap-2">
+            {!dpnsHandle && (
+              <button onClick={() => setShowDpnsInput(!showDpnsInput)} className="text-[10px] text-pnp-textSecondary hover:text-pnp-accent transition-colors">
+                {t.live.linkDpns}
+              </button>
+            )}
+            <button onClick={openWalletHistory} className="text-[10px] text-pnp-textSecondary hover:text-pnp-accent transition-colors">
+              {t.live.history}
+            </button>
+            <button onClick={() => { setBuyError(null); setShowBuyModal(true); }} className="px-2 py-1 rounded-md text-[10px] font-semibold text-white btn-gradient">
+              {t.live.buyTokens}
+            </button>
+          </div>
+        </div>
+      )}
+      {isAuthenticated && showDpnsInput && (
+        <div className="flex gap-2 mb-2">
+          <input
+            type="text"
+            placeholder={t.live.dpnsPlaceholder}
+            value={dpnsInput}
+            onChange={(e) => setDpnsInput(e.target.value)}
+            className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+          />
+          <button onClick={handleSaveDpns} disabled={dpnsSaving} className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium disabled:opacity-50">
+            {dpnsSaving ? t.live.saving : t.live.save}
+          </button>
+        </div>
       )}
 
-      {/* Performer List */}
-      {!performersLoading && performers.length > 0 && (
-        <>
-          <h2 className="text-sm font-medium text-pnp-textSecondary uppercase tracking-wider mb-3">{t.live.performers}</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-            {performers.map((p) => (
-              <Card
-                key={p.id}
-                hover
-                onClick={() => setSelectedPerformer(p)}
-                className={selectedPerformer?.id === p.id ? "border-pnp-accent" : ""}
+      {/* ── Stream list (if multiple) ── */}
+      {streams.length > 1 && (
+        <div className="mt-3">
+          <h2 className="text-xs font-medium text-pnp-textSecondary uppercase tracking-wider mb-2">{t.live.allStreams}</h2>
+          <div className="space-y-1.5 mb-4">
+            {streams.map((stream) => (
+              <button
+                key={stream.id}
+                onClick={() => setActiveStream(stream)}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg border transition-colors ${activeStream?.id === stream.id ? "border-pnp-accent bg-pnp-accent/5" : "border-pnp-border bg-pnp-surface hover:border-pnp-accent/30"}`}
               >
-                <div className="text-center">
-                  <img
-                    src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
-                    alt={p.displayName}
-                    className="w-14 h-14 rounded-full object-cover mx-auto mb-2"
-                    onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
-                  />
-                  <p className="text-sm font-medium text-pnp-textPrimary truncate">{p.displayName}</p>
-                  {p.isFeatured && (
-                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "#5ED1C4" }}>{t.live.performerFeatured}</p>
-                  )}
-                  {p.isAvailable && !p.isFeatured && (
-                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "#5ED1C4" }}>{t.live.performerAvailable}</p>
-                  )}
-                  {selectedPerformer?.id === p.id && (
-                    <p className="text-[10px] mt-0.5 text-gradient font-medium">{t.live.performerTipping}</p>
-                  )}
-                </div>
-              </Card>
+                <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${stream.isLive ? "bg-red-500 animate-pulse" : "bg-pnp-textSecondary/30"}`} />
+                <span className="text-sm text-pnp-textPrimary font-medium flex-1 text-left truncate">{stream.name}</span>
+                <span className={`text-[10px] font-semibold ${stream.isLive ? "text-red-400" : "text-pnp-textSecondary"}`}>
+                  {stream.isLive ? t.live.statusLive : t.live.statusOffline}
+                </span>
+              </button>
             ))}
           </div>
-        </>
+        </div>
+      )}
+
+      {/* ── Performers Grid ── */}
+      {!performersLoading && performers.length > 0 && (
+        <div className="mt-3">
+          <h2 className="text-xs font-medium text-pnp-textSecondary uppercase tracking-wider mb-2">{t.live.performers}</h2>
+          <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+            {performers.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setSelectedPerformer(p)}
+                className={`flex flex-col items-center flex-shrink-0 p-2 rounded-xl border transition-colors min-w-[80px] ${selectedPerformer?.id === p.id ? "border-pnp-accent bg-pnp-accent/5" : "border-pnp-border bg-pnp-surface hover:border-pnp-accent/30"}`}
+              >
+                <img
+                  src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
+                  alt={p.displayName}
+                  className="w-12 h-12 rounded-full object-cover mb-1.5"
+                  onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
+                />
+                <span className="text-xs font-medium text-pnp-textPrimary truncate max-w-[70px]">{p.displayName}</span>
+                {p.isFeatured && (
+                  <span className="text-[9px] mt-0.5" style={{ color: "#5ED1C4" }}>{t.live.performerFeatured}</span>
+                )}
+                {selectedPerformer?.id === p.id && (
+                  <span className="text-[9px] mt-0.5 text-gradient font-medium">{t.live.performerTipping}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       {performersLoading && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+        <div className="flex gap-3 mt-3">
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="w-20 h-24 rounded-xl flex-shrink-0" />)}
         </div>
       )}
 

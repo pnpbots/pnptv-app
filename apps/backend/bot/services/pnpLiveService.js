@@ -108,7 +108,7 @@ class PNPLiveService {
    * @param {number} commissionPercent - Model's commission percentage
    * @returns {Object} { modelEarnings, platformFee }
    */
-  static calculateEarningsSplit(price, commissionPercent = 70) {
+  static calculateEarningsSplit(price, commissionPercent = PNPLiveService.DEFAULT_COMMISSION) {
     const modelEarnings = (price * commissionPercent) / 100;
     const platformFee = price - modelEarnings;
     return {
@@ -275,12 +275,22 @@ class PNPLiveService {
         videoRoom: roomName
       });
 
+      // Strip internal financial fields before returning to the caller.
+      // model_earnings, platform_fee, and video_room_token must never be
+      // sent to a user-facing client — they are for internal accounting only.
+      const {
+        model_earnings: _me,
+        platform_fee: _pf,
+        video_room_token: _vrt,
+        ...publicBooking
+      } = newBooking;
+
       return {
-        ...newBooking,
+        ...publicBooking,
         videoRoom: {
           roomName,
           clientUrl: jaasRoom.clientUrl,
-          modelUrl: jaasRoom.modelUrl
+          // modelUrl intentionally omitted from client response
         }
       };
     } catch (error) {
@@ -584,6 +594,14 @@ class PNPLiveService {
 
       // Record earnings in history
       if (booking.model_earnings) {
+        // Derive the actual commission percent from the stored earnings rather than
+        // hardcoding 60, so that the earnings history is always self-consistent.
+        const grossAmount = parseFloat(booking.price_usd);
+        const modelEarnings = parseFloat(booking.model_earnings);
+        const actualCommissionPercent = grossAmount > 0
+          ? parseFloat(((modelEarnings / grossAmount) * 100).toFixed(4))
+          : PNPLiveService.DEFAULT_COMMISSION;
+
         await query(
           `INSERT INTO pnp_model_earnings
            (model_id, booking_id, gross_amount, commission_percent, model_earnings, platform_fee)
@@ -591,10 +609,10 @@ class PNPLiveService {
           [
             booking.model_id,
             bookingId,
-            booking.price_usd,
-            60, // Default commission
-            booking.model_earnings,
-            booking.platform_fee || (booking.price_usd - booking.model_earnings)
+            grossAmount,
+            actualCommissionPercent,
+            modelEarnings,
+            booking.platform_fee || (grossAmount - modelEarnings)
           ]
         );
       }
