@@ -113,7 +113,7 @@ export default function Live() {
 
   // Load streams + auto-refresh every 30s
   const loadStreams = useCallback(() => {
-    getLiveStreams()
+    return getLiveStreams()
       .then((data) => {
         const liveStreams = data.streams || [];
         setStreams(liveStreams);
