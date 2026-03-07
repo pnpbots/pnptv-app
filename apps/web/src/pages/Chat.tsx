@@ -44,6 +44,7 @@ import {
   VideoCallOverlay,
 } from "@/components/hangouts";
 import { connectSocket } from "@/lib/socket";
+import { translateText } from "@/lib/feedI18n";
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -91,6 +92,7 @@ type View = "list" | "chat";
 interface MessageBubbleProps {
   msg: GroupMessage;
   isMe: boolean;
+  userLang: string;
   onNavigate: (path: string) => void;
   onExpandImage: (src: string) => void;
 }
@@ -98,12 +100,25 @@ interface MessageBubbleProps {
 const MessageBubble = memo(function MessageBubble({
   msg,
   isMe,
+  userLang,
   onNavigate,
   onExpandImage,
 }: MessageBubbleProps) {
   const profilePath = isMe ? "/profile" : `/profile/${msg.user_id}`;
   const hasMedia = !!(msg.media_url && msg.media_type);
   const hasText = !!(msg.content && msg.content.trim());
+  const [translatedContent, setTranslatedContent] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+
+  const handleTranslate = useCallback(async () => {
+    if (isTranslating) return;
+    if (translatedContent) { setTranslatedContent(null); return; }
+    if (!msg.content) return;
+    setIsTranslating(true);
+    const result = await translateText(msg.content, userLang === "es" ? "es" : "en");
+    if (result) setTranslatedContent(result);
+    setIsTranslating(false);
+  }, [isTranslating, translatedContent, msg.content, userLang]);
 
   return (
     <div className={`flex gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
@@ -154,15 +169,34 @@ const MessageBubble = memo(function MessageBubble({
 
         {/* Text content */}
         {hasText && (
-          <div
-            className="rounded-2xl px-3 py-2 text-sm text-pnp-textPrimary whitespace-pre-wrap break-words"
-            style={{
-              background: isMe
-                ? "linear-gradient(135deg, #D4007A, #E69138)"
-                : "rgba(255,255,255,0.08)",
-            }}
-          >
-            {msg.content}
+          <div>
+            <div
+              className="rounded-2xl px-3 py-2 text-sm text-pnp-textPrimary whitespace-pre-wrap break-words"
+              style={{
+                background: isMe
+                  ? "linear-gradient(135deg, #D4007A, #E69138)"
+                  : "rgba(255,255,255,0.08)",
+              }}
+            >
+              {translatedContent ?? msg.content}
+            </div>
+            <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
+              <button
+                onClick={handleTranslate}
+                disabled={isTranslating}
+                className="flex items-center gap-0.5 text-[10px] transition-colors hover:text-teal-400 disabled:opacity-40 px-1 py-0.5 rounded"
+                style={translatedContent ? { color: "#5ED1C4" } : { color: "#8E8E93" }}
+                title={translatedContent ? "Show original" : "Translate"}
+              >
+                {isTranslating ? (
+                  <span>...</span>
+                ) : (
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 01-3.827-5.802" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
         )}
 
@@ -988,6 +1022,7 @@ export default function Chat() {
                 <MessageBubble
                   msg={msg}
                   isMe={msg.user_id === user?.dbId}
+                  userLang={user?.language || "en"}
                   onNavigate={handleNavigate}
                   onExpandImage={handleExpandImage}
                 />
