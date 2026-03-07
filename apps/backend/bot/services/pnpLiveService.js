@@ -38,21 +38,22 @@ class PNPLiveService {
       const cached = await cache.get(cacheKey);
       if (cached) {
         const model = JSON.parse(cached);
+        const basePrice = parseFloat(model.base_price) || 0;
         const priceMap = {
-          30: model.price_30min || this.DEFAULT_PRICING[30],
-          60: model.price_60min || this.DEFAULT_PRICING[60],
-          90: model.price_90min || this.DEFAULT_PRICING[90]
+          30: basePrice > 0 ? basePrice : this.DEFAULT_PRICING[30],
+          60: basePrice > 0 ? parseFloat((basePrice * 1.6).toFixed(2)) : this.DEFAULT_PRICING[60],
+          90: basePrice > 0 ? parseFloat((basePrice * 4).toFixed(2)) : this.DEFAULT_PRICING[90]
         };
         return {
           price: parseFloat(priceMap[durationMinutes]) || this.DEFAULT_PRICING[durationMinutes],
-          commission: parseFloat(model.commission_percent) || this.DEFAULT_COMMISSION
+          commission: this.DEFAULT_COMMISSION
         };
       }
 
       // Fetch from database
       const result = await query(
-        `SELECT price_30min, price_60min, price_90min, commission_percent
-         FROM pnp_models WHERE id = $1`,
+        `SELECT base_price
+         FROM performers WHERE id = $1`,
         [modelId]
       );
 
@@ -67,15 +68,17 @@ class PNPLiveService {
       // Cache the pricing data
       await cache.setex(cacheKey, MODEL_PRICING_CACHE_TTL, JSON.stringify(model));
 
+      // Derive tier pricing from base_price: 30min = base_price, 60min = base_price * 1.6, 90min = base_price * 4
+      const basePrice = parseFloat(model.base_price) || 0;
       const priceMap = {
-        30: model.price_30min || this.DEFAULT_PRICING[30],
-        60: model.price_60min || this.DEFAULT_PRICING[60],
-        90: model.price_90min || this.DEFAULT_PRICING[90]
+        30: basePrice > 0 ? basePrice : this.DEFAULT_PRICING[30],
+        60: basePrice > 0 ? parseFloat((basePrice * 1.6).toFixed(2)) : this.DEFAULT_PRICING[60],
+        90: basePrice > 0 ? parseFloat((basePrice * 4).toFixed(2)) : this.DEFAULT_PRICING[90]
       };
 
       return {
         price: parseFloat(priceMap[durationMinutes]) || this.DEFAULT_PRICING[durationMinutes],
-        commission: parseFloat(model.commission_percent) || this.DEFAULT_COMMISSION
+        commission: this.DEFAULT_COMMISSION
       };
     } catch (error) {
       logger.error('Error getting model pricing:', error);
@@ -123,11 +126,9 @@ class PNPLiveService {
     try {
       const result = await query(
         `SELECT m.*,
-                COALESCE(m.avg_rating, 0) as avg_rating,
-                COALESCE(m.rating_count, 0) as rating_count,
-                COALESCE(m.total_shows, 0) as total_shows,
-                COALESCE(m.total_earnings, 0) as total_earnings
-         FROM pnp_models m
+                COALESCE(m.total_rating, 0) as avg_rating,
+                COALESCE(m.total_calls, 0) as total_shows
+         FROM performers m
          WHERE m.id = $1`,
         [modelId]
       );
@@ -146,12 +147,11 @@ class PNPLiveService {
     try {
       const result = await query(
         `SELECT m.*,
-                COALESCE(m.avg_rating, 0) as avg_rating,
-                COALESCE(m.rating_count, 0) as rating_count,
-                COALESCE(m.total_shows, 0) as total_shows
-         FROM pnp_models m
-         WHERE m.is_active = TRUE
-         ORDER BY m.is_online DESC, m.avg_rating DESC, m.total_shows DESC`
+                COALESCE(m.total_rating, 0) as avg_rating,
+                COALESCE(m.total_calls, 0) as total_shows
+         FROM performers m
+         WHERE m.status = 'active'
+         ORDER BY m.is_available DESC, m.total_rating DESC, m.total_calls DESC`
       );
       return result.rows || [];
     } catch (error) {
@@ -686,14 +686,14 @@ class PNPLiveService {
       const result = await query(
         `SELECT
             m.id as model_id,
-            m.name as model_name,
+            m.display_name as model_name,
             COUNT(b.id) as booking_count,
             SUM(b.price_usd) as total_revenue,
             SUM(CASE WHEN b.payment_status = 'paid' THEN b.price_usd ELSE 0 END) as paid_revenue
-         FROM pnp_models m
+         FROM performers m
          LEFT JOIN pnp_bookings b ON m.id = b.model_id
          WHERE b.created_at >= $1 AND b.created_at <= $2
-         GROUP BY m.id, m.name
+         GROUP BY m.id, m.display_name
          ORDER BY paid_revenue DESC`,
         [startDate, endDate]
       );
@@ -713,7 +713,7 @@ class PNPLiveService {
   static async getModelOnlineStatus(modelId) {
     try {
       const result = await query(
-        `SELECT id, name, is_online, last_online FROM pnp_models WHERE id = $1`,
+        `SELECT id, display_name AS name, is_available AS is_online FROM performers WHERE id = $1`,
         [modelId]
       );
 
@@ -741,7 +741,7 @@ class PNPLiveService {
   static async updateModelOnlineStatus(modelId, isOnline) {
     try {
       const result = await query(
-        `UPDATE pnp_models SET is_online = $2, last_online = CASE WHEN $2 = TRUE THEN NOW() ELSE last_online END WHERE id = $1 RETURNING *`,
+        `UPDATE performers SET is_available = $2 WHERE id = $1 RETURNING *`,
         [modelId, isOnline]
       );
 
@@ -845,17 +845,17 @@ class PNPLiveService {
       // Get model telegram ID for notification
       const PNPLiveNotificationService = require('./pnpLiveNotificationService');
       const modelInfo = await query(
-        `SELECT m.telegram_id FROM pnp_models m
+        `SELECT m.user_id FROM performers m
          JOIN pnp_bookings b ON b.model_id = m.id
          WHERE b.id = $1`,
         [bookingId]
       );
 
       // Send notification to model
-      if (modelInfo.rows?.[0]?.telegram_id) {
+      if (modelInfo.rows?.[0]?.user_id) {
         await PNPLiveNotificationService.sendFeedbackToModel(
           bookingId,
-          modelInfo.rows[0].telegram_id,
+          modelInfo.rows[0].user_id,
           rating,
           comments,
           'es'

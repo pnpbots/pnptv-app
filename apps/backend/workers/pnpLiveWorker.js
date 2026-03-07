@@ -226,24 +226,23 @@ class PNPLiveWorker {
 
       // Mark models as offline if no recent activity
       await query(
-        `UPDATE pnp_models
-         SET is_online = FALSE, updated_at = NOW()
-         WHERE is_online = TRUE
-         AND (last_online IS NULL OR last_online < $1)`,
-        [thirtyMinutesAgo]
+        `UPDATE performers
+         SET is_available = FALSE
+         WHERE is_available = TRUE`,
+        []
       );
 
       // Models with upcoming bookings in next 15 minutes should be marked online
       const fifteenMinutesFromNow = new Date(Date.now() + 15 * 60 * 1000);
       await query(
-        `UPDATE pnp_models m
-         SET is_online = TRUE, last_online = NOW(), updated_at = NOW()
+        `UPDATE performers m
+         SET is_available = TRUE
          FROM pnp_bookings b
          WHERE m.id = b.model_id
          AND b.status = 'confirmed'
          AND b.payment_status = 'paid'
          AND b.booking_time BETWEEN NOW() AND $1
-         AND m.is_online = FALSE`,
+         AND m.is_available = FALSE`,
         [fifteenMinutesFromNow]
       );
     } catch (error) {

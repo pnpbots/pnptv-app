@@ -37,11 +37,8 @@ class PNPLiveAvailabilityService {
 
       // Update model status
       const result = await client.query(
-        `UPDATE pnp_models
-         SET is_online = $2,
-             last_activity_at = NOW(),
-             last_online = CASE WHEN $2 = TRUE THEN NOW() ELSE last_online END,
-             updated_at = NOW()
+        `UPDATE performers
+         SET is_available = $2
          WHERE id = $1
          RETURNING *`,
         [modelId, isOnline]
@@ -88,9 +85,9 @@ class PNPLiveAvailabilityService {
   static async updateModelActivity(modelId) {
     try {
       await query(
-        `UPDATE pnp_models
-         SET last_activity_at = NOW()
-         WHERE id = $1 AND is_online = TRUE`,
+        `UPDATE performers
+         SET is_available = TRUE
+         WHERE id = $1 AND is_available = TRUE`,
         [modelId]
       );
       return true;
@@ -140,9 +137,9 @@ class PNPLiveAvailabilityService {
       }
 
       const result = await query(
-        `SELECT id, name, is_online, is_active, last_online, last_activity_at,
-                can_instant_book, status_message, auto_offline_minutes
-         FROM pnp_models WHERE id = $1`,
+        `SELECT id, display_name AS name, is_available AS is_online, status AS status_message,
+                timezone, max_call_duration, availability_message
+         FROM performers WHERE id = $1`,
         [modelId]
       );
 
@@ -171,8 +168,8 @@ class PNPLiveAvailabilityService {
   static async setModelStatusMessage(modelId, message) {
     try {
       const result = await query(
-        `UPDATE pnp_models
-         SET status_message = $2, updated_at = NOW()
+        `UPDATE performers
+         SET availability_message = $2
          WHERE id = $1
          RETURNING *`,
         [modelId, message?.substring(0, 200)]
@@ -750,10 +747,12 @@ class PNPLiveAvailabilityService {
   static async getOnlineModels() {
     try {
       const result = await query(
-        `SELECT id, name, is_online, avg_rating, total_shows, can_instant_book, status_message
-         FROM pnp_models
-         WHERE is_active = TRUE AND is_online = TRUE
-         ORDER BY avg_rating DESC, total_shows DESC`
+        `SELECT id, display_name AS name, is_available AS is_online,
+                total_rating AS avg_rating, total_calls AS total_shows,
+                availability_message AS status_message
+         FROM performers
+         WHERE status = 'active' AND is_available = TRUE
+         ORDER BY total_rating DESC, total_calls DESC`
       );
       return result.rows || [];
     } catch (error) {

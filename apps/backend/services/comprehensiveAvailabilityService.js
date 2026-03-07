@@ -40,11 +40,11 @@ class ComprehensiveAvailabilityService {
 
         // Get model settings
         const modelResult = await client.query(
-          `SELECT 
-           id, name, is_online, can_instant_book,
-           auto_offline_minutes, status_message,
-           last_activity_at, created_at
-           FROM pnp_models WHERE id = $1`,
+          `SELECT
+           id, display_name AS name, is_available AS is_online,
+           timezone, status AS status_message,
+           created_at
+           FROM performers WHERE id = $1`,
           [modelId]
         );
 

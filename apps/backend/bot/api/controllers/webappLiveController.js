@@ -1,13 +1,7 @@
 const crypto = require('crypto');
-const LiveStreamModel = require('../../../models/liveStreamModel');
 const logger = require('../../../utils/logger');
 const { getRedis } = require('../../../config/redis');
-
-// Agora stub — reads from env; token generation not available without SDK
-const agoraTokenService = {
-  appId: process.env.AGORA_APP_ID || null,
-  generateViewerToken: () => null,
-};
+const axios = require('axios');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -16,99 +10,59 @@ const authGuard = (req, res) => {
 };
 
 // GET /api/webapp/live/streams
+// Proxies to Restreamer API and returns active HLS streams.
 const listStreams = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
+
+  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
+  const restreamerUser = process.env.RESTREAMER_USER;
+  const restreamerPass = process.env.RESTREAMER_PASSWORD;
+
   try {
-    const streams = await LiveStreamModel.getActiveStreams(20);
+    let token = null;
+    if (restreamerUser && restreamerPass) {
+      try {
+        const loginResp = await axios.post(`${restreamerUrl}/api/login`, {
+          username: restreamerUser,
+          password: restreamerPass,
+        }, { timeout: 5000 });
+        token = loginResp.data?.access_token;
+      } catch (loginErr) {
+        logger.warn(`listStreams: Restreamer login failed, trying without auth: ${loginErr.message}`);
+      }
+    }
+
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const resp = await axios.get(`${restreamerUrl}/api/v3/process`, {
+      headers,
+      timeout: 10000,
+    });
+
+    const publicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
+    const processes = resp.data || [];
+    const streams = processes
+      .filter((p) => p.id?.startsWith('restreamer-ui:ingest:'))
+      .map((p) => {
+        const refId = p.reference || p.id;
+        return {
+          id: p.id,
+          name: p.metadata?.['restreamer-ui']?.meta?.name || 'Live Stream',
+          description: p.metadata?.['restreamer-ui']?.meta?.description || '',
+          hlsUrl: `${publicUrl}/memfs/${refId}.m3u8`,
+          isLive: p.state?.exec === 'running',
+        };
+      });
+
     return res.json({ success: true, streams });
   } catch (err) {
     logger.error('webapp listStreams error', err);
-    return res.status(500).json({ error: 'Failed to load streams' });
-  }
-};
-
-// POST /api/webapp/live/start
-const startStream = async (req, res) => {
-  const user = authGuard(req, res); if (!user) return;
-  const { title, category } = req.body;
-  try {
-    const stream = await LiveStreamModel.create({
-      hostId: user.id,
-      hostName: user.firstName || user.first_name || user.username || 'Host',
-      title: title ? String(title).trim().slice(0, 100) : `${user.firstName || user.first_name || user.username || 'Host'}'s Stream`,
-      category: category || 'other',
-      status: 'active',
-      isPublic: true,
-    });
-    return res.json({
-      success: true,
-      streamId: stream.streamId || String(stream.dbId),
-      channelName: stream.channelName,
-      hostToken: stream.hostToken,
-      appId: agoraTokenService.appId,
-    });
-  } catch (err) {
-    logger.error('webapp startStream error', err);
-    return res.status(500).json({ error: 'Failed to start stream' });
-  }
-};
-
-// GET /api/webapp/live/streams/:streamId/join
-const joinStream = async (req, res) => {
-  const user = authGuard(req, res); if (!user) return;
-  const { streamId } = req.params;
-  try {
-    const stream = await LiveStreamModel.getById(streamId);
-    if (!stream) return res.status(404).json({ error: 'Stream not found' });
-    if (stream.status !== 'active') return res.status(410).json({ error: 'Stream is not live' });
-
-    const viewerToken = agoraTokenService.generateViewerToken(stream.channelName, user.id);
-    await LiveStreamModel.joinStream(streamId, user.id, user.firstName || user.first_name || user.username || 'Viewer').catch(() => {});
-
-    return res.json({
-      success: true,
-      streamId,
-      channelName: stream.channelName,
-      viewerToken,
-      appId: agoraTokenService.appId,
-      title: stream.title,
-      hostName: stream.hostName,
-      currentViewers: stream.currentViewers,
-    });
-  } catch (err) {
-    logger.error('webapp joinStream error', err);
-    return res.status(500).json({ error: 'Failed to join stream' });
-  }
-};
-
-// POST /api/webapp/live/streams/:streamId/end
-const endStream = async (req, res) => {
-  const user = authGuard(req, res); if (!user) return;
-  const { streamId } = req.params;
-  try {
-    await LiveStreamModel.endStream(streamId, user.id);
-    return res.json({ success: true });
-  } catch (err) {
-    logger.error('webapp endStream error', err);
-    if (err.message === 'Unauthorized') return res.status(403).json({ error: 'Only the host can end this stream' });
-    return res.status(500).json({ error: 'Failed to end stream' });
-  }
-};
-
-// POST /api/webapp/live/streams/:streamId/leave
-const leaveStream = async (req, res) => {
-  const user = authGuard(req, res); if (!user) return;
-  const { streamId } = req.params;
-  try {
-    await LiveStreamModel.leaveStream(streamId, user.id).catch(() => {});
-    return res.json({ success: true });
-  } catch (err) {
-    logger.error('webapp leaveStream error', err);
-    return res.status(500).json({ error: 'Failed to leave stream' });
+    return res.status(502).json({ success: false, error: 'Failed to load streams from Restreamer' });
   }
 };
 
 // GET /api/webapp/live/rtmp-key
+// Returns the RTMP ingest URL and a per-user stream key for creators/admins.
+// The stream key is generated once per user and stored permanently in Redis.
 const getRtmpKey = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
 
@@ -139,10 +93,8 @@ const getRtmpKey = async (req, res) => {
       return res.status(503).json({ success: false, error: 'Live streaming not available' });
     }
 
-    // Fix #1: Cryptographically random stream key, cached per user in Redis.
-    // Using a deterministic key based on user.id is insecure — anyone who knows
-    // the user's ID can guess the key. The key is generated once and persists
-    // until the user explicitly rotates it.
+    // Cryptographically random stream key, cached per user in Redis.
+    // Generated once and persists until the user explicitly rotates it.
     const redis = getRedis();
     const redisKey = `rtmp:streamkey:${user.id}`;
     let streamKey = await redis.get(redisKey);
@@ -163,4 +115,4 @@ const getRtmpKey = async (req, res) => {
   }
 };
 
-module.exports = { listStreams, startStream, joinStream, endStream, leaveStream, getRtmpKey };
+module.exports = { listStreams, getRtmpKey };

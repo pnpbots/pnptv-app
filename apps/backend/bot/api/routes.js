@@ -2169,10 +2169,6 @@ app.delete('/api/webapp/hangouts/:callId', requireSessionAuth, asyncHandler(weba
 // Web App Live Streaming Routes
 const webappLiveController = require('./controllers/webappLiveController');
 app.get('/api/webapp/live/streams', asyncHandler(webappLiveController.listStreams));
-app.post('/api/webapp/live/start', asyncHandler(webappLiveController.startStream));
-app.get('/api/webapp/live/streams/:streamId/join', asyncHandler(webappLiveController.joinStream));
-app.post('/api/webapp/live/streams/:streamId/end', asyncHandler(webappLiveController.endStream));
-app.post('/api/webapp/live/streams/:streamId/leave', asyncHandler(webappLiveController.leaveStream));
 app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLiveController.getRtmpKey));
 
 // Web App Support Chat (Cristina AI)
@@ -2557,6 +2553,8 @@ const { adminGuard } = require('../../middleware/guards');
 app.get('/api/webapp/admin/stats', adminGuard, asyncHandler(webappAdminController.getStats));
 app.get('/api/webapp/admin/demographics', adminGuard, asyncHandler(webappAdminController.getDemographics));
 app.get('/api/webapp/admin/users', adminGuard, asyncHandler(webappAdminController.listUsers));
+// Bulk user operations — registered BEFORE :id routes to avoid route shadowing
+app.post('/api/webapp/admin/users/bulk-update', adminGuard, asyncHandler(webappAdminController.bulkUpdateUsers));
 app.get('/api/webapp/admin/users/:id', adminGuard, asyncHandler(webappAdminController.getUser));
 app.put('/api/webapp/admin/users/:id', adminGuard, asyncHandler(webappAdminController.updateUser));
 app.post('/api/webapp/admin/users/:id/ban', adminGuard, asyncHandler(webappAdminController.banUser));
@@ -2564,9 +2562,6 @@ app.get('/api/webapp/admin/posts', adminGuard, asyncHandler(webappAdminControlle
 app.delete('/api/webapp/admin/posts/:id', adminGuard, asyncHandler(webappAdminController.deletePost));
 app.get('/api/webapp/admin/hangouts', adminGuard, asyncHandler(webappAdminController.listHangouts));
 app.delete('/api/webapp/admin/hangouts/:id', adminGuard, asyncHandler(webappAdminController.endHangout));
-
-// Bulk user operations — registered BEFORE :id routes to avoid route shadowing
-app.post('/api/webapp/admin/users/bulk-update', adminGuard, asyncHandler(webappAdminController.bulkUpdateUsers));
 
 // Nearby Places management
 const nearbyPlacesAdminController = require('./controllers/nearbyPlacesAdminController');

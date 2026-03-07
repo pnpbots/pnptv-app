@@ -379,11 +379,10 @@ class PNPLiveNotificationService {
     try {
       const result = await query(
         `SELECT b.*,
-                m.name as model_name,
-                m.telegram_id as model_telegram_id,
-                m.commission_percent
+                m.display_name as model_name,
+                m.user_id as model_telegram_id
          FROM pnp_bookings b
-         JOIN pnp_models m ON b.model_id = m.id
+         JOIN performers m ON b.model_id = m.id
          WHERE b.id = $1`,
         [bookingId]
       );
@@ -404,9 +403,9 @@ class PNPLiveNotificationService {
 
       // 1-hour reminders (55-65 min window) - only if not already sent
       const oneHourReminders = await query(
-        `SELECT b.id, b.user_id, m.telegram_id as model_telegram_id
+        `SELECT b.id, b.user_id, m.user_id as model_telegram_id
          FROM pnp_bookings b
-         JOIN pnp_models m ON b.model_id = m.id
+         JOIN performers m ON b.model_id = m.id
          WHERE b.booking_time BETWEEN $1 AND $2
          AND b.status = 'confirmed'
          AND b.payment_status = 'paid'
@@ -419,9 +418,9 @@ class PNPLiveNotificationService {
 
       // 5-minute alerts (4-6 min window) - only if not already sent
       const fiveMinuteAlerts = await query(
-        `SELECT b.id, b.user_id, m.telegram_id as model_telegram_id
+        `SELECT b.id, b.user_id, m.user_id as model_telegram_id
          FROM pnp_bookings b
-         JOIN pnp_models m ON b.model_id = m.id
+         JOIN performers m ON b.model_id = m.id
          WHERE b.booking_time BETWEEN $1 AND $2
          AND b.status = 'confirmed'
          AND b.payment_status = 'paid'
@@ -518,7 +517,7 @@ class PNPLiveNotificationService {
   static async broadcastToModels(message, lang = 'es') {
     try {
       const models = await query(
-        `SELECT telegram_id FROM pnp_models WHERE is_active = TRUE AND telegram_id IS NOT NULL`
+        `SELECT user_id FROM performers WHERE status = 'active' AND user_id IS NOT NULL`
       );
 
       const broadcastMsg = lang === 'es'
@@ -527,8 +526,8 @@ class PNPLiveNotificationService {
 
       let sent = 0;
       for (const model of models.rows || []) {
-        if (model.telegram_id) {
-          const success = await this.sendMessage(model.telegram_id, broadcastMsg);
+        if (model.user_id) {
+          const success = await this.sendMessage(model.user_id, broadcastMsg);
           if (success) sent++;
         }
       }

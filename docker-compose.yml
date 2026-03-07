@@ -454,6 +454,10 @@ services:
       DIRECTUS_URL: http://directus:8055
       BLUESKY_PDS_URL: http://bluesky-pds:3000
       BTCPAY_URL: http://btcpay-server:23000
+      RESTREAMER_URL: http://restreamer:8080
+      RESTREAMER_PUBLIC_URL: https://live.pnptv.app
+      RESTREAMER_USER: admin
+      RESTREAMER_PASSWORD: ${RESTREAMER_PASSWORD}
     networks:
       - pnptvapp_net
     depends_on:

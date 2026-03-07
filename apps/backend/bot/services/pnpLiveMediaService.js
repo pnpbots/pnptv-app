@@ -15,11 +15,11 @@ class PNPLiveMediaService {
   static async getModelProfileImage(modelId) {
     try {
       const result = await query(
-        `SELECT profile_image_url FROM pnp_models WHERE id = $1`,
+        `SELECT photo_url FROM performers WHERE id = $1`,
         [modelId]
       );
-      
-      return result.rows?.[0]?.profile_image_url || null;
+
+      return result.rows?.[0]?.photo_url || null;
     } catch (error) {
       logger.error('Error getting model profile image:', error);
       return null;
@@ -38,17 +38,17 @@ class PNPLiveMediaService {
       }
       
       const result = await query(
-        `SELECT id, name, profile_image_url 
-         FROM pnp_models 
-         WHERE id = ANY($1) AND profile_image_url IS NOT NULL
-         ORDER BY is_online DESC, name ASC`,
+        `SELECT id, display_name, photo_url
+         FROM performers
+         WHERE id = ANY($1) AND photo_url IS NOT NULL
+         ORDER BY is_available DESC, display_name ASC`,
         [modelIds]
       );
-      
+
       return result.rows.map(row => ({
         modelId: row.id,
-        name: row.name,
-        imageUrl: row.profile_image_url
+        name: row.display_name,
+        imageUrl: row.photo_url
       }));
     } catch (error) {
       logger.error('Error getting model images for carousel:', error);
@@ -64,21 +64,21 @@ class PNPLiveMediaService {
   static async getFeaturedModelsWithImages(limit = 6) {
     try {
       const result = await query(
-        `SELECT id, name, profile_image_url, is_online 
-         FROM pnp_models 
-         WHERE is_active = TRUE 
-         AND profile_image_url IS NOT NULL
-         ORDER BY is_online DESC, last_online DESC NULLS LAST, name ASC
+        `SELECT id, display_name, photo_url, is_available
+         FROM performers
+         WHERE status = 'active'
+         AND photo_url IS NOT NULL
+         ORDER BY is_available DESC, display_name ASC
          LIMIT $1`,
         [limit]
       );
-      
+
       return result.rows.map(row => ({
         modelId: row.id,
-        name: row.name,
-        imageUrl: row.profile_image_url,
-        isOnline: row.is_online,
-        status: row.is_online ? '🟢 Online' : '⚪ Available'
+        name: row.display_name,
+        imageUrl: row.photo_url,
+        isOnline: row.is_available,
+        status: row.is_available ? '🟢 Online' : '⚪ Available'
       }));
     } catch (error) {
       logger.error('Error getting featured models with images:', error);
@@ -106,8 +106,8 @@ class PNPLiveMediaService {
   static async updateModelProfileImage(modelId, imageUrl) {
     try {
       await query(
-        `UPDATE pnp_models 
-         SET profile_image_url = $2, updated_at = NOW()
+        `UPDATE performers
+         SET photo_url = $2
          WHERE id = $1`,
         [modelId, imageUrl]
       );
@@ -204,12 +204,12 @@ class PNPLiveMediaService {
   static async getModelMediaStats(modelId) {
     try {
       const result = await query(
-        `SELECT 
-            profile_image_url IS NOT NULL as has_profile_image,
+        `SELECT
+            photo_url IS NOT NULL as has_profile_image,
             (SELECT COUNT(*) FROM pnp_bookings WHERE model_id = $1) as booking_count,
-            (SELECT AVG(rating) FROM pnp_feedback WHERE booking_id IN 
+            (SELECT AVG(rating) FROM pnp_feedback WHERE booking_id IN
                 (SELECT id FROM pnp_bookings WHERE model_id = $1)) as avg_rating
-         FROM pnp_models 
+         FROM performers
          WHERE id = $1`,
         [modelId]
       );
