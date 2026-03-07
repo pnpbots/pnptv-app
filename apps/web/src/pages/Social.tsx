@@ -149,7 +149,7 @@ function PostCard({
     if (translatedContent) { setTranslatedContent(null); return; }
     if (!post.content) return;
     setIsTranslating(true);
-    const result = await translateText(post.content, userLang === "es" ? "es" : "en");
+    const result = await translateText(post.content, userLang || "en");
     if (result) setTranslatedContent(result);
     setIsTranslating(false);
   }, [isTranslating, translatedContent, post.content, userLang]);

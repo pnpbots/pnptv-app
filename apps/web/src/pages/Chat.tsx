@@ -115,7 +115,7 @@ const MessageBubble = memo(function MessageBubble({
     if (translatedContent) { setTranslatedContent(null); return; }
     if (!msg.content) return;
     setIsTranslating(true);
-    const result = await translateText(msg.content, userLang === "es" ? "es" : "en");
+    const result = await translateText(msg.content, userLang || "en");
     if (result) setTranslatedContent(result);
     setIsTranslating(false);
   }, [isTranslating, translatedContent, msg.content, userLang]);

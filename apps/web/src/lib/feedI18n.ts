@@ -114,11 +114,11 @@ export function useFeedI18n(lang?: string | null): FeedStrings {
  */
 export async function translateText(
   text: string,
-  targetLang: "en" | "es"
+  targetLang: string
 ): Promise<string | null> {
   if (!text.trim()) return null;
-  const sourceLang = targetLang === "es" ? "en" : "es";
-  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=${sourceLang}|${targetLang}`;
+  const lang = targetLang || "en";
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=autodetect|${lang}`;
   try {
     const res = await fetch(url);
     const data = await res.json();

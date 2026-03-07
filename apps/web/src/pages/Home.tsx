@@ -101,7 +101,7 @@ export default function Home() {
     if (translatingId === postId) return;
     if (translatedPosts[postId]) { setTranslatedPosts((prev) => { const next = { ...prev }; delete next[postId]; return next; }); return; }
     setTranslatingId(postId);
-    const result = await translateText(content, user?.language === "es" ? "es" : "en");
+    const result = await translateText(content, user?.language || "en");
     if (result) setTranslatedPosts((prev) => ({ ...prev, [postId]: result }));
     setTranslatingId(null);
   }, [translatingId, translatedPosts, user?.language]);
