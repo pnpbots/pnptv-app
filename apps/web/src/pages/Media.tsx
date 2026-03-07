@@ -160,6 +160,30 @@ export default function Media() {
         )}
       </div>
 
+      {/* Telegram PRIME channel banner */}
+      {isPrime && (
+        <a
+          href="https://t.me/+GDD0AAVbvGM3MGEx"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 rounded-xl p-3.5 mb-5 transition-opacity hover:opacity-90"
+          style={{ background: "linear-gradient(135deg, rgba(0,136,204,0.15), rgba(212,0,122,0.10))", border: "1px solid rgba(0,136,204,0.3)" }}
+        >
+          <svg className="w-6 h-6 flex-shrink-0" viewBox="0 0 24 24" fill="#0088CC">
+            <path d="M11.944 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0012 0h-.056zm5.09 7.307l-1.972 9.297c-.146.658-.537.818-1.084.508l-3-2.211-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.334-.373-.121l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.835.926z" />
+          </svg>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-white">Watch PRIME videos on Telegram</p>
+            <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.6)" }}>
+              Use this link while we finish migrating all content to the webapp
+            </p>
+          </div>
+          <svg className="w-4 h-4 flex-shrink-0 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </a>
+      )}
+
       {/* Active video player */}
       {activeVideo && (
         <div className="mb-5 rounded-2xl overflow-hidden bg-black border border-pnp-accent/30 shadow-lg">
