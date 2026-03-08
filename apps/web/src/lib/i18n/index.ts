@@ -26,6 +26,12 @@ import { feed, type FeedStrings } from "./feed";
 import { gamification, type GamificationStrings } from "./gamification";
 import { becomeModel, type BecomeModelStrings } from "./becomeModel";
 import { landing, type LandingStrings } from "./landing";
+import { blog, type BlogStrings } from "./blog";
+import { about, type AboutStrings } from "./about";
+import { careers, type CareersStrings } from "./careers";
+import { communityResources, type CommunityResourcesStrings } from "./communityResources";
+import { shop, type ShopStrings } from "./shop";
+import { notifications, type NotificationsStrings } from "./notifications";
 
 export type Lang = "en" | "es";
 
@@ -52,6 +58,12 @@ export interface I18n {
   gamification: GamificationStrings;
   becomeModel: BecomeModelStrings;
   landing: LandingStrings;
+  blog: BlogStrings;
+  about: AboutStrings;
+  careers: CareersStrings;
+  communityResources: CommunityResourcesStrings;
+  shop: ShopStrings;
+  notifications: NotificationsStrings;
 }
 
 function resolve(lang: Lang): I18n {
@@ -78,6 +90,12 @@ function resolve(lang: Lang): I18n {
     gamification: gamification[lang],
     becomeModel: becomeModel[lang],
     landing: landing[lang],
+    blog: blog[lang],
+    about: about[lang],
+    careers: careers[lang],
+    communityResources: communityResources[lang],
+    shop: shop[lang],
+    notifications: notifications[lang],
   };
 }
 

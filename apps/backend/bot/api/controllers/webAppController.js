@@ -76,6 +76,15 @@ async function createWebUser({ id, firstName, lastName, username, email, passwor
     }
   }
 
+  // Always ensure a username — fallback to pnptv_XXXXXX if nothing was derivable
+  if (!displayName) {
+    while (true) {
+      const candidate = `pnptv_${uuidv4().replace(/-/g, '').substring(0, 6)}`;
+      const { rows: exists } = await query('SELECT id FROM users WHERE username = $1', [candidate]);
+      if (exists.length === 0) { displayName = candidate; break; }
+    }
+  }
+
   const { rows } = await query(
     `INSERT INTO users
        (id, pnptv_id, first_name, last_name, username, email, password_hash,
@@ -116,14 +125,32 @@ async function findOrLinkUser({ telegramId, twitterHandle, xId, email, firstName
   let user = null;
 
   // 1. Lookup priority: telegramId > xId > twitterHandle > email
-  // Also search by id for bot-created users (where id = Telegram numeric ID, telegram may be NULL)
   if (telegramId) {
-    const { rows } = await query(
-      `SELECT ${RETURN_COLS} FROM users WHERE telegram = $1 OR id = $1::text
-       ORDER BY CASE WHEN telegram = $1 THEN 0 ELSE 1 END LIMIT 1`,
+    // First: look up by telegram column (new-style users)
+    const { rows: byTelegram } = await query(
+      `SELECT ${RETURN_COLS} FROM users WHERE telegram = $1 LIMIT 1`,
       [String(telegramId)]
     );
-    if (rows.length > 0) user = rows[0];
+    if (byTelegram.length > 0) {
+      user = byTelegram[0];
+    } else {
+      // Legacy: old bot users had the Telegram numeric ID as their primary key (id column)
+      const { rows: byId } = await query(
+        `SELECT ${RETURN_COLS} FROM users WHERE id = $1 LIMIT 1`,
+        [String(telegramId)]
+      );
+      if (byId.length > 0) {
+        user = byId[0];
+        // Migrate: backfill telegram column so future lookups are consistent
+        if (!user.telegram) {
+          await query(
+            `UPDATE users SET telegram = $1, updated_at = NOW() WHERE id = $2`,
+            [String(telegramId), user.id]
+          ).catch(() => {});
+          user.telegram = String(telegramId);
+        }
+      }
+    }
   }
 
   if (!user && xId) {
@@ -193,6 +220,7 @@ function buildSession(user, extra = {}) {
     id: user.id,
     pnptvId: user.pnptv_id,
     username: user.username,
+    displayName: user.first_name || user.username || 'Member',
     firstName: user.first_name,
     lastName: user.last_name,
     subscriptionStatus: user.subscription_status,
@@ -216,15 +244,15 @@ function buildSession(user, extra = {}) {
       atproto: !!(user.atproto_did),
       x: !!(user.twitter || user.x_user_id || user.x_id || extra.xHandle),
     },
+    last_login_method: extra.last_login_method || user.last_login_method || null,
     ...extra,
   };
 }
 
 function setSessionCookieDuration(session, rememberMe = false) {
   if (!session?.cookie) return;
-  const oneDayMs = 24 * 60 * 60 * 1000;
-  const thirtyDaysMs = 30 * oneDayMs;
-  session.cookie.maxAge = rememberMe ? thirtyDaysMs : oneDayMs;
+  const dayMs = 24 * 60 * 60 * 1000;
+  session.cookie.maxAge = rememberMe ? 365 * dayMs : 90 * dayMs;
 }
 
 // ── Telegram Login Widget verification ───────────────────────────────────────
@@ -375,7 +403,8 @@ const telegramCheckToken = async (req, res) => {
       logger.info(`Existing user login via Telegram deep link: ${user.id} (@${user.username})`);
     }
 
-    req.session.user = buildSession(user, { photoUrl: telegramUser.photo_url || user.photo_file_id });
+    query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'deep_link', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
+    req.session.user = buildSession(user, { photoUrl: telegramUser.photo_url || user.photo_file_id, last_login_method: 'deep_link' });
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );
@@ -512,7 +541,8 @@ const telegramCallback = async (req, res) => {
       logger.info(`Existing user login via Telegram callback: ${user.id} (@${user.username})`);
     }
 
-    req.session.user = buildSession(user, { photoUrl: telegramUser.photo_url || user.photo_file_id });
+    query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'deep_link', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
+    req.session.user = buildSession(user, { photoUrl: telegramUser.photo_url || user.photo_file_id, last_login_method: 'deep_link' });
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );
@@ -585,7 +615,8 @@ const telegramLogin = async (req, res) => {
       logger.info(`Created new user via Telegram widget login: ${user.id} (@${user.username})`);
     }
 
-    req.session.user = buildSession(user, { photoUrl: telegramUser.photo_url || user.photo_file_id });
+    query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'telegram', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
+    req.session.user = buildSession(user, { photoUrl: telegramUser.photo_url || user.photo_file_id, last_login_method: 'telegram' });
 
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
@@ -740,7 +771,8 @@ const emailLogin = async (req, res) => {
       });
     }
 
-    req.session.user = buildSession(user);
+    query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'email', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
+    req.session.user = buildSession(user, { last_login_method: 'email' });
     enforceDefaultFollows(user.id).catch(() => {});
     setSessionCookieDuration(
       req.session,
@@ -1207,7 +1239,8 @@ const xLoginCallback = async (req, res) => {
         [existingId]
       );
       const user = updated[0];
-      req.session.user = buildSession(user, { xHandle });
+      query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'x', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
+      req.session.user = buildSession(user, { xHandle, last_login_method: 'x' });
       await new Promise((resolve, reject) =>
         req.session.save(err => (err ? reject(err) : resolve()))
       );
@@ -1230,7 +1263,8 @@ const xLoginCallback = async (req, res) => {
       logger.info(`Existing user login via X: ${user.id} (@${xHandle})`);
     }
 
-    req.session.user = buildSession(user, { xHandle });
+    query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'x', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
+    req.session.user = buildSession(user, { xHandle, last_login_method: 'x' });
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );
@@ -1268,6 +1302,7 @@ const authStatus = (req, res) => {
       acceptedTerms: user.acceptedTerms,
       language: user.language,
       role: user.role || 'user',
+      last_login_method: user.last_login_method || null,
     },
   });
 };
@@ -1824,7 +1859,8 @@ const telegramWidgetAuth = async (req, res) => {
       logger.info(`[TelegramWidget] Existing user login: ${user.id} (@${user.username})`);
     }
 
-    const sessionData = buildSession(user, { photoUrl: photo_url || user.photo_file_id });
+    query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'telegram', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
+    const sessionData = buildSession(user, { photoUrl: photo_url || user.photo_file_id, last_login_method: 'telegram' });
 
     // Regenerate session ID to prevent session fixation attacks
     await new Promise((resolve, reject) =>

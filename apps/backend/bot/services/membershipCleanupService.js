@@ -441,7 +441,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
             updated_at = NOW()
         WHERE plan_expiry IS NOT NULL
           AND plan_expiry > NOW()
-          AND plan_id = 'member-monthly'
+          AND plan_id = 'member_monthly'
           AND (subscription_status != 'active' OR tier != 'member')
         RETURNING id, username
       `);
@@ -458,7 +458,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
             updated_at = NOW()
         WHERE plan_expiry IS NOT NULL
           AND plan_expiry > NOW()
-          AND (plan_id IS NULL OR plan_id != 'member-monthly')
+          AND (plan_id IS NULL OR plan_id != 'member_monthly')
           AND (subscription_status != 'active' OR tier != 'PRIME')
         RETURNING id, username
       `);

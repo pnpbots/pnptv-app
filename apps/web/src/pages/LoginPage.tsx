@@ -124,6 +124,28 @@ export function LoginPage() {
   const t = getI18n(lang).login;
   const { refreshUser } = useAuth();
 
+  // ── Last login method + username hint (from localStorage)
+  const [lastMethod, setLastMethod] = useState<string | null>(null);
+  const [lastUsername, setLastUsername] = useState<string | null>(null);
+  useEffect(() => {
+    const storedMethod = localStorage.getItem("pnptv_last_auth");
+    const storedUser = localStorage.getItem("pnptv_last_username");
+    if (storedMethod) setLastMethod(storedMethod);
+    if (storedUser) setLastUsername(storedUser);
+  }, []);
+
+  const methodLabel = (method: string | null) => {
+    if (!method) return null;
+    const map: Record<string, string> = {
+      telegram: "Telegram",
+      deep_link: "Telegram",
+      x: "X (Twitter)",
+      email: t.loginWithEmail,
+      admin: "Email",
+    };
+    return map[method] ?? null;
+  };
+
   // ── Widget flow state
   type WidgetStatus = "idle" | "verifying" | "error";
   const [widgetStatus, setWidgetStatus] = useState<WidgetStatus>("idle");
@@ -138,8 +160,10 @@ export function LoginPage() {
   // ── X state
   const [xRedirecting, setXRedirecting] = useState(false);
 
-  // ── Email form state
-  const [showEmailForm, setShowEmailForm] = useState(false);
+  // ── Email form state (auto-expand if last method was email)
+  const [showEmailForm, setShowEmailForm] = useState(
+    () => localStorage.getItem("pnptv_last_auth") === "email",
+  );
   const [emailVal, setEmailVal] = useState("");
   const [passwordVal, setPasswordVal] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
@@ -162,6 +186,8 @@ export function LoginPage() {
       try {
         const result = await telegramWidgetAuth(userData);
         if (result.success) {
+          localStorage.setItem("pnptv_last_auth", "telegram");
+          if (result.user?.username) localStorage.setItem("pnptv_last_username", result.user.username);
           await refreshUser();
           // Session cookie is now set; navigate to root so the router
           // picks up the authenticated state.
@@ -230,6 +256,7 @@ export function LoginPage() {
           const result = await check.json();
           if (result.authenticated) {
             if (pollRef.current) clearInterval(pollRef.current);
+            localStorage.setItem("pnptv_last_auth", "telegram");
             window.location.href = "/";
           }
         } catch {
@@ -245,6 +272,7 @@ export function LoginPage() {
 
   const handleXClick = () => {
     setXRedirecting(true);
+    localStorage.setItem("pnptv_last_auth", "x");
     window.location.href = getXLoginUrl();
   };
 
@@ -271,6 +299,8 @@ export function LoginPage() {
       });
       const data = await res.json();
       if (res.ok && data.authenticated) {
+        localStorage.setItem("pnptv_last_auth", "email");
+        if (data.user?.username) localStorage.setItem("pnptv_last_username", data.user.username);
         window.location.href = "/";
       } else {
         setEmailLoginError(data.error || data.message || t.loginFailed);
@@ -317,34 +347,34 @@ export function LoginPage() {
           </p>
         </div>
 
-        {/* Marketing highlights */}
-        <div className="mb-5 grid grid-cols-3 gap-2 text-center">
-          {(
-            [
-              { icon: "🔥", ...t.featureBadges[0] },
-              { icon: "🎬", ...t.featureBadges[1] },
-              { icon: "🎥", ...t.featureBadges[2] },
-            ] as { icon: string; title: string; sub: string }[]
-          ).map(({ icon, title, sub }) => (
-            <div
-              key={title}
-              className="rounded-xl py-3 px-2"
-              style={{
-                background: "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(255,255,255,0.08)",
-              }}
-            >
-              <div className="text-xl mb-1">{icon}</div>
-              <div className="text-xs font-semibold text-white">{title}</div>
-              <div
-                className="text-[10px] mt-0.5"
-                style={{ color: "#8E8E93" }}
-              >
-                {sub}
+        {/* Welcome back banner + last login method hint */}
+        {(lastUsername || (lastMethod && methodLabel(lastMethod))) && (
+          <div className="mb-4 space-y-1.5 text-center animate-fade-in-up">
+            {lastUsername && (
+              <p className="text-sm font-medium" style={{ color: "#FFFFFF" }}>
+                {lang === "es" ? "Bienvenido de vuelta," : "Welcome back,"}{" "}
+                <span style={{ color: "#D4007A" }}>@{lastUsername}</span>
+              </p>
+            )}
+            {lastMethod && methodLabel(lastMethod) && (
+              <div className="flex items-center justify-center gap-1.5">
+                <span className="text-[11px]" style={{ color: "#636366" }}>
+                  {lang === "es" ? "Último acceso con" : "Last used:"}
+                </span>
+                <span
+                  className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
+                  style={{
+                    background: "rgba(212, 0, 122, 0.12)",
+                    color: "#D4007A",
+                    border: "1px solid rgba(212, 0, 122, 0.2)",
+                  }}
+                >
+                  {methodLabel(lastMethod)}
+                </span>
               </div>
-            </div>
-          ))}
-        </div>
+            )}
+          </div>
+        )}
 
         {/* ── PRIMARY: Telegram Widget ─────────────────────────────────────── */}
         <div className="space-y-4">

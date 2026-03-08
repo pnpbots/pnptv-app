@@ -2598,7 +2598,7 @@ app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {
   // NOTE (H9): Ideally credentials should be sent in the webhook handler after the
   // payment provider confirms success. This is the safest achievable fix at route level.
   const result = await PaymentService.createPayment({
-    userId: user.telegramId || user.telegram_id || user.id,
+    userId,
     planId,
     provider: provider || 'epayco',
     chatId: user.telegramId || user.telegram_id || null,

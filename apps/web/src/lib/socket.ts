@@ -25,5 +25,9 @@ export function connectSocket(): Socket {
 }
 
 export function disconnectSocket(): void {
-  if (socket?.connected) socket.disconnect();
+  if (socket) {
+    socket.removeAllListeners();
+    if (socket.connected) socket.disconnect();
+    socket = null;
+  }
 }

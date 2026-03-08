@@ -1,6 +1,16 @@
+const crypto = require('crypto');
 const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const NotificationEmitter = require('./notificationEmitter');
+
+const TEASER_SECRET = process.env.TEASER_SECRET || 'pnptv-teaser-salt-2026';
+
+function isTeaserPost(postId, viewerId) {
+  const hash = crypto.createHmac('sha256', TEASER_SECRET)
+    .update(`${postId}:${viewerId}`)
+    .digest();
+  return hash[0] % 5 === 0; // ~20% teaser rate, viewer-specific and non-enumerable
+}
 
 class CreatorService {
   // ── Eligibility ─────────────────────────────────────────────────────────────
@@ -275,6 +285,25 @@ class CreatorService {
       [creatorId, rows[0].id, priceUsd, amountCreator, amountPlatform]
     );
 
+    // Notify subscriber's frontend to refresh subscription state
+    try {
+      const socketSingleton = require('./socketSingleton');
+      const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+      if (io) {
+        io.to(`user:${subscriberId}`).emit('subscription:updated', {
+          creatorId,
+          status: 'active',
+          expiresAt,
+        });
+      }
+    } catch (socketErr) {
+      logger.warn('subscribeToCreator: failed to emit subscription:updated socket event', {
+        subscriberId,
+        creatorId,
+        error: socketErr.message,
+      });
+    }
+
     // Notify creator of new subscriber
     try {
       const subscriberRes = await query(
@@ -437,8 +466,8 @@ class CreatorService {
       return { status: 'unlocked', reason: 'subscribed' };
     }
 
-    // Teaser: 20% of posts (postId % 5 === 0)
-    if (postId % 5 === 0) {
+    // Teaser: ~20% of posts, keyed to viewer so enumeration by post ID is not possible
+    if (isTeaserPost(postId, viewerId)) {
       return { status: 'teaser', reason: 'prime_preview' };
     }
 
@@ -469,6 +498,7 @@ class CreatorService {
           locked_reason: 'not_prime',
           content: null,
           media_url: null,
+          media_urls: null,
         };
       });
     }
@@ -501,8 +531,8 @@ class CreatorService {
         return { ...p, exclusive_status: 'unlocked' };
       }
 
-      // Teaser (20% — every 5th post by ID)
-      if (p.id % 5 === 0) {
+      // Teaser (~20% — keyed to viewer so post IDs cannot be enumerated to find teasers)
+      if (isTeaserPost(p.id, viewerId)) {
         return { ...p, exclusive_status: 'teaser' };
       }
 
@@ -513,6 +543,7 @@ class CreatorService {
         locked_reason: 'not_subscribed',
         content: null,
         media_url: null,
+        media_urls: null,
       };
     });
   }

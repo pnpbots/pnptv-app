@@ -1609,6 +1609,20 @@ class PaymentService {
           planId: planIdOrBookingId,
         });
 
+        // PAY-004: Revoke user tier when ePayco payment is reversed.
+        if (userId) {
+          try {
+            await UserModel.updateSubscription(userId, {
+              status: 'churned',
+              planId: null,
+              expiry: new Date(),
+            });
+            logger.info('User tier revoked due to payment reversal', { userId, refPayco: x_ref_payco });
+          } catch (revokeErr) {
+            logger.error('Failed to revoke tier after reversal', { userId, error: revokeErr.message });
+          }
+        }
+
         // H3: Notify the user their payment has been reversed/refunded.
         if (userId) {
           try {
@@ -2266,6 +2280,20 @@ class PaymentService {
           }
 
           logger.info('Daimo payment refunded', { userId, planId, eventId: id });
+
+          // PAY-005: Revoke user tier when Daimo payment is refunded.
+          if (userId) {
+            try {
+              await UserModel.updateSubscription(userId, {
+                status: 'churned',
+                planId: null,
+                expiry: new Date(),
+              });
+              logger.info('User tier revoked due to Daimo refund', { userId, transactionId: id });
+            } catch (revokeErr) {
+              logger.error('Failed to revoke tier after Daimo refund', { userId, error: revokeErr.message });
+            }
+          }
 
           // H3: Notify the user that their Daimo payment has been refunded.
           if (userId) {

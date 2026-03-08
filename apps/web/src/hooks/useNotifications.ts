@@ -8,7 +8,7 @@ import {
 } from "react";
 import React from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
+import { connectSocket } from "@/lib/socket";
 import {
   getNotifications as fetchNotifications,
   getNotificationCounts as fetchCounts,
@@ -31,6 +31,8 @@ interface NotificationsState {
   unreadCount: number;
   latestToast: ToastData | null;
   isConnected: boolean;
+  isLoading: boolean;
+  error: string | null;
   markAllRead: () => Promise<void>;
   markRead: (ids: number[]) => Promise<void>;
   fetchMore: () => Promise<void>;
@@ -45,15 +47,18 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const [unreadCount, setUnreadCount] = useState(0);
   const [latestToast, setLatestToast] = useState<ToastData | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load initial notifications & counts + register push subscription
   useEffect(() => {
     if (!isAuthenticated) return;
 
     const load = async () => {
+      setIsLoading(true);
+      setError(null);
       try {
         const [notifRes, countRes] = await Promise.all([
           fetchNotifications(30, 0),
@@ -62,8 +67,10 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         setNotifications(notifRes.notifications);
         setUnreadCount(countRes.counts.total);
         setOffset(notifRes.notifications.length);
-      } catch {
-        // silently fail
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load notifications");
+      } finally {
+        setIsLoading(false);
       }
 
       // Register push subscription if not already subscribed
@@ -81,12 +88,33 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   // Socket.IO connection + event listeners
   useEffect(() => {
-    if (!isAuthenticated || !user) return;
+    if (!isAuthenticated || !user?.id) return;
 
     const socket = connectSocket();
 
-    const onConnect = () => setIsConnected(true);
-    const onDisconnect = () => setIsConnected(false);
+    const onConnect = () => {
+      setIsConnected(true);
+      // Clear fallback poll — socket is live
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+
+    const onDisconnect = () => {
+      setIsConnected(false);
+      // Start fallback poll only while disconnected
+      if (!pollRef.current) {
+        pollRef.current = setInterval(async () => {
+          try {
+            const res = await fetchCounts();
+            setUnreadCount(res.counts.total);
+          } catch {
+            // ignore transient failures
+          }
+        }, 30000);
+      }
+    };
 
     const onNewNotification = (data: any) => {
       const notif: Notification = {
@@ -109,7 +137,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       setNotifications((prev) => [notif, ...prev]);
       setUnreadCount((prev) => prev + 1);
 
-      // Show toast for high-priority notifications
+      // Show toast for high-priority notifications.
+      // The auto-dismiss timer is owned entirely by the Toast component so it
+      // can pause on hover — the provider only sets the toast data.
       if (data.priority === "high") {
         setLatestToast({
           id: data.id,
@@ -119,8 +149,6 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           entityType: data.entityType,
           entityId: data.entityId,
         });
-        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-        toastTimerRef.current = setTimeout(() => setLatestToast(null), 4000);
       }
     };
 
@@ -128,26 +156,18 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     socket.on("disconnect", onDisconnect);
     socket.on("notification:new", onNewNotification);
 
-    // Fallback polling when disconnected
-    pollRef.current = setInterval(async () => {
-      if (socket.connected) return;
-      try {
-        const res = await fetchCounts();
-        setUnreadCount(res.counts.total);
-      } catch {
-        // ignore
-      }
-    }, 30000);
-
     return () => {
+      // Remove only the notification-specific listeners.
+      // Do NOT call disconnectSocket() — other hooks (chat, hangouts) share the singleton.
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("notification:new", onNewNotification);
-      disconnectSocket();
-      if (pollRef.current) clearInterval(pollRef.current);
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
     };
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user?.id]);
 
   const markAllRead = useCallback(async () => {
     try {
@@ -161,8 +181,6 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   const markRead = useCallback(async (ids: number[]) => {
     try {
-      await markNotificationsAsRead(undefined);
-      // We use the generic mark-read endpoint with notificationIds
       const res = await fetch(
         `${import.meta.env.VITE_API_URL || "https://pnptv.app"}/api/webapp/notifications/mark-read`,
         {
@@ -196,7 +214,6 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   const dismissToast = useCallback(() => {
     setLatestToast(null);
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
   }, []);
 
   const value: NotificationsState = {
@@ -204,6 +221,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     unreadCount,
     latestToast,
     isConnected,
+    isLoading,
+    error,
     markAllRead,
     markRead,
     fetchMore,

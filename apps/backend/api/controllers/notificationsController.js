@@ -1,9 +1,24 @@
 const { query } = require('../../config/postgres');
+const { cache } = require('../../config/redis');
 const logger = require('../../utils/logger');
+const NotificationEmitter = require('../../bot/services/notificationEmitter');
 
 /**
  * Notifications Controller — reads from the unified `notifications` table.
  */
+
+const VALID_CATEGORIES = new Set(['social', 'messaging', 'hangouts', 'commerce', 'system', 'announcements']);
+
+// TTL for the unread counts cache (seconds)
+const UNREAD_COUNT_TTL = 300; // 5 minutes
+
+/**
+ * Build the Redis key for a user's cached unread notification counts.
+ * NOTE: ioredis applies the global keyPrefix ('pnptv:') automatically.
+ */
+function unreadCacheKey(userId) {
+  return `notif:unread:${userId}`;
+}
 
 /**
  * GET /api/webapp/notifications?limit=50&offset=0&category=social
@@ -15,7 +30,8 @@ async function getNotifications(req, res) {
 
     const limit = Math.min(parseInt(req.query.limit) || 50, 100);
     const offset = parseInt(req.query.offset) || 0;
-    const category = req.query.category || null;
+    const rawCategory = req.query.category || null;
+    const category = rawCategory && VALID_CATEGORIES.has(rawCategory) ? rawCategory : null;
 
     const params = [userId, limit, offset];
     let categoryFilter = '';
@@ -70,8 +86,15 @@ async function getNotifications(req, res) {
 
 /**
  * Internal: get unread counts grouped by category.
+ * Uses Redis as a read-through cache (TTL: 5 minutes).
  */
 async function getUnreadCounts(userId) {
+  const cacheKey = unreadCacheKey(userId);
+
+  // Check cache first
+  const cached = await cache.get(cacheKey);
+  if (cached !== null) return cached;
+
   try {
     const { rows } = await query(
       `SELECT category, COUNT(*)::int AS count
@@ -83,9 +106,14 @@ async function getUnreadCounts(userId) {
 
     const counts = { social: 0, messaging: 0, hangouts: 0, commerce: 0, system: 0, total: 0 };
     for (const row of rows) {
-      counts[row.category] = row.count;
+      if (counts[row.category] !== undefined) {
+        counts[row.category] = row.count;
+      }
       counts.total += row.count;
     }
+
+    // Populate cache
+    await cache.set(cacheKey, counts, UNREAD_COUNT_TTL);
     return counts;
   } catch (error) {
     logger.error('Get unread counts error:', error);
@@ -118,13 +146,16 @@ async function markAsRead(req, res) {
     const userId = req.session?.user?.id;
     if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
-    const { notificationIds, category, type } = req.body;
+    const { notificationIds } = req.body;
+    const rawCategory = req.body.category || null;
+    const category = rawCategory && VALID_CATEGORIES.has(rawCategory) ? rawCategory : null;
 
     if (Array.isArray(notificationIds) && notificationIds.length > 0) {
+      const clampedIds = notificationIds.slice(0, 500);
       await query(
         `UPDATE notifications SET is_read = TRUE
          WHERE target_user_id = $1 AND id = ANY($2::bigint[])`,
-        [userId, notificationIds]
+        [userId, clampedIds]
       );
     } else if (category) {
       await query(
@@ -140,6 +171,9 @@ async function markAsRead(req, res) {
         [userId]
       );
     }
+
+    // Invalidate the unread count cache so the next poll reflects the change
+    NotificationEmitter.invalidateUnreadCache(userId).catch(() => {});
 
     res.json({ success: true, message: 'Notifications marked as read' });
   } catch (error) {
@@ -176,4 +210,5 @@ module.exports = {
   getNotifications,
   getNotificationCounts,
   markAsRead,
+  getUnreadCounts,
 };

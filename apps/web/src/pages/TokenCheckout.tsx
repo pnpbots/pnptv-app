@@ -4,6 +4,7 @@ import { DaimoSDKProvider, DaimoModal } from "@daimo/sdk/web";
 import "@daimo/sdk/web/styles.css";
 import "@daimo/sdk/web/theme.css";
 import { getTokenCheckoutData } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 
 // Augment Window with the ePayco checkout object injected by checkout.js
 declare global {
@@ -377,6 +378,7 @@ const POLL_TIMEOUT_MS = 120_000;
 export default function TokenCheckout() {
   const { purchaseId } = useParams<{ purchaseId: string }>();
   const [searchParams] = useSearchParams();
+  const { refreshUser } = useAuth();
   const [state, setState] = useState<CheckoutState>("loading");
   const [data, setData] = useState<Awaited<ReturnType<typeof getTokenCheckoutData>> | null>(null);
   const [error, setError] = useState("");
@@ -456,10 +458,11 @@ export default function TokenCheckout() {
       });
   }, [purchaseId, searchParams, startPolling]);
 
-  const handleSuccess = useCallback(() => {
+  const handleSuccess = useCallback(async () => {
     stopPolling();
+    await refreshUser();
     setState("success");
-  }, [stopPolling]);
+  }, [stopPolling, refreshUser]);
 
   return (
     <div style={BG_STYLES}>

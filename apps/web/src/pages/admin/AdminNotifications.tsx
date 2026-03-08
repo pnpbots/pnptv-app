@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
 import { sendAdminNotification } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 type TargetType = "all" | "tier" | "users";
 
@@ -22,17 +23,35 @@ const EMPTY_FORM: NotifForm = {
   userIdsRaw: "",
 };
 
+const TITLE_MAX = 100;
+const BODY_MAX = 500;
+
 const BellIcon = () => (
-  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+    />
   </svg>
 );
 
+const focusRing =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-surface";
+
 export default function AdminNotifications() {
+  const t = useI18n();
+  const n = t.notifications;
+
   const [form, setForm] = useState<NotifForm>(EMPTY_FORM);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [sending, setSending] = useState(false);
-  const [result, setResult] = useState<{ success: boolean; message: string; sent?: number } | null>(null);
+  const [result, setResult] = useState<{
+    success: boolean;
+    message: string;
+    sent?: number;
+  } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   const handleChange = <K extends keyof NotifForm>(key: K, value: NotifForm[K]) => {
@@ -43,11 +62,11 @@ export default function AdminNotifications() {
 
   const validate = (): boolean => {
     if (!form.title.trim()) {
-      setFormError("Title is required");
+      setFormError(n.titleRequired);
       return false;
     }
     if (!form.body.trim()) {
-      setFormError("Body is required");
+      setFormError(n.bodyRequired);
       return false;
     }
     if (form.targetType === "users") {
@@ -56,7 +75,7 @@ export default function AdminNotifications() {
         .map((s) => s.trim())
         .filter(Boolean);
       if (ids.length === 0) {
-        setFormError("Enter at least one user ID");
+        setFormError(n.atLeastOneUser);
         return false;
       }
     }
@@ -91,7 +110,7 @@ export default function AdminNotifications() {
     } catch (err) {
       setResult({
         success: false,
-        message: err instanceof Error ? err.message : "Failed to send notification",
+        message: err instanceof Error ? err.message : n.failedMessage,
       });
     } finally {
       setSending(false);
@@ -115,23 +134,29 @@ export default function AdminNotifications() {
   return (
     <div className="page-container space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-pnp-textPrimary">Push Notifications</h1>
-        <p className="text-sm text-pnp-textSecondary mt-1">
-          Compose and send push notifications to users
-        </p>
+        <h1 className="text-2xl font-bold text-pnp-textPrimary">{n.adminTitle}</h1>
+        <p className="text-sm text-pnp-textSecondary mt-1">{n.adminSubtitle}</p>
       </div>
 
       {result && (
-        <div className={`px-4 py-3 rounded-lg border text-sm flex items-center justify-between ${
-          result.success
-            ? "bg-green-500/10 border-green-500/20 text-green-400"
-            : "bg-red-500/10 border-red-500/20 text-red-400"
-        }`}>
+        <div
+          role="alert"
+          className={`px-4 py-3 rounded-lg border text-sm flex items-center justify-between gap-2 ${
+            result.success
+              ? "bg-green-500/10 border-green-500/20 text-green-400"
+              : "bg-red-500/10 border-red-500/20 text-red-400"
+          }`}
+        >
           <span>
             {result.message}
             {result.sent !== undefined && ` (${result.sent} sent)`}
           </span>
-          <button onClick={() => setResult(null)} className="ml-2 hover:opacity-70">Dismiss</button>
+          <button
+            onClick={() => setResult(null)}
+            className={`ml-2 hover:opacity-70 transition-opacity min-w-[44px] min-h-[44px] flex items-center justify-center rounded ${focusRing}`}
+          >
+            {n.dismiss}
+          </button>
         </div>
       )}
 
@@ -139,71 +164,116 @@ export default function AdminNotifications() {
         {/* Compose Form */}
         <div className="rounded-xl bg-pnp-surface border border-pnp-border p-5 space-y-4">
           <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider">
-            Compose
+            {n.compose}
           </h2>
 
           {formError && (
-            <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+            <div
+              role="alert"
+              className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400"
+            >
               {formError}
             </div>
           )}
 
+          {/* Title */}
           <div>
-            <label className="block text-xs text-pnp-textSecondary mb-1">Title *</label>
+            <div className="flex items-center justify-between mb-1">
+              <label
+                htmlFor="notif-title"
+                className="block text-xs text-pnp-textSecondary"
+              >
+                {n.labelTitle} *
+              </label>
+              <span className="text-xs text-pnp-textSecondary">
+                {form.title.length}/{TITLE_MAX}
+              </span>
+            </div>
             <input
+              id="notif-title"
               type="text"
               value={form.title}
               onChange={(e) => handleChange("title", e.target.value)}
-              maxLength={100}
-              placeholder="Notification title"
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+              maxLength={TITLE_MAX}
+              placeholder={n.titlePlaceholder}
+              className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent ${focusRing}`}
             />
           </div>
 
+          {/* Body */}
           <div>
-            <label className="block text-xs text-pnp-textSecondary mb-1">Body *</label>
+            <label
+              htmlFor="notif-body"
+              className="block text-xs text-pnp-textSecondary mb-1"
+            >
+              {n.labelBody} *
+            </label>
             <textarea
+              id="notif-body"
               value={form.body}
               onChange={(e) => handleChange("body", e.target.value)}
               rows={3}
-              maxLength={500}
-              placeholder="Notification message body..."
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent resize-none"
+              maxLength={BODY_MAX}
+              placeholder={n.bodyPlaceholder}
+              className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent resize-none ${focusRing}`}
             />
-            <p className="text-xs text-pnp-textSecondary mt-1 text-right">{form.body.length}/500</p>
+            <p className="text-xs text-pnp-textSecondary mt-1 text-right">
+              {form.body.length}/{BODY_MAX}
+            </p>
           </div>
 
+          {/* URL */}
           <div>
-            <label className="block text-xs text-pnp-textSecondary mb-1">URL (optional)</label>
+            <label
+              htmlFor="notif-url"
+              className="block text-xs text-pnp-textSecondary mb-1"
+            >
+              {n.labelUrl}
+            </label>
             <input
+              id="notif-url"
               type="url"
               value={form.url}
               onChange={(e) => handleChange("url", e.target.value)}
-              placeholder="https://app.pnptv.app/..."
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+              placeholder={n.urlPlaceholder}
+              className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent ${focusRing}`}
             />
           </div>
 
+          {/* Target */}
           <div>
-            <label className="block text-xs text-pnp-textSecondary mb-1">Target Audience *</label>
+            <label
+              htmlFor="notif-type"
+              className="block text-xs text-pnp-textSecondary mb-1"
+            >
+              {n.labelTarget} *
+            </label>
             <select
+              id="notif-type"
               value={form.targetType}
               onChange={(e) => handleChange("targetType", e.target.value as TargetType)}
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+              className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent ${focusRing}`}
             >
-              <option value="all">All Users</option>
-              <option value="tier">Specific Tier</option>
-              <option value="users">Specific Users</option>
+              <option value="all">{n.targetAll}</option>
+              <option value="tier">{n.targetTier}</option>
+              <option value="users">{n.targetUsers}</option>
             </select>
           </div>
 
+          {/* Tier selector */}
           {form.targetType === "tier" && (
             <div>
-              <label className="block text-xs text-pnp-textSecondary mb-1">Tier</label>
+              <label
+                htmlFor="notif-tier"
+                className="block text-xs text-pnp-textSecondary mb-1"
+              >
+                {n.labelTier}
+              </label>
               <select
+                id="notif-tier"
                 value={form.tier}
                 onChange={(e) => handleChange("tier", e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+                className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent ${focusRing}`}
               >
                 <option value="free">free</option>
                 <option value="member">member</option>
@@ -212,17 +282,22 @@ export default function AdminNotifications() {
             </div>
           )}
 
+          {/* User IDs */}
           {form.targetType === "users" && (
             <div>
-              <label className="block text-xs text-pnp-textSecondary mb-1">
-                User IDs (comma-separated)
+              <label
+                htmlFor="notif-user-ids"
+                className="block text-xs text-pnp-textSecondary mb-1"
+              >
+                {n.labelUserIds}
               </label>
               <textarea
+                id="notif-user-ids"
                 value={form.userIdsRaw}
                 onChange={(e) => handleChange("userIdsRaw", e.target.value)}
                 rows={3}
-                placeholder="123, 456, 789"
-                className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent resize-none font-mono"
+                placeholder={n.userIdsPlaceholder}
+                className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent resize-none font-mono ${focusRing}`}
               />
               {form.userIdsRaw.trim() && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -238,6 +313,7 @@ export default function AdminNotifications() {
                         {id}
                         <button
                           type="button"
+                          aria-label={`${n.removeUser} ${id}`}
                           onClick={() => {
                             const ids = form.userIdsRaw
                               .split(",")
@@ -245,10 +321,21 @@ export default function AdminNotifications() {
                               .filter((s) => s && s !== id);
                             handleChange("userIdsRaw", ids.join(", "));
                           }}
-                          className="hover:text-red-400 transition-colors"
+                          className={`hover:text-red-400 transition-colors rounded ${focusRing}`}
                         >
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          <svg
+                            className="w-3 h-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            aria-hidden="true"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M6 18L18 6M6 6l12 12"
+                            />
                           </svg>
                         </button>
                       </span>
@@ -262,10 +349,10 @@ export default function AdminNotifications() {
             <button
               onClick={handlePreSend}
               disabled={!form.title.trim() || !form.body.trim()}
-              className="px-5 py-2.5 rounded-lg bg-pnp-accent text-white text-sm font-medium hover:bg-pnp-accent/80 disabled:opacity-50 transition-colors flex items-center gap-2"
+              className={`px-5 py-2.5 rounded-lg bg-pnp-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity flex items-center gap-2 active:scale-[0.98] ${focusRing}`}
             >
               <BellIcon />
-              Send Notification
+              {sending ? n.sending : n.sendNotification}
             </button>
           </div>
         </div>
@@ -273,12 +360,12 @@ export default function AdminNotifications() {
         {/* Preview */}
         <div className="space-y-3">
           <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider">
-            Preview
+            {n.preview}
           </h2>
           <div className="rounded-xl border border-pnp-border bg-pnp-surface overflow-hidden">
             {/* Mock notification bar */}
             <div className="bg-pnp-background/60 px-4 py-2 border-b border-pnp-border">
-              <span className="text-xs text-pnp-textSecondary">Push Notification Preview</span>
+              <span className="text-xs text-pnp-textSecondary">{n.previewLabel}</span>
             </div>
             <div className="p-4 flex items-start gap-3">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-pnp-accent/20">
@@ -286,10 +373,10 @@ export default function AdminNotifications() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-pnp-textPrimary">
-                  {form.title || "Notification Title"}
+                  {form.title || n.labelTitle}
                 </p>
                 <p className="text-sm text-pnp-textSecondary mt-0.5 line-clamp-3">
-                  {form.body || "Your notification message will appear here."}
+                  {form.body || n.bodyPlaceholder}
                 </p>
                 {form.url && (
                   <p className="text-xs text-pnp-accent mt-1 truncate">{form.url}</p>
@@ -298,11 +385,22 @@ export default function AdminNotifications() {
             </div>
             <div className="px-4 pb-3">
               <div className="flex items-center gap-2 text-xs text-pnp-textSecondary">
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                <svg
+                  className="w-3.5 h-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
+                  />
                 </svg>
                 <span>
-                  Sending to:{" "}
+                  {n.sendingTo}{" "}
                   <span className="font-medium text-pnp-textPrimary">{targetLabel()}</span>
                 </span>
               </div>
@@ -311,25 +409,25 @@ export default function AdminNotifications() {
 
           <div className="rounded-xl border border-pnp-border bg-pnp-surface p-4">
             <h3 className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider mb-3">
-              Summary
+              {n.summary}
             </h3>
             <dl className="space-y-2">
               <div className="flex justify-between text-sm">
-                <dt className="text-pnp-textSecondary">Target</dt>
+                <dt className="text-pnp-textSecondary">{n.notifTarget}</dt>
                 <dd className="text-pnp-textPrimary font-medium capitalize">
                   {form.targetType === "tier" ? `${form.tier} tier` : form.targetType}
                 </dd>
               </div>
               <div className="flex justify-between text-sm">
-                <dt className="text-pnp-textSecondary">Title length</dt>
+                <dt className="text-pnp-textSecondary">{n.notifTitleLength}</dt>
                 <dd className="text-pnp-textPrimary">{form.title.length} chars</dd>
               </div>
               <div className="flex justify-between text-sm">
-                <dt className="text-pnp-textSecondary">Body length</dt>
+                <dt className="text-pnp-textSecondary">{n.notifBodyLength}</dt>
                 <dd className="text-pnp-textPrimary">{form.body.length} chars</dd>
               </div>
               <div className="flex justify-between text-sm">
-                <dt className="text-pnp-textSecondary">URL</dt>
+                <dt className="text-pnp-textSecondary">{n.notifUrl}</dt>
                 <dd className="text-pnp-textPrimary">{form.url ? "Yes" : "None"}</dd>
               </div>
             </dl>
@@ -339,9 +437,9 @@ export default function AdminNotifications() {
 
       <ConfirmModal
         open={confirmOpen}
-        title="Send Push Notification"
+        title={n.confirmSendTitle}
         message={`You are about to send "${form.title}" to ${targetLabel()}. This will trigger an immediate push notification. Are you sure?`}
-        confirmLabel="Send Now"
+        confirmLabel={n.sendNow}
         variant="default"
         onConfirm={handleSend}
         onCancel={() => setConfirmOpen(false)}

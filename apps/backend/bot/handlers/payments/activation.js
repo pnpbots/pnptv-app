@@ -9,6 +9,7 @@ const UserModel = require('../../../models/userModel');
 const { createChatInviteLink } = require('../../utils/telegramAdmin');
 const BusinessNotificationService = require('../../services/businessNotificationService');
 const PaymentHistoryService = require('../../../services/paymentHistoryService');
+const { cache } = require('../../../config/redis');
 
 const PRIME_FALLBACK_LINK = 'https://t.me/PNPTV_PRIME';
 
@@ -153,46 +154,64 @@ const registerActivationHandlers = (bot) => {
         return;
       }
 
-      const planId = 'lifetime-pass';
-      const successMessage = MessageTemplates.buildLifetimePassMessage(lang);
-
-      const activated = await activateMembership({
-        ctx,
-        userId: ctx.from.id,
-        planId,
-        product,
-        successMessage,
-      });
-
-      if (!activated) return;
-
-      const codeMarked = await markCodeUsed(code, ctx.from.id, ctx.from.username);
-      if (!codeMarked) {
-        logger.warn('Activation code was not marked as used (possible race)', { code, userId: ctx.from.id });
+      const lockKey = `activation:code:${code}`;
+      const lockAcquired = await cache.acquireLock(lockKey, 30);
+      if (!lockAcquired) {
+        await ctx.reply(lang === 'es'
+          ? '⏳ Activación ya en progreso. Inténtalo de nuevo en unos segundos.'
+          : '⏳ Activation already in progress. Please try again in a few seconds.');
+        return;
       }
 
-      await logActivation({
-        userId: ctx.from.id,
-        username: ctx.from.username,
-        code,
-        product,
-        success: true,
-      });
+      try {
+        const planId = 'lifetime-pass';
+        const successMessage = MessageTemplates.buildLifetimePassMessage(lang);
 
-      BusinessNotificationService.notifyCodeActivation({
-        userId: ctx.from.id,
-        username: ctx.from.username,
-        code,
-        product,
-      }).catch(() => {});
+        const codeMarked = await markCodeUsed(code, ctx.from.id, ctx.from.username);
+        if (!codeMarked) {
+          await ctx.reply(lang === 'es'
+            ? '❌ Este código ya ha sido utilizado.\n\nCada código solo puede ser activado una vez.'
+            : '❌ This code has already been used.\n\nEach code can only be activated once.');
+          return;
+        }
 
-      const inviteLink = await getPrimeInviteLink(ctx, ctx.from.id);
-      await ctx.reply(
-        lang === 'es'
-          ? `🌟 Accede al canal PRIME:\n👉 ${inviteLink}`
-          : `🌟 Access the PRIME channel:\n👉 ${inviteLink}`,
-        { disable_web_page_preview: true }
-      );
+        const activated = await activateMembership({
+          ctx,
+          userId: ctx.from.id,
+          planId,
+          product,
+          successMessage,
+        });
+
+        if (!activated) return;
+
+        await logActivation({
+          userId: ctx.from.id,
+          username: ctx.from.username,
+          code,
+          product,
+          success: true,
+        });
+
+        BusinessNotificationService.notifyCodeActivation({
+          userId: ctx.from.id,
+          username: ctx.from.username,
+          code,
+          product,
+        }).catch(() => {});
+
+        const inviteLink = await getPrimeInviteLink(ctx, ctx.from.id);
+        await ctx.reply(
+          lang === 'es'
+            ? `🌟 Accede al canal PRIME:\n👉 ${inviteLink}`
+            : `🌟 Access the PRIME channel:\n👉 ${inviteLink}`,
+          { disable_web_page_preview: true }
+        );
+      } finally {
+        await cache.releaseLock(lockKey).catch((err) => {
+          logger.warn('Failed to release activation lock', { lockKey, error: err.message });
+        });
+      }
     } catch (error) {
       logger.error('Error in /activate handler:', error);
       await ctx.reply('❌ Error al procesar tu activación. Inténtalo de nuevo más tarde.');
@@ -367,74 +386,88 @@ const registerActivationHandlers = (bot) => {
       const targetUser = await UserModel.getById(targetUserId);
       const lang = targetUser?.language || 'es';
 
-      const successMessage = MessageTemplates.buildLifetime100PromoMessage(lang);
-      const activated = await activateMembership({
-        ctx,
-        userId: targetUserId,
-        planId: 'lifetime100-promo',
-        product,
-        successMessage,
-      });
-
-      if (!activated) return;
-
-      const codeMarked = await markCodeUsed(code, targetUserId, targetUser?.username);
-      if (!codeMarked) {
-        logger.warn('Lifetime100 code was not marked as used (possible race)', { code, targetUserId });
+      const lockKey = `activation:code:${code}`;
+      const lockAcquired = await cache.acquireLock(lockKey, 30);
+      if (!lockAcquired) {
+        await ctx.reply('⏳ Activación ya en progreso para este código. Inténtalo de nuevo en unos segundos.');
+        return;
       }
 
-      await logActivation({
-        userId: targetUserId,
-        username: targetUser?.username,
-        code,
-        product,
-        success: true,
-      });
-
-      // Record payment in history
       try {
-        await PaymentHistoryService.recordPayment({
+        const codeMarked = await markCodeUsed(code, targetUserId, targetUser?.username);
+        if (!codeMarked) {
+          await ctx.reply('❌ Este código ya fue usado.');
+          return;
+        }
+
+        const successMessage = MessageTemplates.buildLifetime100PromoMessage(lang);
+        const activated = await activateMembership({
+          ctx,
           userId: targetUserId,
-          paymentMethod: 'lifetime100',
-          amount: 100,  // Standard lifetime100 price
-          currency: 'USD',
           planId: 'lifetime100-promo',
-          planName: 'Lifetime100 Promo',
-          product: product || 'lifetime100-promo',
-          paymentReference: code,  // Activation code is the payment reference
-          status: 'completed',
-          metadata: {
-            activated_by: ctx.from.id,
-            activated_by_username: ctx.from.username,
-            manual_activation: true,
-            activation_code: code,
-          },
+          product,
+          successMessage,
         });
-      } catch (historyError) {
-        logger.warn('Failed to record lifetime100 payment in history (non-critical):', {
-          error: historyError.message,
+
+        if (!activated) return;
+
+        await logActivation({
           userId: targetUserId,
+          username: targetUser?.username,
           code,
+          product,
+          success: true,
+        });
+
+        // Record payment in history
+        try {
+          await PaymentHistoryService.recordPayment({
+            userId: targetUserId,
+            paymentMethod: 'lifetime100',
+            amount: 100,
+            currency: 'USD',
+            planId: 'lifetime100-promo',
+            planName: 'Lifetime100 Promo',
+            product: product || 'lifetime100-promo',
+            paymentReference: code,
+            status: 'completed',
+            metadata: {
+              activated_by: ctx.from.id,
+              activated_by_username: ctx.from.username,
+              manual_activation: true,
+              activation_code: code,
+            },
+          });
+        } catch (historyError) {
+          logger.warn('Failed to record lifetime100 payment in history (non-critical):', {
+            error: historyError.message,
+            userId: targetUserId,
+            code,
+          });
+        }
+
+        BusinessNotificationService.notifyCodeActivation({
+          userId: targetUserId,
+          username: targetUser?.username,
+          code,
+          product,
+        }).catch(() => {});
+
+        const inviteLink = await getPrimeInviteLink(ctx, targetUserId);
+        await ctx.telegram.sendMessage(
+          targetUserId,
+          lang === 'es'
+            ? `🌟 Accede al canal PRIME:\n👉 ${inviteLink}`
+            : `🌟 Access the PRIME channel:\n👉 ${inviteLink}`,
+          { disable_web_page_preview: true }
+        ).catch(() => {});
+
+        await ctx.reply(`✅ Lifetime100 promo activado para usuario ${targetUserId} con código ${code}`);
+      } finally {
+        await cache.releaseLock(lockKey).catch((err) => {
+          logger.warn('Failed to release activation lock', { lockKey, error: err.message });
         });
       }
-
-      BusinessNotificationService.notifyCodeActivation({
-        userId: targetUserId,
-        username: targetUser?.username,
-        code,
-        product,
-      }).catch(() => {});
-
-      const inviteLink = await getPrimeInviteLink(ctx, targetUserId);
-      await ctx.telegram.sendMessage(
-        targetUserId,
-        lang === 'es'
-          ? `🌟 Accede al canal PRIME:\n👉 ${inviteLink}`
-          : `🌟 Access the PRIME channel:\n👉 ${inviteLink}`,
-        { disable_web_page_preview: true }
-      ).catch(() => {});
-
-      await ctx.reply(`✅ Lifetime100 promo activado para usuario ${targetUserId} con código ${code}`);
     } catch (error) {
       logger.error('Error in /activate_lifetime100 handler:', error);
       await ctx.reply('❌ Error al activar Lifetime100.');

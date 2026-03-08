@@ -61,7 +61,14 @@ self.addEventListener('fetch', (event) => {
 
 // Push notifications
 self.addEventListener('push', (event) => {
-  const data = event.data ? event.data.json() : {};
+  let data = {};
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch {
+      data = { title: 'PNPtv!', body: event.data.text() || '' };
+    }
+  }
   const title = data.title || 'PNPtv!';
   const options = {
     body: data.body || '',

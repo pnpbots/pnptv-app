@@ -24,6 +24,7 @@ interface PnptvUser {
   creator_status?: string;
   creator_type?: string | null;
   contentDisclaimer?: boolean;
+  lastLoginMethod?: string | null;
 }
 
 interface AuthState {
@@ -46,7 +47,7 @@ function mapTelegramUser(u: NonNullable<TelegramAuthResponse["user"]>): PnptvUse
     dbId: u.id,
     username: u.username,
     firstName: u.first_name,
-    displayName: u.display_name,
+    displayName: u.display_name || u.first_name || u.username || "Member",
     language: u.language,
     termsAccepted: u.terms_accepted,
     ageVerified: u.age_verified,
@@ -57,6 +58,7 @@ function mapTelegramUser(u: NonNullable<TelegramAuthResponse["user"]>): PnptvUse
     creator_status: u.creator_status,
     creator_type: u.creator_type,
     contentDisclaimer: u.contentDisclaimer || false,
+    lastLoginMethod: u.last_login_method ?? null,
   };
 }
 
@@ -113,7 +115,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Try OIDC
           const oidcUser = await getUser();
           if (oidcUser && !oidcUser.expired) {
-            // Set initial state from OIDC token, then enrich with real tier/role from DB
+            // Set initial state from OIDC token, then enrich with real tier/role from DB.
+            // Note: isLoading remains true during checkAuthStatus(), so TierGate will not
+            // render until we have the real tier — the OIDC defaults are never surfaced.
             setUser(mapOidcUser(oidcUser));
             try {
               const status = await checkAuthStatus();
@@ -121,8 +125,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 setUser(mapTelegramUser(status.user));
                 setMode("telegram");
               }
-            } catch {
-              // Backend session not yet established — keep OIDC defaults
+            } catch (err) {
+              // Backend session not yet established — tier defaults to 'free' from OIDC token.
+              // This is expected on first OIDC login before the backend session is created.
+              console.warn("[useAuth] checkAuthStatus failed after OIDC login — tier may be stale:", err);
             }
           }
         }

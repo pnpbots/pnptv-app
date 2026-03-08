@@ -1,5 +1,9 @@
 'use strict';
 
+const { getRedis } = require('../../config/redis');
+const { query } = require('../../config/postgres');
+const logger = require('../../utils/logger');
+
 // Canonical tier constants. DB stores 'PRIME' uppercase — normalizeTier handles it.
 const TIER = Object.freeze({
   FREE: 'free',
@@ -102,6 +106,58 @@ function hasAccess(user, requiredTier) {
 }
 
 // ---------------------------------------------------------------------------
+// Fresh tier validation — prevents stale-session PRIME access after expiry.
+// Only hits DB when the session claims PRIME; caches result in Redis for 5 min.
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a user's effective tier against the DB, bypassing a stale session.
+ *
+ * - Returns immediately for non-PRIME tiers (no DB/Redis overhead).
+ * - Checks `tier_check:<userId>` in Redis (5-min TTL) before hitting DB.
+ * - If plan_expiry has passed, returns 'free' and caches that result.
+ * - Callers should update req.session.user.tier when the returned tier differs.
+ *
+ * @param {number|string} userId
+ * @param {string} sessionTier - tier currently stored in the session
+ * @returns {Promise<string>} effective tier (lowercase)
+ */
+async function validateTierFresh(userId, sessionTier) {
+  const normalized = normalizeTier(sessionTier);
+
+  // Only PRIME is at risk of stale-session over-access; skip DB for others.
+  if (normalized !== 'prime') return normalized;
+
+  try {
+    const redis = getRedis();
+    const cacheKey = `tier_check:${userId}`;
+
+    const cached = await redis.get(cacheKey);
+    if (cached) return cached;
+
+    const result = await query(
+      'SELECT tier, plan_expiry FROM users WHERE id = $1',
+      [userId]
+    );
+    const row = result.rows[0];
+    if (!row) {
+      await redis.set(cacheKey, 'free', 'EX', 300);
+      return 'free';
+    }
+
+    const isExpired = row.plan_expiry && new Date(row.plan_expiry) <= new Date();
+    const effectiveTier = isExpired ? 'free' : normalizeTier(row.tier);
+
+    await redis.set(cacheKey, effectiveTier, 'EX', 300);
+    return effectiveTier;
+  } catch (err) {
+    logger.warn(`validateTierFresh failed for user ${userId}: ${err.message}`);
+    // Fail closed: if we cannot confirm PRIME, treat as free.
+    return 'free';
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Express middleware factory.
 // Replaces the inline requirePrimeTier / requireMemberTier in routes.js.
 // ---------------------------------------------------------------------------
@@ -114,23 +170,47 @@ function hasAccess(user, requiredTier) {
  *   router.get('/members',    requireTier(TIER.MEMBER), handler);
  *
  * Admins always pass through regardless of their tier.
+ * For PRIME-gated routes, performs a lightweight DB re-validation (5-min Redis
+ * cache) to prevent stale-session access after subscription expiry (HIGH-04).
  *
  * @param {string} requiredTier - one of TIER.FREE | TIER.MEMBER | TIER.PRIME
  * @returns {import('express').RequestHandler}
  */
 function requireTier(requiredTier) {
-  return (req, res, next) => {
+  const normalized = normalizeTier(requiredTier);
+  const needsFreshCheck = normalized === 'prime';
+
+  return async (req, res, next) => {
     const user = req.session?.user;
 
     if (!user) {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    if (hasAccess(user, requiredTier)) {
+    // Admins bypass all tier gates — no DB check needed.
+    if (isAdmin(user)) {
       return next();
     }
 
-    const normalized = normalizeTier(requiredTier);
+    let effectiveTier = user.tier;
+
+    if (needsFreshCheck) {
+      try {
+        effectiveTier = await validateTierFresh(user.id, user.tier);
+        // Keep session in sync so downstream handlers see the corrected tier.
+        if (effectiveTier !== normalizeTier(user.tier)) {
+          req.session.user.tier = effectiveTier;
+        }
+      } catch (err) {
+        logger.warn(`requireTier fresh-check error for user ${user.id}: ${err.message}`);
+        effectiveTier = 'free';
+      }
+    }
+
+    if (hasMinTier(effectiveTier, requiredTier)) {
+      return next();
+    }
+
     const tierName = normalized === 'prime' ? 'Prime' : 'Member';
     const code = normalized === 'prime' ? 'PRIME_REQUIRED' : 'MEMBER_REQUIRED';
 
@@ -154,5 +234,6 @@ module.exports = {
   hasMinTier,
   isAdmin,
   hasAccess,
+  validateTierFresh,
   requireTier,
 };

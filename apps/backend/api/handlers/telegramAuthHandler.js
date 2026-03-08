@@ -384,6 +384,8 @@ const checkAuthStatus = async (req, res) => {
         date_of_birth: user.date_of_birth || null,
         // Auth methods flags (used by Profile.tsx IdentityConnections)
         auth_methods: authMethods,
+        // Login method tracking
+        last_login_method: user.last_login_method || null,
       }
     });
 

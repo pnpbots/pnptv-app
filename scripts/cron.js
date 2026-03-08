@@ -285,6 +285,39 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // Notification cleanup — daily at 03:00 UTC
+    // Removes read notifications older than 90 days and all hangout_call
+    // notifications older than 30 days (they become stale very quickly).
+    cron.schedule('0 3 * * *', async () => {
+      try {
+        logger.info('Running notification cleanup job...');
+
+        const { rows: oldReadRows } = await pgQuery(
+          `DELETE FROM notifications
+           WHERE is_read = TRUE
+             AND created_at < NOW() - INTERVAL '90 days'
+           RETURNING id`
+        );
+        const deletedRead = oldReadRows.length;
+
+        const { rows: oldCallRows } = await pgQuery(
+          `DELETE FROM notifications
+           WHERE type = 'hangout_call'
+             AND created_at < NOW() - INTERVAL '30 days'
+           RETURNING id`
+        );
+        const deletedCalls = oldCallRows.length;
+
+        logger.info('Notification cleanup completed', {
+          deletedReadOlderThan90Days: deletedRead,
+          deletedHangoutCallsOlderThan30Days: deletedCalls,
+          totalDeleted: deletedRead + deletedCalls,
+        });
+      } catch (error) {
+        logger.error('Error in notification cleanup cron:', error);
+      }
+    });
+
     logger.info('✓ Cron jobs started successfully');
     return true;
   } catch (error) {

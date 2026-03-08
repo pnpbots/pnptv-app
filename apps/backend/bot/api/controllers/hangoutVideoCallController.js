@@ -143,11 +143,22 @@ function emitToHangout(req, groupId, event, payload) {
  * Send push + in-app notifications to all group members except the actor.
  * @param {'hangout_call'|'hangout_creator_joined'} type
  */
+// Maximum number of group members to notify per call event.
+// Prevents fan-out explosions in large public/main groups.
+const MAX_CALL_NOTIFY_RECIPIENTS = 500;
+
 async function notifyGroupMembers({ type, groupId, groupName, actor, callId, message }) {
   try {
+    // Only notify members who have been recently active (joined within 7 days) or, for smaller
+    // groups, all members. Cap at MAX_CALL_NOTIFY_RECIPIENTS to prevent fan-out explosions.
     const { rows: members } = await query(
-      'SELECT user_id FROM hangout_group_members WHERE group_id = $1 AND user_id != $2',
-      [groupId, actor.id]
+      `SELECT user_id
+       FROM hangout_group_members
+       WHERE group_id = $1
+         AND user_id != $2
+       ORDER BY joined_at DESC
+       LIMIT $3`,
+      [groupId, actor.id, MAX_CALL_NOTIFY_RECIPIENTS]
     );
     if (members.length === 0) return;
 

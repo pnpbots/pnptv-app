@@ -66,7 +66,7 @@ class AuthController {
 
       // Update last login
       await query(
-        `UPDATE users SET last_login_at = NOW() WHERE id = $1`,
+        `UPDATE users SET last_login_at = NOW(), last_login_method = 'admin', updated_at = NOW() WHERE id = $1`,
         [user.id]
       );
 
@@ -75,15 +75,16 @@ class AuthController {
         id: user.id,
         email: user.email,
         username: user.username,
+        displayName: user.username || user.email,
         role: user.role,
         tier: user.tier || 'free',
+        last_login_method: 'admin',
       };
       enforceDefaultFollows(user.id).catch(() => {});
 
-      // Set cookie maxAge if remember me
-      if (rememberMe) {
-        req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
-      }
+      // Session duration: 365 days with remember me, 90 days default
+      const dayMs = 24 * 60 * 60 * 1000;
+      req.session.cookie.maxAge = rememberMe ? 365 * dayMs : 90 * dayMs;
 
       logger.info('Admin login successful', {
         userId: user.id,
@@ -166,7 +167,7 @@ class AuthController {
 
       // Update last login
       await query(
-        `UPDATE users SET last_login_at = NOW() WHERE id = $1`,
+        `UPDATE users SET last_login_at = NOW(), last_login_method = 'email', updated_at = NOW() WHERE id = $1`,
         [user.id]
       );
 
@@ -175,10 +176,13 @@ class AuthController {
         id: user.id,
         email: user.email,
         username: user.username,
+        displayName: user.username || user.email,
         role: user.role,
         tier: user.tier || 'free',
         telegramId: user.telegram,
+        last_login_method: 'email',
       };
+      req.session.cookie.maxAge = 90 * 24 * 60 * 60 * 1000;
       enforceDefaultFollows(user.id).catch(() => {});
 
       logger.info('Model login successful', {

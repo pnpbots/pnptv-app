@@ -4,6 +4,7 @@ import { DaimoSDKProvider, DaimoModal } from "@daimo/sdk/web";
 import "@daimo/sdk/web/styles.css";
 import "@daimo/sdk/web/theme.css";
 import { useI18n } from "@/lib/i18n";
+import { useAuth } from "@/hooks/useAuth";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
@@ -27,6 +28,7 @@ export default function DaimoCheckout() {
   const { paymentId } = useParams<{ paymentId: string }>();
   const navigate = useNavigate();
   const { checkout: t } = useI18n();
+  const { refreshUser } = useAuth();
   const [state, setState] = useState<CheckoutState>("loading");
   const [payment, setPayment] = useState<PaymentInfo | null>(null);
   const [error, setError] = useState("");
@@ -68,9 +70,10 @@ export default function DaimoCheckout() {
       });
   }, [paymentId, t.errorNoPaymentId, t.errorPaymentNotFound, t.errorNotCrypto, t.errorSessionNotReady, t.errorCouldNotLoad]);
 
-  const handlePaymentCompleted = useCallback(() => {
+  const handlePaymentCompleted = useCallback(async () => {
+    await refreshUser();
     setState("success");
-  }, []);
+  }, [refreshUser]);
 
   return (
     <div
@@ -258,7 +261,7 @@ export default function DaimoCheckout() {
               {t.paymentConfirmedBody}
             </p>
             <button
-              onClick={() => navigate("/subscribe")}
+              onClick={() => navigate("/welcome")}
               style={{
                 width: "100%",
                 padding: "14px 24px",

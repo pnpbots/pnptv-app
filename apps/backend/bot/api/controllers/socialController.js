@@ -11,6 +11,7 @@ const axios = require('axios');
 
 const { query: dbQuery } = require('../../../config/postgres');
 const NotificationEmitter = require('../../services/notificationEmitter');
+const { validateTierFresh } = require('../../services/accessService');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -47,8 +48,13 @@ const getUserPhotoFromDb = async (userId) => {
 const getFeed = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   try {
-    const viewerTier = req.session?.user?.tier || 'free';
-    const result = await SocialPostService.getFeed(user.id, req.query.cursor, req.query.limit, viewerTier);
+    const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+    const viewerTier = await validateTierFresh(user.id, user.tier || 'free');
+    if (viewerTier !== (user.tier || 'free').toLowerCase()) req.session.user.tier = viewerTier;
+    // Fetch the viewer's blocked list from DB to exclude their posts (C-08)
+    const blockedRes = await dbQuery('SELECT blocked FROM users WHERE id = $1', [user.id]);
+    const blockedIds = (blockedRes.rows[0]?.blocked || []).map(Number);
+    const result = await SocialPostService.getFeed(user.id, req.query.cursor, req.query.limit, viewerTier, isAdmin, blockedIds);
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('getFeed error', err);
@@ -59,7 +65,13 @@ const getFeed = async (req, res) => {
 const getWall = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   try {
-    const result = await SocialPostService.getWall(req.params.userId, user.id, req.query.cursor, req.query.limit);
+    const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+    const viewerTier = await validateTierFresh(user.id, user.tier || 'free');
+    if (viewerTier !== (user.tier || 'free').toLowerCase()) req.session.user.tier = viewerTier;
+    // Fetch the viewer's blocked list from DB to exclude their posts (C-08)
+    const blockedRes = await dbQuery('SELECT blocked FROM users WHERE id = $1', [user.id]);
+    const blockedIds = (blockedRes.rows[0]?.blocked || []).map(Number);
+    const result = await SocialPostService.getWall(req.params.userId, user.id, req.query.cursor, req.query.limit, viewerTier, isAdmin, blockedIds);
     if (!result.profile) return res.status(404).json({ error: 'User not found' });
     return res.json({ success: true, ...result });
   } catch (err) {
@@ -73,7 +85,13 @@ const getWall = async (req, res) => {
 const getWofFeed = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   try {
-    const result = await SocialPostService.getWofFeed(user.id, req.query.cursor, req.query.limit);
+    const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+    const viewerTier = await validateTierFresh(user.id, user.tier || 'free');
+    if (viewerTier !== (user.tier || 'free').toLowerCase()) req.session.user.tier = viewerTier;
+    // Fetch the viewer's blocked list from DB to exclude their posts (C-08)
+    const blockedRes = await dbQuery('SELECT blocked FROM users WHERE id = $1', [user.id]);
+    const blockedIds = (blockedRes.rows[0]?.blocked || []).map(Number);
+    const result = await SocialPostService.getWofFeed(user.id, req.query.cursor, req.query.limit, blockedIds, viewerTier, isAdmin);
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('getWofFeed error', err);
@@ -213,6 +231,32 @@ const getReplies = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const postId = parsePostId(req, res); if (!postId) return;
   try {
+    // HIGH-02: Gate replies on PRIME-gated or exclusive parent posts
+    const parentRes = await dbQuery(
+      `SELECT user_id, is_exclusive, COALESCE(content_tier, 'free') as content_tier
+       FROM social_posts WHERE id = $1 AND is_deleted = false`,
+      [postId]
+    );
+    if (!parentRes.rows.length) return res.status(404).json({ error: 'Post not found' });
+
+    const parent = parentRes.rows[0];
+    const postTier = (parent.content_tier || 'free').toLowerCase();
+    const isExclusiveParent = parent.is_exclusive === true || postTier === 'prime';
+
+    if (isExclusiveParent) {
+      const viewerRole = req.session?.user?.role || '';
+      const isAdmin = viewerRole === 'admin' || viewerRole === 'superadmin';
+      const isAuthor = String(user.id) === String(parent.user_id);
+
+      if (!isAdmin && !isAuthor) {
+        const viewerTier = await validateTierFresh(user.id, req.session?.user?.tier || 'free');
+        if (viewerTier !== (req.session?.user?.tier || 'free').toLowerCase()) req.session.user.tier = viewerTier;
+        if (viewerTier !== 'prime') {
+          return res.status(403).json({ error: 'PRIME subscription required to view replies on this post', code: 'PRIME_REQUIRED' });
+        }
+      }
+    }
+
     const result = await SocialPostService.getReplies(postId, user.id, req.query.cursor);
     return res.json({ success: true, ...result });
   } catch (err) {
@@ -367,7 +411,7 @@ const createPostWithMedia = async (req, res) => {
     const exclusive = isExclusive === 'true' || isExclusive === true;
     const shareable = isShareable !== 'false' && isShareable !== false;
     const vTitle = (mediaType === 'video' && videoTitle) ? videoTitle.toString().trim().slice(0, 150) : null;
-    const vDesc = (mediaType === 'video' && videoDescription) ? videoDescription.toString().trim() : null;
+    const vDesc = (mediaType === 'video' && videoDescription) ? videoDescription.toString().trim().slice(0, 2000) : null;
     const post = await SocialPostService.createPost(
       user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable, null, vTitle, vDesc
     );
@@ -635,11 +679,17 @@ const getPublicProfile = async (req, res) => {
   }
 
   const viewerId = req.session?.user?.id || null;
-  const viewerTier = (req.session?.user?.tier || 'free').toLowerCase();
   const viewerRole = req.session?.user?.role || '';
   const isAdmin = viewerRole === 'admin' || viewerRole === 'superadmin';
 
   try {
+    const viewerTier = viewerId
+      ? await validateTierFresh(viewerId, req.session?.user?.tier || 'free')
+      : 'free';
+    if (viewerId && viewerTier !== (req.session?.user?.tier || 'free').toLowerCase()) {
+      req.session.user.tier = viewerTier;
+    }
+
     // Bidirectional block check: deny access if either party has blocked the other
     if (viewerId && String(viewerId) !== String(userId)) {
       const UserModel = require('../../../models/userModel');
@@ -654,7 +704,7 @@ const getPublicProfile = async (req, res) => {
 
     // Profile browsing is open to all authenticated users (no tier restriction).
 
-    const result = await SocialPostService.getPublicProfile(userId, viewerId, req.query.cursor, req.query.limit, viewerTier);
+    const result = await SocialPostService.getPublicProfile(userId, viewerId, req.query.cursor, req.query.limit, viewerTier, isAdmin);
     if (!result.profile) return res.status(404).json({ error: 'User not found' });
 
     const profile = result.profile;
@@ -911,10 +961,35 @@ const getPost = async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: 'Post not found' });
     const row = rows[0];
     const photo = row.author_photo;
+
+    // H-06: Determine whether this post should be locked for the viewer.
+    // Exclusive posts (is_exclusive=true OR content_tier='prime') are locked when:
+    //   - The viewer is unauthenticated, OR
+    //   - The viewer is not the post author AND does not have PRIME tier/admin role
+    const viewerRole = req.session?.user?.role || '';
+    const viewerIsAdmin = viewerRole === 'admin' || viewerRole === 'superadmin';
+    const isAuthor = viewerId && String(viewerId) === String(row.author_id);
+    const postTier = (row.content_tier || 'free').toLowerCase();
+    const isExclusivePost = row.is_exclusive === true || postTier === 'prime';
+    // HIGH-04: re-validate PRIME tier from DB/cache to prevent stale-session access
+    const viewerTier = viewerId
+      ? await validateTierFresh(viewerId, req.session?.user?.tier || 'free')
+      : 'free';
+    if (viewerId && viewerTier !== (req.session?.user?.tier || 'free').toLowerCase()) {
+      req.session.user.tier = viewerTier;
+    }
+    const viewerHasAccess = viewerIsAdmin || isAuthor || viewerTier === 'prime';
+    const contentLocked = isExclusivePost && !viewerHasAccess;
+
     const post = {
       ...row,
       author_photo: isValidPhotoUrl(photo) ? photo : null,
       is_shareable: row.is_shareable !== false,
+      content_locked: contentLocked,
+      // Null out sensitive content when locked so it is not exposed in the response
+      content: contentLocked ? null : row.content,
+      media_url: contentLocked ? null : row.media_url,
+      media_urls: contentLocked ? null : row.media_urls,
     };
     return res.json({ success: true, post });
   } catch (err) {
