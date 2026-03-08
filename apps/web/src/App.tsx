@@ -25,8 +25,13 @@ function useScreenCaptureGuard() {
     };
 
     // ── 2. Also blur on window blur (catches iOS app-switcher preview) ──
+    // Skip blur when a Jitsi/8x8 iframe is active (clicking inside iframe triggers window blur)
     const onWindowBlur = () => {
       if (root) {
+        const activeEl = document.activeElement;
+        if (activeEl?.tagName === "IFRAME" && (activeEl as HTMLIFrameElement).src?.includes("8x8.vc")) {
+          return; // User clicked inside the video call iframe — don't blur
+        }
         root.style.filter = "blur(30px)";
         root.style.transition = "filter 0.05s";
       }

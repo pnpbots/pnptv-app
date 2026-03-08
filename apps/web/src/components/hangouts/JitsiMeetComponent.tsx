@@ -151,7 +151,6 @@ export function JitsiMeetComponent({
         title={roomName ? `Video call: ${roomName}` : "Video call"}
         onLoad={handleIframeLoad}
         onError={handleIframeError}
-        sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads allow-modals allow-presentation allow-popups-to-escape-sandbox"
       />
 
       {/* Full-screen close button (only in full-screen mode) */}

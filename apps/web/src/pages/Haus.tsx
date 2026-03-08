@@ -51,7 +51,13 @@ export default function Haus() {
         user.username ||
         "Guest";
       const res = await joinCommunityRoom(displayName);
-      const src = `https://8x8.vc/${res.roomName}?jwt=${res.token}#config.prejoinPageEnabled=false`;
+      // URL format: https://8x8.vc/{appId}/{roomName}?jwt={token}
+      // The domain field from backend is "8x8.vc", roomName is "pnptv-haus"
+      // We need the appId (vpaas-magic-cookie-*) which is the sub claim in the JWT
+      // The backend should ideally return the full meeting URL, but for now extract appId from JWT payload
+      const jwtPayload = JSON.parse(atob(res.token.split('.')[1]));
+      const appId = jwtPayload.sub;
+      const src = `https://8x8.vc/${appId}/${res.roomName}?jwt=${res.token}#config.prejoinPageEnabled=false`;
       setRoomInfo(res);
       setIframeSrc(src);
       setJoined(true);
@@ -103,8 +109,8 @@ export default function Haus() {
         </div>
         <iframe
           src={iframeSrc}
-          allow="camera; microphone; display-capture; autoplay; clipboard-write"
-          sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads allow-modals allow-presentation allow-popups-to-escape-sandbox"
+          allow="camera; microphone; display-capture; autoplay; clipboard-write; speaker-selection; fullscreen"
+          allowFullScreen
           className="flex-1 w-full border-0"
           title="The Haus — PNPtv Community Room"
         />
