@@ -66,10 +66,12 @@ class AdminUserController {
 
       // Update subscription status
       if (subscriptionStatus !== undefined) {
+        // user.planId is the correct camelCase field from UserModel.mapRowToUser()
+        // (user.subscription_plan_id does not exist — was a bug that silently set plan_id=NULL)
         await UserModel.updateSubscription(userId, {
           status: subscriptionStatus,
-          planId: user.subscription_plan_id,
-          expiry: user.plan_expiry,
+          planId: user.planId,
+          expiry: user.planExpiry,
         });
         logger.info('Admin updated user subscription', { adminId, userId, subscriptionStatus });
       }
@@ -132,18 +134,20 @@ class AdminUserController {
         }
         await require('../../../config/redis').cache.del(`user:${userId}`);
 
-        // Destroy all active sessions for the banned user
+        // Destroy all active sessions for the banned user.
+        // IMPORTANT: ioredis keyPrefix is prepended automatically, so do NOT include
+        // the prefix in the scan pattern. redis.keys('sess:*') scans '{keyPrefix}sess:*' in Redis.
         if (ban) {
           try {
             const redis = require('../../../config/redis').client;
-            const keys = await redis.keys('pnpapp:sess:*');
+            const keys = await redis.keys('sess:*');
             for (const key of keys) {
               const val = await redis.get(key);
               if (val && val.includes(userId.toString())) {
                 await redis.del(key);
               }
             }
-            logger.info('Destroyed sessions for banned user', { userId });
+            logger.info('Destroyed sessions for banned user', { userId, sessionsScanned: keys.length });
           } catch (sessErr) {
             logger.warn('Failed to destroy sessions for banned user', { userId, error: sessErr.message });
           }

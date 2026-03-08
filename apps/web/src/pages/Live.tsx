@@ -9,7 +9,7 @@ import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 import { useI18n } from "@/lib/i18n";
 
-const BrowserStreamer = lazy(() => import("@/components/BrowserStreamer"));
+const StreamerDashboard = lazy(() => import("@/components/streaming/StreamerDashboard"));
 import {
   getFeaturedPerformers,
   getLiveStreams,
@@ -749,30 +749,15 @@ export default function Live() {
         </div>
       )}
 
-      {/* Browser Streamer — full-screen overlay */}
+      {/* Streamer Dashboard — full-screen overlay (OBS-like pro UI) */}
       {showBrowserStreamer && (
-        <div className="fixed inset-0 z-50 bg-pnp-background flex flex-col">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-pnp-border">
-            <h2 className="text-sm font-bold text-pnp-textPrimary">{t.live.goLiveModalTitle}</h2>
-            <button
-              onClick={() => setShowBrowserStreamer(false)}
-              className="text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+        <Suspense fallback={
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-pnp-background">
+            <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
           </div>
-          <div className="flex-1 overflow-y-auto">
-            <Suspense fallback={
-              <div className="flex items-center justify-center h-full">
-                <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
-              </div>
-            }>
-              <BrowserStreamer />
-            </Suspense>
-          </div>
-        </div>
+        }>
+          <StreamerDashboard onClose={() => setShowBrowserStreamer(false)} />
+        </Suspense>
       )}
     </div>
   );

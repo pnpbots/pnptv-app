@@ -483,8 +483,8 @@ class SupportTopicModel {
         COUNT(*) FILTER (WHERE status = 'open') as open_topics,
         COUNT(*) FILTER (WHERE status = 'resolved') as resolved_topics,
         COUNT(*) FILTER (WHERE status = 'closed') as closed_topics,
-        SUM(message_count) as total_messages,
-        AVG(message_count) as avg_messages_per_topic,
+        COALESCE(SUM(message_count), 0) as total_messages,
+        COALESCE(AVG(message_count)::numeric(10,1), 0) as avg_messages_per_topic,
         COUNT(*) FILTER (WHERE priority = 'high') as high_priority,
         COUNT(*) FILTER (WHERE priority = 'critical') as critical_priority,
         COUNT(*) FILTER (WHERE sla_breached = true) as sla_breaches

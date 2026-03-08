@@ -46,7 +46,12 @@ const getDashboard = async (req, res) => {
 const listApplications = async (req, res) => {
   try {
     const applications = await CreatorService.listApplications(req.query.status || null);
-    return res.json({ success: true, applications });
+    const countResult = await query(
+      `SELECT status, COUNT(*)::int as count FROM model_applications GROUP BY status`
+    );
+    const statusCounts = {};
+    for (const r of countResult.rows) statusCounts[r.status] = r.count;
+    return res.json({ success: true, applications, statusCounts });
   } catch (err) {
     logger.error('listApplications error', err);
     return res.status(500).json({ error: 'Failed to list applications' });
@@ -285,8 +290,8 @@ const listActiveCreators = async (req, res) => {
       `SELECT id, username, first_name, last_name, photo_file_id, creator_type, creator_status,
               creator_strikes, creator_subscriber_count, creator_price_usd, role
        FROM users
-       WHERE creator_status IN ('active', 'suspended', 'pending_review', 'eligible')
-          OR role = 'model'
+       WHERE (creator_status IN ('active', 'suspended', 'pending_review', 'eligible')
+          OR role = 'model') AND creator_status IS NOT NULL
        ORDER BY
          CASE creator_status
            WHEN 'active' THEN 0

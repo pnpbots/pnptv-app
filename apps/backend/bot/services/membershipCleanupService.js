@@ -276,10 +276,14 @@ class MembershipCleanupService {
       }
 
       // Find users with 'expired' status and update to 'churned'
+      // Lifetime plan holders are excluded — they should never be churned
       const expiredStatusUsers = await query(`
         SELECT id, username, plan_expiry, plan_id
         FROM users
         WHERE subscription_status = 'expired'
+          AND plan_id NOT ILIKE '%lifetime%'
+          AND plan_id NOT ILIKE '%life-time%'
+          AND plan_id != 'lifetime100'
       `);
 
       logger.info(`Found ${expiredStatusUsers.rows.length} users with 'expired' status to convert to 'churned'`);
@@ -532,12 +536,16 @@ Type /subscribe to view membership plans and reactivate your access!`;
       }
 
       // Step 4: Ensure 'free' tier for all churned users
+      // Lifetime plan holders are explicitly excluded — they must never be downgraded here
       const fixChurnedTierResult = await query(`
         UPDATE users
         SET tier = 'free',
             updated_at = NOW()
         WHERE subscription_status IN ('churned', 'expired', 'free')
           AND tier != 'free'
+          AND plan_id NOT ILIKE '%lifetime%'
+          AND plan_id NOT ILIKE '%life-time%'
+          AND plan_id != 'lifetime100'
         RETURNING id
       `);
       if (fixChurnedTierResult.rowCount > 0) {
@@ -545,11 +553,15 @@ Type /subscribe to view membership plans and reactivate your access!`;
       }
 
       // Step 5: Convert old 'expired' status to 'churned' for consistency
+      // Lifetime plan holders are explicitly excluded — their status must never be changed here
       const expiredToChurnedResult = await query(`
         UPDATE users
         SET subscription_status = 'churned',
             updated_at = NOW()
         WHERE subscription_status = 'expired'
+          AND plan_id NOT ILIKE '%lifetime%'
+          AND plan_id NOT ILIKE '%life-time%'
+          AND plan_id != 'lifetime100'
         RETURNING id
       `);
       if (expiredToChurnedResult.rowCount > 0) {

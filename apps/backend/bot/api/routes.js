@@ -2061,12 +2061,22 @@ const blockedUsersController = require('../../api/controllers/blockedUsersContro
 const directMessagesController = require('../../api/controllers/directMessagesController');
 const notificationsController = require('../../api/controllers/notificationsController');
 
+// Rate limiter for the Telegram Login Widget endpoint — 5 attempts/min per IP
+const telegramWidgetLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  handler: (req, res) => res.status(429).json({ error: 'Too many login attempts. Try again in a minute.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Web App Authentication
 app.get('/api/webapp/auth/telegram/start', asyncHandler(webAppController.telegramStart));
 app.get('/api/webapp/auth/telegram/callback', asyncHandler(webAppController.telegramCallback));
 app.post('/api/webapp/auth/telegram', authLimiter, asyncHandler(webAppController.telegramLogin));
 app.post('/api/webapp/auth/telegram/token', authLimiter, asyncHandler(webAppController.telegramGenerateToken));
 app.get('/api/webapp/auth/telegram/check', asyncHandler(webAppController.telegramCheckToken));
+app.post('/api/webapp/auth/telegram/widget', telegramWidgetLimiter, asyncHandler(webAppController.telegramWidgetAuth));
 app.post('/api/webapp/auth/email/register', authLimiter, asyncHandler(webAppController.emailRegister));
 app.post('/api/webapp/auth/email/login', authLimiter, asyncHandler(webAppController.emailLogin));
 app.get('/api/webapp/auth/verify-email', asyncHandler(webAppController.verifyEmail));
@@ -2851,7 +2861,7 @@ app.get('/api/webapp/admin/support/tickets', adminGuard, asyncHandler(async (req
   const { rows } = await pool.query(`
     SELECT st.*, u.username, u.first_name, u.last_name, u.tier, u.plan_id, u.language AS user_language,
            (SELECT COUNT(*)::int FROM support_ticket_messages stm WHERE stm.user_id = st.user_id AND stm.sender_type = 'user'
-            AND stm.created_at > COALESCE(st.last_agent_message_at, '1970-01-01')) AS unread_count
+            AND stm.created_at > COALESCE(st.last_agent_message_at, st.created_at)) AS unread_count
     FROM support_topics st
     LEFT JOIN users u ON st.user_id = u.id
     ${whereClause}

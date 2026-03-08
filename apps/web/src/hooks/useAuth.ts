@@ -111,7 +111,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Try OIDC
           const oidcUser = await getUser();
           if (oidcUser && !oidcUser.expired) {
+            // Set initial state from OIDC token, then enrich with real tier/role from DB
             setUser(mapOidcUser(oidcUser));
+            try {
+              const status = await checkAuthStatus();
+              if (status.authenticated && status.user) {
+                setUser(mapTelegramUser(status.user));
+                setMode("telegram");
+              }
+            } catch {
+              // Backend session not yet established — keep OIDC defaults
+            }
           }
         }
       } catch {
@@ -123,9 +133,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     init();
 
-    // Listen for OIDC user changes
+    // Listen for OIDC user changes (e.g. silent token renewal)
     const handleUserLoaded = (u: User) => {
-      if (mode === "oidc") setUser(mapOidcUser(u));
+      if (mode === "oidc") {
+        // Apply OIDC defaults first, then enrich with DB tier/role
+        setUser(mapOidcUser(u));
+        checkAuthStatus()
+          .then((status) => {
+            if (status.authenticated && status.user) {
+              setUser(mapTelegramUser(status.user));
+            }
+          })
+          .catch(() => {
+            // Backend session unavailable — keep OIDC defaults
+          });
+      }
     };
     const handleUserUnloaded = () => {
       if (mode === "oidc") setUser(null);

@@ -1,5 +1,5 @@
 const logger = require('../../../utils/logger');
-const { query } = require('../../../config/postgres');
+const { query, getClient } = require('../../../config/postgres');
 const AdminDashboardService = require('../../../services/adminDashboardService');
 const VideoCallModel = require('../../../models/videoCallModel');
 const SocialPostService = require('../../services/socialPostService');
@@ -93,8 +93,10 @@ const listUsers = async (req, res) => {
 
     if (search) {
       const searchTerm = `%${search}%`;
-      countQuery += ' AND (username ILIKE $1 OR email ILIKE $1 OR id = $2)';
-      dataQuery += ' AND (username ILIKE $1 OR email ILIKE $1 OR id = $2)';
+      // Include first_name and last_name — most Telegram users have no username, only a display name
+      const searchClause = ' AND (username ILIKE $1 OR email ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1 OR id::text = $2)';
+      countQuery += searchClause;
+      dataQuery += searchClause;
       params.push(searchTerm, search);
     }
 
@@ -156,9 +158,21 @@ const getUser = async (req, res) => {
 const updateUser = async (req, res) => {
   const user = req.user;
 
+  // Canonical allowed values — must match DB CHECK constraints and tier vocabulary
+  const VALID_TIERS = ['free', 'member', 'PRIME', 'banned'];
+  const VALID_STATUSES = ['free', 'active', 'churned', 'expired'];
+
   try {
     const { id: userId } = req.params;
     const { username, email, subscriptionStatus, subscriptionPlan, tier, planExpiry } = req.body;
+
+    // Server-side whitelist validation — provides clean 400s instead of raw Postgres constraint errors
+    if (tier !== undefined && !VALID_TIERS.includes(tier)) {
+      return res.status(400).json({ error: `Invalid tier. Must be one of: ${VALID_TIERS.join(', ')}` });
+    }
+    if (subscriptionStatus !== undefined && !VALID_STATUSES.includes(subscriptionStatus)) {
+      return res.status(400).json({ error: `Invalid subscriptionStatus. Must be one of: ${VALID_STATUSES.join(', ')}` });
+    }
 
     const queryParts = [];
     const values = [userId];
@@ -198,6 +212,10 @@ const updateUser = async (req, res) => {
 
     await query(updateQuery, values);
 
+    // Invalidate Redis user cache so subsequent reads reflect the update immediately
+    const { cache } = require('../../../config/redis');
+    await cache.del(`user:${userId}`);
+
     logger.info('Admin updated user', { adminId: user.id, userId, updates: req.body });
 
     const result = await query(
@@ -232,26 +250,40 @@ const banUser = async (req, res) => {
         [userId]
       );
 
-      // Destroy all active sessions so the user is kicked immediately
+      // Invalidate Redis user cache immediately
+      const { cache } = require('../../../config/redis');
+      await cache.del(`user:${userId}`);
+
+      // Destroy all active sessions so the user is kicked out immediately.
+      // IMPORTANT: ioredis keyPrefix is prepended automatically to every key command,
+      // so we must NOT include the prefix in the scan pattern here.
+      // If keyPrefix = 'pnpapp:' then redis.keys('sess:*') scans 'pnpapp:sess:*' in Redis.
       try {
         const redis = require('../../../config/redis').client;
-        const keys = await redis.keys('pnpapp:sess:*');
+        const keys = await redis.keys('sess:*');
         for (const key of keys) {
           const val = await redis.get(key);
           if (val && val.includes(userId.toString())) {
             await redis.del(key);
           }
         }
-        logger.info('Destroyed sessions for banned user', { userId });
+        logger.info('Destroyed sessions for banned user', { userId, sessionsScanned: keys.length });
       } catch (sessErr) {
         logger.warn('Failed to destroy sessions for banned user', { userId, error: sessErr.message });
       }
     } else {
-      // Unban: restore to free tier
+      // Unban: restore to free tier.
+      // Use 'churned' for subscription_status rather than 'free' — the user existed before the ban
+      // and 'churned' correctly reflects an ex-subscriber. An admin can manually re-upgrade if needed.
+      // (Setting to 'free' was wrong: it permanently cleared prior subscription state even for paid users.)
       await query(
-        `UPDATE users SET tier = 'free', subscription_status = 'free', updated_at = NOW() WHERE id = $1`,
+        `UPDATE users SET tier = 'free', subscription_status = 'churned', updated_at = NOW() WHERE id = $1`,
         [userId]
       );
+
+      // Invalidate Redis user cache
+      const { cache } = require('../../../config/redis');
+      await cache.del(`user:${userId}`);
     }
 
     logger.info(`Admin ${ban ? 'banned' : 'unbanned'} user`, {
@@ -336,7 +368,7 @@ const listHangouts = async (req, res) => {
 
   try {
     const result = await query(`
-      SELECT g.id, g.name, g.creator_id, g.is_public, g.created_at,
+      SELECT g.id, g.name, g.description, g.creator_id, g.is_public, g.max_members, g.created_at,
              u.first_name AS creator_first_name, u.username AS creator_username,
              (SELECT count(*) FROM hangout_group_members m WHERE m.group_id = g.id) AS member_count
       FROM hangout_groups g
@@ -347,10 +379,11 @@ const listHangouts = async (req, res) => {
     const hangouts = result.rows.map(row => ({
       id: row.id,
       title: row.name || 'Untitled Room',
+      description: row.description || '',
       creatorId: row.creator_id,
       creatorName: row.creator_first_name || row.creator_username || 'System',
       currentParticipants: parseInt(row.member_count, 10) || 0,
-      maxParticipants: 0,
+      maxParticipants: row.max_members || 200,
       isPublic: row.is_public,
       createdAt: row.created_at,
     }));
@@ -369,18 +402,23 @@ const listHangouts = async (req, res) => {
  */
 const endHangout = async (req, res) => {
   const user = req.user;
+  const { id } = req.params;
+  const client = await getClient();
 
   try {
-    const { id } = req.params;
-
-    await query('DELETE FROM hangout_group_members WHERE group_id = $1', [id]);
-    await query('DELETE FROM hangout_groups WHERE id = $1', [id]);
+    await client.query('BEGIN');
+    await client.query('DELETE FROM hangout_group_members WHERE group_id = $1', [id]);
+    await client.query('DELETE FROM hangout_groups WHERE id = $1', [id]);
+    await client.query('COMMIT');
 
     logger.info('Admin deleted hangout group', { adminId: user.id, groupId: id });
     return res.json({ success: true, message: 'Hangout group deleted' });
   } catch (error) {
+    await client.query('ROLLBACK').catch(rbErr => logger.error('ROLLBACK failed in endHangout:', rbErr));
     logger.error('Error deleting hangout group:', error);
     return res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
   }
 };
 
@@ -420,15 +458,17 @@ const bulkUpdateUsers = async (req, res) => {
             continue;
           }
           const expiryValue = expiry ? new Date(expiry) : null;
+          const planResult = await query('SELECT tier FROM plans WHERE id = $1', [planId]);
+          const targetTier = planResult.rows[0]?.tier || 'PRIME';
           await query(
             `UPDATE users
-             SET tier = 'PRIME',
+             SET tier = $4,
                  subscription_status = 'active',
                  plan_id = $2,
                  plan_expiry = $3,
                  updated_at = NOW()
              WHERE id = $1`,
-            [userId, planId, expiryValue]
+            [userId, planId, expiryValue, targetTier]
           );
         } else if (action === 'downgrade') {
           await query(
@@ -742,7 +782,7 @@ const getDemographics = async (req, res) => {
         MAX(COALESCE(xp, 0)) as max_xp
       FROM users`),
 
-      // Feature engagement counts
+      // Feature engagement counts — tables that are guaranteed to exist
       query(`SELECT
         (SELECT COUNT(*) FROM social_posts) as posts,
         (SELECT COUNT(*) FROM social_post_likes) as post_likes,
@@ -753,9 +793,6 @@ const getDemographics = async (req, res) => {
         (SELECT COUNT(*) FROM live_streams) as streams,
         (SELECT COUNT(*) FROM notifications) as notifications_sent,
         (SELECT COUNT(*) FROM user_follows) as follows,
-        (SELECT COUNT(*) FROM media_play_history) as media_plays,
-        (SELECT COUNT(*) FROM media_favorites) as media_favorites,
-        (SELECT COUNT(*) FROM pnp_tips) as tips,
         (SELECT COUNT(*) FROM push_subscriptions) as push_subs,
         (SELECT COUNT(*) FROM x_accounts) as x_linked,
         (SELECT COUNT(*) FROM user_pds_mapping) as bluesky_linked
@@ -780,6 +817,24 @@ const getDemographics = async (req, res) => {
       FROM users WHERE created_at BETWEEN NOW() - INTERVAL '60 days' AND NOW() - INTERVAL '30 days'`),
     ]);
 
+    // These 3 tables have no migration and may not exist on a fresh deploy.
+    // Run each in its own try/catch so a missing table never crashes the whole endpoint.
+    let mediaPlays = 0;
+    let mediaFavorites = 0;
+    let tips = 0;
+    try {
+      const r = await query(`SELECT COUNT(*) as cnt FROM media_play_history`);
+      mediaPlays = toInt(r.rows[0]?.cnt);
+    } catch (_) { /* table absent — default stays 0 */ }
+    try {
+      const r = await query(`SELECT COUNT(*) as cnt FROM media_favorites`);
+      mediaFavorites = toInt(r.rows[0]?.cnt);
+    } catch (_) { /* table absent — default stays 0 */ }
+    try {
+      const r = await query(`SELECT COUNT(*) as cnt FROM pnp_tips`);
+      tips = toInt(r.rows[0]?.cnt);
+    } catch (_) { /* table absent — default stays 0 */ }
+
     const activity = activityRows.rows[0] || {};
     const features = featureRows.rows[0] || {};
     const xp = xpRows.rows[0] || {};
@@ -788,11 +843,11 @@ const getDemographics = async (req, res) => {
 
     // Compute strategy insights
     const insights = [];
-    const spanishPct = Math.round((languageRows.rows.find(r => r.lang === 'es')?.cnt || 0) / total * 100);
+    const spanishPct = Math.round(toInt(languageRows.rows.find(r => r.lang === 'es')?.cnt) / total * 100);
     if (spanishPct >= 15) {
       insights.push({ type: 'opportunity', title: 'Spanish Audience', body: `${spanishPct}% of users are Spanish-speaking. Prioritize bilingual content, onboarding, and creator outreach in Spanish.` });
     }
-    const freePct = Math.round((tierRows.rows.find(r => r.tier === 'free')?.cnt || 0) / total * 100);
+    const freePct = Math.round(toInt(tierRows.rows.find(r => r.tier === 'free')?.cnt) / total * 100);
     if (freePct >= 10) {
       insights.push({ type: 'conversion', title: 'Free-to-Paid Gap', body: `${freePct}% of users are on the free tier. Improve conversion with targeted upsell flows, limited-time promos, and Lifetime100 visibility.` });
     }
@@ -864,9 +919,9 @@ const getDemographics = async (req, res) => {
           streams: toInt(features.streams),
           notificationsSent: toInt(features.notifications_sent),
           follows: toInt(features.follows),
-          mediaPlays: toInt(features.media_plays),
-          mediaFavorites: toInt(features.media_favorites),
-          tips: toInt(features.tips),
+          mediaPlays,
+          mediaFavorites,
+          tips,
           pushSubscribers: toInt(features.push_subs),
           xLinked: toInt(features.x_linked),
           blueskyLinked: toInt(features.bluesky_linked),

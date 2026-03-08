@@ -1164,17 +1164,21 @@ class PaymentService {
           const plan = await PlanModel.getById(planIdOrBookingId);
           if (plan) {
             const durationDays = plan.duration_days || plan.duration || 30;
+            const isLifetime = plan.isLifetime || plan.is_lifetime || (planIdOrBookingId && planIdOrBookingId.toString().toLowerCase().includes('lifetime'));
 
             // For renewals: extend from current expiry if still active
             let expiryDate;
             const user = await UserModel.getById(userId);
             const currentExpiry = user?.subscription?.expiry || user?.subscription_expiry;
-            if (currentExpiry && new Date(currentExpiry) > new Date()) {
+            if (isLifetime) {
+              expiryDate = null;
+            } else if (currentExpiry && new Date(currentExpiry) > new Date()) {
               expiryDate = new Date(currentExpiry);
+              expiryDate.setDate(expiryDate.getDate() + durationDays);
             } else {
               expiryDate = new Date();
+              expiryDate.setDate(expiryDate.getDate() + durationDays);
             }
-            expiryDate.setDate(expiryDate.getDate() + durationDays);
 
             await UserModel.updateSubscription(userId, {
               status: 'active',
@@ -1397,9 +1401,9 @@ class PaymentService {
           if (plan) {
             // Get user language (from user record or default to Spanish)
             const userLanguage = user?.language || 'es';
-            const expiryDate = new Date();
             const durationDays = plan.duration_days || plan.duration || 30;
-            expiryDate.setDate(expiryDate.getDate() + durationDays);
+            const isLifetimeEmail = plan.isLifetime || plan.is_lifetime || (planIdOrBookingId && planIdOrBookingId.toString().toLowerCase().includes('lifetime'));
+            const expiryDate = isLifetimeEmail ? null : (() => { const d = new Date(); d.setDate(d.getDate() + durationDays); return d; })();
 
             // 1. Generate PDF invoice and send invoice email from pnptv.app
             try {
@@ -1855,9 +1859,9 @@ class PaymentService {
           }
 
           if (plan) {
-            const expiryDate = new Date();
             const durationDays = plan.duration_days || plan.duration || 30;
-            expiryDate.setDate(expiryDate.getDate() + durationDays);
+            const isLifetime = plan.isLifetime || plan.is_lifetime || (planId && planId.toString().toLowerCase().includes('lifetime'));
+            const expiryDate = isLifetime ? null : (() => { const d = new Date(); d.setDate(d.getDate() + durationDays); return d; })();
 
             await UserModel.updateSubscription(userId, {
               status: 'active',
