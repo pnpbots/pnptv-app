@@ -51,13 +51,7 @@ export default function Haus() {
         user.username ||
         "Guest";
       const res = await joinCommunityRoom(displayName);
-      // URL format: https://8x8.vc/{appId}/{roomName}?jwt={token}
-      // The domain field from backend is "8x8.vc", roomName is "pnptv-haus"
-      // We need the appId (vpaas-magic-cookie-*) which is the sub claim in the JWT
-      // The backend should ideally return the full meeting URL, but for now extract appId from JWT payload
-      const jwtPayload = JSON.parse(atob(res.token.split('.')[1]));
-      const appId = jwtPayload.sub;
-      const src = `https://8x8.vc/${appId}/${res.roomName}?jwt=${res.token}#config.prejoinPageEnabled=false`;
+      const src = res.meetingUrl;
       setRoomInfo(res);
       setIframeSrc(src);
       setJoined(true);

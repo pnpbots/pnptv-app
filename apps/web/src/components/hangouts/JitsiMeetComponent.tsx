@@ -38,7 +38,7 @@ export function JitsiMeetComponent({
   useEffect(() => {
     const handler = (event: MessageEvent) => {
       // Only accept messages from 8x8.vc or the Jitsi domain
-      if (!event.origin.includes("8x8.vc") && !event.origin.includes("jitsi")) {
+      if (!event.origin.includes("8x8.vc") && !event.origin.includes("jit.si") && !event.origin.includes("jitsi")) {
         return;
       }
 

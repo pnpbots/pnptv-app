@@ -958,10 +958,10 @@ export async function sendGroupMediaMessage(
 }
 
 export interface JaasCallInfo {
-  token: string;
+  token?: string;
   meetingUrl: string;
   domain: string;
-  appId: string;
+  appId?: string;
 }
 
 export interface ActiveCallInfo {

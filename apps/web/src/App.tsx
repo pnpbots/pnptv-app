@@ -29,7 +29,8 @@ function useScreenCaptureGuard() {
     const onWindowBlur = () => {
       if (root) {
         const activeEl = document.activeElement;
-        if (activeEl?.tagName === "IFRAME" && (activeEl as HTMLIFrameElement).src?.includes("8x8.vc")) {
+        const iframeSrc = (activeEl as HTMLIFrameElement)?.src || "";
+        if (activeEl?.tagName === "IFRAME" && (iframeSrc.includes("8x8.vc") || iframeSrc.includes("jit.si"))) {
           return; // User clicked inside the video call iframe — don't blur
         }
         root.style.filter = "blur(30px)";

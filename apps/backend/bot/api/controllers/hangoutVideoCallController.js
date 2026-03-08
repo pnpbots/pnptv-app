@@ -20,7 +20,6 @@
 
 const { query, getClient } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
-const jaasService = require('../../services/jaasService');
 const PushNotificationService = require('../../services/pushNotificationService');
 const NotificationEmitter = require('../../services/notificationEmitter');
 
@@ -88,50 +87,18 @@ function generateRoomName(groupId, isPersistent) {
 }
 
 /**
- * Build a JaaS JWT and meeting URL for a given user/call, or return null if
- * JaaS is not configured (graceful degradation).
- *
- * For persistent (24/7) calls: everyone gets a moderator token (4h) so they
- * can manage their own audio/video and tokens don't expire mid-session.
+ * Build a public Jitsi meeting URL for a given user/call.
+ * Uses meet.jit.si (free, unlimited) instead of JaaS/8x8.vc.
  */
-function buildJaasPayload(roomName, user, isModerator, isPersistent = false) {
-  if (!jaasService.isConfigured()) {
-    return null;
-  }
+function buildMeetingPayload(roomName, user) {
+  const domain = process.env.JITSI_DOMAIN || 'meet.jit.si';
+  const displayName = encodeURIComponent(user.firstName || user.username || 'User');
+  const meetingUrl = `https://${domain}/${roomName}#config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&userInfo.displayName=${displayName}`;
 
-  try {
-    // In persistent (main/24-7) community rooms everyone gets moderator-level access
-    // so tokens last 4h and users can control their own media.
-    // In user-created subgroups, only the call creator gets moderator access.
-    const useMod = isModerator || isPersistent;
-    const token = useMod
-      ? jaasService.generateModeratorToken(
-          roomName,
-          String(user.id),
-          user.firstName || user.username || 'User',
-          '',
-          user.photoUrl || ''
-        )
-      : jaasService.generateViewerToken(
-          roomName,
-          String(user.id),
-          user.firstName || user.username || 'User',
-          '',
-          user.photoUrl || ''
-        );
-
-    const meetingUrl = jaasService.generateMeetingUrl(roomName, token);
-
-    return {
-      token,
-      meetingUrl,
-      domain: '8x8.vc',
-      appId: jaasService.appId,
-    };
-  } catch (err) {
-    logger.warn('buildJaasPayload failed', { error: err.message });
-    return null;
-  }
+  return {
+    meetingUrl,
+    domain,
+  };
 }
 
 /**
@@ -222,7 +189,7 @@ const startCall = async (req, res) => {
       // Return the existing call instead of creating a duplicate
       const call = existing[0];
       const isModerator = String(call.creator_id) === String(user.id);
-      const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
+      const jaas = buildMeetingPayload(call.room_name, user);
 
       // Auto-join the caller as participant
       await query(
@@ -248,13 +215,6 @@ const startCall = async (req, res) => {
       });
     }
 
-    // Verify JaaS is configured before creating a call
-    if (!jaasService.isConfigured()) {
-      return res.status(503).json({
-        error: 'Video call service is not configured. Please contact support.',
-      });
-    }
-
     const roomName = generateRoomName(groupId, isPersistent);
 
     // Insert new call — persistent groups use is_persistent=TRUE
@@ -277,7 +237,7 @@ const startCall = async (req, res) => {
     // Touch activity timestamp
     await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
 
-    const jaas = buildJaasPayload(roomName, user, true, isPersistent);
+    const jaas = buildMeetingPayload(roomName, user);
 
     const callPayload = {
       id: newCall.id,
@@ -360,7 +320,7 @@ const startCall = async (req, res) => {
         if (rows.length > 0) {
           const call = rows[0];
           const isModerator = String(call.creator_id) === String(user.id);
-          const jaas = buildJaasPayload(call.room_name, user, isModerator);
+          const jaas = buildMeetingPayload(call.room_name, user);
           return res.json({
             success: true,
             isNew: false,
@@ -432,7 +392,7 @@ const getActiveCall = async (req, res) => {
       );
       const isPersistentGroup = groupRows[0]?.is_main === true;
 
-      if (isPersistentGroup && jaasService.isConfigured()) {
+      if (isPersistentGroup) {
         // Resurrect the most recent persistent call, or create a fresh one
         const { rows: lastCall } = await query(
           `SELECT id, room_name, creator_id FROM hangout_video_calls
@@ -481,7 +441,7 @@ const getActiveCall = async (req, res) => {
     );
 
     const isModerator = String(call.creator_id) === String(user.id);
-    const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
+    const jaas = buildMeetingPayload(call.room_name, user);
 
     return res.json({
       success: true,
@@ -569,7 +529,7 @@ const joinCall = async (req, res) => {
     );
 
     const isModerator = String(call.creator_id) === String(user.id);
-    const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
+    const jaas = buildMeetingPayload(call.room_name, user);
 
     // Get authoritative participant count from DB
     const { rows: joinCountRows } = await query(

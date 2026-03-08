@@ -37,37 +37,28 @@ const joinCommunityRoom = async (req, res) => {
     // Get or create community room
     const room = await CommunityRoomService.getCommunityRoom();
 
-    // IMPORTANT: For the 24/7 community room, ALL users need moderator token to join
-    // The room is configured on 8x8 to require at least one moderator
-    // We issue moderator tokens to all participants but restrict actual moderator actions via config
-    // This allows the community room to function as a true open room
-    const isModerator = true; // Always issue moderator token for community room access
-
-    const token = await CommunityRoomService.generateCommunityToken(
-      userId,
-      displayName,
-      email || '',
-      isModerator
-    );
-
-    // Track user join (use true moderator role for tracking, even though we issue moderator token to all)
+    // Track user join
     CommunityRoomService.trackUserJoin(userId, displayName, isTrueModerator ? 'moderator' : 'member');
+
+    // Build public Jitsi meeting URL (free, unlimited)
+    const jitsiDomain = process.env.JITSI_DOMAIN || 'meet.jit.si';
+    const sanitizedName = encodeURIComponent(displayName);
+    const meetingUrl = `https://${jitsiDomain}/${CommunityRoomService.COMMUNITY_ROOM_NAME}#config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&userInfo.displayName=${sanitizedName}`;
 
     logger.info('User joined community room (24/7 open)', {
       userId,
       displayName,
-      isModerator,
-      isGuest: !isModerator
+      domain: jitsiDomain
     });
 
     res.json({
       success: true,
-      token,
-      domain: '8x8.vc',
+      meetingUrl,
+      domain: jitsiDomain,
       roomName: CommunityRoomService.COMMUNITY_ROOM_NAME,
       roomId: CommunityRoomService.COMMUNITY_ROOM_ID,
-      isModerator: isTrueModerator, // Return true moderator status
-      isTrueModerator, // Explicitly indicate if user is a true moderator
+      isModerator: isTrueModerator,
+      isTrueModerator,
       isOpen24_7: true,
       room: {
         id: room.id,
