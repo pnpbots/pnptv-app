@@ -24,6 +24,7 @@ import { checkout, type CheckoutStrings } from "./checkout";
 import { support, type SupportStrings } from "./support";
 import { feed, type FeedStrings } from "./feed";
 import { gamification, type GamificationStrings } from "./gamification";
+import { becomeModel, type BecomeModelStrings } from "./becomeModel";
 
 export type Lang = "en" | "es";
 
@@ -48,6 +49,7 @@ export interface I18n {
   support: SupportStrings;
   feed: FeedStrings;
   gamification: GamificationStrings;
+  becomeModel: BecomeModelStrings;
 }
 
 function resolve(lang: Lang): I18n {
@@ -72,6 +74,7 @@ function resolve(lang: Lang): I18n {
     support: support[lang],
     feed: feed[lang],
     gamification: gamification[lang],
+    becomeModel: becomeModel[lang],
   };
 }
 

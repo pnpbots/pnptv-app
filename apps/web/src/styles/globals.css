@@ -14,6 +14,24 @@
     font-family: "Roboto Mono", monospace;
     -webkit-user-select: none;
     user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  img, canvas {
+    -webkit-user-drag: none;
+    -webkit-touch-callout: none;
+    pointer-events: none;
+  }
+
+  video {
+    -webkit-user-drag: none;
+    -webkit-touch-callout: none;
+  }
+
+  /* Re-enable pointer events on clickable images (buttons, links, interactive areas) */
+  button img, a img, [role="button"] img, [data-interactive] img,
+  label img, [onclick] img {
+    pointer-events: auto;
   }
 
   /* Allow text selection in inputs and textareas */
@@ -275,4 +293,12 @@
   border-radius: 24px;
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
+}
+
+/* ── Screen Capture & Print Protection ─────────────────────────── */
+
+@media print {
+  body {
+    display: none !important;
+  }
 }

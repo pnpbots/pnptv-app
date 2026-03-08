@@ -1,5 +1,6 @@
 'use strict';
 
+const { spawn } = require('child_process');
 const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const { getRedis } = require('../../config/redis');
@@ -589,8 +590,55 @@ function initSocketIO(io) {
 
         io.to(`live:${streamId}`).emit('live:viewer_count', { streamId, count });
 
-        const history = await LiveStreamModel.getComments(streamId, 50);
+        // Try DB history first; fall back to Redis for Restreamer/Directus streams
+        let history = [];
+        try {
+          history = await LiveStreamModel.getComments(streamId, 50);
+        } catch {
+          const raw = await redis.lRange(`live:chat:${streamId}`, 0, 49);
+          history = raw.map(r => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean).reverse();
+        }
         socket.emit('live:history', history);
+
+        // Best-effort: send the current active overlay to this viewer.
+        // The streamId from the client may be a Directus performer ID (numeric
+        // string) or a Restreamer channel ref (e.g. 'pnptv-frank'). We try
+        // both: direct match on channel_ref, then join through users.live_channel
+        // via a performers lookup.  Either query may return 0 rows — that is
+        // fine; viewers simply render no overlay.
+        try {
+          // Attempt 1: streamId is itself a channel_ref slug
+          let overlayRows = [];
+          if (/^[a-zA-Z0-9-]+$/.test(String(streamId)) && !/^\d+$/.test(String(streamId))) {
+            const direct = await query(
+              'SELECT * FROM stream_overlays WHERE channel_ref = $1 AND is_active = true',
+              [streamId]
+            );
+            overlayRows = direct.rows;
+          }
+
+          // Attempt 2: streamId is a numeric Directus performer ID — resolve through
+          // the performers → users → live_channel chain
+          if (overlayRows.length === 0 && /^\d+$/.test(String(streamId))) {
+            const resolved = await query(
+              `SELECT so.*
+               FROM stream_overlays so
+               JOIN users u ON u.live_channel = so.channel_ref
+               JOIN performers p ON p.user_id = u.id
+               WHERE p.directus_id = $1 AND so.is_active = true
+               LIMIT 1`,
+              [String(streamId)]
+            );
+            overlayRows = resolved.rows;
+          }
+
+          if (overlayRows.length > 0) {
+            socket.emit('overlay:config', overlayRows[0]);
+          }
+        } catch (overlayErr) {
+          // Non-fatal — viewer just won't see the overlay on join
+          logger.debug('live:join overlay fetch failed (non-fatal)', { streamId, error: overlayErr.message });
+        }
       } catch (err) {
         logger.error('live:join error', { streamId, userId: user.id, error: err.message });
         socket.emit('live:error', { message: 'Failed to join stream' });
@@ -640,15 +688,31 @@ function initSocketIO(io) {
       try {
         const username = user.username || user.firstName || user.first_name || 'Viewer';
         const trimmedContent = String(content).trim();
-        const commentData = await LiveStreamModel.addComment(streamId, user.id, username, trimmedContent);
+
+        // Try DB-backed storage first; fall back to Redis for Restreamer/Directus streams
+        let commentId;
+        let timestamp;
+        try {
+          const commentData = await LiveStreamModel.addComment(streamId, user.id, username, trimmedContent);
+          commentId = commentData.commentId;
+          timestamp = commentData.timestamp;
+        } catch {
+          commentId = `${Date.now()}-${user.id}`;
+          timestamp = new Date();
+          const redis = getRedis();
+          const msg = JSON.stringify({ id: commentId, streamId, userId: user.id, username, content: trimmedContent, createdAt: timestamp });
+          await redis.lPush(`live:chat:${streamId}`, msg);
+          await redis.lTrim(`live:chat:${streamId}`, 0, 199);
+          await redis.expire(`live:chat:${streamId}`, 86400);
+        }
 
         io.to(`live:${streamId}`).emit('live:message', {
-          id: commentData.commentId,
+          id: commentId,
           streamId,
           userId: user.id,
           username,
           content: trimmedContent,
-          createdAt: commentData.timestamp || new Date(),
+          createdAt: timestamp,
         });
       } catch (err) {
         logger.error('live:message error', { streamId, userId: user.id, error: err.message });
@@ -656,8 +720,196 @@ function initSocketIO(io) {
       }
     });
 
+    // ── Browser → RTMP Stream Bridge ────────────────────────────────────────
+    //
+    // Allows creators to stream directly from their browser using MediaRecorder.
+    // The frontend captures camera/mic via getUserMedia, encodes as webm/opus,
+    // and sends binary chunks via Socket.IO. This handler pipes those chunks
+    // into an FFmpeg child process that re-encodes to H.264+AAC and pushes
+    // to Restreamer over RTMP.
+    //
+    // Only one active stream per socket (enforced by socket.data.ffmpegProcess).
+    // The user's assigned live_channel is verified against channelRef before
+    // spawning FFmpeg.
+
+    socket.on('stream:start', async ({ channelRef } = {}) => {
+      // Reject if already streaming — one stream per connection
+      if (socket.data.ffmpegProcess) {
+        socket.emit('stream:error', { message: 'Already streaming. Stop the current stream first.' });
+        return;
+      }
+
+      if (!channelRef || typeof channelRef !== 'string' || !/^[a-zA-Z0-9-]+$/.test(channelRef)) {
+        socket.emit('stream:error', { message: 'Invalid channelRef' });
+        return;
+      }
+
+      try {
+        // Verify the user has a channel assigned and that it matches channelRef
+        // (admins may stream to any channel)
+        const { rows } = await query(
+          'SELECT live_channel FROM users WHERE id = $1',
+          [user.id]
+        );
+
+        const assignedChannel = rows[0]?.live_channel ?? null;
+        const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+
+        if (!assignedChannel) {
+          socket.emit('stream:error', { message: 'No streaming channel assigned to your account.' });
+          return;
+        }
+
+        if (!isAdmin && assignedChannel !== channelRef) {
+          socket.emit('stream:error', { message: 'channelRef does not match your assigned channel.' });
+          return;
+        }
+
+        // Derive the RTMP stream key from the channel slug.
+        // 'pnptv-santino' → 'santino'. Non-prefixed slugs are used as-is.
+        const streamKey = channelRef.startsWith('pnptv-')
+          ? channelRef.slice('pnptv-'.length)
+          : channelRef;
+
+        const rtmpTarget = `rtmp://restreamer:1935/live/${streamKey}`;
+
+        // Spawn FFmpeg: read webm/opus from stdin, transcode to H.264+AAC, push to RTMP.
+        // -re is omitted so FFmpeg consumes input as fast as it arrives from the socket.
+        // -fflags nobuffer + -flags low_delay minimise latency through the pipeline.
+        const ffmpeg = spawn('ffmpeg', [
+          '-loglevel', 'warning',
+          '-fflags', 'nobuffer',
+          '-flags', 'low_delay',
+          '-i', 'pipe:0',
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',
+          '-tune', 'zerolatency',
+          '-pix_fmt', 'yuv420p',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ar', '44100',
+          '-f', 'flv',
+          rtmpTarget,
+        ], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+
+        socket.data.ffmpegProcess = ffmpeg;
+        socket.data.streamChannelRef = channelRef;
+
+        ffmpeg.stderr.on('data', (chunk) => {
+          // FFmpeg writes progress/warnings to stderr — log at debug level to
+          // avoid flooding production logs. Errors are handled via 'close'.
+          logger.debug(`[ffmpeg:${channelRef}] ${chunk.toString().trim()}`);
+        });
+
+        ffmpeg.on('close', (code, signal) => {
+          logger.info(`FFmpeg process for channel '${channelRef}' exited (code=${code}, signal=${signal})`);
+          // Only emit stopped if the process wasn't already cleaned up by stream:stop
+          if (socket.data.ffmpegProcess === ffmpeg) {
+            socket.data.ffmpegProcess = null;
+            socket.data.streamChannelRef = null;
+            socket.emit('stream:stopped', { channelRef, reason: code !== 0 ? 'ffmpeg_error' : 'completed' });
+          }
+        });
+
+        ffmpeg.on('error', (err) => {
+          logger.error(`FFmpeg spawn error for channel '${channelRef}'`, err);
+          socket.data.ffmpegProcess = null;
+          socket.data.streamChannelRef = null;
+          socket.emit('stream:error', { message: 'Streaming process failed to start. Is FFmpeg installed?' });
+        });
+
+        logger.info(`Browser stream started: user ${user.id} → channel '${channelRef}' → ${rtmpTarget}`);
+        socket.emit('stream:started', { channelRef, rtmpTarget });
+      } catch (err) {
+        logger.error('stream:start error', { userId: user.id, channelRef, err });
+        socket.emit('stream:error', { message: 'Failed to start stream. Please try again.' });
+      }
+    });
+
+    socket.on('stream:data', (data) => {
+      const ffmpeg = socket.data.ffmpegProcess;
+      if (!ffmpeg || !ffmpeg.stdin || ffmpeg.stdin.destroyed) return;
+
+      // Handle backpressure: if the stdin write buffer is full, skip the chunk
+      // rather than buffering unboundedly. This keeps latency low at the cost
+      // of minor visual artefacts when the network or encoder is congested.
+      if (ffmpeg.stdin.writableNeedDrain) return;
+
+      try {
+        // data may arrive as a Buffer (binary Socket.IO frame) or ArrayBuffer
+        const buf = Buffer.isBuffer(data)
+          ? data
+          : data instanceof ArrayBuffer
+            ? Buffer.from(data)
+            : null;
+
+        if (!buf || buf.length === 0) return;
+
+        ffmpeg.stdin.write(buf, (writeErr) => {
+          if (writeErr && !ffmpeg.stdin.destroyed) {
+            logger.warn(`stream:data write error for channel '${socket.data.streamChannelRef}'`, { error: writeErr.message });
+          }
+        });
+      } catch (err) {
+        logger.warn('stream:data processing error', { error: err.message });
+      }
+    });
+
+    socket.on('stream:stop', () => {
+      const ffmpeg = socket.data.ffmpegProcess;
+      const channelRef = socket.data.streamChannelRef;
+
+      if (!ffmpeg) {
+        // Nothing to stop — emit stopped anyway so the client can reset its UI
+        socket.emit('stream:stopped', { channelRef: channelRef ?? null, reason: 'not_streaming' });
+        return;
+      }
+
+      try {
+        // Gracefully close stdin so FFmpeg can flush its output buffers before exiting
+        if (ffmpeg.stdin && !ffmpeg.stdin.destroyed) {
+          ffmpeg.stdin.end();
+        }
+
+        // Give FFmpeg 3 seconds to flush and exit cleanly; then force-kill
+        const killTimer = setTimeout(() => {
+          if (!ffmpeg.killed) {
+            ffmpeg.kill('SIGKILL');
+          }
+        }, 3000);
+
+        ffmpeg.once('close', () => {
+          clearTimeout(killTimer);
+        });
+      } catch (err) {
+        logger.warn('stream:stop cleanup error', { channelRef, error: err.message });
+      } finally {
+        socket.data.ffmpegProcess = null;
+        socket.data.streamChannelRef = null;
+        logger.info(`Browser stream stopped: user ${user.id}, channel '${channelRef}'`);
+        socket.emit('stream:stopped', { channelRef, reason: 'user_stopped' });
+      }
+    });
+
     socket.on('disconnect', async () => {
       logger.info(`Socket disconnected: user ${user.id}`);
+
+      // Clean up any running FFmpeg browser-stream process
+      if (socket.data.ffmpegProcess) {
+        const ffmpeg = socket.data.ffmpegProcess;
+        const channelRef = socket.data.streamChannelRef;
+        try {
+          if (ffmpeg.stdin && !ffmpeg.stdin.destroyed) ffmpeg.stdin.end();
+          setTimeout(() => { if (!ffmpeg.killed) ffmpeg.kill('SIGKILL'); }, 3000);
+          logger.info(`FFmpeg cleanup on disconnect: user ${user.id}, channel '${channelRef}'`);
+        } catch (cleanupErr) {
+          logger.warn('FFmpeg disconnect cleanup error', { channelRef, error: cleanupErr.message });
+        }
+        socket.data.ffmpegProcess = null;
+        socket.data.streamChannelRef = null;
+      }
 
       if (socket.data.liveRooms && socket.data.liveRooms.size > 0) {
         const redis = getRedis();

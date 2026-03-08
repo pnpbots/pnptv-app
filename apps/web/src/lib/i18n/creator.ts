@@ -13,6 +13,7 @@ const strings = {
     tabEarnings: "Earnings",
     tabPayouts: "Payouts",
     tabContent: "Content",
+    tabGoLive: "Go Live",
     tabSettings: "Settings",
 
     // Overview — stats cards
@@ -216,6 +217,7 @@ const strings = {
     tabEarnings: "Ganancias",
     tabPayouts: "Pagos",
     tabContent: "Contenido",
+    tabGoLive: "Transmitir",
     tabSettings: "Ajustes",
 
     statSubscribers: "Suscriptores",

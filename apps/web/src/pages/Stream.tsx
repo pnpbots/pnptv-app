@@ -6,15 +6,23 @@ import { useAuth } from "@/hooks/useAuth";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 import { useI18n } from "@/lib/i18n";
 import { LivePlayer } from "@/components/LivePlayer";
+import { connectSocket } from "@/lib/socket";
 import {
   getLiveStreams,
   getAllPerformers,
   sendTip,
   TIP_AMOUNTS,
+  getStreamOverlayPublic,
   type LiveStream,
   type RecentTip,
+  type StreamOverlay,
   getRecentTips,
 } from "@/lib/api";
+
+function extractChannelRef(streamId: string): string | null {
+  const match = streamId.match(/restreamer-ui:ingest:([\w-]+)/);
+  return match ? match[1] : null;
+}
 
 export default function Stream() {
   const { streamId } = useParams<{ streamId: string }>();
@@ -25,6 +33,7 @@ export default function Stream() {
   const [stream, setStream] = useState<LiveStream | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [overlay, setOverlay] = useState<StreamOverlay | null>(null);
 
   // Chat & tips
   const [chatInput, setChatInput] = useState("");
@@ -91,6 +100,34 @@ export default function Stream() {
     return () => clearInterval(interval);
   }, [loadStream]);
 
+  // Fetch overlay config for this channel and subscribe to real-time updates
+  useEffect(() => {
+    if (!streamId) return;
+    const channelRef = extractChannelRef(streamId);
+    if (!channelRef) return;
+
+    // Initial fetch
+    getStreamOverlayPublic(channelRef)
+      .then((res) => {
+        if (res.overlay?.is_active) setOverlay(res.overlay);
+      })
+      .catch(() => {
+        // Overlay is optional — silently ignore fetch failures
+      });
+
+    // Real-time updates via socket
+    const socket = connectSocket();
+    const handler = (data: StreamOverlay) => {
+      if (data.channel_ref === channelRef) {
+        setOverlay(data.is_active ? data : null);
+      }
+    };
+    socket.on("overlay:updated", handler);
+    return () => {
+      socket.off("overlay:updated", handler);
+    };
+  }, [streamId]);
+
   // Load recent tips
   const loadTips = useCallback(() => {
     getRecentTips()
@@ -124,7 +161,7 @@ export default function Stream() {
     setTipError(null);
     setTipSuccess(null);
     try {
-      await sendTip({ amount, performerId: streamId || "", paymentMethod: tipPaymentTab });
+      await sendTip(streamId || "", amount, undefined, tipPaymentTab);
       setTipSuccess(`${amount}T sent!`);
       setTimeout(() => setTipSuccess(null), 3000);
     } catch (err) {
@@ -184,7 +221,7 @@ export default function Stream() {
 
       {/* Video Player */}
       <div className="relative -mx-4 sm:-mx-6">
-        <LivePlayer src={stream.hlsUrl} title={stream.name} />
+        <LivePlayer src={stream.hlsUrl} title={stream.name} overlay={overlay} />
         {/* Overlay */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-4 pb-3 pt-10">
           <div className="flex items-center gap-2 flex-wrap">

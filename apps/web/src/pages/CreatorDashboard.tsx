@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import {
@@ -33,6 +33,8 @@ import {
   type CmsShow,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+
+const BrowserStreamer = lazy(() => import("@/components/BrowserStreamer"));
 
 const ETHEREUM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -82,7 +84,7 @@ export default function CreatorDashboard() {
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
   const [withdrawSuccess, setWithdrawSuccess] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "earnings" | "payouts" | "settings" | "content">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "earnings" | "payouts" | "settings" | "content" | "golive">("overview");
 
   // Settings tab — payout method
   const [payoutMethod, setPayoutMethod] = useState<"crypto" | "meru">("crypto");
@@ -564,12 +566,12 @@ export default function CreatorDashboard() {
       {isActive && dashboard && (
         <>
           {/* Tab navigation */}
-          <div className="flex border-b border-white/10 mb-4">
-            {(["overview", "earnings", "payouts", "content", "settings"] as const).map((tab) => (
+          <div className="flex overflow-x-auto border-b border-white/10 mb-4 scrollbar-hide">
+            {(["overview", "earnings", "payouts", "content", "golive", "settings"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`flex-1 py-3 text-xs font-semibold text-center transition-colors ${
+                className={`flex-shrink-0 flex-1 min-w-[60px] py-3 text-xs font-semibold text-center transition-colors ${
                   activeTab === tab ? "text-white border-b-2" : "text-white/50"
                 }`}
                 style={activeTab === tab ? { borderImage: "linear-gradient(to right, #D4007A, #E69138) 1" } : undefined}
@@ -578,6 +580,7 @@ export default function CreatorDashboard() {
                   : tab === "earnings" ? t.tabEarnings
                   : tab === "payouts" ? t.tabPayouts
                   : tab === "content" ? t.tabContent
+                  : tab === "golive" ? t.tabGoLive
                   : t.tabSettings
                 }
               </button>
@@ -781,6 +784,27 @@ export default function CreatorDashboard() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Go Live Tab */}
+          {activeTab === "golive" && (
+            <div className="glass-card-sm p-4">
+              <Suspense
+                fallback={
+                  <div className="space-y-4">
+                    <div className="h-6 w-40 rounded-lg bg-pnp-surface animate-pulse" />
+                    <div className="rounded-2xl bg-pnp-surface animate-pulse" style={{ aspectRatio: "16/9" }} />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="h-10 rounded-xl bg-pnp-surface animate-pulse" />
+                      <div className="h-10 rounded-xl bg-pnp-surface animate-pulse" />
+                    </div>
+                    <div className="h-[52px] rounded-2xl bg-pnp-surface animate-pulse" />
+                  </div>
+                }
+              >
+                <BrowserStreamer />
+              </Suspense>
             </div>
           )}
 

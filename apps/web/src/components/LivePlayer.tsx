@@ -1,15 +1,17 @@
 import React, { useRef, useEffect, useState } from "react";
 import Hls from "hls.js";
 import { Badge, Skeleton } from "@pnptv/ui-kit";
+import { StreamOverlayLayer, type StreamOverlayConfig } from "@/components/StreamOverlayLayer";
 
 interface LivePlayerProps {
   src: string;
   title?: string;
   poster?: string;
   className?: string;
+  overlay?: StreamOverlayConfig | null;
 }
 
-export function LivePlayer({ src, title, poster, className = "" }: LivePlayerProps) {
+export function LivePlayer({ src, title, poster, className = "", overlay }: LivePlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<"loading" | "live" | "offline" | "error">("loading");
 
@@ -104,14 +106,18 @@ export function LivePlayer({ src, title, poster, className = "" }: LivePlayerPro
         controls
       />
       {status === "live" && (
-        <div className="absolute top-3 left-3">
+        <div className="absolute top-3 left-3 z-10">
           <Badge variant="error">LIVE</Badge>
         </div>
       )}
       {title && (
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 pt-8">
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 pt-8 z-10">
           <p className="text-white font-medium">{title}</p>
         </div>
+      )}
+      {/* Stream overlay: logos and banners configured by admins */}
+      {overlay?.is_active !== false && (
+        <StreamOverlayLayer overlay={overlay ?? null} />
       )}
     </div>
   );

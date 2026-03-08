@@ -2629,48 +2629,58 @@ export default function Profile() {
         )}
 
         {/* Action buttons */}
-        <div className="flex gap-3 mt-4" ref={subscribeButtonRef}>
+        <div className="mt-4 space-y-2" ref={subscribeButtonRef}>
           {isOwnProfile ? (
             <>
-              <button
-                onClick={() => setEditOpen(true)}
-                className="flex-1 py-2 rounded-lg text-sm font-semibold text-white border border-white/20 hover:border-white/40 transition-colors"
-              >
-                {p.editProfile}
-              </button>
-              {profile.creatorStatus === "active" && (() => {
-                const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
-                return (
-                  <button
-                    onClick={() => navigate("/creator")}
-                    className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors"
-                    style={{ background: `rgba(${tc.rgb},0.15)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.3)` }}
-                  >
-                    {tc.emoji} {p.creatorDashboard}
-                  </button>
-                );
-              })()}
-              <button
-                onClick={handleGoLive}
-                disabled={goLiveLoading}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-white btn-gradient disabled:opacity-50 transition-all"
-              >
-                <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                {goLiveLoading ? "..." : "Go Live"}
-              </button>
-              <button
-                onClick={() => { resetAllTutorials(); window.location.reload(); }}
-                className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/90 transition-colors"
-                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
-              >
-                {p.resetTutorials}
-              </button>
-              <Button variant="danger" className="px-4" onClick={logout}>
-                {p.signOut}
-              </Button>
+              {/* Primary actions */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setEditOpen(true)}
+                  className="flex-1 py-2 rounded-lg text-sm font-semibold text-white border border-white/20 hover:border-white/40 transition-colors"
+                >
+                  {p.editProfile}
+                </button>
+                {profile.creatorStatus === "active" && (() => {
+                  const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
+                  return (
+                    <button
+                      onClick={() => navigate("/creator")}
+                      className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors"
+                      style={{ background: `rgba(${tc.rgb},0.15)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.3)` }}
+                    >
+                      {tc.emoji} {p.creatorDashboard}
+                    </button>
+                  );
+                })()}
+                <button
+                  onClick={handleGoLive}
+                  disabled={goLiveLoading}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white btn-gradient disabled:opacity-50 transition-all"
+                >
+                  <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                  {goLiveLoading ? "..." : "Go Live"}
+                </button>
+              </div>
+              {/* Secondary actions */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { resetAllTutorials(); window.location.reload(); }}
+                  className="flex-1 py-1.5 rounded-lg text-xs text-white/50 hover:text-white/80 transition-colors"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                >
+                  {p.resetTutorials}
+                </button>
+                <button
+                  onClick={logout}
+                  className="flex-1 py-1.5 rounded-lg text-xs text-red-400/70 hover:text-red-400 transition-colors"
+                  style={{ background: "rgba(255,59,48,0.06)", border: "1px solid rgba(255,59,48,0.12)" }}
+                >
+                  {p.signOut}
+                </button>
+              </div>
             </>
           ) : (
-            <>
+            <div className="flex gap-2">
               {isAuthenticated && (
                 <button
                   onClick={handleFollow}
@@ -2709,7 +2719,7 @@ export default function Profile() {
                   </button>
                 );
               })()}
-            </>
+            </div>
           )}
         </div>
         {subscribeError && (

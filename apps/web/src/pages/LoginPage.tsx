@@ -66,7 +66,7 @@ export function LoginPage() {
           if (result.authenticated) {
             if (pollRef.current) clearInterval(pollRef.current);
             // Session cookie is now set — reload to let useAuth pick it up
-            window.location.reload();
+            window.location.href = "/";
           }
         } catch {
           // Network error, keep polling
@@ -99,7 +99,7 @@ export function LoginPage() {
       });
       const data = await res.json();
       if (res.ok && data.authenticated) {
-        window.location.reload();
+        window.location.href = "/";
       } else {
         setEmailLoginError(data.error || data.message || t.loginFailed);
       }
@@ -155,34 +155,6 @@ export function LoginPage() {
             </div>
           ))}
         </div>
-
-        {/* Lifetime100 CTA */}
-        <a
-          href="/lifetime100"
-          className="flex items-center justify-between w-full rounded-xl px-4 py-3 mb-6 group transition-all duration-200 hover:brightness-110"
-          style={{
-            background: "linear-gradient(135deg, #D4007A22, #E6913822)",
-            border: "1px solid #D4007A55",
-          }}
-        >
-          <div>
-            <div className="text-xs font-bold uppercase tracking-wider mb-0.5" style={{ color: "#E69138" }}>
-              🏆 {t.lifetimeDealLabel}
-            </div>
-            <div className="text-sm font-semibold text-white">
-              {t.lifetimeDealTitle}
-            </div>
-            <div className="text-[11px] mt-0.5" style={{ color: "#8E8E93" }}>
-              {t.lifetimeDealSub}
-            </div>
-          </div>
-          <div
-            className="ml-3 shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold text-white"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-          >
-            {t.lifetimeDealCta}
-          </div>
-        </a>
 
         {/* Buttons */}
         <div className="space-y-4">

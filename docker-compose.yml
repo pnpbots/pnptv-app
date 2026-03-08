@@ -439,7 +439,8 @@ services:
       - ./logs:/app/logs
       - pnptv-bot-nm:/app/node_modules
     command: >
-      sh -c "npm install --omit=dev --package-lock=false;
+      sh -c "apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null 2>&1;
+             npm install --omit=dev --package-lock=false;
              node --dns-result-order=ipv4first apps/backend/bot/core/bot.js"
     env_file:
       - .env

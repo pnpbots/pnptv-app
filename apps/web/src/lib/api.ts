@@ -2930,6 +2930,7 @@ export interface StreamOverlay {
   banner_bg_color: string;
   banner_text_color: string;
   banner_style: string;
+  banner_image_url: string | null;
   is_active: boolean;
   updated_by: string | null;
   updated_at: string;
@@ -2957,4 +2958,160 @@ export function getStreamOverlayPublic(
   channelRef: string
 ): Promise<{ success: boolean; overlay: StreamOverlay | null }> {
   return request(`/api/proxy/live/overlay/${encodeURIComponent(channelRef)}`);
+}
+
+// ============================================================================
+// Overlay Asset Library (CMS-managed logos & banners)
+// ============================================================================
+
+export interface OverlayAsset {
+  id: string;
+  type: "logo" | "banner";
+  name: string;
+  category: string | null;
+  sort_order: number;
+  image_url: string | null;
+  image_filename: string | null;
+  image_mime: string | null;
+}
+
+export function getOverlayLibrary(type?: "logo" | "banner"): Promise<{ success: boolean; assets: OverlayAsset[] }> {
+  const params = type ? `?type=${type}` : "";
+  return request(`/api/webapp/admin/overlay-library${params}`);
+}
+
+// ============================================================================
+// Support Dashboard Admin API
+// ============================================================================
+
+export interface SupportStats {
+  openTickets: number;
+  awaitingFirstResponse: number;
+  avgResponseTimeHours: number;
+  csatScore: number;
+  totalRatings: number;
+  slaBreaches: number;
+}
+
+export interface SupportTicket {
+  userId: number;
+  username: string | null;
+  firstName: string | null;
+  tier: string;
+  plan: string | null;
+  language: string | null;
+  status: string;
+  priority: string;
+  category: string;
+  lastMessage: string | null;
+  lastMessageAt: string;
+  unreadCount: number;
+  createdAt: string;
+}
+
+export interface SupportMessage {
+  id: number;
+  content: string;
+  senderRole: "user" | "agent" | "admin";
+  senderName: string | null;
+  createdAt: string;
+}
+
+export function getAdminSupportStats(): Promise<{ success: boolean; stats: SupportStats }> {
+  return request("/api/webapp/admin/support/stats");
+}
+
+export function getAdminSupportTickets(
+  params: Record<string, string>
+): Promise<{ success: boolean; tickets: SupportTicket[]; hasMore: boolean; total: number }> {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/api/webapp/admin/support/tickets?${qs}`);
+}
+
+export function getAdminTicketMessages(
+  userId: string
+): Promise<{ success: boolean; messages: SupportMessage[] }> {
+  return request(`/api/webapp/admin/support/tickets/${userId}/messages`);
+}
+
+export function sendAdminTicketReply(
+  userId: string,
+  content: string
+): Promise<{ success: boolean; message: SupportMessage }> {
+  return request(`/api/webapp/admin/support/tickets/${userId}/reply`, {
+    method: "POST",
+    body: { content },
+  });
+}
+
+export function updateAdminTicket(
+  userId: string,
+  data: Record<string, string>
+): Promise<{ success: boolean; ticket: SupportTicket }> {
+  return request(`/api/webapp/admin/support/tickets/${userId}`, {
+    method: "PATCH",
+    body: data,
+  });
+}
+
+// ============================================================================
+// Community Room (Haus) API — 24/7 open video room powered by JaaS
+// ============================================================================
+
+export interface CommunityRoomInfo {
+  token: string;
+  domain: string;
+  roomName: string;
+  roomId: string;
+  isModerator: boolean;
+  isTrueModerator: boolean;
+  isOpen24_7: boolean;
+  room: {
+    id: string;
+    code: string;
+    name: string;
+    maxParticipants: number;
+    isPersistent: boolean;
+    isOpen24_7: boolean;
+    description: string;
+  };
+}
+
+export interface RoomOccupancy {
+  activeUsers: number;
+  users: Array<{
+    userId: string;
+    displayName: string;
+    role: string;
+    joinedAt: string;
+  }>;
+  roomId: string;
+  maxCapacity: number;
+}
+
+export function joinCommunityRoom(
+  displayName: string
+): Promise<CommunityRoomInfo> {
+  return request("/api/community-room/join", {
+    method: "POST",
+    body: { displayName },
+  });
+}
+
+export function getCommunityRoomOccupancy(): Promise<{
+  success: boolean;
+  occupancy: RoomOccupancy;
+}> {
+  return request("/api/community-room/occupancy");
+}
+
+export function getCommunityRoomStats(): Promise<{
+  success: boolean;
+  stats: {
+    roomId: string;
+    totalActiveUsers: number;
+    messageCount: number;
+  };
+}> {
+  return request("/api/community-room/stats");
 }

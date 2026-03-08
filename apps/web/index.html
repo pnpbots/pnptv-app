@@ -3,16 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
-    <title>PNPtv – Private Social Network, Live Video Rooms & Premium Community</title>
-    <meta name="description" content="PNPtv is a private social platform for gay men into the party and play lifestyle. Live video rooms, creator channels, nearby discovery, and premium adult content. Join a modern PNP community built for real connection." />
+    <title>PNPtv! Clouds & Rush Network</title>
+    <meta name="description" content="PNPtv! is a private social platform for gay men into the party and play lifestyle. Live video rooms, creator channels, nearby discovery, and premium adult content. Join the Clouds & Rush Network." />
     <meta name="keywords" content="gay PNP community, party and play, gay social network, gay live video rooms, gay adult community, PNP lifestyle, gay men dating, gay nearby discovery, private gay platform, gay creator community, gay premium content, gay streaming platform, gay party culture, chemsex community, gay hookup network" />
     <link rel="canonical" href="https://app.pnptv.app/" />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="PNPtv" />
-    <meta property="og:title" content="PNPtv – Private Social Network, Live Video Rooms & Premium Community" />
-    <meta property="og:description" content="PNPtv is a private social platform for gay men into the party and play lifestyle. Live video rooms, nearby discovery, creator channels, and premium content." />
+    <meta property="og:site_name" content="PNPtv!" />
+    <meta property="og:title" content="PNPtv! Clouds & Rush Network" />
+    <meta property="og:description" content="PNPtv! is a private social platform for gay men into the party and play lifestyle. Live video rooms, nearby discovery, creator channels, and premium content." />
     <meta property="og:url" content="https://app.pnptv.app/" />
     <meta property="og:image" content="https://app.pnptv.app/og-image.png" />
     <meta property="og:image:width" content="1200" />
@@ -21,8 +21,8 @@
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="PNPtv – Private Social Network, Live Video Rooms & Premium Community" />
-    <meta name="twitter:description" content="PNPtv is a private social platform for gay men into the party and play lifestyle. Live video rooms, nearby discovery, creator channels, and premium content." />
+    <meta name="twitter:title" content="PNPtv! Clouds & Rush Network" />
+    <meta name="twitter:description" content="PNPtv! is a private social platform for gay men into the party and play lifestyle. Live video rooms, nearby discovery, creator channels, and premium content." />
     <meta name="twitter:image" content="https://app.pnptv.app/og-image.png" />
 
     <!-- Favicon & Icons -->
@@ -35,6 +35,7 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="PNPtv!" />
 
     <!-- Fonts — non-blocking -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -55,14 +56,14 @@
     {
       "@context": "https://schema.org",
       "@type": "WebSite",
-      "name": "PNPtv",
-      "alternateName": "PNPtv.app",
+      "name": "PNPtv! Clouds & Rush Network",
+      "alternateName": "PNPtv!",
       "url": "https://app.pnptv.app",
-      "description": "PNPtv is a private social platform built for gay men into the party and play lifestyle. Connect, stream, and share content in a secure adult community. Features include live video rooms, creator channels, nearby discovery, premium media, and social networking for the PNP scene.",
+      "description": "PNPtv! is a private social platform built for gay men into the party and play lifestyle. Connect, stream, and share content in a secure adult community.",
       "image": "https://app.pnptv.app/og-image.png",
       "publisher": {
         "@type": "Organization",
-        "name": "PNPtv",
+        "name": "PNPtv!",
         "url": "https://pnptv.app",
         "logo": {
           "@type": "ImageObject",
@@ -82,10 +83,10 @@
     {
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
-      "name": "PNPtv",
+      "name": "PNPtv! Clouds & Rush Network",
       "operatingSystem": "Web",
       "applicationCategory": "SocialNetworkingApplication",
-      "description": "Private social platform for gay men into the party and play lifestyle. Live video rooms, creator channels, nearby discovery, and premium adult content. A modern PNP community built for real connection.",
+      "description": "Private social platform for gay men into the party and play lifestyle. Live video rooms, creator channels, nearby discovery, and premium adult content.",
       "url": "https://app.pnptv.app",
       "image": "https://app.pnptv.app/og-image.png",
       "offers": {
@@ -103,8 +104,133 @@
       ]
     }
     </script>
+
+    <!-- Splash screen styles -->
+    <style>
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #121212;
+        transition: opacity 0.4s ease, visibility 0.4s ease;
+      }
+      #splash.hide {
+        opacity: 0;
+        visibility: hidden;
+      }
+      #splash .orb {
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(80px);
+        pointer-events: none;
+      }
+      #splash .orb-1 {
+        width: 320px; height: 320px;
+        top: -10%; left: -5%;
+        background: radial-gradient(circle, rgba(212,0,122,0.35), transparent 70%);
+        animation: orb-float 6s ease-in-out infinite;
+      }
+      #splash .orb-2 {
+        width: 280px; height: 280px;
+        bottom: -10%; right: -5%;
+        background: radial-gradient(circle, rgba(230,145,56,0.3), transparent 70%);
+        animation: orb-float 6s ease-in-out 3s infinite;
+      }
+      #splash .orb-3 {
+        width: 200px; height: 200px;
+        top: 40%; left: 50%;
+        transform: translateX(-50%);
+        background: radial-gradient(circle, rgba(94,209,196,0.15), transparent 70%);
+        animation: orb-float 8s ease-in-out 1.5s infinite;
+      }
+      @keyframes orb-float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-20px); }
+      }
+      #splash .logo-wrap {
+        position: relative;
+        z-index: 1;
+        animation: splash-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+      #splash .logo-wrap img {
+        width: 80px; height: auto;
+        filter: drop-shadow(0 0 30px rgba(212,0,122,0.4));
+      }
+      #splash .brand {
+        position: relative; z-index: 1;
+        margin-top: 20px;
+        text-align: center;
+        animation: splash-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
+      }
+      #splash .brand h1 {
+        font-family: 'Ethnocentric', sans-serif;
+        font-size: 22px;
+        font-weight: 700;
+        color: #fff;
+        letter-spacing: 2px;
+        margin: 0;
+      }
+      #splash .brand p {
+        font-family: 'Roboto Mono', monospace;
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        margin: 8px 0 0;
+        background: linear-gradient(135deg, #D4007A, #E69138);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      #splash .loader {
+        position: relative; z-index: 1;
+        margin-top: 36px;
+        width: 40px; height: 3px;
+        background: rgba(255,255,255,0.08);
+        border-radius: 2px;
+        overflow: hidden;
+        animation: splash-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
+      }
+      #splash .loader-bar {
+        height: 100%;
+        width: 40%;
+        border-radius: 2px;
+        background: linear-gradient(90deg, #D4007A, #E69138);
+        animation: loader-slide 1.2s ease-in-out infinite;
+      }
+      @keyframes splash-in {
+        from { opacity: 0; transform: translateY(16px) scale(0.95); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+      }
+      @keyframes loader-slide {
+        0% { transform: translateX(-100%); }
+        50% { transform: translateX(150%); }
+        100% { transform: translateX(-100%); }
+      }
+    </style>
   </head>
   <body class="bg-pnp-background text-pnp-textPrimary antialiased">
+    <!-- Splash screen — visible until React mounts -->
+    <div id="splash">
+      <div class="orb orb-1"></div>
+      <div class="orb orb-2"></div>
+      <div class="orb orb-3"></div>
+      <div class="logo-wrap">
+        <img src="/Logo2-50.png" alt="PNPtv!" />
+      </div>
+      <div class="brand">
+        <h1>PNPtv!</h1>
+        <p>Clouds & Rush Network</p>
+      </div>
+      <div class="loader">
+        <div class="loader-bar"></div>
+      </div>
+    </div>
+
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

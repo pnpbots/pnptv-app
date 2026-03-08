@@ -481,7 +481,7 @@ class UserModel {
   }
 
   /** Plan IDs that grant the member tier (not PRIME) */
-  static MEMBER_PLAN_IDS = new Set(['member-monthly']);
+  static MEMBER_PLAN_IDS = new Set(['member-monthly', 'lifetime100']);
 
   /**
    * Update user subscription

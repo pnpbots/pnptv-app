@@ -221,13 +221,15 @@ class MembershipCleanupService {
     const results = { toChurned: 0, toFree: 0, errors: 0 };
 
     try {
-      // Find users with 'active' status but expired plan_expiry (excluding lifetime)
+      // Find users with 'active' status but expired plan_expiry (excluding lifetime, but NOT lifetime100)
+      // lifetime100 users with expired plan_expiry should be downgraded to member, not churned
       const expiredActiveUsers = await query(`
         SELECT id, username, subscription_status, plan_expiry, plan_id
         FROM users
         WHERE subscription_status = 'active'
         AND plan_expiry IS NOT NULL
         AND plan_expiry <= NOW()
+        AND plan_id != 'lifetime100'
         AND plan_id NOT ILIKE '%lifetime%'
         AND plan_id NOT ILIKE '%life-time%'
       `);
@@ -247,6 +249,29 @@ class MembershipCleanupService {
         } catch (error) {
           results.errors++;
           logger.error(`Error updating user ${user.id} to churned:`, error);
+        }
+      }
+
+      // Handle lifetime100 users with expired PRIME bonus — downgrade to member (not churned)
+      const lifetime100ExpiredPrime = await query(`
+        SELECT id, username FROM users
+        WHERE plan_id = 'lifetime100'
+          AND subscription_status = 'active'
+          AND tier = 'PRIME'
+          AND plan_expiry IS NOT NULL
+          AND plan_expiry <= NOW()
+      `);
+
+      for (const user of lifetime100ExpiredPrime.rows) {
+        try {
+          await query(
+            `UPDATE users SET tier = 'member', plan_expiry = NULL, updated_at = NOW() WHERE id = $1`,
+            [user.id]
+          );
+          logger.info(`Downgraded lifetime100 user ${user.id} (${user.username || 'no username'}) from PRIME to member (bonus expired)`);
+        } catch (error) {
+          results.errors++;
+          logger.error(`Error downgrading lifetime100 user ${user.id}:`, error);
         }
       }
 
@@ -438,13 +463,48 @@ Type /subscribe to view membership plans and reactivate your access!`;
         logger.info(`Activated ${activateResult.rowCount} PRIME users with valid subscriptions`);
       }
 
-      // Step 2: Update lifetime users to 'active' (plan_id contains 'lifetime' and no expiry)
+      // Step 2a: Update lifetime100 users — they are lifetime MEMBER, not PRIME
+      // If plan_expiry is set and still valid, they get PRIME (bonus period);
+      // otherwise they stay as member
+      const lifetime100WithPrimeResult = await query(`
+        UPDATE users
+        SET subscription_status = 'active',
+            tier = 'PRIME',
+            updated_at = NOW()
+        WHERE plan_id = 'lifetime100'
+          AND plan_expiry IS NOT NULL
+          AND plan_expiry > NOW()
+          AND (subscription_status != 'active' OR tier != 'PRIME')
+        RETURNING id, username
+      `);
+      results.toActive += lifetime100WithPrimeResult.rowCount;
+      if (lifetime100WithPrimeResult.rowCount > 0) {
+        logger.info(`Activated ${lifetime100WithPrimeResult.rowCount} lifetime100 users with PRIME bonus`);
+      }
+
+      const lifetime100MemberResult = await query(`
+        UPDATE users
+        SET subscription_status = 'active',
+            tier = 'member',
+            updated_at = NOW()
+        WHERE plan_id = 'lifetime100'
+          AND (plan_expiry IS NULL OR plan_expiry <= NOW())
+          AND (subscription_status != 'active' OR tier != 'member')
+        RETURNING id, username
+      `);
+      results.toActive += lifetime100MemberResult.rowCount;
+      if (lifetime100MemberResult.rowCount > 0) {
+        logger.info(`Activated ${lifetime100MemberResult.rowCount} lifetime100 users as member tier`);
+      }
+
+      // Step 2b: Update other lifetime users to 'active' PRIME (plan_id contains 'lifetime' but NOT lifetime100)
       const lifetimeResult = await query(`
         UPDATE users
         SET subscription_status = 'active',
             tier = 'PRIME',
             updated_at = NOW()
         WHERE (plan_id ILIKE '%lifetime%' OR plan_id ILIKE '%life-time%')
+          AND plan_id != 'lifetime100'
           AND (subscription_status != 'active' OR tier != 'PRIME')
         RETURNING id, username
       `);
