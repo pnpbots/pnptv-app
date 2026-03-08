@@ -32,6 +32,10 @@ export function LoginPage() {
     try {
       setStatus("waiting");
 
+      // Open window synchronously (inside the click handler) so mobile
+      // browsers don't block it as a popup. We redirect it after the fetch.
+      const win = window.open("about:blank", "_blank");
+
       // 1. Request a login token from the API
       const res = await fetch(`${API_BASE}/api/webapp/auth/telegram/token`, {
         method: "POST",
@@ -40,12 +44,18 @@ export function LoginPage() {
       });
       const data = await res.json();
       if (!data.success || !data.token || !data.deepLink) {
+        if (win) win.close();
         setStatus("error");
         return;
       }
 
-      // 2. Open the Telegram deep link (user authenticates in Telegram)
-      window.open(data.deepLink, "_blank");
+      // 2. Redirect the pre-opened window to the Telegram deep link
+      if (win) {
+        win.location.href = data.deepLink;
+      } else {
+        // Fallback: if popup was still blocked, navigate directly
+        window.location.href = data.deepLink;
+      }
 
       // 3. Poll for auth confirmation
       let attempts = 0;

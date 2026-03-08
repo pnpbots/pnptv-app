@@ -3,13 +3,13 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface JitsiMeetComponentProps {
-  /** The full Jitsi meeting URL (with JWT token) from the backend */
+  /** The full Jitsi meeting URL — domain and room are extracted from this */
   meetingUrl: string;
-  /** Unique room name for this meeting */
+  /** Unique room name for this meeting (fallback if not parseable from URL) */
   roomName?: string;
   /** Called when the user leaves/ends the call */
   onCallEnd?: () => void;
-  /** Called when a participant joins (from Jitsi postMessage events) */
+  /** Called when a participant joins */
   onParticipantJoined?: (count: number) => void;
   /** Called when a participant leaves */
   onParticipantLeft?: (count: number) => void;
@@ -17,6 +17,44 @@ interface JitsiMeetComponentProps {
   fullScreen?: boolean;
   /** Optional className for the container */
   className?: string;
+}
+
+/** Parse domain and room from a meeting URL like https://meet.jit.si/room#config... */
+function parseMeetingUrl(url: string): { domain: string; room: string; displayName: string } {
+  try {
+    const parsed = new URL(url);
+    const domain = parsed.hostname;
+    const room = parsed.pathname.replace(/^\//, "");
+    // Extract displayName from hash params
+    const hash = parsed.hash || "";
+    const nameMatch = hash.match(/userInfo\.displayName=([^&]*)/);
+    const displayName = nameMatch ? decodeURIComponent(nameMatch[1]) : "";
+    return { domain, room, displayName };
+  } catch {
+    return { domain: "meet.jit.si", room: "pnptv-fallback", displayName: "" };
+  }
+}
+
+/** Load the Jitsi External API script if not already loaded */
+function loadJitsiScript(domain: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if ((window as any).JitsiMeetExternalAPI) {
+      resolve();
+      return;
+    }
+    const existing = document.querySelector(`script[src*="external_api"]`);
+    if (existing) {
+      existing.addEventListener("load", () => resolve());
+      existing.addEventListener("error", () => reject(new Error("Failed to load Jitsi API")));
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = `https://${domain}/external_api.js`;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Jitsi API"));
+    document.head.appendChild(script);
+  });
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -30,55 +68,117 @@ export function JitsiMeetComponent({
   fullScreen = false,
   className,
 }: JitsiMeetComponentProps) {
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const apiRef = useRef<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
 
-  // Listen for Jitsi postMessage events
+  // Store callbacks in refs so event listeners always see the latest
+  const onCallEndRef = useRef(onCallEnd);
+  const onParticipantJoinedRef = useRef(onParticipantJoined);
+  const onParticipantLeftRef = useRef(onParticipantLeft);
+  useEffect(() => { onCallEndRef.current = onCallEnd; }, [onCallEnd]);
+  useEffect(() => { onParticipantJoinedRef.current = onParticipantJoined; }, [onParticipantJoined]);
+  useEffect(() => { onParticipantLeftRef.current = onParticipantLeft; }, [onParticipantLeft]);
+
   useEffect(() => {
-    const handler = (event: MessageEvent) => {
-      // Only accept messages from 8x8.vc or the Jitsi domain
-      if (!event.origin.includes("8x8.vc") && !event.origin.includes("jit.si") && !event.origin.includes("jitsi")) {
+    let disposed = false;
+
+    const init = async () => {
+      const { domain, room, displayName } = parseMeetingUrl(meetingUrl);
+      const resolvedRoom = room || roomName || "pnptv-room";
+
+      try {
+        await loadJitsiScript(domain);
+      } catch {
+        if (!disposed) setHasError(true);
         return;
       }
 
-      try {
-        const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+      if (disposed || !containerRef.current) return;
 
-        switch (data.event) {
-          case "video-conference-joined":
-            setIsLoading(false);
-            break;
-          case "video-conference-left":
-          case "video-hangup":
-            onCallEnd?.();
-            break;
-          case "participant-joined":
-            onParticipantJoined?.(data.participantCount || 0);
-            break;
-          case "participant-left":
-            onParticipantLeft?.(data.participantCount || 0);
-            break;
-          default:
-            break;
-        }
-      } catch {
-        // Not a JSON message, ignore
+      const JitsiMeetExternalAPI = (window as any).JitsiMeetExternalAPI;
+      if (!JitsiMeetExternalAPI) {
+        setHasError(true);
+        return;
       }
+
+      const api = new JitsiMeetExternalAPI(domain, {
+        roomName: resolvedRoom,
+        parentNode: containerRef.current,
+        width: "100%",
+        height: "100%",
+        configOverwrite: {
+          prejoinPageEnabled: false,
+          startWithAudioMuted: false,
+          startWithVideoMuted: false,
+          disableDeepLinking: true,
+          disableThirdPartyRequests: true,
+          enableClosePage: false,
+          hideConferenceSubject: false,
+          disableInviteFunctions: true,
+        },
+        interfaceConfigOverwrite: {
+          MOBILE_APP_PROMO: false,
+          SHOW_JITSI_WATERMARK: false,
+          SHOW_WATERMARK_FOR_GUESTS: false,
+          SHOW_BRAND_WATERMARK: false,
+          SHOW_POWERED_BY: false,
+          DISABLE_PRESENCE_STATUS: true,
+          GENERATE_ROOMNAMES_ON_WELCOME_PAGE: false,
+        },
+        userInfo: displayName ? { displayName } : undefined,
+      });
+
+      apiRef.current = api;
+
+      api.addListener("videoConferenceJoined", () => {
+        if (!disposed) setIsLoading(false);
+      });
+
+      api.addListener("videoConferenceLeft", () => {
+        onCallEndRef.current?.();
+      });
+
+      api.addListener("readyToClose", () => {
+        onCallEndRef.current?.();
+      });
+
+      api.addListener("participantJoined", () => {
+        const count = api.getNumberOfParticipants?.() || 0;
+        onParticipantJoinedRef.current?.(count);
+      });
+
+      api.addListener("participantLeft", () => {
+        const count = api.getNumberOfParticipants?.() || 0;
+        onParticipantLeftRef.current?.(count);
+      });
+
+      // Fallback: if videoConferenceJoined never fires, remove loading after 5s
+      setTimeout(() => {
+        if (!disposed) setIsLoading(false);
+      }, 5000);
     };
 
-    window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
-  }, [onCallEnd, onParticipantJoined, onParticipantLeft]);
+    init();
 
-  const handleIframeLoad = useCallback(() => {
-    // Give a short delay for Jitsi to render after the iframe loads
-    setTimeout(() => setIsLoading(false), 2000);
-  }, []);
+    return () => {
+      disposed = true;
+      if (apiRef.current) {
+        try { apiRef.current.dispose(); } catch { /* ignore */ }
+        apiRef.current = null;
+      }
+    };
+  }, [meetingUrl, roomName]);
 
-  const handleIframeError = useCallback(() => {
-    setIsLoading(false);
-    setHasError(true);
+  const handleRetry = useCallback(() => {
+    setHasError(false);
+    setIsLoading(true);
+    // Force re-mount by clearing and re-setting
+    if (apiRef.current) {
+      try { apiRef.current.dispose(); } catch { /* ignore */ }
+      apiRef.current = null;
+    }
   }, []);
 
   // ─── Error state ──────────────────────────────────────────────────────
@@ -97,10 +197,7 @@ export function JitsiMeetComponent({
         </p>
         <div className="flex gap-2">
           <button
-            onClick={() => {
-              setHasError(false);
-              setIsLoading(true);
-            }}
+            onClick={handleRetry}
             className="btn-gradient px-4 py-2 rounded-lg text-xs font-semibold text-white active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
           >
             Try Again
@@ -141,19 +238,10 @@ export function JitsiMeetComponent({
         </div>
       )}
 
-      {/* Jitsi iframe */}
-      <iframe
-        ref={iframeRef}
-        src={meetingUrl}
-        className="w-full h-full border-0"
-        allow="camera; microphone; display-capture; autoplay; clipboard-write; speaker-selection; fullscreen"
-        allowFullScreen
-        title={roomName ? `Video call: ${roomName}` : "Video call"}
-        onLoad={handleIframeLoad}
-        onError={handleIframeError}
-      />
+      {/* Jitsi container — the External API creates an iframe inside this div */}
+      <div ref={containerRef} className="w-full h-full" />
 
-      {/* Full-screen close button (only in full-screen mode) */}
+      {/* Full-screen close button */}
       {fullScreen && (
         <button
           onClick={onCallEnd}

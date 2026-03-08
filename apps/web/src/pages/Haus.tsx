@@ -3,6 +3,7 @@ import { Helmet } from "react-helmet-async";
 import { Card, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { PermissionGate } from "@/components/PermissionGate";
+import { JitsiMeetComponent } from "@/components/hangouts/JitsiMeetComponent";
 import {
   joinCommunityRoom,
   getCommunityRoomOccupancy,
@@ -101,13 +102,13 @@ export default function Haus() {
             Leave Room
           </Button>
         </div>
-        <iframe
-          src={iframeSrc}
-          allow="camera; microphone; display-capture; autoplay; clipboard-write; speaker-selection; fullscreen"
-          allowFullScreen
-          className="flex-1 w-full border-0"
-          title="Main Stage — PNPtv Community Room"
-        />
+        <div className="flex-1 w-full">
+          <JitsiMeetComponent
+            meetingUrl={iframeSrc}
+            roomName={roomInfo?.roomName}
+            onCallEnd={handleLeave}
+          />
+        </div>
       </div>
     );
   }
