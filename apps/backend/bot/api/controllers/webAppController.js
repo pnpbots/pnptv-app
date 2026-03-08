@@ -202,6 +202,7 @@ function buildSession(user, extra = {}) {
     bio: user.bio,
     language: user.language,
     role: user.role || 'user',
+    creator_status: user.creator_status || 'none',
     // ATProto identity fields (preserved for hybrid session)
     atproto_did: user.atproto_did || null,
     atproto_handle: user.atproto_handle || null,

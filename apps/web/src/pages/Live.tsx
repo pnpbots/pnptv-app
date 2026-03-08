@@ -11,7 +11,7 @@ import { useI18n } from "@/lib/i18n";
 
 const BrowserStreamer = lazy(() => import("@/components/BrowserStreamer"));
 import {
-  getAllPerformers,
+  getFeaturedPerformers,
   getLiveStreams,
   getRtmpKey,
   getWalletBalance,
@@ -43,7 +43,7 @@ function isValidPhotoUrl(photo: string | null | undefined): photo is string {
 }
 
 export default function Live() {
-  const { isAuthenticated, login } = useAuth();
+  const { isAuthenticated, user, login } = useAuth();
   const { isFree } = useTier();
   const t = useI18n();
   const navigate = useNavigate();
@@ -95,7 +95,7 @@ export default function Live() {
     setPerformersLoading(true);
     setLoadError(false);
     Promise.all([
-      getAllPerformers(),
+      getFeaturedPerformers(),
       getLiveStreams(),
     ]).then(([perfData, streamData]) => {
       setPerformers(perfData.performers || []);
@@ -276,7 +276,7 @@ export default function Live() {
           <h1 className="text-lg font-bold text-pnp-textPrimary">{t.live.liveTitle}</h1>
           <p className="text-xs text-pnp-textSecondary mt-0.5">{t.live.liveSubtitle}</p>
         </div>
-        {isAuthenticated && (
+        {isAuthenticated && (user?.role === "model" || user?.role === "admin" || user?.role === "superadmin") && (
           <button
             onClick={handleGoLive}
             disabled={goLiveLoading}

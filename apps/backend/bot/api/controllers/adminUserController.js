@@ -115,14 +115,39 @@ class AdminUserController {
         return res.status(404).json({ success: false, error: 'User not found' });
       }
 
-      // Update ban via tier column
+      // Update ban via tier column — full ban: revoke role, creator status, subscription, and sessions
       const newTier = ban === true ? 'banned' : ban === false ? 'free' : null;
       if (newTier) {
-        await query(
-          'UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2',
-          [newTier, userId.toString()]
-        );
+        if (ban) {
+          await query(
+            `UPDATE users SET tier = 'banned', role = 'user', creator_status = 'none',
+             subscription_status = 'expired', updated_at = NOW() WHERE id = $1`,
+            [userId.toString()]
+          );
+        } else {
+          await query(
+            'UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2',
+            [newTier, userId.toString()]
+          );
+        }
         await require('../../../config/redis').cache.del(`user:${userId}`);
+
+        // Destroy all active sessions for the banned user
+        if (ban) {
+          try {
+            const redis = require('../../../config/redis').client;
+            const keys = await redis.keys('pnpapp:sess:*');
+            for (const key of keys) {
+              const val = await redis.get(key);
+              if (val && val.includes(userId.toString())) {
+                await redis.del(key);
+              }
+            }
+            logger.info('Destroyed sessions for banned user', { userId });
+          } catch (sessErr) {
+            logger.warn('Failed to destroy sessions for banned user', { userId, error: sessErr.message });
+          }
+        }
 
         const action = ban ? 'banned' : 'unbanned';
         logger.info(`Admin ${action} user`, {

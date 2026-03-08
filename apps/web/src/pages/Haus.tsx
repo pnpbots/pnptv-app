@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import { Card, Button } from "@pnptv/ui-kit";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useTier } from "@/hooks/useTier";
 import { PermissionGate } from "@/components/PermissionGate";
 import { JitsiMeetComponent } from "@/components/hangouts/JitsiMeetComponent";
 import {
@@ -12,6 +14,8 @@ import {
 
 export default function Haus() {
   const { user, isAuthenticated } = useAuth();
+  const { isFree } = useTier();
+  const navigate = useNavigate();
   const [occupancy, setOccupancy] = useState<number>(0);
   const [occupancyUsers, setOccupancyUsers] = useState<
     Array<{ userId: string; displayName: string; role: string; joinedAt: string }>
@@ -78,6 +82,37 @@ export default function Haus() {
       .catch(() => {});
   };
 
+  if (isAuthenticated && isFree) {
+    return (
+      <div className="p-4 pb-24 max-w-2xl mx-auto">
+        <Helmet>
+          <title>Main Stage | PNPtv</title>
+        </Helmet>
+        <div className="flex flex-col items-center justify-center min-h-[60vh] px-6">
+          <div
+            className="w-24 h-24 rounded-full flex items-center justify-center mb-6"
+            style={{ background: "linear-gradient(135deg, rgba(94,209,196,0.15), rgba(212,0,122,0.15))", border: "1px solid rgba(94,209,196,0.3)" }}
+          >
+            <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#5ED1C4" }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Main Stage</h2>
+          <p className="text-sm text-pnp-textSecondary text-center max-w-xs mb-8">
+            Join the 24/7 community video room to hang out, chat, and vibe with the community. Upgrade to Member to unlock access.
+          </p>
+          <button
+            onClick={() => navigate("/subscribe")}
+            className="px-6 py-3 rounded-full text-base font-semibold text-white"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            Upgrade to Member
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (joined && iframeSrc) {
     return (
       <div className="fixed inset-0 z-50 bg-black flex flex-col">
@@ -86,7 +121,9 @@ export default function Haus() {
         </Helmet>
         <div className="flex items-center justify-between px-4 py-2 bg-pnp-surface border-b border-pnp-border">
           <div className="flex items-center gap-3">
-            <span className="text-xl">🎭</span>
+            <svg className="w-5 h-5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
             <div>
               <h2 className="text-pnp-textPrimary font-bold text-base leading-tight">
                 Main Stage
@@ -121,7 +158,11 @@ export default function Haus() {
 
       {/* Hero */}
       <Card className="p-6 text-center space-y-4">
-        <div className="text-5xl">🎭</div>
+        <div className="w-16 h-16 mx-auto rounded-full flex items-center justify-center" style={{ background: "rgba(94, 209, 196, 0.15)" }}>
+          <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#5ED1C4" }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+        </div>
         <h1 className="text-2xl font-bold text-pnp-textPrimary">Main Stage</h1>
         <p className="text-pnp-textSecondary leading-relaxed">
           PNPtv's 24/7 open community video room. Drop in anytime to hang out,

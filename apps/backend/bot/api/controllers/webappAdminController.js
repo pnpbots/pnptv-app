@@ -224,12 +224,35 @@ const banUser = async (req, res) => {
     const { id: userId } = req.params;
     const { ban, reason = '' } = req.body;
 
-    const newTier = ban ? 'banned' : 'free';
-    const newStatus = ban ? 'churned' : 'free';
-    await query(
-      'UPDATE users SET tier = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3',
-      [newTier, newStatus, userId]
-    );
+    if (ban) {
+      // Full ban: revoke tier, role, creator status, subscription
+      await query(
+        `UPDATE users SET tier = 'banned', role = 'user', creator_status = 'none',
+         subscription_status = 'expired', updated_at = NOW() WHERE id = $1`,
+        [userId]
+      );
+
+      // Destroy all active sessions so the user is kicked immediately
+      try {
+        const redis = require('../../../config/redis').client;
+        const keys = await redis.keys('pnpapp:sess:*');
+        for (const key of keys) {
+          const val = await redis.get(key);
+          if (val && val.includes(userId.toString())) {
+            await redis.del(key);
+          }
+        }
+        logger.info('Destroyed sessions for banned user', { userId });
+      } catch (sessErr) {
+        logger.warn('Failed to destroy sessions for banned user', { userId, error: sessErr.message });
+      }
+    } else {
+      // Unban: restore to free tier
+      await query(
+        `UPDATE users SET tier = 'free', subscription_status = 'free', updated_at = NOW() WHERE id = $1`,
+        [userId]
+      );
+    }
 
     logger.info(`Admin ${ban ? 'banned' : 'unbanned'} user`, {
       adminId: user.id,
@@ -238,7 +261,7 @@ const banUser = async (req, res) => {
     });
 
     const result = await query(
-      `SELECT id, username, email, tier, subscription_status, plan_id AS subscription_plan, plan_expiry FROM users WHERE id = $1`,
+      `SELECT id, username, email, tier, role, creator_status, subscription_status, plan_id AS subscription_plan, plan_expiry FROM users WHERE id = $1`,
       [userId]
     );
 
