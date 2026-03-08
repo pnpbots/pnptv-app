@@ -276,6 +276,16 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
               Try Again
             </button>
           )}
+          {/* Continue anyway — lets user proceed when permissions are denied/unavailable.
+              The Jitsi iframe will handle its own permission prompts inside the call. */}
+          {(denied || unavailable) && (
+            <button
+              onClick={onGranted}
+              className="w-full py-3 rounded-xl text-white font-semibold text-sm transition-all border border-white/20 hover:bg-white/5"
+            >
+              Continue Anyway
+            </button>
+          )}
           {onCancel && (
             <button
               onClick={onCancel}

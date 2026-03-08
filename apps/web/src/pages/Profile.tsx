@@ -2653,7 +2653,7 @@ export default function Profile() {
                   className="flex-1 py-1.5 rounded-lg text-xs text-white/50 hover:text-white/80 transition-colors"
                   style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
                 >
-                  The Haus
+                  Main Stage
                 </button>
               </div>
               <div className="flex gap-2">

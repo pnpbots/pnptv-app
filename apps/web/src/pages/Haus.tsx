@@ -81,14 +81,14 @@ export default function Haus() {
     return (
       <div className="fixed inset-0 z-50 bg-black flex flex-col">
         <Helmet>
-          <title>The Haus | PNPtv</title>
+          <title>Main Stage | PNPtv</title>
         </Helmet>
         <div className="flex items-center justify-between px-4 py-2 bg-pnp-surface border-b border-pnp-border">
           <div className="flex items-center gap-3">
-            <span className="text-xl">🏠</span>
+            <span className="text-xl">🎭</span>
             <div>
               <h2 className="text-pnp-textPrimary font-bold text-base leading-tight">
-                The Haus
+                Main Stage
               </h2>
               {roomInfo && (
                 <p className="text-pnp-textSecondary text-xs">
@@ -106,7 +106,7 @@ export default function Haus() {
           allow="camera; microphone; display-capture; autoplay; clipboard-write; speaker-selection; fullscreen"
           allowFullScreen
           className="flex-1 w-full border-0"
-          title="The Haus — PNPtv Community Room"
+          title="Main Stage — PNPtv Community Room"
         />
       </div>
     );
@@ -115,13 +115,13 @@ export default function Haus() {
   return (
     <div className="p-4 pb-24 max-w-2xl mx-auto space-y-6">
       <Helmet>
-        <title>The Haus | PNPtv</title>
+        <title>Main Stage | PNPtv</title>
       </Helmet>
 
       {/* Hero */}
       <Card className="p-6 text-center space-y-4">
-        <div className="text-5xl">🏠</div>
-        <h1 className="text-2xl font-bold text-pnp-textPrimary">The Haus</h1>
+        <div className="text-5xl">🎭</div>
+        <h1 className="text-2xl font-bold text-pnp-textPrimary">Main Stage</h1>
         <p className="text-pnp-textSecondary leading-relaxed">
           PNPtv's 24/7 open community video room. Drop in anytime to hang out,
           chat, and vibe with the community — no reservation needed.
@@ -195,7 +195,7 @@ export default function Haus() {
             disabled={loading}
             className="w-full"
           >
-            {loading ? "Connecting..." : "Join The Haus"}
+            {loading ? "Connecting..." : "Join Main Stage"}
           </Button>
         ) : (
           <p className="text-pnp-textSecondary text-sm text-center py-2">
@@ -204,9 +204,9 @@ export default function Haus() {
         )}
       </Card>
 
-      {/* House Rules */}
+      {/* Stage Rules */}
       <Card className="p-6 space-y-3">
-        <h3 className="font-semibold text-pnp-textPrimary">House Rules</h3>
+        <h3 className="font-semibold text-pnp-textPrimary">Stage Rules</h3>
         <ul className="text-pnp-textSecondary text-sm space-y-2.5">
           <li className="flex items-start gap-2.5">
             <span className="mt-0.5 shrink-0">🔒</span>
@@ -217,7 +217,7 @@ export default function Haus() {
           <li className="flex items-start gap-2.5">
             <span className="mt-0.5 shrink-0">🚫</span>
             <span>
-              No recording — what happens in the Haus stays in the Haus
+              No recording — what happens on the Stage stays on the Stage
             </span>
           </li>
           <li className="flex items-start gap-2.5">
