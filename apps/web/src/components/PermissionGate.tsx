@@ -276,8 +276,8 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
               Try Again
             </button>
           )}
-          {/* Continue anyway — for WebViews, unavailable devices, or denied perms on mobile */}
-          {(unavailable || denied) && (
+          {/* Continue anyway — only for WebViews/unavailable devices, NOT denied perms */}
+          {(unavailable && !denied) && (
             <button
               onClick={onGranted}
               className="w-full py-3 rounded-xl text-white font-semibold text-sm transition-all border border-white/20 hover:bg-white/5"
