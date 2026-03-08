@@ -149,19 +149,24 @@ export default function Live() {
     setBuyError(null);
     try {
       let checkoutUrl: string;
+      let openedPopup: Window | null = null;
       if (buyMethod === 'card') {
         const result = await buyTokensCard(pkg.id);
         checkoutUrl = result.checkoutUrl;
-        window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
+        openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
       } else if (buyMethod === 'wallet') {
         const result = await buyTokensWallet(pkg.id);
         checkoutUrl = result.checkoutUrl;
-        window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
+        openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
       } else {
         // Dash — BTCPay has its own checkout page
         const result = await buyTokens(pkg.id);
         checkoutUrl = result.checkoutUrl;
-        window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
+        openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
+      }
+      if (!openedPopup) {
+        setBuyError("Your browser blocked the payment popup. Please allow popups for this site and try again.");
+        return; // don't close modal — user can retry
       }
       setShowBuyModal(false);
       // Fallback balance refresh 15s after checkout opens (in case Socket.IO event is missed)

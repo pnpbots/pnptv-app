@@ -148,6 +148,11 @@ function loadScript(src: string): Promise<void> {
 }
 
 // ── ePayco Checkout widget component ─────────────────────────────────────────
+const EPAYCO_ORIGINS = new Set([
+  "https://checkout.epayco.co",
+  "https://secure.epayco.co",
+  "https://epayco.co",
+]);
 interface EPaycoConfig {
   publicKey: string;
   amount: number;
@@ -211,6 +216,7 @@ function EPaycoWidget({ config, tokens, usd, onSuccess }: EPaycoWidgetProps) {
     // Listen for the ePayco postMessage response so we can detect success
     // inside the popup without relying solely on the redirect.
     function onMessage(evt: MessageEvent) {
+      if (!EPAYCO_ORIGINS.has(evt.origin)) return;
       try {
         const data = typeof evt.data === "string" ? JSON.parse(evt.data) : evt.data;
         if (data?.status === "Aceptada" || data?.x_transaction_state === "Aceptada") {
@@ -531,8 +537,11 @@ export default function TokenCheckout() {
             )}
             <button
               onClick={() => {
-                try { window.close(); } catch { /* noop */ }
-                window.location.href = "/live";
+                if (window.opener) {
+                  window.close();
+                } else {
+                  window.location.href = "/live";
+                }
               }}
               style={SECONDARY_BTN}
             >
@@ -596,7 +605,11 @@ export default function TokenCheckout() {
             </p>
             <button
               onClick={() => {
-                if (!window.close()) {
+                if (window.opener) {
+                  // Opened as a popup — close it; parent window stays on /live
+                  window.close();
+                } else {
+                  // Opened directly (e.g. user followed the link) — navigate home
                   window.location.href = "/live";
                 }
               }}

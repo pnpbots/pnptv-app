@@ -72,7 +72,7 @@ function idempotencyKey(provider, purchaseUuid) {
  */
 function generateEpaycoSignature({ invoice, amount, currencyCode }) {
   const pKey = process.env.EPAYCO_P_KEY || process.env.EPAYCO_PRIVATE_KEY;
-  const custId = process.env.EPAYCO_P_CUST_ID || process.env.EPAYCO_PUBLIC_KEY;
+  const custId = process.env.EPAYCO_P_CUST_ID;
 
   if (!pKey || !custId) {
     if (process.env.NODE_ENV === 'production') {
@@ -452,9 +452,9 @@ class TokenCheckoutService {
           description: `${tokens} PNP Tokens`,
           invoice: paymentRef,
           signature: signature,
-          extra1: purchaseUuid,
+          extra1: String(userId),
           extra2: 'token_purchase',
-          extra3: String(userId),
+          extra3: purchaseUuid,
           test: process.env.EPAYCO_TEST_MODE === 'true',
           response: `${WEB_APP_URL}/token-checkout/${purchaseUuid}?status=response`,
           confirmation: `${EPAYCO_WEBHOOK_DOMAIN}/api/webhooks/epayco`,
@@ -602,13 +602,21 @@ class TokenCheckoutService {
         };
       }
 
-      // Mark purchase as paid
-      await client.query(
+      // Mark purchase as paid — RETURNING guards against concurrent webhook double-credit
+      const updateResult = await client.query(
         `UPDATE token_purchases
          SET status = 'paid', settled_at = NOW()
-         WHERE id = $1 AND status = 'pending'`,
+         WHERE id = $1 AND status = 'pending'
+         RETURNING id`,
         [purchase.id]
       );
+
+      if (updateResult.rowCount === 0) {
+        // Another concurrent transaction already processed this purchase
+        await client.query('ROLLBACK');
+        logger.info('creditTokensFromPayment: concurrent update guard triggered (idempotent skip)', { lookupKey });
+        return { success: true, alreadyProcessed: true };
+      }
 
       // Credit wallet atomically
       const walletResult = await client.query(
