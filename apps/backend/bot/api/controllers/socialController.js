@@ -245,7 +245,7 @@ const postToMastodon = async (req, res) => {
 
 const createPostWithMedia = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, isExclusive, isShareable } = req.body;
+  const { content, isExclusive, isShareable, videoTitle, videoDescription } = req.body;
 
   if (!content || !content.toString().trim()) return res.status(400).json({ error: 'Content required' });
 
@@ -366,8 +366,10 @@ const createPostWithMedia = async (req, res) => {
 
     const exclusive = isExclusive === 'true' || isExclusive === true;
     const shareable = isShareable !== 'false' && isShareable !== false;
+    const vTitle = (mediaType === 'video' && videoTitle) ? videoTitle.toString().trim().slice(0, 150) : null;
+    const vDesc = (mediaType === 'video' && videoDescription) ? videoDescription.toString().trim() : null;
     const post = await SocialPostService.createPost(
-      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable
+      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable, null, vTitle, vDesc
     );
 
     if (!replyToId && !repostOfId && !exclusive) {

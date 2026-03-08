@@ -29,11 +29,98 @@ interface ChatMessage {
   timestamp: number;
 }
 
-type WidgetView = "chat" | "ticketForm" | "ticketView";
+type WidgetView = "helpCenter" | "chat" | "tutorial" | "ticketForm" | "ticketView";
 
 interface CristinaWidgetProps {
   mode?: "widget" | "page";
 }
+
+interface TutorialStep {
+  title: string;
+  description: string;
+  action?: string;
+}
+
+interface TutorialTopic {
+  id: string;
+  emoji: string;
+  steps: TutorialStep[];
+}
+
+const TUTORIAL_TOPICS: TutorialTopic[] = [
+  {
+    id: "getting-started",
+    emoji: "🚀",
+    steps: [
+      { title: "Welcome to PNPtv!", description: "PNPtv is your queer PNP community app. You can browse the social feed, watch live streams, join Hangouts video rooms, find people nearby, and unlock exclusive content with PRIME." },
+      { title: "Complete Your Profile", description: "Go to your Profile (bottom nav → person icon). Tap the camera icon to upload a photo, add your bio, set your location, and fill in your interests. A complete profile gets more attention!", action: "Go to Profile" },
+      { title: "Verify Your Age", description: "Some content requires age verification. In Profile → Settings, you can complete age verification using your date of birth. This is required to access creator content.", action: "Go to Settings" },
+      { title: "Accept Community Terms", description: "Read and accept the community guidelines in Profile → Settings → Terms & Conditions. This unlocks full access to the platform.", action: "Go to Settings" },
+    ],
+  },
+  {
+    id: "social-feed",
+    emoji: "📝",
+    steps: [
+      { title: "Browse the Social Feed", description: "Tap 'Social' in the bottom navigation to see posts from the community. Scroll through to discover what's being shared." },
+      { title: "Like & Comment on Posts", description: "Tap the heart icon to like a post. Tap the comment bubble to expand replies and write your own. Your engagement helps creators know you appreciate their content." },
+      { title: "Create a Post", description: "Tap the compose area at the top of the Social feed (or Home). Write your text, attach a photo or video, and tap Send. You can also post exclusively for PRIME members if you're a creator." },
+      { title: "Translate Posts", description: "Tap the globe/translate icon on any post to translate it to your language automatically. Tap again to show the original." },
+      { title: "Share Posts", description: "Tap the share icon to share a post link. You'll be asked to accept the Content Sharing Disclaimer once — after that, sharing is instant." },
+    ],
+  },
+  {
+    id: "live-streams",
+    emoji: "📺",
+    steps: [
+      { title: "Find Live Streams", description: "Tap 'Live' in the bottom navigation to see all active streams. Look for the red LIVE badge on performer cards." },
+      { title: "Watch a Stream", description: "Tap any live card to open the stream player. You can chat in the live chat on the right side while watching." },
+      { title: "Go Live (Browser)", description: "In the Live page, tap 'Go Live'. Choose 'Stream from this device' to broadcast using your camera and microphone directly from the app.", action: "Go to Live" },
+      { title: "Go Live (OBS/RTMP)", description: "Prefer OBS or a streaming app? In the Go Live modal, your RTMP URL and Stream Key are shown. Enter these into OBS → Settings → Stream to broadcast.", action: "Go to Live" },
+    ],
+  },
+  {
+    id: "nearby",
+    emoji: "📍",
+    steps: [
+      { title: "Enable Location", description: "Go to Nearby (bottom nav → map pin icon). Allow location access when prompted. Your exact location is never stored — only a general area." },
+      { title: "Discover Nearby People", description: "Browse members in your area on the map and list view. You can filter by activity and distance radius." },
+      { title: "Connect with Someone", description: "Tap a profile card to view their profile. If they're a PRIME member or you are, you can send them a direct message.", action: "Go to Nearby" },
+      { title: "Privacy Controls", description: "In Profile → Settings, you can hide your location, set your visibility, or disable Nearby entirely at any time." },
+    ],
+  },
+  {
+    id: "hangouts",
+    emoji: "🎥",
+    steps: [
+      { title: "What are Hangouts?", description: "Hangouts are live video rooms where community members can join, see each other on camera, and chat in real time. Think of them like casual video lounges." },
+      { title: "Join a Hangout", description: "Go to Hangouts (bottom nav). Tap any active room card to join. You'll be asked to enable your camera and microphone.", action: "Go to Hangouts" },
+      { title: "Create a Room", description: "Tap the '+' or 'Create Room' button in Hangouts to open your own room. Give it a name, set it public or invite-only, and start your session." },
+      { title: "Manage Your Room", description: "As a room host, you can mute participants, remove disruptive users, and close the room at any time using the host controls panel." },
+    ],
+  },
+  {
+    id: "prime",
+    emoji: "👑",
+    steps: [
+      { title: "What is PRIME?", description: "PRIME is the premium membership tier on PNPtv. PRIME members unlock direct messaging, exclusive creator content, priority in Nearby, HD streaming, and more." },
+      { title: "Subscribe to PRIME", description: "Go to Subscribe (bottom nav → star icon or the upgrade banner). Choose a plan and complete payment. Your PRIME status activates instantly.", action: "Go to Subscribe" },
+      { title: "PRIME Plans", description: "There are multiple PRIME plans: monthly, quarterly, and yearly. Yearly plans offer the best value. Check the Subscribe page for current pricing." },
+      { title: "Check Your Status", description: "In Profile → Settings → Membership, you can see your current tier, plan expiry, and manage your subscription at any time.", action: "Go to Profile" },
+    ],
+  },
+  {
+    id: "creator",
+    emoji: "🎭",
+    steps: [
+      { title: "What is a Creator?", description: "Creators are verified members who can post exclusive content, receive subscriber payments, go live as performers, and appear in the Featured section." },
+      { title: "Apply to Be a Creator", description: "Go to Profile → Settings → Creator Program and submit your application. Include your bio, content type, and links. Our team reviews applications within 48 hours.", action: "Go to Profile" },
+      { title: "Post Exclusive Content", description: "Once approved, when creating a post you'll have an option to mark it as 'Exclusive — PRIME subscribers only'. This content is paywalled for non-subscribers." },
+      { title: "Get Your Subscribers", description: "Your creator profile appears on the Performers section of the Live page. Promote your PNPtv profile on your socials to bring in new subscribers." },
+      { title: "Go Live as a Creator", description: "Creators with an assigned Restreamer channel can broadcast live. Go to your Profile and tap 'Go Live' — your stream appears on the Live page instantly.", action: "Go to Live" },
+    ],
+  },
+];
 
 export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   const { user } = useAuth();
@@ -48,7 +135,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Ticket state
-  const [view, setView] = useState<WidgetView>("chat");
+  const [view, setView] = useState<WidgetView>("helpCenter");
   const [ticket, setTicket] = useState<SupportTicket | null>(null);
   const [ticketMessages, setTicketMessages] = useState<TicketMessage[]>([]);
   const [selectedCategory, setSelectedCategory] =
@@ -56,6 +143,10 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   const [ticketDescription, setTicketDescription] = useState("");
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [hasUnreadReply, setHasUnreadReply] = useState(false);
+
+  // Tutorial state
+  const [selectedTutorial, setSelectedTutorial] = useState<string | null>(null);
+  const [tutorialStep, setTutorialStep] = useState(0);
 
   // Refs that mirror isOpen/view so socket listeners can read current values
   // without being re-registered every time these state values change.
@@ -248,6 +339,9 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
       await clearSupportHistory();
     } catch {}
     setMessages([]);
+    setView("helpCenter");
+    setSelectedTutorial(null);
+    setTutorialStep(0);
   }, []);
 
   const handleCreateTicket = async () => {
@@ -319,6 +413,20 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
     { key: "general", emoji: "📋", label: t.categoryGeneral },
   ];
 
+  // Helper: map topic id to translated name
+  const getTopicName = (topicId: string): string => {
+    const map: Record<string, string> = {
+      "getting-started": t.tutTopicGettingStarted,
+      "social-feed": t.tutTopicSocialFeed,
+      "live-streams": t.tutTopicLiveStreams,
+      "nearby": t.tutTopicNearby,
+      "hangouts": t.tutTopicHangouts,
+      "prime": t.tutTopicPrime,
+      "creator": t.tutTopicCreator,
+    };
+    return map[topicId] ?? topicId;
+  };
+
   // FAB button (widget mode only)
   if (mode === "widget" && !isOpen) {
     return (
@@ -388,6 +496,12 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
             <p className="text-[10px] text-pnp-textSecondary">
               {t.widgetSubtitle}
             </p>
+            <span
+              className="inline-block mt-0.5 px-1.5 py-0 text-[9px] font-bold rounded-full uppercase tracking-wider"
+              style={{ background: "rgba(91,200,245,0.2)", color: "#5BC8F5", border: "1px solid rgba(91,200,245,0.35)" }}
+            >
+              {t.helpTag}
+            </span>
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -458,6 +572,254 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
           )}
         </div>
       </div>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* HELP CENTER VIEW                                                     */}
+      {/* ------------------------------------------------------------------ */}
+      {view === "helpCenter" && (
+        <div className="flex-1 overflow-y-auto p-4">
+          {/* Open ticket banner */}
+          {ticket && ticket.status !== "closed" && (
+            <div
+              onClick={() => { setView("ticketView"); setHasUnreadReply(false); }}
+              className="mb-4 px-3 py-2 bg-cyan-900/40 border border-cyan-500/30 rounded-lg cursor-pointer hover:bg-cyan-900/60 transition-colors"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-cyan-300">📋 {t.openTicketBanner}</span>
+                <span className="text-xs text-cyan-400 font-medium">{t.viewTicketLink}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Greeting */}
+          <div className="text-center mb-5 mt-2">
+            <span className="text-4xl block mb-2">🧜‍♀️</span>
+            <h4 className="text-sm font-semibold text-white mb-1">{t.helpCenterTitle}</h4>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>{t.helpCenterSubtitle}</p>
+          </div>
+
+          {/* 2x2 category grid */}
+          <div className="grid grid-cols-2 gap-2.5 mb-4">
+            {/* Membership */}
+            <button
+              onClick={() => {
+                setView("chat");
+                sendMessage(lang === "es"
+                  ? "¿Cuál es mi estado de membresía actual? Cuéntame sobre los planes PRIME disponibles y qué está incluido."
+                  : "What is my current membership status? Tell me about the available PRIME plans and what's included.");
+              }}
+              className="flex flex-col items-start p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
+              style={{ background: "rgba(91,200,245,0.08)", border: "1px solid rgba(91,200,245,0.2)" }}
+            >
+              <span className="text-xl mb-1.5">💳</span>
+              <p className="text-xs font-semibold text-white leading-tight">{t.catMembership}</p>
+              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{t.catMembershipDesc}</p>
+            </button>
+
+            {/* How to Use */}
+            <button
+              onClick={() => {
+                setView("tutorial");
+                setSelectedTutorial(null);
+                setTutorialStep(0);
+              }}
+              className="flex flex-col items-start p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
+              style={{ background: "rgba(91,200,245,0.08)", border: "1px solid rgba(91,200,245,0.2)" }}
+            >
+              <span className="text-xl mb-1.5">📱</span>
+              <p className="text-xs font-semibold text-white leading-tight">{t.catHowToUse}</p>
+              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{t.catHowToUseDesc}</p>
+            </button>
+
+            {/* Being a Creator */}
+            <button
+              onClick={() => {
+                setView("chat");
+                sendMessage(lang === "es"
+                  ? "¿Cómo me convierto en creador en PNPtv? ¿Cuáles son los requisitos y beneficios?"
+                  : "How do I become a creator on PNPtv? What are the requirements and benefits?");
+              }}
+              className="flex flex-col items-start p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
+              style={{ background: "rgba(212,0,122,0.08)", border: "1px solid rgba(212,0,122,0.2)" }}
+            >
+              <span className="text-xl mb-1.5">🎭</span>
+              <p className="text-xs font-semibold text-white leading-tight">{t.catCreator}</p>
+              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{t.catCreatorDesc}</p>
+            </button>
+
+            {/* Wellness & Community */}
+            <button
+              onClick={() => {
+                setView("chat");
+                sendMessage(lang === "es"
+                  ? "Cuéntame sobre las pautas de la comunidad PNPtv y qué recursos de bienestar y apoyo comunitario están disponibles."
+                  : "Tell me about the PNPtv community guidelines and what wellness resources and community support are available.");
+              }}
+              className="flex flex-col items-start p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
+              style={{ background: "rgba(52,199,89,0.08)", border: "1px solid rgba(52,199,89,0.2)" }}
+            >
+              <span className="text-xl mb-1.5">💚</span>
+              <p className="text-xs font-semibold text-white leading-tight">{t.catWellness}</p>
+              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{t.catWellnessDesc}</p>
+            </button>
+          </div>
+
+          {/* Chat with Cristina CTA */}
+          <button
+            onClick={() => setView("chat")}
+            className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98]"
+            style={{ background: "linear-gradient(135deg, #5BC8F5, #00D4E8)" }}
+          >
+            {t.helpCenterChatBtn}
+          </button>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* TUTORIAL VIEW                                                        */}
+      {/* ------------------------------------------------------------------ */}
+      {view === "tutorial" && (
+        <div className="flex-1 overflow-y-auto p-4">
+          {/* Back button + title */}
+          <div className="flex items-center gap-2 mb-4">
+            <button
+              onClick={() => {
+                if (selectedTutorial) {
+                  setSelectedTutorial(null);
+                  setTutorialStep(0);
+                } else {
+                  setView("helpCenter");
+                }
+              }}
+              className="text-gray-400 hover:text-white transition-colors text-xs font-medium"
+            >
+              {t.tutorialBack}
+            </button>
+            <h3 className="text-white font-semibold text-sm">{t.tutorialTitle}</h3>
+          </div>
+
+          {selectedTutorial === null ? (
+            /* Topic list */
+            <div className="space-y-2">
+              {TUTORIAL_TOPICS.map((topic) => {
+                const topicName = getTopicName(topic.id);
+                return (
+                  <button
+                    key={topic.id}
+                    onClick={() => { setSelectedTutorial(topic.id); setTutorialStep(0); }}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all hover:bg-white/10 active:scale-[0.98]"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
+                  >
+                    <span className="text-2xl flex-shrink-0">{topic.emoji}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-white">{topicName}</p>
+                      <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>{topic.steps.length} steps</p>
+                    </div>
+                    <svg className="w-4 h-4 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            /* Step view */
+            (() => {
+              const topic = TUTORIAL_TOPICS.find((tp) => tp.id === selectedTutorial);
+              if (!topic) return null;
+              const step = topic.steps[tutorialStep];
+              const isLast = tutorialStep === topic.steps.length - 1;
+              const topicName = getTopicName(topic.id);
+              return (
+                <div className="flex flex-col h-full">
+                  {/* Topic header */}
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="text-2xl">{topic.emoji}</span>
+                    <div>
+                      <p className="text-xs font-semibold text-white">{topicName}</p>
+                      <p className="text-[10px]" style={{ color: "#8E8E93" }}>{t.tutorialStepOf} {tutorialStep + 1} {t.tutorialOf} {topic.steps.length}</p>
+                    </div>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="w-full h-1 rounded-full mb-4" style={{ background: "rgba(255,255,255,0.08)" }}>
+                    <div
+                      className="h-1 rounded-full transition-all"
+                      style={{ width: `${((tutorialStep + 1) / topic.steps.length) * 100}%`, background: "linear-gradient(90deg, #5BC8F5, #00D4E8)" }}
+                    />
+                  </div>
+
+                  {/* Step dots */}
+                  <div className="flex gap-1.5 mb-4 justify-center">
+                    {topic.steps.map((_, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setTutorialStep(i)}
+                        className="w-2 h-2 rounded-full transition-all"
+                        style={{ background: i === tutorialStep ? "#5BC8F5" : "rgba(255,255,255,0.2)" }}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Step content card */}
+                  <div className="rounded-xl p-4 mb-4 flex-1" style={{ background: "rgba(91,200,245,0.06)", border: "1px solid rgba(91,200,245,0.15)" }}>
+                    <h4 className="text-sm font-bold text-white mb-2">{step.title}</h4>
+                    <p className="text-sm leading-relaxed" style={{ color: "rgba(255,255,255,0.8)" }}>{step.description}</p>
+                    {step.action && (
+                      <div className="mt-3 flex items-center gap-1.5 text-xs font-medium" style={{ color: "#5BC8F5" }}>
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {step.action}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Navigation */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setTutorialStep((s) => Math.max(0, s - 1))}
+                      disabled={tutorialStep === 0}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-white/20 text-white/70 hover:border-white/40 transition-colors disabled:opacity-30"
+                    >
+                      {t.tutorialPrev}
+                    </button>
+                    {isLast ? (
+                      <button
+                        onClick={() => { setSelectedTutorial(null); setTutorialStep(0); }}
+                        className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white"
+                        style={{ background: "linear-gradient(135deg, #5BC8F5, #00D4E8)" }}
+                      >
+                        {t.tutorialDone}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setTutorialStep((s) => Math.min(topic.steps.length - 1, s + 1))}
+                        className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white"
+                        style={{ background: "linear-gradient(135deg, #5BC8F5, #00D4E8)" }}
+                      >
+                        {t.tutorialNext}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Ask Cristina */}
+                  <button
+                    onClick={() => {
+                      setView("chat");
+                      sendMessage(`${lang === "es" ? "Tengo una pregunta sobre" : "I have a question about"}: ${topicName} — ${step.title}`);
+                    }}
+                    className="mt-2 w-full py-2 rounded-xl text-xs font-medium text-cyan-400 hover:text-cyan-300 transition-colors"
+                    style={{ background: "rgba(91,200,245,0.06)", border: "1px solid rgba(91,200,245,0.15)" }}
+                  >
+                    {t.tutorialAskCristina}
+                  </button>
+                </div>
+              );
+            })()
+          )}
+        </div>
+      )}
 
       {/* ------------------------------------------------------------------ */}
       {/* TICKET FORM VIEW                                                     */}
@@ -669,6 +1031,15 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
 
           {messages.length === 0 && !isLoading && (
             <div className="animate-fade-in-up">
+              {/* Back to Help Center link */}
+              <button
+                onClick={() => setView("helpCenter")}
+                className="text-xs mb-4"
+                style={{ color: "#5BC8F5" }}
+              >
+                ← Back to Help Center
+              </button>
+
               {/* Welcome message */}
               <div className="text-center mb-6 mt-4">
                 <span className="text-4xl block mb-2">🧜‍♀️</span>
@@ -778,8 +1149,8 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
         </div>
       )}
 
-      {/* Input area — hidden in ticketForm view (form has its own submit button) */}
-      {view !== "ticketForm" && (
+      {/* Input area — hidden in ticketForm, helpCenter, and tutorial views */}
+      {view !== "ticketForm" && view !== "helpCenter" && view !== "tutorial" && (
         <form
           onSubmit={handleSubmit}
           className="flex items-center gap-2 p-3 pb-safe border-t border-pnp-border flex-shrink-0"

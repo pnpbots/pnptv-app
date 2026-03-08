@@ -53,6 +53,43 @@ const strings = {
     supportTicketViewTitle: "Support Ticket",
     ticketReplied: "Replied",
     waitingForSupport: "Waiting for support team response...",
+
+    // Help tag
+    helpTag: "Help",
+
+    // Help Center home screen
+    helpCenterTitle: "How can I help you?",
+    helpCenterSubtitle: "Choose a topic or chat with me directly",
+    helpCenterChatBtn: "💬 Chat with Cristina",
+
+    // Help Center category cards
+    catMembership: "Membership & Plans",
+    catMembershipDesc: "Status, subscription, tiers & billing",
+    catHowToUse: "How to Use the App",
+    catHowToUseDesc: "Step-by-step tutorials & guides",
+    catCreator: "Being a Creator",
+    catCreatorDesc: "Apply, post content & grow your audience",
+    catWellness: "Wellness & Community",
+    catWellnessDesc: "Guidelines, safety & community support",
+
+    // Tutorial view
+    tutorialTitle: "Tutorials",
+    tutorialBack: "← Back",
+    tutorialStepOf: "Step",
+    tutorialOf: "of",
+    tutorialPrev: "← Prev",
+    tutorialNext: "Next →",
+    tutorialDone: "Done ✓",
+    tutorialAskCristina: "Ask Cristina about this",
+
+    // Tutorial topic names
+    tutTopicGettingStarted: "Getting Started",
+    tutTopicSocialFeed: "The Social Feed",
+    tutTopicLiveStreams: "Live Streams",
+    tutTopicNearby: "Nearby People",
+    tutTopicHangouts: "Hangouts",
+    tutTopicPrime: "PRIME Membership",
+    tutTopicCreator: "Become a Creator",
   },
   es: {
     pageTitle: "Soporte — PNPtv!",
@@ -97,6 +134,34 @@ const strings = {
     supportTicketViewTitle: "Ticket de Soporte",
     ticketReplied: "Respondido",
     waitingForSupport: "Esperando respuesta del equipo de soporte...",
+
+    helpTag: "Ayuda",
+    helpCenterTitle: "¿Cómo puedo ayudarte?",
+    helpCenterSubtitle: "Elige un tema o chatea conmigo directamente",
+    helpCenterChatBtn: "💬 Chatear con Cristina",
+    catMembership: "Membresía y Planes",
+    catMembershipDesc: "Estado, suscripción, niveles y facturación",
+    catHowToUse: "Cómo Usar la App",
+    catHowToUseDesc: "Tutoriales y guías paso a paso",
+    catCreator: "Ser Creador",
+    catCreatorDesc: "Aplica, publica contenido y crece",
+    catWellness: "Bienestar y Comunidad",
+    catWellnessDesc: "Guías, seguridad y apoyo comunitario",
+    tutorialTitle: "Tutoriales",
+    tutorialBack: "← Atrás",
+    tutorialStepOf: "Paso",
+    tutorialOf: "de",
+    tutorialPrev: "← Ant",
+    tutorialNext: "Sig →",
+    tutorialDone: "Listo ✓",
+    tutorialAskCristina: "Preguntarle a Cristina sobre esto",
+    tutTopicGettingStarted: "Primeros Pasos",
+    tutTopicSocialFeed: "El Feed Social",
+    tutTopicLiveStreams: "Streams en Vivo",
+    tutTopicNearby: "Personas Cercanas",
+    tutTopicHangouts: "Hangouts",
+    tutTopicPrime: "Membresía PRIME",
+    tutTopicCreator: "Ser Creador",
   },
 } as const;
 
