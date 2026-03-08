@@ -164,6 +164,12 @@ export default function Live() {
         window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
       }
       setShowBuyModal(false);
+      // Fallback balance refresh 15s after checkout opens (in case Socket.IO event is missed)
+      setTimeout(() => {
+        getWalletBalance().then((res) => {
+          if (typeof res.balance === 'number') setTokenBalance(res.balance);
+        }).catch(() => {});
+      }, 15_000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "";
       if (msg.includes("not available") || msg.includes("not configured")) {

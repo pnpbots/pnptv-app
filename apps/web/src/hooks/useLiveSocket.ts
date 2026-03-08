@@ -42,6 +42,51 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
   // Tracks the currently joined streamId so we can emit live:leave on change/unmount
   const joinedStreamRef = useRef<string | null>(null);
 
+  // ── Always-on: personal event bus (wallet updates, connection state) ─────────
+  // Runs once on mount — connects the socket regardless of streamId so that
+  // wallet:updated events are received even on non-stream pages (e.g. Live lobby).
+  useEffect(() => {
+    const socket = connectSocket();
+
+    const onWalletUpdated = (data: { balance: number }) => {
+      setWalletBalance(data.balance);
+    };
+    const onConnect = () => {
+      setIsConnected(true);
+      setSocketError(null);
+    };
+    const onDisconnect = () => {
+      setIsConnected(false);
+      joinedStreamRef.current = null;
+    };
+    const onError = () => {
+      setIsConnected(false);
+    };
+    const onLiveError = (data: { message: string }) => {
+      setSocketError(data.message);
+      setTimeout(() => setSocketError(null), 5000);
+    };
+
+    if (socket.connected) {
+      setIsConnected(true);
+    }
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.on("connect_error", onError);
+    socket.on("wallet:updated", onWalletUpdated);
+    socket.on("live:error", onLiveError);
+
+    return () => {
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("connect_error", onError);
+      socket.off("wallet:updated", onWalletUpdated);
+      socket.off("live:error", onLiveError);
+    };
+  }, []);
+
+  // ── Stream-specific: join/leave room, messages, viewer count, tips ───────────
   useEffect(() => {
     if (!streamId) {
       if (joinedStreamRef.current) {
@@ -61,19 +106,8 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       joinedStreamRef.current = streamId;
     };
 
-    const onConnect = () => {
-      setIsConnected(true);
-      setSocketError(null);
+    const onConnectForStream = () => {
       joinStream();
-    };
-
-    const onDisconnect = () => {
-      setIsConnected(false);
-      joinedStreamRef.current = null;
-    };
-
-    const onError = () => {
-      setIsConnected(false);
     };
 
     const onHistory = (data: LiveChatMessage[] | { messages: LiveChatMessage[] }) => {
@@ -99,25 +133,11 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       setLatestTip(tip);
     };
 
-    const onWalletUpdated = (data: { balance: number }) => {
-      setWalletBalance(data.balance);
-    };
-
-    const onLiveError = (data: { message: string }) => {
-      setSocketError(data.message);
-      // Auto-clear after 5s
-      setTimeout(() => setSocketError(null), 5000);
-    };
-
-    socket.on("connect", onConnect);
-    socket.on("disconnect", onDisconnect);
-    socket.on("connect_error", onError);
+    socket.on("connect", onConnectForStream);
     socket.on("live:history", onHistory);
     socket.on("live:message", onMessage);
     socket.on("live:viewer_count", onViewerCount);
     socket.on("live:tip", onTip);
-    socket.on("wallet:updated", onWalletUpdated);
-    socket.on("live:error", onLiveError);
 
     // Leave previous stream if switching mid-session
     if (joinedStreamRef.current && joinedStreamRef.current !== streamId) {
@@ -127,8 +147,6 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
 
     // Join immediately if already connected
     if (socket.connected) {
-      setIsConnected(true);
-      setSocketError(null);
       joinStream();
     }
 
@@ -140,15 +158,11 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
         socket.emit("live:leave", { streamId: joinedStreamRef.current });
         joinedStreamRef.current = null;
       }
-      socket.off("connect", onConnect);
-      socket.off("disconnect", onDisconnect);
-      socket.off("connect_error", onError);
+      socket.off("connect", onConnectForStream);
       socket.off("live:history", onHistory);
       socket.off("live:message", onMessage);
       socket.off("live:viewer_count", onViewerCount);
       socket.off("live:tip", onTip);
-      socket.off("wallet:updated", onWalletUpdated);
-      socket.off("live:error", onLiveError);
     };
   }, [streamId]);
 
