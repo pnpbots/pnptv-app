@@ -64,6 +64,7 @@ export interface TelegramAuthResponse {
     creator_status?: string;
     creator_type?: string | null;
     contentDisclaimer?: boolean;
+    last_login_method?: string | null;
   };
   requiresTerms?: boolean;
   error?: string;
@@ -588,6 +589,7 @@ export interface SocialPostItem {
   bsky_author_display_name?: string | null;
   // Tier-gating fields (free-tier users see blurred posts)
   blurred?: boolean;
+  content_locked?: boolean;
   content_tier?: string;
   // Multi-image support (up to 4 files per post)
   media_urls?: Array<{ url: string; type: string; thumbnail_url?: string }> | null;
@@ -634,6 +636,25 @@ export function crossPostToBluesky(postId: number): Promise<{
   return request(`/api/webapp/social/posts/${postId}/crosspost-bluesky`, {
     method: "POST",
   });
+}
+
+export interface XStatus {
+  linked: boolean;
+  hasWriteScope: boolean;
+  handle: string | null;
+}
+
+export function getXStatus(): Promise<{ success: boolean; status: XStatus }> {
+  return request("/api/social/x-status");
+}
+
+export function sharePostToX(postId: number): Promise<{
+  success: boolean;
+  tweetId?: string;
+  tweetUrl?: string;
+  error?: string;
+}> {
+  return request(`/api/social/posts/${postId}/share-x`, { method: "POST" });
 }
 
 export function getProfile(): Promise<{ success: boolean; profile: UserProfile }> {
@@ -715,6 +736,14 @@ export function getPublicPost(
 ): Promise<{ success: boolean; post: SocialPostItem }> {
   return request(`/api/webapp/social/posts/${postId}`);
 }
+
+/**
+ * Fetch a single post by ID using the authenticated session endpoint.
+ * Respects tier-gating: returns `blurred: true` + `content_locked: true` for
+ * posts the viewer's tier cannot access. Alias for `getPublicPost` with a
+ * semantically accurate name.
+ */
+export const getSocialPost = getPublicPost;
 
 export function getSocialFeedPosts(
   cursor?: string,
@@ -1491,7 +1520,7 @@ export function getNotifications(
 }> {
   const params = new URLSearchParams();
   if (limit) params.append("limit", limit.toString());
-  if (offset) params.append("offset", offset.toString());
+  if (offset != null && offset > 0) params.append("offset", offset.toString());
   return request(`/api/webapp/notifications?${params.toString()}`);
 }
 

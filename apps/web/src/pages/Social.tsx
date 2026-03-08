@@ -8,6 +8,7 @@ import { Modal } from "@pnptv/ui-kit";
 import FreeTierOverlay from "@/components/FreeTierOverlay";
 import { BulkVideoUpload } from "@/components/BulkVideoUpload";
 import { PostComposer } from "@/components/PostComposer";
+import { SharePostModal } from "@/components/SharePostModal";
 import {
   getSocialFeedPosts,
   getWofFeedPosts,
@@ -77,6 +78,7 @@ function PostCard({
   const { feed: t } = useI18n();
   const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
   const [disclaimerAccepting, setDisclaimerAccepting] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   const [showReplies, setShowReplies] = useState(false);
   const [replies, setReplies] = useState<SocialPostItem[]>([]);
   const [loadingReplies, setLoadingReplies] = useState(false);
@@ -140,18 +142,9 @@ function PostCard({
     setSendingReply(false);
   }, [replyText, sendingReply, post]);
 
-  const handleShare = useCallback(async () => {
-    const url = `https://app.pnptv.app/social/post/${post.id}`;
-    const displayName = post.author_first_name || post.author_username || "Someone";
-    const text = post.content
-      ? `${displayName}: ${post.content.slice(0, 100)}`
-      : `Check out ${displayName}'s post on PNPtv!`;
-    if (navigator.share) {
-      try { await navigator.share({ title: `${displayName} on PNPtv!`, text, url }); } catch { /* cancelled */ }
-    } else {
-      try { await navigator.clipboard.writeText(url); } catch { /* silent */ }
-    }
-  }, [post]);
+  const handleShare = useCallback(() => {
+    setShowShareModal(true);
+  }, []);
 
   const handleTranslate = useCallback(async () => {
     if (isTranslating) return;
@@ -625,6 +618,15 @@ function PostCard({
           </div>
         </div>
       )}
+
+      {/* Share Post Modal */}
+      <SharePostModal
+        postId={post.id}
+        postContent={post.content}
+        authorName={post.author_first_name || post.author_username}
+        isOpen={showShareModal}
+        onClose={() => setShowShareModal(false)}
+      />
     </div>
   );
 }

@@ -275,7 +275,7 @@ const sessionMiddleware = session({
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge: 90 * 24 * 60 * 60 * 1000, // 90 days — active users stay logged in
     path: '/',
     domain: process.env.NODE_ENV === 'production' ? '.pnptv.app' : undefined
   }
@@ -2091,7 +2091,7 @@ app.post('/api/webapp/auth/reset-password', authLimiter, asyncHandler(webAppCont
 
 // Web App Profile
 app.get('/api/webapp/profile', asyncHandler(webAppController.getProfile));
-app.put('/api/webapp/profile', asyncHandler(webAppController.updateProfile));
+app.put('/api/webapp/profile', requireSessionAuth, asyncHandler(webAppController.updateProfile));
 app.post('/api/webapp/profile/avatar', requireSessionAuth, uploadLimiter, avatarUpload.single('avatar'), asyncHandler(webAppController.uploadAvatar));
 
 // Web App Privacy Settings
@@ -2159,12 +2159,12 @@ app.get('/api/webapp/users/is-blocked/:userId', asyncHandler(blockedUsersControl
 
 // Web App Follow System
 const followController = require('./controllers/followController');
-app.post('/api/webapp/users/follow',                   asyncHandler(followController.followUser));
-app.post('/api/webapp/users/unfollow',                 asyncHandler(followController.unfollowUser));
+app.post('/api/webapp/users/follow',                   requireSessionAuth, socialActionLimiter, asyncHandler(followController.followUser));
+app.post('/api/webapp/users/unfollow',                 requireSessionAuth, socialActionLimiter, asyncHandler(followController.unfollowUser));
 app.get('/api/webapp/users/follow-status/:userId',     asyncHandler(followController.getFollowStatus));
 app.get('/api/webapp/users/:userId/followers',         asyncHandler(followController.getFollowers));
 app.get('/api/webapp/users/:userId/following',         asyncHandler(followController.getFollowing));
-app.get('/api/webapp/social/feed/following',           asyncHandler(followController.getFollowingFeed));
+app.get('/api/webapp/social/feed/following',           requireSessionAuth, asyncHandler(followController.getFollowingFeed));
 
 // Web App Direct Messages
 app.get('/api/webapp/messages/threads', asyncHandler(directMessagesController.getThreads));
@@ -2173,10 +2173,20 @@ app.post('/api/webapp/messages/send', requireFreeTierDmLimit, asyncHandler(direc
 app.delete('/api/webapp/messages/:messageId', asyncHandler(directMessagesController.deleteMessage));
 app.put('/api/webapp/messages/thread/:otherUserId/read', asyncHandler(directMessagesController.markThreadAsRead));
 
+// Rate limiter for notification read endpoints (60 req/min per authenticated user)
+const notificationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  handler: (req, res) => res.status(429).json({ error: 'Too many notification requests. Slow down.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Web App Notifications
-app.get('/api/webapp/notifications', asyncHandler(notificationsController.getNotifications));
-app.get('/api/webapp/notifications/counts', asyncHandler(notificationsController.getNotificationCounts));
-app.put('/api/webapp/notifications/mark-read', asyncHandler(notificationsController.markAsRead));
+app.get('/api/webapp/notifications', requireSessionAuth, notificationLimiter, asyncHandler(notificationsController.getNotifications));
+app.get('/api/webapp/notifications/counts', requireSessionAuth, notificationLimiter, asyncHandler(notificationsController.getNotificationCounts));
+app.put('/api/webapp/notifications/mark-read', requireSessionAuth, asyncHandler(notificationsController.markAsRead));
 
 // Web App Mastodon Feed
 app.get('/api/webapp/mastodon/feed', asyncHandler(webAppController.getMastodonFeed));
@@ -2371,183 +2381,195 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
   const username = user.username || user.first_name || null;
   const language = user.language || 'es';
 
-  // Ensure user has email + password credentials before processing payment
+  const meruLockKey = `meru:activate:${meruCode}`;
+  const meruLockAcquired = await cache.acquireLock(meruLockKey, 30);
+  if (!meruLockAcquired) {
+    return res.status(409).json({ success: false, error: 'Activation already in progress for this code' });
+  }
+
   try {
-    await ensureEmailCredentials(userId, email.trim(), language);
-    req.session.user = { ...req.session.user, email: email.trim() };
-  } catch (credErr) {
-    if (credErr.message.includes('already associated')) {
-      return res.status(409).json({ success: false, error: credErr.message });
+    // Ensure user has email + password credentials before processing payment
+    try {
+      await ensureEmailCredentials(userId, email.trim(), language);
+      req.session.user = { ...req.session.user, email: email.trim() };
+    } catch (credErr) {
+      if (credErr.message.includes('already associated')) {
+        return res.status(409).json({ success: false, error: credErr.message });
+      }
+      logger.warn('ensureEmailCredentials failed (non-critical)', { userId, error: credErr.message });
     }
-    logger.warn('ensureEmailCredentials failed (non-critical)', { userId, error: credErr.message });
-  }
 
-  // 1. Check code exists and is available
-  const meruLinkService = require('../../services/meruLinkService');
-  const availableLinks = await meruLinkService.getAvailableLinks();
-  const matchingLink = availableLinks.find((link) => link.code === meruCode);
+    // 1. Check code exists and is available
+    const meruLinkService = require('../../services/meruLinkService');
+    const availableLinks = await meruLinkService.getAvailableLinks();
+    const matchingLink = availableLinks.find((link) => link.code === meruCode);
 
-  if (!matchingLink) {
-    return res.status(404).json({ success: false, error: 'Code not found or already used' });
-  }
+    if (!matchingLink) {
+      return res.status(404).json({ success: false, error: 'Code not found or already used' });
+    }
 
-  // 2. Puppeteer verification — confirm payment was made on Meru
-  const meruPaymentService = require('../../services/meruPaymentService');
-  const verification = await meruPaymentService.verifyPayment(meruCode, language);
+    // 2. Puppeteer verification — confirm payment was made on Meru
+    const meruPaymentService = require('../../services/meruPaymentService');
+    const verification = await meruPaymentService.verifyPayment(meruCode, language);
 
-  if (!verification.isPaid) {
-    return res.status(402).json({ success: false, error: 'Payment not yet completed on Meru. Please complete payment first.' });
-  }
+    if (!verification.isPaid) {
+      return res.status(402).json({ success: false, error: 'Payment not yet completed on Meru. Please complete payment first.' });
+    }
 
-  // 3. Activate membership — set lifetime100 (member tier) + 2 months PRIME bonus
-  const UserModel = require('../../models/userModel');
-  const primeExpiry = new Date();
-  primeExpiry.setDate(primeExpiry.getDate() + 60); // 2 months PRIME bonus
+    // 3. Activate membership — set lifetime100 (member tier) + 2 months PRIME bonus
+    const UserModel = require('../../models/userModel');
+    const primeExpiry = new Date();
+    primeExpiry.setDate(primeExpiry.getDate() + 60); // 2 months PRIME bonus
 
-  // Start with PRIME tier (for the 2-month bonus period), then cron/expiry will downgrade to member
-  await UserModel.updateSubscription(userId, {
-    status: 'active',
-    planId: 'lifetime100',
-    expiry: null, // lifetime member — no expiry on the base plan
-  });
-
-  // Grant PRIME for 2 months by temporarily setting tier to PRIME with expiry
-  // The plan_expiry tracks when PRIME expires; after that the user stays as lifetime member
-  const pool = getPool();
-  await pool.query(
-    `UPDATE users SET tier = 'PRIME', plan_expiry = $2, updated_at = NOW() WHERE id = $1`,
-    [userId, primeExpiry.toISOString()]
-  );
-
-  // 4. Invalidate the Meru link + mark activation code used (non-critical)
-  try {
-    await meruLinkService.invalidateLinkAfterActivation(meruCode, userId, username);
-  } catch (e) {
-    logger.warn('Failed to invalidate Meru link (non-critical)', { code: meruCode, error: e.message });
-  }
-  try {
-    const { markCodeUsed } = require('../handlers/payments/activation');
-    await markCodeUsed(meruCode, userId, username);
-  } catch (e) {
-    logger.warn('Failed to mark activation code used (non-critical)', { code: meruCode, error: e.message });
-  }
-
-  // 5. Record payment history
-  const PaymentHistoryService = require('../../services/paymentHistoryService');
-  try {
-    await PaymentHistoryService.recordPayment({
-      userId,
-      paymentMethod: 'meru',
-      amount: 100,
-      currency: 'USD',
+    // Start with PRIME tier (for the 2-month bonus period), then cron/expiry will downgrade to member
+    await UserModel.updateSubscription(userId, {
+      status: 'active',
       planId: 'lifetime100',
-      planName: 'Lifetime Member + 2 Months PRIME',
-      product: 'lifetime100',
-      paymentReference: meruCode,
-      metadata: { activated_via: 'webapp', prime_bonus_expires: primeExpiry.toISOString() },
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent'),
+      expiry: null, // lifetime member — no expiry on the base plan
     });
-  } catch (e) {
-    logger.warn('Failed to record payment history (non-critical)', { code: meruCode, error: e.message });
+
+    // Grant PRIME for 2 months by temporarily setting tier to PRIME with expiry
+    // The plan_expiry tracks when PRIME expires; after that the user stays as lifetime member
+    const pool = getPool();
+    await pool.query(
+      `UPDATE users SET tier = 'PRIME', plan_expiry = $2, updated_at = NOW() WHERE id = $1`,
+      [userId, primeExpiry.toISOString()]
+    );
+
+    // 4. Invalidate the Meru link + mark activation code used (non-critical)
+    try {
+      await meruLinkService.invalidateLinkAfterActivation(meruCode, userId, username);
+    } catch (e) {
+      logger.warn('Failed to invalidate Meru link (non-critical)', { code: meruCode, error: e.message });
+    }
+    try {
+      const { markCodeUsed } = require('../handlers/payments/activation');
+      await markCodeUsed(meruCode, userId, username);
+    } catch (e) {
+      logger.warn('Failed to mark activation code used (non-critical)', { code: meruCode, error: e.message });
+    }
+
+    // 5. Record payment history
+    const PaymentHistoryService = require('../../services/paymentHistoryService');
+    try {
+      await PaymentHistoryService.recordPayment({
+        userId,
+        paymentMethod: 'meru',
+        amount: 100,
+        currency: 'USD',
+        planId: 'lifetime100',
+        planName: 'Lifetime Member + 2 Months PRIME',
+        product: 'lifetime100',
+        paymentReference: meruCode,
+        metadata: { activated_via: 'webapp', prime_bonus_expires: primeExpiry.toISOString() },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+      });
+    } catch (e) {
+      logger.warn('Failed to record payment history (non-critical)', { code: meruCode, error: e.message });
+    }
+
+    // 6. Audit log + business notification (non-critical)
+    try {
+      const { logActivation } = require('../handlers/payments/activation');
+      await logActivation({ userId, username, code: meruCode, product: 'lifetime100', success: true });
+    } catch (e) {
+      logger.warn('Failed to log activation (non-critical)', { error: e.message });
+    }
+    try {
+      const BusinessNotificationService = require('../services/businessNotificationService');
+      await BusinessNotificationService.notifyCodeActivation({ userId, username, code: meruCode, product: 'lifetime100' });
+    } catch (e) {
+      logger.warn('Failed to send business notification (non-critical)', { error: e.message });
+    }
+
+    // 7. Telegram DM with PRIME invite link (async fire-and-forget)
+    PaymentService.sendPaymentConfirmationNotification({
+      userId,
+      plan: { id: 'lifetime100', name: 'Lifetime Member + 2 Months PRIME', display_name: 'Lifetime Member + 2 Months PRIME' },
+      transactionId: meruCode,
+      amount: 100,
+      expiryDate: primeExpiry.toISOString(),
+      language,
+      provider: 'meru',
+    }).catch((e) => logger.warn('Failed to send Telegram DM (non-critical)', { error: e.message }));
+
+    // 8. Invoice + welcome emails (email is now always available)
+    const customerEmail = email ? email.trim() : user.email;
+    if (customerEmail) {
+      const InvoiceService = require('../services/invoiceservice');
+      const EmailService = require('../services/emailservice');
+
+      // Invoice email
+      (async () => {
+        try {
+          const { buffer: invoicePdf } = await InvoiceService.generateInvoice({
+            invoiceNumber: `MERU-${meruCode}`,
+            customerName: user.first_name || username || 'Valued Customer',
+            planName: 'Lifetime Member + 2 Months PRIME',
+            amount: 100,
+            currency: 'USD',
+            provider: 'meru',
+            transactionId: meruCode,
+            purchaseDate: new Date(),
+            expiryDate: primeExpiry,
+            language,
+          });
+
+          await EmailService.sendInvoiceEmail({
+            to: customerEmail,
+            customerName: user.first_name || username || 'Valued Customer',
+            invoiceNumber: `MERU-${meruCode}`,
+            amount: 100,
+            planName: 'Lifetime Member + 2 Months PRIME',
+            invoicePdf,
+          });
+          logger.info('Meru invoice email sent', { to: customerEmail, code: meruCode });
+        } catch (emailError) {
+          logger.warn('Failed to send invoice email (non-critical)', { error: emailError.message });
+        }
+      })();
+
+      // Welcome email with onboarding guide
+      (async () => {
+        try {
+          const { buffer: guidePdf } = await InvoiceService.generateOnboardingGuide({
+            customerName: user.first_name || username || 'Valued Customer',
+            planName: 'Lifetime Member + 2 Months PRIME',
+            language,
+          });
+
+          await EmailService.sendWelcomeEmail({
+            to: customerEmail,
+            customerName: user.first_name || username || 'Valued Customer',
+            planName: 'Lifetime Member + 2 Months PRIME',
+            duration: 'Lifetime Member + 2 months PRIME',
+            expiryDate: primeExpiry,
+            language,
+            onboardingGuidePdf: guidePdf,
+          });
+          logger.info('Meru welcome email sent', { to: customerEmail, code: meruCode });
+        } catch (emailError) {
+          logger.warn('Failed to send welcome email (non-critical)', { error: emailError.message });
+        }
+      })();
+    }
+
+    // 9. Update session so frontend reflects PRIME immediately (bonus period)
+    req.session.user = {
+      ...req.session.user,
+      tier: 'PRIME',
+      subscription_status: 'active',
+      plan_id: 'lifetime100',
+    };
+
+    logger.info('Meru lifetime100 activated via webapp', { userId, code: meruCode, primeExpiry: primeExpiry.toISOString() });
+    res.json({ success: true });
+  } finally {
+    await cache.releaseLock(meruLockKey).catch((err) => {
+      logger.warn('Failed to release Meru activation lock', { lockKey: meruLockKey, error: err.message });
+    });
   }
-
-  // 6. Audit log + business notification (non-critical)
-  try {
-    const { logActivation } = require('../handlers/payments/activation');
-    await logActivation({ userId, username, code: meruCode, product: 'lifetime100', success: true });
-  } catch (e) {
-    logger.warn('Failed to log activation (non-critical)', { error: e.message });
-  }
-  try {
-    const BusinessNotificationService = require('../services/businessNotificationService');
-    await BusinessNotificationService.notifyCodeActivation({ userId, username, code: meruCode, product: 'lifetime100' });
-  } catch (e) {
-    logger.warn('Failed to send business notification (non-critical)', { error: e.message });
-  }
-
-  // 7. Telegram DM with PRIME invite link (async fire-and-forget)
-  PaymentService.sendPaymentConfirmationNotification({
-    userId,
-    plan: { id: 'lifetime100', name: 'Lifetime Member + 2 Months PRIME', display_name: 'Lifetime Member + 2 Months PRIME' },
-    transactionId: meruCode,
-    amount: 100,
-    expiryDate: primeExpiry.toISOString(),
-    language,
-    provider: 'meru',
-  }).catch((e) => logger.warn('Failed to send Telegram DM (non-critical)', { error: e.message }));
-
-  // 8. Invoice + welcome emails (email is now always available)
-  const customerEmail = email ? email.trim() : user.email;
-  if (customerEmail) {
-    const InvoiceService = require('../services/invoiceservice');
-    const EmailService = require('../services/emailservice');
-
-    // Invoice email
-    (async () => {
-      try {
-        const { buffer: invoicePdf } = await InvoiceService.generateInvoice({
-          invoiceNumber: `MERU-${meruCode}`,
-          customerName: user.first_name || username || 'Valued Customer',
-          planName: 'Lifetime Member + 2 Months PRIME',
-          amount: 100,
-          currency: 'USD',
-          provider: 'meru',
-          transactionId: meruCode,
-          purchaseDate: new Date(),
-          expiryDate: primeExpiry,
-          language,
-        });
-
-        await EmailService.sendInvoiceEmail({
-          to: customerEmail,
-          customerName: user.first_name || username || 'Valued Customer',
-          invoiceNumber: `MERU-${meruCode}`,
-          amount: 100,
-          planName: 'Lifetime Member + 2 Months PRIME',
-          invoicePdf,
-        });
-        logger.info('Meru invoice email sent', { to: customerEmail, code: meruCode });
-      } catch (emailError) {
-        logger.warn('Failed to send invoice email (non-critical)', { error: emailError.message });
-      }
-    })();
-
-    // Welcome email with onboarding guide
-    (async () => {
-      try {
-        const { buffer: guidePdf } = await InvoiceService.generateOnboardingGuide({
-          customerName: user.first_name || username || 'Valued Customer',
-          planName: 'Lifetime Member + 2 Months PRIME',
-          language,
-        });
-
-        await EmailService.sendWelcomeEmail({
-          to: customerEmail,
-          customerName: user.first_name || username || 'Valued Customer',
-          planName: 'Lifetime Member + 2 Months PRIME',
-          duration: 'Lifetime Member + 2 months PRIME',
-          expiryDate: primeExpiry,
-          language,
-          onboardingGuidePdf: guidePdf,
-        });
-        logger.info('Meru welcome email sent', { to: customerEmail, code: meruCode });
-      } catch (emailError) {
-        logger.warn('Failed to send welcome email (non-critical)', { error: emailError.message });
-      }
-    })();
-  }
-
-  // 9. Update session so frontend reflects PRIME immediately (bonus period)
-  req.session.user = {
-    ...req.session.user,
-    tier: 'PRIME',
-    subscription_status: 'active',
-    plan_id: 'lifetime100',
-  };
-
-  logger.info('Meru lifetime100 activated via webapp', { userId, code: meruCode, primeExpiry: primeExpiry.toISOString() });
-  res.json({ success: true });
 }));
 
 app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {
@@ -3188,6 +3210,7 @@ const hangoutVideoCallRoutes = require('./routes/hangoutVideoCallRoutes');
 const dmController = require('./controllers/dmController');
 const socialController = require('./controllers/socialController');
 const promotedPostController = require('./controllers/promotedPostController');
+const contentFeedSyncController = require('./controllers/contentFeedSyncController');
 const usersController = require('./controllers/usersController');
 
 // ── Community Chat (REST fallback + media) ──────────────────────────────────
@@ -3394,16 +3417,16 @@ app.get('/api/webapp/social/feed', asyncHandler(socialController.getFeed));
 app.get('/api/webapp/social/wof-feed', asyncHandler(socialController.getWofFeed));
 app.get('/api/webapp/social/wall/:userId', asyncHandler(socialController.getWall));
 app.get('/api/webapp/social/profile/:userId', asyncHandler(socialController.getPublicProfile));
-app.post('/api/webapp/social/posts', socialPostLimiter, asyncHandler(socialController.createPost));
+app.post('/api/webapp/social/posts', requireSessionAuth, socialPostLimiter, asyncHandler(socialController.createPost));
 app.post('/api/webapp/social/posts/with-media', requireSessionAuth, socialPostLimiter, uploadLimiter, postMediaUploadMiddleware, asyncHandler(socialController.createPostWithMedia));
 app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, socialPostLimiter, uploadLimiter, postMultiMediaUploadMiddleware, asyncHandler(socialController.createPostWithMultiMedia));
 app.post('/api/webapp/social/posts/bulk-videos', requireSessionAuth, bulkVideoLimiter, uploadPerformerVideos, asyncHandler(socialController.bulkCreateVideos));
-app.post('/api/webapp/social/posts/:postId/like', socialActionLimiter, asyncHandler(socialController.toggleLike));
-app.delete('/api/webapp/social/posts/:postId', asyncHandler(socialController.deletePost));
+app.post('/api/webapp/social/posts/:postId/like', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.toggleLike));
+app.delete('/api/webapp/social/posts/:postId', requireSessionAuth, asyncHandler(socialController.deletePost));
 app.get('/api/webapp/social/posts/:postId', asyncHandler(socialController.getPost));
-app.get('/api/webapp/social/posts/:postId/replies', asyncHandler(socialController.getReplies));
-app.post('/api/webapp/social/posts/:postId/mastodon', asyncHandler(socialController.postToMastodon));
-app.post('/api/webapp/social/posts/:postId/request-deletion', asyncHandler(socialController.requestWofDeletion));
+app.get('/api/webapp/social/posts/:postId/replies', requireSessionAuth, asyncHandler(socialController.getReplies));
+app.post('/api/webapp/social/posts/:postId/mastodon', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.postToMastodon));
+app.post('/api/webapp/social/posts/:postId/request-deletion', requireSessionAuth, asyncHandler(socialController.requestWofDeletion));
 app.get('/api/webapp/social/wof/leaderboard', asyncHandler(socialController.getWofLeaderboard));
 app.get('/api/webapp/social/wof/stats', asyncHandler(socialController.getWofStats));
 app.post('/api/admin/social/posts/:postId/wof', adminGuard, asyncHandler(socialController.adminFlagWof));
@@ -3411,6 +3434,7 @@ app.delete('/api/admin/social/posts/:postId/wof', adminGuard, asyncHandler(socia
 
 // ── Promoted Posts (CMS Sync) ────────────────────────────────────────────────
 app.post('/api/admin/social/sync-promoted', adminGuard, asyncHandler(promotedPostController.handleSyncPromoted));
+app.post('/api/admin/social/sync-content', adminGuard, asyncHandler(contentFeedSyncController.handleSyncContent));
 
 // Users search
 app.get('/api/webapp/users/search', asyncHandler(usersController.searchUsers));
@@ -4719,9 +4743,6 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
 
     if (subResult.rows.length > 0) {
       const order = subResult.rows[0];
-      if (order.status === 'completed') {
-        return res.json({ success: true, alreadyProcessed: true });
-      }
 
       const PlanModel = require('../../models/planModel');
       const plan = await PlanModel.getById(order.plan_id);
@@ -4736,6 +4757,17 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       // Derive tier from plan: use plan.tier if set, else infer from plan_id prefix
       const newTier = (plan.tier === 'member' || order.plan_id.startsWith('member_')) ? 'member' : 'PRIME';
 
+      // Atomic idempotency guard: only proceed if the order is still in 'pending' state.
+      // If another webhook delivery already completed it, rowCount will be 0.
+      const settleResult = await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW() WHERE id = $1 AND status = 'pending' RETURNING id`,
+        [order.id]
+      );
+      if (settleResult.rowCount === 0) {
+        logger.info('BTCPay subscription already processed or not pending', { invoiceId, orderId: order.id });
+        return res.json({ success: true, alreadyProcessed: true });
+      }
+
       await dbQuery(
         `UPDATE users
          SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW()
@@ -4743,14 +4775,16 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
         [order.user_id, newTier, order.plan_id, expiryDate]
       );
 
-      await dbQuery(
-        `UPDATE dash_subscription_orders
-         SET status = 'completed', completed_at = NOW()
-         WHERE id = $1`,
-        [order.id]
-      );
-
       logger.info('BTCPay: subscription activated', { userId: order.user_id, planId: order.plan_id, invoiceId });
+
+      // PAY-006: Invalidate Redis user cache after raw SQL tier update.
+      try {
+        const { cache } = require('../../../config/redis');
+        await cache.del(`user:${order.user_id}`);
+        logger.info('Cleared user cache after BTCPay subscription activation', { userId: order.user_id });
+      } catch (cacheErr) {
+        logger.warn('Failed to clear user cache after BTCPay activation', { error: cacheErr.message });
+      }
 
       try {
         const socketSingleton = require('../services/socketSingleton');
@@ -4964,7 +4998,26 @@ app.post('/api/webapp/auth/atproto/unlink', asyncHandler(atprotoController.unlin
 // POST /api/webapp/social/posts/:postId/crosspost-bluesky — cross-post a PNPtv post to Bluesky
 app.post(
   '/api/webapp/social/posts/:postId/crosspost-bluesky',
+  requireSessionAuth,
+  socialActionLimiter,
   asyncHandler(atprotoController.crossPostToBluesky)
+);
+
+// ==========================================
+// X (TWITTER) CROSS-POST ENDPOINTS
+// ==========================================
+const xShareController = require('./controllers/xShareController');
+
+// GET /api/social/x-status — returns connected, hasWriteScope, username for the UI
+app.get('/api/social/x-status', requireSessionAuth, asyncHandler(xShareController.getXStatus));
+
+// POST /api/webapp/social/posts/:postId/share-x — share a PNPtv post to the user's X account
+// Rate-limited to 25 shares per user per 24 h (enforced inside the controller via Redis)
+app.post(
+  '/api/webapp/social/posts/:postId/share-x',
+  requireSessionAuth,
+  socialActionLimiter,
+  asyncHandler(xShareController.shareToX)
 );
 
 // ==========================================
@@ -5018,6 +5071,7 @@ app.get('/api/webapp/auth/verify', authenticateUser, (req, res) => {
 
 // ── Auto-sync promoted posts from Directus CMS ──────────────────────────────
 promotedPostController.startAutoSync();
+contentFeedSyncController.startContentFeedSync();
 
 // ==========================================
 // PUBLIC ENDPOINTS (no auth required)

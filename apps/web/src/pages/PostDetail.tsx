@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { getPublicPost, updateProfile, type SocialPostItem } from "@/lib/api";
+import { getSocialPost, updateProfile, type SocialPostItem } from "@/lib/api";
+import { SharePostModal } from "@/components/SharePostModal";
 
 const APP_BASE = "https://app.pnptv.app";
 
@@ -52,7 +53,7 @@ export default function PostDetail() {
   const [post, setPost] = useState<SocialPostItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [shareCopied, setShareCopied] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   const [contentDisclaimer, setContentDisclaimer] = useState(user?.contentDisclaimer || false);
   const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
   const [disclaimerAccepting, setDisclaimerAccepting] = useState(false);
@@ -66,7 +67,7 @@ export default function PostDetail() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getPublicPost(postId)
+    getSocialPost(postId)
       .then((res) => {
         if (!cancelled) {
           setPost(res.post);
@@ -82,42 +83,13 @@ export default function PostDetail() {
     return () => { cancelled = true; };
   }, [postId]);
 
-  const shareUrl = `${APP_BASE}/social/post/${postId}`;
-
-  const doShare = useCallback(async () => {
-    if (!post) return;
-    const displayName = post.author_first_name || post.author_username || "Someone";
-    const shareData = {
-      title: `${displayName} on PNPtv!`,
-      text: post.content
-        ? post.content.slice(0, 140)
-        : `Check out this post on PNPtv!`,
-      url: shareUrl,
-    };
-    if (navigator.share) {
-      try {
-        await navigator.share(shareData);
-      } catch {
-        // user cancelled or browser rejected — silent
-      }
-    } else {
-      try {
-        await navigator.clipboard.writeText(shareUrl);
-        setShareCopied(true);
-        setTimeout(() => setShareCopied(false), 2500);
-      } catch {
-        // clipboard blocked — silent
-      }
-    }
-  }, [post, shareUrl]);
-
   const handleShare = useCallback(() => {
     if (contentDisclaimer) {
-      doShare();
+      setShowShareModal(true);
     } else {
       setShowDisclaimerModal(true);
     }
-  }, [contentDisclaimer, doShare]);
+  }, [contentDisclaimer]);
 
   const handleAcceptDisclaimer = useCallback(async () => {
     setDisclaimerAccepting(true);
@@ -125,10 +97,12 @@ export default function PostDetail() {
       await updateProfile({ contentDisclaimer: true });
       setContentDisclaimer(true);
       setShowDisclaimerModal(false);
-      await doShare();
+      setShowShareModal(true);
     } catch { /* silent */ }
     setDisclaimerAccepting(false);
-  }, [doShare]);
+  }, []);
+
+  const shareUrl = `${APP_BASE}/social/post/${postId}`;
 
   const metaTitle = post
     ? `${post.author_first_name || post.author_username || "PNPtv"} on PNPtv!`
@@ -235,7 +209,34 @@ export default function PostDetail() {
             </div>
 
             {/* Post content */}
-            {post.is_exclusive && post.exclusive_status === "locked" ? (
+            {post.blurred ? (
+              /* Tier-gated content: viewer's subscription tier is too low */
+              <div className="rounded-xl p-6 text-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <svg className="w-8 h-8 mx-auto mb-2 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+                <p className="text-sm font-semibold text-white mb-1">
+                  {post.content_tier === "prime" || post.content_tier === "PRIME"
+                    ? "PRIME Content"
+                    : "Member Content"}
+                </p>
+                <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
+                  {post.content_tier === "prime" || post.content_tier === "PRIME"
+                    ? "PRIME content — Subscribe to view"
+                    : "This post is for members only. Upgrade to view."}
+                </p>
+                <button
+                  onClick={() => navigate("/subscribe")}
+                  className="inline-flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-xl text-white"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  {post.content_tier === "prime" || post.content_tier === "PRIME"
+                    ? "Upgrade to PRIME"
+                    : "Become a Member"}
+                </button>
+              </div>
+            ) : post.is_exclusive && post.exclusive_status === "locked" ? (
+              /* Creator exclusive content: viewer is not subscribed to this creator */
               <div className="rounded-xl p-6 text-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
                 <svg className="w-8 h-8 mx-auto mb-2 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
@@ -346,24 +347,13 @@ export default function PostDetail() {
                 <button
                   onClick={handleShare}
                   className="ml-auto flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-all border border-white/10 hover:border-white/20 hover:text-white"
-                  style={shareCopied ? { color: "#34C759", borderColor: "rgba(52,199,89,0.3)" } : { color: "#8E8E93" }}
+                  style={{ color: "#8E8E93" }}
                   aria-label="Share this post"
                 >
-                  {shareCopied ? (
-                    <>
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                      Copied!
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 00-2.25 2.25v9a2.25 2.25 0 002.25 2.25h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25H15m0-3l-3-3m0 0l-3 3m3-3V15" />
-                      </svg>
-                      Share
-                    </>
-                  )}
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 00-2.25 2.25v9a2.25 2.25 0 002.25 2.25h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25H15m0-3l-3-3m0 0l-3 3m3-3V15" />
+                  </svg>
+                  Share
                 </button>
               )}
             </div>
@@ -415,6 +405,15 @@ export default function PostDetail() {
               </div>
             </div>
           )}
+
+          {/* Share Post Modal */}
+          <SharePostModal
+            postId={post.id}
+            postContent={post.content}
+            authorName={post.author_first_name || post.author_username}
+            isOpen={showShareModal}
+            onClose={() => setShowShareModal(false)}
+          />
 
           {/* CTA to view full feed */}
           <div className="glass-card-sm p-5 text-center">

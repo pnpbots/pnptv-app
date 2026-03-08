@@ -39,7 +39,7 @@ const X_TOKEN_URL = 'https://api.twitter.com/2/oauth2/token';
 const X_TOKEN_URL_ALT = 'https://api.x.com/2/oauth2/token';
 const X_USERINFO_URL = 'https://api.twitter.com/2/users/me';
 const X_USERINFO_URL_ALT = 'https://api.x.com/2/users/me';
-const X_SCOPE = 'tweet.read users.read offline.access';
+const X_SCOPE = 'tweet.read tweet.write users.read offline.access media.write';
 
 const REDIS_STATE_PREFIX = 'x:oauth:state:';
 const REDIS_STATE_TTL_SECONDS = 600; // 10 minutes
@@ -158,7 +158,7 @@ async function consumeOAuthState(state) {
  * currently authenticated session user. Creates a new user as a last resort.
  * Returns { user, isNew }.
  */
-async function findOrCreateXUser({ xUserId, xUsername, xName, accessToken, refreshToken, expiresAt, sessionUser }) {
+async function findOrCreateXUser({ xUserId, xUsername, xName, accessToken, refreshToken, expiresAt, oauthScopes, sessionUser }) {
   const COLS = `id, pnptv_id, first_name, last_name, username, email,
                 subscription_status, tier, terms_accepted, photo_file_id, bio, language,
                 telegram, twitter, x_id, x_user_id, x_username, role,
@@ -195,9 +195,10 @@ async function findOrCreateXUser({ xUserId, xUsername, xName, accessToken, refre
            x_access_token_encrypted = $3,
            x_refresh_token_encrypted = COALESCE($4, x_refresh_token_encrypted),
            x_token_expires_at = $5,
+           x_oauth_scopes = $6,
            updated_at = NOW()
-       WHERE id = $6`,
-      [xUserId, xUsername, encryptedAccess, encryptedRefresh, expiresAt, sessionUser.id]
+       WHERE id = $7`,
+      [xUserId, xUsername, encryptedAccess, encryptedRefresh, expiresAt, oauthScopes || null, sessionUser.id]
     );
 
     const { rows } = await query(`SELECT ${COLS} FROM users WHERE id = $1`, [sessionUser.id]);
@@ -216,9 +217,10 @@ async function findOrCreateXUser({ xUserId, xUsername, xName, accessToken, refre
              x_access_token_encrypted = $2,
              x_refresh_token_encrypted = COALESCE($3, x_refresh_token_encrypted),
              x_token_expires_at = $4,
+             x_oauth_scopes = $5,
              updated_at = NOW()
-         WHERE id = $5`,
-        [xUsername, encryptedAccess, encryptedRefresh, expiresAt, existing.id]
+         WHERE id = $6`,
+        [xUsername, encryptedAccess, encryptedRefresh, expiresAt, oauthScopes || null, existing.id]
       );
       const { rows: refreshed } = await query(`SELECT ${COLS} FROM users WHERE id = $1`, [existing.id]);
       return { user: refreshed[0], isNew: false };
@@ -238,9 +240,10 @@ async function findOrCreateXUser({ xUserId, xUsername, xName, accessToken, refre
              x_access_token_encrypted = $3,
              x_refresh_token_encrypted = COALESCE($4, x_refresh_token_encrypted),
              x_token_expires_at = $5,
+             x_oauth_scopes = $6,
              updated_at = NOW()
-         WHERE id = $6`,
-        [xUserId, xUsername, encryptedAccess, encryptedRefresh, expiresAt, existing.id]
+         WHERE id = $7`,
+        [xUserId, xUsername, encryptedAccess, encryptedRefresh, expiresAt, oauthScopes || null, existing.id]
       );
       const { rows: refreshed } = await query(`SELECT ${COLS} FROM users WHERE id = $1`, [existing.id]);
       return { user: refreshed[0], isNew: false };
@@ -256,16 +259,16 @@ async function findOrCreateXUser({ xUserId, xUsername, xName, accessToken, refre
   const { rows } = await query(
     `INSERT INTO users
        (id, pnptv_id, first_name, last_name, username, twitter, x_id, x_user_id, x_username,
-        x_access_token_encrypted, x_refresh_token_encrypted, x_token_expires_at,
+        x_access_token_encrypted, x_refresh_token_encrypted, x_token_expires_at, x_oauth_scopes,
         subscription_status, tier, role, terms_accepted, is_active, created_at, updated_at)
      VALUES
-       ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+       ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
         'free', 'free', 'user', false, true, NOW(), NOW())
      RETURNING ${COLS}`,
     [
       userId, pnptvId, firstName || 'User', lastName, xUsername,
       xUsername, xUserId, xUserId, xUsername,
-      encryptedAccess, encryptedRefresh, expiresAt,
+      encryptedAccess, encryptedRefresh, expiresAt, oauthScopes || null,
     ]
   );
 
@@ -463,6 +466,8 @@ router.get('/callback', callbackLimiter, async (req, res) => {
   const refreshToken = tokenRes.data.refresh_token || null;
   const expiresIn = tokenRes.data.expires_in || 7200; // X default is 2h
   const expiresAt = new Date(Date.now() + expiresIn * 1000);
+  // Persist exactly what X returned so we can verify tweet.write before cross-posting
+  const oauthScopes = tokenRes.data.scope || null;
 
   // ---------------------------------------------------------------------------
   // Fetch X user profile — try v2 API, then v1.1 fallback
@@ -530,6 +535,7 @@ router.get('/callback', callbackLimiter, async (req, res) => {
       accessToken,
       refreshToken,
       expiresAt,
+      oauthScopes,
       sessionUser: req.session?.user || null,
     }));
   } catch (dbErr) {

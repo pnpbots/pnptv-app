@@ -330,13 +330,17 @@ const deleteGroup = async (req, res) => {
       return res.status(403).json({ error: 'Only the creator can delete this group' });
     }
 
-    // End active calls
+    // End active calls (both legacy and new tables)
     await query(
       `UPDATE video_calls SET is_active=false, ended_at=NOW() WHERE group_id=$1 AND is_active=true`,
       [groupId]
     );
+    await query(
+      `UPDATE hangout_video_calls SET status='ended', ended_at=NOW() WHERE group_id=$1 AND status='active'`,
+      [groupId]
+    );
 
-    // Delete group (cascade deletes members)
+    // Delete group (cascade deletes members, participants, join requests)
     await query('DELETE FROM hangout_groups WHERE id=$1', [groupId]);
 
     return res.json({ success: true });

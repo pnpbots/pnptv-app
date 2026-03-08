@@ -27,8 +27,15 @@ const Welcome = lazy(() => import("@/pages/Welcome"));
 const Join = lazy(() => import("@/pages/Join"));
 const BecomeModel = lazy(() => import("@/pages/BecomeModel"));
 const CmsPage = lazy(() => import("@/pages/CmsPage"));
+const LandingPage = lazy(() => import("@/pages/LandingPage"));
+const BlogPage = lazy(() => import("@/pages/BlogPage"));
+const AboutPage = lazy(() => import("@/pages/AboutPage"));
+const CareersPage = lazy(() => import("@/pages/CareersPage"));
+const CommunityResourcesPage = lazy(() => import("@/pages/CommunityResourcesPage"));
+const ShopPage = lazy(() => import("@/pages/ShopPage"));
 const Haus = lazy(() => import("@/pages/Haus"));
 const PostDetail = lazy(() => import("@/pages/PostDetail"));
+const Settings = lazy(() => import("@/pages/Settings"));
 
 // Admin pages
 const StatsOverview = lazy(() => import("@/pages/admin/StatsOverview"));
@@ -162,7 +169,9 @@ export const router = createBrowserRouter([
         path: "social/post/:postId",
         element: (
           <ModuleLoader>
-            <PostDetail />
+            <VerificationGate>
+              <PostDetail />
+            </VerificationGate>
           </ModuleLoader>
         ),
       },
@@ -181,6 +190,16 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <Profile />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "settings",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <Settings />
+            </VerificationGate>
           </ModuleLoader>
         ),
       },
@@ -420,6 +439,54 @@ export const router = createBrowserRouter([
       </ModuleLoader>
     ),
   })),
+  {
+    path: "/blog",
+    element: (
+      <ModuleLoader>
+        <BlogPage />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/about",
+    element: (
+      <ModuleLoader>
+        <AboutPage />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/careers",
+    element: (
+      <ModuleLoader>
+        <CareersPage />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/community-resources",
+    element: (
+      <ModuleLoader>
+        <CommunityResourcesPage />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/shop",
+    element: (
+      <ModuleLoader>
+        <ShopPage />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/landing",
+    element: (
+      <ModuleLoader>
+        <LandingPage />
+      </ModuleLoader>
+    ),
+  },
   {
     path: "/page/:slug",
     element: (

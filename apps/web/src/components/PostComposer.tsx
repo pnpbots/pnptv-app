@@ -22,7 +22,7 @@ import React, {
 } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
-import { checkAuthStatus, type SocialPostItem } from "@/lib/api";
+import { checkAuthStatus, getXStatus, sharePostToX, type SocialPostItem } from "@/lib/api";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -257,6 +257,8 @@ export function PostComposer({
   const [isActiveCreator, setIsActiveCreator] = useState(false);
   const [isExclusive, setIsExclusive] = useState(false);
   const [isShareable, setIsShareable] = useState(true);
+  const [xHasWriteScope, setXHasWriteScope] = useState(false);
+  const [crossPostX, setCrossPostX] = useState(false);
   const [videoTitle, setVideoTitle] = useState("");
   const [videoDescription, setVideoDescription] = useState("");
 
@@ -266,7 +268,7 @@ export function PostComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dragCounterRef = useRef(0); // tracks nested drag-enter/leave pairs
 
-  // ── Creator status ─────────────────────────────────────────────────────────
+  // ── Creator status + X write-scope check ──────────────────────────────────
   useEffect(() => {
     if (!isAuthenticated) return;
     checkAuthStatus()
@@ -282,6 +284,13 @@ export function PostComposer({
       })
       .catch(() => {
         // Non-critical
+      });
+    getXStatus()
+      .then((res) => {
+        setXHasWriteScope(res.status.linked && res.status.hasWriteScope);
+      })
+      .catch(() => {
+        setXHasWriteScope(false);
       });
   }, [isAuthenticated]);
 
@@ -447,6 +456,7 @@ export function PostComposer({
     setUploadProgress(null);
     setIsExclusive(false);
     setIsShareable(true);
+    setCrossPostX(false);
     setVideoTitle("");
     setVideoDescription("");
     if (compact) setIsExpanded(false);
@@ -570,6 +580,10 @@ export function PostComposer({
       }
 
       if (result.success && result.post) {
+        // Fire X cross-post in the background — non-blocking, errors are silently dropped
+        if (crossPostX) {
+          sharePostToX(result.post.id).catch(() => { /* non-critical */ });
+        }
         onPostCreated?.(result.post);
         clearForm();
       } else {
@@ -581,7 +595,7 @@ export function PostComposer({
     } finally {
       setIsPosting(false);
     }
-  }, [text, files, isPosting, isExclusive, isShareable, videoTitle, videoDescription, onPostCreated, clearForm]);
+  }, [text, files, isPosting, isExclusive, isShareable, crossPostX, videoTitle, videoDescription, onPostCreated, clearForm]);
 
   // ── Keyboard submit (Ctrl/Cmd + Enter) ────────────────────────────────────
   const handleKeyDown = useCallback(
@@ -746,24 +760,44 @@ export function PostComposer({
           {/* Video title & description — shown when a video is attached */}
           {hasVideo && (
             <div className="mb-3 space-y-2">
-              <input
-                type="text"
-                value={videoTitle}
-                onChange={(e) => setVideoTitle(e.target.value.slice(0, 150))}
-                placeholder="Video title (optional)"
-                disabled={isPosting}
-                maxLength={150}
-                className="w-full bg-white/5 text-white text-sm rounded-lg px-3 py-2 border border-white/10 outline-none placeholder:text-white/30 focus:border-pnp-pink/50 disabled:opacity-60 transition-colors"
-              />
-              <textarea
-                value={videoDescription}
-                onChange={(e) => setVideoDescription(e.target.value.slice(0, 500))}
-                placeholder="Video description (optional)"
-                disabled={isPosting}
-                rows={2}
-                maxLength={500}
-                className="w-full bg-white/5 text-white text-sm rounded-lg px-3 py-2 border border-white/10 outline-none placeholder:text-white/30 focus:border-pnp-pink/50 disabled:opacity-60 resize-none transition-colors"
-              />
+              <div>
+                <input
+                  type="text"
+                  value={videoTitle}
+                  onChange={(e) => setVideoTitle(e.target.value.slice(0, 150))}
+                  placeholder="Video title (optional)"
+                  disabled={isPosting}
+                  maxLength={150}
+                  className="w-full bg-white/5 text-white text-sm rounded-lg px-3 py-2 border border-white/10 outline-none placeholder:text-white/30 focus:border-pnp-pink/50 disabled:opacity-60 transition-colors"
+                />
+                <div className="flex justify-end mt-0.5">
+                  <span
+                    className="text-[11px] tabular-nums"
+                    style={{ color: videoTitle.length >= 150 ? "#FF453A" : "#555" }}
+                  >
+                    {videoTitle.length}/150
+                  </span>
+                </div>
+              </div>
+              <div>
+                <textarea
+                  value={videoDescription}
+                  onChange={(e) => setVideoDescription(e.target.value.slice(0, 500))}
+                  placeholder="Video description (optional)"
+                  disabled={isPosting}
+                  rows={2}
+                  maxLength={500}
+                  className="w-full bg-white/5 text-white text-sm rounded-lg px-3 py-2 border border-white/10 outline-none placeholder:text-white/30 focus:border-pnp-pink/50 disabled:opacity-60 resize-none transition-colors"
+                />
+                <div className="flex justify-end mt-0.5">
+                  <span
+                    className="text-[11px] tabular-nums"
+                    style={{ color: videoDescription.length >= 500 ? "#FF453A" : "#555" }}
+                  >
+                    {videoDescription.length}/500
+                  </span>
+                </div>
+              </div>
             </div>
           )}
 
@@ -898,6 +932,35 @@ export function PostComposer({
               }
             />
           </div>
+
+          {/* Also post to X toggle — only shown when X is linked with write scope */}
+          {xHasWriteScope && (
+            <div className="mt-2">
+              <ToggleSwitch
+                id={`${baseId}-crosspost-x`}
+                checked={crossPostX}
+                onChange={setCrossPostX}
+                disabled={isPosting}
+                activeColor="#FFFFFF"
+                label="Also post to X"
+                icon={
+                  <svg
+                    viewBox="0 0 1200 1227"
+                    fill="currentColor"
+                    className="w-4 h-4"
+                    aria-hidden="true"
+                  >
+                    <path d="M714.163 519.284L1160.89 0H1055.03L667.137 450.887L357.328 0H0L468.492 681.821L0 1226.37H105.866L515.491 750.218L842.672 1226.37H1200L714.163 519.284ZM569.165 687.828L521.697 619.934L144.011 79.6944H306.615L611.412 515.685L658.88 583.579L1055.08 1150.3H892.476L569.165 687.828Z" />
+                  </svg>
+                }
+              />
+              {crossPostX && (
+                <p className="text-[11px] mt-1 px-1" style={{ color: "#555" }}>
+                  This post will also appear on your X timeline
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Format hint — shown when no files attached and not uploading */}
           {files.length === 0 && !isPosting && (

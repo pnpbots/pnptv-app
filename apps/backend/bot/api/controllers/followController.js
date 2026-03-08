@@ -5,6 +5,7 @@ const logger = require('../../../utils/logger');
 const NotificationEmitter = require('../../services/notificationEmitter');
 
 const { isEnforcedFollow } = require('../../services/followService');
+const { validateTierFresh } = require('../../services/accessService');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -230,16 +231,42 @@ const getFollowing = async (req, res) => {
 const getFollowingFeed = async (req, res) => {
   const actor = authGuard(req, res); if (!actor) return;
   const limit = Math.min(parseInt(req.query.limit) || 20, 50);
-  const cursor = req.query.cursor ? BigInt(req.query.cursor) : null;
+  const cursorId = req.query.cursor ? parseInt(req.query.cursor, 10) : null;
+  const viewerRole = req.session?.user?.role || '';
+  const isAdmin = viewerRole === 'admin' || viewerRole === 'superadmin';
+  // HIGH-04: re-validate PRIME tier from DB/cache to prevent stale-session access
+  const viewerTier = await validateTierFresh(actor.id, req.session?.user?.tier || 'free');
+  if (viewerTier !== (req.session?.user?.tier || 'free').toLowerCase()) {
+    req.session.user.tier = viewerTier;
+  }
 
   try {
+    // Fetch viewer's blocked list for feed filtering (C-08)
+    const blockedRes = await query('SELECT blocked FROM users WHERE id = $1', [actor.id]);
+    const blockedIds = (blockedRes.rows[0]?.blocked || []).map(Number);
+
+    // Build parameterized query
+    // $1=actor.id, $2=limit+1, [$3=cursorId], $N=blockedIds
+    const params = [actor.id, limit + 1];
+    if (cursorId) params.push(cursorId);
+    const blockedParam = blockedIds.length > 0 ? blockedIds : [];
+    params.push(blockedParam);
+    const blockedParamIdx = params.length;
+    const cursorClause = cursorId ? `AND sp.id < $3` : '';
+
     const result = await query(
-      `SELECT sp.id, sp.content, sp.media_url, sp.media_type,
+      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url,
+              sp.video_title, sp.video_description,
+              sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count,
-              sp.created_at, sp.is_wof, sp.bluesky_uri, sp.bluesky_cid,
+              sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
+              sp.is_promoted, sp.promoted_link, sp.promoted_link_label, sp.promoted_thumbnail,
+              COALESCE(sp.content_tier, 'free') AS content_tier,
               u.id AS author_id, u.username AS author_username,
               u.first_name AS author_first_name, u.photo_file_id AS author_photo,
+              u.creator_status AS author_creator_status, u.creator_type AS author_creator_type,
+              u.creator_verified AS author_creator_verified, u.creator_price_usd AS author_creator_price,
               EXISTS(
                 SELECT 1 FROM social_post_likes pl
                 WHERE pl.post_id = sp.id AND pl.user_id = $1
@@ -250,33 +277,70 @@ const getFollowingFeed = async (req, res) => {
        WHERE uf.follower_id = $1
          AND sp.is_deleted = FALSE
          AND sp.reply_to_id IS NULL
-         AND ($2::bigint IS NULL OR sp.id < $2::bigint)
+         ${cursorClause}
+         AND sp.user_id != ALL($${blockedParamIdx}::text[])
        ORDER BY sp.id DESC
-       LIMIT $3`,
-      [actor.id, cursor !== null ? String(cursor) : null, limit + 1]
+       LIMIT $2`,
+      params
     );
 
     const hasMore = result.rows.length > limit;
-    const posts = result.rows.slice(0, limit).map((r) => ({
-      id: r.id,
-      content: r.content,
-      media_url: r.media_url,
-      media_type: r.media_type,
-      reply_to_id: r.reply_to_id,
-      repost_of_id: r.repost_of_id,
-      likes_count: r.likes_count,
-      reposts_count: r.reposts_count,
-      replies_count: r.replies_count,
-      created_at: r.created_at,
-      is_wof: r.is_wof,
-      bluesky_uri: r.bluesky_uri,
-      bluesky_cid: r.bluesky_cid,
-      author_id: r.author_id,
-      author_username: r.author_username,
-      author_first_name: r.author_first_name,
-      author_photo: r.author_photo,
-      liked_by_me: r.liked_by_me,
-    }));
+    const rawPosts = result.rows.slice(0, limit);
+
+    // Determine content_locked for exclusive posts the viewer cannot access (H-02)
+    const allowedTiers = new Set(['free']);
+    if (!isAdmin) {
+      if (viewerTier === 'member') allowedTiers.add('member');
+      if (viewerTier === 'prime') { allowedTiers.add('member'); allowedTiers.add('prime'); }
+    }
+
+    const posts = rawPosts.map((r) => {
+      const isValidPhoto = r.author_photo && (r.author_photo.startsWith('/') || r.author_photo.startsWith('http'));
+      const postTier = (r.content_tier || 'free').toLowerCase();
+      const isExclusivePost = r.is_exclusive === true || postTier === 'prime';
+      const isAuthor = String(actor.id) === String(r.author_id);
+      const viewerCanSee = isAdmin || isAuthor || allowedTiers.has(postTier) || allowedTiers.has(r.content_tier);
+      const contentLocked = isExclusivePost && !viewerCanSee;
+
+      return {
+        id: r.id,
+        content: contentLocked ? null : r.content,
+        media_url: contentLocked ? null : r.media_url,
+        media_type: contentLocked ? null : r.media_type,
+        media_urls: contentLocked ? null : r.media_urls,
+        video_thumbnail_url: r.video_thumbnail_url,
+        video_title: r.video_title,
+        video_description: r.video_description,
+        bluesky_uri: r.bluesky_uri,
+        bluesky_cid: r.bluesky_cid,
+        source_channel: r.source_channel,
+        reply_to_id: r.reply_to_id,
+        repost_of_id: r.repost_of_id,
+        likes_count: r.likes_count,
+        reposts_count: r.reposts_count,
+        replies_count: r.replies_count,
+        is_exclusive: r.is_exclusive,
+        is_shareable: r.is_shareable,
+        is_wof: r.is_wof,
+        created_at: r.created_at,
+        is_promoted: r.is_promoted,
+        promoted_link: r.promoted_link,
+        promoted_link_label: r.promoted_link_label,
+        promoted_thumbnail: r.promoted_thumbnail,
+        content_tier: r.content_tier,
+        author_id: r.author_id,
+        author_username: r.author_username,
+        author_first_name: r.author_first_name,
+        author_photo: isValidPhoto ? r.author_photo : null,
+        author_creator_status: r.author_creator_status,
+        author_creator_type: r.author_creator_type,
+        author_creator_verified: r.author_creator_verified,
+        author_creator_price: r.author_creator_price,
+        liked_by_me: r.liked_by_me,
+        content_locked: contentLocked,
+        blurred: contentLocked,
+      };
+    });
 
     return res.json({
       success: true,

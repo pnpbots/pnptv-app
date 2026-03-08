@@ -407,6 +407,13 @@ const endHangout = async (req, res) => {
 
   try {
     await client.query('BEGIN');
+    // End active calls before deleting
+    await client.query(`UPDATE video_calls SET is_active=false, ended_at=NOW() WHERE group_id=$1 AND is_active=true`, [id]);
+    await client.query(`UPDATE hangout_video_calls SET status='ended', ended_at=NOW() WHERE group_id=$1 AND status='active'`, [id]);
+    // Clean up participants, members, join requests, then the group
+    await client.query('DELETE FROM hangout_call_participants WHERE call_id IN (SELECT id FROM hangout_video_calls WHERE group_id = $1)', [id]);
+    await client.query('DELETE FROM hangout_video_calls WHERE group_id = $1', [id]);
+    await client.query('DELETE FROM hangout_join_requests WHERE group_id = $1', [id]);
     await client.query('DELETE FROM hangout_group_members WHERE group_id = $1', [id]);
     await client.query('DELETE FROM hangout_groups WHERE id = $1', [id]);
     await client.query('COMMIT');
@@ -611,6 +618,12 @@ const sendPushNotification = async (req, res) => {
     }
     if (!body || !body.trim()) {
       return res.status(400).json({ error: 'body is required' });
+    }
+    if (url !== undefined && url !== null && url !== '') {
+      const urlStr = String(url);
+      if (!urlStr.startsWith('/') && !urlStr.startsWith('https://')) {
+        return res.status(400).json({ error: 'url must be a relative path starting with / or an absolute https:// URL' });
+      }
     }
 
     const validTargetTypes = ['all', 'tier', 'users'];

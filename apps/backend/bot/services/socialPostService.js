@@ -32,11 +32,27 @@ class SocialPostService {
    * Requires userId for the liked_by_me subquery.
    * Uses ID-based cursor pagination for consistent, index-friendly fetching.
    */
-  static async getFeed(userId, cursor, limit = 20, viewerTier) {
+  /**
+   * @param {number}   userId      - Authenticated viewer's user ID
+   * @param {string}   cursor      - Opaque cursor (post ID) for pagination
+   * @param {number}   limit       - Page size (max 50)
+   * @param {string}   viewerTier  - Viewer's subscription tier ('free'|'member'|'prime')
+   * @param {boolean}  isAdmin     - True when the viewer has an admin/superadmin role
+   * @param {number[]} blockedIds  - Array of user IDs the viewer has blocked (C-08)
+   */
+  static async getFeed(userId, cursor, limit = 20, viewerTier, isAdmin = false, blockedIds = []) {
     const lim = Math.min(Number(limit) || 20, 50);
     const fetchLimit = lim + 10;
     const cursorId = cursor ? parseInt(cursor, 10) : null;
-    const params = cursorId ? [userId, fetchLimit, cursorId] : [userId, fetchLimit];
+
+    // Build parameterized query — $1=userId, $2=fetchLimit, [$3=cursorId], $N=blockedIds
+    const params = [userId, fetchLimit];
+    if (cursorId) params.push(cursorId);
+    const blockedParam = blockedIds.length > 0 ? blockedIds.map(Number) : [];
+    params.push(blockedParam);
+    const blockedParamIdx = params.length; // last param index
+    const cursorClause = cursorId ? `AND sp.id < $3` : '';
+
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
               sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
@@ -56,7 +72,8 @@ class SocialPostService {
        LEFT JOIN social_posts rp ON sp.repost_of_id = rp.id
        LEFT JOIN users ru ON rp.user_id = ru.id
        WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL
-         ${cursorId ? 'AND sp.id < $3' : ''}
+         ${cursorClause}
+         AND sp.user_id != ALL($${blockedParamIdx}::text[])
        ORDER BY sp.id DESC
        LIMIT $2`,
       params
@@ -65,9 +82,9 @@ class SocialPostService {
     if (viewerTier !== undefined) {
       posts = await CreatorService.filterFeedExclusivePosts(posts, userId, viewerTier);
     }
-    // Apply content_tier blurring based on viewer tier
+    // Apply content_tier blurring based on viewer tier (H-01, H-08)
     if (viewerTier !== undefined) {
-      posts = SocialPostService._applyContentTierBlur(posts, viewerTier);
+      posts = SocialPostService._applyContentTierBlur(posts, viewerTier, isAdmin);
     }
     const page = posts.slice(0, lim);
     const nextCursor = posts.length > lim ? String(page[page.length - 1].id) : null;
@@ -92,12 +109,15 @@ class SocialPostService {
          FROM social_posts sp
          JOIN users u ON sp.user_id = u.id
          WHERE sp.is_promoted = true AND sp.is_deleted = false
+           AND sp.user_id != ALL($2::text[])
          ORDER BY sp.id DESC
          LIMIT 1`,
-        [userId]
+        [userId, blockedParam]
       );
       if (promotedRows.length > 0) {
-        const promoted = sanitizePostRows(promotedRows)[0];
+        let promoted = sanitizePostRows(promotedRows)[0];
+        // Apply the same tier gate as the rest of the feed (CRIT-01)
+        [promoted] = SocialPostService._applyContentTierBlur([promoted], viewerTier, isAdmin);
         // Remove duplicate if it already appears in the page
         const filtered = pinnedIds.has(promoted.id)
           ? page.filter(p => p.id !== promoted.id)
@@ -111,16 +131,26 @@ class SocialPostService {
 
   /**
    * Blur posts whose content_tier exceeds the viewer's tier.
-   * Blurred posts retain metadata but have content and media_url set to null.
+   * Blurred posts retain metadata but have content and media_url set to null,
+   * and gain a `content_locked: true` flag so the frontend can render a paywall.
    * Tier hierarchy: free < member < PRIME
+   *
+   * @param {Array}   posts       - Array of post rows
+   * @param {string}  viewerTier  - Viewer's subscription tier string
+   * @param {boolean} isAdmin     - When true, bypass all tier blurring (H-08 fix)
    */
-  static _applyContentTierBlur(posts, viewerTier) {
+  static _applyContentTierBlur(posts, viewerTier, isAdmin = false) {
+    // Admins can see all content regardless of tier (H-08: tier string never equals 'admin')
+    if (isAdmin) {
+      return posts.map(post => ({ ...post, content_locked: false }));
+    }
+
     const normalizedViewer = (viewerTier || 'free').toLowerCase();
     // Determine which content tiers the viewer can see in full
     const allowedTiers = new Set(['free']);
     if (normalizedViewer === 'member') {
       allowedTiers.add('member');
-    } else if (normalizedViewer === 'prime' || normalizedViewer === 'admin') {
+    } else if (normalizedViewer === 'prime') {
       allowedTiers.add('member');
       allowedTiers.add('prime');
       allowedTiers.add('PRIME');
@@ -130,9 +160,9 @@ class SocialPostService {
       const postTier = (post.content_tier || 'free').toLowerCase();
       const isAllowed = allowedTiers.has(post.content_tier) || allowedTiers.has(postTier);
       if (isAllowed) {
-        return post;
+        return { ...post, content_locked: false };
       }
-      // Blur: keep metadata, null out content and media
+      // Blur: keep metadata, null out content and media, set content_locked flag
       return {
         id: post.id,
         author_id: post.author_id,
@@ -149,9 +179,11 @@ class SocialPostService {
         is_wof: post.is_wof,
         liked_by_me: post.liked_by_me,
         blurred: true,
+        content_locked: true,
         content: null,
         media_url: null,
         media_type: null,
+        media_urls: null,
       };
     });
   }
@@ -191,50 +223,89 @@ class SocialPostService {
   /**
    * Paginated WoF sub-feed for the Social page (/api/webapp/social/wof-feed).
    * Same pattern as getFeed but filters WHERE is_wof = true.
+   *
+   * @param {number}   userId     - Authenticated viewer's user ID
+   * @param {string}   cursor     - Opaque cursor for pagination
+   * @param {number}   limit      - Page size (max 50)
+   * @param {number[]} blockedIds - User IDs the viewer has blocked (C-08)
    */
-  static async getWofFeed(userId, cursor, limit = 20) {
+  static async getWofFeed(userId, cursor, limit = 20, blockedIds = [], viewerTier, isAdmin = false) {
     const lim = Math.min(Number(limit) || 20, 50);
     const cursorId = cursor ? parseInt(cursor, 10) : null;
-    const params = cursorId ? [userId, lim, cursorId] : [userId, lim];
+    const blockedParam = blockedIds.length > 0 ? blockedIds.map(Number) : [];
+
+    // Param order: $1=userId, $2=lim, [$3=cursorId], $N=blockedParam
+    const params = [userId, lim];
+    if (cursorId) params.push(cursorId);
+    params.push(blockedParam);
+    const blockedParamIdx = params.length;
+    const cursorClause = cursorId ? `AND sp.id < $3` : '';
+
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
               sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_shareable, sp.is_wof, sp.created_at,
+              COALESCE(sp.content_tier, 'free') as content_tier,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
               EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me
        FROM social_posts sp
        JOIN users u ON sp.user_id = u.id
        WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL AND sp.is_wof = true AND sp.is_exclusive = false
-         ${cursorId ? 'AND sp.id < $3' : ''}
+         ${cursorClause}
+         AND sp.user_id != ALL($${blockedParamIdx}::text[])
        ORDER BY sp.id DESC
        LIMIT $2`,
       params
     );
+    let posts = sanitizePostRows(rows);
+    // Apply content_tier blurring so PRIME-gated WoF posts are locked for non-PRIME viewers (HIGH-03)
+    if (viewerTier !== undefined) {
+      posts = SocialPostService._applyContentTierBlur(posts, viewerTier, isAdmin);
+    }
     const nextCursor = rows.length === lim ? String(rows[rows.length - 1].id) : null;
-    return { posts: sanitizePostRows(rows), nextCursor };
+    return { posts, nextCursor };
   }
 
   // ── Wall ──────────────────────────────────────────────────────────────────
 
-  static async getWall(userId, viewerId, cursor, limit = 20) {
+  /**
+   * @param {number}   userId      - Profile owner's user ID
+   * @param {number}   viewerId    - Authenticated viewer's user ID
+   * @param {string}   cursor      - Opaque cursor for pagination
+   * @param {number}   limit       - Page size (max 50)
+   * @param {string}   viewerTier  - Viewer's subscription tier ('free'|'member'|'prime')
+   * @param {boolean}  isAdmin     - True when viewer has admin/superadmin role (H-08)
+   * @param {number[]} blockedIds  - User IDs the viewer has blocked (C-08)
+   */
+  static async getWall(userId, viewerId, cursor, limit = 20, viewerTier, isAdmin = false, blockedIds = []) {
     const lim = Math.min(Number(limit) || 20, 50);
     const cursorId = cursor ? parseInt(cursor, 10) : null;
-    const params = cursorId ? [viewerId, userId, lim, cursorId] : [viewerId, userId, lim];
+    const blockedParam = blockedIds.length > 0 ? blockedIds.map(Number) : [];
+
+    // Param order: $1=viewerId, $2=userId, $3=lim, [$4=cursorId], $N=blockedParam
+    const params = [viewerId, userId, lim];
+    if (cursorId) params.push(cursorId);
+    params.push(blockedParam);
+    const blockedParamIdx = params.length;
+    const cursorClause = cursorId ? `AND sp.id < $4` : '';
+
     const [postsRes, profileRes] = await Promise.all([
       query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
                 sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
                 sp.reply_to_id, sp.repost_of_id,
-                sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_shareable, sp.is_wof, sp.created_at,
+                sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
+                COALESCE(sp.content_tier, 'free') as content_tier,
                 u.id as author_id, u.username as author_username,
                 u.first_name as author_first_name, u.photo_file_id as author_photo,
                 EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me
          FROM social_posts sp
          JOIN users u ON sp.user_id = u.id
          WHERE sp.is_deleted = false AND sp.user_id = $2 AND sp.reply_to_id IS NULL
-           ${cursorId ? 'AND sp.id < $4' : ''}
+           ${cursorClause}
+           AND sp.user_id != ALL($${blockedParamIdx}::text[])
          ORDER BY sp.id DESC LIMIT $3`,
         params
       ),
@@ -247,8 +318,19 @@ class SocialPostService {
     ]);
     const profile = profileRes.rows[0] || null;
     if (profile) profile.photo_file_id = isValidPhotoUrl(profile.photo_file_id) ? profile.photo_file_id : null;
-    const nextCursor = postsRes.rows.length === lim ? String(postsRes.rows[postsRes.rows.length - 1].id) : null;
-    return { profile, posts: sanitizePostRows(postsRes.rows), nextCursor };
+
+    let posts = sanitizePostRows(postsRes.rows);
+    // Filter exclusive creator posts the viewer hasn't subscribed to (mirrors getFeed behaviour)
+    if (viewerTier !== undefined) {
+      posts = await CreatorService.filterFeedExclusivePosts(posts, viewerId, viewerTier);
+    }
+    // Apply content_tier blurring so exclusive posts are locked for non-PRIME viewers (H-03, H-08)
+    if (viewerTier !== undefined) {
+      posts = SocialPostService._applyContentTierBlur(posts, viewerTier, isAdmin);
+    }
+
+    const nextCursor = posts.length === lim ? String(posts[posts.length - 1].id) : null;
+    return { profile, posts, nextCursor };
   }
 
   // ── Create Post ───────────────────────────────────────────────────────────
@@ -383,7 +465,7 @@ class SocialPostService {
 
   // ── Public Profile ────────────────────────────────────────────────────────
 
-  static async getPublicProfile(userId, viewerId, cursor, limit = 20, viewerTier) {
+  static async getPublicProfile(userId, viewerId, cursor, limit = 20, viewerTier, isAdmin = false) {
     const lim = Math.min(Number(limit) || 20, 50);
     const cursorId = cursor ? parseInt(cursor, 10) : null;
     const params = [userId, lim];
@@ -405,6 +487,7 @@ class SocialPostService {
                 sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
                 sp.reply_to_id, sp.repost_of_id,
                 sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
+                COALESCE(sp.content_tier, 'free') as content_tier,
                 u.id as author_id, u.username as author_username,
                 u.first_name as author_first_name, u.photo_file_id as author_photo
                 ${likedSubquery}
@@ -465,6 +548,10 @@ class SocialPostService {
 
     if (viewerTier) {
       posts = await CreatorService.filterFeedExclusivePosts(posts, viewerId, viewerTier);
+    }
+    // Apply content_tier blurring for PRIME-gated posts (CRIT-02)
+    if (viewerTier !== undefined) {
+      posts = SocialPostService._applyContentTierBlur(posts, viewerTier, isAdmin);
     }
 
     const nextCursor = posts.length === lim ? String(posts[posts.length - 1].id) : null;

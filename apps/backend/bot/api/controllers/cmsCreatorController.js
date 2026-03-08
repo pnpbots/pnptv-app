@@ -134,7 +134,7 @@ const listContent = async (req, res) => {
         sort: '-date_created',
         limit: Math.min(Number(limit), 50),
         page: Number(page),
-        fields: 'id,status,title,description,type,media_url,thumbnail,duration_seconds,is_premium,tags,series,episode_number,date_created,date_updated',
+        fields: 'id,status,title,description,type,media_url,thumbnail,duration_seconds,is_premium,tags,series,episode_number,publish_to_feed,social_post_id,date_created,date_updated',
       },
     });
 
@@ -157,7 +157,7 @@ const createContent = async (req, res) => {
     const performer = await getOrCreatePerformer(user.pnptv_id, user);
 
     const allowed = ['title', 'description', 'type', 'media_url', 'duration_seconds',
-      'is_premium', 'tags', 'series', 'episode_number', 'status'];
+      'is_premium', 'tags', 'series', 'episode_number', 'status', 'publish_to_feed'];
     const item = { performer: performer.id, status: 'draft' };
     for (const k of allowed) {
       if (req.body[k] !== undefined) item[k] = req.body[k];
@@ -196,7 +196,7 @@ const updateContent = async (req, res) => {
     }
 
     const allowed = ['title', 'description', 'type', 'media_url', 'duration_seconds',
-      'is_premium', 'tags', 'series', 'episode_number', 'status'];
+      'is_premium', 'tags', 'series', 'episode_number', 'status', 'publish_to_feed'];
     const patch = {};
     for (const k of allowed) {
       if (req.body[k] !== undefined) patch[k] = req.body[k];

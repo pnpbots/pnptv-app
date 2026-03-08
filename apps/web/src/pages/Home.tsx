@@ -8,6 +8,7 @@ import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useDirectus } from "@/hooks/useDirectus";
 import { useI18n } from "@/lib/i18n";
 import { PostComposer } from "@/components/PostComposer";
+import { SharePostModal } from "@/components/SharePostModal";
 import {
   getHomeFeedPosts,
   getSocialFeedPosts,
@@ -58,6 +59,8 @@ export default function Home() {
   const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
   const [disclaimerAccepting, setDisclaimerAccepting] = useState(false);
   const [pendingSharePostId, setPendingSharePostId] = useState<number | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareModalPostId, setShareModalPostId] = useState<number | null>(null);
 
   const { data: announcements } = useDirectus<Announcement>({
     collection: "announcements",
@@ -104,23 +107,15 @@ export default function Home() {
     } catch { /* silent */ }
   }, []);
 
-  const doShare = useCallback(async (postId: number) => {
-    const url = `${window.location.origin}/social#post-${postId}`;
-    if (navigator.share) {
-      try { await navigator.share({ title: "PNPtv Post", url }); } catch { /* cancelled */ }
-    } else {
-      await navigator.clipboard.writeText(url);
-    }
-  }, []);
-
-  const handleShare = useCallback(async (postId: number) => {
+  const handleShare = useCallback((postId: number) => {
     if (contentDisclaimer) {
-      await doShare(postId);
+      setShareModalPostId(postId);
+      setShowShareModal(true);
     } else {
       setPendingSharePostId(postId);
       setShowDisclaimerModal(true);
     }
-  }, [contentDisclaimer, doShare]);
+  }, [contentDisclaimer]);
 
   const handleAcceptDisclaimer = useCallback(async () => {
     setDisclaimerAccepting(true);
@@ -129,12 +124,13 @@ export default function Home() {
       setContentDisclaimer(true);
       setShowDisclaimerModal(false);
       if (pendingSharePostId !== null) {
-        await doShare(pendingSharePostId);
+        setShareModalPostId(pendingSharePostId);
+        setShowShareModal(true);
         setPendingSharePostId(null);
       }
     } catch { /* silent */ }
     setDisclaimerAccepting(false);
-  }, [pendingSharePostId, doShare]);
+  }, [pendingSharePostId]);
 
   const handleTranslate = useCallback(async (postId: number, content: string) => {
     if (translatingId === postId) return;
@@ -538,6 +534,15 @@ export default function Home() {
             </div>
           </div>
         </div>
+      )}
+
+      {shareModalPostId !== null && (
+        <SharePostModal
+          postId={shareModalPostId}
+          isOpen={showShareModal}
+          onClose={() => { setShowShareModal(false); setShareModalPostId(null); }}
+          contentDisclaimerAccepted={contentDisclaimer}
+        />
       )}
     </div>
   );
