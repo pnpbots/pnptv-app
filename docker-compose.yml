@@ -510,7 +510,7 @@ services:
       start_period: 120s
 
   btcpay-nbxplorer:
-    image: nicolasdorier/nbxplorer:2.5.7
+    image: nicolasdorier/nbxplorer:2.5.30
     container_name: btcpay-nbxplorer
     restart: unless-stopped
     volumes:

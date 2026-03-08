@@ -63,15 +63,24 @@ async function createDashInvoice({ usdAmount, userId, orderId, description = 'PN
     receipt: { enabled: false },
   };
 
-  const response = await btcpayClient.post(`/stores/${BTCPAY_STORE_ID}/invoices`, payload);
-  const invoice = response.data;
+  try {
+    const response = await btcpayClient.post(`/stores/${BTCPAY_STORE_ID}/invoices`, payload);
+    const invoice = response.data;
 
-  return {
-    success: true,
-    invoiceId: invoice.id,
-    checkoutUrl: `${BTCPAY_PUBLIC_URL}/i/${invoice.id}`,
-    status: invoice.status,
-  };
+    return {
+      success: true,
+      invoiceId: invoice.id,
+      checkoutUrl: `${BTCPAY_PUBLIC_URL}/i/${invoice.id}`,
+      status: invoice.status,
+    };
+  } catch (err) {
+    logger.error('BTCPay createDashInvoice failed:', {
+      status: err.response?.status,
+      data: err.response?.data,
+      message: err.message,
+    });
+    throw err;
+  }
 }
 
 /**
