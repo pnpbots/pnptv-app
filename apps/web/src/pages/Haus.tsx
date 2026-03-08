@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import { Card, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
+import { PermissionGate } from "@/components/PermissionGate";
 import {
   joinCommunityRoom,
   getCommunityRoomOccupancy,
@@ -20,6 +21,7 @@ export default function Haus() {
   const [roomInfo, setRoomInfo] = useState<CommunityRoomInfo | null>(null);
   const [error, setError] = useState("");
   const [occupancyError, setOccupancyError] = useState(false);
+  const [showPermGate, setShowPermGate] = useState(false);
 
   useEffect(() => {
     getCommunityRoomOccupancy()
@@ -32,7 +34,13 @@ export default function Haus() {
       });
   }, []);
 
-  const handleJoin = async () => {
+  const handleJoinClick = () => {
+    if (!user) return;
+    setShowPermGate(true);
+  };
+
+  const handlePermGranted = useCallback(async () => {
+    setShowPermGate(false);
     if (!user) return;
     setLoading(true);
     setError("");
@@ -54,7 +62,7 @@ export default function Haus() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   const handleLeave = () => {
     setJoined(false);
@@ -183,7 +191,7 @@ export default function Haus() {
         )}
         {isAuthenticated ? (
           <Button
-            onClick={handleJoin}
+            onClick={handleJoinClick}
             disabled={loading}
             className="w-full"
           >
@@ -231,6 +239,14 @@ export default function Haus() {
           </li>
         </ul>
       </Card>
+
+      {/* Permission gate modal */}
+      {showPermGate && (
+        <PermissionGate
+          onGranted={handlePermGranted}
+          onCancel={() => setShowPermGate(false)}
+        />
+      )}
     </div>
   );
 }

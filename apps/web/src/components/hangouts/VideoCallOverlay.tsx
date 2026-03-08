@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { JitsiMeetComponent } from "./JitsiMeetComponent";
+import { PermissionGate } from "@/components/PermissionGate";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,7 @@ export function VideoCallOverlay({
   const [participantCount, setParticipantCount] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
+  const [permsGranted, setPermsGranted] = useState(false);
 
   // Prevent body scroll in fullscreen mode
   useEffect(() => {
@@ -172,6 +174,16 @@ export function VideoCallOverlay({
           </button>
         </div>
       </div>
+    );
+  }
+
+  // ─── Permission gate ──────────────────────────────────────────────────
+  if (!permsGranted) {
+    return (
+      <PermissionGate
+        onGranted={() => setPermsGranted(true)}
+        onCancel={onClose}
+      />
     );
   }
 
