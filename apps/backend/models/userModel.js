@@ -136,6 +136,8 @@ class UserModel {
       lastBillingAttempt: row.last_billing_attempt || null,
       wofPhotoConsent: row.wof_photo_consent || false,
       contentDisclaimer: row.content_disclaimer || false,
+      contentDisclaimerAcceptedAt: row.content_disclaimer_accepted_at || null,
+      contentDisclaimerAcceptedIp: row.content_disclaimer_accepted_ip || null,
     };
   }
 

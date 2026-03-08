@@ -63,6 +63,7 @@ export interface TelegramAuthResponse {
     photo_url?: string | null;
     creator_status?: string;
     creator_type?: string | null;
+    contentDisclaimer?: boolean;
   };
   requiresTerms?: boolean;
   error?: string;
@@ -454,6 +455,8 @@ export interface TokenCheckoutData {
     amount: number;
     currency: string;
     description: string;
+    invoice: string;
+    signature: string | null;
     extra1: string;
     extra2: string;
     extra3: string;

@@ -23,6 +23,7 @@ interface PnptvUser {
   role: string;
   creator_status?: string;
   creator_type?: string | null;
+  contentDisclaimer?: boolean;
 }
 
 interface AuthState {
@@ -55,6 +56,7 @@ function mapTelegramUser(u: NonNullable<TelegramAuthResponse["user"]>): PnptvUse
     role: u.role || "user",
     creator_status: u.creator_status,
     creator_type: u.creator_type,
+    contentDisclaimer: u.contentDisclaimer || false,
   };
 }
 

@@ -13,6 +13,7 @@ import {
   getSocialFeedPosts,
   getFeaturedPerformers,
   togglePostLike,
+  updateProfile,
   type SocialPostItem,
   type FeaturedPerformer,
 } from "@/lib/api";
@@ -53,6 +54,10 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [translatedPosts, setTranslatedPosts] = useState<Record<number, string>>({});
   const [translatingId, setTranslatingId] = useState<number | null>(null);
+  const [contentDisclaimer, setContentDisclaimer] = useState(user?.contentDisclaimer || false);
+  const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
+  const [disclaimerAccepting, setDisclaimerAccepting] = useState(false);
+  const [pendingSharePostId, setPendingSharePostId] = useState<number | null>(null);
 
   const { data: announcements } = useDirectus<Announcement>({
     collection: "announcements",
@@ -98,6 +103,38 @@ export default function Home() {
       );
     } catch { /* silent */ }
   }, []);
+
+  const doShare = useCallback(async (postId: number) => {
+    const url = `${window.location.origin}/social#post-${postId}`;
+    if (navigator.share) {
+      try { await navigator.share({ title: "PNPtv Post", url }); } catch { /* cancelled */ }
+    } else {
+      await navigator.clipboard.writeText(url);
+    }
+  }, []);
+
+  const handleShare = useCallback(async (postId: number) => {
+    if (contentDisclaimer) {
+      await doShare(postId);
+    } else {
+      setPendingSharePostId(postId);
+      setShowDisclaimerModal(true);
+    }
+  }, [contentDisclaimer, doShare]);
+
+  const handleAcceptDisclaimer = useCallback(async () => {
+    setDisclaimerAccepting(true);
+    try {
+      await updateProfile({ contentDisclaimer: true });
+      setContentDisclaimer(true);
+      setShowDisclaimerModal(false);
+      if (pendingSharePostId !== null) {
+        await doShare(pendingSharePostId);
+        setPendingSharePostId(null);
+      }
+    } catch { /* silent */ }
+    setDisclaimerAccepting(false);
+  }, [pendingSharePostId, doShare]);
 
   const handleTranslate = useCallback(async (postId: number, content: string) => {
     if (translatingId === postId) return;
@@ -412,17 +449,10 @@ export default function Home() {
                         </svg>
                         {(post.replies_count || 0) > 0 && <span>{post.replies_count}</span>}
                       </button>
-                      {/* Share */}
+                      {/* Share — requires content disclaimer */}
                       <button
-                        onClick={async () => {
-                          const url = `${window.location.origin}/social#post-${post.id}`;
-                          if (navigator.share) {
-                            try { await navigator.share({ title: "PNPtv Post", url }); } catch { /* cancelled */ }
-                          } else {
-                            await navigator.clipboard.writeText(url);
-                          }
-                        }}
-                        className="flex items-center gap-1.5 text-xs"
+                        onClick={() => handleShare(post.id)}
+                        className="flex items-center gap-1.5 text-xs hover:text-green-400 transition-colors"
                         style={{ color: "#8E8E93" }}
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -460,6 +490,53 @@ export default function Home() {
           >
             {t.viewAllPosts}
           </button>
+        </div>
+      )}
+
+      {/* Content Disclaimer Modal */}
+      {showDisclaimerModal && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+          onClick={() => setShowDisclaimerModal(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-5 space-y-4"
+            style={{ background: "#1C1C1E", border: "1px solid rgba(212,0,122,0.25)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                </svg>
+              </div>
+              <h3 className="text-base font-bold text-white">Content Sharing Disclaimer</h3>
+            </div>
+            <p className="text-sm text-white/80 leading-relaxed">
+              By accepting this disclaimer, you acknowledge that you are responsible for any content you share from this platform.
+              Shared content must comply with our community guidelines and applicable laws.
+            </p>
+            <p className="text-xs text-white/50 leading-relaxed">
+              This action is permanent and cannot be undone. Your acceptance date, time, and IP address will be recorded.
+            </p>
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => setShowDisclaimerModal(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-white/20 text-white/70 hover:border-white/40 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAcceptDisclaimer}
+                disabled={disclaimerAccepting}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-50 transition-all"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                {disclaimerAccepting ? "..." : "Accept & Share"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

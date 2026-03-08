@@ -24,6 +24,14 @@ const strings = {
     redirectingToX: "Redirecting to X...",
     loginWithEmail: "Login with Email",
 
+    // Telegram Widget flow
+    telegramWidgetVerifying: "Verifying with Telegram...",
+    telegramWidgetError: "Telegram verification failed. Please try again.",
+    telegramWidgetRetry: "Try again",
+    telegramWidgetFallbackLink: "Having trouble? Try the alternative login",
+    telegramWidgetBlocked: "If the Telegram button didn't appear, try the alternative login below.",
+    alternativeTelegramLogin: "Alternative Telegram login",
+
     // Divider
     orDivider: "or",
 
@@ -82,6 +90,14 @@ const strings = {
     loginWithX: "Entrar con X",
     redirectingToX: "Redirigiendo a X...",
     loginWithEmail: "Entrar con Email",
+
+    // Telegram Widget flow
+    telegramWidgetVerifying: "Verificando con Telegram...",
+    telegramWidgetError: "Verificación de Telegram fallida. Por favor intenta de nuevo.",
+    telegramWidgetRetry: "Intentar de nuevo",
+    telegramWidgetFallbackLink: "¿Problemas? Prueba el inicio de sesión alternativo",
+    telegramWidgetBlocked: "Si el botón de Telegram no aparece, usa el inicio de sesión alternativo abajo.",
+    alternativeTelegramLogin: "Inicio de sesión alternativo de Telegram",
 
     orDivider: "o",
 

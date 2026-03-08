@@ -1159,6 +1159,53 @@ class PaymentService {
 
       // Process based on transaction state
       if (effectiveState === 'Aceptada' || effectiveState === 'Aprobada') {
+        // Handle token purchase — credit tokens instead of activating a subscription
+        if (planIdOrBookingId === 'token_purchase' && paymentIdOrType) {
+          try {
+            const TokenCheckoutService = require('./tokenCheckoutService');
+            const creditResult = await TokenCheckoutService.creditTokensFromPayment(paymentIdOrType, 'epayco', {
+              transactionId: x_transaction_id,
+              referenceCode: x_ref_payco,
+            });
+
+            if (creditResult.notFound) {
+              logger.error('ePayco token purchase webhook: token_purchase record not found', {
+                paymentId: paymentIdOrType,
+                refPayco: x_ref_payco,
+              });
+            } else if (creditResult.success && !creditResult.alreadyProcessed) {
+              logger.info('ePayco: tokens credited', {
+                userId: creditResult.userId,
+                tokens: creditResult.tokens,
+                paymentId: paymentIdOrType,
+                newBalance: creditResult.newBalance,
+              });
+
+              // Emit real-time wallet update
+              try {
+                const socketSingleton = require('./socketSingleton');
+                const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+                if (io && creditResult.userId) {
+                  io.to(`user:${creditResult.userId}`).emit('wallet:updated', {
+                    balance: creditResult.newBalance,
+                    credited: creditResult.tokens,
+                  });
+                }
+              } catch (emitErr) {
+                logger.warn(`ePayco token wallet socket emit failed: ${emitErr.message}`);
+              }
+            }
+          } catch (tokenErr) {
+            logger.error('ePayco token purchase credit failed', {
+              error: tokenErr.message,
+              paymentId: paymentIdOrType,
+              refPayco: x_ref_payco,
+            });
+          }
+
+          return { success: true, type: 'token_purchase' };
+        }
+
         // Activate user subscription
         if (userId && planIdOrBookingId) {
           const plan = await PlanModel.getById(planIdOrBookingId);
@@ -1813,6 +1860,55 @@ class PaymentService {
 
         // Pending statuses — no action needed for bookings
         return { success: true };
+      }
+
+      // Handle token purchase — credit tokens instead of activating a subscription
+      if (planId === 'token_purchase') {
+        if (status === 'payment_completed' || status === 'succeeded') {
+          try {
+            const TokenCheckoutService = require('./tokenCheckoutService');
+            const creditResult = await TokenCheckoutService.creditTokensFromPayment(paymentId, 'daimo', {
+              transactionId: source?.txHash || id,
+              payerAddress: source?.payerAddress,
+            });
+
+            if (creditResult.notFound) {
+              logger.error('Daimo token purchase webhook: token_purchase record not found', {
+                paymentId,
+                daimoEventId: id,
+              });
+            } else if (creditResult.success && !creditResult.alreadyProcessed) {
+              logger.info('Daimo: tokens credited', {
+                userId: creditResult.userId,
+                tokens: creditResult.tokens,
+                paymentId,
+                newBalance: creditResult.newBalance,
+              });
+
+              // Emit real-time wallet update
+              try {
+                const socketSingleton = require('./socketSingleton');
+                const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+                if (io && creditResult.userId) {
+                  io.to(`user:${creditResult.userId}`).emit('wallet:updated', {
+                    balance: creditResult.newBalance,
+                    credited: creditResult.tokens,
+                  });
+                }
+              } catch (emitErr) {
+                logger.warn(`Daimo token wallet socket emit failed: ${emitErr.message}`);
+              }
+            }
+          } catch (tokenErr) {
+            logger.error('Daimo token purchase credit failed', {
+              error: tokenErr.message,
+              paymentId,
+              daimoEventId: id,
+            });
+          }
+        }
+
+        return { success: true, type: 'token_purchase' };
       }
 
       if (!planId) {

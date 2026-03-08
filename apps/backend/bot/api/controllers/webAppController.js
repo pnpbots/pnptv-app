@@ -203,6 +203,7 @@ function buildSession(user, extra = {}) {
     language: user.language,
     role: user.role || 'user',
     creator_status: user.creator_status || 'none',
+    contentDisclaimer: user.content_disclaimer || false,
     // ATProto identity fields (preserved for hybrid session)
     atproto_did: user.atproto_did || null,
     atproto_handle: user.atproto_handle || null,
@@ -1509,6 +1510,22 @@ const updateProfile = async (req, res) => {
     const vals = [];
     allowed.forEach(key => {
       if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+        // Content disclaimer: once accepted, cannot be reverted
+        if (key === 'contentDisclaimer') {
+          if (req.body[key] !== true) return; // Only allow setting to true, ignore false/revert
+          sets.push(`${colMap[key]} = $${sets.length + 1}`);
+          vals.push(true);
+          // Also record timestamp and IP
+          const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim()
+            || req.headers['x-real-ip']
+            || req.socket?.remoteAddress
+            || 'unknown';
+          sets.push(`content_disclaimer_accepted_at = $${sets.length + 1}`);
+          vals.push(new Date());
+          sets.push(`content_disclaimer_accepted_ip = $${sets.length + 1}`);
+          vals.push(clientIp);
+          return;
+        }
         sets.push(`${colMap[key]} = $${sets.length + 1}`);
         if (key === 'interests') {
           // DB column is text[] — parse comma-separated string to array
@@ -1756,6 +1773,92 @@ const unlinkX = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/webapp/auth/telegram/widget
+ * Authenticates a user via the official Telegram Login Widget callback.
+ *
+ * The widget POSTs all user fields + hash directly to us (via window.onTelegramAuth).
+ * We verify the hash with the bot token, find-or-create the user, regenerate the
+ * session ID to prevent fixation, then return a session cookie.
+ *
+ * Verification algorithm (per https://core.telegram.org/widgets/login):
+ *   1. data-check-string = alphabetically sorted "key=value" pairs joined by "\n"
+ *   2. secret_key = SHA256(bot_token)  — plain hash, NOT HMAC
+ *   3. hash = HMAC-SHA256(secret_key, data-check-string) in hex
+ */
+const telegramWidgetAuth = async (req, res) => {
+  try {
+    const { id, first_name, last_name, username, photo_url, auth_date, hash } = req.body || {};
+
+    if (!id || !hash || !auth_date) {
+      return res.status(400).json({ success: false, error: 'Missing required Telegram auth fields' });
+    }
+
+    // Verify the Telegram widget hash using the shared helper
+    const isValid = verifyTelegramAuth(req.body);
+    const skipVerification = process.env.SKIP_TELEGRAM_HASH_VERIFICATION === 'true'
+      && process.env.NODE_ENV !== 'production';
+
+    if (!isValid && !skipVerification) {
+      logger.warn('[TelegramWidget] Hash verification failed', { userId: id });
+      return res.status(401).json({ success: false, error: 'Invalid authentication data' });
+    }
+
+    if (skipVerification && !isValid) {
+      logger.warn('[TelegramWidget] DEVELOPMENT: hash verification bypassed', { userId: id });
+    }
+
+    const telegramId = String(id);
+
+    const { user, isNew } = await findOrLinkUser({
+      telegramId,
+      firstName: first_name || null,
+      lastName: last_name || null,
+      username: username || null,
+      photoFileId: photo_url || null,
+    });
+
+    if (isNew) {
+      logger.info(`[TelegramWidget] New user created: ${user.id} (@${user.username})`);
+    } else {
+      logger.info(`[TelegramWidget] Existing user login: ${user.id} (@${user.username})`);
+    }
+
+    const sessionData = buildSession(user, { photoUrl: photo_url || user.photo_file_id });
+
+    // Regenerate session ID to prevent session fixation attacks
+    await new Promise((resolve, reject) =>
+      req.session.regenerate(err => (err ? reject(err) : resolve()))
+    );
+
+    req.session.user = sessionData;
+
+    await new Promise((resolve, reject) =>
+      req.session.save(err => (err ? reject(err) : resolve()))
+    );
+
+    return res.json({
+      success: true,
+      isNew,
+      user: {
+        id: user.id,
+        pnptvId: user.pnptv_id,
+        username: user.username,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        photoUrl: photo_url || user.photo_file_id,
+        subscriptionStatus: user.subscription_status,
+        tier: user.tier || 'free',
+        role: user.role || 'user',
+        termsAccepted: user.terms_accepted,
+      },
+    });
+  } catch (error) {
+    logger.error('[TelegramWidget] Auth error:', error);
+    return res.status(500).json({ success: false, error: 'Authentication failed. Please try again.' });
+  }
+};
+
 module.exports = {
   telegramStart,
   telegramCallback,
@@ -1763,6 +1866,7 @@ module.exports = {
   telegramGenerateToken,
   telegramCheckToken,
   telegramConfirmLogin,
+  telegramWidgetAuth,
   emailRegister,
   emailLogin,
   verifyEmail,

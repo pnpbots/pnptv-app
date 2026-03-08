@@ -146,6 +146,117 @@ class PaymentController {
 
       // Get plan information (handle both camelCase and snake_case from payment)
       const planId = payment.planId || payment.plan_id;
+      const paymentType = payment.metadata?.type;
+
+      // Token purchases do not have a plan — handle them separately
+      if (paymentType === 'token_purchase') {
+        const tokenAmount = payment.metadata?.tokensAmount || 0;
+        const paymentAmountUsd = parseFloat(payment.amount) || payment.metadata?.usdAmount || 0;
+        const priceInCOP = Math.round(paymentAmountUsd * 4000);
+        const amountCOPString = String(priceInCOP);
+        const currencyCode = 'COP';
+        const actualPaymentId = payment.id || payment.paymentId;
+        const paymentRef = `TOK-${actualPaymentId.substring(0, 8).toUpperCase()}`;
+        const webhookDomain = process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
+        const epaycoWebhookDomain = process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://pnptv.app';
+        const provider = payment.provider || 'epayco';
+        const userId = payment.userId || payment.user_id;
+
+        const tokenPaymentData = {
+          paymentId: actualPaymentId,
+          paymentRef,
+          userId,
+          // Must be 'token_purchase' (not null) so ePayco sends x_extra2='token_purchase'
+          // back in the webhook, allowing the webhook handler to credit tokens correctly.
+          planId: 'token_purchase',
+          provider,
+          status: payment.status,
+          amountUSD: paymentAmountUsd,
+          amountCOP: priceInCOP,
+          currencyCode,
+          isPromo: false,
+          originalPrice: null,
+          discountAmount: null,
+          promoCode: null,
+          plan: {
+            id: payment.metadata?.packageId || 'tokens',
+            sku: 'TOKENS',
+            name: `${tokenAmount} PNP Tokens`,
+            description: `${tokenAmount} PNP Tokens — $${paymentAmountUsd} USD`,
+            icon: '🪙',
+            duration: null,
+            features: [`${tokenAmount} tokens added to your wallet`, 'Use for tips and live streams'],
+          },
+        };
+
+        if (provider === 'epayco') {
+          tokenPaymentData.epaycoPublicKey = process.env.EPAYCO_PUBLIC_KEY;
+          tokenPaymentData.testMode = process.env.EPAYCO_TEST_MODE === 'true';
+          tokenPaymentData.confirmationUrl = `${epaycoWebhookDomain}/api/webhooks/epayco`;
+          tokenPaymentData.responseUrl = `${webhookDomain}/api/payment-response`;
+          tokenPaymentData.epaycoSignature = PaymentService.generateEpaycoCheckoutSignature({
+            invoice: paymentRef,
+            amount: amountCOPString,
+            currencyCode,
+          });
+          // Persist expected webhook values for strict amount/currency validation
+          try {
+            if (
+              payment.metadata?.expected_epayco_amount !== amountCOPString
+              || payment.metadata?.expected_epayco_currency !== currencyCode
+            ) {
+              await PaymentModel.updateStatus(actualPaymentId, payment.status, {
+                expected_epayco_amount: amountCOPString,
+                expected_epayco_currency: currencyCode,
+              });
+            }
+          } catch (metaError) {
+            logger.error('Failed to persist expected ePayco webhook amount/currency for token purchase (non-critical)', {
+              paymentId: actualPaymentId,
+              error: metaError.message,
+            });
+          }
+          if (!tokenPaymentData.epaycoSignature) {
+            return res.status(500).json({ success: false, error: 'Error de configuración del pago.' });
+          }
+        } else if (provider === 'daimo') {
+          const existingSessionId = payment.metadata?.daimo_payment_id || payment.daimo_payment_id;
+          const existingClientSecret = payment.metadata?.daimo_client_secret;
+          if (existingSessionId && existingClientSecret) {
+            tokenPaymentData.daimoSessionId = existingSessionId;
+            tokenPaymentData.daimoClientSecret = existingClientSecret;
+          } else {
+            try {
+              const daimoResult = await DaimoConfig.createDaimoPayment({
+                amount: paymentAmountUsd,
+                userId,
+                planId: 'token_purchase',
+                chatId: '',
+                paymentId: actualPaymentId,
+                description: `${tokenAmount} PNP Tokens`,
+              });
+              if (daimoResult.success) {
+                tokenPaymentData.daimoSessionId = daimoResult.daimoPaymentId;
+                tokenPaymentData.daimoClientSecret = daimoResult.clientSecret;
+                await PaymentModel.updateStatus(actualPaymentId, 'pending', {
+                  daimo_payment_id: daimoResult.daimoPaymentId,
+                  daimo_client_secret: daimoResult.clientSecret,
+                });
+              } else {
+                throw new Error(daimoResult.error || 'Daimo payment creation failed');
+              }
+            } catch (daimoErr) {
+              logger.error('Error creating Daimo session for token purchase:', daimoErr);
+              tokenPaymentData.daimoSessionId = null;
+              tokenPaymentData.daimoClientSecret = null;
+            }
+          }
+        }
+
+        logger.info('Token purchase payment info retrieved', { paymentId, userId, tokenAmount });
+        return res.json({ success: true, payment: tokenPaymentData });
+      }
+
       const plan = await PlanModel.getById(planId);
 
       if (!plan) {

@@ -732,7 +732,7 @@ function initSocketIO(io) {
     // The user's assigned live_channel is verified against channelRef before
     // spawning FFmpeg.
 
-    socket.on('stream:start', async ({ channelRef } = {}) => {
+    socket.on('stream:start', async ({ channelRef, videoBitrate, audioBitrate, fps } = {}) => {
       // Reject if already streaming — one stream per connection
       if (socket.data.ffmpegProcess) {
         socket.emit('stream:error', { message: 'Already streaming. Stop the current stream first.' });
@@ -743,6 +743,22 @@ function initSocketIO(io) {
         socket.emit('stream:error', { message: 'Invalid channelRef' });
         return;
       }
+
+      // Validate and clamp quality parameters
+      const safeVideoBitrate = (typeof videoBitrate === 'number' && isFinite(videoBitrate))
+        ? Math.min(Math.max(videoBitrate, 100_000), 6_000_000)
+        : 2_500_000;
+      const safeAudioBitrate = (typeof audioBitrate === 'number' && isFinite(audioBitrate))
+        ? Math.min(Math.max(audioBitrate, 32_000), 320_000)
+        : 128_000;
+      const safeFps = (typeof fps === 'number' && isFinite(fps))
+        ? Math.min(Math.max(Math.round(fps), 15), 60)
+        : 30;
+
+      const videoBitrateK = Math.round(safeVideoBitrate / 1000);
+      const maxrateK      = Math.round(safeVideoBitrate * 1.2 / 1000);
+      const bufsizeK      = Math.round(safeVideoBitrate * 2 / 1000);
+      const audioBitrateK = Math.round(safeAudioBitrate / 1000);
 
       try {
         // Verify the user has a channel assigned and that it matches channelRef
@@ -785,8 +801,12 @@ function initSocketIO(io) {
           '-preset', 'veryfast',
           '-tune', 'zerolatency',
           '-pix_fmt', 'yuv420p',
+          '-b:v', `${videoBitrateK}k`,
+          '-maxrate', `${maxrateK}k`,
+          '-bufsize', `${bufsizeK}k`,
+          '-r', String(safeFps),
           '-c:a', 'aac',
-          '-b:a', '128k',
+          '-b:a', `${audioBitrateK}k`,
           '-ar', '44100',
           '-f', 'flv',
           rtmpTarget,

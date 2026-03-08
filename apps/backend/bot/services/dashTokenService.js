@@ -135,7 +135,7 @@ class DashTokenService {
   }
 
   /**
-   * Record a pending token purchase invoice
+   * Record a pending token purchase invoice (BTCPay/Dash)
    * @param {string} userId
    * @param {number} tokens
    * @param {number} usdAmount
@@ -150,6 +150,117 @@ class DashTokenService {
        ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
       [userId, tokens, usdAmount, invoiceId]
     );
+  }
+
+  /**
+   * Record a pending token purchase for ePayco or Daimo
+   * Uses a prefixed internal payment ID as the idempotency key stored in btcpay_invoice_id.
+   * @param {string} userId
+   * @param {number} tokens
+   * @param {number} usdAmount
+   * @param {string} paymentId   — internal UUID from the payments table
+   * @param {string} paymentMethod — 'epayco' | 'daimo'
+   * @returns {Promise<void>}
+   */
+  static async recordPurchaseForPayment(userId, tokens, usdAmount, paymentId, paymentMethod) {
+    // Store the internal payment UUID prefixed with the provider as the idempotency key.
+    // btcpay_invoice_id allows NULLs but has a UNIQUE constraint, so using a namespaced
+    // prefix avoids collisions with real BTCPay invoice IDs.
+    const idempotencyKey = `${paymentMethod}:${paymentId}`;
+    await query(
+      `INSERT INTO token_purchases
+         (user_id, tokens_credited, usd_amount, btcpay_invoice_id, status, payment_method)
+       VALUES ($1, $2, $3, $4, 'pending', $5)
+       ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
+      [userId, tokens, usdAmount, idempotencyKey, paymentMethod]
+    );
+  }
+
+  /**
+   * Credit tokens for a payment-method purchase (ePayco or Daimo).
+   * Uses the namespaced idempotency key stored during recordPurchaseForPayment.
+   * @param {string} paymentId   — internal UUID from the payments table
+   * @param {string} paymentMethod — 'epayco' | 'daimo'
+   * @returns {Promise<{newBalance: number, alreadyProcessed: boolean, userId?: string, tokens?: number}>}
+   */
+  static async creditTokensByPaymentId(paymentId, paymentMethod) {
+    const idempotencyKey = `${paymentMethod}:${paymentId}`;
+    const lockKey = `token:credit:${idempotencyKey}`;
+    const acquired = await cache.acquireLock(lockKey, 120).catch(() => false);
+    if (!acquired) {
+      logger.warn('creditTokensByPaymentId duplicate blocked', { idempotencyKey });
+      return { newBalance: 0, alreadyProcessed: true };
+    }
+
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      // Look up the pending purchase record
+      const purchaseResult = await client.query(
+        `SELECT id, user_id, tokens_credited, usd_amount, status
+         FROM token_purchases
+         WHERE btcpay_invoice_id = $1`,
+        [idempotencyKey]
+      );
+
+      if (purchaseResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        logger.warn('creditTokensByPaymentId: purchase record not found', { idempotencyKey });
+        return { newBalance: 0, alreadyProcessed: false, notFound: true };
+      }
+
+      const purchase = purchaseResult.rows[0];
+
+      if (purchase.status === 'paid') {
+        await client.query('ROLLBACK');
+        return { newBalance: 0, alreadyProcessed: true, userId: purchase.user_id, tokens: purchase.tokens_credited };
+      }
+
+      // Mark purchase as paid
+      await client.query(
+        `UPDATE token_purchases
+         SET status = 'paid', settled_at = NOW()
+         WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
+        [idempotencyKey]
+      );
+
+      // Credit wallet (atomic)
+      const walletResult = await client.query(
+        `INSERT INTO user_token_wallets (user_id, balance_tokens)
+         VALUES ($1, $2)
+         ON CONFLICT (user_id) DO UPDATE
+           SET balance_tokens = user_token_wallets.balance_tokens + $2,
+               updated_at = NOW()
+         RETURNING balance_tokens`,
+        [purchase.user_id, purchase.tokens_credited]
+      );
+
+      await client.query('COMMIT');
+      const newBalance = walletResult.rows[0]?.balance_tokens ?? purchase.tokens_credited;
+
+      await cache.del(`wallet:${purchase.user_id}`).catch(() => {});
+      logger.info('Tokens credited via payment', {
+        userId: purchase.user_id,
+        tokens: purchase.tokens_credited,
+        idempotencyKey,
+        newBalance,
+      });
+
+      return {
+        newBalance,
+        alreadyProcessed: false,
+        userId: purchase.user_id,
+        tokens: purchase.tokens_credited,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      logger.error('creditTokensByPaymentId error:', error);
+      throw error;
+    } finally {
+      client.release();
+      await cache.releaseLock(lockKey).catch(() => {});
+    }
   }
 
   /**

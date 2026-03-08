@@ -18,12 +18,34 @@ const Wifi = (p: React.SVGProps<SVGSVGElement>) => <svg {...p} xmlns="http://www
 const WifiOff = (p: React.SVGProps<SVGSVGElement>) => <svg {...p} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>;
 const RefreshCw = (p: React.SVGProps<SVGSVGElement>) => <svg {...p} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>;
 const ChevronDown = (p: React.SVGProps<SVGSVGElement>) => <svg {...p} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>;
+const Monitor = (p: React.SVGProps<SVGSVGElement>) => <svg {...p} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>;
+const MonitorOff = (p: React.SVGProps<SVGSVGElement>) => <svg {...p} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M17 17H4a2 2 0 0 1-2-2V5c0-.53.19-1.04.54-1.43"/><path d="M22 15a2 2 0 0 0 .59-1.43V5a2 2 0 0 0-2-2H9"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><line x1="1" y1="1" x2="23" y2="23"/></svg>;
+const Eye = (p: React.SVGProps<SVGSVGElement>) => <svg {...p} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>;
+const EyeOff = (p: React.SVGProps<SVGSVGElement>) => <svg {...p} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>;
+const LayoutGrid = (p: React.SVGProps<SVGSVGElement>) => <svg {...p} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>;
 import { useI18n } from "@/lib/i18n";
 import { getMyChannel } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
 import type { Socket } from "socket.io-client";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Quality Presets ─────────────────────────────────────────────────────────
+
+const QUALITY_PRESETS = [
+  { id: "720p",  label: "720p HD",      width: 1280, height: 720,  videoBitrate: 2_500_000, audioBitrate: 128000, fps: 30 },
+  { id: "480p",  label: "480p SD",      width: 854,  height: 480,  videoBitrate: 1_000_000, audioBitrate: 128000, fps: 30 },
+  { id: "360p",  label: "360p Low",     width: 640,  height: 360,  videoBitrate:   600_000, audioBitrate:  96000, fps: 24 },
+  { id: "1080p", label: "1080p Full HD",width: 1920, height: 1080, videoBitrate: 4_500_000, audioBitrate: 192000, fps: 30 },
+] as const;
+
+type PresetId = typeof QUALITY_PRESETS[number]["id"];
+type QualityPreset = typeof QUALITY_PRESETS[number];
+
+// ─── PiP position cycling ─────────────────────────────────────────────────────
+
+type PipPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left";
+const PIP_POSITIONS: PipPosition[] = ["bottom-right", "bottom-left", "top-right", "top-left"];
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 type StreamStatus = "idle" | "connecting" | "live" | "stopping" | "error";
 type PermissionState = "unknown" | "granted" | "denied" | "not_found";
@@ -231,9 +253,35 @@ export default function BrowserStreamer() {
   const [channel, setChannel] = useState<ChannelInfo | null>(null);
   const [channelLoading, setChannelLoading] = useState(false);
 
-  // Refs
+  // Quality preset
+  const [selectedPresetId, setSelectedPresetId] = useState<PresetId>("720p");
+  const selectedPreset = useMemo(
+    (): QualityPreset =>
+      QUALITY_PRESETS.find((p) => p.id === selectedPresetId) ?? QUALITY_PRESETS[0],
+    [selectedPresetId]
+  );
+
+  // Screen sharing + PiP state
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [pipPosition, setPipPosition] = useState<PipPosition>("bottom-right");
+  const [showPip, setShowPip] = useState(true);
+
+  // Refs — camera/mic stream
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // Refs — screen share
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  // Refs — hidden camera video element for PiP compositing
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  // Refs — screen video element for compositing
+  const screenVideoRef = useRef<HTMLVideoElement | null>(null);
+  // Refs — canvas for composited output
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Refs — the captureStream() from the canvas
+  const canvasStreamRef = useRef<MediaStream | null>(null);
+  // Refs — rAF handle for the draw loop
+  const rafRef = useRef<number | null>(null);
+
   const recorderRef = useRef<MediaRecorder | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -283,16 +331,29 @@ export default function BrowserStreamer() {
 
   // ── Request permissions and start preview ────────────────────────────────
   const startPreview = useCallback(
-    async (cameraId: string, micId: string) => {
+    async (cameraId: string, micId: string, preset?: QualityPreset) => {
+      const p = preset ?? selectedPreset;
+
       // Stop any existing preview track
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
       }
 
+      const videoConstraints: MediaTrackConstraints = {
+        width: { ideal: p.width },
+        height: { ideal: p.height },
+        frameRate: { ideal: p.fps },
+        ...(cameraId ? { deviceId: { exact: cameraId } } : {}),
+      };
+
+      const audioConstraints: MediaTrackConstraints = {
+        ...(micId ? { deviceId: { exact: micId } } : {}),
+      };
+
       const constraints: MediaStreamConstraints = {
-        video: cameraId ? { deviceId: { exact: cameraId } } : true,
-        audio: micId ? { deviceId: { exact: micId } } : true,
+        video: videoConstraints,
+        audio: audioConstraints,
       };
 
       try {
@@ -330,14 +391,14 @@ export default function BrowserStreamer() {
         }
       }
     },
-    [enumerateDevices]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [enumerateDevices, selectedPreset]
   );
 
   // ── Initial mount: enumerate devices then request permission ─────────────
   useEffect(() => {
     if (!browserSupported) return;
 
-    // Try silent enumeration first (no permission required in many browsers)
     navigator.mediaDevices
       .enumerateDevices()
       .then((devices) => {
@@ -347,7 +408,6 @@ export default function BrowserStreamer() {
         const firstCam = cams[0]?.deviceId ?? "";
         const firstMic = mics[0]?.deviceId ?? "";
 
-        // Always request getUserMedia to trigger permission prompt
         startPreview(firstCam, firstMic);
       })
       .catch(() => {
@@ -360,24 +420,20 @@ export default function BrowserStreamer() {
   useEffect(() => {
     if (permission !== "granted" || status !== "idle") return;
     if (!selectedCamera && !selectedMic) return;
-    startPreview(selectedCamera, selectedMic);
+    if (!isScreenSharing) {
+      startPreview(selectedCamera, selectedMic);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCamera, selectedMic]);
 
   // ── Handle device-selector change events ─────────────────────────────────
-  const handleCameraChange = useCallback(
-    (deviceId: string) => {
-      setSelectedCamera(deviceId);
-    },
-    []
-  );
+  const handleCameraChange = useCallback((deviceId: string) => {
+    setSelectedCamera(deviceId);
+  }, []);
 
-  const handleMicChange = useCallback(
-    (deviceId: string) => {
-      setSelectedMic(deviceId);
-    },
-    []
-  );
+  const handleMicChange = useCallback((deviceId: string) => {
+    setSelectedMic(deviceId);
+  }, []);
 
   // ── Load channel info (lazy — only when going live) ───────────────────────
   const loadChannel = useCallback(async (): Promise<ChannelInfo | null> => {
@@ -400,17 +456,245 @@ export default function BrowserStreamer() {
   // ── Quality estimator based on bytes/sec ─────────────────────────────────
   const recordChunkSize = useCallback((bytes: number) => {
     bytesSentRef.current.push(bytes);
-    // Keep only last 5 chunks for rolling average
     if (bytesSentRef.current.length > 5) {
       bytesSentRef.current.shift();
     }
     const avg =
       bytesSentRef.current.reduce((a, b) => a + b, 0) /
       bytesSentRef.current.length;
-    // ~125KB/s = good (1 Mbps), ~50KB/s = fair, below = poor
     if (avg >= 100_000) setQuality("good");
     else if (avg >= 40_000) setQuality("fair");
     else setQuality("poor");
+  }, []);
+
+  // ── Canvas compositing loop (screen + camera PiP) ─────────────────────────
+  const stopCanvasComposite = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }, []);
+
+  const startCanvasComposite = useCallback(
+    (preset: QualityPreset, pip: PipPosition, pipVisible: boolean) => {
+      const canvas = canvasRef.current;
+      const screenVideo = screenVideoRef.current;
+      const cameraVideo = cameraVideoRef.current;
+      if (!canvas || !screenVideo) return;
+
+      canvas.width = preset.width;
+      canvas.height = preset.height;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const frameInterval = 1000 / preset.fps;
+      let lastDraw = 0;
+
+      const draw = (now: number) => {
+        rafRef.current = requestAnimationFrame(draw);
+
+        if (now - lastDraw < frameInterval) return;
+        lastDraw = now;
+
+        // Draw screen capture
+        if (screenVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+          ctx.drawImage(screenVideo, 0, 0, canvas.width, canvas.height);
+        } else {
+          ctx.fillStyle = "#000";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // Draw camera PiP
+        if (
+          pipVisible &&
+          cameraVideo &&
+          cameraVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+        ) {
+          const pipW = Math.round(canvas.width * 0.25);
+          const pipH = Math.round(pipW * (9 / 16));
+          const margin = 12;
+
+          let pipX: number;
+          let pipY: number;
+
+          if (pip === "bottom-right") {
+            pipX = canvas.width - pipW - margin;
+            pipY = canvas.height - pipH - margin;
+          } else if (pip === "bottom-left") {
+            pipX = margin;
+            pipY = canvas.height - pipH - margin;
+          } else if (pip === "top-right") {
+            pipX = canvas.width - pipW - margin;
+            pipY = margin;
+          } else {
+            pipX = margin;
+            pipY = margin;
+          }
+
+          // Rounded clip for PiP
+          const radius = 8;
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(pipX + radius, pipY);
+          ctx.lineTo(pipX + pipW - radius, pipY);
+          ctx.quadraticCurveTo(pipX + pipW, pipY, pipX + pipW, pipY + radius);
+          ctx.lineTo(pipX + pipW, pipY + pipH - radius);
+          ctx.quadraticCurveTo(pipX + pipW, pipY + pipH, pipX + pipW - radius, pipY + pipH);
+          ctx.lineTo(pipX + radius, pipY + pipH);
+          ctx.quadraticCurveTo(pipX, pipY + pipH, pipX, pipY + pipH - radius);
+          ctx.lineTo(pipX, pipY + radius);
+          ctx.quadraticCurveTo(pipX, pipY, pipX + radius, pipY);
+          ctx.closePath();
+          ctx.clip();
+          ctx.drawImage(cameraVideo, pipX, pipY, pipW, pipH);
+          ctx.restore();
+
+          // Border around PiP
+          ctx.save();
+          ctx.strokeStyle = "rgba(255,255,255,0.6)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(pipX + radius, pipY);
+          ctx.lineTo(pipX + pipW - radius, pipY);
+          ctx.quadraticCurveTo(pipX + pipW, pipY, pipX + pipW, pipY + radius);
+          ctx.lineTo(pipX + pipW, pipY + pipH - radius);
+          ctx.quadraticCurveTo(pipX + pipW, pipY + pipH, pipX + pipW - radius, pipY + pipH);
+          ctx.lineTo(pipX + radius, pipY + pipH);
+          ctx.quadraticCurveTo(pipX, pipY + pipH, pipX, pipY + pipH - radius);
+          ctx.lineTo(pipX, pipY + radius);
+          ctx.quadraticCurveTo(pipX, pipY, pipX + radius, pipY);
+          ctx.closePath();
+          ctx.stroke();
+          ctx.restore();
+        }
+      };
+
+      rafRef.current = requestAnimationFrame(draw);
+    },
+    []
+  );
+
+  // Re-run compositing when PiP settings change while screen sharing is active
+  useEffect(() => {
+    if (!isScreenSharing) return;
+    stopCanvasComposite();
+    startCanvasComposite(selectedPreset, pipPosition, showPip);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pipPosition, showPip, isScreenSharing]);
+
+  // ── Start screen sharing ──────────────────────────────────────────────────
+  const startScreenShare = useCallback(async () => {
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
+      });
+
+      screenStreamRef.current = screenStream;
+
+      // Build hidden screen video element for canvas input
+      const screenVideo = document.createElement("video");
+      screenVideo.autoplay = true;
+      screenVideo.playsInline = true;
+      screenVideo.muted = true;
+      screenVideo.srcObject = screenStream;
+      screenVideoRef.current = screenVideo;
+      await screenVideo.play().catch(() => { /* autoplay may be handled by browser */ });
+
+      // Build hidden camera video element for PiP input
+      if (streamRef.current) {
+        const camVideo = document.createElement("video");
+        camVideo.autoplay = true;
+        camVideo.playsInline = true;
+        camVideo.muted = true;
+        camVideo.srcObject = streamRef.current;
+        cameraVideoRef.current = camVideo;
+        await camVideo.play().catch(() => { /* autoplay may be handled by browser */ });
+      }
+
+      // Show canvas composited output in the preview <video>
+      const canvas = canvasRef.current;
+      if (canvas) {
+        // captureStream fps=0 means we drive it manually via rAF
+        const canvasStream = canvas.captureStream(0);
+        canvasStreamRef.current = canvasStream;
+
+        // Merge audio tracks from camera stream into canvas stream
+        if (streamRef.current) {
+          streamRef.current.getAudioTracks().forEach((track) => {
+            canvasStream.addTrack(track);
+          });
+        }
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = canvasStream;
+        }
+
+        startCanvasComposite(selectedPreset, pipPosition, showPip);
+      }
+
+      setIsScreenSharing(true);
+
+      // Auto-revert when user stops sharing via browser UI
+      const screenVideoTrack = screenStream.getVideoTracks()[0];
+      if (screenVideoTrack) {
+        screenVideoTrack.addEventListener("ended", () => {
+          stopScreenShare();
+        });
+      }
+    } catch (err: unknown) {
+      // User cancelled getDisplayMedia — not an error worth surfacing
+      if (err instanceof DOMException && err.name === "NotAllowedError") return;
+      setStreamError("Screen sharing failed. Please try again.");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPreset, pipPosition, showPip, startCanvasComposite]);
+
+  // ── Stop screen sharing ───────────────────────────────────────────────────
+  const stopScreenShare = useCallback(() => {
+    stopCanvasComposite();
+
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      screenStreamRef.current = null;
+    }
+
+    if (screenVideoRef.current) {
+      screenVideoRef.current.srcObject = null;
+      screenVideoRef.current = null;
+    }
+
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = null;
+      cameraVideoRef.current = null;
+    }
+
+    canvasStreamRef.current = null;
+
+    // Restore camera stream in the preview element
+    if (videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+
+    setIsScreenSharing(false);
+  }, [stopCanvasComposite]);
+
+  // ── Toggle screen sharing ─────────────────────────────────────────────────
+  const handleToggleScreenShare = useCallback(() => {
+    if (isScreenSharing) {
+      stopScreenShare();
+    } else {
+      startScreenShare();
+    }
+  }, [isScreenSharing, startScreenShare, stopScreenShare]);
+
+  // ── Cycle PiP position ────────────────────────────────────────────────────
+  const handleCyclePipPosition = useCallback(() => {
+    setPipPosition((prev) => {
+      const idx = PIP_POSITIONS.indexOf(prev);
+      return PIP_POSITIONS[(idx + 1) % PIP_POSITIONS.length];
+    });
   }, []);
 
   // ── Go Live ───────────────────────────────────────────────────────────────
@@ -475,13 +759,39 @@ export default function BrowserStreamer() {
     socket.on("stream:error", onStreamError);
     socket.on("live:viewer_count", onViewerCount);
 
-    // 4. Emit stream:start
-    socket.emit("stream:start", { channelRef: chan.ref });
+    // 4. Emit stream:start with quality params
+    socket.emit("stream:start", {
+      channelRef: chan.ref,
+      videoBitrate: selectedPreset.videoBitrate,
+      audioBitrate: selectedPreset.audioBitrate,
+      fps: selectedPreset.fps,
+    });
 
-    // 5. Create MediaRecorder
+    // 5. Determine which stream to record:
+    //    - Screen sharing active → use the canvas composite stream
+    //    - Camera only → use the raw camera stream
+    const recordStream = isScreenSharing && canvasStreamRef.current
+      ? canvasStreamRef.current
+      : streamRef.current;
+
+    if (!recordStream) {
+      setStreamError(t.cameraPermissionDenied);
+      setStatus("error");
+      socket.off("stream:started", onStarted);
+      socket.off("stream:stopped", onStopped);
+      socket.off("stream:error", onStreamError);
+      socket.off("live:viewer_count", onViewerCount);
+      return;
+    }
+
+    // 6. Create MediaRecorder
     let recorder: MediaRecorder;
     try {
-      recorder = new MediaRecorder(streamRef.current, { mimeType });
+      recorder = new MediaRecorder(recordStream, {
+        mimeType,
+        videoBitsPerSecond: selectedPreset.videoBitrate,
+        audioBitsPerSecond: selectedPreset.audioBitrate,
+      });
     } catch {
       setStreamError(t.browserNotSupported);
       setStatus("error");
@@ -507,7 +817,7 @@ export default function BrowserStreamer() {
 
     recorder.start(1000); // 1-second chunks
     recorderRef.current = recorder;
-  }, [t, loadChannel, recordChunkSize]);
+  }, [t, loadChannel, recordChunkSize, selectedPreset, isScreenSharing]);
 
   // ── Stop Streaming ────────────────────────────────────────────────────────
   const handleStop = useCallback(() => {
@@ -518,7 +828,6 @@ export default function BrowserStreamer() {
       socketRef.current.emit("stream:stop");
     }
 
-    // Remove stream-specific listeners but keep socket alive
     if (socketRef.current) {
       socketRef.current.off("stream:started");
       socketRef.current.off("stream:stopped");
@@ -559,9 +868,14 @@ export default function BrowserStreamer() {
     return () => {
       stopMediaRecorder();
       clearDurationTimer();
+      stopCanvasComposite();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
+      }
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach((track) => track.stop());
+        screenStreamRef.current = null;
       }
       if (socketRef.current) {
         socketRef.current.off("stream:started");
@@ -570,6 +884,7 @@ export default function BrowserStreamer() {
         socketRef.current.off("live:viewer_count");
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Derived state ─────────────────────────────────────────────────────────
@@ -658,11 +973,14 @@ export default function BrowserStreamer() {
         <StatusBadge status={status} t={t} />
       </div>
 
-      {/* Camera preview */}
+      {/* Camera / screen preview */}
       <div
         className="relative w-full overflow-hidden rounded-2xl bg-pnp-surface border border-pnp-border"
         style={{ aspectRatio: "16/9" }}
       >
+        {/* Hidden canvas for compositing — always mounted so ref is available */}
+        <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
+
         {/* Video element — always mounted so srcObject assignment works */}
         <video
           ref={videoRef}
@@ -670,7 +988,7 @@ export default function BrowserStreamer() {
           playsInline
           muted
           className="absolute inset-0 w-full h-full object-cover"
-          aria-label="Camera preview"
+          aria-label={isScreenSharing ? "Screen share preview" : "Camera preview"}
         />
 
         {/* Preview loading overlay */}
@@ -694,12 +1012,86 @@ export default function BrowserStreamer() {
           </div>
         )}
 
-        {/* Stats overlay — visible when live */}
-        {status === "live" && (
+        {/* Screen badge — shown when screen sharing but not yet live */}
+        {isScreenSharing && status !== "live" && (
+          <div className="absolute top-3 left-3">
+            <span
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-bold text-white"
+              style={{ background: "rgba(94,209,196,0.85)", backdropFilter: "blur(4px)" }}
+            >
+              <Monitor className="w-3 h-3" aria-hidden="true" />
+              Screen
+            </span>
+          </div>
+        )}
+
+        {/* Screen badge alongside LIVE badge */}
+        {isScreenSharing && status === "live" && (
+          <div className="absolute top-3 left-3 flex items-center gap-2">
+            <span
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-bold text-white"
+              style={{ background: "rgba(239,68,68,0.9)", backdropFilter: "blur(4px)" }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" aria-hidden="true" />
+              {t.statusLive}
+            </span>
+            <span
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-bold text-white"
+              style={{ background: "rgba(94,209,196,0.75)", backdropFilter: "blur(4px)" }}
+            >
+              <Monitor className="w-3 h-3" aria-hidden="true" />
+              Screen
+            </span>
+          </div>
+        )}
+
+        {/* PiP controls — shown when screen sharing is active */}
+        {isScreenSharing && (
           <div
-            className="absolute bottom-3 left-3 right-3 flex items-center justify-between"
+            className="absolute bottom-3 right-3 flex items-center gap-1.5"
+            aria-label="Picture-in-picture controls"
           >
-            {/* Viewers */}
+            {/* Toggle PiP visibility */}
+            <button
+              onClick={() => setShowPip((v) => !v)}
+              className="
+                flex items-center justify-center w-9 h-9 rounded-xl
+                text-white transition-all duration-150
+                hover:opacity-90 active:scale-95
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent
+              "
+              style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(6px)" }}
+              aria-label={showPip ? "Hide camera" : "Show camera"}
+              title={showPip ? "Hide camera" : "Show camera"}
+            >
+              {showPip ? (
+                <Eye className="w-4 h-4" aria-hidden="true" />
+              ) : (
+                <EyeOff className="w-4 h-4" aria-hidden="true" />
+              )}
+            </button>
+
+            {/* Cycle PiP position */}
+            <button
+              onClick={handleCyclePipPosition}
+              className="
+                flex items-center justify-center w-9 h-9 rounded-xl
+                text-white transition-all duration-150
+                hover:opacity-90 active:scale-95
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent
+              "
+              style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(6px)" }}
+              aria-label="Move camera position"
+              title="Move camera position"
+            >
+              <LayoutGrid className="w-4 h-4" aria-hidden="true" />
+            </button>
+          </div>
+        )}
+
+        {/* Stats overlay — visible when live */}
+        {status === "live" && !isScreenSharing && (
+          <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
             <span
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-white"
               style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
@@ -708,7 +1100,6 @@ export default function BrowserStreamer() {
               {t.viewers(viewerCount)}
             </span>
 
-            {/* Duration */}
             <span
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-white tabular-nums"
               style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
@@ -717,7 +1108,6 @@ export default function BrowserStreamer() {
               {formatDuration(durationSec)}
             </span>
 
-            {/* Quality */}
             <span
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold"
               style={{
@@ -731,7 +1121,70 @@ export default function BrowserStreamer() {
             </span>
           </div>
         )}
+
+        {/* Stats overlay when live + screen sharing (left side only to avoid overlap with PiP controls) */}
+        {status === "live" && isScreenSharing && (
+          <div className="absolute bottom-3 left-3 flex items-center gap-1.5">
+            <span
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-white"
+              style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
+            >
+              <Users className="w-3.5 h-3.5" aria-hidden="true" />
+              {t.viewers(viewerCount)}
+            </span>
+            <span
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-white tabular-nums"
+              style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
+            >
+              <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+              {formatDuration(durationSec)}
+            </span>
+          </div>
+        )}
       </div>
+
+      {/* Quality preset selector — shown when not streaming */}
+      {!isStreaming && (
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-medium text-pnp-textSecondary">Quality</span>
+          <div
+            className="flex flex-wrap gap-2"
+            role="group"
+            aria-label="Stream quality preset"
+          >
+            {QUALITY_PRESETS.map((preset) => {
+              const active = preset.id === selectedPresetId;
+              return (
+                <button
+                  key={preset.id}
+                  onClick={() => {
+                    setSelectedPresetId(preset.id);
+                    if (permission === "granted" && status === "idle" && !isScreenSharing) {
+                      startPreview(selectedCamera, selectedMic, preset);
+                    }
+                  }}
+                  disabled={isConnecting}
+                  className={[
+                    "inline-flex items-center justify-center px-4 rounded-full text-xs font-semibold transition-all duration-150",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent",
+                    "disabled:opacity-50 disabled:cursor-not-allowed",
+                    "active:scale-95",
+                    // min touch target height
+                    "min-h-[44px] sm:min-h-[36px]",
+                    active
+                      ? "btn-gradient text-white shadow-sm"
+                      : "bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent hover:text-pnp-textPrimary",
+                  ].join(" ")}
+                  aria-pressed={active}
+                  aria-label={`Select ${preset.label} quality`}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Device selectors — hidden while streaming to avoid disruption */}
       {!isStreaming && (
@@ -797,64 +1250,94 @@ export default function BrowserStreamer() {
         </button>
       )}
 
-      {/* Primary action button */}
+      {/* Primary action row — Go Live / Stop  +  Screen Share toggle */}
       {status !== "error" && (
-        <div className="pt-1">
-          {isStreaming ? (
+        <div className="pt-1 flex items-center gap-2">
+          {/* Screen share toggle — shown only when not streaming, or when live */}
+          {(canGoLive || status === "live") && (
             <button
-              onClick={handleStop}
-              disabled={status === "stopping"}
-              className="
-                w-full flex items-center justify-center gap-2.5
-                min-h-[52px] px-6 rounded-2xl
-                text-sm font-bold text-white
-                transition-all duration-150
-                disabled:opacity-50 disabled:cursor-not-allowed
-                hover:opacity-90 active:scale-[0.98]
-                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2
-              "
-              style={{ background: "linear-gradient(135deg, #b91c1c, #dc2626)" }}
-              aria-label={t.stopStreaming}
+              onClick={handleToggleScreenShare}
+              disabled={isConnecting || status === "stopping"}
+              className={[
+                "flex items-center justify-center min-h-[52px] min-w-[52px] px-3 rounded-2xl",
+                "text-sm font-semibold transition-all duration-150",
+                "disabled:opacity-50 disabled:cursor-not-allowed",
+                "hover:opacity-90 active:scale-95",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2",
+                "border",
+                isScreenSharing
+                  ? "bg-pnp-accent/20 border-pnp-accent text-pnp-accent"
+                  : "bg-pnp-surface border-pnp-border text-pnp-textSecondary",
+              ].join(" ")}
+              aria-label={isScreenSharing ? "Stop screen sharing" : "Share screen"}
+              title={isScreenSharing ? "Stop screen sharing" : "Share screen"}
             >
-              <StopCircle className="w-5 h-5" aria-hidden="true" />
-              {status === "stopping" ? t.connecting : t.stopStreaming}
-            </button>
-          ) : (
-            <button
-              onClick={handleGoLive}
-              disabled={!canGoLive || isConnecting}
-              className="
-                w-full flex items-center justify-center gap-2.5
-                min-h-[52px] px-6 rounded-2xl
-                text-sm font-bold text-white
-                btn-gradient
-                transition-all duration-150
-                disabled:opacity-50 disabled:cursor-not-allowed
-                hover:opacity-90 active:scale-[0.98]
-                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2
-              "
-              aria-label={t.startStreaming}
-            >
-              {isConnecting ? (
-                <>
-                  <span
-                    className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin"
-                    aria-hidden="true"
-                  />
-                  {t.connecting}
-                </>
+              {isScreenSharing ? (
+                <MonitorOff className="w-5 h-5" aria-hidden="true" />
               ) : (
-                <>
-                  <Radio className="w-5 h-5" aria-hidden="true" />
-                  {t.startStreaming}
-                </>
+                <Monitor className="w-5 h-5" aria-hidden="true" />
               )}
             </button>
           )}
+
+          {/* Go Live / Stop button */}
+          <div className="flex-1">
+            {isStreaming ? (
+              <button
+                onClick={handleStop}
+                disabled={status === "stopping"}
+                className="
+                  w-full flex items-center justify-center gap-2.5
+                  min-h-[52px] px-6 rounded-2xl
+                  text-sm font-bold text-white
+                  transition-all duration-150
+                  disabled:opacity-50 disabled:cursor-not-allowed
+                  hover:opacity-90 active:scale-[0.98]
+                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2
+                "
+                style={{ background: "linear-gradient(135deg, #b91c1c, #dc2626)" }}
+                aria-label={t.stopStreaming}
+              >
+                <StopCircle className="w-5 h-5" aria-hidden="true" />
+                {status === "stopping" ? t.connecting : t.stopStreaming}
+              </button>
+            ) : (
+              <button
+                onClick={handleGoLive}
+                disabled={!canGoLive || isConnecting}
+                className="
+                  w-full flex items-center justify-center gap-2.5
+                  min-h-[52px] px-6 rounded-2xl
+                  text-sm font-bold text-white
+                  btn-gradient
+                  transition-all duration-150
+                  disabled:opacity-50 disabled:cursor-not-allowed
+                  hover:opacity-90 active:scale-[0.98]
+                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2
+                "
+                aria-label={t.startStreaming}
+              >
+                {isConnecting ? (
+                  <>
+                    <span
+                      className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin"
+                      aria-hidden="true"
+                    />
+                    {t.connecting}
+                  </>
+                ) : (
+                  <>
+                    <Radio className="w-5 h-5" aria-hidden="true" />
+                    {t.startStreaming}
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Stats row — shown when live (below the button for accessibility focus order) */}
+      {/* Stats row — shown when live */}
       {status === "live" && (
         <dl
           className="grid grid-cols-3 gap-2"

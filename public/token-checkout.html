@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PNPtv! — Token Checkout</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0e0a10;
+            --surface: rgba(30, 20, 35, 0.85);
+            --border: rgba(212, 0, 122, 0.25);
+            --pink: #D4007A;
+            --amber: #E69138;
+            --text: #FFFFFF;
+            --muted: #8E8E93;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px 16px 40px;
+            overflow-x: hidden;
+        }
+        .orb {
+            position: fixed;
+            border-radius: 50%;
+            pointer-events: none;
+            filter: blur(80px);
+            opacity: 0.18;
+        }
+        .orb-pink  { width: 420px; height: 420px; top: -10%; left: -10%;  background: radial-gradient(circle, var(--pink), transparent 70%); }
+        .orb-amber { width: 360px; height: 360px; bottom: -10%; right: -8%; background: radial-gradient(circle, var(--amber), transparent 70%); }
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            width: 100%;
+            max-width: 420px;
+            padding: 32px 28px;
+            position: relative;
+            z-index: 1;
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .logo span {
+            font-size: 22px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--pink), var(--amber));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: 1px;
+        }
+        .logo .tagline { font-size: 12px; color: var(--muted); margin-top: 4px; }
+        .divider { height: 1px; background: var(--border); margin: 16px 0; }
+        .token-badge {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(212, 0, 122, 0.08);
+            border: 1px solid rgba(212, 0, 122, 0.2);
+            border-radius: 14px;
+            padding: 14px 16px;
+            margin-bottom: 20px;
+        }
+        .token-badge .icon { font-size: 32px; }
+        .token-badge .info .amount { font-size: 22px; font-weight: 700; color: var(--text); }
+        .token-badge .info .price  { font-size: 13px; color: var(--muted); margin-top: 2px; }
+        .section-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px; }
+        .pay-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 15px;
+            border-radius: 14px;
+            border: none;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.15s;
+            background: linear-gradient(135deg, var(--pink), var(--amber));
+            color: #fff;
+            margin-top: 8px;
+        }
+        .pay-btn:hover  { opacity: 0.9; }
+        .pay-btn:active { transform: scale(0.98); }
+        .pay-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .status-msg {
+            text-align: center;
+            font-size: 14px;
+            padding: 12px;
+            border-radius: 10px;
+            margin-top: 16px;
+            display: none;
+        }
+        .status-msg.error   { background: rgba(255, 59, 48, 0.15); color: #FF6B6B; display: block; }
+        .status-msg.success { background: rgba(52, 199, 89, 0.15); color: #4CD964; display: block; }
+        .status-msg.info    { background: rgba(90, 200, 250, 0.12); color: #5AC8FA; display: block; }
+        .loader {
+            width: 22px; height: 22px;
+            border: 3px solid rgba(255,255,255,0.25);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-state {
+            text-align: center;
+            padding: 40px 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+        .loading-state .loader { margin-bottom: 12px; display: block; margin: 0 auto 12px; }
+        .error-state {
+            text-align: center;
+            padding: 40px 0;
+            color: #FF6B6B;
+            font-size: 14px;
+        }
+        .error-state .icon { font-size: 36px; margin-bottom: 10px; }
+        /* ePayco button container */
+        #epayco-btn-wrapper { margin-top: 4px; }
+        /* Daimo SDK anchor wrapper */
+        #daimo-btn-wrapper { margin-top: 4px; }
+        .secure-note {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--muted);
+            margin-top: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="orb orb-pink"></div>
+    <div class="orb orb-amber"></div>
+
+    <div class="card">
+        <div class="logo">
+            <span>PNPtv!</span>
+            <div class="tagline">Token Checkout</div>
+        </div>
+        <div class="divider"></div>
+
+        <!-- Loading / error / content states -->
+        <div id="loading-state" class="loading-state">
+            <span class="loader"></span>
+            Loading checkout&hellip;
+        </div>
+        <div id="error-state" class="error-state" style="display:none;">
+            <div class="icon">&#x26A0;&#xFE0F;</div>
+            <div id="error-msg">Unable to load checkout. Please go back and try again.</div>
+        </div>
+        <div id="content" style="display:none;">
+            <div class="token-badge">
+                <div class="icon">&#x1FA99;</div>
+                <div class="info">
+                    <div class="amount" id="token-amount"></div>
+                    <div class="price" id="token-price"></div>
+                </div>
+            </div>
+            <div class="section-title">Payment Method</div>
+
+            <!-- ePayco card payment -->
+            <div id="epayco-section" style="display:none;">
+                <div id="epayco-btn-wrapper">
+                    <button type="button" class="pay-btn" id="epayco-pay-btn">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                        Pay with Card
+                    </button>
+                </div>
+            </div>
+
+            <!-- Daimo wallet payment -->
+            <div id="daimo-section" style="display:none;">
+                <div id="daimo-btn-wrapper">
+                    <button type="button" class="pay-btn" id="daimo-pay-btn">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                        Pay with Crypto Wallet
+                    </button>
+                </div>
+            </div>
+
+            <div id="status-msg" class="status-msg"></div>
+        </div>
+
+        <div class="secure-note">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Secured by PNPtv
+        </div>
+    </div>
+
+    <!-- ePayco SDK (loaded conditionally) -->
+    <script>
+    (function() {
+        'use strict';
+
+        // ── Handle ePayco response redirect (?status=response) ───────────────
+        var urlParams = new URLSearchParams(location.search);
+        if (urlParams.get('status') === 'response') {
+            document.getElementById('loading-state').style.display = 'none';
+            var pendingHtml = '<div style="text-align:center;padding:32px 0;">'
+                + '<span class="loader" style="display:block;margin:0 auto 16px;width:32px;height:32px;"></span>'
+                + '<p style="font-size:17px;font-weight:700;margin-bottom:8px;">Verifying Payment&hellip;</p>'
+                + '<p style="font-size:13px;color:var(--muted);">Your payment was submitted. We\'re confirming it with ePayco — this usually takes a few seconds.</p>'
+                + '</div>';
+            document.getElementById('content').innerHTML = pendingHtml;
+            document.getElementById('content').style.display = 'block';
+
+            // Poll until confirmed or timeout
+            var purchaseIdForPoll = location.pathname.split('/').filter(Boolean).pop();
+            var pollStart = Date.now();
+            var pollTimer = setInterval(function() {
+                if (Date.now() - pollStart > 120000) {
+                    clearInterval(pollTimer);
+                    document.getElementById('content').innerHTML = '<div style="text-align:center;padding:32px 0;">'
+                        + '<p style="font-size:17px;font-weight:700;margin-bottom:8px;">Payment Submitted</p>'
+                        + '<p style="font-size:13px;color:var(--muted);margin-bottom:20px;">Confirmation is taking longer than expected. Your tokens will be credited automatically — check your wallet in a minute.</p>'
+                        + '<a href="/" style="display:inline-block;padding:12px 24px;border-radius:12px;background:linear-gradient(135deg,var(--pink),var(--amber));color:#fff;font-weight:600;text-decoration:none;">Return to App</a>'
+                        + '</div>';
+                    return;
+                }
+                fetch('/api/token-checkout/' + purchaseIdForPoll)
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (d.status === 'paid' || d.status === 'completed') {
+                            clearInterval(pollTimer);
+                            document.getElementById('content').innerHTML = '<div style="text-align:center;padding:32px 0;">'
+                                + '<div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#30D158,#34C759);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">'
+                                + '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>'
+                                + '<p style="font-size:20px;font-weight:700;margin-bottom:8px;">Payment Confirmed!</p>'
+                                + '<p style="font-size:13px;color:var(--muted);margin-bottom:20px;">Your tokens have been credited. You can close this window.</p>'
+                                + '<a href="/" style="display:inline-block;padding:12px 24px;border-radius:12px;background:linear-gradient(135deg,var(--pink),var(--amber));color:#fff;font-weight:600;text-decoration:none;">Return to App</a>'
+                                + '</div>';
+                        }
+                    })
+                    .catch(function() { /* keep polling */ });
+            }, 3000);
+            return;
+        }
+
+        const purchaseId = location.pathname.split('/').filter(Boolean).pop();
+        if (!purchaseId || purchaseId.length < 36) {
+            showError('Invalid checkout link.');
+            return;
+        }
+
+        let checkoutData = null;
+
+        function showError(msg) {
+            document.getElementById('loading-state').style.display = 'none';
+            document.getElementById('content').style.display = 'none';
+            var errState = document.getElementById('error-state');
+            errState.style.display = 'block';
+            document.getElementById('error-msg').textContent = msg || 'Unable to load checkout.';
+        }
+
+        function showStatus(msg, type) {
+            const el = document.getElementById('status-msg');
+            el.textContent = msg;
+            el.className = 'status-msg ' + type;
+        }
+
+        function hideStatus() {
+            const el = document.getElementById('status-msg');
+            el.className = 'status-msg';
+            el.textContent = '';
+        }
+
+        function setButtonLoading(btnId, loading) {
+            const btn = document.getElementById(btnId);
+            if (!btn) return;
+            btn.disabled = loading;
+            if (loading) {
+                btn.dataset.originalText = btn.innerHTML;
+                btn.innerHTML = '<span class="loader"></span>';
+            } else {
+                btn.innerHTML = btn.dataset.originalText || btn.innerHTML;
+            }
+        }
+
+        // ── Load checkout data ───────────────────────────────────────────────
+        fetch('/api/token-checkout/' + purchaseId)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.success) {
+                    showError(data.error || 'Checkout not found.');
+                    return;
+                }
+
+                checkoutData = data;
+
+                if (data.status === 'paid' || data.status === 'completed') {
+                    document.getElementById('loading-state').style.display = 'none';
+                    document.getElementById('content').style.display = 'block';
+                    document.getElementById('token-amount').textContent = data.tokens + ' PNP Tokens';
+                    document.getElementById('token-price').textContent = '$' + (data.usd || 0).toFixed(2) + ' USD';
+                    showStatus('This purchase has already been completed. Your tokens are in your wallet.', 'success');
+                    return;
+                }
+
+                // Render token summary
+                document.getElementById('loading-state').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+                document.getElementById('token-amount').textContent = data.tokens + ' PNP Tokens';
+                document.getElementById('token-price').textContent = '$' + (data.usd || 0).toFixed(2) + ' USD';
+
+                if (data.provider === 'epayco') {
+                    renderEpayco(data);
+                } else if (data.provider === 'daimo') {
+                    renderDaimo(data);
+                } else {
+                    showError('Unsupported payment provider for this checkout page.');
+                }
+            })
+            .catch(function(err) {
+                console.error('Checkout load error:', err);
+                showError('Network error. Please check your connection and refresh.');
+            });
+
+        // ── ePayco handler ───────────────────────────────────────────────────
+        function renderEpayco(data) {
+            document.getElementById('epayco-section').style.display = 'block';
+
+            var script = document.createElement('script');
+            script.src = 'https://checkout.epayco.co/checkout.js';
+            script.onload = function() {
+                initEpaycoButton(data);
+            };
+            script.onerror = function() {
+                showError('Could not load payment SDK. Please try again.');
+            };
+            document.head.appendChild(script);
+
+            document.getElementById('epayco-pay-btn').addEventListener('click', function() {
+                if (window._epaycoHandler) {
+                    window._epaycoHandler.open();
+                } else {
+                    showStatus('Payment SDK loading, please wait...', 'info');
+                }
+            });
+        }
+
+        function initEpaycoButton(data) {
+            var ep = data.epayco || {};
+            try {
+                var cfg = {
+                    key: ep.publicKey,
+                    test: ep.test || false,
+                    external: '0',
+                    invoice: ep.invoice || '',
+                    amount: String(ep.amount),
+                    name: ep.description,
+                    description: ep.description,
+                    currency: ep.currency || 'COP',
+                    country: 'CO',
+                    lang: 'en',
+                    tax_base: '0',
+                    tax: '0',
+                    tax_ico: '0',
+                    extra1: ep.extra1 || data.purchaseId,
+                    extra2: ep.extra2 || 'token_purchase',
+                    extra3: ep.extra3 || String(data.tokens),
+                    confirmation: ep.confirmation,
+                    response: ep.response,
+                };
+                if (ep.signature) cfg.p_hash_key = ep.signature;
+
+                window._epaycoHandler = window.ePayco.checkout.configure(cfg);
+
+                var btn = document.getElementById('epayco-pay-btn');
+                btn.onclick = function() {
+                    hideStatus();
+                    window._epaycoHandler.open();
+                };
+            } catch (e) {
+                console.error('ePayco init error:', e);
+                showError('Payment initialization failed. Please reload and try again.');
+            }
+        }
+
+        // ── Daimo handler ─────────────────────────────────────────────────────
+        function renderDaimo(data) {
+            var dm = data.daimo || {};
+            document.getElementById('daimo-section').style.display = 'block';
+
+            if (!dm.sessionId || !dm.clientSecret) {
+                showError('Crypto wallet payment session unavailable. Please go back and create a new checkout.');
+                document.getElementById('daimo-section').style.display = 'none';
+                return;
+            }
+
+            var script = document.createElement('script');
+            script.src = 'https://pay.daimo.com/sdk/v0/daimo-pay.iife.js';
+            script.onload = function() {
+                initDaimoButton(data);
+            };
+            script.onerror = function() {
+                document.getElementById('daimo-pay-btn').onclick = function() {
+                    window.location.href = 'https://pay.daimo.com/checkout/' + dm.sessionId;
+                };
+            };
+            document.head.appendChild(script);
+        }
+
+        function initDaimoButton(data) {
+            var dm = data.daimo || {};
+            var btn = document.getElementById('daimo-pay-btn');
+
+            try {
+                if (window.DaimoPay && typeof window.DaimoPay.openCheckout === 'function') {
+                    btn.onclick = function() {
+                        hideStatus();
+                        setButtonLoading('daimo-pay-btn', true);
+                        try {
+                            window.DaimoPay.openCheckout({
+                                sessionId: dm.sessionId,
+                                clientSecret: dm.clientSecret,
+                                onSuccess: function() {
+                                    setButtonLoading('daimo-pay-btn', false);
+                                    showStatus('Payment received! Your tokens are being credited to your wallet.', 'success');
+                                    btn.disabled = true;
+                                },
+                                onError: function(err) {
+                                    setButtonLoading('daimo-pay-btn', false);
+                                    showStatus('Payment failed or cancelled. Please try again.', 'error');
+                                    console.error('Daimo checkout error:', err);
+                                },
+                                onClose: function() {
+                                    setButtonLoading('daimo-pay-btn', false);
+                                },
+                            });
+                        } catch (openErr) {
+                            setButtonLoading('daimo-pay-btn', false);
+                            console.error('Daimo openCheckout error:', openErr);
+                            window.location.href = 'https://pay.daimo.com/checkout/' + dm.sessionId;
+                        }
+                    };
+                } else {
+                    btn.onclick = function() {
+                        window.location.href = 'https://pay.daimo.com/checkout/' + dm.sessionId;
+                    };
+                }
+            } catch (e) {
+                console.error('Daimo init error:', e);
+                btn.onclick = function() {
+                    window.location.href = 'https://pay.daimo.com/checkout/' + dm.sessionId;
+                };
+            }
+        }
+    })();
+    </script>
+</body>
+</html>

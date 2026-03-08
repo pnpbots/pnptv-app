@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
     <title>PNPtv! Clouds & Rush Network</title>
     <meta name="description" content="PNPtv! is a private social platform for gay men into the party and play lifestyle. Live video rooms, creator channels, nearby discovery, and premium adult content. Join the Clouds & Rush Network." />
-    <meta name="keywords" content="gay PNP community, party and play, gay social network, gay live video rooms, gay adult community, PNP lifestyle, gay men dating, gay nearby discovery, private gay platform, gay creator community, gay premium content, gay streaming platform, gay party culture, chemsex community, gay hookup network" />
+    <meta name="keywords" content="gay PNP community, party and play, gay social network, gay live video rooms, gay adult community, PNP lifestyle, gay men dating, gay nearby discovery, private gay platform, gay creator community, gay premium content, gay streaming platform, gay party culture, gay hookup network" />
     <link rel="canonical" href="https://app.pnptv.app/" />
 
     <!-- Open Graph -->
@@ -115,115 +115,194 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        background: #121212;
-        transition: opacity 0.4s ease, visibility 0.4s ease;
+        background: #0a0a0a;
+        overflow: hidden;
       }
       #splash.hide {
-        opacity: 0;
-        visibility: hidden;
+        animation: splash-exit 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
       }
-      #splash .orb {
+      @keyframes splash-exit {
+        0% { opacity: 1; transform: scale(1); }
+        60% { opacity: 0.5; transform: scale(1.05); }
+        100% { opacity: 0; transform: scale(1.1); visibility: hidden; }
+      }
+
+      /* Background gradient mesh */
+      #splash::before {
+        content: '';
         position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(ellipse 60% 50% at 20% 30%, rgba(212,0,122,0.15) 0%, transparent 60%),
+          radial-gradient(ellipse 50% 60% at 80% 70%, rgba(230,145,56,0.12) 0%, transparent 60%),
+          radial-gradient(ellipse 40% 40% at 50% 50%, rgba(94,209,196,0.06) 0%, transparent 50%);
+        animation: bg-breathe 4s ease-in-out infinite;
+      }
+      @keyframes bg-breathe {
+        0%, 100% { opacity: 0.6; transform: scale(1); }
+        50% { opacity: 1; transform: scale(1.05); }
+      }
+
+      /* Floating particles */
+      .splash-particle {
+        position: absolute;
+        width: 2px; height: 2px;
         border-radius: 50%;
-        filter: blur(80px);
+        background: rgba(255,255,255,0.3);
         pointer-events: none;
       }
-      #splash .orb-1 {
-        width: 320px; height: 320px;
-        top: -10%; left: -5%;
-        background: radial-gradient(circle, rgba(212,0,122,0.35), transparent 70%);
-        animation: orb-float 6s ease-in-out infinite;
+      .sp-1 { top: 15%; left: 20%; animation: particle-drift 8s linear infinite; }
+      .sp-2 { top: 25%; left: 75%; animation: particle-drift 6s linear 1s infinite; width: 3px; height: 3px; background: rgba(212,0,122,0.4); }
+      .sp-3 { top: 60%; left: 10%; animation: particle-drift 10s linear 2s infinite; }
+      .sp-4 { top: 70%; left: 85%; animation: particle-drift 7s linear 0.5s infinite; width: 3px; height: 3px; background: rgba(230,145,56,0.4); }
+      .sp-5 { top: 40%; left: 50%; animation: particle-drift 9s linear 3s infinite; }
+      .sp-6 { top: 80%; left: 35%; animation: particle-drift 11s linear 1.5s infinite; width: 2px; height: 2px; background: rgba(94,209,196,0.3); }
+      .sp-7 { top: 10%; left: 60%; animation: particle-drift 7s linear 4s infinite; }
+      .sp-8 { top: 50%; left: 90%; animation: particle-drift 8s linear 2.5s infinite; background: rgba(212,0,122,0.3); }
+      @keyframes particle-drift {
+        0% { transform: translateY(0) translateX(0); opacity: 0; }
+        10% { opacity: 1; }
+        90% { opacity: 1; }
+        100% { transform: translateY(-60px) translateX(20px); opacity: 0; }
       }
-      #splash .orb-2 {
-        width: 280px; height: 280px;
-        bottom: -10%; right: -5%;
-        background: radial-gradient(circle, rgba(230,145,56,0.3), transparent 70%);
-        animation: orb-float 6s ease-in-out 3s infinite;
+
+      /* Glow ring behind logo */
+      .splash-ring {
+        position: absolute;
+        width: 160px; height: 160px;
+        border-radius: 50%;
+        border: 1px solid rgba(212,0,122,0.2);
+        animation: ring-pulse 2.5s ease-in-out infinite, splash-scale-in 1s cubic-bezier(0.16, 1, 0.3, 1) both;
+        z-index: 0;
       }
-      #splash .orb-3 {
-        width: 200px; height: 200px;
-        top: 40%; left: 50%;
-        transform: translateX(-50%);
-        background: radial-gradient(circle, rgba(94,209,196,0.15), transparent 70%);
-        animation: orb-float 8s ease-in-out 1.5s infinite;
+      .splash-ring-2 {
+        position: absolute;
+        width: 220px; height: 220px;
+        border-radius: 50%;
+        border: 1px solid rgba(230,145,56,0.1);
+        animation: ring-pulse 2.5s ease-in-out 0.8s infinite, splash-scale-in 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
+        z-index: 0;
       }
-      @keyframes orb-float {
-        0%, 100% { transform: translateY(0); }
-        50% { transform: translateY(-20px); }
+      @keyframes ring-pulse {
+        0%, 100% { transform: scale(1); opacity: 0.4; }
+        50% { transform: scale(1.08); opacity: 0.8; }
       }
+      @keyframes splash-scale-in {
+        from { opacity: 0; transform: scale(0.5); }
+        to { opacity: 1; transform: scale(1); }
+      }
+
+      /* Logo */
       #splash .logo-wrap {
         position: relative;
-        z-index: 1;
-        animation: splash-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+        z-index: 2;
+        animation: logo-enter 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
       }
       #splash .logo-wrap img {
-        width: 80px; height: auto;
-        filter: drop-shadow(0 0 30px rgba(212,0,122,0.4));
+        width: 88px; height: auto;
+        filter: drop-shadow(0 0 40px rgba(212,0,122,0.5)) drop-shadow(0 0 80px rgba(230,145,56,0.3));
+        animation: logo-glow 3s ease-in-out infinite;
       }
+      @keyframes logo-enter {
+        from { opacity: 0; transform: translateY(24px) scale(0.8); filter: blur(8px); }
+        to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+      }
+      @keyframes logo-glow {
+        0%, 100% { filter: drop-shadow(0 0 40px rgba(212,0,122,0.5)) drop-shadow(0 0 80px rgba(230,145,56,0.3)); }
+        50% { filter: drop-shadow(0 0 50px rgba(212,0,122,0.7)) drop-shadow(0 0 100px rgba(230,145,56,0.4)); }
+      }
+
+      /* Brand text */
       #splash .brand {
-        position: relative; z-index: 1;
-        margin-top: 20px;
+        position: relative; z-index: 2;
+        margin-top: 24px;
         text-align: center;
-        animation: splash-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
-      }
-      #splash .brand h1 {
-        font-family: 'Ethnocentric', sans-serif;
-        font-size: 22px;
-        font-weight: 700;
-        color: #fff;
-        letter-spacing: 2px;
-        margin: 0;
+        animation: text-enter 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
       }
       #splash .brand p {
         font-family: 'Roboto Mono', monospace;
         font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 3px;
+        font-weight: 600;
+        letter-spacing: 5px;
         text-transform: uppercase;
-        margin: 8px 0 0;
-        background: linear-gradient(135deg, #D4007A, #E69138);
+        margin: 0;
+        background: linear-gradient(135deg, #D4007A, #E69138, #5ED1C4);
+        background-size: 200% 200%;
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
+        animation: gradient-shift 3s ease-in-out infinite;
       }
+      @keyframes text-enter {
+        from { opacity: 0; transform: translateY(12px); filter: blur(4px); }
+        to { opacity: 1; transform: translateY(0); filter: blur(0); }
+      }
+      @keyframes gradient-shift {
+        0%, 100% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+      }
+
+      /* Loading bar */
       #splash .loader {
-        position: relative; z-index: 1;
-        margin-top: 36px;
-        width: 40px; height: 3px;
-        background: rgba(255,255,255,0.08);
+        position: relative; z-index: 2;
+        margin-top: 40px;
+        width: 48px; height: 2px;
+        background: rgba(255,255,255,0.06);
         border-radius: 2px;
         overflow: hidden;
-        animation: splash-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
+        animation: text-enter 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.5s both;
       }
       #splash .loader-bar {
         height: 100%;
-        width: 40%;
+        width: 50%;
         border-radius: 2px;
-        background: linear-gradient(90deg, #D4007A, #E69138);
-        animation: loader-slide 1.2s ease-in-out infinite;
-      }
-      @keyframes splash-in {
-        from { opacity: 0; transform: translateY(16px) scale(0.95); }
-        to { opacity: 1; transform: translateY(0) scale(1); }
+        background: linear-gradient(90deg, #D4007A, #E69138, #5ED1C4);
+        background-size: 200% 100%;
+        animation: loader-slide 1.4s ease-in-out infinite, gradient-shift 2s ease-in-out infinite;
       }
       @keyframes loader-slide {
-        0% { transform: translateX(-100%); }
-        50% { transform: translateX(150%); }
-        100% { transform: translateX(-100%); }
+        0% { transform: translateX(-120%); }
+        50% { transform: translateX(160%); }
+        100% { transform: translateX(-120%); }
+      }
+
+      /* Scan line effect — subtle CRT feel */
+      #splash::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: repeating-linear-gradient(
+          0deg,
+          transparent,
+          transparent 2px,
+          rgba(0,0,0,0.03) 2px,
+          rgba(0,0,0,0.03) 4px
+        );
+        pointer-events: none;
+        z-index: 3;
       }
     </style>
   </head>
   <body class="bg-pnp-background text-pnp-textPrimary antialiased">
     <!-- Splash screen — visible until React mounts -->
     <div id="splash">
-      <div class="orb orb-1"></div>
-      <div class="orb orb-2"></div>
-      <div class="orb orb-3"></div>
+      <!-- Floating particles -->
+      <div class="splash-particle sp-1"></div>
+      <div class="splash-particle sp-2"></div>
+      <div class="splash-particle sp-3"></div>
+      <div class="splash-particle sp-4"></div>
+      <div class="splash-particle sp-5"></div>
+      <div class="splash-particle sp-6"></div>
+      <div class="splash-particle sp-7"></div>
+      <div class="splash-particle sp-8"></div>
+      <!-- Glow rings -->
+      <div class="splash-ring"></div>
+      <div class="splash-ring-2"></div>
+      <!-- Logo -->
       <div class="logo-wrap">
         <img src="/Logo2-50.png" alt="PNPtv!" />
       </div>
       <div class="brand">
-        <h1>PNPtv!</h1>
         <p>Clouds & Rush Network</p>
       </div>
       <div class="loader">
