@@ -283,11 +283,20 @@ const listActiveCreators = async (req, res) => {
   try {
     const { rows } = await query(
       `SELECT id, username, first_name, last_name, photo_file_id, creator_type, creator_status,
-              creator_strikes, creator_subscriber_count, creator_price_usd
+              creator_strikes, creator_subscriber_count, creator_price_usd, role
        FROM users
-       WHERE creator_status IN ('active', 'suspended')
-       ORDER BY creator_subscriber_count DESC NULLS LAST
-       LIMIT 100`
+       WHERE creator_status IN ('active', 'suspended', 'pending_review', 'eligible')
+          OR role = 'model'
+       ORDER BY
+         CASE creator_status
+           WHEN 'active' THEN 0
+           WHEN 'pending_review' THEN 1
+           WHEN 'eligible' THEN 2
+           WHEN 'suspended' THEN 3
+           ELSE 4
+         END,
+         creator_subscriber_count DESC NULLS LAST
+       LIMIT 200`
     );
     return res.json({ success: true, creators: rows });
   } catch (err) {

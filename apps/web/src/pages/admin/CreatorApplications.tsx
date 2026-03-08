@@ -419,6 +419,24 @@ function ActiveCreatorsTab() {
                   />
                 </div>
 
+                {/* Status badge for non-active creators */}
+                {creator.creator_status !== "active" && (
+                  <span
+                    className="text-[10px] px-2 py-0.5 rounded-full font-semibold mb-1 inline-block"
+                    style={
+                      creator.creator_status === "pending_review"
+                        ? { background: "rgba(234,179,8,0.15)", color: "#EAB308", border: "1px solid rgba(234,179,8,0.3)" }
+                        : creator.creator_status === "eligible"
+                          ? { background: "rgba(59,130,246,0.15)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.3)" }
+                          : { background: "rgba(255,255,255,0.06)", color: "#8E8E93" }
+                    }
+                  >
+                    {creator.creator_status === "pending_review" ? "Pending Review"
+                      : creator.creator_status === "eligible" ? "Eligible"
+                      : creator.creator_status || "none"}
+                  </span>
+                )}
+
                 {/* Meta row */}
                 <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>
                   {creator.creator_type

@@ -2605,28 +2605,6 @@ export default function Profile() {
           <MonetizeContentCard creatorStatus={profile.creatorStatus} onActivated={() => loadProfile()} />
         )}
 
-        {/* Performer availability strip */}
-        {isPerformer && (
-          <div
-            className="flex items-center justify-between mt-4 rounded-lg px-4 py-2.5"
-            style={{ background: "rgba(94,209,196,0.07)", border: "1px solid rgba(94,209,196,0.2)" }}
-          >
-            <div className="flex items-center gap-2">
-              <span
-                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                style={{ background: profile.performerData!.isAvailable ? "#30D158" : "#8E8E93" }}
-              />
-              <span className="text-xs font-medium" style={{ color: profile.performerData!.isAvailable ? "#30D158" : "#8E8E93" }}>
-                {profile.performerData!.isAvailable
-                  ? (profile.performerData!.availabilityMessage || p.availableForCalls)
-                  : p.currentlyUnavailable}
-              </span>
-            </div>
-            <span className="text-sm font-bold" style={{ color: "#5ED1C4" }}>
-              ${profile.performerData!.basePrice}{p.perCall}
-            </span>
-          </div>
-        )}
 
         {/* Action buttons */}
         <div className="mt-4 space-y-2" ref={subscribeButtonRef}>
@@ -2662,6 +2640,22 @@ export default function Profile() {
                 </button>
               </div>
               {/* Secondary actions */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => navigate("/become-a-model")}
+                  className="flex-1 py-1.5 rounded-lg text-xs text-white/50 hover:text-white/80 transition-colors"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                >
+                  Become a Model
+                </button>
+                <button
+                  onClick={() => navigate("/haus")}
+                  className="flex-1 py-1.5 rounded-lg text-xs text-white/50 hover:text-white/80 transition-colors"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                >
+                  The Haus
+                </button>
+              </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => { resetAllTutorials(); window.location.reload(); }}

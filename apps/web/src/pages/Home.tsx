@@ -243,6 +243,26 @@ export default function Home() {
         </div>
       )}
 
+      {/* The Haus — 24/7 community video room */}
+      <div
+        className="glass-card-sm p-4 mb-5 cursor-pointer hover:border-white/15 transition-colors"
+        onClick={() => navigate("/haus")}
+        style={{ borderLeft: "3px solid rgba(94, 209, 196, 0.5)" }}
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg flex-shrink-0" style={{ background: "rgba(94, 209, 196, 0.15)" }}>
+            🏠
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-semibold text-white">The Haus</h3>
+            <p className="text-xs text-white/50">24/7 community video room — drop in anytime</p>
+          </div>
+          <svg className="w-4 h-4 text-white/30 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+
       {/* Create post — navigates to Social page */}
       <div
         className="glass-card-sm p-4 mb-6 cursor-pointer hover:border-white/20 transition-colors"

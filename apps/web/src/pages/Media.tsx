@@ -8,6 +8,7 @@ import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useTier } from "@/hooks/useTier";
 import { useI18n } from "@/lib/i18n";
 import { type Content, type Performer, getAssetUrl } from "@/lib/directus";
+import { AnimatedVideoThumbnail } from "@/components/AnimatedVideoThumbnail";
 
 function formatDuration(seconds: number | null): string {
   if (!seconds) return "";
@@ -311,37 +312,13 @@ export default function Media() {
                     : "border-pnp-border hover:border-pnp-accent/50"
                 }`}
               >
-                {/* Thumbnail */}
+                {/* Thumbnail — cycles through random video frames */}
                 <div className="relative aspect-video bg-pnp-bg group">
-                  {thumb ? (
-                    <img
-                      src={thumb}
-                      alt={video.title}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-pnp-surface to-pnp-bg">
-                      <svg
-                        className="w-8 h-8 text-pnp-textSecondary"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={1.5}
-                          d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={1.5}
-                          d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                        />
-                      </svg>
-                    </div>
-                  )}
+                  <AnimatedVideoThumbnail
+                    videoUrl={isPrime ? (video.media_url || null) : null}
+                    posterUrl={thumb}
+                    alt={video.title}
+                  />
 
                   {/* Play overlay */}
                   {!isActive && (
