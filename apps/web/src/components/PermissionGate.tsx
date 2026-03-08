@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 
-type PermStatus = "prompt" | "granted" | "denied" | "checking";
+type PermStatus = "prompt" | "granted" | "denied" | "checking" | "unavailable";
 
 interface PermissionGateProps {
   /** Called once permissions are granted */
@@ -9,40 +9,84 @@ interface PermissionGateProps {
   onCancel?: () => void;
 }
 
+/** Detect mobile browser */
+function isMobile(): boolean {
+  return /Android|iPhone|iPad|iPod|Mobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+/** Detect in-app WebView (Telegram, Instagram, etc.) */
+function isWebView(): boolean {
+  const ua = navigator.userAgent;
+  return /Telegram|Instagram|FBAN|FBAV|Line\/|Snapchat|Twitter|MicroMessenger/i.test(ua);
+}
+
+/** Check if mediaDevices API is available */
+function hasMediaDevices(): boolean {
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
 /**
  * Shows a modal asking the user to grant camera + microphone permissions.
  * Must be triggered by a user gesture (button tap) so the browser allows the prompt.
- * If permissions are already granted, calls onGranted immediately.
+ * On mobile WebViews where getUserMedia isn't available, offers a "Continue anyway"
+ * option since the Jitsi iframe handles its own permissions.
  */
 export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
   const [camStatus, setCamStatus] = useState<PermStatus>("checking");
   const [micStatus, setMicStatus] = useState<PermStatus>("checking");
   const [requesting, setRequesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mediaUnavailable, setMediaUnavailable] = useState(false);
 
   // Check current permission state on mount
   useEffect(() => {
     let cancelled = false;
     async function check() {
+      // If mediaDevices API isn't available (WebView, insecure context), skip permission check
+      if (!hasMediaDevices()) {
+        if (!cancelled) {
+          setMediaUnavailable(true);
+          setCamStatus("unavailable");
+          setMicStatus("unavailable");
+        }
+        return;
+      }
+
       try {
-        if (navigator.permissions) {
+        // navigator.permissions.query for camera/mic is NOT supported on iOS Safari
+        // and many mobile browsers — only use it on desktop
+        if (navigator.permissions && !isMobile()) {
           const [cam, mic] = await Promise.all([
             navigator.permissions.query({ name: "camera" as PermissionName }).catch(() => null),
             navigator.permissions.query({ name: "microphone" as PermissionName }).catch(() => null),
           ]);
           if (cancelled) return;
-          setCamStatus(cam?.state || "prompt");
-          setMicStatus(mic?.state || "prompt");
 
-          // Already granted — skip the gate
-          if (cam?.state === "granted" && mic?.state === "granted") {
-            onGranted();
+          const camState = cam?.state || "prompt";
+          const micState = mic?.state || "prompt";
+          setCamStatus(camState);
+          setMicStatus(micState);
+
+          // Already granted — verify with actual getUserMedia before skipping
+          if (camState === "granted" && micState === "granted") {
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+              stream.getTracks().forEach(t => t.stop());
+              if (!cancelled) onGranted();
+            } catch {
+              // Permissions API lied — show the gate
+              if (!cancelled) {
+                setCamStatus("prompt");
+                setMicStatus("prompt");
+              }
+            }
             return;
           }
         } else {
-          // permissions API not available — try getUserMedia directly
-          setCamStatus("prompt");
-          setMicStatus("prompt");
+          if (!cancelled) {
+            setCamStatus("prompt");
+            setMicStatus("prompt");
+          }
         }
       } catch {
         if (!cancelled) {
@@ -56,23 +100,77 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
   }, [onGranted]);
 
   const requestPermissions = useCallback(async () => {
+    if (!hasMediaDevices()) {
+      // No getUserMedia — let user proceed, Jitsi iframe handles its own permissions
+      onGranted();
+      return;
+    }
+
     setRequesting(true);
     setError(null);
     try {
+      // Try both together first
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      // Immediately stop tracks — we just needed the permission prompt
       stream.getTracks().forEach(t => t.stop());
       setCamStatus("granted");
       setMicStatus("granted");
       onGranted();
     } catch (err: unknown) {
       const e = err as DOMException;
+
+      // On mobile, try requesting video and audio separately as fallback
+      // Some devices fail on combined request but succeed individually
+      if (isMobile() && (e.name === "NotFoundError" || e.name === "OverconstrainedError" || e.name === "NotReadableError")) {
+        try {
+          const results = await Promise.allSettled([
+            navigator.mediaDevices.getUserMedia({ video: true }).then(s => { s.getTracks().forEach(t => t.stop()); return "video"; }),
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(s => { s.getTracks().forEach(t => t.stop()); return "audio"; }),
+          ]);
+
+          const granted = results.filter(r => r.status === "fulfilled").map(r => (r as PromiseFulfilledResult<string>).value);
+
+          if (granted.includes("video")) setCamStatus("granted");
+          if (granted.includes("audio")) setMicStatus("granted");
+
+          // At least one succeeded — let them proceed (Jitsi handles the rest)
+          if (granted.length > 0) {
+            onGranted();
+            return;
+          }
+        } catch {
+          // Fall through to error handling below
+        }
+      }
+
       if (e.name === "NotAllowedError" || e.name === "PermissionDeniedError") {
         setCamStatus("denied");
         setMicStatus("denied");
-        setError("Permission denied. Please enable Camera and Microphone in your browser or device settings, then try again.");
+        if (isMobile()) {
+          setError("Permission denied. Open your device Settings > find your browser > enable Camera and Microphone, then come back and try again.");
+        } else {
+          setError("Permission denied. Click the camera icon in your browser's address bar to enable permissions, then try again.");
+        }
       } else if (e.name === "NotFoundError") {
-        setError("No camera or microphone found on this device.");
+        setError("No camera or microphone found. You can still join — the video call app will use any available devices.");
+        // Let them continue since Jitsi handles device selection itself
+        setCamStatus("unavailable");
+        setMicStatus("unavailable");
+        setMediaUnavailable(true);
+      } else if (e.name === "NotReadableError") {
+        setError("Camera or microphone is already in use by another app. Close other apps using the camera, then try again.");
+      } else if (e.name === "OverconstrainedError") {
+        // Device doesn't meet constraints — try with minimal constraints
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: true });
+          stream.getTracks().forEach(t => t.stop());
+          setCamStatus("granted");
+          setMicStatus("granted");
+          onGranted();
+          return;
+        } catch {
+          setError("Could not access camera with the required settings. You can continue without camera.");
+          setMediaUnavailable(true);
+        }
       } else {
         setError(e.message || "Could not access camera/microphone.");
       }
@@ -85,6 +183,16 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
   if (camStatus === "checking" || micStatus === "checking") return null;
 
   const denied = camStatus === "denied" || micStatus === "denied";
+  const unavailable = mediaUnavailable || camStatus === "unavailable" || micStatus === "unavailable";
+  const inWebView = isWebView();
+
+  // Status dot color helper
+  const dotColor = (status: PermStatus) => {
+    if (status === "granted") return "bg-green-500";
+    if (status === "denied") return "bg-red-500";
+    if (status === "unavailable") return "bg-gray-500";
+    return "bg-yellow-500";
+  };
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
@@ -115,8 +223,14 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
         <div className="text-center">
           <h2 className="text-lg font-bold text-white">Camera & Microphone</h2>
           <p className="text-sm mt-2" style={{ color: "#8E8E93" }}>
-            {denied
-              ? "Permissions were blocked. You'll need to enable them in your browser or device settings."
+            {inWebView && unavailable
+              ? "This in-app browser doesn't support camera access. Open this link in your default browser (Safari/Chrome) for the best experience, or continue to join anyway."
+              : unavailable && !denied
+              ? "Camera/microphone access isn't available in this browser. You can still join — the video call will request permissions directly."
+              : denied
+              ? isMobile()
+                ? "Permissions were blocked. Go to your device Settings, find your browser, and enable Camera & Microphone."
+                : "Permissions were blocked. Click the camera icon in your address bar to enable them."
               : "To join video calls, we need access to your camera and microphone. Tap below to allow."
             }
           </p>
@@ -125,11 +239,11 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
         {/* Permission indicators */}
         <div className="flex justify-center gap-6">
           <div className="flex items-center gap-2">
-            <div className={`w-2.5 h-2.5 rounded-full ${camStatus === "granted" ? "bg-green-500" : camStatus === "denied" ? "bg-red-500" : "bg-yellow-500"}`} />
+            <div className={`w-2.5 h-2.5 rounded-full ${dotColor(camStatus)}`} />
             <span className="text-xs text-white/70">Camera</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className={`w-2.5 h-2.5 rounded-full ${micStatus === "granted" ? "bg-green-500" : micStatus === "denied" ? "bg-red-500" : "bg-yellow-500"}`} />
+            <div className={`w-2.5 h-2.5 rounded-full ${dotColor(micStatus)}`} />
             <span className="text-xs text-white/70">Microphone</span>
           </div>
         </div>
@@ -143,7 +257,7 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
 
         {/* Buttons */}
         <div className="space-y-2">
-          {!denied && (
+          {!denied && !unavailable && (
             <button
               onClick={requestPermissions}
               disabled={requesting}
@@ -160,6 +274,15 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
               style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
             >
               Try Again
+            </button>
+          )}
+          {/* Continue anyway — for WebViews, unavailable devices, or denied perms on mobile */}
+          {(unavailable || denied) && (
+            <button
+              onClick={onGranted}
+              className="w-full py-3 rounded-xl text-white font-semibold text-sm transition-all border border-white/20 hover:bg-white/5"
+            >
+              Continue Anyway
             </button>
           )}
           {onCancel && (
