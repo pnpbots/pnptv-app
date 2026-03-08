@@ -50,6 +50,7 @@ export interface TelegramAuthResponse {
   success: boolean;
   user?: {
     id?: string;
+    pnptv_id?: string;
     telegram_id: number;
     username: string;
     first_name: string;

@@ -92,7 +92,7 @@ const handleTelegramAuth = async (req, res) => {
 
     // Check if user exists in our database
     let userQuery = await query(
-      `SELECT id, telegram, username, email, subscription_status, tier, terms_accepted,
+      `SELECT id, pnptv_id, telegram, username, email, subscription_status, tier, terms_accepted,
               first_name, language, photo_file_id,
               COALESCE(age_verified, false) as age_verified,
               COALESCE(onboarding_complete, false) as onboarding_complete,
@@ -122,7 +122,7 @@ const handleTelegramAuth = async (req, res) => {
 
         // Re-query to get the created user
         userQuery = await query(
-          `SELECT id, telegram, username, email, subscription_status, terms_accepted,
+          `SELECT id, pnptv_id, telegram, username, email, subscription_status, terms_accepted,
                   first_name, language, photo_file_id,
                   COALESCE(age_verified, false) as age_verified,
                   COALESCE(onboarding_complete, false) as onboarding_complete,
@@ -194,13 +194,17 @@ const handleTelegramAuth = async (req, res) => {
       });
     });
 
+    // Persist last_login_method + last_login_at for MiniApp path
+    query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'mini_app', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
+
     // Store user in session (after regeneration so old session ID is invalidated)
     req.session.user = {
       id: user.id,
+      pnptvId: user.pnptv_id,
       telegramId: user.telegram,
       username: user.username,
       firstName: user.first_name || telegramUser.first_name || '',
-      displayName: user.first_name || telegramUser.first_name || user.username || '',
+      displayName: user.first_name || telegramUser.first_name || user.username || 'Member',
       language: user.language || 'en',
       email: user.email,
       photoUrl,
@@ -209,7 +213,8 @@ const handleTelegramAuth = async (req, res) => {
       acceptedTerms: user.terms_accepted,
       ageVerified: user.age_verified,
       onboardingComplete: user.onboarding_complete,
-      role
+      role,
+      last_login_method: 'mini_app',
     };
 
     logger.info(`User ${user.id} authenticated successfully, terms accepted: ${user.terms_accepted}`);
@@ -323,11 +328,12 @@ const checkAuthStatus = async (req, res) => {
     // Refresh tier, role, and subscription from DB (prevents stale session data)
     try {
       const { rows } = await query(
-        'SELECT tier, role, subscription_status, photo_file_id, creator_status, creator_type, age_verified, terms_accepted, date_of_birth, content_disclaimer FROM users WHERE id = $1',
+        'SELECT pnptv_id, tier, role, subscription_status, photo_file_id, creator_status, creator_type, age_verified, terms_accepted, date_of_birth, content_disclaimer FROM users WHERE id = $1',
         [user.id]
       );
       if (rows.length > 0) {
         const fresh = rows[0];
+        if (fresh.pnptv_id) user.pnptvId = fresh.pnptv_id;
         user.tier = fresh.tier || 'free';
         user.role = fresh.role || user.role || 'user';
         user.subscriptionStatus = fresh.subscription_status || user.subscriptionStatus || 'free';
@@ -359,6 +365,7 @@ const checkAuthStatus = async (req, res) => {
       authenticated: true,
       user: {
         id: user.id,
+        pnptv_id: user.pnptvId || null,
         telegram_id: user.telegramId || user.telegram || user.id,
         username: user.username || '',
         first_name: user.firstName || user.first_name || user.username || '',

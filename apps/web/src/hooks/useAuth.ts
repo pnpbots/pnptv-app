@@ -43,7 +43,7 @@ const AuthContext = createContext<AuthState | null>(null);
 
 function mapTelegramUser(u: NonNullable<TelegramAuthResponse["user"]>): PnptvUser {
   return {
-    id: u.telegram_id,
+    id: u.pnptv_id || u.id || u.telegram_id,
     dbId: u.id,
     username: u.username,
     firstName: u.first_name,
