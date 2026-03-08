@@ -389,15 +389,27 @@ function PostCard({
               {!post.is_promoted && post.media_url && (
                 <div className="mt-3">
                   {post.media_type === "video" ? (
-                    <video
-                      src={post.media_url}
-                      controls
-                      playsInline
-                      muted
-                      className="w-full max-h-80 rounded-lg object-cover"
-                      preload="metadata"
-                      onError={(e) => { (e.target as HTMLVideoElement).parentElement!.style.display = "none"; }}
-                    />
+                    <>
+                      {(post.video_title || post.video_description) && (
+                        <div className="mb-2 px-1">
+                          {post.video_title && (
+                            <h4 className="text-sm font-semibold text-white">{post.video_title}</h4>
+                          )}
+                          {post.video_description && (
+                            <p className="text-xs text-white/60 mt-0.5 line-clamp-2">{post.video_description}</p>
+                          )}
+                        </div>
+                      )}
+                      <video
+                        src={post.media_url}
+                        controls
+                        playsInline
+                        muted
+                        className="w-full max-h-80 rounded-lg object-cover"
+                        preload="metadata"
+                        onError={(e) => { (e.target as HTMLVideoElement).parentElement!.style.display = "none"; }}
+                      />
+                    </>
                   ) : (
                     <img
                       src={post.media_url}

@@ -565,6 +565,9 @@ export interface SocialPostItem {
   repost_author_username?: string;
   repost_author_first_name?: string;
   is_wof?: boolean;
+  // Video metadata
+  video_title?: string | null;
+  video_description?: string | null;
   // Exclusive content fields
   is_exclusive?: boolean;
   exclusive_status?: "unlocked" | "teaser" | "locked";

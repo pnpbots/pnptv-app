@@ -257,6 +257,8 @@ export function PostComposer({
   const [isActiveCreator, setIsActiveCreator] = useState(false);
   const [isExclusive, setIsExclusive] = useState(false);
   const [isShareable, setIsShareable] = useState(true);
+  const [videoTitle, setVideoTitle] = useState("");
+  const [videoDescription, setVideoDescription] = useState("");
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -445,6 +447,8 @@ export function PostComposer({
     setUploadProgress(null);
     setIsExclusive(false);
     setIsShareable(true);
+    setVideoTitle("");
+    setVideoDescription("");
     if (compact) setIsExpanded(false);
   }, [compact]);
 
@@ -511,6 +515,8 @@ export function PostComposer({
             formData.append("media", files[0].file);
             if (isExclusive) formData.append("isExclusive", "true");
             if (!isShareable) formData.append("isShareable", "false");
+            if (videoTitle.trim()) formData.append("videoTitle", videoTitle.trim());
+            if (videoDescription.trim()) formData.append("videoDescription", videoDescription.trim());
 
             const xhr = new XMLHttpRequest();
             xhr.open("POST", `${API_BASE}/api/webapp/social/posts/with-media`);
@@ -575,7 +581,7 @@ export function PostComposer({
     } finally {
       setIsPosting(false);
     }
-  }, [text, files, isPosting, isExclusive, isShareable, onPostCreated, clearForm]);
+  }, [text, files, isPosting, isExclusive, isShareable, videoTitle, videoDescription, onPostCreated, clearForm]);
 
   // ── Keyboard submit (Ctrl/Cmd + Enter) ────────────────────────────────────
   const handleKeyDown = useCallback(
@@ -736,6 +742,30 @@ export function PostComposer({
 
           {/* Media preview grid */}
           <MediaPreviewGrid files={files} onRemove={removeFile} disabled={isPosting} />
+
+          {/* Video title & description — shown when a video is attached */}
+          {hasVideo && (
+            <div className="mb-3 space-y-2">
+              <input
+                type="text"
+                value={videoTitle}
+                onChange={(e) => setVideoTitle(e.target.value.slice(0, 150))}
+                placeholder="Video title (optional)"
+                disabled={isPosting}
+                maxLength={150}
+                className="w-full bg-white/5 text-white text-sm rounded-lg px-3 py-2 border border-white/10 outline-none placeholder:text-white/30 focus:border-pnp-pink/50 disabled:opacity-60 transition-colors"
+              />
+              <textarea
+                value={videoDescription}
+                onChange={(e) => setVideoDescription(e.target.value.slice(0, 500))}
+                placeholder="Video description (optional)"
+                disabled={isPosting}
+                rows={2}
+                maxLength={500}
+                className="w-full bg-white/5 text-white text-sm rounded-lg px-3 py-2 border border-white/10 outline-none placeholder:text-white/30 focus:border-pnp-pink/50 disabled:opacity-60 resize-none transition-colors"
+              />
+            </div>
+          )}
 
           {/* Upload progress bar */}
           {uploadProgress !== null && (

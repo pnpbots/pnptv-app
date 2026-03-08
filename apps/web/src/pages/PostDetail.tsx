@@ -289,15 +289,27 @@ export default function PostDetail() {
                 ) : post.media_url ? (
                   <div className="mt-3">
                     {post.media_type === "video" ? (
-                      <video
-                        src={post.media_url}
-                        controls
-                        playsInline
-                        muted
-                        className="w-full max-h-96 rounded-xl object-cover"
-                        preload="metadata"
-                        poster={post.video_thumbnail_url ?? undefined}
-                      />
+                      <>
+                        {(post.video_title || post.video_description) && (
+                          <div className="mb-2">
+                            {post.video_title && (
+                              <h3 className="text-base font-semibold text-white">{post.video_title}</h3>
+                            )}
+                            {post.video_description && (
+                              <p className="text-sm text-white/60 mt-1">{post.video_description}</p>
+                            )}
+                          </div>
+                        )}
+                        <video
+                          src={post.media_url}
+                          controls
+                          playsInline
+                          muted
+                          className="w-full max-h-96 rounded-xl object-cover"
+                          preload="metadata"
+                          poster={post.video_thumbnail_url ?? undefined}
+                        />
+                      </>
                     ) : (
                       <img
                         src={post.media_url}
