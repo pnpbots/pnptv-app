@@ -205,10 +205,8 @@ class CreatorService {
       [applicationId, adminId, notes || null]
     );
 
-    await query(
-      "UPDATE users SET creator_status = 'none' WHERE id = $1",
-      [app.user_id]
-    );
+    // Do NOT reset creator_status — the user remains an active tier creator.
+    // Only full-time promotion is denied; their existing tier enrollment is preserved.
 
     NotificationEmitter.emit({
       type: 'creator_rejected',

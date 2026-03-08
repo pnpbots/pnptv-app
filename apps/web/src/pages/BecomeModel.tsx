@@ -8,9 +8,10 @@ import { useAuth } from "@/hooks/useAuth";
 const STEPS = [
   { icon: "👤", key: "processStep1" },
   { icon: "🏅", key: "processStep2" },
-  { icon: "📝", key: "processStep3" },
-  { icon: "🎥", key: "processStep4" },
-  { icon: "🔴", key: "processStep5" },
+  { icon: "❄️", key: "processStep3" },
+  { icon: "📝", key: "processStep4" },
+  { icon: "🎥", key: "processStep5" },
+  { icon: "🔴", key: "processStep6" },
 ] as const;
 
 export default function BecomeModel() {
@@ -19,6 +20,7 @@ export default function BecomeModel() {
   const navigate = useNavigate();
 
   const isCreator = user?.role === "model" || user?.role === "admin" || user?.role === "superadmin";
+  const isActiveTierCreator = user?.creator_status === "active" && ["ice", "crystal", "diamond"].includes(user?.creator_type || "");
 
   return (
     <div className="page-container max-w-3xl mx-auto px-4 py-8 space-y-10">
@@ -124,10 +126,10 @@ export default function BecomeModel() {
         <p className="text-sm text-pnp-textSecondary max-w-md mx-auto">{t.ctaBody}</p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <button
-            onClick={() => navigate(isAuthenticated ? "/apply" : "/join")}
+            onClick={() => navigate(isAuthenticated ? (isActiveTierCreator ? "/apply" : "/creator") : "/join")}
             className="px-8 py-3 rounded-xl text-sm font-bold text-white btn-gradient hover:opacity-90 active:scale-[0.98] transition-all"
           >
-            {t.ctaButton}
+            {isAuthenticated && !isActiveTierCreator ? t.ctaButtonEnroll : t.ctaButton}
           </button>
           {isCreator && (
             <button

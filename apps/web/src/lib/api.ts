@@ -53,6 +53,8 @@ export interface TelegramAuthResponse {
     tier: string;
     role: string;
     photo_url?: string | null;
+    creator_status?: string;
+    creator_type?: string | null;
   };
   requiresTerms?: boolean;
   error?: string;
@@ -1677,6 +1679,9 @@ export function getApplicationStatus(): Promise<{
   success: boolean;
   hasApplication: boolean;
   application?: ModelApplication;
+  creatorStatus?: string;
+  creatorType?: string;
+  eligibleForFullTime?: boolean;
 }> {
   return request("/api/apply/status");
 }

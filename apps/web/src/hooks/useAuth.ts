@@ -21,6 +21,8 @@ interface PnptvUser {
   subscriptionType: string;
   tier: string;
   role: string;
+  creator_status?: string;
+  creator_type?: string | null;
 }
 
 interface AuthState {
@@ -51,6 +53,8 @@ function mapTelegramUser(u: NonNullable<TelegramAuthResponse["user"]>): PnptvUse
     subscriptionType: u.subscription_type,
     tier: u.tier || "free",
     role: u.role || "user",
+    creator_status: u.creator_status,
+    creator_type: u.creator_type,
   };
 }
 

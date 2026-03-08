@@ -28,24 +28,46 @@ class ApplyController {
         return res.status(401).json({ success: false, error: 'Authentication required' });
       }
 
-      const result = await query(
-        `SELECT id, application_type, stage_name, status, call_scheduled,
-                created_at, updated_at
-         FROM model_applications
-         WHERE user_id = $1
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [userId]
-      );
+      // Fetch application AND creator status in parallel
+      const [appResult, userResult] = await Promise.all([
+        query(
+          `SELECT id, application_type, stage_name, status, call_scheduled,
+                  created_at, updated_at
+           FROM model_applications
+           WHERE user_id = $1
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [userId]
+        ),
+        query(
+          `SELECT creator_status, creator_type FROM users WHERE id = $1`,
+          [userId]
+        ),
+      ]);
 
-      if (result.rows.length === 0) {
-        return res.json({ success: true, hasApplication: false });
+      const user = userResult.rows[0] || {};
+      const creatorStatus = user.creator_status || 'none';
+      const creatorType = user.creator_type || null;
+      const isActiveTierCreator =
+        creatorStatus === 'active' && ['ice', 'crystal', 'diamond'].includes(creatorType);
+
+      if (appResult.rows.length === 0) {
+        return res.json({
+          success: true,
+          hasApplication: false,
+          creatorStatus,
+          creatorType,
+          eligibleForFullTime: isActiveTierCreator,
+        });
       }
 
       return res.json({
         success: true,
         hasApplication: true,
-        application: result.rows[0],
+        application: appResult.rows[0],
+        creatorStatus,
+        creatorType,
+        eligibleForFullTime: isActiveTierCreator,
       });
     } catch (error) {
       logger.error('Error in getStatus:', error);
@@ -143,6 +165,24 @@ class ApplyController {
       const userId = req.user?.id;
       if (!userId) {
         return res.status(401).json({ success: false, error: 'Authentication required' });
+      }
+
+      // Gate: user must be an active tier creator (Ice/Crystal/Diamond) to apply for full-time
+      const userRes = await query(
+        `SELECT creator_status, creator_type FROM users WHERE id = $1`,
+        [userId]
+      );
+      const user = userRes.rows[0];
+      if (!user) {
+        return res.status(404).json({ success: false, error: 'User not found' });
+      }
+      const isActiveTierCreator =
+        user.creator_status === 'active' && ['ice', 'crystal', 'diamond'].includes(user.creator_type);
+      if (!isActiveTierCreator) {
+        return res.status(403).json({
+          success: false,
+          error: 'You must be an active creator (Ice, Crystal, or Diamond) before applying for full-time status.',
+        });
       }
 
       const {

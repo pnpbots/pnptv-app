@@ -235,6 +235,8 @@ export default function Apply() {
   const [error, setError] = useState<string | null>(null);
   const [existingApp, setExistingApp] = useState<ModelApplication | null>(null);
   const [appId, setAppId] = useState<string | null>(null);
+  const [eligibleForFullTime, setEligibleForFullTime] = useState(false);
+  const [creatorType, setCreatorType] = useState<string | null>(null);
 
   const STEPS = [
     t.stepChooseType,
@@ -245,13 +247,15 @@ export default function Apply() {
     t.stepConfirmation,
   ];
 
-  // Check for existing application on mount
+  // Check for existing application and creator tier eligibility on mount
   useEffect(() => {
     getApplicationStatus()
       .then((res) => {
         if (res.hasApplication && res.application) {
           setExistingApp(res.application);
         }
+        setEligibleForFullTime(res.eligibleForFullTime ?? false);
+        setCreatorType(res.creatorType ?? null);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -390,6 +394,44 @@ export default function Apply() {
           {t.pageHeading}
         </h1>
         <StatusCard app={existingApp} />
+      </div>
+    );
+  }
+
+  // Gate: must be an active tier creator to access the full-time application
+  if (!eligibleForFullTime) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-8">
+        <h1 className="text-2xl font-bold text-pnp-textPrimary mb-6">
+          {t.pageHeading}
+        </h1>
+        <Card className="text-center space-y-4">
+          <div className="w-14 h-14 mx-auto rounded-full bg-pnp-accent/10 flex items-center justify-center">
+            <svg className="w-7 h-7 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <h2 className="text-lg font-bold text-pnp-textPrimary">
+            {t.tierRequiredTitle}
+          </h2>
+          <p className="text-sm text-pnp-textSecondary max-w-md mx-auto">
+            {t.tierRequiredBody}
+          </p>
+          <div className="bg-pnp-surface rounded-lg p-4 text-left max-w-sm mx-auto space-y-2 text-sm">
+            <p className="font-semibold text-pnp-textPrimary">{t.tierRequiredStepsTitle}</p>
+            <ol className="list-decimal list-inside space-y-1 text-pnp-textSecondary">
+              <li>{t.tierRequiredStep1}</li>
+              <li>{t.tierRequiredStep2}</li>
+              <li>{t.tierRequiredStep3}</li>
+            </ol>
+          </div>
+          <button
+            onClick={() => navigate("/creator")}
+            className="px-8 py-3 rounded-xl text-sm font-bold text-white btn-gradient hover:opacity-90 active:scale-[0.98] transition-all"
+          >
+            {t.tierRequiredCta}
+          </button>
+        </Card>
       </div>
     );
   }

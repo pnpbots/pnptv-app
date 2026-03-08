@@ -114,6 +114,15 @@ const strings = {
     whatsNextStep4: "If approved, your creator dashboard unlocks",
     backToHome: "Back to Home",
 
+    // Tier gate (must be active tier creator before applying for full-time)
+    tierRequiredTitle: "Creator Tier Required",
+    tierRequiredBody: "To apply for full-time model status, you must first be an active creator with an approved tier (Ice, Crystal, or Diamond). Complete the tier enrollment process first, then come back here to upgrade.",
+    tierRequiredStepsTitle: "How to get started:",
+    tierRequiredStep1: "Meet the eligibility criteria (posts, likes, followers)",
+    tierRequiredStep2: "Enroll as an Ice, Crystal, or Diamond creator",
+    tierRequiredStep3: "Once approved, return here to apply for full-time status",
+    tierRequiredCta: "Go to Creator Enrollment",
+
     // Status card
     existingApplicationTitle: "Your Application",
     statusLabel: "Status",
@@ -232,6 +241,15 @@ const strings = {
     whatsNextStep3: "Recibirás una notificación por Telegram con el resultado",
     whatsNextStep4: "Si eres aprobado, tu panel de creador se desbloquea",
     backToHome: "Volver al Inicio",
+
+    // Tier gate
+    tierRequiredTitle: "Se Requiere Nivel de Creador",
+    tierRequiredBody: "Para solicitar el estatus de modelo de tiempo completo, primero debes ser un creador activo con un nivel aprobado (Ice, Crystal o Diamond). Completa el proceso de inscripción de nivel primero, luego vuelve aquí para subir de nivel.",
+    tierRequiredStepsTitle: "Cómo empezar:",
+    tierRequiredStep1: "Cumple los criterios de elegibilidad (publicaciones, likes, seguidores)",
+    tierRequiredStep2: "Inscríbete como creador Ice, Crystal o Diamond",
+    tierRequiredStep3: "Una vez aprobado, regresa aquí para solicitar estatus de tiempo completo",
+    tierRequiredCta: "Ir a Inscripción de Creador",
 
     existingApplicationTitle: "Tu Solicitud",
     statusLabel: "Estado",
