@@ -2567,7 +2567,7 @@ export function startXOAuth(adminId?: number, adminUsername?: string): Promise<{
   if (adminId) params.set("admin_id", String(adminId));
   if (adminUsername) params.set("admin_username", adminUsername);
   const qs = params.toString();
-  return request(`/api/admin/x/oauth/login${qs ? `?${qs}` : ""}`);
+  return request(`/api/admin/x/oauth/start${qs ? `?${qs}` : ""}`);
 }
 
 // ============================================================================

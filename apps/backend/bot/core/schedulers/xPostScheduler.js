@@ -116,6 +116,19 @@ class XPostScheduler {
         error: error.message,
       });
 
+      // 402 = API credits exhausted — auto-pause campaign and fail immediately
+      if (error.response?.status === 402 && post.campaign_id) {
+        logger.warn('X API credits exhausted, auto-pausing campaign', {
+          postId,
+          campaignId: post.campaign_id,
+          detail: error.response?.data?.detail || error.message,
+        });
+        await db.query(
+          `UPDATE x_auto_campaigns SET status = 'paused', next_run_at = NULL, updated_at = NOW() WHERE campaign_id = $1 AND status = 'active'`,
+          [post.campaign_id]
+        );
+      }
+
       // Check retry count and handle accordingly
       await this.handleFailure(post, error);
     }
@@ -183,6 +196,11 @@ class XPostScheduler {
     // Rate limit errors are retryable
     if (error.response?.status === 429) {
       return true;
+    }
+
+    // 402 = credits exhausted — not retryable
+    if (error.response?.status === 402) {
+      return false;
     }
 
     // Server errors (5xx) are retryable
