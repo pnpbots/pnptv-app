@@ -846,13 +846,26 @@ export default function Chat() {
             <span className="text-xs font-medium text-green-400">{onlineMembers.length}</span>
           </button>
 
-          {/* Video call button */}
-          <VideoCallButton
-            hasActiveCall={!!callUrl || callState.isActive}
-            onStartCall={handleStartCall}
-            isLoading={callLoading}
-            participantCount={callState.participantCount}
-          />
+          {/* Video call: Main Stage link for main group, regular call button for others */}
+          {activeGroup.isMain ? (
+            <button
+              onClick={() => navigate("/haus")}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
+              style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              Main Stage
+            </button>
+          ) : (
+            <VideoCallButton
+              hasActiveCall={!!callUrl || callState.isActive}
+              onStartCall={handleStartCall}
+              isLoading={callLoading}
+              participantCount={callState.participantCount}
+            />
+          )}
 
           {/* Leave/delete button (hidden for main + Wall of Fame groups) */}
           {!activeGroup.isMain && !activeGroup.isWallOfFame && (
@@ -871,8 +884,8 @@ export default function Chat() {
           )}
         </div>
 
-        {/* Active call banner */}
-        {showCallBanner && (
+        {/* Active call banner (not for main group — uses Main Stage) */}
+        {showCallBanner && !activeGroup.isMain && (
           <VideoCallBanner
             isActive={true}
             onJoin={handleStartCall}
@@ -881,8 +894,8 @@ export default function Chat() {
           />
         )}
 
-        {/* Embedded video call */}
-        {callUrl && (
+        {/* Embedded video call (not for main group) */}
+        {callUrl && !activeGroup.isMain && (
           <VideoCallOverlay
             meetingUrl={callUrl}
             groupName={activeGroup.name}

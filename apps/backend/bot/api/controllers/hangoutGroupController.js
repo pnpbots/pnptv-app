@@ -26,31 +26,13 @@ const isMember = async (groupId, userId) => {
   return rows.length > 0;
 };
 
-// Auto-join community groups based on user language:
-// - PNPTV Community (is_main) for everyone
-// - PNP English for English speakers (or unknown language)
-// - PNP Español for Spanish speakers
+// Auto-join the main community group for everyone
 const ensureMainGroupMembership = async (userId) => {
-  // Always join the main community group
   await query(
     `INSERT INTO hangout_group_members (group_id, user_id, role)
      SELECT id, $1, 'member' FROM hangout_groups WHERE is_main = true
      ON CONFLICT DO NOTHING`,
     [userId]
-  );
-
-  // Join language-specific group based on user's language
-  const { rows } = await query('SELECT language FROM users WHERE id = $1', [userId]);
-  const lang = rows[0]?.language || 'en';
-  const isSpanish = lang === 'es';
-
-  // Join the matching language group (PNP English id=10, PNP Español id=11)
-  const langGroupId = isSpanish ? 11 : 10;
-  await query(
-    `INSERT INTO hangout_group_members (group_id, user_id, role)
-     VALUES ($1, $2, 'member')
-     ON CONFLICT DO NOTHING`,
-    [langGroupId, userId]
   );
 };
 
