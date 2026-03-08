@@ -337,7 +337,7 @@ export function LandingPage() {
   const sheet = activeSheet ? sheetContent[activeSheet] : null;
 
   return (
-    <div className="min-h-screen flex flex-col relative overflow-x-hidden" style={{ background: "#0A0A0B" }}>
+    <div className="h-dvh flex flex-col relative overflow-hidden" style={{ background: "#0A0A0B" }}>
 
       {/* Background orbs */}
       <div className="fixed top-[-15%] left-[-5%] w-[500px] h-[500px] rounded-full opacity-10 blur-3xl pointer-events-none" style={{ background: "radial-gradient(circle, #D4007A, transparent 70%)" }} aria-hidden="true" />
@@ -356,7 +356,7 @@ export function LandingPage() {
       </header>
 
       {/* ── HERO ────────────────────────────────────────────────────────────── */}
-      <main className="flex-1 flex flex-col items-center justify-center text-center px-5 pt-14 pb-24 min-h-screen">
+      <main className="flex-1 flex flex-col items-center justify-center text-center px-5 pt-14 pb-28 overflow-y-auto">
 
         {/* Logo — centered, prominent */}
         <img src="/Logo2-50.png" alt="PNPtv!" className="h-16 sm:h-20 w-auto mb-5 animate-fade-in-up" style={{ filter: "drop-shadow(0 0 24px rgba(212,0,122,0.4))" }} />
@@ -525,30 +525,52 @@ export function LandingPage() {
         </div>
       </main>
 
-      {/* ── BOTTOM NAV BAR ──────────────────────────────────────────────────── */}
-      <nav
-        className="fixed bottom-0 left-0 right-0 z-40 overflow-x-auto no-scrollbar"
+      {/* ── BOTTOM BAR ──────────────────────────────────────────────────────── */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-40 flex flex-col"
         style={{ background: "rgba(10,10,11,0.95)", backdropFilter: "blur(16px)", borderTop: "1px solid rgba(255,255,255,0.08)" }}
-        aria-label="Explore PNPtv"
       >
-        <div className="flex items-center gap-2 px-4 h-12 w-max">
-          {navItems.map(item => (
-            <button
-              key={item.id}
-              onClick={() => setActiveSheet(activeSheet === item.id ? null : item.id)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all duration-150 flex-shrink-0"
-              style={
-                activeSheet === item.id
-                  ? { background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff" }
-                  : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.55)" }
-              }
+        {/* Carousel nav pills */}
+        <nav className="overflow-x-auto no-scrollbar" aria-label="Explore PNPtv">
+          <div className="flex items-center gap-2 px-4 h-12 w-max">
+            {navItems.map(item => (
+              <button
+                key={item.id}
+                onClick={() => setActiveSheet(activeSheet === item.id ? null : item.id)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all duration-150 flex-shrink-0"
+                style={
+                  activeSheet === item.id
+                    ? { background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff" }
+                    : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.55)" }
+                }
+              >
+                <span>{item.emoji}</span>
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
+
+        {/* Legal links */}
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 px-4 pb-safe py-2" style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+          {[
+            { label: "Terms", href: "/terms" },
+            { label: "Privacy", href: "/privacy" },
+            { label: "Cookies", href: "/cookies" },
+            { label: "Content Policy", href: "/content-policy" },
+            { label: "DMCA", href: "/dmca" },
+            { label: "Refunds", href: "/refunds" },
+            { label: "Contact", href: "/contact" },
+          ].map(l => (
+            <a key={l.href} href={l.href} className="text-[10px] whitespace-nowrap transition-colors" style={{ color: "rgba(255,255,255,0.25)" }}
+              onMouseEnter={e => (e.currentTarget.style.color = "rgba(255,255,255,0.6)")}
+              onMouseLeave={e => (e.currentTarget.style.color = "rgba(255,255,255,0.25)")}
             >
-              <span>{item.emoji}</span>
-              <span>{item.label}</span>
-            </button>
+              {l.label}
+            </a>
           ))}
         </div>
-      </nav>
+      </div>
 
       {/* ── BOTTOM SHEET ────────────────────────────────────────────────────── */}
       {sheet && (
