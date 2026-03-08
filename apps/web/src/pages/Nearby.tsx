@@ -31,16 +31,25 @@ type FilterSegment = "all" | "users" | "places";
 
 // ─── Custom marker icons ────────────────────────────────────────────────────
 
-function createUserIcon() {
+function createUserAvatarIcon(photoUrl: string | null | undefined, displayName: string): L.DivIcon {
+  const initials = (displayName || "?")[0].toUpperCase();
+  const inner = photoUrl
+    ? `<img src="${photoUrl}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='<span style=\\'font-size:11px;font-weight:700;color:#FFB454;\\'>${initials}</span>'" />`
+    : `<span style="font-size:11px;font-weight:700;color:#FFB454;">${initials}</span>`;
   return L.divIcon({
     className: "",
-    iconSize: [28, 28],
-    iconAnchor: [14, 28],
-    popupAnchor: [0, -28],
-    html: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="#FFB454" stroke="#1C1C1E" stroke-width="1.5">
-      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-      <circle cx="12" cy="10" r="3" fill="#1C1C1E" stroke="none"/>
-    </svg>`,
+    iconSize: [38, 44],
+    iconAnchor: [19, 44],
+    popupAnchor: [0, -44],
+    html: `
+      <div style="position:relative;width:38px;height:44px;">
+        <div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:10px solid #FFB454;"></div>
+        <div style="position:absolute;top:0;left:0;width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#D4007A,#E69138);padding:2px;overflow:hidden;display:flex;align-items:center;justify-content:center;border:2px solid #FFB454;box-shadow:0 2px 8px rgba(0,0,0,0.5);">
+          <div style="width:100%;height:100%;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#2C2C2E;">
+            ${inner}
+          </div>
+        </div>
+      </div>`,
   });
 }
 
@@ -62,18 +71,17 @@ function createMyIconOffline() {
   });
 }
 
-function createPlaceIcon() {
+function createPlaceIcon(emoji = "📍"): L.DivIcon {
   return L.divIcon({
     className: "",
-    iconSize: [30, 30],
-    iconAnchor: [15, 30],
-    popupAnchor: [0, -30],
-    html: `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="#34C85A" stroke="#1C1C1E" stroke-width="1.5">
-      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-      <rect x="9" y="8" width="6" height="5" rx="0.5" fill="#1C1C1E" stroke="none"/>
-      <line x1="11" y1="13" x2="11" y2="8" stroke="#34C85A" stroke-width="1"/>
-      <line x1="13" y1="13" x2="13" y2="8" stroke="#34C85A" stroke-width="1"/>
-    </svg>`,
+    iconSize: [36, 42],
+    iconAnchor: [18, 42],
+    popupAnchor: [0, -42],
+    html: `
+      <div style="position:relative;width:36px;height:42px;">
+        <div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid #34C85A;"></div>
+        <div style="position:absolute;top:0;left:0;width:32px;height:32px;border-radius:50%;background:#1C2E1C;border:2px solid #34C85A;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 2px 8px rgba(0,0,0,0.5);">${emoji}</div>
+      </div>`,
   });
 }
 
@@ -90,6 +98,83 @@ function MapRecenter({ lat, lng }: { lat: number; lng: number }) {
 
 function isValidPhotoUrl(url: string | null | undefined): url is string {
   return !!url && (url.startsWith("/") || url.startsWith("http"));
+}
+
+// ─── Discovery Strip ─────────────────────────────────────────────────────────
+
+interface DiscoveryStripProps {
+  users: NearbyUser[];
+  places: NearbyPlace[];
+}
+
+function DiscoveryStrip({ users, places }: DiscoveryStripProps) {
+  const cards: { emoji: string; title: string; subtitle: string }[] = [];
+
+  // Community nudge card
+  if (users.length > 0) {
+    const count = users.length;
+    const nudges = [
+      `${count === 1 ? "Someone in the community is" : `${count} community members are`} nearby right now — go say hi!`,
+      `${count} ${count === 1 ? "member is" : "members are"} around you today. Maybe make a new friend?`,
+      `You're not alone — ${count} ${count === 1 ? "person from" : "people from"} the community ${count === 1 ? "is" : "are"} close by.`,
+    ];
+    cards.push({
+      emoji: "👋",
+      title: count === 1 ? "1 member nearby" : `${count} members nearby`,
+      subtitle: nudges[count % nudges.length],
+    });
+  }
+
+  // Nearest place per emoji (up to 3 unique places)
+  const seenEmojis = new Set<string>();
+  [...places]
+    .filter((p) => p.location !== null)
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 8)
+    .forEach((p) => {
+      const emoji = p.categoryEmoji || "📍";
+      if (seenEmojis.has(emoji)) return;
+      seenEmojis.add(emoji);
+      const dist = p.distance < 1
+        ? `${Math.round(p.distance * 1000)}m`
+        : `${p.distance.toFixed(1)}km`;
+      const slug = p.categorySlug || "";
+      let subtitle = `${p.name} is ${dist} away`;
+      if (slug === "saunas") subtitle = `${p.name} is ${dist} away — a hot spot in the community`;
+      else if (slug === "bars-clubs") subtitle = `${p.name} is ${dist} away — PNP-friendly vibes nearby`;
+      else if (slug === "wellness") subtitle = `${p.name} is ${dist} away — take a moment for yourself`;
+      else if (slug === "pnp-friendly") subtitle = `${p.name} is ${dist} away — community-approved spot`;
+      else if (slug === "hotels-lodging") subtitle = `${p.name} is ${dist} away — a great local option`;
+      cards.push({
+        emoji,
+        title: `${p.name} · ${dist}`,
+        subtitle,
+      });
+      if (cards.length >= 5) return;
+    });
+
+  if (cards.length === 0) return null;
+
+  return (
+    <div
+      className="flex gap-2 overflow-x-auto pb-1 mb-2 scrollbar-none"
+      style={{ scrollbarWidth: "none", msOverflowStyle: "none" } as React.CSSProperties}
+    >
+      {cards.map((card, i) => (
+        <div
+          key={i}
+          className="flex-shrink-0 rounded-xl p-3 border border-white/10 backdrop-blur-md"
+          style={{ background: "rgba(28,28,30,0.85)", minWidth: 200, maxWidth: 240 }}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-lg">{card.emoji}</span>
+            <p className="text-xs font-semibold text-pnp-textPrimary truncate">{card.title}</p>
+          </div>
+          <p className="text-[11px] text-pnp-textSecondary leading-relaxed line-clamp-2">{card.subtitle}</p>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // ─── Detail sheet for tapped items ──────────────────────────────────────────
@@ -480,10 +565,8 @@ export default function Nearby() {
   const [submitPlaceOpen, setSubmitPlaceOpen] = useState(false);
   const watchIdRef = useRef<number | null>(null);
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const userIconRef = useRef(createUserIcon());
   const myIconRef = useRef(createMyIcon());
   const myIconOfflineRef = useRef(createMyIconOffline());
-  const placeIconRef = useRef(createPlaceIcon());
 
   // Computed filtered counts
   const showUsers = filter === "all" || filter === "users";
@@ -691,7 +774,7 @@ export default function Nearby() {
       {myPos && (
         <div className="absolute inset-0">
           <style>{`
-            .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(0.95) contrast(0.9); }
+            .leaflet-tile-pane { filter: brightness(0.5) saturate(0.5) contrast(1.1); }
             .leaflet-container { background: #1C1C1E; }
             .leaflet-control-zoom a { background: #2C2C2E !important; color: #FFB454 !important; border-color: #3C3C3E !important; }
             .leaflet-control-attribution { display: none !important; }
@@ -729,13 +812,15 @@ export default function Nearby() {
               icon={locationStatus === "online" ? myIconRef.current : myIconOfflineRef.current}
             />
 
-            {/* Nearby users */}
-            {showUsers &&
-              nearbyUsers.map((u) => (
+            {/* Nearby users — avatar markers */}
+            {showUsers && nearbyUsers.map((u) => {
+              const displayName = u.name || u.username || "?";
+              const icon = createUserAvatarIcon(u.photo_url, displayName);
+              return (
                 <Marker
                   key={u.user_id}
                   position={[u.latitude, u.longitude]}
-                  icon={userIconRef.current}
+                  icon={icon}
                   eventHandlers={{
                     click: () => {
                       setSelectedPlace(null);
@@ -743,15 +828,17 @@ export default function Nearby() {
                     },
                   }}
                 />
-              ))}
+              );
+            })}
 
-            {/* Nearby places */}
-            {showPlaces &&
-              nearbyPlaces.filter((p) => p.location !== null).map((p) => (
+            {/* Nearby places — category emoji markers */}
+            {showPlaces && nearbyPlaces.filter((p) => p.location !== null).map((p) => {
+              const emoji = p.categoryEmoji || "📍";
+              return (
                 <Marker
                   key={`place-${p.id}`}
                   position={[p.location!.lat, p.location!.lng]}
-                  icon={placeIconRef.current}
+                  icon={createPlaceIcon(emoji)}
                   eventHandlers={{
                     click: () => {
                       setSelectedUser(null);
@@ -759,7 +846,8 @@ export default function Nearby() {
                     },
                   }}
                 />
-              ))}
+              );
+            })}
           </MapContainer>
         </div>
       )}
@@ -834,6 +922,27 @@ export default function Nearby() {
             ))}
           </div>
         </div>
+
+        {/* Nearest place ambient pill */}
+        {showPlaces && nearbyPlaces.length > 0 && (() => {
+          const nearest = [...nearbyPlaces]
+            .filter((p) => p.location !== null)
+            .sort((a, b) => a.distance - b.distance)[0];
+          if (!nearest) return null;
+          const dist = nearest.distance < 1
+            ? `${Math.round(nearest.distance * 1000)}m`
+            : `${nearest.distance.toFixed(1)}km`;
+          const emoji = nearest.categoryEmoji || "📍";
+          return (
+            <div className="flex justify-center pb-2 pointer-events-none">
+              <div className="pointer-events-auto inline-flex items-center gap-1.5 bg-pnp-surface/80 backdrop-blur-md rounded-full px-3 py-1.5 border border-white/10 shadow-lg">
+                <span className="text-sm">{emoji}</span>
+                <span className="text-xs text-pnp-textPrimary font-medium truncate max-w-[160px]">{nearest.name}</span>
+                <span className="text-xs text-pnp-textSecondary">· {dist}</span>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Submit place FAB */}
@@ -883,16 +992,19 @@ export default function Nearby() {
               </div>
             )}
 
+            {/* Discovery strip — shown when results exist */}
+            {!isSearching && (nearbyUsers.length > 0 || nearbyPlaces.length > 0) && (
+              <DiscoveryStrip users={nearbyUsers} places={nearbyPlaces} />
+            )}
+
             {/* No results card */}
             {!isSearching && nearbyUsers.length === 0 && nearbyPlaces.length === 0 && (
               <div className="mb-3 bg-pnp-surface/80 backdrop-blur-md rounded-xl p-3 border border-white/5">
                 <div className="flex items-center gap-3">
-                  <svg className="w-8 h-8 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
+                  <span className="text-2xl">🌍</span>
                   <div>
-                    <p className="text-sm font-medium text-pnp-textPrimary">{t.booking.nothingNearbyYet}</p>
-                    <p className="text-xs text-pnp-textSecondary">{t.booking.tryIncreasingRadius}</p>
+                    <p className="text-sm font-semibold text-pnp-textPrimary">The community is out there</p>
+                    <p className="text-xs text-pnp-textSecondary mt-0.5">Try expanding your radius — members could be just a little further away</p>
                   </div>
                 </div>
               </div>
