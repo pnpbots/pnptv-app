@@ -6,6 +6,8 @@ import { NotificationProvider } from "@/hooks/useNotifications";
 import { router } from "@/router";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
+import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
+import { useAuth } from "@/hooks/useAuth";
 
 function useScreenCaptureGuard() {
   useEffect(() => {
@@ -104,6 +106,16 @@ function useScreenCaptureGuard() {
   }, []);
 }
 
+function AppOverlays() {
+  const { isAuthenticated } = useAuth();
+  return (
+    <>
+      <PWAInstallBanner />
+      <NotificationPermissionPrompt isAuthenticated={isAuthenticated} />
+    </>
+  );
+}
+
 export default function App() {
   useScreenCaptureGuard();
 
@@ -113,7 +125,7 @@ export default function App() {
         <AuthProvider>
           <NotificationProvider>
             <RouterProvider router={router} />
-            <PWAInstallBanner />
+            <AppOverlays />
           </NotificationProvider>
         </AuthProvider>
       </HelmetProvider>

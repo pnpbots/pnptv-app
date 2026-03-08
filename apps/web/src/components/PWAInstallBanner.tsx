@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useI18n } from "@/lib/i18n";
 
-const DISMISS_KEY = "pwa_install_dismissed_until";
+const DISMISS_KEY = "pwa_install_dismissed_v2";
 const DISMISS_HOURS = 6; // Re-show after 6 hours if dismissed
 
 function isStandalone(): boolean {
