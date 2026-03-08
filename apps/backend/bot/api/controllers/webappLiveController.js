@@ -9,7 +9,18 @@ const authGuard = (req, res) => {
 };
 
 /**
+ * Module-level cache for the Restreamer auth token.
+ * Tokens typically last 1 hour; we cache for 55 minutes to avoid expiry mid-request.
+ */
+const _restreamerTokenCache = {
+  token: null,
+  expiresAt: 0,
+  TTL_MS: 55 * 60 * 1000, // 55 minutes
+};
+
+/**
  * Authenticate with the Restreamer API and return a Bearer token.
+ * Results are cached for 55 minutes to avoid hitting the login endpoint on every request.
  * Returns null if credentials are not configured or login fails (non-fatal).
  *
  * @param {string} restreamerUrl - Internal Restreamer base URL (e.g. http://restreamer:8080)
@@ -20,13 +31,27 @@ async function getRestreamerToken(restreamerUrl) {
   const pass = process.env.RESTREAMER_PASSWORD;
   // Use strict undefined check — empty-string credentials are still valid and must be sent.
   if (user === undefined || pass === undefined) return null;
+
+  // Return cached token if still valid.
+  if (_restreamerTokenCache.token && Date.now() < _restreamerTokenCache.expiresAt) {
+    return _restreamerTokenCache.token;
+  }
+
   try {
     const resp = await axios.post(`${restreamerUrl}/api/login`, {
       username: user,
       password: pass,
     }, { timeout: 5000 });
-    return resp.data?.access_token ?? null;
+    const token = resp.data?.access_token ?? null;
+    if (token) {
+      _restreamerTokenCache.token = token;
+      _restreamerTokenCache.expiresAt = Date.now() + _restreamerTokenCache.TTL_MS;
+    }
+    return token;
   } catch (err) {
+    // Clear stale cache on auth failure so the next request retries immediately.
+    _restreamerTokenCache.token = null;
+    _restreamerTokenCache.expiresAt = 0;
     logger.warn(`Restreamer login failed: ${err.message}`);
     return null;
   }
@@ -211,7 +236,7 @@ const getRtmpKey = async (req, res) => {
 // ---------------------------------------------------------------------------
 const assignChannel = async (req, res) => {
   const admin = req.session?.user;
-  if (!admin || admin.role !== 'admin') {
+  if (!admin || (admin.role !== 'admin' && admin.role !== 'superadmin')) {
     return res.status(403).json({ error: 'Admin access required' });
   }
 
@@ -272,7 +297,7 @@ const assignChannel = async (req, res) => {
 // ---------------------------------------------------------------------------
 const listChannels = async (req, res) => {
   const admin = req.session?.user;
-  if (!admin || admin.role !== 'admin') {
+  if (!admin || (admin.role !== 'admin' && admin.role !== 'superadmin')) {
     return res.status(403).json({ error: 'Admin access required' });
   }
 

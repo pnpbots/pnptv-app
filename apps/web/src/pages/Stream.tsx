@@ -27,7 +27,7 @@ function extractChannelRef(streamId: string): string | null {
 export default function Stream() {
   const { streamId } = useParams<{ streamId: string }>();
   const navigate = useNavigate();
-  useI18n(); // load hook for language context; all strings in this page are hardcoded English
+  const t = useI18n();
   const { isAuthenticated, login } = useAuth();
 
   const [stream, setStream] = useState<LiveStream | null>(null);
@@ -84,10 +84,10 @@ export default function Stream() {
             setStream(syntheticStream);
             setError(null);
           } else {
-            setError("Stream not found");
+            setError(t.live.streamNotFound);
           }
         } catch {
-          setError("Stream not found");
+          setError(t.live.streamNotFound);
         }
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load stream"));
@@ -162,19 +162,38 @@ export default function Stream() {
     setTipSuccess(null);
     try {
       await sendTip(streamId || "", amount, undefined, tipPaymentTab);
-      setTipSuccess(`${amount}T sent!`);
+      setTipSuccess(t.live.tipSuccess);
       setTimeout(() => setTipSuccess(null), 3000);
     } catch (err) {
-      setTipError(err instanceof Error ? err.message : "Tip failed");
+      setTipError(err instanceof Error ? err.message : t.live.tipFailed);
     } finally {
       setTipping(false);
     }
   };
 
   const chatEndRef = React.useRef<HTMLDivElement>(null);
+  const chatContainerRef = React.useRef<HTMLDivElement>(null);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+
+  const isNearBottom = () => {
+    const el = chatContainerRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (isNearBottom()) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      setHasNewMessages(false);
+    } else {
+      setHasNewMessages(true);
+    }
   }, [chatMessages]);
+
+  const scrollToBottom = () => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    setHasNewMessages(false);
+  };
 
   const formatTimeAgo = (dateStr: string) => {
     const diff = Date.now() - new Date(dateStr).getTime();
@@ -199,9 +218,9 @@ export default function Stream() {
   if (error || !stream) {
     return (
       <div className="page-container text-center py-20">
-        <p className="text-pnp-textSecondary mb-4">{error || "Stream not found"}</p>
+        <p className="text-pnp-textSecondary mb-4">{error || t.live.streamNotFound}</p>
         <button onClick={() => navigate("/live")} className="text-sm text-pnp-accent hover:underline">
-          Back to Live
+          {t.live.backToLive}
         </button>
       </div>
     );
@@ -216,7 +235,7 @@ export default function Stream() {
 
       {/* Back link */}
       <button onClick={() => navigate("/live")} className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors">
-        ← Back to Live
+        {String.fromCharCode(8592)} {t.live.backToLive}
       </button>
 
       {/* Video Player */}
@@ -291,19 +310,28 @@ export default function Stream() {
       <Card>
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <h3 className="text-xs font-medium text-pnp-textPrimary">Live Chat</h3>
+            <h3 className="text-xs font-medium text-pnp-textPrimary">{t.live.liveChatTitle}</h3>
             <span className={`flex items-center gap-1 text-[10px] ${chatConnected ? "text-pnp-textSecondary" : "text-pnp-textSecondary/50"}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${chatConnected ? "bg-green-500" : "bg-pnp-textSecondary/30"}`} />
-              {chatConnected ? "Connected" : "Connecting..."}
+              {chatConnected ? t.live.chatConnected : t.live.chatConnecting}
             </span>
           </div>
           {socketError && <span className="text-[10px] text-pnp-error">{socketError}</span>}
         </div>
 
-        <div className="h-48 overflow-y-auto space-y-1 mb-2 pr-1" style={{ scrollbarWidth: "thin" }}>
+        <div className="relative">
+        {hasNewMessages && (
+          <button
+            onClick={scrollToBottom}
+            className="absolute -top-2 left-1/2 -translate-x-1/2 z-10 px-3 py-1 rounded-full bg-pnp-accent text-white text-[10px] font-semibold shadow-lg"
+          >
+            New messages
+          </button>
+        )}
+        <div ref={chatContainerRef} className="h-48 overflow-y-auto space-y-1 mb-2 pr-1" style={{ scrollbarWidth: "thin" }}>
           {chatMessages.length === 0 ? (
             <p className="text-[10px] text-pnp-textSecondary text-center py-4">
-              {chatConnected ? "Be the first to say something!" : "Connecting to chat..."}
+              {chatConnected ? t.live.beFirstToChat : t.live.connectingToChat}
             </p>
           ) : (
             chatMessages.map((msg) => (
@@ -315,6 +343,7 @@ export default function Stream() {
             ))
           )}
           <div ref={chatEndRef} />
+        </div>
         </div>
 
         {isAuthenticated ? (
@@ -347,7 +376,7 @@ export default function Stream() {
           </div>
         ) : (
           <button onClick={login} className="text-xs text-pnp-accent hover:underline">
-            Log in to chat
+            {t.live.logInToChat}
           </button>
         )}
       </Card>

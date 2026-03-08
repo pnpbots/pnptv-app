@@ -4065,7 +4065,7 @@ app.get('/api/proxy/live/performers', asyncHandler(async (req, res) => {
 app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimiter, asyncHandler(async (req, res) => {
   const user = req.session?.user;
 
-  const { performerId, amount, message, paymentMethod = 'daimo' } = req.body;
+  const { performerId, amount, message, paymentMethod = 'daimo', idempotencyKey } = req.body;
   if (!performerId || !amount) {
     return res.status(400).json({ success: false, error: 'performerId and amount are required' });
   }
@@ -4083,6 +4083,28 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
   try {
     const userId = String(user.telegram_id || user.id);
 
+    // --- Validate performer existence (Fix 3) ---
+    // performers in the tip picker come from Directus CMS via /api/proxy/live/performers.
+    // We validate against the same source: a Directus items/performers lookup.
+    try {
+      const performerResp = await axios.get(`${DIRECTUS_INTERNAL_URL}/items/performers`, {
+        params: {
+          'filter[id][_eq]': String(performerId),
+          'filter[status][_eq]': 'published',
+          'fields[]': ['id', 'name'],
+          limit: 1,
+        },
+        timeout: 5000,
+      });
+      const found = performerResp.data?.data;
+      if (!Array.isArray(found) || found.length === 0) {
+        return res.status(404).json({ success: false, error: 'Performer not found' });
+      }
+    } catch (validationErr) {
+      logger.warn(`Tips: performer validation failed for id=${performerId}: ${validationErr.message}`);
+      return res.status(404).json({ success: false, error: 'Performer not found' });
+    }
+
     // Look up performer name for payment description
     let performerName = performerId;
     try {
@@ -4092,6 +4114,40 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
 
     // --- Token-based instant tip ---
     if (paymentMethod === 'tokens') {
+      // --- Idempotency check (Fix 4) ---
+      // If an idempotencyKey is supplied, check for a matching tip created within the last 5 seconds
+      // from the same user to the same performer for the same amount. Return the existing tip if found.
+      if (idempotencyKey && typeof idempotencyKey === 'string') {
+        try {
+          const dupCheck = await getPool().query(
+            `SELECT id, amount, created_at FROM pnp_tips
+             WHERE user_telegram_id = $1
+               AND performer_id = $2
+               AND amount = $3
+               AND payment_method = 'tokens'
+               AND created_at > NOW() - INTERVAL '5 seconds'
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [userId, String(performerId), numAmount]
+          );
+          if (dupCheck.rows.length > 0) {
+            const existing = dupCheck.rows[0];
+            logger.info(`Tips: idempotency hit — returning existing tip ${existing.id} for user ${userId}`);
+            return res.json({
+              success: true,
+              tipId: existing.id,
+              paymentUrl: null,
+              amount: parseFloat(existing.amount),
+              paymentMethod: 'tokens',
+              duplicate: true,
+            });
+          }
+        } catch (idempErr) {
+          // Non-fatal: if the idempotency check errors, proceed with normal creation
+          logger.warn(`Tips: idempotency check failed: ${idempErr.message}`);
+        }
+      }
+
       const DashTokenService = require('../services/dashTokenService');
       const debit = await DashTokenService.debitTokens(userId, numAmount);
       if (!debit.success) {

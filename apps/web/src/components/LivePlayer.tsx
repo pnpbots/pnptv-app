@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from "react";
 import Hls from "hls.js";
 import { Badge, Skeleton } from "@pnptv/ui-kit";
 import { StreamOverlayLayer, type StreamOverlayConfig } from "@/components/StreamOverlayLayer";
+import { useI18n } from "@/lib/i18n";
 
 interface LivePlayerProps {
   src: string;
@@ -14,6 +15,7 @@ interface LivePlayerProps {
 export function LivePlayer({ src, title, poster, className = "", overlay }: LivePlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<"loading" | "live" | "offline" | "error">("loading");
+  const t = useI18n();
 
   useEffect(() => {
     const video = videoRef.current;
@@ -86,8 +88,14 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
           <svg className="w-16 h-16 text-pnp-textSecondary mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
-          <p className="text-pnp-textSecondary font-medium">Stream Offline</p>
-          <p className="text-sm text-pnp-textSecondary/60 mt-1">Check back later</p>
+          <p className="text-pnp-textSecondary font-medium">{t.live.streamOffline}</p>
+          <p className="text-sm text-pnp-textSecondary/60 mt-1">{t.live.checkBackLater}</p>
+          <a
+            href="/live"
+            className="inline-block mt-4 px-4 py-2 rounded-lg text-xs font-semibold text-white btn-gradient"
+          >
+            Back to Live
+          </a>
         </div>
       </div>
     );

@@ -51,7 +51,7 @@ export default function Live() {
   const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
   const [performersLoading, setPerformersLoading] = useState(true);
   const [liveStreams, setLiveStreams] = useState<LiveStream[]>([]);
-
+  const [loadError, setLoadError] = useState(false);
 
   // Dash token wallet
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
@@ -72,6 +72,7 @@ export default function Live() {
   // Booking
   const [showBooking, setShowBooking] = useState(false);
   const [bookingLoaded, setBookingLoaded] = useState(false);
+  const [bookingError, setBookingError] = useState(false);
 
   // Go Live
   const [showGoLive, setShowGoLive] = useState(false);
@@ -88,12 +89,15 @@ export default function Live() {
   // Load performers + streams
   useEffect(() => {
     setPerformersLoading(true);
+    setLoadError(false);
     Promise.all([
-      getAllPerformers().catch(() => ({ performers: [] })),
-      getLiveStreams().catch(() => ({ streams: [] })),
+      getAllPerformers(),
+      getLiveStreams(),
     ]).then(([perfData, streamData]) => {
       setPerformers(perfData.performers || []);
       setLiveStreams((streamData.streams || []).filter((s: LiveStream) => s.isLive));
+    }).catch(() => {
+      setLoadError(true);
     }).finally(() => setPerformersLoading(false));
 
     // Refresh streams periodically
@@ -123,6 +127,15 @@ export default function Live() {
   useEffect(() => {
     if (socketBalance !== null) setTokenBalance(socketBalance);
   }, [socketBalance]);
+
+  // Booking iframe timeout — show error if still not loaded after 15 seconds.
+  // The effect re-runs when bookingLoaded flips true; the cleanup cancels the
+  // pending timer, so setBookingError is never called on a successful load.
+  useEffect(() => {
+    if (!showBooking || bookingLoaded) return;
+    const timer = setTimeout(() => setBookingError(true), 15000);
+    return () => clearTimeout(timer);
+  }, [showBooking, bookingLoaded]);
 
   const handleBuyTokens = async (pkg: TokenPackage) => {
     setBuyingPackage(pkg.id);
@@ -229,16 +242,16 @@ export default function Live() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
             </svg>
           </div>
-          <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Live Streams</h2>
+          <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">{t.live.liveStreamsTitle}</h2>
           <p className="text-sm text-pnp-textSecondary text-center max-w-xs mb-8">
-            Watch creators go live, tip with tokens, and book private sessions. Upgrade to Member to unlock live streaming.
+            {t.live.freeUserUpsell}
           </p>
           <button
             onClick={() => navigate("/subscribe")}
             className="px-6 py-3 rounded-full text-base font-semibold text-white"
             style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
           >
-            Upgrade to Member
+            {t.live.upgradeToMember}
           </button>
         </div>
       </div>
@@ -270,6 +283,14 @@ export default function Live() {
           </button>
         )}
       </div>
+      {loadError && (
+        <div className="mb-4 p-3 rounded-xl bg-pnp-error/10 border border-pnp-error/20 flex items-center justify-between">
+          <p className="text-xs text-pnp-error">{t.live.failedToLoadStreams}</p>
+          <button onClick={() => window.location.reload()} className="text-xs font-semibold text-pnp-accent">
+            {t.live.retryLoading}
+          </button>
+        </div>
+      )}
       {goLiveError && (
         <p className="text-[10px] text-pnp-error mb-2">{goLiveError}</p>
       )}
@@ -331,7 +352,7 @@ export default function Live() {
                       : "text-pnp-textPrimary bg-pnp-surface border border-pnp-border hover:border-pnp-accent/40"
                   }`}
                 >
-                  {isLive ? "Watch Live" : (t.live.viewProfile || "View Profile")}
+                  {isLive ? t.live.watchLive : t.live.viewProfile}
                 </button>
               </div>
             );
@@ -363,7 +384,7 @@ export default function Live() {
         if (communityStreams.length === 0) return null;
         return (
           <div className="mb-4">
-            <h2 className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider mb-2">Community Live</h2>
+            <h2 className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider mb-2">{t.live.communityLive}</h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {communityStreams.map((s) => (
                 <div
@@ -389,7 +410,7 @@ export default function Live() {
                     onClick={() => navigate(`/live/${encodeURIComponent(s.id)}`)}
                     className="mt-2 w-full py-1.5 rounded-lg font-semibold text-xs active:scale-95 transition-all text-white bg-red-500 hover:bg-red-600"
                   >
-                    Watch Live
+                    {t.live.watchLive}
                   </button>
                 </div>
               ))}
@@ -467,21 +488,40 @@ export default function Live() {
               </Button>
             </div>
             <div className="embed-frame relative" style={{ minHeight: "500px" }}>
-              {!bookingLoaded && (
+              {bookingError ? (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="text-center">
-                    <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                    <p className="text-xs text-pnp-textSecondary">{t.live.loadingBooking}</p>
+                    <p className="text-sm text-pnp-textSecondary mb-3">{t.live.loadingBookingFailed}</p>
+                    <button
+                      onClick={() => {
+                        setBookingLoaded(false);
+                        setBookingError(false);
+                      }}
+                      className="px-4 py-2 rounded-lg btn-gradient text-white text-xs font-semibold"
+                    >
+                      {t.live.retryLoading}
+                    </button>
                   </div>
                 </div>
+              ) : (
+                <>
+                  {!bookingLoaded && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                        <p className="text-xs text-pnp-textSecondary">{t.live.loadingBooking}</p>
+                      </div>
+                    </div>
+                  )}
+                  <iframe
+                    src={`${CALCOM_URL}?embed=true`}
+                    className="w-full border-0 rounded-xl"
+                    style={{ height: "600px", opacity: bookingLoaded ? 1 : 0 }}
+                    onLoad={() => setBookingLoaded(true)}
+                    title={t.live.bookingCalendarTitle}
+                  />
+                </>
               )}
-              <iframe
-                src={`${CALCOM_URL}?embed=true`}
-                className="w-full border-0 rounded-xl"
-                style={{ height: "600px", opacity: bookingLoaded ? 1 : 0 }}
-                onLoad={() => setBookingLoaded(true)}
-                title={t.live.bookingCalendarTitle}
-              />
             </div>
             <Card className="mt-3">
               <div className="flex items-start gap-3">
