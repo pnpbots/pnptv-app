@@ -1,4 +1,5 @@
-import React, { lazy, Suspense, useState, useEffect } from "react";
+import React, { lazy, Suspense, useState, useEffect, useCallback } from "react";
+import Cal, { getCalApi } from "@calcom/embed-react";
 import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Card, Skeleton, Button } from "@pnptv/ui-kit";
@@ -518,41 +519,14 @@ export default function Live() {
                 {t.live.openFullCalendar}
               </Button>
             </div>
-            <div className="embed-frame relative" style={{ minHeight: "500px" }}>
-              {bookingError ? (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-center">
-                    <p className="text-sm text-pnp-textSecondary mb-3">{t.live.loadingBookingFailed}</p>
-                    <button
-                      onClick={() => {
-                        setBookingLoaded(false);
-                        setBookingError(false);
-                      }}
-                      className="px-4 py-2 rounded-lg btn-gradient text-white text-xs font-semibold"
-                    >
-                      {t.live.retryLoading}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {!bookingLoaded && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="text-center">
-                        <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                        <p className="text-xs text-pnp-textSecondary">{t.live.loadingBooking}</p>
-                      </div>
-                    </div>
-                  )}
-                  <iframe
-                    src={`${CALCOM_URL}?embed=true`}
-                    className="w-full border-0 rounded-xl"
-                    style={{ height: "600px", opacity: bookingLoaded ? 1 : 0 }}
-                    onLoad={() => setBookingLoaded(true)}
-                    title={t.live.bookingCalendarTitle}
-                  />
-                </>
-              )}
+            <div className="embed-frame overflow-hidden" style={{ minHeight: "500px" }}>
+              <Cal
+                calLink=""
+                config={{ theme: "dark" }}
+                calOrigin={CALCOM_URL}
+                embedJsUrl={`${CALCOM_URL}/embed/embed.js`}
+                style={{ width: "100%", height: "100%", minHeight: "500px" }}
+              />
             </div>
             <Card className="mt-3">
               <div className="flex items-start gap-3">
