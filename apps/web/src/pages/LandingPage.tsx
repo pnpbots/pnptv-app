@@ -340,22 +340,21 @@ export function LandingPage() {
     <div className="app-shell bg-pnp-background">
 
       {/* ── HEADER ──────────────────────────────────────────────────────────── */}
-      <header className="glass-nav border-b border-pnp-border flex items-center justify-between px-4 h-14 flex-shrink-0">
-        <div className="w-16" />
-        <img src="/Logo2-50.png" alt="PNPtv!" className="h-8 w-auto" />
-        <div className="w-16 flex justify-end">
-          <button
-            onClick={() => { setLoginOpen(v => !v); setLoginView("options"); }}
-            className="text-sm font-medium text-pnp-textSecondary hover:text-white transition-colors"
-          >
-            Log in
-          </button>
-        </div>
+      <header className="glass-nav border-b border-pnp-border flex items-center justify-end px-4 h-14 flex-shrink-0">
+        <button
+          onClick={() => { setLoginOpen(v => !v); setLoginView("options"); }}
+          className="text-sm font-medium text-pnp-textSecondary hover:text-white transition-colors"
+        >
+          Log in
+        </button>
       </header>
 
       {/* ── HERO ────────────────────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-col items-center justify-center text-center px-4 overflow-y-auto">
         <div className="w-full max-w-xs flex flex-col items-center gap-4">
+
+          {/* Logo — hero centerpiece */}
+          <img src="/Logo2-50.png" alt="PNPtv!" className="h-20 w-auto" />
 
           {/* Tagline */}
           <div>
