@@ -101,8 +101,10 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
 
   const requestPermissions = useCallback(async () => {
     if (!hasMediaDevices()) {
-      // No getUserMedia — let user proceed, Jitsi iframe handles its own permissions
-      onGranted();
+      setError("Camera/microphone not available in this browser. Please open this page in Safari or Chrome.");
+      setMediaUnavailable(true);
+      setCamStatus("unavailable");
+      setMicStatus("unavailable");
       return;
     }
 
@@ -151,11 +153,9 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
           setError("Permission denied. Click the camera icon in your browser's address bar to enable permissions, then try again.");
         }
       } else if (e.name === "NotFoundError") {
-        setError("No camera or microphone found. You can still join — the video call app will use any available devices.");
-        // Let them continue since Jitsi handles device selection itself
-        setCamStatus("unavailable");
-        setMicStatus("unavailable");
-        setMediaUnavailable(true);
+        setError("No camera or microphone found on this device. You need a camera and microphone to join video calls.");
+        setCamStatus("denied");
+        setMicStatus("denied");
       } else if (e.name === "NotReadableError") {
         setError("Camera or microphone is already in use by another app. Close other apps using the camera, then try again.");
       } else if (e.name === "OverconstrainedError") {
@@ -274,15 +274,6 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
               style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
             >
               Try Again
-            </button>
-          )}
-          {/* Continue anyway — only for WebViews/unavailable devices, NOT denied perms */}
-          {(unavailable && !denied) && (
-            <button
-              onClick={onGranted}
-              className="w-full py-3 rounded-xl text-white font-semibold text-sm transition-all border border-white/20 hover:bg-white/5"
-            >
-              Continue Anyway
             </button>
           )}
           {onCancel && (
