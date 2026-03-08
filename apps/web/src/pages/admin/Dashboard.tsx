@@ -132,9 +132,9 @@ const SECTIONS: Section[] = [
         external: false,
       },
       {
-        title: "Nearby / Booking",
-        description: "Location-based discovery & booking",
-        url: "/booking",
+        title: "Nearby",
+        description: "Location-based discovery",
+        url: "/nearby",
         badge: "Nearby",
         external: false,
       },

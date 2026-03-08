@@ -98,8 +98,8 @@ const getSubscriptionStatus = async (req, res) => {
 
 // POST /api/webapp/creator/:creatorId/subscribe
 const subscribeToCreator = async (req, res) => {
-  if (!hasAccess(req.user, 'PRIME')) {
-    return res.status(403).json({ error: 'PRIME subscription required to subscribe to creators' });
+  if (!hasAccess(req.user, 'member')) {
+    return res.status(403).json({ error: 'Member subscription required to subscribe to creators' });
   }
   try {
     const result = await CreatorService.subscribeToCreator(req.user.id, req.params.creatorId, req.body.paymentId);

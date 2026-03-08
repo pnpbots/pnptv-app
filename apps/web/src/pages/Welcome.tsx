@@ -10,7 +10,7 @@ const featureRoutes = [
   { icon: "\ud83d\udcf9", route: "/chat", color: "from-orange-500 to-pink-600" },
   { icon: "\ud83d\udd34", route: "/live", color: "from-red-600 to-orange-500" },
   { icon: "\ud83d\udcac", route: "/social", color: "from-blue-500 to-purple-600" },
-  { icon: "\ud83d\udccd", route: "/booking", color: "from-green-500 to-teal-500" },
+  { icon: "\ud83d\udccd", route: "/nearby", color: "from-green-500 to-teal-500" },
   { icon: "\u2709\ufe0f", route: "/dm", color: "from-indigo-500 to-blue-500" },
   { icon: "\ud83d\udc64", route: "/profile", color: "from-purple-500 to-pink-500" },
   { icon: "\u2b50", route: null, external: "https://t.me/PNPtvBot", color: "from-yellow-500 to-orange-500" },

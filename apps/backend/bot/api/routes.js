@@ -60,6 +60,9 @@ const canvaRoutes = require('./routes/canvaRoutes');
 // ATProto / Bluesky OAuth routes (public endpoints served at the monorepo root)
 const atprotoOAuthRoutes = require('./routes/atprotoOAuthRoutes');
 
+// Community Room (Haus) — 24/7 open video room powered by JaaS
+const communityRoomController = require('./controllers/communityRoomController');
+
 // ATProto controller for profile fetching, unlinking, and cross-posting
 const atprotoController = require('./controllers/atprotoController');
 
@@ -2131,7 +2134,7 @@ app.delete('/api/webapp/hangouts/:callId', requireSessionAuth, asyncHandler(weba
 
 // Web App Live Streaming Routes
 const webappLiveController = require('./controllers/webappLiveController');
-app.get('/api/webapp/live/streams', requireSessionAuth, asyncHandler(webappLiveController.listStreams));
+app.get('/api/webapp/live/streams', requireSessionAuth, requireMemberTier, asyncHandler(webappLiveController.listStreams));
 app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLiveController.getRtmpKey));
 // Admin: manage Restreamer channel assignments
 app.get('/api/webapp/admin/live/channels', requireSessionAuth, asyncHandler(webappLiveController.listChannels));
@@ -2150,6 +2153,10 @@ app.get('/api/webapp/admin/stream-overlays/:channelRef', requireSessionAuth, asy
 app.put('/api/webapp/admin/stream-overlays/:channelRef', requireSessionAuth, asyncHandler(streamOverlayController.updateOverlay));
 // Public overlay endpoint — no auth, short cache, used by the frontend LivePlayer
 app.get('/api/proxy/live/overlay/:channelRef', asyncHandler(streamOverlayController.getPublicOverlay));
+
+// Overlay Asset Library (CMS-managed logos & banners)
+const overlayLibraryController = require('./controllers/overlayLibraryController');
+app.get('/api/webapp/admin/overlay-library', requireSessionAuth, asyncHandler(overlayLibraryController.listAssets));
 
 // Web App Support Chat (Cristina AI)
 const supportController = require('./controllers/supportController');
@@ -2732,6 +2739,177 @@ app.post('/api/webapp/admin/mono/chat', adminGuard, asyncHandler(async (req, res
   res.json({ success: true, message: reply });
 }));
 
+// ── Admin Support Dashboard ──────────────────────────────────────────────────
+app.get('/api/webapp/admin/support/stats', adminGuard, asyncHandler(async (req, res) => {
+  const SupportTopicModel = require('../../models/supportTopicModel');
+  const pool = getPool();
+
+  const stats = await SupportTopicModel.getStatistics();
+
+  const { rows: [frt] } = await pool.query(`
+    SELECT AVG(EXTRACT(EPOCH FROM (first_response_at - created_at))/3600)::numeric(10,1) AS avg_hours
+    FROM support_topics WHERE first_response_at IS NOT NULL
+  `).catch(() => ({ rows: [{ avg_hours: null }] }));
+
+  const { rows: [csat] } = await pool.query(`
+    SELECT AVG(user_satisfaction)::numeric(3,1) AS avg_csat,
+           COUNT(user_satisfaction)::int AS total_ratings
+    FROM support_topics WHERE user_satisfaction IS NOT NULL
+  `).catch(() => ({ rows: [{ avg_csat: null, total_ratings: 0 }] }));
+
+  const { rows: [waiting] } = await pool.query(`
+    SELECT COUNT(*)::int AS count
+    FROM support_topics WHERE first_response_at IS NULL AND status = 'open'
+  `).catch(() => ({ rows: [{ count: 0 }] }));
+
+  const { rows: [today] } = await pool.query(`
+    SELECT COUNT(*)::int AS count
+    FROM support_topics WHERE created_at > NOW() - INTERVAL '24 hours'
+  `).catch(() => ({ rows: [{ count: 0 }] }));
+
+  res.json({
+    success: true,
+    data: {
+      ...stats,
+      avg_first_response_hours: frt.avg_hours,
+      avg_csat: csat.avg_csat,
+      total_ratings: csat.total_ratings,
+      awaiting_first_response: waiting.count,
+      new_today: today.count,
+    }
+  });
+}));
+
+app.get('/api/webapp/admin/support/tickets', adminGuard, asyncHandler(async (req, res) => {
+  const pool = getPool();
+  const { status, priority, category, search, limit: lim, offset: off } = req.query;
+
+  let where = [];
+  let params = [];
+  let idx = 1;
+
+  if (status) { where.push(`st.status = $${idx++}`); params.push(status); }
+  if (priority) { where.push(`st.priority = $${idx++}`); params.push(priority); }
+  if (category) { where.push(`st.category = $${idx++}`); params.push(category); }
+  if (search) {
+    where.push(`(st.user_id ILIKE $${idx} OR st.thread_name ILIKE $${idx} OR u.username ILIKE $${idx} OR u.first_name ILIKE $${idx})`);
+    params.push(`%${search}%`);
+    idx++;
+  }
+
+  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const limit = Math.min(parseInt(lim) || 50, 100);
+  const offset = parseInt(off) || 0;
+
+  const { rows } = await pool.query(`
+    SELECT st.*, u.username, u.first_name, u.last_name, u.tier, u.plan_id, u.language AS user_language,
+           (SELECT COUNT(*)::int FROM support_ticket_messages stm WHERE stm.user_id = st.user_id AND stm.sender_type = 'user'
+            AND stm.created_at > COALESCE(st.last_agent_message_at, '1970-01-01')) AS unread_count
+    FROM support_topics st
+    LEFT JOIN users u ON st.user_id = u.id
+    ${whereClause}
+    ORDER BY
+      CASE st.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+      CASE st.status WHEN 'open' THEN 0 WHEN 'resolved' THEN 1 ELSE 2 END,
+      st.last_message_at DESC
+    LIMIT $${idx} OFFSET $${idx + 1}
+  `, [...params, limit, offset]);
+
+  const { rows: [{ count: total }] } = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM support_topics st LEFT JOIN users u ON st.user_id = u.id ${whereClause}`,
+    params
+  );
+
+  res.json({ success: true, data: rows, total, limit, offset });
+}));
+
+app.get('/api/webapp/admin/support/tickets/:userId/messages', adminGuard, asyncHandler(async (req, res) => {
+  const SupportTicketMessageModel = require('../../models/supportTicketMessageModel');
+  const messages = await SupportTicketMessageModel.getByUserId(req.params.userId);
+  res.json({ success: true, data: messages });
+}));
+
+app.post('/api/webapp/admin/support/tickets/:userId/reply', adminGuard, asyncHandler(async (req, res) => {
+  const { content } = req.body;
+  if (!content || typeof content !== 'string' || !content.trim() || content.length > 2000) {
+    return res.status(400).json({ success: false, error: 'Message required (max 2000 chars)' });
+  }
+
+  const userId = req.params.userId;
+  const adminName = req.session?.user?.displayName || req.session?.user?.username || 'Support';
+  const SupportTicketMessageModel = require('../../models/supportTicketMessageModel');
+  const SupportTopicModel = require('../../models/supportTopicModel');
+
+  const saved = await SupportTicketMessageModel.create({
+    userId,
+    senderType: 'agent',
+    senderName: adminName,
+    content: content.trim(),
+  });
+
+  await SupportTopicModel.updateLastMessage(userId);
+  await SupportTopicModel.updateLastAgentMessage(userId);
+
+  const topic = await SupportTopicModel.getByUserId(userId);
+  if (topic && !topic.first_response_at) {
+    await SupportTopicModel.updateFirstResponse(userId);
+  }
+
+  try {
+    const io = require('../services/socketSingleton').get();
+    if (io && saved) {
+      io.to(`user:${userId}`).emit('support:newMessage', {
+        id: saved.id,
+        sender_type: 'agent',
+        sender_name: adminName,
+        content: content.trim(),
+        created_at: saved.created_at || new Date().toISOString(),
+      });
+    }
+  } catch (e) {
+    logger.warn('Socket emit failed for support reply', { error: e.message });
+  }
+
+  try {
+    const bot = require('../core/bot');
+    if (bot?.telegram) {
+      await bot.telegram.sendMessage(userId, `*Support Reply*\n\n${content.trim()}`, { parse_mode: 'Markdown' }).catch(() => {});
+    }
+  } catch (e) { /* user may have blocked bot */ }
+
+  res.json({ success: true, data: saved });
+}));
+
+app.patch('/api/webapp/admin/support/tickets/:userId', adminGuard, asyncHandler(async (req, res) => {
+  const SupportTopicModel = require('../../models/supportTopicModel');
+  const userId = req.params.userId;
+  const { status, priority, category } = req.body;
+
+  let updated;
+  if (status && ['open', 'resolved', 'closed'].includes(status)) {
+    updated = await SupportTopicModel.updateStatus(userId, status);
+    if (status === 'resolved' || status === 'closed') {
+      await SupportTopicModel.updateResolutionTime(userId);
+    }
+    try {
+      const io = require('../services/socketSingleton').get();
+      if (io) io.to(`user:${userId}`).emit('support:statusChange', { status });
+    } catch {}
+  }
+  if (priority && ['low', 'medium', 'high', 'critical'].includes(priority)) {
+    updated = await SupportTopicModel.updatePriority(userId, priority);
+  }
+  if (category) {
+    updated = await SupportTopicModel.updateCategory(userId, category);
+  }
+
+  if (!updated) {
+    return res.status(400).json({ success: false, error: 'No valid fields to update' });
+  }
+
+  res.json({ success: true, data: updated });
+}));
+
 // Plan management
 app.get('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminController.listPlans));
 app.post('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminController.createPlan));
@@ -3228,7 +3406,7 @@ app.get('/api/proxy/media/stream/:songId', asyncHandler(async (req, res) => {
 }));
 
 // --- Restreamer Live Proxy ---
-app.get('/api/proxy/live/streams', asyncHandler(async (req, res) => {
+app.get('/api/proxy/live/streams', requireSessionAuth, requireMemberTier, asyncHandler(async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   try {
     const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
@@ -3882,13 +4060,10 @@ app.get('/api/proxy/live/performers', asyncHandler(async (req, res) => {
   }
 }));
 
-// POST /api/proxy/live/tips — Create a tip (auth required)
+// POST /api/proxy/live/tips — Create a tip (member+ required)
 // paymentMethod: 'daimo' (default) | 'tokens' (instant, deducts from wallet)
-app.post('/api/proxy/live/tips', tipLimiter, asyncHandler(async (req, res) => {
+app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimiter, asyncHandler(async (req, res) => {
   const user = req.session?.user;
-  if (!user) {
-    return res.status(401).json({ success: false, error: 'Authentication required' });
-  }
 
   const { performerId, amount, message, paymentMethod = 'daimo' } = req.body;
   if (!performerId || !amount) {
@@ -4022,7 +4197,7 @@ app.post('/api/proxy/live/tips', tipLimiter, asyncHandler(async (req, res) => {
 }));
 
 // GET /api/proxy/live/tips/recent — Recent completed tips (auth required)
-app.get('/api/proxy/live/tips/recent', requireSessionAuth, asyncHandler(async (req, res) => {
+app.get('/api/proxy/live/tips/recent', requireSessionAuth, requireMemberTier, asyncHandler(async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
     const tips = await PNPLiveTipsService.getRecentTips(limit, 30);
@@ -4568,6 +4743,19 @@ app.use('/api/webapp/gamification', gamificationRoutes);
 
 // Canva Connect API routes
 app.use('/api/canva', canvaRoutes);
+
+// ==========================================
+// Community Room (Haus) — 24/7 open video room powered by JaaS
+// ==========================================
+app.post('/api/community-room/join', authenticateUser, asyncHandler(communityRoomController.joinCommunityRoom));
+app.get('/api/community-room/occupancy', authenticateUser, asyncHandler(communityRoomController.getRoomOccupancy));
+app.get('/api/community-room/chat-history', authenticateUser, asyncHandler(communityRoomController.getChatHistory));
+app.post('/api/community-room/message', authenticateUser, asyncHandler(communityRoomController.addMessage));
+app.get('/api/community-room/stats', authenticateUser, asyncHandler(communityRoomController.getRoomStats));
+app.get('/api/community-room/leaderboard', authenticateUser, asyncHandler(communityRoomController.getLeaderboard));
+app.post('/api/community-room/moderation/mute', verifyAdminJWT, asyncHandler(communityRoomController.muteUser));
+app.post('/api/community-room/moderation/remove', verifyAdminJWT, asyncHandler(communityRoomController.removeUser));
+app.post('/api/community-room/moderation/clear-chat', verifyAdminJWT, asyncHandler(communityRoomController.clearChat));
 
 // ==========================================
 // ATProto / Bluesky OAuth Routes (PUBLIC — no session required)

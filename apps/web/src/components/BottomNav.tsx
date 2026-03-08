@@ -34,7 +34,7 @@ const navItems = [
     ),
   },
   {
-    to: "/booking",
+    to: "/nearby",
     label: "Nearby",
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

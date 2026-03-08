@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { Outlet, NavLink, useNavigate, Navigate, useLocation } from "react-router-dom";
 import { BottomNav } from "./BottomNav";
 import { useAuth } from "@/hooks/useAuth";
 import { useTelegram } from "@/hooks/useTelegram";
-import { LoginPage } from "@/pages/LoginPage";
 import { CristinaWidget } from "@/components/CristinaWidget";
 import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
@@ -22,8 +21,9 @@ export function Layout() {
     { to: "/chat", label: t.nav.hangouts },
     { to: "/media", label: t.nav.prime },
     { to: "/live", label: t.nav.live },
-    { to: "/booking", label: t.nav.nearby },
+    { to: "/nearby", label: t.nav.nearby },
     { to: "/dm", label: t.nav.messages },
+    { to: "/become-a-model", label: t.nav.becomeModel },
   ];
 
   useEffect(() => {
@@ -48,7 +48,7 @@ export function Layout() {
   }, [isAuthenticated]);
 
   if (!isAuthenticated && !isLoading) {
-    return <LoginPage />;
+    return <Navigate to="/login" replace />;
   }
 
   return (

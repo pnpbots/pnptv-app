@@ -126,9 +126,9 @@ const createGroup = async (req, res) => {
   if (!name?.trim()) return res.status(400).json({ error: 'Group name is required' });
 
   try {
-    // PRIME check
-    if (!hasAccess(user, 'PRIME')) {
-      return res.status(403).json({ error: 'Only PRIME members can create subgroups' });
+    // Member+ check
+    if (!hasAccess(user, 'member')) {
+      return res.status(403).json({ error: 'Member subscription required to create hangout groups' });
     }
 
     // Monthly limit: max 3 user-created hangouts per PRIME user per calendar month

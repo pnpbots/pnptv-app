@@ -15,7 +15,6 @@ const router = express.Router();
 
 const NearbyController = require('../controllers/nearbyController');
 const { authenticateUser } = require('../middleware/auth');
-const { requireTier } = require('../../services/accessService');
 const redisGeoService = require('../../../services/redisGeoService');
 const { getRedis } = require('../../../config/redis');
 
@@ -34,35 +33,24 @@ const initializeGeoService = async () => {
 // Call initialization when route is loaded
 initializeGeoService();
 
-// Middleware
+// Middleware — all authenticated users can share/clear their location
 router.use(authenticateUser);
 
-// Tier gate — only prime users (or admins) can access Nearby
-router.use(requireTier('PRIME'));
-
-// Update user location
+// All nearby features open to all authenticated users
 router.post('/update-location', (req, res) => {
   NearbyController.updateLocation(req, res);
 });
-
-// Search nearby users
+router.post('/clear', (req, res) => {
+  NearbyController.clearLocation(req, res);
+});
 router.get('/search', (req, res) => {
   NearbyController.searchNearby(req, res);
 });
-
-// Search nearby places / businesses / sites
 router.get('/places', (req, res) => {
   NearbyController.searchNearbyPlaces(req, res);
 });
-
-// Get statistics
 router.get('/stats', (req, res) => {
   NearbyController.getStats(req, res);
-});
-
-// Clear user location (go offline)
-router.post('/clear', (req, res) => {
-  NearbyController.clearLocation(req, res);
 });
 
 // Batch update locations (admin only)

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Card, Skeleton, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
+import { useTier } from "@/hooks/useTier";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
@@ -41,6 +42,7 @@ function isValidPhotoUrl(photo: string | null | undefined): photo is string {
 
 export default function Live() {
   const { isAuthenticated, login } = useAuth();
+  const { isFree } = useTier();
   const t = useI18n();
   const navigate = useNavigate();
   const { showTutorial, dismissTutorial } = useTutorial("live");
@@ -209,6 +211,39 @@ export default function Live() {
       );
     });
   };
+
+  // Free-tier gate — show upsell instead of live content
+  if (isAuthenticated && isFree) {
+    return (
+      <div className="page-container">
+        <Helmet>
+          <title>{t.live.pageTitle}</title>
+          <meta name="description" content={t.live.pageDescription} />
+        </Helmet>
+        <div className="flex flex-col items-center justify-center min-h-[60vh] px-6">
+          <div
+            className="w-24 h-24 rounded-full flex items-center justify-center mb-6"
+            style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(94,209,196,0.15))", border: "1px solid rgba(212,0,122,0.3)" }}
+          >
+            <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#D4007A" }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Live Streams</h2>
+          <p className="text-sm text-pnp-textSecondary text-center max-w-xs mb-8">
+            Watch creators go live, tip with tokens, and book private sessions. Upgrade to Member to unlock live streaming.
+          </p>
+          <button
+            onClick={() => navigate("/subscribe")}
+            className="px-6 py-3 rounded-full text-base font-semibold text-white"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            Upgrade to Member
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page-container">

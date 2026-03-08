@@ -422,35 +422,7 @@ const getPublicProfile = async (req, res) => {
       }
     }
 
-    // Free-tier profile browsing restriction:
-    // Free users may only view profiles of users they have an existing connection with.
-    // Connections: any DM thread between viewer and target, OR target liked viewer's post.
-    // Admins, members, and prime users have unrestricted profile browsing.
-    if (viewerId && !isAdmin && viewerTier === 'free' && String(viewerId) !== String(userId)) {
-      const [dmCheck, likeCheck] = await Promise.all([
-        dbQuery(
-          `SELECT 1 FROM dm_threads
-           WHERE (user_a = $1 AND user_b = $2) OR (user_a = $2 AND user_b = $1)
-           LIMIT 1`,
-          [viewerId, userId]
-        ),
-        dbQuery(
-          `SELECT 1 FROM social_post_likes spl
-           JOIN social_posts sp ON sp.id = spl.post_id
-           WHERE spl.user_id = $2 AND sp.user_id = $1
-           LIMIT 1`,
-          [viewerId, userId]
-        ),
-      ]);
-      const hasConnection = dmCheck.rows.length > 0 || likeCheck.rows.length > 0;
-      if (!hasConnection) {
-        return res.status(403).json({
-          success: false,
-          error: 'Upgrade to Member to browse member profiles',
-          code: 'PROFILE_RESTRICTED',
-        });
-      }
-    }
+    // Profile browsing is open to all authenticated users (no tier restriction).
 
     const result = await SocialPostService.getPublicProfile(userId, viewerId, req.query.cursor, req.query.limit, viewerTier);
     if (!result.profile) return res.status(404).json({ error: 'User not found' });

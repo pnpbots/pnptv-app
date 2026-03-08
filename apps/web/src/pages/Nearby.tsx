@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Badge, Button } from "@pnptv/ui-kit";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useAuth } from "@/hooks/useAuth";
-import { useTier } from "@/hooks/useTier";
 import { useI18n } from "@/lib/i18n";
 import {
   updateNearbyLocation,
@@ -303,143 +302,6 @@ function PlaceDetailSheet({ place, onClose }: PlaceDetailSheetProps) {
   );
 }
 
-// ─── Free-tier count card ────────────────────────────────────────────────────
-
-function NearbyCountCard({ count }: { count: number }) {
-  const t = useI18n();
-  return (
-    <div className="page-container flex flex-col items-center justify-center min-h-[60vh] px-6">
-      <div
-        className="w-24 h-24 rounded-full flex items-center justify-center mb-6"
-        style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(230,145,56,0.15))", border: "1px solid rgba(212,0,122,0.3)" }}
-      >
-        <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#D4007A" }}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      </div>
-
-      <p className="text-4xl font-bold text-pnp-textPrimary mb-1">
-        {count > 0 ? count : "0"}
-      </p>
-      <p className="text-base text-pnp-textSecondary mb-1">
-        {count === 1 ? t.booking.personSingular : t.booking.personPlural} {t.booking.nearYou}
-      </p>
-      <p className="text-sm text-pnp-textSecondary mb-8 text-center max-w-xs">
-        {t.booking.freeUpgradeBody}
-      </p>
-
-      <Link
-        to="/subscribe"
-        className="inline-block px-6 py-3 rounded-full text-base font-semibold text-white"
-        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-      >
-        {t.booking.upgradeToSeeMap}
-      </Link>
-    </div>
-  );
-}
-
-// ─── Member-tier blurred profile list ────────────────────────────────────────
-
-function MemberNearbyList({ users }: { users: NearbyUser[] }) {
-  const t = useI18n();
-  return (
-    <div className="page-container px-4 py-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.booking.nearbyTitle}</h1>
-          <p className="text-sm text-pnp-textSecondary mt-1">
-            {t.booking.nearbyCount(users.length, users.length === 1 ? t.booking.personSingular : t.booking.personPlural)}
-          </p>
-        </div>
-        <Link
-          to="/subscribe"
-          className="text-xs px-3 py-1.5 rounded-full font-semibold text-white flex-shrink-0"
-          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-        >
-          {t.booking.upgradeToPrime}
-        </Link>
-      </div>
-
-      {/* PRIME upgrade prompt */}
-      <div
-        className="rounded-xl p-4 mb-4 border"
-        style={{ background: "rgba(255,180,84,0.06)", borderColor: "rgba(255,180,84,0.2)" }}
-      >
-        <div className="flex items-center gap-3">
-          <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#FFB454" }}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          <p className="text-sm text-pnp-textSecondary">
-            {t.booking.upgradePrimePrompt}{" "}
-            <Link to="/subscribe" className="font-semibold" style={{ color: "#FFB454" }}>
-              PRIME
-            </Link>{" "}
-            {t.booking.upgradePrimeBody}
-          </p>
-        </div>
-      </div>
-
-      {users.length === 0 ? (
-        <div className="glass-card-sm p-8 text-center">
-          <p className="text-pnp-textPrimary font-medium mb-1">{t.booking.nobodyNearbyYet}</p>
-          <p className="text-sm text-pnp-textSecondary">{t.booking.nobodyNearbyHint}</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {users.map((u) => {
-            const displayName = u.name || u.username || `User #${u.user_id}`;
-            return (
-              <div
-                key={u.user_id}
-                className="glass-card-sm p-3 flex items-center gap-3"
-                style={{ filter: "blur(0px)" }}
-              >
-                {/* Photo placeholder — blurred */}
-                <div
-                  className="w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center text-lg font-bold"
-                  style={{
-                    background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))",
-                    color: "#D4007A",
-                    filter: "blur(4px)",
-                    userSelect: "none",
-                  }}
-                >
-                  {displayName[0].toUpperCase()}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  {/* Name visible, no click through */}
-                  <p className="text-sm font-semibold text-pnp-textPrimary truncate">
-                    {displayName}
-                  </p>
-                  {/* Distance blurred for member tier */}
-                  <p
-                    className="text-xs text-pnp-textSecondary"
-                    style={{ filter: "blur(4px)", userSelect: "none" }}
-                  >
-                    {u.accuracy_estimate || t.booking.nearbyFallback}
-                  </p>
-                </div>
-
-                {/* No profile link for member tier */}
-                <div
-                  className="text-xs px-2.5 py-1 rounded-full border flex-shrink-0"
-                  style={{ borderColor: "rgba(255,255,255,0.1)", color: "#8E8E93" }}
-                >
-                  PRIME
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Submit Place Modal ──────────────────────────────────────────────────────
 
 const PLACE_CATEGORIES_IDS = [
@@ -583,10 +445,9 @@ function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: numbe
 
 type PageState = "loading" | "denied" | "ready";
 
-export default function Booking() {
+export default function Nearby() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { isPrime, isFree } = useTier();
   const t = useI18n();
   const { showTutorial, dismissTutorial } = useTutorial("nearby");
 
@@ -765,16 +626,6 @@ export default function Booking() {
     (path: string) => navigate(path),
     [navigate]
   );
-
-  // ─── Free-tier: show count card once we know the position ──────────────────
-  if (isFree && pageState === "ready") {
-    return <NearbyCountCard count={nearbyCount} />;
-  }
-
-  // ─── Member-tier: show blurred profile list (no map) ────────────────────────
-  if (!isPrime && pageState === "ready") {
-    return <MemberNearbyList users={nearbyUsers} />;
-  }
 
   // ─── Loading state (only show if no cached position) ───────────
   if (pageState === "loading" && !myPos) {

@@ -7,10 +7,11 @@ import { VerificationGate } from "@/components/VerificationGate";
 import { TierGate } from "@/components/TierGate";
 
 const Home = lazy(() => import("@/pages/Home"));
+const LoginPage = lazy(() => import("@/pages/LoginPage"));
 const Media = lazy(() => import("@/pages/Media"));
 const Live = lazy(() => import("@/pages/Live"));
 const Stream = lazy(() => import("@/pages/Stream"));
-const Booking = lazy(() => import("@/pages/Booking"));
+const Nearby = lazy(() => import("@/pages/Nearby"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const Social = lazy(() => import("@/pages/Social"));
 const Profile = lazy(() => import("@/pages/Profile"));
@@ -25,6 +26,7 @@ const Welcome = lazy(() => import("@/pages/Welcome"));
 const Join = lazy(() => import("@/pages/Join"));
 const BecomeModel = lazy(() => import("@/pages/BecomeModel"));
 const CmsPage = lazy(() => import("@/pages/CmsPage"));
+const Haus = lazy(() => import("@/pages/Haus"));
 
 // Admin pages
 const StatsOverview = lazy(() => import("@/pages/admin/StatsOverview"));
@@ -43,6 +45,7 @@ const AdminDemographics = lazy(() => import("@/pages/admin/AdminDemographics"));
 const Mono = lazy(() => import("@/pages/admin/Mono"));
 const Gamification = lazy(() => import("@/pages/admin/Gamification"));
 const StreamManagement = lazy(() => import("@/pages/admin/StreamManagement"));
+const SupportDashboard = lazy(() => import("@/pages/admin/SupportDashboard"));
 
 export const router = createBrowserRouter([
   {
@@ -90,14 +93,18 @@ export const router = createBrowserRouter([
         ),
       },
       {
-        path: "booking",
+        path: "nearby",
         element: (
           <ModuleLoader>
             <VerificationGate>
-              <Booking />
+              <Nearby />
             </VerificationGate>
           </ModuleLoader>
         ),
+      },
+      {
+        path: "booking",
+        element: <Navigate to="/nearby" replace />,
       },
       {
         path: "chat",
@@ -105,6 +112,16 @@ export const router = createBrowserRouter([
           <ModuleLoader>
             <VerificationGate>
               <Chat />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "haus",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <Haus />
             </VerificationGate>
           </ModuleLoader>
         ),
@@ -347,11 +364,23 @@ export const router = createBrowserRouter([
           </ModuleLoader>
         ),
       },
+      {
+        path: "support",
+        element: (
+          <ModuleLoader>
+            <SupportDashboard />
+          </ModuleLoader>
+        ),
+      },
     ],
   },
   {
     path: "/login",
-    element: <Navigate to="/" replace />,
+    element: (
+      <ModuleLoader>
+        <LoginPage />
+      </ModuleLoader>
+    ),
   },
   {
     path: "/join",
@@ -361,22 +390,26 @@ export const router = createBrowserRouter([
       </ModuleLoader>
     ),
   },
-  {
-    path: "/terms",
+  ...[
+    "terms",
+    "privacy",
+    "cookies",
+    "community-guidelines",
+    "content-policy",
+    "refunds",
+    "subscriptions",
+    "creator-terms",
+    "dmca",
+    "safety",
+    "contact",
+  ].map((slug) => ({
+    path: `/${slug}`,
     element: (
       <ModuleLoader>
         <CmsPage />
       </ModuleLoader>
     ),
-  },
-  {
-    path: "/privacy",
-    element: (
-      <ModuleLoader>
-        <CmsPage />
-      </ModuleLoader>
-    ),
-  },
+  })),
   {
     path: "/page/:slug",
     element: (
