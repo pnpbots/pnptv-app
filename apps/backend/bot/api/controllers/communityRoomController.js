@@ -1,4 +1,5 @@
 const CommunityRoomService = require('../../services/communityRoomService');
+const jaasService = require('../../services/jaasService');
 const logger = require('../../../utils/logger');
 
 /**
@@ -40,21 +41,27 @@ const joinCommunityRoom = async (req, res) => {
     // Track user join
     CommunityRoomService.trackUserJoin(userId, displayName, isTrueModerator ? 'moderator' : 'member');
 
-    // Build public Jitsi meeting URL (free, unlimited)
-    const jitsiDomain = process.env.JITSI_DOMAIN || 'meet.jit.si';
-    const sanitizedName = encodeURIComponent(displayName);
-    const meetingUrl = `https://${jitsiDomain}/${CommunityRoomService.COMMUNITY_ROOM_NAME}#config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&userInfo.displayName=${sanitizedName}`;
+    // Generate JaaS JWT — everyone gets moderator token in the 24/7 room
+    const token = await CommunityRoomService.generateCommunityToken(
+      userId,
+      displayName,
+      '',
+      true // all users get moderator token in community room
+    );
+
+    const meetingUrl = jaasService.generateMeetingUrl(CommunityRoomService.COMMUNITY_ROOM_NAME, token);
 
     logger.info('User joined community room (24/7 open)', {
       userId,
       displayName,
-      domain: jitsiDomain
+      isModerator: true,
     });
 
     res.json({
       success: true,
+      token,
       meetingUrl,
-      domain: jitsiDomain,
+      domain: '8x8.vc',
       roomName: CommunityRoomService.COMMUNITY_ROOM_NAME,
       roomId: CommunityRoomService.COMMUNITY_ROOM_ID,
       isModerator: isTrueModerator,
@@ -67,7 +74,7 @@ const joinCommunityRoom = async (req, res) => {
         maxParticipants: room.maxParticipants,
         isPersistent: true,
         isOpen24_7: true,
-        description: 'PNPtv 24/7 Haus - Open to all members'
+        description: 'PNPtv 24/7 Main Stage - Open to all members'
       }
     });
   } catch (error) {

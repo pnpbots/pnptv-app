@@ -22,6 +22,7 @@ const { query, getClient } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const PushNotificationService = require('../../services/pushNotificationService');
 const NotificationEmitter = require('../../services/notificationEmitter');
+const jaasService = require('../../services/jaasService');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -87,18 +88,44 @@ function generateRoomName(groupId, isPersistent) {
 }
 
 /**
- * Build a public Jitsi meeting URL for a given user/call.
- * Uses meet.jit.si (free, unlimited) instead of JaaS/8x8.vc.
+ * Build a JaaS meeting payload with JWT token for a given user/call.
  */
-function buildMeetingPayload(roomName, user) {
-  const domain = process.env.JITSI_DOMAIN || 'meet.jit.si';
-  const displayName = encodeURIComponent(user.firstName || user.username || 'User');
-  const meetingUrl = `https://${domain}/${roomName}#config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&userInfo.displayName=${displayName}`;
+function buildJaasPayload(roomName, user, isModerator, isPersistent = false) {
+  if (!jaasService.isConfigured()) {
+    return null;
+  }
 
-  return {
-    meetingUrl,
-    domain,
-  };
+  try {
+    // In persistent (main/24-7) community rooms everyone gets moderator-level access.
+    // In user-created subgroups, only the call creator gets moderator access.
+    const useMod = isModerator || isPersistent;
+    const token = useMod
+      ? jaasService.generateModeratorToken(
+          roomName,
+          String(user.id),
+          user.firstName || user.username || 'User',
+          '',
+          user.photoUrl || ''
+        )
+      : jaasService.generateViewerToken(
+          roomName,
+          String(user.id),
+          user.firstName || user.username || 'User',
+          '',
+          user.photoUrl || ''
+        );
+
+    const meetingUrl = jaasService.generateMeetingUrl(roomName, token);
+
+    return {
+      token,
+      meetingUrl,
+      domain: '8x8.vc',
+    };
+  } catch (err) {
+    logger.warn('buildJaasPayload failed', { error: err.message });
+    return null;
+  }
 }
 
 /**
@@ -189,7 +216,7 @@ const startCall = async (req, res) => {
       // Return the existing call instead of creating a duplicate
       const call = existing[0];
       const isModerator = String(call.creator_id) === String(user.id);
-      const jaas = buildMeetingPayload(call.room_name, user);
+      const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
 
       // Auto-join the caller as participant
       await query(
@@ -237,7 +264,7 @@ const startCall = async (req, res) => {
     // Touch activity timestamp
     await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
 
-    const jaas = buildMeetingPayload(roomName, user);
+    const jaas = buildJaasPayload(roomName, user, true, isPersistent);
 
     const callPayload = {
       id: newCall.id,
@@ -320,7 +347,7 @@ const startCall = async (req, res) => {
         if (rows.length > 0) {
           const call = rows[0];
           const isModerator = String(call.creator_id) === String(user.id);
-          const jaas = buildMeetingPayload(call.room_name, user);
+          const jaas = buildJaasPayload(call.room_name, user, isModerator, false);
           return res.json({
             success: true,
             isNew: false,
@@ -441,7 +468,7 @@ const getActiveCall = async (req, res) => {
     );
 
     const isModerator = String(call.creator_id) === String(user.id);
-    const jaas = buildMeetingPayload(call.room_name, user);
+    const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
 
     return res.json({
       success: true,
@@ -529,7 +556,7 @@ const joinCall = async (req, res) => {
     );
 
     const isModerator = String(call.creator_id) === String(user.id);
-    const jaas = buildMeetingPayload(call.room_name, user);
+    const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
 
     // Get authoritative participant count from DB
     const { rows: joinCountRows } = await query(

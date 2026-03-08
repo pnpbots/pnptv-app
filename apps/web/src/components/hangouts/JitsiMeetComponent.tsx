@@ -19,19 +19,24 @@ interface JitsiMeetComponentProps {
   className?: string;
 }
 
-/** Parse domain and room from a meeting URL like https://meet.jit.si/room#config... */
-function parseMeetingUrl(url: string): { domain: string; room: string; displayName: string } {
+/** Parse domain, room, and JWT from a meeting URL.
+ *  Supports both JaaS (https://8x8.vc/vpaas-xxx/room?jwt=xxx) and
+ *  public Jitsi (https://meet.jit.si/room#config...) formats. */
+function parseMeetingUrl(url: string): { domain: string; room: string; jwt: string; displayName: string } {
   try {
     const parsed = new URL(url);
     const domain = parsed.hostname;
-    const room = parsed.pathname.replace(/^\//, "");
-    // Extract displayName from hash params
+    const pathParts = parsed.pathname.replace(/^\//, "").split("/");
+    // For 8x8.vc: path is /vpaas-magic-cookie-xxx/roomName — room includes the tenant prefix
+    const room = pathParts.join("/");
+    const jwt = parsed.searchParams.get("jwt") || "";
+    // Extract displayName from hash params (public Jitsi format)
     const hash = parsed.hash || "";
     const nameMatch = hash.match(/userInfo\.displayName=([^&]*)/);
     const displayName = nameMatch ? decodeURIComponent(nameMatch[1]) : "";
-    return { domain, room, displayName };
+    return { domain, room, jwt, displayName };
   } catch {
-    return { domain: "meet.jit.si", room: "pnptv-fallback", displayName: "" };
+    return { domain: "8x8.vc", room: "pnptv-fallback", jwt: "", displayName: "" };
   }
 }
 
@@ -85,7 +90,7 @@ export function JitsiMeetComponent({
     let disposed = false;
 
     const init = async () => {
-      const { domain, room, displayName } = parseMeetingUrl(meetingUrl);
+      const { domain, room, jwt, displayName } = parseMeetingUrl(meetingUrl);
       const resolvedRoom = room || roomName || "pnptv-room";
 
       try {
@@ -103,7 +108,7 @@ export function JitsiMeetComponent({
         return;
       }
 
-      const api = new JitsiMeetExternalAPI(domain, {
+      const apiOptions: Record<string, any> = {
         roomName: resolvedRoom,
         parentNode: containerRef.current,
         width: "100%",
@@ -117,6 +122,9 @@ export function JitsiMeetComponent({
           enableClosePage: false,
           hideConferenceSubject: false,
           disableInviteFunctions: true,
+          lobbyModeEnabled: false,
+          requireDisplayName: false,
+          enableInsecureRoomNameWarning: false,
         },
         interfaceConfigOverwrite: {
           MOBILE_APP_PROMO: false,
@@ -128,7 +136,14 @@ export function JitsiMeetComponent({
           GENERATE_ROOMNAMES_ON_WELCOME_PAGE: false,
         },
         userInfo: displayName ? { displayName } : undefined,
-      });
+      };
+
+      // Pass JWT token if present (JaaS/8x8.vc authentication)
+      if (jwt) {
+        apiOptions.jwt = jwt;
+      }
+
+      const api = new JitsiMeetExternalAPI(domain, apiOptions);
 
       apiRef.current = api;
 

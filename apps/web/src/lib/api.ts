@@ -3060,10 +3060,11 @@ export function updateAdminTicket(
 }
 
 // ============================================================================
-// Community Room (Haus) API — 24/7 open video room powered by Jitsi
+// Community Room (Main Stage) API — 24/7 open video room powered by JaaS
 // ============================================================================
 
 export interface CommunityRoomInfo {
+  token: string;
   meetingUrl: string;
   domain: string;
   roomName: string;
