@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate, Navigate, useLocation } from "react-route
 import { BottomNav } from "./BottomNav";
 import { useAuth } from "@/hooks/useAuth";
 import { useTelegram } from "@/hooks/useTelegram";
+import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { CristinaWidget } from "@/components/CristinaWidget";
 import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
@@ -12,6 +13,7 @@ import { useI18n } from "@/lib/i18n";
 export function Layout() {
   const { isAuthenticated, isAdmin, user, isLoading } = useAuth();
   const { isTelegram } = useTelegram();
+  useViewportHeight();
   const navigate = useNavigate();
   const t = useI18n();
   const [dmUnread, setDmUnread] = useState(0);
@@ -53,7 +55,7 @@ export function Layout() {
   }
 
   return (
-    <div className="min-h-screen bg-pnp-background">
+    <div className="app-shell bg-pnp-background">
       {/* Desktop sidebar */}
       <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-60 lg:flex-col border-r border-pnp-border glass-nav">
         <div className="flex items-center justify-between px-6 h-16 border-b border-pnp-border">
@@ -163,13 +165,13 @@ export function Layout() {
         </div>
       </header>
 
-      {/* Main content */}
-      <main className={`lg:pl-60 pb-20 lg:pb-0 ${isTelegram ? "pb-24" : ""}`}>
+      {/* Main content — flex-1 + overflow so content scrolls, nav stays pinned */}
+      <main className="flex-1 overflow-y-auto overscroll-contain lg:pl-60 lg:overflow-visible">
         <Outlet />
       </main>
 
-      {/* Mobile bottom nav */}
-      <div className="lg:hidden">
+      {/* Mobile bottom nav — part of flex flow, always at bottom */}
+      <div className="flex-shrink-0 lg:hidden">
         <BottomNav />
       </div>
 

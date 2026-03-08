@@ -3400,6 +3400,7 @@ app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, social
 app.post('/api/webapp/social/posts/bulk-videos', requireSessionAuth, bulkVideoLimiter, uploadPerformerVideos, asyncHandler(socialController.bulkCreateVideos));
 app.post('/api/webapp/social/posts/:postId/like', socialActionLimiter, asyncHandler(socialController.toggleLike));
 app.delete('/api/webapp/social/posts/:postId', asyncHandler(socialController.deletePost));
+app.get('/api/webapp/social/posts/:postId', asyncHandler(socialController.getPost));
 app.get('/api/webapp/social/posts/:postId/replies', asyncHandler(socialController.getReplies));
 app.post('/api/webapp/social/posts/:postId/mastodon', asyncHandler(socialController.postToMastodon));
 app.post('/api/webapp/social/posts/:postId/request-deletion', asyncHandler(socialController.requestWofDeletion));
@@ -4465,40 +4466,26 @@ app.get('/api/wallet/history', asyncHandler(async (req, res) => {
   res.json({ success: true, history });
 }));
 
+const TokenCheckoutService = require('../services/tokenCheckoutService');
+
 // POST /api/wallet/buy — create a BTCPay Dash invoice for token purchase
 app.post('/api/wallet/buy', asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
 
   const { packageId } = req.body;
-  const pkg = DashTokenService.TOKEN_PACKAGES.find(p => p.id === packageId);
-  if (!pkg) {
-    return res.status(400).json({ success: false, error: 'Invalid package ID' });
-  }
+  if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
 
   const userId = String(user.telegram_id || user.id);
-  const orderId = `pnptv-tokens-${userId}-${Date.now()}`;
 
   try {
-    const invoice = await createDashInvoice({
-      usdAmount: pkg.usd,
-      userId,
-      orderId,
-      description: `${pkg.tokens} PNP Tokens`,
-    });
-
-    // Record pending purchase
-    await DashTokenService.recordPurchase(userId, pkg.tokens, pkg.usd, invoice.invoiceId);
-
-    res.json({
-      success: true,
-      invoiceId: invoice.invoiceId,
-      checkoutUrl: invoice.checkoutUrl,
-      tokens: pkg.tokens,
-      usd: pkg.usd,
-    });
+    const result = await TokenCheckoutService.createDashCheckout(userId, packageId);
+    res.json(result);
   } catch (err) {
-    logger.error(`Wallet buy error: ${err.message}`);
+    logger.error(`Wallet buy (Dash) error: ${err.message}`);
+    if (err.code === 'INVALID_PACKAGE') {
+      return res.status(400).json({ success: false, error: 'Invalid package ID' });
+    }
     if (err.message?.includes('not configured')) {
       return res.status(503).json({ success: false, error: 'Crypto payments are not available yet. Please use another payment method.', code: 'BTCPAY_NOT_CONFIGURED' });
     }
@@ -4508,6 +4495,80 @@ app.post('/api/wallet/buy', asyncHandler(async (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to create Dash invoice. Please try again.', code: 'BTCPAY_ERROR' });
   }
 }));
+
+// POST /api/wallet/buy-card — purchase tokens via ePayco card checkout
+app.post('/api/wallet/buy-card', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const { packageId } = req.body;
+  if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
+
+  const userId = String(user.telegram_id || user.id);
+
+  try {
+    const result = await TokenCheckoutService.createCardCheckout(userId, packageId);
+    res.json(result);
+  } catch (err) {
+    logger.error(`Wallet buy-card error: ${err.message}`);
+    if (err.code === 'INVALID_PACKAGE') {
+      return res.status(400).json({ success: false, error: 'Invalid package ID' });
+    }
+    res.status(500).json({ success: false, error: 'Failed to create card checkout. Please try again.' });
+  }
+}));
+
+// POST /api/wallet/buy-wallet — purchase tokens via Daimo crypto wallet checkout
+app.post('/api/wallet/buy-wallet', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const { packageId } = req.body;
+  if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
+
+  const userId = String(user.telegram_id || user.id);
+
+  try {
+    const result = await TokenCheckoutService.createWalletCheckout(userId, packageId);
+    res.json(result);
+  } catch (err) {
+    logger.error(`Wallet buy-wallet error: ${err.message}`);
+    if (err.code === 'INVALID_PACKAGE') {
+      return res.status(400).json({ success: false, error: 'Invalid package ID' });
+    }
+    if (err.code === 'DAIMO_ERROR') {
+      return res.status(503).json({ success: false, error: err.message, code: 'DAIMO_ERROR' });
+    }
+    if (err.message?.includes('DAIMO_TREASURY_ADDRESS')) {
+      return res.status(503).json({ success: false, error: 'Crypto wallet payments are not yet configured.', code: 'DAIMO_NOT_CONFIGURED' });
+    }
+    res.status(500).json({ success: false, error: 'Failed to create wallet checkout. Please try again.' });
+  }
+}));
+
+// GET /api/token-checkout/:purchaseId — return checkout page data (ePayco widget config or Daimo session)
+app.get('/api/token-checkout/:purchaseId', asyncHandler(async (req, res) => {
+  const { purchaseId } = req.params;
+  if (!purchaseId || !/^[0-9a-f-]{36}$/i.test(purchaseId)) {
+    return res.status(400).json({ success: false, error: 'Invalid purchaseId' });
+  }
+
+  try {
+    const data = await TokenCheckoutService.getCheckoutData(purchaseId);
+    if (!data) {
+      return res.status(404).json({ success: false, error: 'Token purchase not found or uses external checkout page' });
+    }
+    res.json({ success: true, ...data });
+  } catch (err) {
+    logger.error(`Token checkout data error: ${err.message}`, { purchaseId });
+    res.status(500).json({ success: false, error: 'Failed to load checkout data. Please try again.' });
+  }
+}));
+
+// GET /token-checkout/:purchaseId — serve the static token checkout HTML page
+app.get('/token-checkout/:purchaseId', (req, res) => {
+  res.sendFile(path.join(__dirname, '../../../../public/token-checkout.html'));
+});
 
 // POST /api/wallet/link-dpns — link a Dash DPNS handle
 app.post('/api/wallet/link-dpns', asyncHandler(async (req, res) => {
@@ -4957,6 +5018,25 @@ app.get('/api/webapp/auth/verify', authenticateUser, (req, res) => {
 
 // ── Auto-sync promoted posts from Directus CMS ──────────────────────────────
 promotedPostController.startAutoSync();
+
+// ==========================================
+// PUBLIC ENDPOINTS (no auth required)
+// ==========================================
+
+// Public post endpoint — minimal data for OG crawlers and external embeds.
+// Only returns non-deleted, non-exclusive posts.
+app.get('/api/public/social/posts/:postId', asyncHandler(socialController.getPublicPost));
+
+// ==========================================
+// OG / OPEN GRAPH ENDPOINTS
+// ==========================================
+// These routes serve minimal HTML pages with og: and twitter: meta tags.
+// Crawlers (Twitterbot, Facebot, etc.) hit /og/* to get proper previews.
+// Real browsers are immediately meta-refreshed to the SPA URL.
+const ogController = require('./controllers/ogController');
+// Player endpoint must be registered BEFORE the wildcard /og/* route
+app.get('/og/player/:postId', asyncHandler(ogController.renderPlayer));
+app.get('/og/*', asyncHandler(ogController.renderOG));
 
 // Sentry error handler - must be last
 if (process.env.SENTRY_DSN) {

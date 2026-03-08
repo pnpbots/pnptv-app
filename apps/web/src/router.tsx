@@ -20,6 +20,7 @@ const Subscribe = lazy(() => import("@/pages/Subscribe"));
 const DirectMessages = lazy(() => import("@/pages/DirectMessages"));
 const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
 const DaimoCheckout = lazy(() => import("@/pages/DaimoCheckout"));
+const TokenCheckout = lazy(() => import("@/pages/TokenCheckout"));
 const Support = lazy(() => import("@/pages/Support"));
 const Apply = lazy(() => import("@/pages/Apply"));
 const Welcome = lazy(() => import("@/pages/Welcome"));
@@ -27,6 +28,7 @@ const Join = lazy(() => import("@/pages/Join"));
 const BecomeModel = lazy(() => import("@/pages/BecomeModel"));
 const CmsPage = lazy(() => import("@/pages/CmsPage"));
 const Haus = lazy(() => import("@/pages/Haus"));
+const PostDetail = lazy(() => import("@/pages/PostDetail"));
 
 // Admin pages
 const StatsOverview = lazy(() => import("@/pages/admin/StatsOverview"));
@@ -153,6 +155,14 @@ export const router = createBrowserRouter([
             <VerificationGate>
               <Social />
             </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "social/post/:postId",
+        element: (
+          <ModuleLoader>
+            <PostDetail />
           </ModuleLoader>
         ),
       },
@@ -431,6 +441,14 @@ export const router = createBrowserRouter([
     element: (
       <ModuleLoader>
         <DaimoCheckout />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/token-checkout/:purchaseId",
+    element: (
+      <ModuleLoader>
+        <TokenCheckout />
       </ModuleLoader>
     ),
   },

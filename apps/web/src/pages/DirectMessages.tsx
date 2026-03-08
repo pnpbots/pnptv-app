@@ -735,7 +735,7 @@ function Conversation({
   const partnerInitial = (partnerName || "U")[0].toUpperCase();
 
   return (
-    <div className="flex flex-col" style={{ height: "calc(100dvh - 5rem)" }}>
+    <div className="flex flex-col h-full">
       {/* Lightbox */}
       {lightboxSrc && (
         <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />

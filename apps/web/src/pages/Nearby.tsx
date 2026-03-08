@@ -681,7 +681,7 @@ export default function Nearby() {
 
   // ─── Map ready state ────────────────────────────────────────────
   return (
-    <div className="page-container !p-0 relative" style={{ height: "calc(100dvh - 8rem)" }}>
+    <div className="page-container !p-0 relative h-full">
       <Helmet>
         <title>{t.booking.pageTitle}</title>
         <meta name="description" content={t.booking.pageDescription} />

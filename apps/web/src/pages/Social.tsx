@@ -21,6 +21,7 @@ import {
   createReply,
   checkAuthStatus,
   getFeaturedPerformers,
+  updateProfile,
   type SocialPostItem,
   type AuthMethods,
   type FeaturedPerformer,
@@ -59,6 +60,8 @@ function PostCard({
   onDelete,
   onWofToggle,
   onNavigate,
+  contentDisclaimerAccepted,
+  onAcceptDisclaimer,
 }: {
   post: SocialPostItem;
   currentUserId: string;
@@ -68,8 +71,12 @@ function PostCard({
   onDelete: (id: number) => void;
   onWofToggle?: (id: number, nowWof: boolean) => void;
   onNavigate: (path: string) => void;
+  contentDisclaimerAccepted?: boolean;
+  onAcceptDisclaimer?: () => Promise<void>;
 }) {
   const { feed: t } = useI18n();
+  const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
+  const [disclaimerAccepting, setDisclaimerAccepting] = useState(false);
   const [showReplies, setShowReplies] = useState(false);
   const [replies, setReplies] = useState<SocialPostItem[]>([]);
   const [loadingReplies, setLoadingReplies] = useState(false);
@@ -134,13 +141,15 @@ function PostCard({
   }, [replyText, sendingReply, post]);
 
   const handleShare = useCallback(async () => {
-    const url = `${window.location.origin}/social#post-${post.id}`;
-    const text = `${post.author_first_name || post.author_username || "Someone"}: ${post.content.slice(0, 100)}`;
+    const url = `https://app.pnptv.app/social/post/${post.id}`;
+    const displayName = post.author_first_name || post.author_username || "Someone";
+    const text = post.content
+      ? `${displayName}: ${post.content.slice(0, 100)}`
+      : `Check out ${displayName}'s post on PNPtv!`;
     if (navigator.share) {
-      try { await navigator.share({ title: "PNPtv Post", text, url }); } catch { /* cancelled */ }
+      try { await navigator.share({ title: `${displayName} on PNPtv!`, text, url }); } catch { /* cancelled */ }
     } else {
-      await navigator.clipboard.writeText(url);
-      // Brief visual feedback handled by button state
+      try { await navigator.clipboard.writeText(url); } catch { /* silent */ }
     }
   }, [post]);
 
@@ -436,10 +445,16 @@ function PostCard({
               {localReplyCount > 0 && <span>{localReplyCount}</span>}
             </button>
 
-            {/* Share — only shown when poster allows sharing */}
+            {/* Share — requires content disclaimer */}
             {post.is_shareable !== false && (
               <button
-                onClick={handleShare}
+                onClick={() => {
+                  if (contentDisclaimerAccepted) {
+                    handleShare();
+                  } else {
+                    setShowDisclaimerModal(true);
+                  }
+                }}
                 className="flex items-center gap-1.5 text-xs hover:text-green-400 transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -543,6 +558,61 @@ function PostCard({
           )}
         </div>
       </div>
+
+      {/* Content Disclaimer Modal */}
+      {showDisclaimerModal && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+          onClick={() => setShowDisclaimerModal(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-5 space-y-4"
+            style={{ background: "#1C1C1E", border: "1px solid rgba(212,0,122,0.25)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                </svg>
+              </div>
+              <h3 className="text-base font-bold text-white">Content Sharing Disclaimer</h3>
+            </div>
+            <p className="text-sm text-white/80 leading-relaxed">
+              By accepting this disclaimer, you acknowledge that you are responsible for any content you share from this platform.
+              Shared content must comply with our community guidelines and applicable laws.
+            </p>
+            <p className="text-xs text-white/50 leading-relaxed">
+              This action is permanent and cannot be undone. Your acceptance date, time, and IP address will be recorded.
+            </p>
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => setShowDisclaimerModal(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-white/20 text-white/70 hover:border-white/40 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setDisclaimerAccepting(true);
+                  try {
+                    await onAcceptDisclaimer?.();
+                    setShowDisclaimerModal(false);
+                    handleShare();
+                  } catch { /* silent */ }
+                  setDisclaimerAccepting(false);
+                }}
+                disabled={disclaimerAccepting}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-50 transition-all"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                {disclaimerAccepting ? "..." : "Accept & Share"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -583,6 +653,13 @@ export default function Social() {
 
   // Featured performers
   const [featuredPerformers, setFeaturedPerformers] = useState<FeaturedPerformer[]>([]);
+
+  // Content disclaimer state
+  const [contentDisclaimer, setContentDisclaimer] = useState(user?.contentDisclaimer || false);
+  const handleAcceptDisclaimer = useCallback(async () => {
+    await updateProfile({ contentDisclaimer: true });
+    setContentDisclaimer(true);
+  }, []);
 
   useEffect(() => {
     getFeaturedPerformers()
@@ -953,6 +1030,8 @@ export default function Social() {
               onDelete={handleDelete}
               onWofToggle={handleWofToggle}
               onNavigate={navigate}
+              contentDisclaimerAccepted={contentDisclaimer}
+              onAcceptDisclaimer={handleAcceptDisclaimer}
             />
           ))}
 
@@ -1019,6 +1098,8 @@ export default function Social() {
               onDelete={handleDelete}
               onWofToggle={handleWofToggle}
               onNavigate={navigate}
+              contentDisclaimerAccepted={contentDisclaimer}
+              onAcceptDisclaimer={handleAcceptDisclaimer}
             />
           ))}
 
@@ -1088,6 +1169,8 @@ export default function Social() {
               onDelete={handleDelete}
               onWofToggle={handleWofToggle}
               onNavigate={navigate}
+              contentDisclaimerAccepted={contentDisclaimer}
+              onAcceptDisclaimer={handleAcceptDisclaimer}
             />
           ))}
           {followingNextCursor && (

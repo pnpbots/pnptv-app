@@ -63,6 +63,22 @@
 }
 
 @layer components {
+  /* App shell: flex column on mobile (uses JS-driven --app-vh), normal flow on desktop */
+  .app-shell {
+    display: flex;
+    flex-direction: column;
+    height: calc(var(--app-vh, 1vh) * 100);
+    overflow: hidden;
+  }
+  @screen lg {
+    .app-shell {
+      display: block;
+      height: auto;
+      min-height: 100vh;
+      overflow: visible;
+    }
+  }
+
   .page-container {
     @apply max-w-7xl mx-auto px-4 sm:px-6 py-6 overflow-x-hidden;
   }
@@ -216,6 +232,25 @@
 
 .animate-subtle-glow {
   animation: subtleGlow 3s ease-in-out infinite;
+}
+
+/* ── App entrance after splash ────────────────────────────────────── */
+
+@keyframes appReveal {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(8px);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0);
+  }
+}
+
+#root {
+  animation: appReveal 0.5s cubic-bezier(0.16, 1, 0.3, 1) 1.2s both;
 }
 
 /* ── Tutorial System ────────────────────────────────────────────────── */

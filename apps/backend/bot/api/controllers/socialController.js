@@ -880,4 +880,100 @@ const bulkCreateVideos = async (req, res) => {
   return res.json({ success: true, posts: createdPosts, errors });
 };
 
-module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, createPostWithMultiMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof };
+// ── Get Single Post (public, no auth required) ────────────────────────────────
+
+const getPost = async (req, res) => {
+  const id = parsePostId(req, res);
+  if (!id) return;
+  try {
+    const viewerId = req.session?.user?.id || null;
+    const { rows } = await dbQuery(
+      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url,
+              sp.bluesky_uri, sp.bluesky_cid,
+              sp.reply_to_id, sp.repost_of_id,
+              sp.likes_count, sp.reposts_count, sp.replies_count,
+              sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.is_promoted, sp.created_at,
+              COALESCE(sp.content_tier, 'free') as content_tier,
+              u.id as author_id, u.username as author_username,
+              u.first_name as author_first_name, u.photo_file_id as author_photo,
+              u.creator_status as author_creator_status, u.creator_type as author_creator_type,
+              u.creator_verified as author_creator_verified, u.creator_price_usd as author_creator_price,
+              ${viewerId
+                ? 'EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$2) as liked_by_me'
+                : 'false as liked_by_me'}
+       FROM social_posts sp
+       JOIN users u ON sp.user_id = u.id
+       WHERE sp.id = $1 AND sp.is_deleted = false`,
+      viewerId ? [id, viewerId] : [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Post not found' });
+    const row = rows[0];
+    const photo = row.author_photo;
+    const post = {
+      ...row,
+      author_photo: isValidPhotoUrl(photo) ? photo : null,
+      is_shareable: row.is_shareable !== false,
+    };
+    return res.json({ success: true, post });
+  } catch (err) {
+    logger.error('getPost error', err);
+    return res.status(500).json({ error: 'Failed to load post' });
+  }
+};
+
+// ── Public Post (no auth, non-exclusive only, minimal fields for OG) ──────────
+
+const getPublicPost = async (req, res) => {
+  const id = parseInt(req.params.postId, 10);
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ error: 'Invalid post ID' });
+  }
+
+  try {
+    const result = await dbQuery(
+      `SELECT
+         sp.id,
+         LEFT(sp.content, 200)   AS content,
+         sp.media_url,
+         sp.media_type,
+         sp.media_urls,
+         sp.video_thumbnail_url,
+         u.username              AS author_username,
+         u.first_name            AS author_first_name,
+         u.photo_file_id         AS author_photo
+       FROM social_posts sp
+       JOIN users u ON sp.user_id = u.id
+       WHERE sp.id = $1
+         AND sp.is_deleted = false
+         AND (sp.is_exclusive IS NOT TRUE)`,
+      [id]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    const post = result.rows[0];
+
+    // Normalize media_urls if stored as a JSON string
+    if (post.media_urls && typeof post.media_urls === 'string') {
+      try {
+        post.media_urls = JSON.parse(post.media_urls);
+      } catch (_) {
+        post.media_urls = null;
+      }
+    }
+
+    // Only expose web-servable photo URLs — not Telegram file IDs
+    if (!isValidPhotoUrl(post.author_photo)) {
+      post.author_photo = null;
+    }
+
+    return res.json({ success: true, post });
+  } catch (err) {
+    logger.error('getPublicPost error', err);
+    return res.status(500).json({ error: 'Failed to load post' });
+  }
+};
+
+module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, createPostWithMultiMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof, getPost, getPublicPost };

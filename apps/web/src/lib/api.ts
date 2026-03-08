@@ -427,12 +427,48 @@ export function buyTokens(packageId: string): Promise<{ success: boolean; invoic
   return request("/api/wallet/buy", { method: "POST", body: { packageId } });
 }
 
+export function buyTokensCard(packageId: string): Promise<{ success: boolean; checkoutUrl: string; tokens: number; usd: number }> {
+  return request("/api/wallet/buy-card", { method: "POST", body: { packageId } });
+}
+
+export function buyTokensWallet(packageId: string): Promise<{ success: boolean; checkoutUrl: string; tokens: number; usd: number }> {
+  return request("/api/wallet/buy-wallet", { method: "POST", body: { packageId } });
+}
+
 export function linkDPNS(dpnsHandle: string): Promise<{ success: boolean; dpnsHandle: string }> {
   return request("/api/wallet/link-dpns", { method: "POST", body: { dpnsHandle } });
 }
 
 export function getWalletHistory(): Promise<{ success: boolean; history: TokenPurchase[] }> {
   return request("/api/wallet/history");
+}
+
+export interface TokenCheckoutData {
+  success: boolean;
+  provider: "epayco" | "daimo";
+  tokens: number;
+  usd: number;
+  status: string;
+  epayco?: {
+    publicKey: string;
+    amount: number;
+    currency: string;
+    description: string;
+    extra1: string;
+    extra2: string;
+    extra3: string;
+    test: boolean;
+    response: string;
+    confirmation: string;
+  };
+  daimo?: {
+    sessionId: string;
+    clientSecret: string;
+  };
+}
+
+export function getTokenCheckoutData(purchaseId: string): Promise<TokenCheckoutData> {
+  return request(`/api/token-checkout/${encodeURIComponent(purchaseId)}`);
 }
 
 export function getRecentTips(
