@@ -858,6 +858,7 @@ export default function CreatorApplications() {
   const navigate = useNavigate();
   const [mainTab, setMainTab] = useState<MainTab>("applications");
   const [applications, setApplications] = useState<CreatorApplication[]>([]);
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("pending");
@@ -870,6 +871,7 @@ export default function CreatorApplications() {
     try {
       const res = await getCreatorApplications(filter || undefined);
       setApplications(res.applications);
+      if (res.statusCounts) setStatusCounts(res.statusCounts);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
@@ -986,11 +988,13 @@ export default function CreatorApplications() {
               { value: "approved", label: "Approved" },
               { value: "rejected", label: "Rejected" },
               { value: "", label: "All" },
-            ].map((tab) => (
+            ].map((tab) => {
+              const count = tab.value ? statusCounts[tab.value] : Object.values(statusCounts).reduce((a, b) => a + b, 0);
+              return (
               <button
                 key={tab.value}
                 onClick={() => setFilter(tab.value)}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0"
+                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0 flex items-center gap-1.5"
                 style={
                   filter === tab.value
                     ? { background: "rgba(212,0,122,0.15)", color: "#D4007A" }
@@ -998,8 +1002,14 @@ export default function CreatorApplications() {
                 }
               >
                 {tab.label}
+                {count != null && count > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "rgba(255,255,255,0.1)" }}>
+                    {count}
+                  </span>
+                )}
               </button>
-            ))}
+              );
+            })}
           </div>
 
           {loading ? (

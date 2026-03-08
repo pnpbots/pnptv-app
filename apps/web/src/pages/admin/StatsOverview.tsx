@@ -240,7 +240,7 @@ export default function StatsOverview() {
               value={stats ? formatCurrency(stats.monthlyRevenue) : "$0.00 USD"}
               icon={<TrendUpIcon />}
               variant="warning"
-              subtitle="Last 30 days (USD)"
+              subtitle="Rolling 30 days (USD)"
             />
             <StatCard
               label="Churned Users"

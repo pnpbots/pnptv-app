@@ -93,6 +93,43 @@ export function telegramAuth(initData: string): Promise<TelegramAuthResponse> {
   });
 }
 
+export interface TelegramWidgetUser {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+  auth_date: number;
+  hash: string;
+}
+
+export interface TelegramWidgetAuthResponse {
+  success: boolean;
+  isNew?: boolean;
+  user?: {
+    id: string;
+    pnptvId: string;
+    username: string | null;
+    firstName: string;
+    lastName: string | null;
+    photoUrl: string | null;
+    subscriptionStatus: string;
+    tier: string;
+    role: string;
+    termsAccepted: boolean;
+  };
+  error?: string;
+}
+
+export function telegramWidgetAuth(
+  data: TelegramWidgetUser,
+): Promise<TelegramWidgetAuthResponse> {
+  return request("/api/webapp/auth/telegram/widget", {
+    method: "POST",
+    body: data,
+  });
+}
+
 export function checkAuthStatus(): Promise<AuthStatusResponse> {
   return request("/api/auth-status");
 }
@@ -629,6 +666,12 @@ export function getPublicProfile(
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
   return request(`/api/webapp/social/profile/${userId}?${params}`);
+}
+
+export function getPublicPost(
+  postId: string | number
+): Promise<{ success: boolean; post: SocialPostItem }> {
+  return request(`/api/webapp/social/posts/${postId}`);
 }
 
 export function getSocialFeedPosts(
@@ -1948,7 +1991,7 @@ export function unsubscribeFromCreator(
 
 export function getCreatorApplications(
   status?: string
-): Promise<{ success: boolean; applications: CreatorApplication[] }> {
+): Promise<{ success: boolean; applications: CreatorApplication[]; statusCounts?: Record<string, number> }> {
   const params = status ? `?status=${status}` : "";
   return request(`/api/webapp/creator/applications${params}`);
 }
@@ -2524,6 +2567,7 @@ export interface AdminPost {
 export interface AdminHangout {
   id: string;
   title: string;
+  description: string;
   creatorId: string;
   creatorName: string;
   currentParticipants: number;

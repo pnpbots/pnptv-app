@@ -134,10 +134,15 @@ export default function HangoutModeration() {
                 </Badge>
               </div>
 
-              {/* Member count */}
+              {/* Description */}
+              {hangout.description && (
+                <p className="text-xs text-pnp-textSecondary line-clamp-2">{hangout.description}</p>
+              )}
+
+              {/* Member count + capacity */}
               <div className="flex items-center gap-1.5 text-xs text-pnp-textSecondary">
                 <UsersIcon />
-                <span>{memberCount(hangout).toLocaleString()} members</span>
+                <span>{memberCount(hangout).toLocaleString()} / {hangout.maxParticipants || 200} members</span>
               </div>
 
               {/* Footer */}
