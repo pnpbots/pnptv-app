@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
@@ -7,11 +7,11 @@ import { useNavigate } from "react-router-dom";
 import { Modal } from "@pnptv/ui-kit";
 import FreeTierOverlay from "@/components/FreeTierOverlay";
 import { BulkVideoUpload } from "@/components/BulkVideoUpload";
+import { PostComposer } from "@/components/PostComposer";
 import {
   getSocialFeedPosts,
   getWofFeedPosts,
   getFollowingFeed,
-  createSocialPost,
   togglePostLike,
   deleteSocialPost,
   requestWofDeletion,
@@ -608,17 +608,9 @@ export default function Social() {
       });
   }, [isAuthenticated]);
 
-  // Composer state
-  const [text, setText] = useState("");
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
-  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
-  const [isPosting, setIsPosting] = useState(false);
-  const [postError, setPostError] = useState<string | null>(null);
-  const [isExclusive, setIsExclusive] = useState(false);
-  const [isShareable, setIsShareable] = useState(true);
+  // Creator status (for bulk upload button visibility)
   const [isActiveCreator, setIsActiveCreator] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load feed
   const loadFeed = useCallback(async (cursor?: string) => {
@@ -755,52 +747,6 @@ export default function Social() {
     setFollowingPosts(updater);
   }, []);
 
-  // Post composer
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setMediaFile(file);
-    setMediaPreview(URL.createObjectURL(file));
-  }, []);
-
-  const clearMedia = useCallback(() => {
-    setMediaFile(null);
-    if (mediaPreview) URL.revokeObjectURL(mediaPreview);
-    setMediaPreview(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }, [mediaPreview]);
-
-  const submitPost = useCallback(async () => {
-    if (!text.trim() || isPosting) return;
-    setIsPosting(true);
-    setPostError(null);
-    try {
-      const res = await createSocialPost(
-        text.trim(),
-        mediaFile || undefined,
-        false,
-        isExclusive,
-        isShareable
-      );
-      if (res.success && res.post) {
-        setPosts((prev) => [res.post, ...prev]);
-      }
-      setText("");
-      clearMedia();
-      setIsExclusive(false);
-      setIsShareable(true);
-    } catch (err: unknown) {
-      setPostError(err instanceof Error ? err.message : "Failed to create post");
-    } finally {
-      setIsPosting(false);
-    }
-  }, [text, mediaFile, isPosting, clearMedia, isExclusive, isShareable]);
-
-  const handlePost = useCallback(() => {
-    if (!text.trim() || isPosting) return;
-    submitPost();
-  }, [text, isPosting, submitPost]);
-
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
       <Helmet>
@@ -889,209 +835,39 @@ export default function Social() {
 
       {/* Post Composer (hidden on WoF tab) */}
       {isAuthenticated && activeTab === "all" && (
-        <div className="glass-card-sm p-4 mb-6">
+        <div className="mb-6">
           {/* Bulk video upload panel (active creators only) */}
-          {isActiveCreator && showBulkUpload && (
-            <BulkVideoUpload
-              onSuccess={(newPosts) => {
-                setPosts((prev) => [...newPosts.reverse(), ...prev]);
-                setShowBulkUpload(false);
-              }}
-              onCancel={() => setShowBulkUpload(false)}
-            />
-          )}
-
-          {isActiveCreator && showBulkUpload ? null : (
-          <div className="flex gap-3">
-            {/* Composer avatar — show user photo */}
-            {isValidPhotoUrl(user?.photoUrl) ? (
-              <img src={user.photoUrl} alt={`${user?.displayName || "User"}'s avatar`} className="w-10 h-10 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-            ) : (
-              <div
-                className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
-              >
-                {(user?.displayName || "U")[0].toUpperCase()}
-              </div>
-            )}
-            <div className="flex-1">
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value.slice(0, 2000))}
-                placeholder={t.whatOnYourMind}
-                className="w-full bg-transparent text-white text-sm py-2 border-b border-white/10 mb-3 resize-none outline-none placeholder:text-white/40"
-                rows={3}
-                disabled={isPosting}
+          {isActiveCreator && showBulkUpload ? (
+            <div className="glass-card-sm p-4">
+              <BulkVideoUpload
+                onSuccess={(newPosts) => {
+                  setPosts((prev) => [...newPosts.reverse(), ...prev]);
+                  setShowBulkUpload(false);
+                }}
+                onCancel={() => setShowBulkUpload(false)}
               />
-
-              <div className="flex justify-end mb-2">
-                <span className={`text-xs ${text.length > 1800 ? "text-red-400" : ""}`} style={{ color: text.length > 1800 ? undefined : "#8E8E93" }}>
-                  {text.length}/2000
-                </span>
-              </div>
-
-              {/* Media preview */}
-              {mediaPreview && (
-                <div className="relative mb-3 inline-block">
-                  {mediaFile && mediaFile.type.startsWith("video/") ? (
-                    <video src={mediaPreview} className="max-h-48 rounded-lg object-cover" muted playsInline />
-                  ) : (
-                    <img src={mediaPreview} alt="Preview" className="max-h-48 rounded-lg object-cover" />
-                  )}
-                  <button
-                    onClick={clearMedia}
-                    className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center text-white text-xs"
-                    style={{ background: "rgba(0,0,0,0.7)" }}
-                  >
-                    &times;
-                  </button>
-                </div>
-              )}
-
-              {postError && <p className="text-xs text-red-400 mb-2">{postError}</p>}
-
-              {/* Actions */}
-              <div className="flex flex-col gap-3">
-                {/* Media buttons row */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*,video/*"
-                      className="hidden"
-                      onChange={handleFileSelect}
-                    />
-                    <button
-                      onClick={() => {
-                        if (fileInputRef.current) {
-                          fileInputRef.current.accept = "image/*";
-                          fileInputRef.current.click();
-                          fileInputRef.current.accept = "image/*,video/*";
-                        }
-                      }}
-                      disabled={isPosting}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 hover:bg-white/5 hover:border-white/20 transition-colors disabled:opacity-40"
-                      style={{ color: "#D4007A" }}
-                      aria-label="Attach photo"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
-                      </svg>
-                      {t.photo}
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (fileInputRef.current) {
-                          fileInputRef.current.accept = "video/*";
-                          fileInputRef.current.click();
-                          fileInputRef.current.accept = "image/*,video/*";
-                        }
-                      }}
-                      disabled={isPosting}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 hover:bg-white/5 hover:border-white/20 transition-colors disabled:opacity-40"
-                      style={{ color: "#E69138" }}
-                      aria-label="Attach video"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
-                      </svg>
-                      {t.video}
-                    </button>
-                  </div>
-                  <button
-                    onClick={handlePost}
-                    disabled={!text.trim() || isPosting}
-                    className="btn-gradient px-4 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-40 min-h-[36px]"
-                  >
-                    {isPosting ? t.posting : t.post}
-                  </button>
-                </div>
-
-                {/* Exclusive content toggle — only shown for active creators */}
-                {isActiveCreator && (
-                  <div className="flex items-center justify-between rounded-lg px-3 py-2.5" style={{ background: "rgba(212,0,122,0.06)", border: "1px solid rgba(212,0,122,0.2)" }}>
-                    <label
-                      htmlFor="exclusive-toggle"
-                      className="flex items-center gap-2 cursor-pointer select-none flex-1"
-                    >
-                      <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#D4007A" }}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                      </svg>
-                      <span className="text-xs font-medium" style={{ color: isExclusive ? "#D4007A" : "#8E8E93" }}>
-                        {t.exclusiveToggle}
-                      </span>
-                    </label>
-                    <button
-                      id="exclusive-toggle"
-                      role="switch"
-                      aria-checked={isExclusive}
-                      aria-label="Mark as exclusive"
-                      onClick={() => setIsExclusive((v) => !v)}
-                      disabled={isPosting}
-                      className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-                      style={{
-                        background: isExclusive ? "#D4007A" : "rgba(255,255,255,0.15)",
-                        outlineOffset: "2px",
-                      }}
-                    >
-                      <span
-                        className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform duration-200"
-                        style={{ transform: isExclusive ? "translateX(18px)" : "translateX(2px)" }}
-                      />
-                    </button>
-                  </div>
-                )}
-
-                {/* Allow sharing toggle */}
-                <div className="flex items-center justify-between rounded-lg px-3 py-2.5" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                  <label
-                    htmlFor="shareable-toggle"
-                    className="flex items-center gap-2 cursor-pointer select-none flex-1"
-                  >
-                    <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: isShareable ? "#34D399" : "#8E8E93" }}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0-12.814a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0 12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
-                    </svg>
-                    <span className="text-xs font-medium" style={{ color: isShareable ? "#34D399" : "#8E8E93" }}>
-                      {t.allowSharing}
-                    </span>
-                  </label>
-                  <button
-                    id="shareable-toggle"
-                    role="switch"
-                    aria-checked={isShareable}
-                    aria-label="Allow sharing this post"
-                    onClick={() => setIsShareable((v) => !v)}
-                    disabled={isPosting}
-                    className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-                    style={{
-                      background: isShareable ? "#34D399" : "rgba(255,255,255,0.15)",
-                      outlineOffset: "2px",
-                    }}
-                  >
-                    <span
-                      className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform duration-200"
-                      style={{ transform: isShareable ? "translateX(18px)" : "translateX(2px)" }}
-                    />
-                  </button>
-                </div>
-              </div>
             </div>
-          </div>
-          )}
-
-          {/* Bulk Videos button — active creators only, shown below composer */}
-          {isActiveCreator && !showBulkUpload && (
-            <button
-              onClick={() => setShowBulkUpload(true)}
-              className="mt-3 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 hover:bg-white/5 hover:border-white/20 transition-colors w-full justify-center"
-              style={{ color: "#E69138" }}
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-              </svg>
-              {t.bulkUploadVideos}
-            </button>
+          ) : (
+            <>
+              <PostComposer
+                onPostCreated={(newPost) => {
+                  setPosts((prev) => [newPost, ...prev]);
+                }}
+              />
+              {/* Bulk Videos button — active creators only */}
+              {isActiveCreator && (
+                <button
+                  onClick={() => setShowBulkUpload(true)}
+                  className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 hover:bg-white/5 hover:border-white/20 transition-colors w-full justify-center"
+                  style={{ color: "#E69138" }}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                  </svg>
+                  {t.bulkUploadVideos}
+                </button>
+              )}
+            </>
           )}
         </div>
       )}

@@ -280,14 +280,16 @@ const createPostWithMedia = async (req, res) => {
     }
 
     if (req.file) {
-      const { buffer } = req.file;
+      const tempPath = req.file.path; // disk storage path (may be undefined for memory storage)
+      const hasBuffer = !!req.file.buffer;
+
       // __dirname = /app/apps/backend/bot/api/controllers
       // 5 levels up reaches /app (monorepo root), then /public
       const uploadDir = path.join(__dirname, '../../../../../public/uploads/posts');
       await fs.mkdir(uploadDir, { recursive: true });
 
       // --- MAGIC BYTE VALIDATION ---
-      // Never trust client-supplied Content-Type; inspect actual file bytes.
+      // Only read first 4100 bytes for magic byte detection (avoid loading GB files into memory)
       const MAGIC_TO_MEDIA_TYPE = {
         'image/jpeg': 'image',
         'image/png':  'image',
@@ -304,7 +306,20 @@ const createPostWithMedia = async (req, res) => {
         'video/3gpp': 'video',
         'video/hevc': 'video',
       };
-      const detected = await FileType.fromBuffer(buffer);
+
+      let headerBytes;
+      if (hasBuffer) {
+        headerBytes = req.file.buffer.length > 4100 ? req.file.buffer.subarray(0, 4100) : req.file.buffer;
+      } else {
+        // Disk storage: read only first 4100 bytes
+        const fh = await fs.open(tempPath, 'r');
+        headerBytes = Buffer.alloc(4100);
+        const { bytesRead } = await fh.read(headerBytes, 0, 4100, 0);
+        await fh.close();
+        headerBytes = headerBytes.subarray(0, bytesRead);
+      }
+
+      const detected = await FileType.fromBuffer(headerBytes);
       const detectedMime = detected?.mime;
       mediaType = MAGIC_TO_MEDIA_TYPE[detectedMime] || null;
 
@@ -314,23 +329,37 @@ const createPostWithMedia = async (req, res) => {
           claimedMime: req.file.mimetype,
           detectedMime: detectedMime || 'unknown',
         });
+        if (tempPath) await fs.unlink(tempPath).catch(() => {});
         return res.status(400).json({ error: 'Only image (jpg/png/webp/gif/heic/hevc/avif/tiff/bmp) or video (mp4/webm/mov/3gp) files are allowed' });
       }
 
       if (mediaType === 'image') {
         const filename = `img-${user.id}-${Date.now()}.webp`;
         const filePath = path.join(uploadDir, filename);
-        await sharp(buffer)
+        // Images are small enough for memory — read from buffer or disk
+        const imgBuffer = hasBuffer ? req.file.buffer : await fs.readFile(tempPath);
+        await sharp(imgBuffer)
           .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 70, progressive: true })
           .toFile(filePath);
+        if (tempPath) await fs.unlink(tempPath).catch(() => {});
         mediaUrl = `/uploads/posts/${filename}`;
       } else {
         const VIDEO_EXT = { 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/3gpp': '3gp', 'video/hevc': 'mp4' };
         const ext = VIDEO_EXT[detectedMime] || 'mp4';
         const filename = `vid-${user.id}-${Date.now()}.${ext}`;
         const filePath = path.join(uploadDir, filename);
-        await fs.writeFile(filePath, buffer);
+        if (tempPath) {
+          // Move disk temp file to final destination (no memory copy needed)
+          const fsSync = require('fs');
+          try { fsSync.renameSync(tempPath, filePath); } catch {
+            // Cross-device rename fallback: copy + delete
+            await fs.copyFile(tempPath, filePath);
+            await fs.unlink(tempPath).catch(() => {});
+          }
+        } else {
+          await fs.writeFile(filePath, req.file.buffer);
+        }
         mediaUrl = `/uploads/posts/${filename}`;
       }
     }
@@ -375,6 +404,205 @@ const createPostWithMedia = async (req, res) => {
     return res.json({ success: true, post: fullPost });
   } catch (err) {
     logger.error('createPostWithMedia error', err);
+    return res.status(500).json({ error: 'Failed to create post' });
+  }
+};
+
+// ── Create Post with Multi-Media (up to 4 images) ────────────────────────────
+
+const MAGIC_TO_MEDIA_TYPE = {
+  'image/jpeg': 'image',
+  'image/png':  'image',
+  'image/webp': 'image',
+  'image/gif':  'image',
+  'image/heic': 'image',
+  'image/heif': 'image',
+  'image/avif': 'image',
+  'image/tiff': 'image',
+  'image/bmp':  'image',
+  'video/mp4':  'video',
+  'video/webm': 'video',
+  'video/quicktime': 'video',
+  'video/3gpp': 'video',
+  'video/hevc': 'video',
+};
+
+const VIDEO_EXT_MAP = { 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/3gpp': '3gp', 'video/hevc': 'mp4' };
+
+const createPostWithMultiMedia = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const { content, isExclusive, isShareable } = req.body;
+
+  if (!content || !content.toString().trim()) return res.status(400).json({ error: 'Content required' });
+
+  let replyToId = req.body.replyToId ? parseInt(req.body.replyToId, 10) : null;
+  let repostOfId = req.body.repostOfId ? parseInt(req.body.repostOfId, 10) : null;
+  if (req.body.replyToId && (!Number.isFinite(replyToId) || replyToId <= 0)) {
+    return res.status(400).json({ error: 'Invalid replyToId' });
+  }
+  if (req.body.repostOfId && (!Number.isFinite(repostOfId) || repostOfId <= 0)) {
+    return res.status(400).json({ error: 'Invalid repostOfId' });
+  }
+
+  const maxLen = replyToId ? 500 : 5000;
+  if (content.toString().length > maxLen) return res.status(400).json({ error: `Content too long (max ${maxLen} chars)` });
+
+  const files = req.files || [];
+  if (files.length === 0) return res.status(400).json({ error: 'At least one media file required' });
+  if (files.length > 4) return res.status(400).json({ error: 'Maximum 4 files per post' });
+
+  try {
+    if (replyToId) {
+      const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
+      if (!parentCheck.rows.length) return res.status(404).json({ error: 'Parent post not found' });
+      if (parentCheck.rows[0].reply_to_id !== null) return res.status(400).json({ error: 'Cannot reply to a reply' });
+    }
+
+    if (isExclusive === 'true' || isExclusive === true) {
+      const creatorCheck = await dbQuery('SELECT creator_status FROM users WHERE id = $1', [user.id]);
+      if (creatorCheck.rows[0]?.creator_status !== 'active') {
+        return res.status(403).json({ error: 'Only active creators can post exclusive content' });
+      }
+    }
+
+    const uploadDir = path.join(__dirname, '../../../../../public/uploads/posts');
+    await fs.mkdir(uploadDir, { recursive: true });
+
+    const mediaItems = [];
+    const timestamp = Date.now();
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const hasBuffer = !!file.buffer;
+      const fileTempPath = file.path;
+
+      // Read only header bytes for magic detection (avoid loading large videos into memory)
+      let headerBytes;
+      if (hasBuffer) {
+        headerBytes = file.buffer.length > 4100 ? file.buffer.subarray(0, 4100) : file.buffer;
+      } else {
+        const fh = await fs.open(fileTempPath, 'r');
+        headerBytes = Buffer.alloc(4100);
+        const { bytesRead } = await fh.read(headerBytes, 0, 4100, 0);
+        await fh.close();
+        headerBytes = headerBytes.subarray(0, bytesRead);
+      }
+
+      const detected = await FileType.fromBuffer(headerBytes);
+      const detectedMime = detected?.mime;
+      const mediaType = MAGIC_TO_MEDIA_TYPE[detectedMime] || null;
+
+      if (!mediaType) {
+        logger.warn('createPostWithMultiMedia: rejected file — magic bytes do not match allowed types', {
+          userId: user.id,
+          fileIndex: i,
+          claimedMime: file.mimetype,
+          detectedMime: detectedMime || 'unknown',
+        });
+        if (fileTempPath) await fs.unlink(fileTempPath).catch(() => {});
+        continue;
+      }
+
+      if (mediaType === 'image') {
+        const filename = `img-${user.id}-${timestamp}-${i}.webp`;
+        const destPath = path.join(uploadDir, filename);
+        const imgBuffer = hasBuffer ? file.buffer : await fs.readFile(fileTempPath);
+        await sharp(imgBuffer)
+          .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+          .webp({ quality: 70, progressive: true })
+          .toFile(destPath);
+        if (fileTempPath) await fs.unlink(fileTempPath).catch(() => {});
+        mediaItems.push({ url: `/uploads/posts/${filename}`, type: 'image' });
+      } else {
+        const ext = VIDEO_EXT_MAP[detectedMime] || 'mp4';
+        const filename = `vid-${user.id}-${timestamp}-${i}.${ext}`;
+        const destPath = path.join(uploadDir, filename);
+        if (fileTempPath) {
+          const fsSync = require('fs');
+          try { fsSync.renameSync(fileTempPath, destPath); } catch {
+            await fs.copyFile(fileTempPath, destPath);
+            await fs.unlink(fileTempPath).catch(() => {});
+          }
+        } else {
+          await fs.writeFile(destPath, file.buffer);
+        }
+        mediaItems.push({ url: `/uploads/posts/${filename}`, type: 'video' });
+      }
+    }
+
+    if (mediaItems.length === 0) {
+      return res.status(400).json({ error: 'No valid media files could be processed' });
+    }
+
+    const exclusive = isExclusive === 'true' || isExclusive === true;
+    const shareable = isShareable !== 'false' && isShareable !== false;
+    const contentTier = exclusive ? 'PRIME' : 'free';
+
+    const result = await dbQuery(
+      `INSERT INTO social_posts
+         (user_id, content, media_url, media_type, media_urls, reply_to_id, repost_of_id,
+          is_wof, is_exclusive, is_shareable, content_tier)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9, $10)
+       RETURNING id, content, media_url, media_type, media_urls, video_thumbnail_url,
+                 reply_to_id, repost_of_id,
+                 likes_count, reposts_count, replies_count, is_wof, is_exclusive, is_shareable, content_tier, created_at`,
+      [
+        user.id,
+        content.toString().trim(),
+        mediaItems[0].url,
+        mediaItems[0].type,
+        JSON.stringify(mediaItems),
+        replyToId || null,
+        repostOfId || null,
+        exclusive,
+        shareable,
+        contentTier,
+      ]
+    );
+
+    const post = result.rows[0];
+
+    if (replyToId) {
+      await dbQuery('UPDATE social_posts SET replies_count = replies_count + 1 WHERE id = $1 AND is_deleted = false', [replyToId]);
+    }
+    if (repostOfId) {
+      await dbQuery('UPDATE social_posts SET reposts_count = reposts_count + 1 WHERE id = $1 AND is_deleted = false', [repostOfId]);
+    }
+
+    if (!replyToId && !repostOfId && !exclusive) {
+      SocialPostService.mirrorToMastodon(content.toString().trim(), post.id);
+    }
+
+    if (replyToId) {
+      const parentRow = await dbQuery('SELECT user_id FROM social_posts WHERE id = $1', [replyToId]);
+      const parentAuthorId = parentRow.rows[0]?.user_id;
+      if (parentAuthorId) {
+        NotificationEmitter.emit({
+          type: 'reply', category: 'social', priority: 'normal',
+          actorId: user.id, targetUserId: parentAuthorId,
+          entityType: 'post', entityId: String(replyToId),
+          message: `${user.firstName || user.first_name || user.username} replied to your post`,
+        });
+      }
+    }
+
+    const authorPhoto = await getUserPhotoFromDb(user.id) || user.photoUrl || null;
+    const fullPost = {
+      ...post,
+      media_urls: mediaItems,
+      author_id: user.id,
+      author_username: user.username,
+      author_first_name: user.firstName || user.first_name,
+      author_photo: authorPhoto,
+      liked_by_me: false,
+    };
+
+    const io = req.app.get('io');
+    if (io) io.emit('feed:new_post', fullPost);
+
+    return res.json({ success: true, post: fullPost });
+  } catch (err) {
+    logger.error('createPostWithMultiMedia error', err);
     return res.status(500).json({ error: 'Failed to create post' });
   }
 };
@@ -652,4 +880,4 @@ const bulkCreateVideos = async (req, res) => {
   return res.json({ success: true, posts: createdPosts, errors });
 };
 
-module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof };
+module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, createPostWithMultiMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof };

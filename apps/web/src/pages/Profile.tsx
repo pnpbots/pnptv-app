@@ -7,6 +7,7 @@ import { useTutorial, resetAllTutorials } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button, Badge, Modal, Input, Skeleton } from "@pnptv/ui-kit";
+import { PostComposer } from "@/components/PostComposer";
 import {
   getProfile,
   getPublicProfile,
@@ -15,7 +16,6 @@ import {
   uploadAvatar,
   togglePostLike,
   deleteSocialPost,
-  createSocialPost,
   checkAuthStatus,
   unlinkX,
   updateLanguage,
@@ -547,150 +547,6 @@ function EditProfileModal({
         </div>
       </div>
     </Modal>
-  );
-}
-
-// ── Compose Post Inline ──────────────────────────────────────────────────────
-
-function ComposePost({
-  onPosted,
-  photoUrl,
-  displayName,
-}: {
-  onPosted: () => void;
-  photoUrl: string | null;
-  displayName: string;
-}) {
-  const t = useI18n();
-  const p = t.profile;
-  const [text, setText] = useState("");
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
-  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
-  const [posting, setPosting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const clearMedia = useCallback(() => {
-    setMediaFile(null);
-    if (mediaPreview) URL.revokeObjectURL(mediaPreview);
-    setMediaPreview(null);
-    if (fileRef.current) fileRef.current.value = "";
-  }, [mediaPreview]);
-
-  const handlePost = async () => {
-    if (!text.trim() || posting) return;
-    setPosting(true);
-    setError(null);
-    try {
-      await createSocialPost(text.trim(), mediaFile || undefined);
-      setText("");
-      clearMedia();
-      onPosted();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to post");
-    } finally {
-      setPosting(false);
-    }
-  };
-
-  return (
-    <div className="glass-card-sm p-4">
-      <div className="flex gap-3">
-        {photoUrl ? (
-          <img src={photoUrl} alt={`${displayName}'s avatar`} className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
-        ) : (
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
-          >
-            {displayName[0]?.toUpperCase() || "U"}
-          </div>
-        )}
-        <div className="flex-1">
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value.slice(0, 500))}
-            placeholder={p.composePlaceholder}
-            className="w-full bg-transparent text-white text-sm py-2 border-b border-white/10 mb-2 resize-none outline-none placeholder:text-white/40"
-            rows={2}
-            disabled={posting}
-          />
-          <div className="flex justify-end mb-1">
-            <span className={`text-xs ${text.length > 450 ? "text-red-400" : ""}`} style={{ color: text.length > 450 ? undefined : "#8E8E93" }}>
-              {text.length}/500
-            </span>
-          </div>
-
-          {mediaPreview && (
-            <div className="relative mb-2 inline-block">
-              {mediaFile?.type.startsWith("video/") ? (
-                <video src={mediaPreview} className="max-h-40 rounded-lg" muted playsInline />
-              ) : (
-                <img src={mediaPreview} alt="Preview" className="max-h-40 rounded-lg object-cover" />
-              )}
-              <button
-                onClick={clearMedia}
-                className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center text-white text-xs"
-                style={{ background: "rgba(0,0,0,0.7)" }}
-              >
-                &times;
-              </button>
-            </div>
-          )}
-
-          {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
-
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3" style={{ color: "#8E8E93" }}>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    if (file.size > 50 * 1024 * 1024) {
-                      setError(p.fileTooLarge);
-                      return;
-                    }
-                    setMediaFile(file);
-                    setMediaPreview(URL.createObjectURL(file));
-                  }
-                }}
-              />
-              <button
-                onClick={() => fileRef.current?.click()}
-                disabled={posting}
-                className="hover:text-pnp-accent transition-colors"
-                title={p.photoOrVideo}
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25c0 .828.672 1.5 1.5 1.5z" />
-                </svg>
-              </button>
-              <button
-                onClick={() => fileRef.current?.click()}
-                disabled={posting}
-                className="hover:text-pnp-accent transition-colors"
-                title={p.uploadVideo}
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
-                </svg>
-              </button>
-            </div>
-            <button
-              onClick={handlePost}
-              disabled={!text.trim() || posting}
-              className="btn-gradient px-4 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-40"
-            >
-              {posting ? p.posting : p.post}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -2630,14 +2486,16 @@ export default function Profile() {
                     </button>
                   );
                 })()}
-                <button
-                  onClick={handleGoLive}
-                  disabled={goLiveLoading}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white btn-gradient disabled:opacity-50 transition-all"
-                >
-                  <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                  {goLiveLoading ? "..." : "Go Live"}
-                </button>
+                {profile.creatorStatus === "active" && (
+                  <button
+                    onClick={handleGoLive}
+                    disabled={goLiveLoading}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white btn-gradient disabled:opacity-50 transition-all"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                    {goLiveLoading ? "..." : "Go Live"}
+                  </button>
+                )}
               </div>
               {/* Secondary actions */}
               <div className="flex gap-2">
@@ -3071,10 +2929,9 @@ export default function Profile() {
       {/* ── Compose (own profile, posts tab) ── */}
       {isOwnProfile && activeTab === "posts" && (
         <div className="mb-4">
-          <ComposePost
-            onPosted={() => loadProfile()}
-            photoUrl={photoUrl}
-            displayName={displayName}
+          <PostComposer
+            onPostCreated={() => loadProfile()}
+            placeholder={p.composePlaceholder}
           />
         </div>
       )}

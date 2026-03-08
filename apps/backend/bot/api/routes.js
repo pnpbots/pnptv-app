@@ -855,45 +855,92 @@ const avatarUpload = multer({
   }
 });
 
-// Social post media upload - 50MB max, images or videos
-const postMediaUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    // Accept known media types + application/octet-stream (iOS often sends this for HEIC/MOV).
-    // Real validation happens via magic bytes in the controller.
-    const isAllowed = /^(application\/octet-stream|image\/(jpeg|jpg|png|webp|gif|heic|heif|avif|tiff|bmp|x-ms-bmp)|video\/(mp4|webm|quicktime|3gpp|hevc|x-m4v))$/i.test(file.mimetype || '');
-    if (isAllowed) return cb(null, true);
-    logger.warn('postMediaUpload rejected mime', { mime: file.mimetype, originalname: file.originalname, ip: req.ip });
-    cb(new Error('Unsupported file type. Supported: images (jpg/png/webp/gif/heic/avif) and videos (mp4/webm/mov)'));
-  }
-});
+// ── Tiered upload limits: 512 MB for regular users, 3 GB for active creators ──
+const UPLOAD_LIMIT_REGULAR = 512 * 1024 * 1024;   // 512 MB
+const UPLOAD_LIMIT_CREATOR = 3 * 1024 * 1024 * 1024; // 3 GB
 
-// Performer bulk video upload — 200 MB per file, up to 5 videos, disk storage
 const fsSyncMkdir = require('fs');
+const MEDIA_TEMP_DIR = '/tmp/pnptv-uploads';
+fsSyncMkdir.mkdirSync(MEDIA_TEMP_DIR, { recursive: true });
 const PERFORMER_VIDEO_TEMP_DIR = '/tmp/pnptv-videos';
 fsSyncMkdir.mkdirSync(PERFORMER_VIDEO_TEMP_DIR, { recursive: true });
 
+const postMediaFileFilter = (req, file, cb) => {
+  const isAllowed = /^(application\/octet-stream|image\/(jpeg|jpg|png|webp|gif|heic|heif|avif|tiff|bmp|x-ms-bmp)|video\/(mp4|webm|quicktime|3gpp|hevc|x-m4v))$/i.test(file.mimetype || '');
+  if (isAllowed) return cb(null, true);
+  logger.warn('postMediaUpload rejected mime', { mime: file.mimetype, originalname: file.originalname, ip: req.ip });
+  cb(new Error('Unsupported file type. Supported: images (jpg/png/webp/gif/heic/avif) and videos (mp4/webm/mov)'));
+};
+
+// Helper: check if session user is an active creator (check session first, fallback to role)
+const isActiveCreator = (req) => {
+  const u = req.session?.user;
+  if (!u) return false;
+  if (u.creator_status === 'active') return true;
+  // Admins/superadmins also get creator-tier limits
+  if (u.role === 'admin' || u.role === 'superadmin') return true;
+  return false;
+};
+
+// Disk storage for large uploads (memory can't handle 3 GB)
+const postMediaDiskStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, MEDIA_TEMP_DIR),
+  filename: (req, file, cb) => cb(null, `upload-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`),
+});
+
+// Dynamic single-file upload middleware — picks limit based on creator status
+const postMediaUploadMiddleware = (req, res, next) => {
+  const limit = isActiveCreator(req) ? UPLOAD_LIMIT_CREATOR : UPLOAD_LIMIT_REGULAR;
+  const limitLabel = isActiveCreator(req) ? '3 GB' : '512 MB';
+  const upload = multer({
+    storage: postMediaDiskStorage,
+    limits: { fileSize: limit },
+    fileFilter: postMediaFileFilter,
+  }).single('media');
+  upload(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: `File too large. Maximum ${limitLabel}.` });
+    return res.status(400).json({ error: err.message || 'Upload error' });
+  });
+};
+
+// Dynamic multi-file upload middleware
+const postMultiMediaUploadMiddleware = (req, res, next) => {
+  const limit = isActiveCreator(req) ? UPLOAD_LIMIT_CREATOR : UPLOAD_LIMIT_REGULAR;
+  const limitLabel = isActiveCreator(req) ? '3 GB' : '512 MB';
+  const upload = multer({
+    storage: postMediaDiskStorage,
+    limits: { fileSize: limit, files: 4 },
+    fileFilter: postMediaFileFilter,
+  }).array('media', 4);
+  upload(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: `File too large. Maximum ${limitLabel} per file.` });
+    if (err.code === 'LIMIT_FILE_COUNT') return res.status(400).json({ error: 'Too many files. Maximum 4 at a time.' });
+    return res.status(400).json({ error: err.message || 'Upload error' });
+  });
+};
+
+// Performer bulk video upload — creator-only, 3 GB per file, up to 5 videos, disk storage
 const performerVideoStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, PERFORMER_VIDEO_TEMP_DIR),
   filename: (req, file, cb) => cb(null, `vid-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`),
 });
 
-const performerVideoUpload = multer({
-  storage: performerVideoStorage,
-  limits: { fileSize: 200 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const isVideo = /^video\/(mp4|webm)$/i.test(file.mimetype || '');
-    if (isVideo) return cb(null, true);
-    cb(new Error('Only video (mp4/webm) files are allowed'));
-  },
-});
-
 const uploadPerformerVideos = (req, res, next) => {
-  performerVideoUpload.array('videos', 5)(req, res, (err) => {
+  const upload = multer({
+    storage: performerVideoStorage,
+    limits: { fileSize: UPLOAD_LIMIT_CREATOR },
+    fileFilter: (req, file, cb) => {
+      const isVideo = /^video\/(mp4|webm)$/i.test(file.mimetype || '');
+      if (isVideo) return cb(null, true);
+      cb(new Error('Only video (mp4/webm) files are allowed'));
+    },
+  }).array('videos', 5);
+  upload(req, res, (err) => {
     if (!err) return next();
-    let message = 'Invalid video file. Only mp4/webm up to 200 MB are allowed.';
-    if (err.code === 'LIMIT_FILE_SIZE') message = 'Video too large. Maximum 200 MB per file.';
+    let message = 'Invalid video file. Only mp4/webm up to 3 GB are allowed.';
+    if (err.code === 'LIMIT_FILE_SIZE') message = 'Video too large. Maximum 3 GB per file.';
     if (err.code === 'LIMIT_FILE_COUNT') message = 'Too many videos. Maximum 5 at a time.';
     return res.status(400).json({ error: message });
   });
@@ -3338,7 +3385,8 @@ app.get('/api/webapp/social/wof-feed', asyncHandler(socialController.getWofFeed)
 app.get('/api/webapp/social/wall/:userId', asyncHandler(socialController.getWall));
 app.get('/api/webapp/social/profile/:userId', asyncHandler(socialController.getPublicProfile));
 app.post('/api/webapp/social/posts', socialPostLimiter, asyncHandler(socialController.createPost));
-app.post('/api/webapp/social/posts/with-media', requireSessionAuth, socialPostLimiter, uploadLimiter, postMediaUpload.single('media'), asyncHandler(socialController.createPostWithMedia));
+app.post('/api/webapp/social/posts/with-media', requireSessionAuth, socialPostLimiter, uploadLimiter, postMediaUploadMiddleware, asyncHandler(socialController.createPostWithMedia));
+app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, socialPostLimiter, uploadLimiter, postMultiMediaUploadMiddleware, asyncHandler(socialController.createPostWithMultiMedia));
 app.post('/api/webapp/social/posts/bulk-videos', requireSessionAuth, bulkVideoLimiter, uploadPerformerVideos, asyncHandler(socialController.bulkCreateVideos));
 app.post('/api/webapp/social/posts/:postId/like', socialActionLimiter, asyncHandler(socialController.toggleLike));
 app.delete('/api/webapp/social/posts/:postId', asyncHandler(socialController.deletePost));

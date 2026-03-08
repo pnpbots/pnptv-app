@@ -7,6 +7,7 @@ import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useDirectus } from "@/hooks/useDirectus";
 import { useI18n } from "@/lib/i18n";
+import { PostComposer } from "@/components/PostComposer";
 import {
   getHomeFeedPosts,
   getSocialFeedPosts,
@@ -251,7 +252,9 @@ export default function Home() {
       >
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg flex-shrink-0" style={{ background: "rgba(94, 209, 196, 0.15)" }}>
-            🎭
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#5ED1C4" }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
           </div>
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-semibold text-white">Main Stage</h3>
@@ -263,45 +266,14 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Create post — navigates to Social page */}
-      <div
-        className="glass-card-sm p-4 mb-6 cursor-pointer hover:border-white/20 transition-colors"
-        onClick={() => navigate("/social")}
-      >
-        <div className="flex gap-3">
-          {isValidPhotoUrl(user?.photoUrl) ? (
-            <img src={user.photoUrl} alt={`${user?.displayName || "User"}'s avatar`} className="w-10 h-10 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-          ) : (
-            <div
-              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
-            >
-              {(user?.displayName || "U")[0].toUpperCase()}
-            </div>
-          )}
-          <div className="flex-1">
-            <div className="w-full bg-transparent text-white/40 text-sm py-2 border-b border-white/10 mb-3 cursor-text">
-              {t.whatOnYourMind}
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3" style={{ color: "#8E8E93" }}>
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <span className="btn-gradient px-4 py-1.5 rounded-lg text-white text-sm font-semibold">
-                {t.post}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Create post — compact composer, expands on focus */}
+      {isAuthenticated && (
+        <PostComposer
+          compact
+          onPostCreated={(newPost) => setPosts((prev) => [newPost, ...prev])}
+          className="mb-6"
+        />
+      )}
 
       {/* Social Feed */}
       <div className="flex items-center justify-between mb-4">

@@ -1,5 +1,13 @@
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
+function friendlyHttpError(status: number, fallback: string): string {
+  if (status === 413) return "File is too large. Max 512 MB (or 3 GB for creators).";
+  if (status === 401) return "Please log in again to continue.";
+  if (status === 403) return "You don't have permission to do this.";
+  if (status === 429) return "Too many requests. Please wait a moment and try again.";
+  return fallback;
+}
+
 interface ApiOptions {
   method?: string;
   body?: unknown;
@@ -29,7 +37,7 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
           ? (error.error as { message: string }).message
           : typeof error.message === "string"
             ? error.message
-            : `API error ${res.status}`;
+            : friendlyHttpError(res.status, `API error ${res.status}`);
     throw new Error(errorMessage);
   }
 
@@ -502,6 +510,8 @@ export interface SocialPostItem {
   // Tier-gating fields (free-tier users see blurred posts)
   blurred?: boolean;
   content_tier?: string;
+  // Multi-image support (up to 4 files per post)
+  media_urls?: Array<{ url: string; type: string; thumbnail_url?: string }> | null;
   // Video thumbnail (poster frame generated server-side)
   video_thumbnail_url?: string | null;
   // Promoted post fields (CMS-managed featured content)
@@ -641,16 +651,43 @@ export function getWofFeedPosts(
 
 export function createSocialPost(
   content: string,
-  mediaFile?: File,
+  mediaFiles?: File | File[],
   crossPostBluesky?: boolean,
   isExclusive?: boolean,
-  isShareable?: boolean
+  isShareable?: boolean,
 ): Promise<{ success: boolean; post: SocialPostItem }> {
-  if (mediaFile) {
-    // Use FormData for media posts
+  const filesArray = mediaFiles
+    ? Array.isArray(mediaFiles)
+      ? mediaFiles
+      : [mediaFiles]
+    : [];
+
+  if (filesArray.length > 1) {
+    // Multi-image path — up to 4 files
     const formData = new FormData();
     formData.append("content", content);
-    formData.append("media", mediaFile);
+    filesArray.forEach((f) => formData.append("media", f));
+    if (crossPostBluesky) formData.append("crossPostBluesky", "true");
+    if (isExclusive) formData.append("isExclusive", "true");
+    if (isShareable === false) formData.append("isShareable", "false");
+    return fetch(`${API_BASE}/api/webapp/social/posts/with-multi-media`, {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    }).then(async (res) => {
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(error.error || `API error ${res.status}`);
+      }
+      return res.json();
+    });
+  }
+
+  if (filesArray.length === 1) {
+    // Single-file path — use existing endpoint for backward compat
+    const formData = new FormData();
+    formData.append("content", content);
+    formData.append("media", filesArray[0]);
     if (crossPostBluesky) formData.append("crossPostBluesky", "true");
     if (isExclusive) formData.append("isExclusive", "true");
     if (isShareable === false) formData.append("isShareable", "false");
@@ -666,6 +703,8 @@ export function createSocialPost(
       return res.json();
     });
   }
+
+  // Text-only path
   return request("/api/webapp/social/posts", {
     method: "POST",
     body: { content, crossPostBluesky: crossPostBluesky ?? false, isExclusive: isExclusive ?? false, isShareable: isShareable ?? true },
