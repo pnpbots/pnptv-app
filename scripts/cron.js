@@ -18,6 +18,8 @@ const PaymentRecoveryService = require(path.join(backendPath, 'bot/services/paym
 const MediaCleanupService = require(path.join(backendPath, 'bot/services/mediaCleanupService'));
 const CreatorService = require(path.join(backendPath, 'bot/services/creatorService'));
 const CreatorPayoutService = require(path.join(backendPath, 'bot/services/creatorPayoutService'));
+const SubscriptionReminderEmailService = require(path.join(backendPath, 'services/subscriptionReminderEmailService'));
+const TelegramSubscriptionReminderService = require(path.join(backendPath, 'bot/services/subscriptionReminderService'));
 
 /**
  * Initialize and start cron jobs
@@ -34,6 +36,11 @@ const startCronJobs = async (bot = null) => {
     if (bot) {
       MembershipCleanupService.initialize(bot);
       TutorialReminderService.initialize(bot);
+    }
+
+    // Initialize Telegram subscription reminder service
+    if (bot) {
+      TelegramSubscriptionReminderService.initialize(bot);
     }
 
     // Daimo payment recovery - process stuck Daimo payments every 5 minutes
@@ -317,6 +324,45 @@ const startCronJobs = async (bot = null) => {
         logger.error('Error in notification cleanup cron:', error);
       }
     });
+
+    // Subscription expiry email reminders — daily at 10 AM UTC
+    // Targets users with subscriptions expiring in 7-14 days
+    cron.schedule(process.env.SUB_EXPIRY_EMAIL_CRON || '0 10 * * *', async () => {
+      try {
+        logger.info('Running subscription expiry email reminders...');
+        const results = await SubscriptionReminderEmailService.sendExpiryReminders();
+        logger.info('Subscription expiry email reminders sent', results);
+      } catch (error) {
+        logger.error('Error in subscription expiry email reminder cron:', error);
+      }
+    });
+
+    // Re-engagement emails to churned users — weekly on Monday at 11 AM UTC
+    // Targets users who haven't paid in 30+ days
+    cron.schedule(process.env.SUB_REENGAGEMENT_CRON || '0 11 * * 1', async () => {
+      try {
+        logger.info('Running re-engagement email campaign...');
+        const results = await SubscriptionReminderEmailService.sendReEngagementEmails();
+        logger.info('Re-engagement emails sent', results);
+      } catch (error) {
+        logger.error('Error in re-engagement email cron:', error);
+      }
+    });
+
+    // Telegram subscription reminders — daily at 9 AM UTC
+    // Sends 3-day and 1-day warnings before subscription expiry via private DM
+    if (bot) {
+      cron.schedule(process.env.SUB_REMINDER_TELEGRAM_CRON || '0 9 * * *', async () => {
+        try {
+          logger.info('Running Telegram subscription reminders...');
+          const sent3d = await TelegramSubscriptionReminderService.send3DayReminders();
+          const sent1d = await TelegramSubscriptionReminderService.send1DayReminders();
+          logger.info(`Telegram subscription reminders sent — 3-day: ${sent3d}, 1-day: ${sent1d}`);
+        } catch (error) {
+          logger.error('Error in Telegram subscription reminder cron:', error);
+        }
+      });
+    }
 
     logger.info('✓ Cron jobs started successfully');
     return true;

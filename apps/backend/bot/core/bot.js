@@ -103,7 +103,6 @@ const { setupAgeVerificationMiddleware } = require('./middleware/ageVerification
 const CallReminderService = require('../services/callReminderService');
 const GroupCleanupService = require('../services/groupCleanupService');
 const broadcastScheduler = require('../../services/broadcastScheduler');
-const SubscriptionReminderService = require('../../services/subscriptionReminderEmailService');
 const MembershipCleanupService = require('../services/membershipCleanupService');
 const BusinessNotificationService = require('../services/businessNotificationService');
 const TutorialReminderService = require('../services/tutorialReminderService');
