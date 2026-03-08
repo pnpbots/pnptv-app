@@ -36,6 +36,9 @@ class PaymentWebhookEventModel {
         provider,
         eventId,
         error: error.message,
+        errorCode: error.code,       // PostgreSQL error code (e.g. 23505, 22001)
+        errorDetail: error.detail,   // PostgreSQL constraint/column detail
+        errorHint: error.hint,
       });
     }
   }

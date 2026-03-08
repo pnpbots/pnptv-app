@@ -4747,8 +4747,12 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       const PlanModel = require('../../models/planModel');
       const plan = await PlanModel.getById(order.plan_id);
       if (!plan) {
-        logger.error('BTCPay sub webhook: plan not found', { planId: order.plan_id });
-        return res.status(500).json({ success: false, error: 'Plan not found' });
+        logger.error('BTCPay: plan not found for settled invoice', { invoiceId, planId: order.plan_id });
+        await dbQuery(
+          `UPDATE dash_subscription_orders SET status = 'failed', notes = 'plan_not_found' WHERE id = $1`,
+          [order.id]
+        );
+        return res.status(200).json({ success: false, error: 'plan_not_found', invoiceId });
       }
 
       const durationDays = plan.duration_days || plan.duration || 30;
@@ -4799,6 +4803,79 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
         }
       } catch (emitErr) {
         logger.warn(`BTCPay sub socket emit failed: ${emitErr.message}`);
+      }
+
+      // F-02: Post-purchase notifications for BTCPay users (fire-and-forget)
+      try {
+        const userData = await dbQuery(
+          'SELECT email, language, telegram FROM users WHERE id = $1',
+          [order.user_id]
+        );
+        const u = userData.rows[0];
+        if (u) {
+          const planName = plan.display_name || plan.name || order.plan_id;
+          const language = u.language || 'es';
+          // Telegram DM (only for users with Telegram)
+          if (u.telegram) {
+            try {
+              const PaymentNotificationService = require('../services/paymentNotificationService');
+              await PaymentNotificationService.sendPaymentConfirmation(order.user_id, {
+                planId: order.plan_id,
+                planName,
+                amount: order.amount || 0,
+                currency: 'USD',
+                provider: 'btcpay',
+                language,
+              });
+            } catch (dmErr) {
+              logger.warn('BTCPay: Telegram DM failed (non-critical)', { userId: order.user_id, error: dmErr.message });
+            }
+          }
+          // Email invoice + welcome (only if email available)
+          if (u.email) {
+            try {
+              const InvoiceService = require('../services/invoiceservice');
+              const EmailService = require('../services/emailservice');
+              const { buffer: invoicePdf } = await InvoiceService.generateInvoice({
+                invoiceNumber: invoiceId,
+                customerName: u.telegram || order.user_id,
+                customerEmail: u.email,
+                planName,
+                amount: order.amount || 0,
+                currency: 'USD',
+                paymentDate: new Date(),
+                provider: 'Dash/BTCPay',
+                language,
+              });
+              await EmailService.sendInvoiceEmail({
+                to: u.email,
+                invoicePdf,
+                invoiceNumber: invoiceId,
+                customerName: u.telegram || order.user_id,
+                amount: order.amount || 0,
+                currency: 'USD',
+                planName,
+              });
+              const { buffer: guidePdf } = await InvoiceService.generateOnboardingGuide({
+                customerName: u.telegram || order.user_id,
+                planName,
+                language,
+              });
+              await EmailService.sendWelcomeEmail({
+                to: u.email,
+                customerName: u.telegram || order.user_id,
+                planName,
+                guidePdf,
+                language,
+              });
+              logger.info('BTCPay: invoice + welcome emails sent', { to: u.email, planId: order.plan_id });
+            } catch (emailErr) {
+              logger.warn('BTCPay: email notification failed (non-critical)', { userId: order.user_id, error: emailErr.message });
+            }
+          }
+        }
+      } catch (notifErr) {
+        logger.warn('BTCPay post-purchase notification block failed', { error: notifErr.message });
       }
 
       return res.json({ success: true, type: 'subscription', planId: order.plan_id });

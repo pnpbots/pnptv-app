@@ -1203,6 +1203,18 @@ class PaymentService {
             });
           }
 
+          // Mark the payment record as completed so polling returns 'completed'
+          if (paymentIdOrType) {
+            try {
+              await PaymentModel.updateStatus(paymentIdOrType, 'completed', {
+                completedAt: new Date(),
+                completedBy: 'epayco_webhook',
+              });
+            } catch (err) {
+              logger.error('Failed to mark token purchase payment as completed', { paymentId: paymentIdOrType, error: err.message });
+            }
+          }
+
           return { success: true, type: 'token_purchase' };
         }
 
@@ -1947,17 +1959,8 @@ class PaymentService {
 
         // Process based on status
         if (status === 'payment_completed' || status === 'succeeded') {
-          // Payment successful
-          if (paymentId) {
-            await PaymentModel.updateStatus(paymentId, 'completed', {
-              transaction_id: source?.txHash || id,
-              daimo_event_id: id,
-              payer_address: source?.payerAddress,
-              chain_id: source?.chainId,
-            });
-          }
-
-          // Update user subscription
+          // Update user subscription FIRST, then mark payment completed
+          // (mirrors ePayco: activate before marking complete so retries stay unblocked on plan errors)
           const plan = await PlanModel.getById(planId);
           const user = await UserModel.getById(userId);
 
@@ -1968,7 +1971,7 @@ class PaymentService {
             return { success: false, error: `Plan not found: ${planId}` };
           }
 
-          if (plan) {
+          {
             const durationDays = plan.duration_days || plan.duration || 30;
             const isLifetime = plan.isLifetime || plan.is_lifetime || (planId && planId.toString().toLowerCase().includes('lifetime'));
             const expiryDate = isLifetime ? null : (() => { const d = new Date(); d.setDate(d.getDate() + durationDays); return d; })();
@@ -1978,6 +1981,16 @@ class PaymentService {
               planId,
               expiry: expiryDate,
             });
+
+            // Mark payment completed only after subscription is activated
+            if (paymentId) {
+              await PaymentModel.updateStatus(paymentId, 'completed', {
+                transaction_id: source?.txHash || id,
+                daimo_event_id: id,
+                payer_address: source?.payerAddress,
+                chain_id: source?.chainId,
+              });
+            }
 
             logger.info('User subscription activated via Daimo webhook', {
               userId,
