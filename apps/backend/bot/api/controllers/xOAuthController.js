@@ -86,8 +86,8 @@ const buildHashRecoveryPage = (title, message, botLink) => `
 
 const startOAuth = async (req, res) => {
   try {
-    const adminId = req.query.admin_id ? Number(req.query.admin_id) : null;
-    const adminUsername = req.query.admin_username || null;
+    const adminId = req.session?.user?.id ? Number(req.session.user.id) : null;
+    const adminUsername = req.session?.user?.username || null;
     const url = await XOAuthService.createAuthUrl({ adminId, adminUsername });
     res.json({ success: true, url });
   } catch (error) {

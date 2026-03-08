@@ -47,9 +47,11 @@ const listCampaigns = async (req, res) => {
   }
 };
 
+const VALID_GROK_MODES = new Set(['xPost', 'broadcast', 'salesPost', 'sharePost', 'post', 'videoDescription']);
+
 const createCampaign = async (req, res) => {
   try {
-    const {
+    let {
       name, accountId, topic, grokMode, language, customPrompt,
       intervalMinutes, activeHoursStart, activeHoursEnd, maxPosts,
       mediaFolderId,
@@ -57,6 +59,14 @@ const createCampaign = async (req, res) => {
 
     if (!name || !accountId || !topic) {
       return res.status(400).json({ error: 'name, accountId, and topic are required' });
+    }
+
+    if (grokMode && !VALID_GROK_MODES.has(grokMode)) {
+      return res.status(400).json({ error: 'Invalid grokMode' });
+    }
+
+    if (intervalMinutes !== undefined) {
+      intervalMinutes = Math.max(15, Number(intervalMinutes) || 15);
     }
 
     const campaignId = await XAutoCampaignService.createCampaign({
@@ -91,7 +101,17 @@ const createCampaign = async (req, res) => {
 const updateCampaign = async (req, res) => {
   try {
     const { id } = req.params;
-    await XAutoCampaignService.updateCampaign(id, req.body);
+    const updates = { ...req.body };
+
+    if (updates.grokMode && !VALID_GROK_MODES.has(updates.grokMode)) {
+      return res.status(400).json({ error: 'Invalid grokMode' });
+    }
+
+    if (updates.intervalMinutes !== undefined) {
+      updates.intervalMinutes = Math.max(15, Number(updates.intervalMinutes) || 15);
+    }
+
+    await XAutoCampaignService.updateCampaign(id, updates);
     logger.info('X auto campaign updated', {
       campaignId: id,
       adminId: req.session?.user?.id,

@@ -28,6 +28,7 @@ const healthController = require('./controllers/healthController');
 const hangoutsController = require('./controllers/hangoutsController');
 const xOAuthRoutes = require('./xOAuthRoutes');
 const xFollowersRoutes = require('./xFollowersRoutes');
+const { adminGuard: xOAuthAdminGuard } = require('../../middleware/guards');
 const adminUserRoutes = require('./routes/adminUserRoutes');
 const userManagementRoutes = require('./routes/userManagementRoutes');
 const nearbyRoutes = require('./routes/nearby.routes');
@@ -1991,7 +1992,7 @@ app.use('/api/users', userManagementRoutes);
 // Nearby Geolocation API Routes
 app.use('/api/nearby', nearbyRoutes);
 
-app.use('/api/admin/x/oauth', xOAuthRoutes);
+app.use('/api/admin/x/oauth', xOAuthAdminGuard, xOAuthRoutes);
 app.use('/api/auth/x', xOAuthRoutes); // Alias for X Developer Portal redirect URI
 app.use('/api/x/followers', xFollowersRoutes);
 
@@ -2334,13 +2335,25 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
     return res.status(402).json({ success: false, error: 'Payment not yet completed on Meru. Please complete payment first.' });
   }
 
-  // 3. Activate membership — set PRIME lifetime
+  // 3. Activate membership — set lifetime100 (member tier) + 2 months PRIME bonus
   const UserModel = require('../../models/userModel');
+  const primeExpiry = new Date();
+  primeExpiry.setDate(primeExpiry.getDate() + 60); // 2 months PRIME bonus
+
+  // Start with PRIME tier (for the 2-month bonus period), then cron/expiry will downgrade to member
   await UserModel.updateSubscription(userId, {
     status: 'active',
-    planId: 'lifetime-pass',
-    expiry: null,
+    planId: 'lifetime100',
+    expiry: null, // lifetime member — no expiry on the base plan
   });
+
+  // Grant PRIME for 2 months by temporarily setting tier to PRIME with expiry
+  // The plan_expiry tracks when PRIME expires; after that the user stays as lifetime member
+  const pool = getPool();
+  await pool.query(
+    `UPDATE users SET tier = 'PRIME', plan_expiry = $2, updated_at = NOW() WHERE id = $1`,
+    [userId, primeExpiry.toISOString()]
+  );
 
   // 4. Invalidate the Meru link + mark activation code used (non-critical)
   try {
@@ -2361,13 +2374,13 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
     await PaymentHistoryService.recordPayment({
       userId,
       paymentMethod: 'meru',
-      amount: 50,
+      amount: 100,
       currency: 'USD',
-      planId: 'lifetime-pass',
-      planName: 'Lifetime Pass',
-      product: 'lifetime-pass',
+      planId: 'lifetime100',
+      planName: 'Lifetime Member + 2 Months PRIME',
+      product: 'lifetime100',
       paymentReference: meruCode,
-      metadata: { activated_via: 'webapp' },
+      metadata: { activated_via: 'webapp', prime_bonus_expires: primeExpiry.toISOString() },
       ipAddress: req.ip,
       userAgent: req.get('user-agent'),
     });
@@ -2378,13 +2391,13 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
   // 6. Audit log + business notification (non-critical)
   try {
     const { logActivation } = require('../handlers/payments/activation');
-    await logActivation({ userId, username, code: meruCode, product: 'lifetime-pass', success: true });
+    await logActivation({ userId, username, code: meruCode, product: 'lifetime100', success: true });
   } catch (e) {
     logger.warn('Failed to log activation (non-critical)', { error: e.message });
   }
   try {
     const BusinessNotificationService = require('../services/businessNotificationService');
-    await BusinessNotificationService.notifyCodeActivation({ userId, username, code: meruCode, product: 'lifetime-pass' });
+    await BusinessNotificationService.notifyCodeActivation({ userId, username, code: meruCode, product: 'lifetime100' });
   } catch (e) {
     logger.warn('Failed to send business notification (non-critical)', { error: e.message });
   }
@@ -2392,10 +2405,10 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
   // 7. Telegram DM with PRIME invite link (async fire-and-forget)
   PaymentService.sendPaymentConfirmationNotification({
     userId,
-    plan: { id: 'lifetime-pass', name: 'Lifetime Pass', display_name: 'Lifetime Pass' },
+    plan: { id: 'lifetime100', name: 'Lifetime Member + 2 Months PRIME', display_name: 'Lifetime Member + 2 Months PRIME' },
     transactionId: meruCode,
-    amount: 50,
-    expiryDate: null,
+    amount: 100,
+    expiryDate: primeExpiry.toISOString(),
     language,
     provider: 'meru',
   }).catch((e) => logger.warn('Failed to send Telegram DM (non-critical)', { error: e.message }));
@@ -2412,13 +2425,13 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
         const { buffer: invoicePdf } = await InvoiceService.generateInvoice({
           invoiceNumber: `MERU-${meruCode}`,
           customerName: user.first_name || username || 'Valued Customer',
-          planName: 'Lifetime Pass',
-          amount: 50,
+          planName: 'Lifetime Member + 2 Months PRIME',
+          amount: 100,
           currency: 'USD',
           provider: 'meru',
           transactionId: meruCode,
           purchaseDate: new Date(),
-          expiryDate: null,
+          expiryDate: primeExpiry,
           language,
         });
 
@@ -2426,8 +2439,8 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
           to: customerEmail,
           customerName: user.first_name || username || 'Valued Customer',
           invoiceNumber: `MERU-${meruCode}`,
-          amount: 50,
-          planName: 'Lifetime Pass',
+          amount: 100,
+          planName: 'Lifetime Member + 2 Months PRIME',
           invoicePdf,
         });
         logger.info('Meru invoice email sent', { to: customerEmail, code: meruCode });
@@ -2441,16 +2454,16 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
       try {
         const { buffer: guidePdf } = await InvoiceService.generateOnboardingGuide({
           customerName: user.first_name || username || 'Valued Customer',
-          planName: 'Lifetime Pass',
+          planName: 'Lifetime Member + 2 Months PRIME',
           language,
         });
 
         await EmailService.sendWelcomeEmail({
           to: customerEmail,
           customerName: user.first_name || username || 'Valued Customer',
-          planName: 'Lifetime Pass',
-          duration: 'Lifetime',
-          expiryDate: null,
+          planName: 'Lifetime Member + 2 Months PRIME',
+          duration: 'Lifetime Member + 2 months PRIME',
+          expiryDate: primeExpiry,
           language,
           onboardingGuidePdf: guidePdf,
         });
@@ -2461,15 +2474,15 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
     })();
   }
 
-  // 9. Update session so frontend reflects PRIME immediately
+  // 9. Update session so frontend reflects PRIME immediately (bonus period)
   req.session.user = {
     ...req.session.user,
     tier: 'PRIME',
     subscription_status: 'active',
-    plan_id: 'lifetime-pass',
+    plan_id: 'lifetime100',
   };
 
-  logger.info('Meru lifetime pass activated via webapp', { userId, code: meruCode });
+  logger.info('Meru lifetime100 activated via webapp', { userId, code: meruCode, primeExpiry: primeExpiry.toISOString() });
   res.json({ success: true });
 }));
 
@@ -2585,7 +2598,9 @@ app.post('/api/webapp/admin/grok/manager-chat', adminGuard, asyncHandler(async (
     return res.status(400).json({ success: false, error: 'Message is required' });
   }
 
-  const adminId = String(req.session?.user?.id || 'admin');
+  const userId = req.session?.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Authentication required' });
+  const adminId = String(userId);
   const redisKey = `grok:manager:chat:${adminId}`;
   const HISTORY_TTL = 7200; // 2 hours
   const MAX_HISTORY = 20;   // 10 pairs

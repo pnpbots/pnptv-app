@@ -126,26 +126,32 @@ class XAutoCampaignService {
    * Pause a campaign.
    */
   static async pauseCampaign(campaignId) {
-    await db.query(
+    const result = await db.query(
       `UPDATE x_auto_campaigns
        SET status = 'paused', next_run_at = NULL, updated_at = NOW()
-       WHERE campaign_id = $1`,
+       WHERE campaign_id = $1 AND status = 'active'`,
       [campaignId]
     );
+    if (result.rowCount === 0) {
+      throw new Error('Campaign not found or not in active status');
+    }
   }
 
   /**
    * Resume a campaign — set active and schedule next run.
    */
   static async resumeCampaign(campaignId) {
-    await db.query(
+    const result = await db.query(
       `UPDATE x_auto_campaigns
        SET status = 'active',
            next_run_at = NOW() + (interval_minutes || ' minutes')::INTERVAL,
            updated_at = NOW()
-       WHERE campaign_id = $1`,
+       WHERE campaign_id = $1 AND status = 'paused'`,
       [campaignId]
     );
+    if (result.rowCount === 0) {
+      throw new Error('Campaign not found or not in paused status');
+    }
   }
 
   /**

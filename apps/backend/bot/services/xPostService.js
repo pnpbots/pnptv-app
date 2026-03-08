@@ -770,7 +770,7 @@ class XPostService {
             FOR UPDATE SKIP LOCKED
             LIMIT 1
         )
-        RETURNING post_id, account_id, text, media_url, admin_id, admin_username, retry_count;
+        RETURNING post_id, account_id, text, media_url, admin_id, admin_username, retry_count, campaign_id;
       `;
       const result = await client.query(query);
       await client.query('COMMIT');
@@ -866,12 +866,12 @@ class XPostService {
   static async reschedulePost(postId, delayMinutes) {
     const query = `
       UPDATE x_post_jobs
-      SET scheduled_at = NOW() + INTERVAL '${delayMinutes} minutes',
+      SET scheduled_at = NOW() + ($1 * INTERVAL '1 minute'),
           status = 'scheduled',
           updated_at = CURRENT_TIMESTAMP
-      WHERE post_id = $1
+      WHERE post_id = $2
     `;
-    await db.query(query, [postId]);
+    await db.query(query, [delayMinutes, postId]);
   }
 }
 

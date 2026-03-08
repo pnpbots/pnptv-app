@@ -1,5 +1,6 @@
 const logger = require('../../../utils/logger');
 const XPostService = require('../../services/xPostService');
+const db = require('../../../utils/db');
 
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [5, 15, 30]; // minutes
@@ -25,6 +26,13 @@ class XPostScheduler {
     }
 
     this.isRunning = true;
+
+    // Recover posts orphaned in 'sending' by a previous crash
+    db.query(`
+      UPDATE x_post_jobs SET status = 'scheduled', updated_at = CURRENT_TIMESTAMP
+      WHERE status = 'sending' AND updated_at < NOW() - INTERVAL '5 minutes'
+    `).catch(err => logger.error('Failed to reset stuck sending posts:', err));
+
     // Process immediately on start, then every 30 seconds
     this.processQueue();
     this.interval = setInterval(() => this.processQueue(), 30 * 1000);
@@ -85,6 +93,14 @@ class XPostScheduler {
       // getPendingPosts() already atomically set status to 'sending'
       // Attempt to publish
       const response = await XPostService.publishScheduledPost(post);
+
+      // Success - increment campaign total_posted counter if applicable
+      if (post.campaign_id) {
+        db.query(
+          `UPDATE x_auto_campaigns SET total_posted = total_posted + 1, updated_at = NOW() WHERE campaign_id = $1`,
+          [post.campaign_id]
+        ).catch(err => logger.error('Failed to increment campaign total_posted:', err));
+      }
 
       // Success - notify admin
       await this.notifyAdmin(post, 'success', response);
