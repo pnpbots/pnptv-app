@@ -109,7 +109,7 @@ const LANG_MAP: Record<string, Lang> = {
 
 const SUPPORTED_LANGS = new Set<Lang>(["en","es","pt","zh","zhTW","fr","de","th","it","tr","ru","nl","vi","ja","id","ar"]);
 
-/** Get the current language from user profile or browser. */
+/** Get the current language from user profile, localStorage, or browser. */
 export function getLang(userLang?: string | null): Lang {
   if (userLang) {
     const lower = userLang.toLowerCase();
@@ -119,6 +119,13 @@ export function getLang(userLang?: string | null): Lang {
     const base = lower.split("-")[0];
     if (LANG_MAP[base]) return LANG_MAP[base];
   }
+  // localStorage fallback (for unauthenticated visitors)
+  if (typeof localStorage !== "undefined") {
+    try {
+      const stored = localStorage.getItem("pnptv_lang");
+      if (stored && LANG_MAP[stored]) return LANG_MAP[stored];
+    } catch { /* private browsing */ }
+  }
   // Browser detection fallback
   if (typeof navigator !== "undefined" && navigator.language) {
     const browserLang = navigator.language.toLowerCase();
@@ -127,6 +134,11 @@ export function getLang(userLang?: string | null): Lang {
     if (LANG_MAP[base]) return LANG_MAP[base];
   }
   return "en";
+}
+
+/** Save language preference to localStorage (for unauthenticated visitors). */
+export function setGuestLang(lang: Lang): void {
+  try { localStorage.setItem("pnptv_lang", lang); } catch { /* ignore */ }
 }
 
 /** Hook: returns all i18n strings for the user's language. */
