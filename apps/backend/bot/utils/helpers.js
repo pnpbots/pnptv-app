@@ -314,4 +314,29 @@ module.exports = {
   safeReplyOrEdit,
   safeEditMessage,
   safeAnswerCbQuery,
+  resolveUserId,
 };
+
+/**
+ * Resolve a userId param to the canonical DB id.
+ * Handles: numeric telegram IDs (passthrough), pnptv_id UUIDs, and usernames.
+ * Returns the DB `users.id` or null if not found.
+ */
+async function resolveUserId(userId) {
+  if (!userId) return null;
+  if (userId.startsWith('@')) userId = userId.slice(1);
+
+  const isNumeric = /^\d+$/.test(userId);
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+
+  if (isNumeric) return userId; // telegram IDs are used as-is
+
+  const { query } = require('../../config/postgres');
+  if (isUuid) {
+    const r = await query('SELECT id FROM users WHERE id = $1 OR pnptv_id = $1 LIMIT 1', [userId]);
+    return r.rows.length ? r.rows[0].id : null;
+  }
+  // username lookup
+  const r = await query('SELECT id FROM users WHERE lower(username) = lower($1) LIMIT 1', [userId]);
+  return r.rows.length ? r.rows[0].id : null;
+}

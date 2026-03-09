@@ -20,6 +20,7 @@
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { processChatMedia } = require('../../services/chatMediaService');
+const { resolveUserId } = require('../../utils/helpers');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -152,7 +153,7 @@ const sendDmMediaMessage = async (req, res) => {
   const user = authGuard(req, res);
   if (!user) return;
 
-  const recipientId = req.params.recipientId || req.body?.recipientId;
+  const recipientId = await resolveUserId(req.params.recipientId || req.body?.recipientId);
 
   if (!recipientId) {
     return res.status(400).json({ error: 'recipientId is required' });

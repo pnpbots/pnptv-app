@@ -2,6 +2,7 @@ const logger = require('../../../utils/logger');
 const CreatorService = require('../../services/creatorService');
 const { query } = require('../../../config/postgres');
 const { hasAccess } = require('../../services/accessService');
+const { resolveUserId } = require('../../utils/helpers');
 
 // GET /api/webapp/creator/eligibility
 const getEligibility = async (req, res) => {
@@ -93,7 +94,9 @@ const rejectApplication = async (req, res) => {
 // GET /api/webapp/creator/:creatorId/subscription-status
 const getSubscriptionStatus = async (req, res) => {
   try {
-    const result = await CreatorService.getSubscriptionStatus(req.user.id, req.params.creatorId);
+    const creatorId = await resolveUserId(req.params.creatorId);
+    if (!creatorId) return res.status(404).json({ error: 'Creator not found' });
+    const result = await CreatorService.getSubscriptionStatus(req.user.id, creatorId);
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('getSubscriptionStatus error', err);
@@ -107,7 +110,9 @@ const subscribeToCreator = async (req, res) => {
     return res.status(403).json({ error: 'Member subscription required to subscribe to creators' });
   }
   try {
-    const result = await CreatorService.subscribeToCreator(req.user.id, req.params.creatorId, req.body.paymentId);
+    const creatorId = await resolveUserId(req.params.creatorId);
+    if (!creatorId) return res.status(404).json({ error: 'Creator not found' });
+    const result = await CreatorService.subscribeToCreator(req.user.id, creatorId, req.body.paymentId);
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('subscribeToCreator error', err);
@@ -118,7 +123,9 @@ const subscribeToCreator = async (req, res) => {
 // POST /api/webapp/creator/:creatorId/unsubscribe
 const unsubscribeFromCreator = async (req, res) => {
   try {
-    const result = await CreatorService.unsubscribeFromCreator(req.user.id, req.params.creatorId);
+    const creatorId = await resolveUserId(req.params.creatorId);
+    if (!creatorId) return res.status(404).json({ error: 'Creator not found' });
+    const result = await CreatorService.unsubscribeFromCreator(req.user.id, creatorId);
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('unsubscribeFromCreator error', err);
@@ -314,7 +321,9 @@ const listActiveCreators = async (req, res) => {
 // Protected at route level by roleGuard('admin', 'superadmin')
 const getStrikes = async (req, res) => {
   try {
-    const strikes = await CreatorService.getCreatorStrikes(req.params.creatorId);
+    const creatorId = await resolveUserId(req.params.creatorId);
+    if (!creatorId) return res.status(404).json({ error: 'Creator not found' });
+    const strikes = await CreatorService.getCreatorStrikes(creatorId);
     return res.json({ success: true, strikes });
   } catch (err) {
     logger.error('getStrikes error', err);
@@ -330,8 +339,10 @@ const issueStrike = async (req, res) => {
     return res.status(400).json({ error: 'Reason is required' });
   }
   try {
+    const creatorId = await resolveUserId(req.params.creatorId);
+    if (!creatorId) return res.status(404).json({ error: 'Creator not found' });
     const result = await CreatorService.issueStrike(
-      req.params.creatorId,
+      creatorId,
       req.user.id,
       reason.trim()
     );

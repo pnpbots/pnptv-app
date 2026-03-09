@@ -95,6 +95,12 @@ export default function Settings() {
   const [contentDisclaimer, setContentDisclaimer] = useState(false);
   const [contentDisclaimerSaving, setContentDisclaimerSaving] = useState(false);
 
+  // ── Notification Preferences state ───────────────────────────────────────
+  type ChannelPrefs = { inApp: boolean; bot: boolean; email: boolean; push: boolean };
+  type NotifPrefs = Record<string, ChannelPrefs | { enabled: boolean; start: string; end: string }>;
+  const [notifPrefs, setNotifPrefs] = useState<NotifPrefs | null>(null);
+  const [notifLoading, setNotifLoading] = useState(true);
+
   // ── Referral state ────────────────────────────────────────────────────────
   const [referralStats, setReferralStats] = useState<ReferralStats | null>(null);
   const [referralCopied, setReferralCopied] = useState(false);
@@ -108,9 +114,11 @@ export default function Settings() {
     async function load() {
       setProfileLoading(true);
       try {
-        const [profileRes, referralRes] = await Promise.all([
+        const [profileRes, referralRes, notifRes] = await Promise.all([
           getProfile(),
           getMyReferral().catch(() => null),
+          fetch(`${import.meta.env.VITE_API_URL || "https://pnptv.app"}/api/webapp/notifications/preferences`, { credentials: "include" })
+            .then(r => r.ok ? r.json() : null).catch(() => null),
         ]);
 
         if (cancelled) return;
@@ -124,6 +132,10 @@ export default function Settings() {
         if (referralRes) {
           setReferralStats(referralRes);
         }
+        if (notifRes?.preferences) {
+          setNotifPrefs(notifRes.preferences);
+        }
+        setNotifLoading(false);
       } catch {
         // Silent — individual sections degrade gracefully
       } finally {
@@ -188,6 +200,44 @@ export default function Settings() {
       setContentDisclaimerSaving(false);
     }
   }, [contentDisclaimer]);
+
+  const handleNotifToggle = useCallback(async (type: string, channel: string, newValue: boolean) => {
+    if (!notifPrefs) return;
+    // Optimistic update
+    const prev = { ...notifPrefs };
+    const typePref = notifPrefs[type] as ChannelPrefs;
+    setNotifPrefs({ ...notifPrefs, [type]: { ...typePref, [channel]: newValue } });
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || "https://pnptv.app"}/api/webapp/notifications/preferences`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [type]: { [channel]: newValue } }),
+      });
+      if (!res.ok) setNotifPrefs(prev); // revert
+    } catch {
+      setNotifPrefs(prev); // revert
+    }
+  }, [notifPrefs]);
+
+  const handleQuietHoursToggle = useCallback(async () => {
+    if (!notifPrefs) return;
+    const qh = notifPrefs.quiet_hours as { enabled: boolean; start: string; end: string } | undefined;
+    const newEnabled = !(qh?.enabled ?? false);
+    const prev = { ...notifPrefs };
+    setNotifPrefs({ ...notifPrefs, quiet_hours: { enabled: newEnabled, start: qh?.start ?? "23:00", end: qh?.end ?? "08:00" } });
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || "https://pnptv.app"}/api/webapp/notifications/preferences`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quiet_hours: { enabled: newEnabled } }),
+      });
+      if (!res.ok) setNotifPrefs(prev);
+    } catch {
+      setNotifPrefs(prev);
+    }
+  }, [notifPrefs]);
 
   const handleCopyReferral = useCallback(() => {
     if (!referralStats?.link) return;
@@ -359,6 +409,97 @@ export default function Settings() {
             accentColor="#D4007A"
           />
         </div>
+      </Section>
+
+      {/* ── Notifications ─────────────────────────────────────────────────── */}
+      <Section title="Notifications">
+        {notifLoading ? (
+          <div className="space-y-3">
+            <div className="h-4 rounded bg-white/10 animate-pulse w-48" />
+            <div className="h-4 rounded bg-white/10 animate-pulse w-40" />
+            <div className="h-4 rounded bg-white/10 animate-pulse w-44" />
+          </div>
+        ) : notifPrefs ? (
+          <>
+            <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+              Choose how you receive notifications. In-App is always on.
+            </p>
+
+            {/* Column headers */}
+            <div className="flex items-center gap-1 mb-2 px-1">
+              <div className="flex-1" />
+              <div className="w-11 text-center text-[10px] font-medium" style={{ color: "#8E8E93" }}>Push</div>
+              <div className="w-11 text-center text-[10px] font-medium" style={{ color: "#8E8E93" }}>Bot</div>
+              <div className="w-11 text-center text-[10px] font-medium" style={{ color: "#8E8E93" }}>Email</div>
+            </div>
+
+            {/* Notification type rows */}
+            {([
+              ["likes", "Likes"],
+              ["follows", "New Followers"],
+              ["replies", "Replies / Comments"],
+              ["dms", "Direct Messages"],
+              ["payments", "Payments"],
+              ["announcements", "Announcements"],
+              ["hangout_calls", "Hangout Calls"],
+            ] as const).map(([key, label]) => {
+              const pref = notifPrefs[key] as ChannelPrefs | undefined;
+              if (!pref) return null;
+              return (
+                <div
+                  key={key}
+                  className="flex items-center gap-1 rounded-lg px-3 py-2.5 mb-1"
+                  style={{ background: "rgba(255,255,255,0.03)" }}
+                >
+                  <p className="flex-1 text-sm text-white truncate">{label}</p>
+                  <div className="w-11 flex justify-center">
+                    <Toggle
+                      checked={pref.push !== false}
+                      onChange={() => handleNotifToggle(key, "push", pref.push === false)}
+                      accentColor="#5ED1C4"
+                    />
+                  </div>
+                  <div className="w-11 flex justify-center">
+                    <Toggle
+                      checked={pref.bot === true}
+                      onChange={() => handleNotifToggle(key, "bot", !pref.bot)}
+                      accentColor="#5ED1C4"
+                    />
+                  </div>
+                  <div className="w-11 flex justify-center">
+                    <Toggle
+                      checked={pref.email === true}
+                      onChange={() => handleNotifToggle(key, "email", !pref.email)}
+                      accentColor="#5ED1C4"
+                    />
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Quiet Hours */}
+            <div
+              className="flex items-center justify-between rounded-lg px-3 py-3 mt-3"
+              style={{ background: "rgba(102,126,234,0.06)", border: "1px solid rgba(102,126,234,0.15)" }}
+            >
+              <div className="flex-1 min-w-0 mr-3">
+                <p className="text-sm font-medium text-white">Quiet Hours</p>
+                <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                  No push or bot notifications during quiet hours (11 PM - 8 AM)
+                </p>
+              </div>
+              <Toggle
+                checked={(notifPrefs.quiet_hours as { enabled: boolean })?.enabled === true}
+                onChange={handleQuietHoursToggle}
+                accentColor="#667eea"
+              />
+            </div>
+          </>
+        ) : (
+          <p className="text-xs" style={{ color: "#8E8E93" }}>
+            Unable to load notification preferences.
+          </p>
+        )}
       </Section>
 
       {/* ── Referral Program ─────────────────────────────────────────────── */}

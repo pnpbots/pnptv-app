@@ -12,6 +12,7 @@ const axios = require('axios');
 const { query: dbQuery } = require('../../../config/postgres');
 const NotificationEmitter = require('../../services/notificationEmitter');
 const { validateTierFresh } = require('../../services/accessService');
+const { resolveUserId } = require('../../utils/helpers');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -71,7 +72,9 @@ const getWall = async (req, res) => {
     // Fetch the viewer's blocked list from DB to exclude their posts (C-08)
     const blockedRes = await dbQuery('SELECT blocked FROM users WHERE id = $1', [user.id]);
     const blockedIds = (blockedRes.rows[0]?.blocked || []).map(Number);
-    const result = await SocialPostService.getWall(req.params.userId, user.id, req.query.cursor, req.query.limit, viewerTier, isAdmin, blockedIds);
+    const wallUserId = await resolveUserId(req.params.userId);
+    if (!wallUserId) return res.status(404).json({ error: 'User not found' });
+    const result = await SocialPostService.getWall(wallUserId, user.id, req.query.cursor, req.query.limit, viewerTier, isAdmin, blockedIds);
     if (!result.profile) return res.status(404).json({ error: 'User not found' });
     return res.json({ success: true, ...result });
   } catch (err) {
@@ -670,16 +673,9 @@ const getHomeFeed = async (req, res) => {
 const getPublicProfile = async (req, res) => {
   let { userId } = req.params;
 
-  // Strip leading @ if present (e.g. @SantinoFurioso → SantinoFurioso)
-  if (userId.startsWith('@')) userId = userId.slice(1);
-
-  // Resolve username to ID if the param looks like a username (not a numeric Telegram ID or UUID)
-  const isNumericOrUuid = /^\d+$/.test(userId) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
-  if (!isNumericOrUuid) {
-    const resolved = await dbQuery('SELECT id FROM users WHERE lower(username) = lower($1) LIMIT 1', [userId]);
-    if (resolved.rows.length === 0) return res.status(404).json({ error: 'User not found' });
-    userId = resolved.rows[0].id;
-  }
+  // Resolve param to canonical DB id (handles @usernames, pnptv_id UUIDs, telegram IDs)
+  userId = await resolveUserId(userId);
+  if (!userId) return res.status(404).json({ error: 'User not found' });
 
   const viewerId = req.session?.user?.id || null;
   const viewerRole = req.session?.user?.role || '';

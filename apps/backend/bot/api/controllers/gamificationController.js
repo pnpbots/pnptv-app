@@ -1,4 +1,5 @@
 const gamificationService = require('../../services/gamificationService');
+const { resolveUserId } = require('../../utils/helpers');
 
 // GET /api/webapp/gamification/categories
 async function getCategories(req, res) {
@@ -25,7 +26,9 @@ async function getBadges(req, res) {
 // GET /api/webapp/gamification/user/:userId/badges
 async function getUserBadges(req, res) {
   try {
-    const badges = await gamificationService.getUserBadges(req.params.userId);
+    const userId = await resolveUserId(req.params.userId);
+    if (!userId) return res.status(404).json({ success: false, error: 'User not found' });
+    const badges = await gamificationService.getUserBadges(userId);
     res.json({ success: true, badges });
   } catch (err) {
     console.error('getUserBadges error:', err);

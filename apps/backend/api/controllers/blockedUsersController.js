@@ -1,5 +1,6 @@
 const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
+const { resolveUserId } = require('../../bot/utils/helpers');
 
 /**
  * Blocked Users Controller
@@ -22,13 +23,18 @@ async function blockUser(req, res) {
       });
     }
 
-    const { blockedUserId } = req.body;
+    const rawBlockedId = req.body?.blockedUserId;
 
-    if (!blockedUserId) {
+    if (!rawBlockedId) {
       return res.status(400).json({
         success: false,
         error: 'blockedUserId is required'
       });
+    }
+
+    const blockedUserId = await resolveUserId(rawBlockedId);
+    if (!blockedUserId) {
+      return res.status(404).json({ success: false, error: 'User not found' });
     }
 
     // Prevent self-blocking (also enforced by DB constraint)
@@ -36,19 +42,6 @@ async function blockUser(req, res) {
       return res.status(400).json({
         success: false,
         error: 'Cannot block yourself'
-      });
-    }
-
-    // Check if user exists
-    const userCheck = await query(
-      'SELECT id FROM users WHERE id = $1',
-      [blockedUserId]
-    );
-
-    if (userCheck.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'User not found'
       });
     }
 
@@ -100,7 +93,7 @@ async function unblockUser(req, res) {
       });
     }
 
-    const { blockedUserId } = req.params;
+    const blockedUserId = await resolveUserId(req.params.blockedUserId);
 
     if (!blockedUserId) {
       return res.status(400).json({
@@ -203,7 +196,8 @@ async function isUserBlocked(req, res) {
       });
     }
 
-    const { userId } = req.params;
+    const userId = await resolveUserId(req.params.userId);
+    if (!userId) return res.status(404).json({ success: false, error: 'User not found' });
 
     const result = await query(
       'SELECT id FROM blocked_users WHERE user_id = $1 AND blocked_user_id = $2',

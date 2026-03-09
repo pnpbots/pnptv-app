@@ -6,6 +6,7 @@ const NotificationEmitter = require('../../services/notificationEmitter');
 
 const { isEnforcedFollow } = require('../../services/followService');
 const { validateTierFresh } = require('../../services/accessService');
+const { resolveUserId } = require('../../utils/helpers');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -17,7 +18,7 @@ const authGuard = (req, res) => {
 
 const followUser = async (req, res) => {
   const actor = authGuard(req, res); if (!actor) return;
-  const { userId: targetId } = req.body;
+  const targetId = await resolveUserId(req.body?.userId);
 
   if (!targetId) return res.status(400).json({ error: 'userId required' });
   if (String(targetId) === String(actor.id)) return res.status(400).json({ error: 'Cannot follow yourself' });
@@ -75,7 +76,7 @@ const followUser = async (req, res) => {
 
 const unfollowUser = async (req, res) => {
   const actor = authGuard(req, res); if (!actor) return;
-  const { userId: targetId } = req.body;
+  const targetId = await resolveUserId(req.body?.userId);
 
   if (!targetId) return res.status(400).json({ error: 'userId required' });
 
@@ -117,7 +118,7 @@ const unfollowUser = async (req, res) => {
 
 const getFollowStatus = async (req, res) => {
   const actor = authGuard(req, res); if (!actor) return;
-  const { userId: targetId } = req.params;
+  const targetId = await resolveUserId(req.params.userId);
 
   if (!targetId) return res.status(400).json({ error: 'userId required' });
 
@@ -148,7 +149,7 @@ const getFollowStatus = async (req, res) => {
 
 const getFollowers = async (req, res) => {
   const actor = authGuard(req, res); if (!actor) return;
-  const { userId: targetId } = req.params;
+  const targetId = await resolveUserId(req.params.userId);
   const limit = Math.min(parseInt(req.query.limit) || 20, 50);
   const cursor = req.query.cursor || null;
 
@@ -189,7 +190,7 @@ const getFollowers = async (req, res) => {
 
 const getFollowing = async (req, res) => {
   const actor = authGuard(req, res); if (!actor) return;
-  const { userId: targetId } = req.params;
+  const targetId = await resolveUserId(req.params.userId);
   const limit = Math.min(parseInt(req.query.limit) || 20, 50);
   const cursor = req.query.cursor || null;
 

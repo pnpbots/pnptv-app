@@ -3,6 +3,7 @@ const UserModel = require('../../../models/userModel');
 const { query } = require('../../../utils/db');
 const PermissionService = require('../../services/permissionService');
 const supportRoutingService = require('../../services/supportRoutingService');
+const { resolveUserId } = require('../../utils/helpers');
 
 class AdminUserController {
   /**
@@ -11,7 +12,7 @@ class AdminUserController {
    */
   static async getUser(req, res) {
     try {
-      const { userId } = req.params;
+      const userId = await resolveUserId(req.params.userId);
       const adminId = req.user?.id;
 
       // Verify admin permission
@@ -39,7 +40,7 @@ class AdminUserController {
    */
   static async updateUser(req, res) {
     try {
-      const { userId } = req.params;
+      const userId = await resolveUserId(req.params.userId);
       const adminId = req.user?.id;
       const { username, email, subscriptionStatus, isPrime, tier } = req.body;
 
@@ -102,7 +103,7 @@ class AdminUserController {
    */
   static async toggleBan(req, res) {
     try {
-      const { userId } = req.params;
+      const userId = await resolveUserId(req.params.userId);
       const { ban, reason } = req.body;
       const adminId = req.user?.id;
 
@@ -175,7 +176,7 @@ class AdminUserController {
    */
   static async sendDirectMessage(req, res) {
     try {
-      const { userId } = req.params;
+      const userId = await resolveUserId(req.params.userId);
       const { message, messageType = 'text' } = req.body;
       const adminId = req.user?.id;
 

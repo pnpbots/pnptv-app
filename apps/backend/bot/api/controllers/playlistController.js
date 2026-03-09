@@ -1,6 +1,7 @@
 const MediaPlayerModel = require('../../../models/mediaPlayerModel');
 const db = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
+const { resolveUserId } = require('../../utils/helpers');
 
 const normalizeKeyPart = (value) => String(value || '')
   .trim()
@@ -35,7 +36,7 @@ const dedupePlaylists = (playlists) => {
  */
 const getUserPlaylists = async (req, res) => {
   try {
-    const userId = req.query.userId || req.headers['x-user-id'];
+    const userId = await resolveUserId(req.query.userId || req.headers['x-user-id']);
 
     if (!userId) {
       return res.status(400).json({ error: 'User ID is required' });
@@ -109,7 +110,7 @@ const getPublicPlaylists = async (req, res) => {
  */
 const createPlaylist = async (req, res) => {
   try {
-    const userId = req.body.userId || req.headers['x-user-id'];
+    const userId = await resolveUserId(req.body.userId || req.headers['x-user-id']);
     const {
       title,
       description,

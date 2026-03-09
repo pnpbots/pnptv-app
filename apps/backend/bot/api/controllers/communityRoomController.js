@@ -1,6 +1,7 @@
 const CommunityRoomService = require('../../services/communityRoomService');
 const jaasService = require('../../services/jaasService');
 const logger = require('../../../utils/logger');
+const { resolveUserId } = require('../../utils/helpers');
 
 /**
  * Get community room info and generate token
@@ -219,7 +220,8 @@ const muteUser = async (req, res) => {
     if (!sessionUser || !sessionUser.id) {
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
-    const { targetUserId } = req.body;
+    const targetUserId = await resolveUserId(req.body.targetUserId);
+    if (!targetUserId) return res.status(400).json({ success: false, error: 'targetUserId required' });
 
     const UserModel = require('../../../models/userModel');
     const user = await UserModel.getById(sessionUser.id);
@@ -260,7 +262,8 @@ const removeUser = async (req, res) => {
     if (!sessionUser || !sessionUser.id) {
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
-    const { targetUserId } = req.body;
+    const targetUserId = await resolveUserId(req.body.targetUserId);
+    if (!targetUserId) return res.status(400).json({ success: false, error: 'targetUserId required' });
 
     const UserModel = require('../../../models/userModel');
     const user = await UserModel.getById(sessionUser.id);

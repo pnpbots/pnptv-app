@@ -1,6 +1,7 @@
 const ageVerificationService = require('../../services/ageVerificationService');
 const logger = require('../../../utils/logger');
 const path = require('path');
+const { resolveUserId } = require('../../utils/helpers');
 
 /**
  * Age Verification Controller - Handles camera-based age verification
@@ -12,7 +13,7 @@ class AgeVerificationController {
    */
   static async verifyAge(req, res) {
     try {
-      const userId = req.body.user_id || req.query.user_id;
+      const userId = await resolveUserId(req.body.user_id || req.query.user_id);
 
       if (!userId) {
         return res.status(400).json({

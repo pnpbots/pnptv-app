@@ -9,6 +9,128 @@ const NotificationEmitter = require('../../bot/services/notificationEmitter');
 
 const VALID_CATEGORIES = new Set(['social', 'messaging', 'hangouts', 'commerce', 'system', 'announcements']);
 
+// ─── Notification Preferences ─────────────────────────────────────────────────
+
+const ALLOWED_PREF_KEYS = new Set([
+  'likes', 'follows', 'replies', 'dms',
+  'group_messages', 'group_joins', 'wof',
+  'payments', 'announcements', 'hangout_calls',
+  'quiet_hours',
+]);
+
+const CHANNEL_KEYS = ['inApp', 'bot', 'email', 'push'];
+
+const HH_MM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * Canonical defaults — used when a row has no preferences yet, when back-filling
+ * newly added keys, or as the "true" target when upgrading old boolean values.
+ */
+const DEFAULT_PREFS = {
+  likes:          { inApp: true,  bot: true,  email: true,  push: true  },
+  follows:        { inApp: true,  bot: true,  email: true,  push: true  },
+  replies:        { inApp: true,  bot: true,  email: true,  push: true  },
+  dms:            { inApp: true,  bot: false, email: false, push: true  },
+  group_messages: { inApp: true,  bot: false, email: false, push: false },
+  group_joins:    { inApp: true,  bot: false, email: false, push: false },
+  wof:            { inApp: true,  bot: true,  email: true,  push: true  },
+  payments:       { inApp: true,  bot: true,  email: true,  push: true  },
+  announcements:  { inApp: true,  bot: true,  email: true,  push: true  },
+  hangout_calls:  { inApp: true,  bot: true,  email: false, push: true  },
+  quiet_hours:    { enabled: false, start: '23:00', end: '08:00' },
+};
+
+/**
+ * Returns true if the stored prefs object is in the old boolean format,
+ * i.e. any non-quiet_hours key holds a primitive instead of an object.
+ */
+function isLegacyBooleanFormat(prefs) {
+  for (const key of ALLOWED_PREF_KEYS) {
+    if (key === 'quiet_hours') continue;
+    if (key in prefs && typeof prefs[key] !== 'object') return true;
+  }
+  return false;
+}
+
+/**
+ * Upgrade a legacy boolean-format prefs object to the new per-channel format.
+ *   boolean true  → per-key default object (preserves intended channel defaults)
+ *   boolean false → all-channels-off object
+ * Keys already in object format are merged with their default (fills channel gaps).
+ */
+function upgradeLegacyPrefs(prefs) {
+  const upgraded = {};
+  for (const key of ALLOWED_PREF_KEYS) {
+    if (key === 'quiet_hours') {
+      const qh = prefs[key];
+      if (qh && typeof qh === 'object') {
+        upgraded.quiet_hours = {
+          enabled: typeof qh.enabled === 'boolean' ? qh.enabled : false,
+          start:   HH_MM_RE.test(qh.start) ? qh.start : '23:00',
+          end:     HH_MM_RE.test(qh.end)   ? qh.end   : '08:00',
+        };
+      } else {
+        upgraded.quiet_hours = { ...DEFAULT_PREFS.quiet_hours };
+      }
+      continue;
+    }
+    if (!(key in prefs)) {
+      upgraded[key] = { ...DEFAULT_PREFS[key] };
+    } else if (typeof prefs[key] === 'boolean') {
+      upgraded[key] = prefs[key] === true
+        ? { ...DEFAULT_PREFS[key] }
+        : { inApp: false, bot: false, email: false, push: false };
+    } else if (typeof prefs[key] === 'object' && prefs[key] !== null) {
+      // Already an object — merge with default to fill any missing channel keys
+      upgraded[key] = { ...DEFAULT_PREFS[key], ...prefs[key] };
+    } else {
+      upgraded[key] = { ...DEFAULT_PREFS[key] };
+    }
+  }
+  return upgraded;
+}
+
+/**
+ * Validate a partial preferences update payload.
+ * Returns { valid: true } or { valid: false, error: string }.
+ */
+function validatePrefsUpdate(body) {
+  for (const key of Object.keys(body)) {
+    if (!ALLOWED_PREF_KEYS.has(key)) {
+      return { valid: false, error: `Unknown preference key: "${key}"` };
+    }
+    if (key === 'quiet_hours') {
+      const qh = body[key];
+      if (typeof qh !== 'object' || qh === null || Array.isArray(qh)) {
+        return { valid: false, error: 'quiet_hours must be an object' };
+      }
+      if ('enabled' in qh && typeof qh.enabled !== 'boolean') {
+        return { valid: false, error: 'quiet_hours.enabled must be a boolean' };
+      }
+      if ('start' in qh && !HH_MM_RE.test(qh.start)) {
+        return { valid: false, error: 'quiet_hours.start must be HH:MM (24-hour)' };
+      }
+      if ('end' in qh && !HH_MM_RE.test(qh.end)) {
+        return { valid: false, error: 'quiet_hours.end must be HH:MM (24-hour)' };
+      }
+      continue;
+    }
+    const channelUpdate = body[key];
+    if (typeof channelUpdate !== 'object' || channelUpdate === null || Array.isArray(channelUpdate)) {
+      return { valid: false, error: `"${key}" must be an object with channel flags` };
+    }
+    for (const channel of Object.keys(channelUpdate)) {
+      if (!CHANNEL_KEYS.includes(channel)) {
+        return { valid: false, error: `Unknown channel "${channel}" in "${key}"` };
+      }
+      if (typeof channelUpdate[channel] !== 'boolean') {
+        return { valid: false, error: `"${key}.${channel}" must be a boolean` };
+      }
+    }
+  }
+  return { valid: true };
+}
+
 // TTL for the unread counts cache (seconds)
 const UNREAD_COUNT_TTL = 300; // 5 minutes
 
@@ -182,6 +304,136 @@ async function markAsRead(req, res) {
   }
 }
 
+/**
+ * GET /api/webapp/notifications/preferences
+ * Returns the user's notification_preferences from the DB.
+ * Auto-upgrades legacy boolean format to the new per-channel format on first read.
+ */
+async function getPreferences(req, res) {
+  try {
+    const userId = req.session?.user?.id;
+    if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+    const { rows } = await query(
+      'SELECT notification_preferences FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    let prefs = rows[0].notification_preferences || {};
+
+    // Auto-upgrade on-read for any user still on the old boolean format.
+    // We persist the result so this only fires once per user.
+    if (isLegacyBooleanFormat(prefs)) {
+      prefs = upgradeLegacyPrefs(prefs);
+      await query(
+        'UPDATE users SET notification_preferences = $1 WHERE id = $2',
+        [JSON.stringify(prefs), userId]
+      );
+      NotificationEmitter.invalidatePrefsCache(userId).catch(() => {});
+    }
+
+    // Back-fill any keys missing from the stored object (e.g. new keys added
+    // after the user record was last written) without overwriting existing choices.
+    let needsBackfill = false;
+    for (const key of ALLOWED_PREF_KEYS) {
+      if (!(key in prefs)) {
+        prefs[key] = { ...DEFAULT_PREFS[key] };
+        needsBackfill = true;
+      }
+    }
+    if (needsBackfill) {
+      await query(
+        'UPDATE users SET notification_preferences = $1 WHERE id = $2',
+        [JSON.stringify(prefs), userId]
+      );
+      NotificationEmitter.invalidatePrefsCache(userId).catch(() => {});
+    }
+
+    res.json({ success: true, preferences: prefs });
+  } catch (error) {
+    logger.error('Get notification preferences error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get notification preferences' });
+  }
+}
+
+/**
+ * PUT /api/webapp/notifications/preferences
+ * Body: partial object — only the keys/channels you want to change.
+ * Deep-merges at the channel level so sending { "likes": { "bot": false } }
+ * only flips the bot flag without touching inApp/email/push.
+ */
+async function updatePreferences(req, res) {
+  try {
+    const userId = req.session?.user?.id;
+    if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+    const body = req.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return res.status(400).json({ success: false, error: 'Request body must be a JSON object' });
+    }
+    if (Object.keys(body).length === 0) {
+      return res.status(400).json({ success: false, error: 'Request body must not be empty' });
+    }
+
+    const validation = validatePrefsUpdate(body);
+    if (!validation.valid) {
+      return res.status(400).json({ success: false, error: validation.error });
+    }
+
+    // Fetch current preferences, upgrading from legacy format if necessary
+    const { rows } = await query(
+      'SELECT notification_preferences FROM users WHERE id = $1',
+      [userId]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    let current = rows[0].notification_preferences || {};
+    if (isLegacyBooleanFormat(current)) {
+      current = upgradeLegacyPrefs(current);
+    }
+
+    // Ensure all canonical keys are present before merging
+    for (const key of ALLOWED_PREF_KEYS) {
+      if (!(key in current)) {
+        current[key] = { ...DEFAULT_PREFS[key] };
+      }
+    }
+
+    // Deep-merge: channel-level keys are merged individually so callers only
+    // need to send the fields they want to change.
+    for (const key of Object.keys(body)) {
+      if (key === 'quiet_hours') {
+        current.quiet_hours = { ...current.quiet_hours, ...body.quiet_hours };
+      } else {
+        current[key] = { ...current[key], ...body[key] };
+      }
+    }
+
+    const { rows: updated } = await query(
+      `UPDATE users
+       SET notification_preferences = $1::jsonb
+       WHERE id = $2
+       RETURNING notification_preferences`,
+      [JSON.stringify(current), userId]
+    );
+
+    // Bust the NotificationEmitter Redis prefs cache so the next delivery
+    // attempt reads the fresh preferences from the DB.
+    await NotificationEmitter.invalidatePrefsCache(userId);
+
+    res.json({ success: true, preferences: updated[0].notification_preferences });
+  } catch (error) {
+    logger.error('Update notification preferences error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update notification preferences' });
+  }
+}
+
 function formatNotification(row) {
   const meta = row.metadata || {};
   return {
@@ -211,4 +463,6 @@ module.exports = {
   getNotificationCounts,
   markAsRead,
   getUnreadCounts,
+  getPreferences,
+  updatePreferences,
 };

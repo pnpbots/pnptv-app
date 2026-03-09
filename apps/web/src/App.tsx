@@ -7,6 +7,7 @@ import { router } from "@/router";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
+import { PermissionOnboarding } from "@/components/PermissionOnboarding";
 import { useAuth } from "@/hooks/useAuth";
 
 function useScreenCaptureGuard() {
@@ -117,6 +118,7 @@ function AppOverlays() {
   return (
     <>
       <PWAInstallBanner />
+      <PermissionOnboarding isAuthenticated={isAuthenticated} />
       <NotificationPermissionPrompt isAuthenticated={isAuthenticated} />
     </>
   );

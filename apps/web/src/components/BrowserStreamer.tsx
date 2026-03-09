@@ -804,7 +804,7 @@ export default function BrowserStreamer() {
 
     recorder.ondataavailable = (e: BlobEvent) => {
       if (e.data && e.data.size > 0 && socket.connected) {
-        socket.emit("stream:data", e.data);
+        e.data.arrayBuffer().then((ab) => socket.emit("stream:data", ab));
         recordChunkSize(e.data.size);
       }
     };

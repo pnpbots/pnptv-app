@@ -868,7 +868,7 @@ export default function StreamerDashboard({
     recorder.ondataavailable = (e: BlobEvent) => {
       if (e.data && e.data.size > 0) {
         if (socket?.connected) {
-          socket.emit("stream:data", e.data);
+          e.data.arrayBuffer().then((ab) => socket.emit("stream:data", ab));
           bytesWindowRef.current.push({ bytes: e.data.size, ts: Date.now() });
           bytesSentTotalRef.current += e.data.size;
           frameCountRef.current += 1;

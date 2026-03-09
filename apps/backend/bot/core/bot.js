@@ -224,6 +224,9 @@ const startApiServer = (modeLabel) => {
   require('../services/notificationEmitter').setIO(io);
   initSocketIO(io);
 
+  // Start the daily notification email digest scheduler
+  require('../services/notificationDigestScheduler').start();
+
   server.listen(PORT, '0.0.0.0', () => {
     const prefix = modeLabel ? `${modeLabel} ` : '';
     logger.info(`✓ ${prefix}API server running on port ${PORT} (Socket.IO attached)`);

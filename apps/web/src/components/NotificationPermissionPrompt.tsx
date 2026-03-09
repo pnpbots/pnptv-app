@@ -3,8 +3,9 @@ import { subscribeToPush } from "@/lib/pushNotifications";
 import { useI18n } from "@/lib/i18n";
 
 const DISMISS_KEY = "push_notif_prompt_dismissed_v2";
+const ONBOARDING_KEY = "pnptv_permissions_onboarded_v1";
 const DISMISS_DAYS = 3;
-const SHOW_DELAY_MS = 6000;
+const SHOW_DELAY_MS = 8000;
 
 function isDismissed(): boolean {
   const until = localStorage.getItem(DISMISS_KEY);
@@ -36,6 +37,8 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
     if (Notification.permission === "granted") return;
     if (Notification.permission === "denied") return;
     if (isDismissed()) return;
+    // Don't show if the permission onboarding already handled notifications
+    if (localStorage.getItem(ONBOARDING_KEY) === "done") return;
 
     showTimerRef.current = setTimeout(() => setShow(true), SHOW_DELAY_MS);
 

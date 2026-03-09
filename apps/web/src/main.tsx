@@ -9,14 +9,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   </React.StrictMode>
 );
 
-// Dismiss splash screen once React has mounted — hold briefly for visual impact
+// Dismiss splash screen after React mounts
 requestAnimationFrame(() => {
   const splash = document.getElementById("splash");
   if (splash) {
-    // Let the splash breathe for a moment before dismissing
     setTimeout(() => {
       splash.classList.add("hide");
-      setTimeout(() => splash.remove(), 700);
-    }, 600);
+      setTimeout(() => splash.remove(), 500);
+    }, 1400);
   }
 });
+

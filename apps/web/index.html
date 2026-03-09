@@ -108,51 +108,135 @@
     <!-- Splash screen styles -->
     <style>
       #splash {
-        position: fixed;
-        inset: 0;
-        z-index: 99999;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        background: #0a0a0a;
+        position: fixed; inset: 0; z-index: 99999;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        background: #0a0a0a; overflow: hidden;
       }
       #splash.hide {
-        animation: splash-exit 0.4s ease-out forwards;
+        animation: splash-exit .5s cubic-bezier(.4,0,.2,1) forwards;
       }
       @keyframes splash-exit {
-        to { opacity: 0; visibility: hidden; }
+        to { opacity: 0; transform: scale(1.05); visibility: hidden; }
       }
-      #splash .logo-wrap {
-        animation: splash-fade-in 0.5s ease-out both;
+
+      /* Ambient gradient background */
+      #splash::before {
+        content: ''; position: absolute; inset: -50%;
+        background: conic-gradient(from 0deg at 50% 50%,
+          transparent 0deg, rgba(212,0,122,.08) 60deg, transparent 120deg,
+          rgba(230,145,56,.06) 200deg, transparent 280deg, rgba(212,0,122,.08) 360deg);
+        animation: splash-bg-rotate 6s linear infinite;
       }
-      #splash .logo-wrap img {
-        width: 64px; height: auto;
+      @keyframes splash-bg-rotate { to { transform: rotate(360deg); } }
+
+      /* Outer pulse ring */
+      .splash-ring {
+        position: absolute; border-radius: 50%;
+        border: 1px solid rgba(212,0,122,.15);
+        animation: splash-ring-pulse 2.5s ease-out infinite;
       }
-      #splash .splash-spinner {
-        margin-top: 32px;
-        width: 32px; height: 32px;
-        border-radius: 50%;
-        border: 2px solid transparent;
-        border-top-color: #D4007A;
-        animation: splash-fade-in 0.5s ease-out 0.2s both, splash-spin 0.8s linear infinite;
+      .splash-ring-1 { width: 140px; height: 140px; }
+      .splash-ring-2 { width: 200px; height: 200px; animation-delay: .8s; border-color: rgba(230,145,56,.12); }
+      .splash-ring-3 { width: 260px; height: 260px; animation-delay: 1.6s; border-color: rgba(212,0,122,.08); }
+      @keyframes splash-ring-pulse {
+        0% { transform: scale(.7); opacity: 1; }
+        100% { transform: scale(1.3); opacity: 0; }
       }
-      @keyframes splash-fade-in {
-        from { opacity: 0; }
-        to { opacity: 1; }
+
+      /* Floating particles */
+      .splash-particle {
+        position: absolute; width: 3px; height: 3px; border-radius: 50%;
+        background: rgba(212,0,122,.5);
       }
-      @keyframes splash-spin {
-        to { transform: rotate(360deg); }
+      .splash-p1 { top: 30%; left: 20%; animation: splash-float 3s ease-in-out infinite; }
+      .splash-p2 { top: 60%; left: 75%; animation: splash-float 4s ease-in-out .5s infinite; background: rgba(230,145,56,.5); }
+      .splash-p3 { top: 20%; left: 65%; animation: splash-float 3.5s ease-in-out 1s infinite; width: 2px; height: 2px; }
+      .splash-p4 { top: 70%; left: 30%; animation: splash-float 4.5s ease-in-out 1.5s infinite; background: rgba(230,145,56,.4); width: 2px; height: 2px; }
+      .splash-p5 { top: 45%; left: 85%; animation: splash-float 3s ease-in-out 2s infinite; }
+      .splash-p6 { top: 80%; left: 55%; animation: splash-float 3.8s ease-in-out .3s infinite; background: rgba(230,145,56,.35); width: 2px; height: 2px; }
+      @keyframes splash-float {
+        0%, 100% { transform: translateY(0) scale(1); opacity: .3; }
+        50% { transform: translateY(-30px) scale(1.5); opacity: .8; }
+      }
+
+      /* Logo container */
+      .splash-logo-wrap {
+        position: relative; z-index: 2;
+        animation: splash-logo-enter .8s cubic-bezier(.16,1,.3,1) both;
+      }
+      .splash-logo-wrap img {
+        width: 72px; height: auto;
+        filter: drop-shadow(0 0 20px rgba(212,0,122,.3)) drop-shadow(0 0 40px rgba(230,145,56,.15));
+      }
+      @keyframes splash-logo-enter {
+        from { opacity: 0; transform: scale(.6) translateY(10px); filter: blur(8px); }
+        to { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
+      }
+
+      /* Orbiting dot */
+      .splash-orbit {
+        position: absolute; width: 120px; height: 120px; z-index: 1;
+        animation: splash-orbit-spin 2s linear infinite;
+      }
+      .splash-orbit::after {
+        content: ''; position: absolute; top: 0; left: 50%;
+        width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%;
+        background: linear-gradient(135deg, #D4007A, #E69138);
+        box-shadow: 0 0 8px rgba(212,0,122,.6), 0 0 16px rgba(230,145,56,.3);
+      }
+      @keyframes splash-orbit-spin { to { transform: rotate(360deg); } }
+
+      /* Gradient progress bar */
+      .splash-progress {
+        position: relative; z-index: 2;
+        margin-top: 36px; width: 120px; height: 2px;
+        background: rgba(255,255,255,.06); border-radius: 2px; overflow: hidden;
+      }
+      .splash-progress::after {
+        content: ''; position: absolute; inset: 0;
+        background: linear-gradient(90deg, #D4007A, #E69138);
+        animation: splash-progress-fill 1.2s cubic-bezier(.4,0,.2,1) .3s both;
+        border-radius: 2px;
+      }
+      @keyframes splash-progress-fill {
+        from { transform: scaleX(0); transform-origin: left; }
+        to { transform: scaleX(1); transform-origin: left; }
+      }
+
+      /* Brand text */
+      .splash-brand {
+        position: relative; z-index: 2;
+        margin-top: 16px; font-family: 'Ethnocentric', sans-serif;
+        font-size: 11px; letter-spacing: 4px; text-transform: uppercase;
+        background: linear-gradient(135deg, #D4007A, #E69138);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text;
+        animation: splash-text-enter .6s ease-out .5s both;
+      }
+      @keyframes splash-text-enter {
+        from { opacity: 0; transform: translateY(6px); letter-spacing: 8px; }
+        to { opacity: 1; transform: translateY(0); letter-spacing: 4px; }
       }
     </style>
   </head>
   <body class="bg-pnp-background text-pnp-textPrimary antialiased">
-    <!-- Splash screen — visible until React mounts -->
+    <!-- Dynamic splash screen -->
     <div id="splash">
-      <div class="logo-wrap">
+      <div class="splash-particle splash-p1"></div>
+      <div class="splash-particle splash-p2"></div>
+      <div class="splash-particle splash-p3"></div>
+      <div class="splash-particle splash-p4"></div>
+      <div class="splash-particle splash-p5"></div>
+      <div class="splash-particle splash-p6"></div>
+      <div class="splash-ring splash-ring-1"></div>
+      <div class="splash-ring splash-ring-2"></div>
+      <div class="splash-ring splash-ring-3"></div>
+      <div class="splash-orbit"></div>
+      <div class="splash-logo-wrap">
         <img src="/Logo2-50.png" alt="PNPtv!" />
       </div>
-      <div class="splash-spinner"></div>
+      <div class="splash-progress"></div>
+      <div class="splash-brand">PNPtv!</div>
     </div>
 
     <div id="root"></div>

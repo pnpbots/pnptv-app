@@ -1,6 +1,7 @@
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { getRedis } = require('../../../config/redis');
+const { resolveUserId } = require('../../utils/helpers');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -40,7 +41,7 @@ const getThreads = async (req, res) => {
 // Get conversation messages with a specific user
 const getConversation = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { partnerId } = req.params;
+  const partnerId = await resolveUserId(req.params.partnerId);
   const { cursor } = req.query;
   try {
     const { rows } = await query(
@@ -81,7 +82,7 @@ const getConversation = async (req, res) => {
 // Get partner user info
 const getPartnerInfo = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { partnerId } = req.params;
+  const partnerId = await resolveUserId(req.params.partnerId);
   try {
     const { rows } = await query(
       `SELECT id, username, first_name, last_name, photo_file_id, pnptv_id FROM users WHERE id=$1`,
@@ -98,9 +99,10 @@ const getPartnerInfo = async (req, res) => {
 // Send a DM via REST (fallback when Socket.IO is unavailable)
 const sendMessage = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { recipientId } = req.params;
+  const recipientId = await resolveUserId(req.params.recipientId);
   const { content } = req.body;
   if (!content?.trim()) return res.status(400).json({ error: 'Content required' });
+  if (!recipientId) return res.status(404).json({ error: 'Recipient not found' });
   if (recipientId === user.id) return res.status(400).json({ error: 'Cannot message yourself' });
   try {
     // Check if sender is blocked by recipient

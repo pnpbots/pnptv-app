@@ -2230,6 +2230,8 @@ const notificationLimiter = rateLimit({
 app.get('/api/webapp/notifications', requireSessionAuth, notificationLimiter, asyncHandler(notificationsController.getNotifications));
 app.get('/api/webapp/notifications/counts', requireSessionAuth, notificationLimiter, asyncHandler(notificationsController.getNotificationCounts));
 app.put('/api/webapp/notifications/mark-read', requireSessionAuth, asyncHandler(notificationsController.markAsRead));
+app.get('/api/webapp/notifications/preferences', requireSessionAuth, asyncHandler(notificationsController.getPreferences));
+app.put('/api/webapp/notifications/preferences', requireSessionAuth, asyncHandler(notificationsController.updatePreferences));
 
 // Web App Mastodon Feed
 app.get('/api/webapp/mastodon/feed', asyncHandler(webAppController.getMastodonFeed));
