@@ -89,6 +89,14 @@ function initSocketIO(io) {
     const user = socket.data.user;
     logger.info(`Socket connected: user ${user.id}`);
 
+    // Activity tracking — 5-min TTL key for notification throttling
+    const _activityRedis = getRedis();
+    const _activityKey = `user:${user.id}:active`;
+    _activityRedis.set(_activityKey, '1', 'EX', 300).catch(() => {});
+    socket.onAny(() => {
+      _activityRedis.set(_activityKey, '1', 'EX', 300).catch(() => {});
+    });
+
     // Join personal room for DMs and targeted notifications
     socket.join(`user:${user.id}`);
 
@@ -817,14 +825,21 @@ function initSocketIO(io) {
         socket.data.ffmpegProcess = ffmpeg;
         socket.data.streamChannelRef = channelRef;
 
+        let ffmpegStderrLines = 0;
         ffmpeg.stderr.on('data', (chunk) => {
-          // FFmpeg writes progress/warnings to stderr — log at debug level to
-          // avoid flooding production logs. Errors are handled via 'close'.
-          logger.debug(`[ffmpeg:${channelRef}] ${chunk.toString().trim()}`);
+          ffmpegStderrLines++;
+          // Log first 20 lines at warn level to capture startup errors/codec info,
+          // then switch to debug to avoid flooding production logs.
+          const line = chunk.toString().trim();
+          if (ffmpegStderrLines <= 20) {
+            logger.warn(`[ffmpeg:${channelRef}] ${line}`);
+          } else {
+            logger.debug(`[ffmpeg:${channelRef}] ${line}`);
+          }
         });
 
         ffmpeg.on('close', (code, signal) => {
-          logger.info(`FFmpeg process for channel '${channelRef}' exited (code=${code}, signal=${signal})`);
+          logger.info(`FFmpeg process for channel '${channelRef}' exited (code=${code}, signal=${signal}), received ${socket.data.streamDataChunks || 0} chunks / ${socket.data.streamDataBytes || 0} bytes`);
           // Only emit stopped if the process wasn't already cleaned up by stream:stop
           if (socket.data.ffmpegProcess === ffmpeg) {
             socket.data.ffmpegProcess = null;
@@ -840,6 +855,8 @@ function initSocketIO(io) {
           socket.emit('stream:error', { message: 'Streaming process failed to start. Is FFmpeg installed?' });
         });
 
+        socket.data.streamDataChunks = 0;
+        socket.data.streamDataBytes = 0;
         logger.info(`Browser stream started: user ${user.id} → channel '${channelRef}' → ${rtmpTarget}`);
         socket.emit('stream:started', { channelRef, rtmpTarget });
       } catch (err) {
@@ -858,14 +875,30 @@ function initSocketIO(io) {
       if (ffmpeg.stdin.writableNeedDrain) return;
 
       try {
-        // data may arrive as a Buffer (binary Socket.IO frame) or ArrayBuffer
-        const buf = Buffer.isBuffer(data)
-          ? data
-          : data instanceof ArrayBuffer
-            ? Buffer.from(data)
-            : null;
+        // data may arrive as Buffer, ArrayBuffer, Uint8Array, or other typed arrays
+        // from the browser's MediaRecorder Blob sent via Socket.IO binary frames.
+        let buf;
+        if (Buffer.isBuffer(data)) {
+          buf = data;
+        } else if (data instanceof ArrayBuffer) {
+          buf = Buffer.from(data);
+        } else if (data instanceof Uint8Array || ArrayBuffer.isView(data)) {
+          buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+        } else if (typeof data === 'object' && data !== null && data.type === 'Buffer' && Array.isArray(data.data)) {
+          // Socket.IO JSON-serialized Buffer fallback
+          buf = Buffer.from(data.data);
+        } else {
+          // Last resort: try direct conversion
+          buf = Buffer.from(data);
+        }
 
         if (!buf || buf.length === 0) return;
+
+        socket.data.streamDataChunks = (socket.data.streamDataChunks || 0) + 1;
+        socket.data.streamDataBytes = (socket.data.streamDataBytes || 0) + buf.length;
+        if (socket.data.streamDataChunks <= 3 || socket.data.streamDataChunks % 100 === 0) {
+          logger.info(`[stream:data] chunk #${socket.data.streamDataChunks}, ${buf.length} bytes, total ${socket.data.streamDataBytes} bytes`);
+        }
 
         ffmpeg.stdin.write(buf, (writeErr) => {
           if (writeErr && !ffmpeg.stdin.destroyed) {
