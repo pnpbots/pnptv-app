@@ -595,7 +595,7 @@ function initSocketIO(io) {
         try {
           history = await LiveStreamModel.getComments(streamId, 50);
         } catch {
-          const raw = await redis.lRange(`live:chat:${streamId}`, 0, 49);
+          const raw = await redis.lrange(`live:chat:${streamId}`, 0, 49);
           history = raw.map(r => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean).reverse();
         }
         socket.emit('live:history', history);
@@ -701,8 +701,8 @@ function initSocketIO(io) {
           timestamp = new Date();
           const redis = getRedis();
           const msg = JSON.stringify({ id: commentId, streamId, userId: user.id, username, content: trimmedContent, createdAt: timestamp });
-          await redis.lPush(`live:chat:${streamId}`, msg);
-          await redis.lTrim(`live:chat:${streamId}`, 0, 199);
+          await redis.lpush(`live:chat:${streamId}`, msg);
+          await redis.ltrim(`live:chat:${streamId}`, 0, 199);
           await redis.expire(`live:chat:${streamId}`, 86400);
         }
 

@@ -4203,13 +4203,45 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
   try {
     const userId = String(user.telegram_id || user.id);
 
-    // --- Validate performer existence (Fix 3) ---
+    // --- Resolve performer ID ---
+    // The frontend may send a Restreamer process ID (e.g. 'restreamer-ui:ingest:pnptv-santino')
+    // instead of a Directus performer ID. Resolve it to the actual performer via the
+    // users.live_channel → performers.user_id chain.
+    let resolvedPerformerId = String(performerId);
+    const restreamerMatch = resolvedPerformerId.match(/^restreamer-ui:ingest:([\w-]+)$/);
+    if (restreamerMatch) {
+      const channelRef = restreamerMatch[1];
+      try {
+        const { rows } = await getPool().query(
+          `SELECT p.directus_id FROM performers p
+           JOIN users u ON p.user_id = u.id
+           WHERE u.live_channel = $1
+           LIMIT 1`,
+          [channelRef]
+        );
+        if (rows.length > 0 && rows[0].directus_id) {
+          resolvedPerformerId = String(rows[0].directus_id);
+        } else {
+          // No performer linked — try using the user ID directly as performer lookup
+          const userRows = await getPool().query('SELECT id FROM users WHERE live_channel = $1 LIMIT 1', [channelRef]);
+          if (userRows.rows.length > 0) {
+            resolvedPerformerId = String(userRows.rows[0].id);
+          }
+        }
+      } catch (resolveErr) {
+        logger.warn(`Tips: failed to resolve channel ref '${channelRef}' to performer: ${resolveErr.message}`);
+      }
+    }
+
+    // --- Validate performer existence ---
     // performers in the tip picker come from Directus CMS via /api/proxy/live/performers.
     // We validate against the same source: a Directus items/performers lookup.
+    // Fall back to a local DB lookup if Directus is unreachable.
+    let performerValidated = false;
     try {
       const performerResp = await axios.get(`${DIRECTUS_INTERNAL_URL}/items/performers`, {
         params: {
-          'filter[id][_eq]': String(performerId),
+          'filter[id][_eq]': resolvedPerformerId,
           'filter[status][_eq]': 'published',
           'fields[]': ['id', 'name'],
           limit: 1,
@@ -4217,18 +4249,30 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
         timeout: 5000,
       });
       const found = performerResp.data?.data;
-      if (!Array.isArray(found) || found.length === 0) {
-        return res.status(404).json({ success: false, error: 'Performer not found' });
-      }
+      performerValidated = Array.isArray(found) && found.length > 0;
     } catch (validationErr) {
-      logger.warn(`Tips: performer validation failed for id=${performerId}: ${validationErr.message}`);
+      logger.warn(`Tips: Directus validation failed for id=${resolvedPerformerId}: ${validationErr.message}`);
+    }
+
+    // Fallback: check local performers table if Directus validation failed
+    if (!performerValidated) {
+      try {
+        const localCheck = await getPool().query(
+          'SELECT id FROM performers WHERE directus_id = $1 OR user_id = $1 LIMIT 1',
+          [resolvedPerformerId]
+        );
+        performerValidated = localCheck.rows.length > 0;
+      } catch { /* ignore */ }
+    }
+
+    if (!performerValidated) {
       return res.status(404).json({ success: false, error: 'Performer not found' });
     }
 
     // Look up performer name for payment description
-    let performerName = performerId;
+    let performerName = resolvedPerformerId;
     try {
-      const performer = await PerformerModel.getById(performerId);
+      const performer = await PerformerModel.getById(resolvedPerformerId);
       if (performer) performerName = performer.displayName;
     } catch { /* ignore */ }
 
@@ -4248,7 +4292,7 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
                AND created_at > NOW() - INTERVAL '5 seconds'
              ORDER BY created_at DESC
              LIMIT 1`,
-            [userId, String(performerId), numAmount]
+            [userId, String(resolvedPerformerId), numAmount]
           );
           if (dupCheck.rows.length > 0) {
             const existing = dupCheck.rows[0];
@@ -4278,7 +4322,7 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
         userId, null, null,
         numAmount,
         (message || '').slice(0, 200),
-        String(performerId)
+        String(resolvedPerformerId)
       );
 
       if (!tip) {
@@ -4306,7 +4350,11 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
             paymentMethod: 'tokens',
           };
           // Emit to the specific performer's live room; all viewers in that room receive it
-          io.to(`live:${String(performerId)}`).emit('live:tip', tipPayload);
+          // Emit to both the resolved performer room and the original stream room
+          io.to(`live:${String(resolvedPerformerId)}`).emit('live:tip', tipPayload);
+          if (resolvedPerformerId !== String(performerId)) {
+            io.to(`live:${String(performerId)}`).emit('live:tip', tipPayload);
+          }
           // Notify sender of new balance
           const socketId = req.session?.socketId;
           if (socketId) {
@@ -4334,7 +4382,7 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
       null,       // booking_id
       numAmount,
       (message || '').slice(0, 200),
-      String(performerId)  // performer_id (UUID from performers table)
+      String(resolvedPerformerId)  // performer_id (resolved from channel ref if needed)
     );
 
     if (!tip) {
