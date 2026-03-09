@@ -4213,14 +4213,14 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
       const channelRef = restreamerMatch[1];
       try {
         const { rows } = await getPool().query(
-          `SELECT p.directus_id FROM performers p
+          `SELECT p.id AS performer_id FROM performers p
            JOIN users u ON p.user_id = u.id
            WHERE u.live_channel = $1
            LIMIT 1`,
           [channelRef]
         );
-        if (rows.length > 0 && rows[0].directus_id) {
-          resolvedPerformerId = String(rows[0].directus_id);
+        if (rows.length > 0 && rows[0].performer_id) {
+          resolvedPerformerId = String(rows[0].performer_id);
         } else {
           // No performer linked — try using the user ID directly as performer lookup
           const userRows = await getPool().query('SELECT id FROM users WHERE live_channel = $1 LIMIT 1', [channelRef]);
@@ -4258,7 +4258,7 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
     if (!performerValidated) {
       try {
         const localCheck = await getPool().query(
-          'SELECT id FROM performers WHERE directus_id = $1 OR user_id = $1 LIMIT 1',
+          'SELECT id FROM performers WHERE id::text = $1 OR user_id = $1 LIMIT 1',
           [resolvedPerformerId]
         );
         performerValidated = localCheck.rows.length > 0;
@@ -4285,7 +4285,7 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
         try {
           const dupCheck = await getPool().query(
             `SELECT id, amount, created_at FROM pnp_tips
-             WHERE user_telegram_id = $1
+             WHERE user_id = $1
                AND performer_id = $2
                AND amount = $3
                AND payment_method = 'tokens'
