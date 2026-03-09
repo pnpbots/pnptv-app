@@ -17,7 +17,7 @@ function getModeConfig(mode, hasMedia) {
     post: { temperature: 0.7, defaultTokens: 320, mediaTokens: 260 },
     videoDescription: { temperature: 0.7, defaultTokens: 350, mediaTokens: 300 },
     salesPost: { temperature: 0.7, defaultTokens: 400, mediaTokens: 350 },
-    xPost: { temperature: 0.7, defaultTokens: 750, mediaTokens: 750 },
+    xPost: { temperature: 0.7, defaultTokens: 450, mediaTokens: 450 },
   };
 
   const fallback = { temperature: 0.7, defaultTokens: 300, mediaTokens: 240 };
@@ -145,18 +145,17 @@ Posts 3-8 — EL VALOR: Testimonios, funcionalidades, fragmentos de contenido, b
 Post 9 — EL RESUMEN: Beneficios clave en formato conciso: privacidad, comunidad global, contenido exclusivo.
 Post 10 — EL CTA: Llamada a la acción con el link pnptv.app/join. Rota entre tipo Comunidad, Exclusividad o Curiosidad.
 
-ESTRUCTURA DE CADA OPCIÓN DE POST INDIVIDUAL:
+ESTRUCTURA DE CADA OPCIÓN DE POST INDIVIDUAL (MÁXIMO 250 CARACTERES):
 1. GANCHO: Para el scroll (afirmación / pregunta / dato sorprendente)
 2. DESARROLLO: Beneficio concreto (qué gana, qué resuelve, qué puede hacer)
-3. CTA: Directo y orientado al beneficio
-4. LINK: pnptv.app/join (o variante) — solo una vez, al final
+3. CTA: Directo y orientado al beneficio (el link se añade automáticamente, NO lo escribas tú)
 
 TU FLUJO:
 Cuando recibas un tema o idea, no des explicaciones ni hagas preguntas. Entrega SOLO las 3 opciones listas para copiar y pegar.
 
-OPCIÓN A (El Gancho Directo): Opinión fuerte o verdad incómoda → beneficio directo → CTA contundente → link
-OPCIÓN B (El Aportador de Valor): Promesa de valor útil → qué aprende/gana el usuario → CTA de descubrimiento → link
-OPCIÓN C (El Estilo Curiosidad): Intriga o pregunta retórica → curiosidad amplificada con beneficio real → CTA de acción → link
+OPCIÓN A (El Gancho Directo): Opinión fuerte o verdad incómoda → beneficio directo → CTA contundente (máx 250 chars, sin link)
+OPCIÓN B (El Aportador de Valor): Promesa de valor útil → qué aprende/gana el usuario → CTA de descubrimiento (máx 250 chars, sin link)
+OPCIÓN C (El Estilo Curiosidad): Intriga o pregunta retórica → curiosidad amplificada con beneficio real → CTA de acción (máx 250 chars, sin link)
 
 OUTPUT EN EL IDIOMA SOLICITADO. Sin mezcla de idiomas. Transcreación cultural, no traducción literal.`;
 
@@ -177,7 +176,7 @@ OUTPUT EN EL IDIOMA SOLICITADO. Sin mezcla de idiomas. Transcreación cultural, 
   }
 
   if (mode === 'xPost') {
-    return `${methDaddyPersona}\n\n${xPostBasePrompt}\n\n${langHint}\n\nOUTPUT RULES:\n- Genera EXACTAMENTE 3 opciones (A, B, C) como se describe arriba.\n- No agregues explicaciones ni texto extra, solo las 3 opciones.\n- Respeta el límite de 280 caracteres por opción.\n- Incluye SIEMPRE el link pnptv.app/join (o pnptv.app/plans, pnptv.app/lifetime100) exactamente UNA VEZ en cada opción, al FINAL. NUNCA al inicio.\n- NO incluyas ningún otro link o URL.\n- Aplica algospeak automáticamente cuando el contexto sea promocional de alto riesgo.\n- Rota el tipo de CTA entre las 3 opciones: A=comunidad, B=exclusividad, C=curiosidad.\n- Añade un click trigger (1 frase de confianza) debajo del link en al menos una opción.\n- ABSOLUTAMENTE NADA DE MARKDOWN: no asteriscos (*), no guiones bajos (_), no backticks, no headers (#), no listas con guiones. SOLO TEXTO PLANO.\n- CRÍTICO: Write ALL post content EXCLUSIVELY in ${language}. ZERO language mixing. No Spanglish. Every single word must be in ${language} only. Slang and expressions must also be in ${language}.\n- IMPORTANT: Each option block must contain ONLY the tweet text itself. Do NOT include the option label (e.g. "OPCIÓN A", "OPTION A", "(El Gancho Directo)", etc.) inside the tweet body. The label goes on its own line as a header, then the tweet text follows.`;
+    return `${methDaddyPersona}\n\n${xPostBasePrompt}\n\n${langHint}\n\nOUTPUT RULES:\n\n⚠️ REGLA #1 — LÍMITE DE CARACTERES (NO NEGOCIABLE):\nCada opción debe tener MÁXIMO 250 CARACTERES de texto (sin contar el link). El link pnptv.app/join se añade automáticamente al final — NO lo incluyas tú. X tiene un límite estricto de 280 caracteres y el link ocupa 23 caracteres + 1 salto de línea = 24 caracteres reservados. Si tu texto supera 250 caracteres, el post se CORTARÁ y no se publicará completo. CUENTA LOS CARACTERES antes de generar cada opción. Prioriza BREVEDAD y PEGADA.\n\n- Genera EXACTAMENTE 3 opciones (A, B, C) como se describe arriba.\n- No agregues explicaciones ni texto extra, solo las 3 opciones.\n- MÁXIMO 250 CARACTERES por opción (texto solamente, sin el link). CUENTA CADA CARÁCTER.\n- NO incluyas links ni URLs en el texto. El link pnptv.app/join se añade automáticamente después.\n- Aplica algospeak automáticamente cuando el contexto sea promocional de alto riesgo.\n- Rota el tipo de CTA entre las 3 opciones: A=comunidad, B=exclusividad, C=curiosidad.\n- ABSOLUTAMENTE NADA DE MARKDOWN: no asteriscos (*), no guiones bajos (_), no backticks, no headers (#), no listas con guiones. SOLO TEXTO PLANO.\n- CRÍTICO: Write ALL post content EXCLUSIVELY in ${language}. ZERO language mixing. No Spanglish. Every single word must be in ${language} only. Slang and expressions must also be in ${language}.\n- IMPORTANT: Each option block must contain ONLY the tweet text itself. Do NOT include the option label (e.g. "OPCIÓN A", "OPTION A", "(El Gancho Directo)", etc.) inside the tweet body. The label goes on its own line as a header, then the tweet text follows.\n\nRECUERDA: 250 CARACTERES MÁXIMO por opción. Posts más largos serán cortados por el sistema.`;
   }
 
   return `${methDaddyPersona}\n\n${langHint}\n\nOutput rules:\n- Return ONLY the final message text in Meth Daddy style\n- ABSOLUTELY NO MARKDOWN: no asterisks, no underscores, no backticks, no # headers, no bullet dashes. PLAIN TEXT ONLY.\n- CRITICAL: Keep text UNDER 450 characters total\n- End with hashtags`;

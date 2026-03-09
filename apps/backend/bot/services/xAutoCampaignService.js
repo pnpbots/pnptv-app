@@ -238,6 +238,18 @@ class XAutoCampaignService {
       postText = this._stripOptionLabel(grokResponse);
     }
 
+    // Smart truncation: X allows 280 chars, URLs count as 23 via t.co.
+    // Reserve 24 chars (23 for link + 1 newline) for the pnptv.app link.
+    const X_TEXT_BUDGET = 280 - 24; // 256 chars for text body
+    if (postText.length > X_TEXT_BUDGET) {
+      logger.warn('Post text exceeds X limit, smart-truncating', {
+        campaignId: campaign.campaign_id,
+        originalLength: postText.length,
+        budget: X_TEXT_BUDGET,
+      });
+      postText = this._smartTruncate(postText, X_TEXT_BUDGET);
+    }
+
     // Normalize for X character limits and ensure required links
     const requiredLinks = ['pnptv.app'];
     const { text: normalizedText } = XPostService.ensureRequiredLinks(postText, requiredLinks);
@@ -448,6 +460,46 @@ class XAutoCampaignService {
   // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Smart truncate text to fit within a character budget.
+   * Tries to cut at the last complete sentence, then at word boundary.
+   * Removes any trailing incomplete URLs.
+   */
+  static _smartTruncate(text, maxChars) {
+    if (text.length <= maxChars) return text;
+
+    // Try cutting at the last sentence boundary (. ! ? followed by space or end)
+    const sentenceRegex = /[.!?]\s/g;
+    let lastSentenceEnd = -1;
+    let match;
+    while ((match = sentenceRegex.exec(text)) !== null) {
+      if (match.index + 1 <= maxChars) {
+        lastSentenceEnd = match.index + 1; // include the punctuation
+      }
+    }
+
+    // If we found a sentence boundary with at least 40% of the budget used, use it
+    if (lastSentenceEnd > maxChars * 0.4) {
+      return text.slice(0, lastSentenceEnd).trim();
+    }
+
+    // Fall back to word boundary
+    const truncated = text.slice(0, maxChars);
+    const lastSpace = truncated.lastIndexOf(' ');
+    if (lastSpace > maxChars * 0.4) {
+      let result = truncated.slice(0, lastSpace).trim();
+      // Remove any trailing incomplete URL (e.g. "pnptv" or "pnptv.app/jo")
+      result = result.replace(/\s+\S*\.?\S*$/, (m) => {
+        // Only remove if it looks like a partial URL
+        if (/https?:|\.app|\.com|pnptv/i.test(m)) return '';
+        return m;
+      });
+      return result.trim();
+    }
+
+    return truncated.trim();
+  }
 
   /**
    * Extract a random option from Grok's xPost response (3 options A/B/C).
