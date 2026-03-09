@@ -2856,7 +2856,8 @@ export function sendAdminNotification(payload: {
   targetType: "all" | "tier" | "users";
   tier?: string;
   userIds?: string[];
-}): Promise<{ success: boolean; sent: number; message: string }> {
+  channels?: string[];
+}): Promise<{ success: boolean; sent: number; botDmSent: number; emailSent: number; message: string }> {
   return request("/api/webapp/admin/notifications/push", { method: "POST", body: payload });
 }
 

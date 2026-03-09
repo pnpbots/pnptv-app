@@ -5,6 +5,8 @@ import { useI18n } from "@/lib/i18n";
 
 type TargetType = "all" | "tier" | "users";
 
+type Channel = "push" | "bot" | "email";
+
 interface NotifForm {
   title: string;
   body: string;
@@ -23,6 +25,8 @@ const EMPTY_FORM: NotifForm = {
   userIdsRaw: "",
 };
 
+const ALL_CHANNELS: Channel[] = ["push", "bot", "email"];
+
 const TITLE_MAX = 100;
 const BODY_MAX = 500;
 
@@ -37,25 +41,66 @@ const BellIcon = () => (
   </svg>
 );
 
+const CheckIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+  </svg>
+);
+
 const focusRing =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-surface";
+
+const CHANNEL_ICONS: Record<Channel, React.ReactNode> = {
+  push: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+    </svg>
+  ),
+  bot: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+    </svg>
+  ),
+  email: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+    </svg>
+  ),
+};
 
 export default function AdminNotifications() {
   const t = useI18n();
   const n = t.notifications;
 
   const [form, setForm] = useState<NotifForm>(EMPTY_FORM);
+  const [channels, setChannels] = useState<Set<Channel>>(new Set(ALL_CHANNELS));
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{
     success: boolean;
     message: string;
     sent?: number;
+    botDmSent?: number;
+    emailSent?: number;
   } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   const handleChange = <K extends keyof NotifForm>(key: K, value: NotifForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+    setFormError(null);
+    setResult(null);
+  };
+
+  const toggleChannel = (ch: Channel) => {
+    setChannels((prev) => {
+      const next = new Set(prev);
+      if (next.has(ch)) {
+        next.delete(ch);
+      } else {
+        next.add(ch);
+      }
+      return next;
+    });
     setFormError(null);
     setResult(null);
   };
@@ -79,6 +124,10 @@ export default function AdminNotifications() {
         return false;
       }
     }
+    if (channels.size === 0) {
+      setFormError(n.atLeastOneChannel);
+      return false;
+    }
     return true;
   };
 
@@ -101,11 +150,19 @@ export default function AdminNotifications() {
         targetType: form.targetType,
         tier: form.targetType === "tier" ? form.tier : undefined,
         userIds,
+        channels: Array.from(channels),
       });
 
-      setResult({ success: res.success, message: res.message, sent: res.sent });
+      setResult({
+        success: res.success,
+        message: res.message,
+        sent: res.sent,
+        botDmSent: res.botDmSent,
+        emailSent: res.emailSent,
+      });
       if (res.success) {
         setForm(EMPTY_FORM);
+        setChannels(new Set(ALL_CHANNELS));
       }
     } catch (err) {
       setResult({
@@ -131,6 +188,44 @@ export default function AdminNotifications() {
     return `${count} specific user(s)`;
   };
 
+  const channelSummary = (): string => {
+    const labels: Record<Channel, string> = {
+      push: n.channelPush,
+      bot: n.channelBot,
+      email: n.channelEmail,
+    };
+    return ALL_CHANNELS.filter((ch) => channels.has(ch))
+      .map((ch) => labels[ch])
+      .join(", ") || "—";
+  };
+
+  const confirmMessage = (): string => {
+    const chLabels: Record<Channel, string> = {
+      push: n.channelPush,
+      bot: n.channelBot,
+      email: n.channelEmail,
+    };
+    const chList = ALL_CHANNELS.filter((ch) => channels.has(ch))
+      .map((ch) => chLabels[ch])
+      .join(", ");
+    return `You are about to send "${form.title}" to ${targetLabel()} via: ${chList}. Are you sure?`;
+  };
+
+  const resultSummary = (): string => {
+    if (!result?.success) return "";
+    const parts: string[] = [];
+    if (channels.has("push") && result.sent !== undefined) {
+      parts.push(`Push: ${result.sent}`);
+    }
+    if (channels.has("bot") && result.botDmSent !== undefined) {
+      parts.push(`Bot DM: ${result.botDmSent}`);
+    }
+    if (channels.has("email") && result.emailSent !== undefined) {
+      parts.push(`Email: ${result.emailSent}`);
+    }
+    return parts.length > 0 ? ` (${parts.join(" · ")})` : "";
+  };
+
   return (
     <div className="page-container space-y-6">
       <div>
@@ -149,7 +244,7 @@ export default function AdminNotifications() {
         >
           <span>
             {result.message}
-            {result.sent !== undefined && ` (${result.sent} sent)`}
+            {result.success && resultSummary()}
           </span>
           <button
             onClick={() => setResult(null)}
@@ -345,10 +440,57 @@ export default function AdminNotifications() {
             </div>
           )}
 
+          {/* Channel Selection */}
+          <div>
+            <p className="block text-xs text-pnp-textSecondary mb-2">{n.channelsLabel}</p>
+            <div className="flex flex-col gap-2">
+              {ALL_CHANNELS.map((ch) => {
+                const checked = channels.has(ch);
+                const labels: Record<Channel, string> = {
+                  push: n.channelPush,
+                  bot: n.channelBot,
+                  email: n.channelEmail,
+                };
+                return (
+                  <label
+                    key={ch}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-colors select-none ${
+                      checked
+                        ? "border-pnp-accent/40 bg-pnp-accent/8"
+                        : "border-pnp-border bg-pnp-background hover:border-pnp-accent/30"
+                    }`}
+                  >
+                    <span
+                      className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 border transition-colors ${
+                        checked
+                          ? "bg-pnp-accent border-pnp-accent text-white"
+                          : "border-pnp-border bg-pnp-surface text-transparent"
+                      }`}
+                    >
+                      <CheckIcon />
+                    </span>
+                    <input
+                      type="checkbox"
+                      className="sr-only"
+                      checked={checked}
+                      onChange={() => toggleChannel(ch)}
+                    />
+                    <span className="flex items-center gap-2 text-sm text-pnp-textPrimary">
+                      <span className={checked ? "text-pnp-accent" : "text-pnp-textSecondary"}>
+                        {CHANNEL_ICONS[ch]}
+                      </span>
+                      {labels[ch]}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="flex justify-end pt-2">
             <button
               onClick={handlePreSend}
-              disabled={!form.title.trim() || !form.body.trim()}
+              disabled={!form.title.trim() || !form.body.trim() || channels.size === 0}
               className={`px-5 py-2.5 rounded-lg bg-pnp-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity flex items-center gap-2 active:scale-[0.98] ${focusRing}`}
             >
               <BellIcon />
@@ -419,6 +561,10 @@ export default function AdminNotifications() {
                 </dd>
               </div>
               <div className="flex justify-between text-sm">
+                <dt className="text-pnp-textSecondary">{n.channelsLabel}</dt>
+                <dd className="text-pnp-textPrimary text-right max-w-[55%]">{channelSummary()}</dd>
+              </div>
+              <div className="flex justify-between text-sm">
                 <dt className="text-pnp-textSecondary">{n.notifTitleLength}</dt>
                 <dd className="text-pnp-textPrimary">{form.title.length} chars</dd>
               </div>
@@ -438,7 +584,7 @@ export default function AdminNotifications() {
       <ConfirmModal
         open={confirmOpen}
         title={n.confirmSendTitle}
-        message={`You are about to send "${form.title}" to ${targetLabel()}. This will trigger an immediate push notification. Are you sure?`}
+        message={confirmMessage()}
         confirmLabel={n.sendNow}
         variant="default"
         onConfirm={handleSend}

@@ -659,7 +659,7 @@ const sendPushNotification = async (req, res) => {
   const admin = req.user;
 
   try {
-    const { title, body, url, targetType, tier, userIds } = req.body;
+    const { title, body, url, targetType, tier, userIds, channels } = req.body;
 
     if (!title || !title.trim()) {
       return res.status(400).json({ error: 'title is required' });
@@ -685,22 +685,119 @@ const sendPushNotification = async (req, res) => {
       return res.status(400).json({ error: 'userIds must be a non-empty array when targetType is "users"' });
     }
 
+    // Determine which channels to use — default to all three if not specified
+    const activeChannels = Array.isArray(channels) && channels.length > 0
+      ? channels
+      : ['push', 'bot', 'email'];
+
+    const doPush = activeChannels.includes('push');
+    const doBot = activeChannels.includes('bot');
+    const doEmail = activeChannels.includes('email');
+
+    // ── Push channel ──────────────────────────────────────────────────────────
     const PushNotificationService = require('../../services/pushNotificationService');
-    const payload = { title, body, url };
+    const pushPayload = { title, body, url };
 
     let sent = 0;
-    if (targetType === 'all') {
-      sent = await PushNotificationService.sendToAll(payload);
-    } else if (targetType === 'tier') {
-      sent = await PushNotificationService.sendToTier(tier, payload);
-    } else if (targetType === 'users') {
-      sent = await PushNotificationService.sendToUsers(userIds, payload);
+    if (doPush) {
+      if (targetType === 'all') {
+        sent = await PushNotificationService.sendToAll(pushPayload);
+      } else if (targetType === 'tier') {
+        sent = await PushNotificationService.sendToTier(tier, pushPayload);
+      } else if (targetType === 'users') {
+        sent = await PushNotificationService.sendToUsers(userIds, pushPayload);
+      }
     }
 
-    // Persist system notification for in-app display
-    // We insert one notification per targeted user. For 'all' and 'tier' we skip
-    // per-user rows to avoid mass inserts — a single global record is stored with
-    // actor_id = admin, target_user_id = admin (system record marker).
+    // ── Resolve target users for bot DM + email channels ─────────────────────
+    let targetUsers = [];
+    if (doBot || doEmail) {
+      let usersResult;
+      if (targetType === 'all') {
+        usersResult = await query(
+          'SELECT id, email, telegram, first_name, username FROM users WHERE deleted_at IS NULL'
+        );
+      } else if (targetType === 'tier') {
+        // Match users whose active subscription plan matches the requested tier label.
+        // The `tier` column on users is populated by the subscription system.
+        usersResult = await query(
+          `SELECT id, email, telegram, first_name, username
+             FROM users
+            WHERE deleted_at IS NULL
+              AND tier = $1`,
+          [tier]
+        );
+      } else {
+        // 'users' — explicit numeric IDs from the admin form
+        const numericIds = userIds.map(Number).filter((n) => !isNaN(n) && n > 0);
+        if (numericIds.length > 0) {
+          usersResult = await query(
+            `SELECT id, email, telegram, first_name, username
+               FROM users
+              WHERE id = ANY($1::int[])
+                AND deleted_at IS NULL`,
+            [numericIds]
+          );
+        } else {
+          usersResult = { rows: [] };
+        }
+      }
+      targetUsers = usersResult.rows;
+    }
+
+    // ── Bot DM channel ────────────────────────────────────────────────────────
+    let botDmSent = 0;
+    if (doBot && targetUsers.length > 0) {
+      const { sendNotificationViaTelegram } = require('../../services/notificationBotDelivery');
+      const usersWithTelegram = targetUsers.filter((u) => u.telegram);
+
+      // Fire-and-forget: send all DMs concurrently, count fulfilled
+      const dmResults = await Promise.allSettled(
+        usersWithTelegram.map((u) =>
+          sendNotificationViaTelegram(u.id, {
+            type: 'announcement',
+            message: title ? `${title}\n\n${body}` : body,
+          })
+        )
+      );
+      botDmSent = dmResults.filter((r) => r.status === 'fulfilled').length;
+    }
+
+    // ── Email channel ─────────────────────────────────────────────────────────
+    let emailSent = 0;
+    if (doEmail && targetUsers.length > 0) {
+      const emailService = require('../../../services/emailService');
+      const usersWithEmail = targetUsers.filter((u) => u.email);
+
+      const appUrl = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
+      const actionUrl = url
+        ? (url.startsWith('http') ? url : `${appUrl}${url}`)
+        : appUrl;
+
+      // Build a simple, readable HTML body for the broadcast email
+      const htmlBody = `
+        <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+          <h2 style="margin:0 0 12px;color:#1a1a2e">${title.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</h2>
+          <p style="margin:0 0 20px;color:#444;line-height:1.6">${body.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</p>
+          <a href="${actionUrl}" style="display:inline-block;padding:10px 20px;background:#7c3aed;color:#fff;text-decoration:none;border-radius:6px">Open PNPtv!</a>
+          <p style="margin:24px 0 0;font-size:12px;color:#999">You received this message as a PNPtv! member.</p>
+        </div>`.trim();
+
+      const emailResults = await Promise.allSettled(
+        usersWithEmail.map((u) =>
+          emailService.send({
+            to: u.email,
+            subject: title,
+            html: htmlBody,
+          }).catch((err) => {
+            logger.warn('[sendPushNotification] Email send failed', { userId: u.id, error: err.message });
+          })
+        )
+      );
+      emailSent = emailResults.filter((r) => r.status === 'fulfilled').length;
+    }
+
+    // ── Persist system notification record ────────────────────────────────────
     const notificationMessage = url ? `${body} — ${url}` : body;
     await query(
       `INSERT INTO notifications
@@ -716,12 +813,37 @@ const sendPushNotification = async (req, res) => {
         'admin_broadcast',
         `push_${Date.now()}`,
         notificationMessage,
-        JSON.stringify({ title, body, url, targetType, tier: tier || null, sentCount: sent }),
+        JSON.stringify({
+          title,
+          body,
+          url,
+          targetType,
+          tier: tier || null,
+          channels: activeChannels,
+          sentCount: sent,
+          botDmSent,
+          emailSent,
+        }),
       ]
     );
 
-    logger.info('Admin sent push notification', { adminId: admin.id, targetType, tier, sent });
-    return res.json({ success: true, sent, message: 'Notification sent' });
+    logger.info('Admin sent broadcast notification', {
+      adminId: admin.id,
+      targetType,
+      tier,
+      channels: activeChannels,
+      sent,
+      botDmSent,
+      emailSent,
+    });
+
+    return res.json({
+      success: true,
+      sent,
+      botDmSent,
+      emailSent,
+      message: 'Notification sent',
+    });
   } catch (error) {
     logger.error('Error sending push notification:', error);
     return res.status(500).json({ error: error.message });
