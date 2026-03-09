@@ -131,6 +131,860 @@ const strings = {
 
     copyright: "\u00a9 2026 PNPtv. Todos los derechos reservados.",
   },
+
+  pt: {
+    tagline: "A comunidade queer #1 de PNP",
+
+    featureBadges: [
+      { title: "Performers Quentes", sub: "Latino & mais" },
+      { title: "Conteúdo PNP", sub: "Sem censura" },
+      { title: "Salas de Vídeo", sub: "Ao vivo e privadas" },
+    ] as const,
+
+    lifetimeDealLabel: "Oferta Vitalícia",
+    lifetimeDealTitle: "$100 — acesso PRIME, para sempre",
+    lifetimeDealSub: "Um pagamento. Sem renovações. Nunca expira.",
+    lifetimeDealCta: "Quero isso →",
+
+    loginWithTelegram: "Entrar com Telegram",
+    waitingForTelegram: "Aguardando Telegram...",
+    telegramInstructions: "Abra o Telegram e pressione Iniciar para entrar",
+    loginWithX: "Entrar com X",
+    redirectingToX: "Redirecionando para X...",
+    loginWithEmail: "Entrar com Email",
+
+    telegramWidgetVerifying: "Verificando com Telegram...",
+    telegramWidgetError: "Verificação do Telegram falhou. Por favor, tente novamente.",
+    telegramWidgetRetry: "Tentar novamente",
+    telegramWidgetFallbackLink: "Problemas? Tente o login alternativo",
+    telegramWidgetBlocked: "Se o botão do Telegram não aparecer, use o login alternativo abaixo.",
+    alternativeTelegramLogin: "Login alternativo do Telegram",
+
+    orDivider: "ou",
+
+    emailPlaceholder: "Endereço de e-mail",
+    passwordPlaceholder: "Senha",
+    rememberMe: "Lembrar de mim",
+    logIn: "Entrar",
+    cancel: "Cancelar",
+
+    emailAndPasswordRequired: "Por favor, insira seu e-mail e senha",
+    loginFailed: "Falha no login",
+    connectionError: "Erro de conexão. Por favor, tente novamente.",
+    loginFailedRetry: "Falha no login. Por favor, tente novamente.",
+
+    legalPrefix: "Ao continuar, você concorda com nossos",
+    legalTerms: "Termos",
+    legalAnd: "e a",
+    legalPrivacyPolicy: "Política de Privacidade",
+
+    footerLinks: {
+      cookies: "Cookies",
+      communityGuidelines: "Diretrizes da Comunidade",
+      contentPolicy: "Política de Conteúdo",
+      refunds: "Reembolsos",
+      subscriptions: "Assinaturas",
+      creatorTerms: "Termos do Criador",
+      dmca: "DMCA",
+      safety: "Segurança",
+      contact: "Contato",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. Todos os direitos reservados.",
+  },
+
+  zh: {
+    tagline: "全球第一 PNP 酷儿社区",
+
+    featureBadges: [
+      { title: "热门表演者", sub: "拉丁裔及更多" },
+      { title: "PNP 内容", sub: "无审查" },
+      { title: "视频房间", sub: "直播和私密" },
+    ] as const,
+
+    lifetimeDealLabel: "终身优惠",
+    lifetimeDealTitle: "$100 — PRIME 永久访问权",
+    lifetimeDealSub: "一次付款。无需续费。永不过期。",
+    lifetimeDealCta: "立即获取 →",
+
+    loginWithTelegram: "使用 Telegram 登录",
+    waitingForTelegram: "等待 Telegram...",
+    telegramInstructions: "打开 Telegram 并按开始以登录",
+    loginWithX: "使用 X 登录",
+    redirectingToX: "正在跳转至 X...",
+    loginWithEmail: "使用邮箱登录",
+
+    telegramWidgetVerifying: "正在通过 Telegram 验证...",
+    telegramWidgetError: "Telegram 验证失败，请重试。",
+    telegramWidgetRetry: "重试",
+    telegramWidgetFallbackLink: "遇到问题？尝试备用登录方式",
+    telegramWidgetBlocked: "如果 Telegram 按钮未显示，请使用下方的备用登录方式。",
+    alternativeTelegramLogin: "Telegram 备用登录",
+
+    orDivider: "或",
+
+    emailPlaceholder: "电子邮件地址",
+    passwordPlaceholder: "密码",
+    rememberMe: "记住我",
+    logIn: "登录",
+    cancel: "取消",
+
+    emailAndPasswordRequired: "请输入您的邮箱和密码",
+    loginFailed: "登录失败",
+    connectionError: "连接错误，请重试。",
+    loginFailedRetry: "登录失败，请重试。",
+
+    legalPrefix: "继续即表示您同意我们的",
+    legalTerms: "服务条款",
+    legalAnd: "和",
+    legalPrivacyPolicy: "隐私政策",
+
+    footerLinks: {
+      cookies: "Cookie 政策",
+      communityGuidelines: "社区准则",
+      contentPolicy: "内容政策",
+      refunds: "退款政策",
+      subscriptions: "订阅",
+      creatorTerms: "创作者条款",
+      dmca: "DMCA",
+      safety: "安全",
+      contact: "联系我们",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. 保留所有权利。",
+  },
+
+  zhTW: {
+    tagline: "全球第一 PNP 酷兒社群",
+
+    featureBadges: [
+      { title: "熱門表演者", sub: "拉丁裔及更多" },
+      { title: "PNP 內容", sub: "無審查" },
+      { title: "視訊房間", sub: "直播與私密" },
+    ] as const,
+
+    lifetimeDealLabel: "終身優惠",
+    lifetimeDealTitle: "$100 — PRIME 永久使用權",
+    lifetimeDealSub: "一次付款。無需續約。永不過期。",
+    lifetimeDealCta: "立即取得 →",
+
+    loginWithTelegram: "使用 Telegram 登入",
+    waitingForTelegram: "等待 Telegram...",
+    telegramInstructions: "開啟 Telegram 並按開始以登入",
+    loginWithX: "使用 X 登入",
+    redirectingToX: "正在跳轉至 X...",
+    loginWithEmail: "使用電子郵件登入",
+
+    telegramWidgetVerifying: "正在透過 Telegram 驗證...",
+    telegramWidgetError: "Telegram 驗證失敗，請重試。",
+    telegramWidgetRetry: "重試",
+    telegramWidgetFallbackLink: "遇到問題？試試備用登入方式",
+    telegramWidgetBlocked: "如果 Telegram 按鈕未顯示，請使用下方的備用登入方式。",
+    alternativeTelegramLogin: "Telegram 備用登入",
+
+    orDivider: "或",
+
+    emailPlaceholder: "電子郵件地址",
+    passwordPlaceholder: "密碼",
+    rememberMe: "記住我",
+    logIn: "登入",
+    cancel: "取消",
+
+    emailAndPasswordRequired: "請輸入您的電子郵件和密碼",
+    loginFailed: "登入失敗",
+    connectionError: "連線錯誤，請重試。",
+    loginFailedRetry: "登入失敗，請重試。",
+
+    legalPrefix: "繼續即表示您同意我們的",
+    legalTerms: "服務條款",
+    legalAnd: "和",
+    legalPrivacyPolicy: "隱私政策",
+
+    footerLinks: {
+      cookies: "Cookie 政策",
+      communityGuidelines: "社群準則",
+      contentPolicy: "內容政策",
+      refunds: "退款政策",
+      subscriptions: "訂閱",
+      creatorTerms: "創作者條款",
+      dmca: "DMCA",
+      safety: "安全",
+      contact: "聯絡我們",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. 版權所有。",
+  },
+
+  fr: {
+    tagline: "La communauté queer PNP #1",
+
+    featureBadges: [
+      { title: "Performers Hot", sub: "Latino & plus" },
+      { title: "Contenu PNP", sub: "Non censuré" },
+      { title: "Salles Vidéo", sub: "Live et privées" },
+    ] as const,
+
+    lifetimeDealLabel: "Offre à Vie",
+    lifetimeDealTitle: "$100 — accès PRIME à vie",
+    lifetimeDealSub: "Un seul paiement. Sans renouvellement. Pour toujours.",
+    lifetimeDealCta: "Je veux ça →",
+
+    loginWithTelegram: "Se connecter avec Telegram",
+    waitingForTelegram: "En attente de Telegram...",
+    telegramInstructions: "Ouvrez Telegram et appuyez sur Démarrer pour vous connecter",
+    loginWithX: "Se connecter avec X",
+    redirectingToX: "Redirection vers X...",
+    loginWithEmail: "Se connecter avec l'e-mail",
+
+    telegramWidgetVerifying: "Vérification avec Telegram...",
+    telegramWidgetError: "La vérification Telegram a échoué. Veuillez réessayer.",
+    telegramWidgetRetry: "Réessayer",
+    telegramWidgetFallbackLink: "Des problèmes ? Essayez la connexion alternative",
+    telegramWidgetBlocked: "Si le bouton Telegram n'apparaît pas, utilisez la connexion alternative ci-dessous.",
+    alternativeTelegramLogin: "Connexion Telegram alternative",
+
+    orDivider: "ou",
+
+    emailPlaceholder: "Adresse e-mail",
+    passwordPlaceholder: "Mot de passe",
+    rememberMe: "Se souvenir de moi",
+    logIn: "Se connecter",
+    cancel: "Annuler",
+
+    emailAndPasswordRequired: "Veuillez saisir votre e-mail et mot de passe",
+    loginFailed: "Échec de la connexion",
+    connectionError: "Erreur de connexion. Veuillez réessayer.",
+    loginFailedRetry: "Échec de la connexion. Veuillez réessayer.",
+
+    legalPrefix: "En continuant, vous acceptez nos",
+    legalTerms: "Conditions",
+    legalAnd: "et notre",
+    legalPrivacyPolicy: "Politique de Confidentialité",
+
+    footerLinks: {
+      cookies: "Cookies",
+      communityGuidelines: "Règles de la Communauté",
+      contentPolicy: "Politique de Contenu",
+      refunds: "Remboursements",
+      subscriptions: "Abonnements",
+      creatorTerms: "Conditions Créateurs",
+      dmca: "DMCA",
+      safety: "Sécurité",
+      contact: "Contact",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. Tous droits réservés.",
+  },
+
+  de: {
+    tagline: "Die #1 queere PNP-Community",
+
+    featureBadges: [
+      { title: "Heiße Performer", sub: "Latino & mehr" },
+      { title: "PNP-Inhalte", sub: "Unzensiert" },
+      { title: "Videoräume", sub: "Live und privat" },
+    ] as const,
+
+    lifetimeDealLabel: "Lifetime-Angebot",
+    lifetimeDealTitle: "$100 — PRIME-Zugang, für immer",
+    lifetimeDealSub: "Einmalige Zahlung. Keine Verlängerungen. Läuft nie ab.",
+    lifetimeDealCta: "Jetzt sichern →",
+
+    loginWithTelegram: "Mit Telegram einloggen",
+    waitingForTelegram: "Warte auf Telegram...",
+    telegramInstructions: "Öffne Telegram und drücke Start zum Einloggen",
+    loginWithX: "Mit X einloggen",
+    redirectingToX: "Weiterleitung zu X...",
+    loginWithEmail: "Mit E-Mail einloggen",
+
+    telegramWidgetVerifying: "Verifizierung mit Telegram...",
+    telegramWidgetError: "Telegram-Verifizierung fehlgeschlagen. Bitte versuche es erneut.",
+    telegramWidgetRetry: "Erneut versuchen",
+    telegramWidgetFallbackLink: "Probleme? Probiere die alternative Anmeldung",
+    telegramWidgetBlocked: "Wenn die Telegram-Schaltfläche nicht erscheint, nutze die alternative Anmeldung unten.",
+    alternativeTelegramLogin: "Alternative Telegram-Anmeldung",
+
+    orDivider: "oder",
+
+    emailPlaceholder: "E-Mail-Adresse",
+    passwordPlaceholder: "Passwort",
+    rememberMe: "Angemeldet bleiben",
+    logIn: "Einloggen",
+    cancel: "Abbrechen",
+
+    emailAndPasswordRequired: "Bitte gib deine E-Mail und dein Passwort ein",
+    loginFailed: "Anmeldung fehlgeschlagen",
+    connectionError: "Verbindungsfehler. Bitte versuche es erneut.",
+    loginFailedRetry: "Anmeldung fehlgeschlagen. Bitte versuche es erneut.",
+
+    legalPrefix: "Mit dem Fortfahren stimmst du unseren",
+    legalTerms: "Nutzungsbedingungen",
+    legalAnd: "und der",
+    legalPrivacyPolicy: "Datenschutzrichtlinie",
+
+    footerLinks: {
+      cookies: "Cookies",
+      communityGuidelines: "Community-Richtlinien",
+      contentPolicy: "Inhaltsrichtlinie",
+      refunds: "Rückerstattungen",
+      subscriptions: "Abonnements",
+      creatorTerms: "Creator-Bedingungen",
+      dmca: "DMCA",
+      safety: "Sicherheit",
+      contact: "Kontakt",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. Alle Rechte vorbehalten.",
+  },
+
+  th: {
+    tagline: "ชุมชน PNP Queer อันดับ 1",
+
+    featureBadges: [
+      { title: "นักแสดงยอดนิยม", sub: "ละตินและอื่นๆ" },
+      { title: "เนื้อหา PNP", sub: "ไม่เซ็นเซอร์" },
+      { title: "ห้องวิดีโอ", sub: "สดและส่วนตัว" },
+    ] as const,
+
+    lifetimeDealLabel: "ดีลตลอดชีพ",
+    lifetimeDealTitle: "$100 — สิทธิ์ PRIME ตลอดชีพ",
+    lifetimeDealSub: "จ่ายครั้งเดียว ไม่ต้องต่ออายุ ไม่มีวันหมดอายุ",
+    lifetimeDealCta: "รับเลย →",
+
+    loginWithTelegram: "เข้าสู่ระบบด้วย Telegram",
+    waitingForTelegram: "รอ Telegram...",
+    telegramInstructions: "เปิด Telegram แล้วกด Start เพื่อเข้าสู่ระบบ",
+    loginWithX: "เข้าสู่ระบบด้วย X",
+    redirectingToX: "กำลังไปที่ X...",
+    loginWithEmail: "เข้าสู่ระบบด้วยอีเมล",
+
+    telegramWidgetVerifying: "กำลังยืนยันตัวตนผ่าน Telegram...",
+    telegramWidgetError: "การยืนยันตัวตนผ่าน Telegram ล้มเหลว กรุณาลองใหม่",
+    telegramWidgetRetry: "ลองใหม่",
+    telegramWidgetFallbackLink: "มีปัญหา? ลองวิธีเข้าสู่ระบบแบบอื่น",
+    telegramWidgetBlocked: "หากปุ่ม Telegram ไม่ปรากฏ ให้ใช้วิธีเข้าสู่ระบบแบบอื่นด้านล่าง",
+    alternativeTelegramLogin: "เข้าสู่ระบบ Telegram แบบอื่น",
+
+    orDivider: "หรือ",
+
+    emailPlaceholder: "ที่อยู่อีเมล",
+    passwordPlaceholder: "รหัสผ่าน",
+    rememberMe: "จดจำฉัน",
+    logIn: "เข้าสู่ระบบ",
+    cancel: "ยกเลิก",
+
+    emailAndPasswordRequired: "กรุณากรอกอีเมลและรหัสผ่านของคุณ",
+    loginFailed: "เข้าสู่ระบบล้มเหลว",
+    connectionError: "เกิดข้อผิดพลาดในการเชื่อมต่อ กรุณาลองใหม่",
+    loginFailedRetry: "เข้าสู่ระบบล้มเหลว กรุณาลองใหม่",
+
+    legalPrefix: "การดำเนินการต่อแสดงว่าคุณยอมรับ",
+    legalTerms: "เงื่อนไขการใช้งาน",
+    legalAnd: "และ",
+    legalPrivacyPolicy: "นโยบายความเป็นส่วนตัว",
+
+    footerLinks: {
+      cookies: "คุกกี้",
+      communityGuidelines: "แนวทางชุมชน",
+      contentPolicy: "นโยบายเนื้อหา",
+      refunds: "การคืนเงิน",
+      subscriptions: "การสมัครสมาชิก",
+      creatorTerms: "เงื่อนไขครีเอเตอร์",
+      dmca: "DMCA",
+      safety: "ความปลอดภัย",
+      contact: "ติดต่อ",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. สงวนลิขสิทธิ์ทั้งหมด",
+  },
+
+  it: {
+    tagline: "La community queer PNP #1",
+
+    featureBadges: [
+      { title: "Performer Hot", sub: "Latino & altro" },
+      { title: "Contenuti PNP", sub: "Non censurati" },
+      { title: "Stanze Video", sub: "Live e private" },
+    ] as const,
+
+    lifetimeDealLabel: "Offerta a Vita",
+    lifetimeDealTitle: "$100 — accesso PRIME per sempre",
+    lifetimeDealSub: "Un solo pagamento. Nessun rinnovo. Non scade mai.",
+    lifetimeDealCta: "Prendilo →",
+
+    loginWithTelegram: "Accedi con Telegram",
+    waitingForTelegram: "In attesa di Telegram...",
+    telegramInstructions: "Apri Telegram e premi Avvia per accedere",
+    loginWithX: "Accedi con X",
+    redirectingToX: "Reindirizzamento a X...",
+    loginWithEmail: "Accedi con Email",
+
+    telegramWidgetVerifying: "Verifica con Telegram in corso...",
+    telegramWidgetError: "Verifica Telegram fallita. Per favore riprova.",
+    telegramWidgetRetry: "Riprova",
+    telegramWidgetFallbackLink: "Problemi? Prova il login alternativo",
+    telegramWidgetBlocked: "Se il pulsante Telegram non appare, usa il login alternativo qui sotto.",
+    alternativeTelegramLogin: "Login Telegram alternativo",
+
+    orDivider: "oppure",
+
+    emailPlaceholder: "Indirizzo e-mail",
+    passwordPlaceholder: "Password",
+    rememberMe: "Ricordami",
+    logIn: "Accedi",
+    cancel: "Annulla",
+
+    emailAndPasswordRequired: "Inserisci la tua e-mail e la password",
+    loginFailed: "Accesso fallito",
+    connectionError: "Errore di connessione. Per favore riprova.",
+    loginFailedRetry: "Accesso fallito. Per favore riprova.",
+
+    legalPrefix: "Continuando, accetti i nostri",
+    legalTerms: "Termini",
+    legalAnd: "e la",
+    legalPrivacyPolicy: "Informativa sulla Privacy",
+
+    footerLinks: {
+      cookies: "Cookie",
+      communityGuidelines: "Linee Guida della Community",
+      contentPolicy: "Politica dei Contenuti",
+      refunds: "Rimborsi",
+      subscriptions: "Abbonamenti",
+      creatorTerms: "Termini Creator",
+      dmca: "DMCA",
+      safety: "Sicurezza",
+      contact: "Contatti",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. Tutti i diritti riservati.",
+  },
+
+  tr: {
+    tagline: "1 numaralı queer PNP topluluğu",
+
+    featureBadges: [
+      { title: "Ateşli Performerlar", sub: "Latin ve daha fazlası" },
+      { title: "PNP İçeriği", sub: "Sansürsüz" },
+      { title: "Video Odaları", sub: "Canlı ve özel" },
+    ] as const,
+
+    lifetimeDealLabel: "Ömür Boyu Fırsat",
+    lifetimeDealTitle: "$100 — ömür boyu PRIME erişimi",
+    lifetimeDealSub: "Tek ödeme. Yenileme yok. Asla sona ermez.",
+    lifetimeDealCta: "Hemen al →",
+
+    loginWithTelegram: "Telegram ile giriş yap",
+    waitingForTelegram: "Telegram bekleniyor...",
+    telegramInstructions: "Telegram'ı aç ve giriş yapmak için Başlat'a bas",
+    loginWithX: "X ile giriş yap",
+    redirectingToX: "X'e yönlendiriliyor...",
+    loginWithEmail: "E-posta ile giriş yap",
+
+    telegramWidgetVerifying: "Telegram ile doğrulanıyor...",
+    telegramWidgetError: "Telegram doğrulaması başarısız oldu. Lütfen tekrar dene.",
+    telegramWidgetRetry: "Tekrar dene",
+    telegramWidgetFallbackLink: "Sorun mu yaşıyorsun? Alternatif girişi dene",
+    telegramWidgetBlocked: "Telegram butonu görünmüyorsa, aşağıdaki alternatif girişi kullan.",
+    alternativeTelegramLogin: "Alternatif Telegram girişi",
+
+    orDivider: "veya",
+
+    emailPlaceholder: "E-posta adresi",
+    passwordPlaceholder: "Şifre",
+    rememberMe: "Beni hatırla",
+    logIn: "Giriş Yap",
+    cancel: "İptal",
+
+    emailAndPasswordRequired: "Lütfen e-posta ve şifreni gir",
+    loginFailed: "Giriş başarısız",
+    connectionError: "Bağlantı hatası. Lütfen tekrar dene.",
+    loginFailedRetry: "Giriş başarısız. Lütfen tekrar dene.",
+
+    legalPrefix: "Devam ederek",
+    legalTerms: "Kullanım Koşulları'nı",
+    legalAnd: "ve",
+    legalPrivacyPolicy: "Gizlilik Politikası'nı",
+
+    footerLinks: {
+      cookies: "Çerezler",
+      communityGuidelines: "Topluluk Kuralları",
+      contentPolicy: "İçerik Politikası",
+      refunds: "İadeler",
+      subscriptions: "Abonelikler",
+      creatorTerms: "İçerik Üretici Koşulları",
+      dmca: "DMCA",
+      safety: "Güvenlik",
+      contact: "İletişim",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. Tüm hakları saklıdır.",
+  },
+
+  ru: {
+    tagline: "Квир-сообщество PNP №1",
+
+    featureBadges: [
+      { title: "Горячие Перформеры", sub: "Латино и другие" },
+      { title: "PNP Контент", sub: "Без цензуры" },
+      { title: "Видеокомнаты", sub: "Прямой эфир и приватные" },
+    ] as const,
+
+    lifetimeDealLabel: "Пожизненное предложение",
+    lifetimeDealTitle: "$100 — доступ PRIME навсегда",
+    lifetimeDealSub: "Один платёж. Без продлений. Никогда не истекает.",
+    lifetimeDealCta: "Получить →",
+
+    loginWithTelegram: "Войти через Telegram",
+    waitingForTelegram: "Ожидание Telegram...",
+    telegramInstructions: "Откройте Telegram и нажмите Старт для входа",
+    loginWithX: "Войти через X",
+    redirectingToX: "Перенаправление в X...",
+    loginWithEmail: "Войти через Email",
+
+    telegramWidgetVerifying: "Проверка через Telegram...",
+    telegramWidgetError: "Верификация Telegram не удалась. Пожалуйста, попробуйте снова.",
+    telegramWidgetRetry: "Попробовать снова",
+    telegramWidgetFallbackLink: "Проблемы? Попробуйте альтернативный вход",
+    telegramWidgetBlocked: "Если кнопка Telegram не появилась, воспользуйтесь альтернативным входом ниже.",
+    alternativeTelegramLogin: "Альтернативный вход через Telegram",
+
+    orDivider: "или",
+
+    emailPlaceholder: "Адрес электронной почты",
+    passwordPlaceholder: "Пароль",
+    rememberMe: "Запомнить меня",
+    logIn: "Войти",
+    cancel: "Отмена",
+
+    emailAndPasswordRequired: "Пожалуйста, введите email и пароль",
+    loginFailed: "Ошибка входа",
+    connectionError: "Ошибка подключения. Пожалуйста, попробуйте снова.",
+    loginFailedRetry: "Ошибка входа. Пожалуйста, попробуйте снова.",
+
+    legalPrefix: "Продолжая, вы соглашаетесь с нашими",
+    legalTerms: "Условиями",
+    legalAnd: "и",
+    legalPrivacyPolicy: "Политикой конфиденциальности",
+
+    footerLinks: {
+      cookies: "Куки",
+      communityGuidelines: "Правила сообщества",
+      contentPolicy: "Политика контента",
+      refunds: "Возвраты",
+      subscriptions: "Подписки",
+      creatorTerms: "Условия для авторов",
+      dmca: "DMCA",
+      safety: "Безопасность",
+      contact: "Контакты",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. Все права защищены.",
+  },
+
+  nl: {
+    tagline: "De #1 queer PNP-community",
+
+    featureBadges: [
+      { title: "Hete Performers", sub: "Latino & meer" },
+      { title: "PNP-content", sub: "Ongecensureerd" },
+      { title: "Videoruimtes", sub: "Live en privé" },
+    ] as const,
+
+    lifetimeDealLabel: "Levenslange Deal",
+    lifetimeDealTitle: "$100 — PRIME-toegang, voor altijd",
+    lifetimeDealSub: "Eén betaling. Geen verlengingen. Verloopt nooit.",
+    lifetimeDealCta: "Pak het →",
+
+    loginWithTelegram: "Inloggen met Telegram",
+    waitingForTelegram: "Wachten op Telegram...",
+    telegramInstructions: "Open Telegram en druk op Start om in te loggen",
+    loginWithX: "Inloggen met X",
+    redirectingToX: "Doorsturen naar X...",
+    loginWithEmail: "Inloggen met e-mail",
+
+    telegramWidgetVerifying: "Verificatie via Telegram...",
+    telegramWidgetError: "Telegram-verificatie mislukt. Probeer het opnieuw.",
+    telegramWidgetRetry: "Opnieuw proberen",
+    telegramWidgetFallbackLink: "Problemen? Probeer de alternatieve login",
+    telegramWidgetBlocked: "Als de Telegram-knop niet verschijnt, gebruik dan de alternatieve login hieronder.",
+    alternativeTelegramLogin: "Alternatieve Telegram-login",
+
+    orDivider: "of",
+
+    emailPlaceholder: "E-mailadres",
+    passwordPlaceholder: "Wachtwoord",
+    rememberMe: "Onthoud mij",
+    logIn: "Inloggen",
+    cancel: "Annuleren",
+
+    emailAndPasswordRequired: "Vul je e-mail en wachtwoord in",
+    loginFailed: "Inloggen mislukt",
+    connectionError: "Verbindingsfout. Probeer het opnieuw.",
+    loginFailedRetry: "Inloggen mislukt. Probeer het opnieuw.",
+
+    legalPrefix: "Door verder te gaan ga je akkoord met onze",
+    legalTerms: "Voorwaarden",
+    legalAnd: "en het",
+    legalPrivacyPolicy: "Privacybeleid",
+
+    footerLinks: {
+      cookies: "Cookies",
+      communityGuidelines: "Community-richtlijnen",
+      contentPolicy: "Inhoudsbeleid",
+      refunds: "Terugbetalingen",
+      subscriptions: "Abonnementen",
+      creatorTerms: "Maker-voorwaarden",
+      dmca: "DMCA",
+      safety: "Veiligheid",
+      contact: "Contact",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. Alle rechten voorbehouden.",
+  },
+
+  vi: {
+    tagline: "Cộng đồng queer PNP số 1",
+
+    featureBadges: [
+      { title: "Diễn Viên Nóng Bỏng", sub: "Latino & nhiều hơn" },
+      { title: "Nội Dung PNP", sub: "Không kiểm duyệt" },
+      { title: "Phòng Video", sub: "Trực tiếp và riêng tư" },
+    ] as const,
+
+    lifetimeDealLabel: "Ưu Đãi Trọn Đời",
+    lifetimeDealTitle: "$100 — quyền truy cập PRIME mãi mãi",
+    lifetimeDealSub: "Một lần thanh toán. Không gia hạn. Không bao giờ hết hạn.",
+    lifetimeDealCta: "Lấy ngay →",
+
+    loginWithTelegram: "Đăng nhập bằng Telegram",
+    waitingForTelegram: "Đang chờ Telegram...",
+    telegramInstructions: "Mở Telegram và nhấn Bắt đầu để đăng nhập",
+    loginWithX: "Đăng nhập bằng X",
+    redirectingToX: "Đang chuyển hướng đến X...",
+    loginWithEmail: "Đăng nhập bằng Email",
+
+    telegramWidgetVerifying: "Đang xác minh qua Telegram...",
+    telegramWidgetError: "Xác minh Telegram thất bại. Vui lòng thử lại.",
+    telegramWidgetRetry: "Thử lại",
+    telegramWidgetFallbackLink: "Gặp sự cố? Thử phương thức đăng nhập khác",
+    telegramWidgetBlocked: "Nếu nút Telegram không xuất hiện, hãy dùng phương thức đăng nhập khác bên dưới.",
+    alternativeTelegramLogin: "Đăng nhập Telegram thay thế",
+
+    orDivider: "hoặc",
+
+    emailPlaceholder: "Địa chỉ email",
+    passwordPlaceholder: "Mật khẩu",
+    rememberMe: "Ghi nhớ tôi",
+    logIn: "Đăng Nhập",
+    cancel: "Hủy",
+
+    emailAndPasswordRequired: "Vui lòng nhập email và mật khẩu",
+    loginFailed: "Đăng nhập thất bại",
+    connectionError: "Lỗi kết nối. Vui lòng thử lại.",
+    loginFailedRetry: "Đăng nhập thất bại. Vui lòng thử lại.",
+
+    legalPrefix: "Bằng cách tiếp tục, bạn đồng ý với",
+    legalTerms: "Điều khoản",
+    legalAnd: "và",
+    legalPrivacyPolicy: "Chính sách Bảo mật",
+
+    footerLinks: {
+      cookies: "Cookie",
+      communityGuidelines: "Nguyên tắc Cộng đồng",
+      contentPolicy: "Chính sách Nội dung",
+      refunds: "Hoàn tiền",
+      subscriptions: "Đăng ký",
+      creatorTerms: "Điều khoản Nhà sáng tạo",
+      dmca: "DMCA",
+      safety: "An toàn",
+      contact: "Liên hệ",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. Bảo lưu mọi quyền.",
+  },
+
+  ja: {
+    tagline: "No.1 クィア PNP コミュニティ",
+
+    featureBadges: [
+      { title: "人気パフォーマー", sub: "ラテン系ほか" },
+      { title: "PNP コンテンツ", sub: "無修正" },
+      { title: "ビデオルーム", sub: "ライブ＆プライベート" },
+    ] as const,
+
+    lifetimeDealLabel: "生涯プラン",
+    lifetimeDealTitle: "$100 — PRIME 永久アクセス",
+    lifetimeDealSub: "一回払い。更新不要。永久に有効。",
+    lifetimeDealCta: "今すぐ手に入れる →",
+
+    loginWithTelegram: "Telegram でログイン",
+    waitingForTelegram: "Telegram を待っています...",
+    telegramInstructions: "Telegram を開いてスタートを押してログイン",
+    loginWithX: "X でログイン",
+    redirectingToX: "X にリダイレクト中...",
+    loginWithEmail: "メールでログイン",
+
+    telegramWidgetVerifying: "Telegram で認証中...",
+    telegramWidgetError: "Telegram 認証に失敗しました。もう一度お試しください。",
+    telegramWidgetRetry: "再試行",
+    telegramWidgetFallbackLink: "問題がありますか？代替ログインをお試しください",
+    telegramWidgetBlocked: "Telegram ボタンが表示されない場合は、下の代替ログインをご利用ください。",
+    alternativeTelegramLogin: "Telegram 代替ログイン",
+
+    orDivider: "または",
+
+    emailPlaceholder: "メールアドレス",
+    passwordPlaceholder: "パスワード",
+    rememberMe: "ログイン状態を保持",
+    logIn: "ログイン",
+    cancel: "キャンセル",
+
+    emailAndPasswordRequired: "メールアドレスとパスワードを入力してください",
+    loginFailed: "ログイン失敗",
+    connectionError: "接続エラーです。もう一度お試しください。",
+    loginFailedRetry: "ログインに失敗しました。もう一度お試しください。",
+
+    legalPrefix: "続行することで、以下に同意したことになります：",
+    legalTerms: "利用規約",
+    legalAnd: "および",
+    legalPrivacyPolicy: "プライバシーポリシー",
+
+    footerLinks: {
+      cookies: "クッキー",
+      communityGuidelines: "コミュニティガイドライン",
+      contentPolicy: "コンテンツポリシー",
+      refunds: "返金",
+      subscriptions: "サブスクリプション",
+      creatorTerms: "クリエイター規約",
+      dmca: "DMCA",
+      safety: "安全",
+      contact: "お問い合わせ",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. 無断複製・転載を禁じます。",
+  },
+
+  id: {
+    tagline: "Komunitas queer PNP #1",
+
+    featureBadges: [
+      { title: "Performer Terpanas", sub: "Latino & lainnya" },
+      { title: "Konten PNP", sub: "Tanpa sensor" },
+      { title: "Ruang Video", sub: "Live dan privat" },
+    ] as const,
+
+    lifetimeDealLabel: "Penawaran Seumur Hidup",
+    lifetimeDealTitle: "$100 — akses PRIME selamanya",
+    lifetimeDealSub: "Satu kali bayar. Tanpa perpanjangan. Tidak pernah kedaluwarsa.",
+    lifetimeDealCta: "Dapatkan →",
+
+    loginWithTelegram: "Masuk dengan Telegram",
+    waitingForTelegram: "Menunggu Telegram...",
+    telegramInstructions: "Buka Telegram dan tekan Mulai untuk masuk",
+    loginWithX: "Masuk dengan X",
+    redirectingToX: "Mengalihkan ke X...",
+    loginWithEmail: "Masuk dengan Email",
+
+    telegramWidgetVerifying: "Memverifikasi dengan Telegram...",
+    telegramWidgetError: "Verifikasi Telegram gagal. Silakan coba lagi.",
+    telegramWidgetRetry: "Coba lagi",
+    telegramWidgetFallbackLink: "Ada masalah? Coba login alternatif",
+    telegramWidgetBlocked: "Jika tombol Telegram tidak muncul, gunakan login alternatif di bawah.",
+    alternativeTelegramLogin: "Login Telegram alternatif",
+
+    orDivider: "atau",
+
+    emailPlaceholder: "Alamat email",
+    passwordPlaceholder: "Kata sandi",
+    rememberMe: "Ingat saya",
+    logIn: "Masuk",
+    cancel: "Batal",
+
+    emailAndPasswordRequired: "Masukkan email dan kata sandi Anda",
+    loginFailed: "Login gagal",
+    connectionError: "Kesalahan koneksi. Silakan coba lagi.",
+    loginFailedRetry: "Login gagal. Silakan coba lagi.",
+
+    legalPrefix: "Dengan melanjutkan, Anda menyetujui",
+    legalTerms: "Syarat",
+    legalAnd: "dan",
+    legalPrivacyPolicy: "Kebijakan Privasi",
+
+    footerLinks: {
+      cookies: "Cookie",
+      communityGuidelines: "Panduan Komunitas",
+      contentPolicy: "Kebijakan Konten",
+      refunds: "Pengembalian Dana",
+      subscriptions: "Langganan",
+      creatorTerms: "Ketentuan Kreator",
+      dmca: "DMCA",
+      safety: "Keamanan",
+      contact: "Kontak",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. Semua hak dilindungi.",
+  },
+
+  ar: {
+    tagline: "مجتمع PNP الكويري الأول عالمياً",
+
+    featureBadges: [
+      { title: "فنانون ساخنون", sub: "لاتيني وأكثر" },
+      { title: "محتوى PNP", sub: "بلا رقابة" },
+      { title: "غرف الفيديو", sub: "مباشر وخاص" },
+    ] as const,
+
+    lifetimeDealLabel: "عرض مدى الحياة",
+    lifetimeDealTitle: "$100 — وصول PRIME للأبد",
+    lifetimeDealSub: "دفعة واحدة. بلا تجديد. لا تنتهي أبداً.",
+    lifetimeDealCta: "احصل عليه ←",
+
+    loginWithTelegram: "الدخول عبر Telegram",
+    waitingForTelegram: "في انتظار Telegram...",
+    telegramInstructions: "افتح Telegram واضغط ابدأ لتسجيل الدخول",
+    loginWithX: "الدخول عبر X",
+    redirectingToX: "جارٍ التحويل إلى X...",
+    loginWithEmail: "الدخول عبر البريد الإلكتروني",
+
+    telegramWidgetVerifying: "جارٍ التحقق عبر Telegram...",
+    telegramWidgetError: "فشل التحقق عبر Telegram. يرجى المحاولة مجدداً.",
+    telegramWidgetRetry: "أعد المحاولة",
+    telegramWidgetFallbackLink: "هل تواجه مشكلة؟ جرّب تسجيل الدخول البديل",
+    telegramWidgetBlocked: "إذا لم يظهر زر Telegram، استخدم تسجيل الدخول البديل أدناه.",
+    alternativeTelegramLogin: "تسجيل دخول Telegram البديل",
+
+    orDivider: "أو",
+
+    emailPlaceholder: "عنوان البريد الإلكتروني",
+    passwordPlaceholder: "كلمة المرور",
+    rememberMe: "تذكّرني",
+    logIn: "تسجيل الدخول",
+    cancel: "إلغاء",
+
+    emailAndPasswordRequired: "يرجى إدخال بريدك الإلكتروني وكلمة المرور",
+    loginFailed: "فشل تسجيل الدخول",
+    connectionError: "خطأ في الاتصال. يرجى المحاولة مجدداً.",
+    loginFailedRetry: "فشل تسجيل الدخول. يرجى المحاولة مجدداً.",
+
+    legalPrefix: "بالمتابعة، أنت توافق على",
+    legalTerms: "الشروط والأحكام",
+    legalAnd: "و",
+    legalPrivacyPolicy: "سياسة الخصوصية",
+
+    footerLinks: {
+      cookies: "ملفات تعريف الارتباط",
+      communityGuidelines: "إرشادات المجتمع",
+      contentPolicy: "سياسة المحتوى",
+      refunds: "المبالغ المستردة",
+      subscriptions: "الاشتراكات",
+      creatorTerms: "شروط المبدعين",
+      dmca: "DMCA",
+      safety: "الأمان",
+      contact: "اتصل بنا",
+    },
+
+    copyright: "\u00a9 2026 PNPtv. جميع الحقوق محفوظة.",
+  },
 } as const;
 
 export type LoginStrings = typeof strings.en;

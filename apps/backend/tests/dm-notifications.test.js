@@ -21,7 +21,7 @@ const session = require('express-session');
 
 // ── Mock ioredis ──────────────────────────────────────────────────────────────
 
-jest.mock('../../config/redis', () => {
+jest.mock('../config/redis', () => {
   const store = new Map();
   const redis = {
     get: jest.fn(async (key) => store.get(key) ?? null),
@@ -49,7 +49,7 @@ jest.mock('../../config/redis', () => {
 // ── Mock pg ───────────────────────────────────────────────────────────────────
 
 const mockQuery = jest.fn();
-jest.mock('../../config/postgres', () => ({ query: mockQuery }));
+jest.mock('../config/postgres', () => ({ query: mockQuery }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -97,14 +97,14 @@ let requireFreeTierDmLimit;
 
 beforeAll(() => {
   // Load controllers after mocks are in place
-  directMessagesController = require('../../api/controllers/directMessagesController');
+  directMessagesController = require('../api/controllers/directMessagesController');
   dmController             = require('../bot/api/controllers/dmController');
-  notificationsController  = require('../../api/controllers/notificationsController');
+  notificationsController  = require('../api/controllers/notificationsController');
 
   // Load the middleware in isolation
   // We inline a copy of requireFreeTierDmLimit here because it is defined
   // inside routes.js and not exported separately.
-  const { getRedis } = require('../../config/redis');
+  const { getRedis } = require('../config/redis');
   requireFreeTierDmLimit = async (req, res, next) => {
     const user = req.session?.user;
     if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
@@ -140,7 +140,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   mockQuery.mockReset();
-  const { getRedis } = require('../../config/redis');
+  const { getRedis } = require('../config/redis');
   getRedis()._reset();
 });
 
@@ -505,7 +505,7 @@ describe('requireFreeTierDmLimit middleware', () => {
   });
 
   it('REGRESSION DM-3 (documented): fails open when Redis throws — free user bypasses limit', async () => {
-    const { getRedis } = require('../../config/redis');
+    const { getRedis } = require('../config/redis');
     getRedis().incr.mockRejectedValueOnce(new Error('ECONNREFUSED'));
 
     const sess = makeSession(ALICE_ID, 'free');

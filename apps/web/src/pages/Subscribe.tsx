@@ -101,10 +101,6 @@ export default function Subscribe() {
   const [submitting, setSubmitting] = useState(false);
   const [showCOP, setShowCOP] = useState(false);
 
-  // Email for credentials
-  const [email, setEmail] = useState("");
-  const [emailError, setEmailError] = useState<string | null>(null);
-
   // Payment polling state
   const [pollingPaymentId, setPollingPaymentId] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
@@ -216,26 +212,15 @@ export default function Subscribe() {
     return () => { cancelled = true; };
   }, [dashInvoice, dashPolling, refreshUser]);
 
-  function validateEmail(): boolean {
-    const trimmed = email.trim();
-    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) || trimmed.length > 254) {
-      setEmailError(s.invalidEmail);
-      return false;
-    }
-    setEmailError(null);
-    return true;
-  }
-
   async function handleSubscribe() {
     if (!selectedPlan || submitting) return;
-    if (!validateEmail()) return;
 
     setSubmitting(true);
     setError(null);
 
     try {
       if (provider === "dash") {
-        const result = await createDashSubscription(selectedPlan, email.trim());
+        const result = await createDashSubscription(selectedPlan);
         if (result.success && result.checkoutUrl) {
           setDashInvoice({
             invoiceId: result.invoiceId,
@@ -254,7 +239,7 @@ export default function Subscribe() {
           }
         }
       } else {
-        const result = await createPayment(selectedPlan, provider, email.trim());
+        const result = await createPayment(selectedPlan, provider);
         if (result.success && result.paymentUrl) {
           window.open(result.paymentUrl, "_blank", "noopener,noreferrer");
           if (result.paymentId) {
@@ -272,11 +257,14 @@ export default function Subscribe() {
     }
   }
 
+  // Meru email (only used for Meru code activation)
+  const [meruEmail, setMeruEmail] = useState("");
+
   async function handleMeruActivate() {
     if (!meruCode.trim() || meruSubmitting) return;
-    if (!validateEmail()) {
-      setMeruError(s.pleaseEnterValidEmailAbove);
-      document.getElementById("subscribe-email")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const trimmedEmail = meruEmail.trim();
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail) || trimmedEmail.length > 254) {
+      setMeruError(s.invalidEmail);
       return;
     }
 
@@ -284,7 +272,7 @@ export default function Subscribe() {
     setMeruError(null);
 
     try {
-      const result = await activateMeruCode(meruCode.trim(), email.trim());
+      const result = await activateMeruCode(meruCode.trim(), trimmedEmail);
 
       if (result.success) {
         await refreshUser();
@@ -517,27 +505,6 @@ export default function Subscribe() {
         })}
       </div>
 
-      {/* Email address */}
-      <div className="mb-6">
-        <label htmlFor="subscribe-email" className="text-sm font-medium text-pnp-textPrimary mb-1 block">
-          {s.emailAddress}
-        </label>
-        <p className="text-xs text-pnp-textSecondary mb-2">
-          {s.emailDesc}
-        </p>
-        <input
-          id="subscribe-email"
-          type="email"
-          value={email}
-          onChange={(e) => { setEmail(e.target.value); setEmailError(null); }}
-          placeholder={s.emailPlaceholder}
-          className="w-full rounded-xl px-4 py-2.5 bg-white/5 border border-white/10 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-[#D4007A] transition-colors"
-        />
-        {emailError && (
-          <p className="mt-1.5 text-xs text-red-400">{emailError}</p>
-        )}
-      </div>
-
       {/* Payment method */}
       <div className="mb-6">
         <h3 className="text-sm font-medium text-pnp-textPrimary mb-3">{s.paymentMethod}</h3>
@@ -671,6 +638,14 @@ export default function Subscribe() {
         <label className="text-sm font-medium text-pnp-textPrimary mb-2 block">
           {s.haveMeruCode}
         </label>
+        <input
+          type="email"
+          value={meruEmail}
+          onChange={(e) => { setMeruEmail(e.target.value); setMeruError(null); }}
+          placeholder={s.emailPlaceholder}
+          disabled={meruSubmitting}
+          className="w-full rounded-xl px-4 py-2.5 mb-2 bg-white/5 border border-white/10 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-[#D4007A] transition-colors disabled:opacity-50"
+        />
         <div className="flex gap-2">
           <input
             type="text"
@@ -682,7 +657,7 @@ export default function Subscribe() {
           />
           <button
             onClick={handleMeruActivate}
-            disabled={!meruCode.trim() || meruSubmitting}
+            disabled={!meruCode.trim() || !meruEmail.trim() || meruSubmitting}
             className="btn-gradient px-5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
           >
             {meruSubmitting ? s.verifying : s.activate}

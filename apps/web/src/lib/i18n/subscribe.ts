@@ -14,7 +14,7 @@ const strings = {
 
     // ── Plan tier section labels ──────────────────────────────────────────────
     communityMember: "Community Member",
-    communityMemberDesc: "Social features only — does not include PRIME media or exclusive content",
+    communityMemberDesc: "Access to the app and social features — does not include PRIME or exclusive content",
     prime: "PRIME",
     primeDesc: "Full access — PRIME media, Nearby Premium, hangouts, exclusive content & more",
 
@@ -27,8 +27,8 @@ const strings = {
     bestValue: "Best Value",
 
     // ── Plan features — member-monthly ─────────────────────────────────────────
-    featureMember1: "Hangout group rooms",
-    featureMember2: "Social feed access",
+    featureMember1: "Full app access",
+    featureMember2: "Social feed & hangout rooms",
     featureMember3: "Nearby users discovery",
 
     // ── Plan features — week_pass ─────────────────────────────────────────────
@@ -66,9 +66,9 @@ const strings = {
     featureLifetime5: "Never pay again",
 
     // ── Member plan excluded features ─────────────────────────────────────────
-    excludedMember1: "No PRIME media access",
-    excludedMember2: "No exclusive video content",
-    excludedMember3: "No Telegram PRIME channel access",
+    excludedMember1: "No PRIME access",
+    excludedMember2: "No exclusive content or videos",
+    excludedMember3: "No Telegram PRIME channel",
     excludedMember4: "No VIP badge or priority support",
 
     // ── Email section ─────────────────────────────────────────────────────────
@@ -157,7 +157,7 @@ const strings = {
 
     // ── Plan tier section labels ──────────────────────────────────────────────
     communityMember: "Miembro de comunidad",
-    communityMemberDesc: "Solo funciones sociales — no incluye media PRIME ni contenido exclusivo",
+    communityMemberDesc: "Acceso a la app y funciones sociales — no incluye PRIME ni contenido exclusivo",
     prime: "PRIME",
     primeDesc: "Acceso completo — media PRIME, Nearby Premium, hangouts, contenido exclusivo y más",
 
@@ -170,8 +170,8 @@ const strings = {
     bestValue: "Mejor precio",
 
     // ── Plan features — member-monthly ─────────────────────────────────────────
-    featureMember1: "Salas de grupo Hangout",
-    featureMember2: "Acceso al feed social",
+    featureMember1: "Acceso completo a la app",
+    featureMember2: "Feed social y salas de hangout",
     featureMember3: "Descubrimiento de usuarios cercanos",
 
     // ── Plan features — week_pass ─────────────────────────────────────────────
@@ -209,9 +209,9 @@ const strings = {
     featureLifetime5: "No vuelves a pagar nunca",
 
     // ── Member plan excluded features ─────────────────────────────────────────
-    excludedMember1: "Sin acceso a media PRIME",
-    excludedMember2: "Sin contenido de video exclusivo",
-    excludedMember3: "Sin acceso al canal PRIME de Telegram",
+    excludedMember1: "Sin acceso PRIME",
+    excludedMember2: "Sin contenido exclusivo ni videos",
+    excludedMember3: "Sin canal PRIME de Telegram",
     excludedMember4: "Sin insignia VIP ni soporte prioritario",
 
     // ── Email section ─────────────────────────────────────────────────────────
@@ -283,6 +283,1700 @@ const strings = {
     failedToCreateDashInvoice: "Error al crear la factura Dash",
     failedToCreatePayment: "Error al crear el pago",
     paymentErrorGeneric: "Error en el pago",
+  },
+
+  pt: {
+    pageTitle: "Assinar — PNPtv!",
+    pageDescription: "Escolha seu plano PNPtv. Desbloqueie conteúdo exclusivo, acesso PRIME a vídeos, descoberta por proximidade e muito mais.",
+
+    chooseYourPlan: "Escolha Seu Plano",
+    subtitle: "Desbloqueie conteúdo exclusivo e recursos com PNPTV PRIME",
+
+    showPricesInUSD: "Ver preços em USD",
+    showPricesInCOP: "Ver preços em COP",
+
+    communityMember: "Membro da Comunidade",
+    communityMemberDesc: "Acesso ao app e recursos sociais — não inclui PRIME nem conteúdo exclusivo",
+    prime: "PRIME",
+    primeDesc: "Acesso completo — mídia PRIME, Nearby Premium, hangouts, conteúdo exclusivo e mais",
+
+    lifetime: "Vitalício",
+    monthly: "Mensal",
+    perMonth: "/mês",
+
+    bestValue: "Melhor Custo-Benefício",
+
+    featureMember1: "Acesso completo ao app",
+    featureMember2: "Feed social e salas de hangout",
+    featureMember3: "Descoberta de usuários próximos",
+
+    featureWeek1: "7 dias de acesso PRIME completo",
+    featureWeek2: "Conteúdo PRIME exclusivo",
+    featureWeek3: "Recursos Nearby Premium",
+    featureWeek4: "Hangouts comunitários",
+
+    featureThreeMonths1: "3 meses de acesso PRIME completo",
+    featureThreeMonths2: "Acesso completo à biblioteca de mídia PRIME",
+    featureThreeMonths3: "Recursos Nearby Premium",
+    featureThreeMonths4: "Hangouts comunitários",
+    featureThreeMonths5: "Suporte prioritário",
+
+    featureCrystal1: "6 meses de acesso PRIME completo",
+    featureCrystal2: "Conteúdo PRIME ilimitado + lançamentos antecipados",
+    featureCrystal3: "Recursos Nearby Premium",
+    featureCrystal4: "Status VIP na comunidade",
+    featureCrystal5: "Suporte prioritário",
+
+    featureYearly1: "1 ano de acesso PRIME completo",
+    featureYearly2: "Conteúdo PRIME ilimitado + exclusivos",
+    featureYearly3: "Recursos Nearby Premium",
+    featureYearly4: "Badge VIP + suporte prioritário",
+    featureYearly5: "Acesso a eventos exclusivos",
+
+    featureLifetime1: "Acesso PRIME vitalício — pague uma vez",
+    featureLifetime2: "Tudo do plano Anual, para sempre",
+    featureLifetime3: "Badge de Fundador",
+    featureLifetime4: "Solicitações de recursos prioritárias",
+    featureLifetime5: "Nunca mais pague",
+
+    excludedMember1: "Sem acesso PRIME",
+    excludedMember2: "Sem conteúdo exclusivo ou vídeos",
+    excludedMember3: "Sem canal PRIME do Telegram",
+    excludedMember4: "Sem badge VIP nem suporte prioritário",
+
+    emailAddress: "Endereço de e-mail",
+    emailDesc: "Enviaremos suas credenciais de acesso e informações de assinatura",
+    emailPlaceholder: "voce@exemplo.com",
+    invalidEmail: "Por favor, insira um endereço de e-mail válido",
+
+    paymentMethod: "Método de Pagamento",
+    cardPse: "Cartão / PSE",
+    cardPseDesc: "Crédito, Débito",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "Anônimo",
+    dashComingSoon: "Em breve",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "Pague anonimamente com Dash — sem cartão de crédito, sem identidade necessária. Você receberá um endereço de pagamento + código QR para enviar de qualquer carteira Dash.",
+    getDashWallet: "Obter Carteira Dash ↗",
+    buyOnKraken: "Comprar na Kraken ↗",
+    buyOnUphold: "Comprar na Uphold ↗",
+
+    waitingForDashPayment: "Aguardando pagamento Dash —",
+    dashInvoiceDesc: "Conclua seu pagamento na página de checkout BTCPay. Esta página será atualizada automaticamente após confirmação.",
+    openDashCheckout: "Abrir Checkout Dash",
+    cancel: "Cancelar",
+
+    or: "ou",
+    wantBestDeal: "Quer o melhor negócio?",
+    lifetime100Desc: "Obtenha nossa promo Lifetime100 — um único pagamento de $100 por acesso PRIME vitalício. Sem assinaturas, sem renovações, seu para sempre.",
+    checkoutLifetime100: "Ver a oferta Lifetime100",
+    haveMeruCode: "Tem um código Meru?",
+    meruCodePlaceholder: "Digite seu código Meru",
+    activate: "Ativar",
+    verifying: "Verificando...",
+    verifyingPayment: "Verificando pagamento... isso pode levar alguns segundos",
+    activationFailed: "Falha na ativação",
+    activationError: "Erro na ativação",
+    pleaseEnterValidEmailAbove: "Por favor, insira um endereço de e-mail válido acima",
+
+    waitingForPayment: "Aguardando pagamento...",
+    completePaymentInWindow: "Conclua o pagamento na janela de checkout. Esta página será atualizada automaticamente.",
+
+    subscribeNow: "Assinar Agora",
+    processingPayment: "Processando...",
+    goBack: "Voltar",
+
+    paymentConfirmed: "Pagamento Confirmado!",
+    subscriptionNowActive: "Sua assinatura está ativa. Verifique seu e-mail para a fatura e o guia de integração.",
+    goToPNPtv: "Ir para PNPtv!",
+
+    noPlansAvailable: "Nenhum plano disponível",
+    failedToLoadPlans: "Falha ao carregar os planos",
+    retry: "Tentar novamente",
+    paymentTimedOut: "A verificação do pagamento expirou. Se você concluiu o pagamento, sua assinatura será ativada automaticamente.",
+    paymentNotSuccessful: "O pagamento não foi bem-sucedido. Por favor, tente novamente.",
+    dashNotConfigured: "Os pagamentos com Dash ainda não estão disponíveis. Por favor, use ePayco ou Daimo.",
+    dashServerUnavailable: "O servidor de pagamento está temporariamente indisponível. Por favor, tente novamente em alguns minutos.",
+    dashExpired: "O pagamento Dash expirou ou não foi recebido. Por favor, tente novamente.",
+    failedToCreateDashInvoice: "Falha ao criar fatura Dash",
+    failedToCreatePayment: "Falha ao criar pagamento",
+    paymentErrorGeneric: "Erro no pagamento",
+  },
+
+  zh: {
+    pageTitle: "订阅 — PNPtv!",
+    pageDescription: "选择您的 PNPtv 方案。解锁独家内容、PRIME 视频访问、附近发现功能等。",
+
+    chooseYourPlan: "选择您的方案",
+    subtitle: "使用 PNPTV PRIME 解锁独家内容和功能",
+
+    showPricesInUSD: "以美元显示价格",
+    showPricesInCOP: "以哥伦比亚比索显示价格",
+
+    communityMember: "社区会员",
+    communityMemberDesc: "访问应用和社交功能 — 不包含 PRIME 或独家内容",
+    prime: "PRIME",
+    primeDesc: "完整访问 — PRIME 媒体、Nearby Premium、Hangouts、独家内容等",
+
+    lifetime: "终身",
+    monthly: "月付",
+    perMonth: "/月",
+
+    bestValue: "最超值",
+
+    featureMember1: "完整应用访问",
+    featureMember2: "社交动态和聚会房间",
+    featureMember3: "附近用户发现",
+
+    featureWeek1: "7 天完整 PRIME 访问",
+    featureWeek2: "独家 PRIME 内容",
+    featureWeek3: "Nearby Premium 功能",
+    featureWeek4: "社区 Hangouts",
+
+    featureThreeMonths1: "3 个月完整 PRIME 访问",
+    featureThreeMonths2: "完整 PRIME 媒体库访问",
+    featureThreeMonths3: "Nearby Premium 功能",
+    featureThreeMonths4: "社区 Hangouts",
+    featureThreeMonths5: "优先支持",
+
+    featureCrystal1: "6 个月完整 PRIME 访问",
+    featureCrystal2: "无限 PRIME 内容 + 早期发布",
+    featureCrystal3: "Nearby Premium 功能",
+    featureCrystal4: "VIP 社区身份",
+    featureCrystal5: "优先支持",
+
+    featureYearly1: "1 年完整 PRIME 访问",
+    featureYearly2: "无限 PRIME 内容 + 独家内容",
+    featureYearly3: "Nearby Premium 功能",
+    featureYearly4: "VIP 徽章 + 优先支持",
+    featureYearly5: "独家活动访问",
+
+    featureLifetime1: "终身 PRIME 访问 — 一次付款",
+    featureLifetime2: "年度方案的一切，永久有效",
+    featureLifetime3: "创始人徽章",
+    featureLifetime4: "优先功能请求",
+    featureLifetime5: "永不再付费",
+
+    excludedMember1: "无 PRIME 访问",
+    excludedMember2: "无独家内容或视频",
+    excludedMember3: "无 Telegram PRIME 频道",
+    excludedMember4: "无 VIP 徽章或优先支持",
+
+    emailAddress: "电子邮件地址",
+    emailDesc: "我们将发送您的登录凭证和会员信息",
+    emailPlaceholder: "you@example.com",
+    invalidEmail: "请输入有效的电子邮件地址",
+
+    paymentMethod: "支付方式",
+    cardPse: "银行卡 / PSE",
+    cardPseDesc: "信用卡、借记卡",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "匿名",
+    dashComingSoon: "即将推出",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "使用 Dash 匿名支付 — 无需信用卡，无需身份验证。您将收到支付地址和二维码，可从任意 Dash 钱包发送。",
+    getDashWallet: "获取 Dash 钱包 ↗",
+    buyOnKraken: "在 Kraken 购买 ↗",
+    buyOnUphold: "在 Uphold 购买 ↗",
+
+    waitingForDashPayment: "等待 Dash 付款 —",
+    dashInvoiceDesc: "请在 BTCPay 结账页面完成付款。确认后，本页面将自动更新。",
+    openDashCheckout: "打开 Dash 结账",
+    cancel: "取消",
+
+    or: "或",
+    wantBestDeal: "想要最优惠的价格？",
+    lifetime100Desc: "获取我们的 Lifetime100 优惠 — 一次性支付 $100 获得终身 PRIME 访问。无订阅，无续费，永远属于您。",
+    checkoutLifetime100: "查看 Lifetime100 优惠",
+    haveMeruCode: "有 Meru 码？",
+    meruCodePlaceholder: "输入您的 Meru 码",
+    activate: "激活",
+    verifying: "验证中...",
+    verifyingPayment: "正在验证付款...这可能需要几秒钟",
+    activationFailed: "激活失败",
+    activationError: "激活错误",
+    pleaseEnterValidEmailAbove: "请在上方输入有效的电子邮件地址",
+
+    waitingForPayment: "等待付款...",
+    completePaymentInWindow: "在结账窗口完成付款。本页面将自动更新。",
+
+    subscribeNow: "立即订阅",
+    processingPayment: "处理中...",
+    goBack: "返回",
+
+    paymentConfirmed: "付款已确认！",
+    subscriptionNowActive: "您的订阅已激活。请查看电子邮件获取发票和入门指南。",
+    goToPNPtv: "前往 PNPtv!",
+
+    noPlansAvailable: "暂无可用方案",
+    failedToLoadPlans: "加载方案失败",
+    retry: "重试",
+    paymentTimedOut: "付款验证超时。如果您已完成付款，您的订阅将自动激活。",
+    paymentNotSuccessful: "付款未成功，请重试。",
+    dashNotConfigured: "Dash 支付暂不可用，请使用 ePayco 或 Daimo。",
+    dashServerUnavailable: "支付服务器暂时不可用，请几分钟后重试。",
+    dashExpired: "Dash 付款已过期或未收到，请重试。",
+    failedToCreateDashInvoice: "创建 Dash 发票失败",
+    failedToCreatePayment: "创建付款失败",
+    paymentErrorGeneric: "付款错误",
+  },
+
+  zhTW: {
+    pageTitle: "訂閱 — PNPtv!",
+    pageDescription: "選擇您的 PNPtv 方案。解鎖獨家內容、PRIME 影片訪問、附近探索功能等。",
+
+    chooseYourPlan: "選擇您的方案",
+    subtitle: "使用 PNPTV PRIME 解鎖獨家內容和功能",
+
+    showPricesInUSD: "以美元顯示價格",
+    showPricesInCOP: "以哥倫比亞披索顯示價格",
+
+    communityMember: "社群會員",
+    communityMemberDesc: "存取應用程式和社交功能 — 不含 PRIME 或獨家內容",
+    prime: "PRIME",
+    primeDesc: "完整存取 — PRIME 媒體、Nearby Premium、Hangouts、獨家內容等",
+
+    lifetime: "終身",
+    monthly: "月付",
+    perMonth: "/月",
+
+    bestValue: "最超值",
+
+    featureMember1: "完整應用存取",
+    featureMember2: "社交動態和聚會房間",
+    featureMember3: "附近用戶探索",
+
+    featureWeek1: "7 天完整 PRIME 存取",
+    featureWeek2: "獨家 PRIME 內容",
+    featureWeek3: "Nearby Premium 功能",
+    featureWeek4: "社群 Hangouts",
+
+    featureThreeMonths1: "3 個月完整 PRIME 存取",
+    featureThreeMonths2: "完整 PRIME 媒體庫存取",
+    featureThreeMonths3: "Nearby Premium 功能",
+    featureThreeMonths4: "社群 Hangouts",
+    featureThreeMonths5: "優先支援",
+
+    featureCrystal1: "6 個月完整 PRIME 存取",
+    featureCrystal2: "無限 PRIME 內容 + 早期發布",
+    featureCrystal3: "Nearby Premium 功能",
+    featureCrystal4: "VIP 社群身份",
+    featureCrystal5: "優先支援",
+
+    featureYearly1: "1 年完整 PRIME 存取",
+    featureYearly2: "無限 PRIME 內容 + 獨家內容",
+    featureYearly3: "Nearby Premium 功能",
+    featureYearly4: "VIP 徽章 + 優先支援",
+    featureYearly5: "獨家活動存取",
+
+    featureLifetime1: "終身 PRIME 存取 — 一次付款",
+    featureLifetime2: "年度方案的一切，永久有效",
+    featureLifetime3: "創始人徽章",
+    featureLifetime4: "優先功能請求",
+    featureLifetime5: "永不再付費",
+
+    excludedMember1: "無 PRIME 存取",
+    excludedMember2: "無獨家內容或影片",
+    excludedMember3: "無 Telegram PRIME 頻道",
+    excludedMember4: "無 VIP 徽章或優先支援",
+
+    emailAddress: "電子郵件地址",
+    emailDesc: "我們將傳送您的登入憑證和會員資訊",
+    emailPlaceholder: "you@example.com",
+    invalidEmail: "請輸入有效的電子郵件地址",
+
+    paymentMethod: "付款方式",
+    cardPse: "銀行卡 / PSE",
+    cardPseDesc: "信用卡、金融卡",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "匿名",
+    dashComingSoon: "即將推出",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "使用 Dash 匿名付款 — 無需信用卡，無需身份驗證。您將收到付款地址和 QR 碼，可從任意 Dash 錢包發送。",
+    getDashWallet: "取得 Dash 錢包 ↗",
+    buyOnKraken: "在 Kraken 購買 ↗",
+    buyOnUphold: "在 Uphold 購買 ↗",
+
+    waitingForDashPayment: "等待 Dash 付款 —",
+    dashInvoiceDesc: "請在 BTCPay 結帳頁面完成付款。確認後，本頁面將自動更新。",
+    openDashCheckout: "開啟 Dash 結帳",
+    cancel: "取消",
+
+    or: "或",
+    wantBestDeal: "想要最優惠的價格？",
+    lifetime100Desc: "取得我們的 Lifetime100 優惠 — 一次性支付 $100 即可獲得終身 PRIME 存取。無訂閱、無續費，永遠屬於您。",
+    checkoutLifetime100: "查看 Lifetime100 優惠",
+    haveMeruCode: "有 Meru 碼？",
+    meruCodePlaceholder: "輸入您的 Meru 碼",
+    activate: "啟用",
+    verifying: "驗證中...",
+    verifyingPayment: "正在驗證付款...這可能需要幾秒鐘",
+    activationFailed: "啟用失敗",
+    activationError: "啟用錯誤",
+    pleaseEnterValidEmailAbove: "請在上方輸入有效的電子郵件地址",
+
+    waitingForPayment: "等待付款...",
+    completePaymentInWindow: "在結帳視窗完成付款。本頁面將自動更新。",
+
+    subscribeNow: "立即訂閱",
+    processingPayment: "處理中...",
+    goBack: "返回",
+
+    paymentConfirmed: "付款已確認！",
+    subscriptionNowActive: "您的訂閱已啟用。請查看電子郵件獲取發票和入門指南。",
+    goToPNPtv: "前往 PNPtv!",
+
+    noPlansAvailable: "暫無可用方案",
+    failedToLoadPlans: "載入方案失敗",
+    retry: "重試",
+    paymentTimedOut: "付款驗證逾時。如果您已完成付款，您的訂閱將自動啟用。",
+    paymentNotSuccessful: "付款未成功，請重試。",
+    dashNotConfigured: "Dash 付款暫不可用，請使用 ePayco 或 Daimo。",
+    dashServerUnavailable: "付款伺服器暫時不可用，請幾分鐘後重試。",
+    dashExpired: "Dash 付款已過期或未收到，請重試。",
+    failedToCreateDashInvoice: "建立 Dash 發票失敗",
+    failedToCreatePayment: "建立付款失敗",
+    paymentErrorGeneric: "付款錯誤",
+  },
+
+  fr: {
+    pageTitle: "S'abonner — PNPtv!",
+    pageDescription: "Choisissez votre plan PNPtv. Débloquez du contenu exclusif, l'accès vidéo PRIME, la découverte de proximité et plus encore.",
+
+    chooseYourPlan: "Choisissez Votre Plan",
+    subtitle: "Débloquez du contenu exclusif et des fonctionnalités avec PNPTV PRIME",
+
+    showPricesInUSD: "Voir les prix en USD",
+    showPricesInCOP: "Voir les prix en COP",
+
+    communityMember: "Membre de la Communauté",
+    communityMemberDesc: "Accès à l'app et aux fonctionnalités sociales — n'inclut pas PRIME ni le contenu exclusif",
+    prime: "PRIME",
+    primeDesc: "Accès complet — médias PRIME, Nearby Premium, hangouts, contenu exclusif et plus",
+
+    lifetime: "À vie",
+    monthly: "Mensuel",
+    perMonth: "/mois",
+
+    bestValue: "Meilleur Rapport Qualité-Prix",
+
+    featureMember1: "Accès complet à l'app",
+    featureMember2: "Fil social et salons de hangout",
+    featureMember3: "Découverte des utilisateurs proches",
+
+    featureWeek1: "7 jours d'accès PRIME complet",
+    featureWeek2: "Contenu PRIME exclusif",
+    featureWeek3: "Fonctionnalités Nearby Premium",
+    featureWeek4: "Hangouts communautaires",
+
+    featureThreeMonths1: "3 mois d'accès PRIME complet",
+    featureThreeMonths2: "Accès complet à la médiathèque PRIME",
+    featureThreeMonths3: "Fonctionnalités Nearby Premium",
+    featureThreeMonths4: "Hangouts communautaires",
+    featureThreeMonths5: "Support prioritaire",
+
+    featureCrystal1: "6 mois d'accès PRIME complet",
+    featureCrystal2: "Contenu PRIME illimité + sorties anticipées",
+    featureCrystal3: "Fonctionnalités Nearby Premium",
+    featureCrystal4: "Statut VIP dans la communauté",
+    featureCrystal5: "Support prioritaire",
+
+    featureYearly1: "1 an d'accès PRIME complet",
+    featureYearly2: "Contenu PRIME illimité + exclusivités",
+    featureYearly3: "Fonctionnalités Nearby Premium",
+    featureYearly4: "Badge VIP + support prioritaire",
+    featureYearly5: "Accès aux événements exclusifs",
+
+    featureLifetime1: "Accès PRIME à vie — paiement unique",
+    featureLifetime2: "Tout du plan Annuel, pour toujours",
+    featureLifetime3: "Badge Fondateur",
+    featureLifetime4: "Demandes de fonctionnalités prioritaires",
+    featureLifetime5: "Ne payez plus jamais",
+
+    excludedMember1: "Pas d'accès PRIME",
+    excludedMember2: "Pas de contenu exclusif ni vidéos",
+    excludedMember3: "Pas de canal PRIME Telegram",
+    excludedMember4: "Pas de badge VIP ni de support prioritaire",
+
+    emailAddress: "Adresse e-mail",
+    emailDesc: "Nous vous enverrons vos identifiants de connexion et vos informations d'adhésion",
+    emailPlaceholder: "vous@exemple.com",
+    invalidEmail: "Veuillez saisir une adresse e-mail valide",
+
+    paymentMethod: "Mode de Paiement",
+    cardPse: "Carte / PSE",
+    cardPseDesc: "Crédit, Débit",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "Anonyme",
+    dashComingSoon: "Bientôt disponible",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "Payez anonymement avec Dash — sans carte de crédit, sans identité requise. Vous recevrez une adresse de paiement + code QR à envoyer depuis n'importe quel portefeuille Dash.",
+    getDashWallet: "Obtenir un portefeuille Dash ↗",
+    buyOnKraken: "Acheter sur Kraken ↗",
+    buyOnUphold: "Acheter sur Uphold ↗",
+
+    waitingForDashPayment: "En attente du paiement Dash —",
+    dashInvoiceDesc: "Finalisez votre paiement sur la page de checkout BTCPay. Cette page se mettra à jour automatiquement après confirmation.",
+    openDashCheckout: "Ouvrir le paiement Dash",
+    cancel: "Annuler",
+
+    or: "ou",
+    wantBestDeal: "Vous voulez la meilleure offre ?",
+    lifetime100Desc: "Obtenez notre promo Lifetime100 — un seul paiement de $100 pour un accès PRIME à vie. Sans abonnement, sans renouvellement, pour toujours à vous.",
+    checkoutLifetime100: "Voir l'offre Lifetime100",
+    haveMeruCode: "Vous avez un code Meru ?",
+    meruCodePlaceholder: "Entrez votre code Meru",
+    activate: "Activer",
+    verifying: "Vérification...",
+    verifyingPayment: "Vérification du paiement... cela peut prendre quelques secondes",
+    activationFailed: "Échec de l'activation",
+    activationError: "Erreur d'activation",
+    pleaseEnterValidEmailAbove: "Veuillez saisir une adresse e-mail valide ci-dessus",
+
+    waitingForPayment: "En attente du paiement...",
+    completePaymentInWindow: "Finalisez le paiement dans la fenêtre de checkout. Cette page se mettra à jour automatiquement.",
+
+    subscribeNow: "S'abonner Maintenant",
+    processingPayment: "Traitement en cours...",
+    goBack: "Retour",
+
+    paymentConfirmed: "Paiement Confirmé !",
+    subscriptionNowActive: "Votre abonnement est maintenant actif. Consultez vos e-mails pour votre facture et votre guide d'intégration.",
+    goToPNPtv: "Aller sur PNPtv!",
+
+    noPlansAvailable: "Aucun plan disponible",
+    failedToLoadPlans: "Impossible de charger les plans",
+    retry: "Réessayer",
+    paymentTimedOut: "La vérification du paiement a expiré. Si vous avez effectué le paiement, votre abonnement s'activera automatiquement.",
+    paymentNotSuccessful: "Le paiement n'a pas abouti. Veuillez réessayer.",
+    dashNotConfigured: "Les paiements Dash ne sont pas encore disponibles. Veuillez utiliser ePayco ou Daimo.",
+    dashServerUnavailable: "Le serveur de paiement est temporairement indisponible. Veuillez réessayer dans quelques minutes.",
+    dashExpired: "Le paiement Dash a expiré ou n'a pas été reçu. Veuillez réessayer.",
+    failedToCreateDashInvoice: "Échec de la création de la facture Dash",
+    failedToCreatePayment: "Échec de la création du paiement",
+    paymentErrorGeneric: "Erreur de paiement",
+  },
+
+  de: {
+    pageTitle: "Abonnieren — PNPtv!",
+    pageDescription: "Wähle deinen PNPtv-Plan. Schalte exklusive Inhalte, PRIME-Videozugang, Nutzer-in-der-Nähe-Entdeckung und mehr frei.",
+
+    chooseYourPlan: "Wähle Deinen Plan",
+    subtitle: "Schalte exklusive Inhalte und Funktionen mit PNPTV PRIME frei",
+
+    showPricesInUSD: "Preise in USD anzeigen",
+    showPricesInCOP: "Preise in COP anzeigen",
+
+    communityMember: "Community-Mitglied",
+    communityMemberDesc: "Zugang zur App und sozialen Funktionen — enthält kein PRIME oder exklusive Inhalte",
+    prime: "PRIME",
+    primeDesc: "Vollzugang — PRIME-Medien, Nearby Premium, Hangouts, exklusive Inhalte & mehr",
+
+    lifetime: "Lebenslang",
+    monthly: "Monatlich",
+    perMonth: "/Monat",
+
+    bestValue: "Bestes Angebot",
+
+    featureMember1: "Vollständiger App-Zugang",
+    featureMember2: "Social-Feed und Hangout-Räume",
+    featureMember3: "Nutzer in der Nähe entdecken",
+
+    featureWeek1: "7 Tage vollständiger PRIME-Zugang",
+    featureWeek2: "Exklusive PRIME-Inhalte",
+    featureWeek3: "Nearby-Premium-Funktionen",
+    featureWeek4: "Community-Hangouts",
+
+    featureThreeMonths1: "3 Monate vollständiger PRIME-Zugang",
+    featureThreeMonths2: "Vollständiger Zugang zur PRIME-Medienbibliothek",
+    featureThreeMonths3: "Nearby-Premium-Funktionen",
+    featureThreeMonths4: "Community-Hangouts",
+    featureThreeMonths5: "Prioritätssupport",
+
+    featureCrystal1: "6 Monate vollständiger PRIME-Zugang",
+    featureCrystal2: "Unbegrenzte PRIME-Inhalte + Early-Access-Releases",
+    featureCrystal3: "Nearby-Premium-Funktionen",
+    featureCrystal4: "VIP-Community-Status",
+    featureCrystal5: "Prioritätssupport",
+
+    featureYearly1: "1 Jahr vollständiger PRIME-Zugang",
+    featureYearly2: "Unbegrenzte PRIME-Inhalte + Exklusives",
+    featureYearly3: "Nearby-Premium-Funktionen",
+    featureYearly4: "VIP-Badge + Prioritätssupport",
+    featureYearly5: "Zugang zu exklusiven Events",
+
+    featureLifetime1: "Lebenslanger PRIME-Zugang — einmalige Zahlung",
+    featureLifetime2: "Alles aus dem Jahresplan, für immer",
+    featureLifetime3: "Gründer-Badge",
+    featureLifetime4: "Prioritäre Feature-Anfragen",
+    featureLifetime5: "Nie wieder zahlen",
+
+    excludedMember1: "Kein PRIME-Zugang",
+    excludedMember2: "Keine exklusiven Inhalte oder Videos",
+    excludedMember3: "Kein Telegram-PRIME-Kanal",
+    excludedMember4: "Kein VIP-Badge oder Prioritätssupport",
+
+    emailAddress: "E-Mail-Adresse",
+    emailDesc: "Wir senden dir deine Login-Daten und Mitgliedschaftsinformationen",
+    emailPlaceholder: "du@beispiel.de",
+    invalidEmail: "Bitte gib eine gültige E-Mail-Adresse ein",
+
+    paymentMethod: "Zahlungsmethode",
+    cardPse: "Karte / PSE",
+    cardPseDesc: "Kredit, Debit",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "Anonym",
+    dashComingSoon: "Demnächst verfügbar",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "Zahle anonym mit Dash — keine Kreditkarte, keine Identität erforderlich. Du erhältst eine Zahlungsadresse + QR-Code zum Senden von einer beliebigen Dash-Wallet.",
+    getDashWallet: "Dash-Wallet holen ↗",
+    buyOnKraken: "Auf Kraken kaufen ↗",
+    buyOnUphold: "Auf Uphold kaufen ↗",
+
+    waitingForDashPayment: "Warte auf Dash-Zahlung —",
+    dashInvoiceDesc: "Schließe die Zahlung auf der BTCPay-Checkout-Seite ab. Diese Seite wird nach Bestätigung automatisch aktualisiert.",
+    openDashCheckout: "Dash-Checkout öffnen",
+    cancel: "Abbrechen",
+
+    or: "oder",
+    wantBestDeal: "Du willst das beste Angebot?",
+    lifetime100Desc: "Hol dir unsere Lifetime100-Promo — eine einmalige Zahlung von $100 für lebenslangen PRIME-Zugang. Kein Abo, keine Verlängerungen, für immer deins.",
+    checkoutLifetime100: "Lifetime100-Deal ansehen",
+    haveMeruCode: "Hast du einen Meru-Code?",
+    meruCodePlaceholder: "Meru-Code eingeben",
+    activate: "Aktivieren",
+    verifying: "Verifizieren...",
+    verifyingPayment: "Zahlung wird überprüft... dies kann einige Sekunden dauern",
+    activationFailed: "Aktivierung fehlgeschlagen",
+    activationError: "Aktivierungsfehler",
+    pleaseEnterValidEmailAbove: "Bitte gib oben eine gültige E-Mail-Adresse ein",
+
+    waitingForPayment: "Warte auf Zahlung...",
+    completePaymentInWindow: "Schließe die Zahlung im Checkout-Fenster ab. Diese Seite wird automatisch aktualisiert.",
+
+    subscribeNow: "Jetzt Abonnieren",
+    processingPayment: "Wird verarbeitet...",
+    goBack: "Zurück",
+
+    paymentConfirmed: "Zahlung bestätigt!",
+    subscriptionNowActive: "Dein Abonnement ist jetzt aktiv. Prüfe deine E-Mails für deine Rechnung und den Onboarding-Leitfaden.",
+    goToPNPtv: "Zu PNPtv!",
+
+    noPlansAvailable: "Keine Pläne verfügbar",
+    failedToLoadPlans: "Pläne konnten nicht geladen werden",
+    retry: "Erneut versuchen",
+    paymentTimedOut: "Zahlungsverifizierung abgelaufen. Wenn du die Zahlung abgeschlossen hast, wird dein Abonnement automatisch aktiviert.",
+    paymentNotSuccessful: "Die Zahlung war nicht erfolgreich. Bitte versuche es erneut.",
+    dashNotConfigured: "Dash-Zahlungen sind noch nicht verfügbar. Bitte nutze ePayco oder Daimo.",
+    dashServerUnavailable: "Der Zahlungsserver ist vorübergehend nicht verfügbar. Bitte versuche es in einigen Minuten erneut.",
+    dashExpired: "Dash-Zahlung abgelaufen oder nicht eingegangen. Bitte versuche es erneut.",
+    failedToCreateDashInvoice: "Dash-Rechnung konnte nicht erstellt werden",
+    failedToCreatePayment: "Zahlung konnte nicht erstellt werden",
+    paymentErrorGeneric: "Zahlungsfehler",
+  },
+
+  th: {
+    pageTitle: "สมัครสมาชิก — PNPtv!",
+    pageDescription: "เลือกแผน PNPtv ของคุณ ปลดล็อกเนื้อหาพิเศษ การเข้าถึงวิดีโอ PRIME ฟีเจอร์ค้นหาผู้ใช้ใกล้เคียง และอื่นๆ",
+
+    chooseYourPlan: "เลือกแผนของคุณ",
+    subtitle: "ปลดล็อกเนื้อหาพิเศษและฟีเจอร์ด้วย PNPTV PRIME",
+
+    showPricesInUSD: "แสดงราคาเป็น USD",
+    showPricesInCOP: "แสดงราคาเป็น COP",
+
+    communityMember: "สมาชิกชุมชน",
+    communityMemberDesc: "เข้าถึงแอปและฟีเจอร์สังคม — ไม่รวม PRIME หรือเนื้อหาพิเศษ",
+    prime: "PRIME",
+    primeDesc: "เข้าถึงครบถ้วน — สื่อ PRIME, Nearby Premium, hangouts, เนื้อหาพิเศษและอื่นๆ",
+
+    lifetime: "ตลอดชีพ",
+    monthly: "รายเดือน",
+    perMonth: "/เดือน",
+
+    bestValue: "คุ้มที่สุด",
+
+    featureMember1: "เข้าถึงแอปเต็มรูปแบบ",
+    featureMember2: "ฟีดสังคมและห้อง Hangout",
+    featureMember3: "ค้นหาผู้ใช้ใกล้เคียง",
+
+    featureWeek1: "เข้าถึง PRIME เต็มรูปแบบ 7 วัน",
+    featureWeek2: "เนื้อหา PRIME พิเศษ",
+    featureWeek3: "ฟีเจอร์ Nearby Premium",
+    featureWeek4: "Hangouts ชุมชน",
+
+    featureThreeMonths1: "เข้าถึง PRIME เต็มรูปแบบ 3 เดือน",
+    featureThreeMonths2: "เข้าถึงคลังสื่อ PRIME ครบถ้วน",
+    featureThreeMonths3: "ฟีเจอร์ Nearby Premium",
+    featureThreeMonths4: "Hangouts ชุมชน",
+    featureThreeMonths5: "ซัพพอร์ตพิเศษ",
+
+    featureCrystal1: "เข้าถึง PRIME เต็มรูปแบบ 6 เดือน",
+    featureCrystal2: "เนื้อหา PRIME ไม่จำกัด + เปิดตัวก่อนใคร",
+    featureCrystal3: "ฟีเจอร์ Nearby Premium",
+    featureCrystal4: "สถานะ VIP ในชุมชน",
+    featureCrystal5: "ซัพพอร์ตพิเศษ",
+
+    featureYearly1: "เข้าถึง PRIME เต็มรูปแบบ 1 ปี",
+    featureYearly2: "เนื้อหา PRIME ไม่จำกัด + เนื้อหาพิเศษ",
+    featureYearly3: "ฟีเจอร์ Nearby Premium",
+    featureYearly4: "แบดจ์ VIP + ซัพพอร์ตพิเศษ",
+    featureYearly5: "เข้าถึงอีเวนต์พิเศษ",
+
+    featureLifetime1: "เข้าถึง PRIME ตลอดชีพ — จ่ายครั้งเดียว",
+    featureLifetime2: "ทุกอย่างในแผนรายปี ตลอดไป",
+    featureLifetime3: "แบดจ์ผู้ก่อตั้ง",
+    featureLifetime4: "คำขอฟีเจอร์แบบพิเศษ",
+    featureLifetime5: "ไม่ต้องจ่ายอีกเลย",
+
+    excludedMember1: "ไม่มีการเข้าถึง PRIME",
+    excludedMember2: "ไม่มีเนื้อหาพิเศษหรือวิดีโอ",
+    excludedMember3: "ไม่มีช่อง PRIME ของ Telegram",
+    excludedMember4: "ไม่มีแบดจ์ VIP หรือซัพพอร์ตพิเศษ",
+
+    emailAddress: "ที่อยู่อีเมล",
+    emailDesc: "เราจะส่งข้อมูลล็อกอินและข้อมูลสมาชิกของคุณ",
+    emailPlaceholder: "you@example.com",
+    invalidEmail: "กรุณากรอกที่อยู่อีเมลที่ถูกต้อง",
+
+    paymentMethod: "วิธีการชำระเงิน",
+    cardPse: "บัตร / PSE",
+    cardPseDesc: "เครดิต, เดบิต",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "ไม่ระบุตัวตน",
+    dashComingSoon: "เร็วๆ นี้",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "ชำระแบบไม่ระบุตัวตนด้วย Dash — ไม่ต้องใช้บัตรเครดิต ไม่ต้องยืนยันตัวตน คุณจะได้รับที่อยู่การชำระเงินและ QR Code เพื่อส่งจากกระเป๋า Dash ใดก็ได้",
+    getDashWallet: "รับกระเป๋า Dash ↗",
+    buyOnKraken: "ซื้อที่ Kraken ↗",
+    buyOnUphold: "ซื้อที่ Uphold ↗",
+
+    waitingForDashPayment: "รอการชำระเงิน Dash —",
+    dashInvoiceDesc: "ทำการชำระเงินให้เสร็จสมบูรณ์ที่หน้า BTCPay Checkout หน้านี้จะอัปเดตโดยอัตโนมัติเมื่อยืนยันแล้ว",
+    openDashCheckout: "เปิด Dash Checkout",
+    cancel: "ยกเลิก",
+
+    or: "หรือ",
+    wantBestDeal: "ต้องการดีลที่ดีที่สุด?",
+    lifetime100Desc: "รับโปรโมชัน Lifetime100 ของเรา — ชำระครั้งเดียว $100 เพื่อเข้าถึง PRIME ตลอดชีพ ไม่มีการสมัครสมาชิก ไม่มีการต่ออายุ เป็นของคุณตลอดไป",
+    checkoutLifetime100: "ดูดีล Lifetime100",
+    haveMeruCode: "มีโค้ด Meru?",
+    meruCodePlaceholder: "กรอกโค้ด Meru ของคุณ",
+    activate: "เปิดใช้งาน",
+    verifying: "กำลังตรวจสอบ...",
+    verifyingPayment: "กำลังตรวจสอบการชำระเงิน... อาจใช้เวลาสักครู่",
+    activationFailed: "การเปิดใช้งานล้มเหลว",
+    activationError: "ข้อผิดพลาดในการเปิดใช้งาน",
+    pleaseEnterValidEmailAbove: "กรุณากรอกที่อยู่อีเมลที่ถูกต้องด้านบน",
+
+    waitingForPayment: "รอการชำระเงิน...",
+    completePaymentInWindow: "ทำการชำระเงินให้เสร็จสมบูรณ์ในหน้าต่าง Checkout หน้านี้จะอัปเดตโดยอัตโนมัติ",
+
+    subscribeNow: "สมัครสมาชิกเลย",
+    processingPayment: "กำลังดำเนินการ...",
+    goBack: "กลับไป",
+
+    paymentConfirmed: "ยืนยันการชำระเงินแล้ว!",
+    subscriptionNowActive: "การสมัครสมาชิกของคุณใช้งานได้แล้ว ตรวจสอบอีเมลสำหรับใบแจ้งหนี้และคู่มือการเริ่มต้น",
+    goToPNPtv: "ไปที่ PNPtv!",
+
+    noPlansAvailable: "ไม่มีแผนให้เลือก",
+    failedToLoadPlans: "โหลดแผนล้มเหลว",
+    retry: "ลองใหม่",
+    paymentTimedOut: "การตรวจสอบการชำระเงินหมดเวลา หากคุณชำระเงินเสร็จแล้ว การสมัครสมาชิกจะเปิดใช้งานโดยอัตโนมัติ",
+    paymentNotSuccessful: "การชำระเงินไม่สำเร็จ กรุณาลองใหม่",
+    dashNotConfigured: "การชำระเงินด้วย Dash ยังไม่พร้อมใช้งาน กรุณาใช้ ePayco หรือ Daimo",
+    dashServerUnavailable: "เซิร์ฟเวอร์การชำระเงินไม่พร้อมใช้งานชั่วคราว กรุณาลองอีกครั้งในอีกสักครู่",
+    dashExpired: "การชำระเงิน Dash หมดอายุหรือไม่ได้รับ กรุณาลองใหม่",
+    failedToCreateDashInvoice: "สร้างใบแจ้งหนี้ Dash ล้มเหลว",
+    failedToCreatePayment: "สร้างการชำระเงินล้มเหลว",
+    paymentErrorGeneric: "ข้อผิดพลาดในการชำระเงิน",
+  },
+
+  it: {
+    pageTitle: "Abbonati — PNPtv!",
+    pageDescription: "Scegli il tuo piano PNPtv. Sblocca contenuti esclusivi, accesso video PRIME, scoperta di utenti nelle vicinanze e altro ancora.",
+
+    chooseYourPlan: "Scegli Il Tuo Piano",
+    subtitle: "Sblocca contenuti esclusivi e funzionalità con PNPTV PRIME",
+
+    showPricesInUSD: "Mostra prezzi in USD",
+    showPricesInCOP: "Mostra prezzi in COP",
+
+    communityMember: "Membro della Community",
+    communityMemberDesc: "Accesso all'app e alle funzionalità social — non include PRIME o contenuti esclusivi",
+    prime: "PRIME",
+    primeDesc: "Accesso completo — media PRIME, Nearby Premium, hangout, contenuti esclusivi e altro",
+
+    lifetime: "A vita",
+    monthly: "Mensile",
+    perMonth: "/mese",
+
+    bestValue: "Miglior Rapporto Qualità-Prezzo",
+
+    featureMember1: "Accesso completo all'app",
+    featureMember2: "Feed social e stanze hangout",
+    featureMember3: "Scoperta utenti nelle vicinanze",
+
+    featureWeek1: "7 giorni di accesso PRIME completo",
+    featureWeek2: "Contenuti PRIME esclusivi",
+    featureWeek3: "Funzionalità Nearby Premium",
+    featureWeek4: "Hangout comunitari",
+
+    featureThreeMonths1: "3 mesi di accesso PRIME completo",
+    featureThreeMonths2: "Accesso completo alla mediateca PRIME",
+    featureThreeMonths3: "Funzionalità Nearby Premium",
+    featureThreeMonths4: "Hangout comunitari",
+    featureThreeMonths5: "Supporto prioritario",
+
+    featureCrystal1: "6 mesi di accesso PRIME completo",
+    featureCrystal2: "Contenuti PRIME illimitati + uscite anticipate",
+    featureCrystal3: "Funzionalità Nearby Premium",
+    featureCrystal4: "Status VIP nella community",
+    featureCrystal5: "Supporto prioritario",
+
+    featureYearly1: "1 anno di accesso PRIME completo",
+    featureYearly2: "Contenuti PRIME illimitati + esclusivi",
+    featureYearly3: "Funzionalità Nearby Premium",
+    featureYearly4: "Badge VIP + supporto prioritario",
+    featureYearly5: "Accesso a eventi esclusivi",
+
+    featureLifetime1: "Accesso PRIME a vita — pagamento unico",
+    featureLifetime2: "Tutto del piano Annuale, per sempre",
+    featureLifetime3: "Badge Fondatore",
+    featureLifetime4: "Richieste di funzionalità prioritarie",
+    featureLifetime5: "Non paghi mai più",
+
+    excludedMember1: "Nessun accesso PRIME",
+    excludedMember2: "Nessun contenuto esclusivo o video",
+    excludedMember3: "Nessun canale PRIME Telegram",
+    excludedMember4: "Nessun badge VIP né supporto prioritario",
+
+    emailAddress: "Indirizzo e-mail",
+    emailDesc: "Ti invieremo le credenziali di accesso e le informazioni sull'abbonamento",
+    emailPlaceholder: "tu@esempio.it",
+    invalidEmail: "Per favore inserisci un indirizzo e-mail valido",
+
+    paymentMethod: "Metodo di Pagamento",
+    cardPse: "Carta / PSE",
+    cardPseDesc: "Credito, Debito",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "Anonimo",
+    dashComingSoon: "Prossimamente",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "Paga anonimamente con Dash — nessuna carta di credito, nessuna identità richiesta. Riceverai un indirizzo di pagamento + codice QR da inviare da qualsiasi wallet Dash.",
+    getDashWallet: "Ottieni Wallet Dash ↗",
+    buyOnKraken: "Acquista su Kraken ↗",
+    buyOnUphold: "Acquista su Uphold ↗",
+
+    waitingForDashPayment: "In attesa del pagamento Dash —",
+    dashInvoiceDesc: "Completa il pagamento nella pagina di checkout BTCPay. Questa pagina si aggiornerà automaticamente dopo la conferma.",
+    openDashCheckout: "Apri Checkout Dash",
+    cancel: "Annulla",
+
+    or: "oppure",
+    wantBestDeal: "Vuoi la migliore offerta?",
+    lifetime100Desc: "Ottieni la nostra promo Lifetime100 — un unico pagamento di $100 per l'accesso PRIME a vita. Nessun abbonamento, nessun rinnovo, tuo per sempre.",
+    checkoutLifetime100: "Vedi l'offerta Lifetime100",
+    haveMeruCode: "Hai un codice Meru?",
+    meruCodePlaceholder: "Inserisci il tuo codice Meru",
+    activate: "Attiva",
+    verifying: "Verifica in corso...",
+    verifyingPayment: "Verifica del pagamento in corso... potrebbero volerci alcuni secondi",
+    activationFailed: "Attivazione fallita",
+    activationError: "Errore di attivazione",
+    pleaseEnterValidEmailAbove: "Per favore inserisci un indirizzo e-mail valido sopra",
+
+    waitingForPayment: "In attesa del pagamento...",
+    completePaymentInWindow: "Completa il pagamento nella finestra di checkout. Questa pagina si aggiornerà automaticamente.",
+
+    subscribeNow: "Abbonati Ora",
+    processingPayment: "Elaborazione in corso...",
+    goBack: "Torna Indietro",
+
+    paymentConfirmed: "Pagamento Confermato!",
+    subscriptionNowActive: "Il tuo abbonamento è ora attivo. Controlla la tua e-mail per la fattura e la guida di onboarding.",
+    goToPNPtv: "Vai su PNPtv!",
+
+    noPlansAvailable: "Nessun piano disponibile",
+    failedToLoadPlans: "Impossibile caricare i piani",
+    retry: "Riprova",
+    paymentTimedOut: "La verifica del pagamento è scaduta. Se hai completato il pagamento, il tuo abbonamento si attiverà automaticamente.",
+    paymentNotSuccessful: "Il pagamento non è andato a buon fine. Per favore riprova.",
+    dashNotConfigured: "I pagamenti Dash non sono ancora disponibili. Per favore usa ePayco o Daimo.",
+    dashServerUnavailable: "Il server di pagamento è temporaneamente non disponibile. Per favore riprova tra qualche minuto.",
+    dashExpired: "Il pagamento Dash è scaduto o non è stato ricevuto. Per favore riprova.",
+    failedToCreateDashInvoice: "Impossibile creare la fattura Dash",
+    failedToCreatePayment: "Impossibile creare il pagamento",
+    paymentErrorGeneric: "Errore di pagamento",
+  },
+
+  tr: {
+    pageTitle: "Abone Ol — PNPtv!",
+    pageDescription: "PNPtv planını seç. Özel içerikleri, PRIME video erişimini, yakınımdaki kullanıcı keşfini ve daha fazlasını aç.",
+
+    chooseYourPlan: "Planını Seç",
+    subtitle: "PNPTV PRIME ile özel içeriklerin ve özelliklerin kilidini aç",
+
+    showPricesInUSD: "Fiyatları USD olarak göster",
+    showPricesInCOP: "Fiyatları COP olarak göster",
+
+    communityMember: "Topluluk Üyesi",
+    communityMemberDesc: "Uygulamaya ve sosyal özelliklere erişim — PRIME veya özel içerik dahil değil",
+    prime: "PRIME",
+    primeDesc: "Tam erişim — PRIME medya, Nearby Premium, hangoutlar, özel içerik ve daha fazlası",
+
+    lifetime: "Ömür Boyu",
+    monthly: "Aylık",
+    perMonth: "/ay",
+
+    bestValue: "En İyi Değer",
+
+    featureMember1: "Tam uygulama erişimi",
+    featureMember2: "Sosyal akış ve hangout odaları",
+    featureMember3: "Yakındaki kullanıcı keşfi",
+
+    featureWeek1: "7 gün tam PRIME erişimi",
+    featureWeek2: "Özel PRIME içeriği",
+    featureWeek3: "Nearby Premium özellikleri",
+    featureWeek4: "Topluluk hangoutları",
+
+    featureThreeMonths1: "3 ay tam PRIME erişimi",
+    featureThreeMonths2: "Tam PRIME medya kütüphanesi erişimi",
+    featureThreeMonths3: "Nearby Premium özellikleri",
+    featureThreeMonths4: "Topluluk hangoutları",
+    featureThreeMonths5: "Öncelikli destek",
+
+    featureCrystal1: "6 ay tam PRIME erişimi",
+    featureCrystal2: "Sınırsız PRIME içeriği + erken yayınlar",
+    featureCrystal3: "Nearby Premium özellikleri",
+    featureCrystal4: "VIP topluluk statüsü",
+    featureCrystal5: "Öncelikli destek",
+
+    featureYearly1: "1 yıl tam PRIME erişimi",
+    featureYearly2: "Sınırsız PRIME içeriği + özel içerikler",
+    featureYearly3: "Nearby Premium özellikleri",
+    featureYearly4: "VIP rozeti + öncelikli destek",
+    featureYearly5: "Özel etkinliklere erişim",
+
+    featureLifetime1: "Ömür boyu PRIME erişimi — tek seferlik ödeme",
+    featureLifetime2: "Yıllık plandaki her şey, sonsuza kadar",
+    featureLifetime3: "Kurucu rozeti",
+    featureLifetime4: "Öncelikli özellik talepleri",
+    featureLifetime5: "Bir daha asla ödeme yapma",
+
+    excludedMember1: "PRIME erişimi yok",
+    excludedMember2: "Özel içerik veya videolar yok",
+    excludedMember3: "Telegram PRIME kanalı yok",
+    excludedMember4: "VIP rozeti veya öncelikli destek yok",
+
+    emailAddress: "E-posta adresi",
+    emailDesc: "Giriş bilgilerini ve üyelik bilgilerini e-posta ile göndereceğiz",
+    emailPlaceholder: "sen@ornek.com",
+    invalidEmail: "Lütfen geçerli bir e-posta adresi gir",
+
+    paymentMethod: "Ödeme Yöntemi",
+    cardPse: "Kart / PSE",
+    cardPseDesc: "Kredi, Banka Kartı",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "Anonim",
+    dashComingSoon: "Yakında",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "Dash ile anonim öde — kredi kartı gerekmez, kimlik gerekmez. Herhangi bir Dash cüzdanından gönderebileceğin bir ödeme adresi ve QR kodu alacaksın.",
+    getDashWallet: "Dash Cüzdanı Al ↗",
+    buyOnKraken: "Kraken'dan Satın Al ↗",
+    buyOnUphold: "Uphold'dan Satın Al ↗",
+
+    waitingForDashPayment: "Dash ödemesi bekleniyor —",
+    dashInvoiceDesc: "Ödemeyi BTCPay checkout sayfasında tamamla. Bu sayfa onaylandıktan sonra otomatik olarak güncellenecek.",
+    openDashCheckout: "Dash Checkout'u Aç",
+    cancel: "İptal",
+
+    or: "veya",
+    wantBestDeal: "En iyi fırsatı mı istiyorsun?",
+    lifetime100Desc: "Lifetime100 promosyonumuzu al — ömür boyu PRIME erişimi için tek seferlik $100 ödeme. Abonelik yok, yenileme yok, sonsuza kadar senin.",
+    checkoutLifetime100: "Lifetime100 fırsatına bak",
+    haveMeruCode: "Meru kodun var mı?",
+    meruCodePlaceholder: "Meru kodunu gir",
+    activate: "Etkinleştir",
+    verifying: "Doğrulanıyor...",
+    verifyingPayment: "Ödeme doğrulanıyor... bu birkaç saniye sürebilir",
+    activationFailed: "Etkinleştirme başarısız",
+    activationError: "Etkinleştirme hatası",
+    pleaseEnterValidEmailAbove: "Lütfen yukarıya geçerli bir e-posta adresi gir",
+
+    waitingForPayment: "Ödeme bekleniyor...",
+    completePaymentInWindow: "Ödemeyi checkout penceresinde tamamla. Bu sayfa otomatik olarak güncellenecek.",
+
+    subscribeNow: "Şimdi Abone Ol",
+    processingPayment: "İşleniyor...",
+    goBack: "Geri Dön",
+
+    paymentConfirmed: "Ödeme Onaylandı!",
+    subscriptionNowActive: "Aboneliğin şimdi aktif. Faturan ve katılım rehberin için e-postanı kontrol et.",
+    goToPNPtv: "PNPtv!'e Git",
+
+    noPlansAvailable: "Mevcut plan yok",
+    failedToLoadPlans: "Planlar yüklenemedi",
+    retry: "Tekrar Dene",
+    paymentTimedOut: "Ödeme doğrulama zaman aşımına uğradı. Ödemeyi tamamladıysan, aboneliğin otomatik olarak etkinleşecek.",
+    paymentNotSuccessful: "Ödeme başarısız oldu. Lütfen tekrar dene.",
+    dashNotConfigured: "Dash ödemeleri henüz mevcut değil. Lütfen ePayco veya Daimo kullan.",
+    dashServerUnavailable: "Ödeme sunucusu geçici olarak kullanılamıyor. Lütfen birkaç dakika içinde tekrar dene.",
+    dashExpired: "Dash ödemesi süresi doldu veya alınamadı. Lütfen tekrar dene.",
+    failedToCreateDashInvoice: "Dash faturası oluşturulamadı",
+    failedToCreatePayment: "Ödeme oluşturulamadı",
+    paymentErrorGeneric: "Ödeme hatası",
+  },
+
+  ru: {
+    pageTitle: "Подписка — PNPtv!",
+    pageDescription: "Выбери свой план PNPtv. Разблокируй эксклюзивный контент, доступ к PRIME-видео, функцию поиска рядом и многое другое.",
+
+    chooseYourPlan: "Выбери Свой План",
+    subtitle: "Разблокируй эксклюзивный контент и функции с PNPTV PRIME",
+
+    showPricesInUSD: "Показать цены в USD",
+    showPricesInCOP: "Показать цены в COP",
+
+    communityMember: "Участник сообщества",
+    communityMemberDesc: "Доступ к приложению и социальным функциям — не включает PRIME или эксклюзивный контент",
+    prime: "PRIME",
+    primeDesc: "Полный доступ — PRIME-медиа, Nearby Premium, hangout'ы, эксклюзивный контент и больше",
+
+    lifetime: "Пожизненно",
+    monthly: "Ежемесячно",
+    perMonth: "/мес",
+
+    bestValue: "Лучшая Цена",
+
+    featureMember1: "Полный доступ к приложению",
+    featureMember2: "Социальная лента и hangout-комнаты",
+    featureMember3: "Поиск пользователей рядом",
+
+    featureWeek1: "7 дней полного PRIME-доступа",
+    featureWeek2: "Эксклюзивный PRIME-контент",
+    featureWeek3: "Функции Nearby Premium",
+    featureWeek4: "Communal hangout'ы",
+
+    featureThreeMonths1: "3 месяца полного PRIME-доступа",
+    featureThreeMonths2: "Полный доступ к PRIME-медиатеке",
+    featureThreeMonths3: "Функции Nearby Premium",
+    featureThreeMonths4: "Communal hangout'ы",
+    featureThreeMonths5: "Приоритетная поддержка",
+
+    featureCrystal1: "6 месяцев полного PRIME-доступа",
+    featureCrystal2: "Безлимитный PRIME-контент + ранний доступ",
+    featureCrystal3: "Функции Nearby Premium",
+    featureCrystal4: "VIP-статус в сообществе",
+    featureCrystal5: "Приоритетная поддержка",
+
+    featureYearly1: "1 год полного PRIME-доступа",
+    featureYearly2: "Безлимитный PRIME-контент + эксклюзивы",
+    featureYearly3: "Функции Nearby Premium",
+    featureYearly4: "VIP-значок + приоритетная поддержка",
+    featureYearly5: "Доступ к эксклюзивным мероприятиям",
+
+    featureLifetime1: "Пожизненный PRIME-доступ — разовый платёж",
+    featureLifetime2: "Всё из годового плана, навсегда",
+    featureLifetime3: "Значок основателя",
+    featureLifetime4: "Приоритетные запросы функций",
+    featureLifetime5: "Больше никогда не платить",
+
+    excludedMember1: "Нет доступа к PRIME",
+    excludedMember2: "Нет эксклюзивного контента или видео",
+    excludedMember3: "Нет Telegram PRIME-канала",
+    excludedMember4: "Нет VIP-значка или приоритетной поддержки",
+
+    emailAddress: "Адрес электронной почты",
+    emailDesc: "Мы отправим твои данные для входа и информацию о членстве",
+    emailPlaceholder: "you@example.com",
+    invalidEmail: "Пожалуйста, введи корректный адрес электронной почты",
+
+    paymentMethod: "Способ Оплаты",
+    cardPse: "Карта / PSE",
+    cardPseDesc: "Кредитная, Дебетовая",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "Анонимно",
+    dashComingSoon: "Скоро",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "Плати анонимно с Dash — без кредитной карты, без удостоверения личности. Ты получишь платёжный адрес + QR-код для отправки из любого Dash-кошелька.",
+    getDashWallet: "Получить Dash-кошелёк ↗",
+    buyOnKraken: "Купить на Kraken ↗",
+    buyOnUphold: "Купить на Uphold ↗",
+
+    waitingForDashPayment: "Ожидание Dash-платежа —",
+    dashInvoiceDesc: "Заверши платёж на странице оформления BTCPay. Страница автоматически обновится после подтверждения.",
+    openDashCheckout: "Открыть Dash Checkout",
+    cancel: "Отмена",
+
+    or: "или",
+    wantBestDeal: "Хочешь лучшую цену?",
+    lifetime100Desc: "Получи нашу акцию Lifetime100 — единовременный платёж $100 за пожизненный PRIME-доступ. Без подписки, без продлений, навсегда твой.",
+    checkoutLifetime100: "Смотреть предложение Lifetime100",
+    haveMeruCode: "Есть код Meru?",
+    meruCodePlaceholder: "Введи свой код Meru",
+    activate: "Активировать",
+    verifying: "Проверка...",
+    verifyingPayment: "Проверка платежа... это может занять несколько секунд",
+    activationFailed: "Активация не удалась",
+    activationError: "Ошибка активации",
+    pleaseEnterValidEmailAbove: "Пожалуйста, введи корректный адрес электронной почты выше",
+
+    waitingForPayment: "Ожидание оплаты...",
+    completePaymentInWindow: "Заверши оплату в окне оформления. Страница обновится автоматически.",
+
+    subscribeNow: "Подписаться",
+    processingPayment: "Обработка...",
+    goBack: "Назад",
+
+    paymentConfirmed: "Платёж подтверждён!",
+    subscriptionNowActive: "Твоя подписка активна. Проверь электронную почту для получения счёта и руководства по началу работы.",
+    goToPNPtv: "Перейти на PNPtv!",
+
+    noPlansAvailable: "Нет доступных планов",
+    failedToLoadPlans: "Не удалось загрузить планы",
+    retry: "Повторить",
+    paymentTimedOut: "Время проверки платежа истекло. Если ты завершил оплату, подписка активируется автоматически.",
+    paymentNotSuccessful: "Платёж не прошёл. Пожалуйста, попробуй снова.",
+    dashNotConfigured: "Dash-платежи ещё не доступны. Пожалуйста, используй ePayco или Daimo.",
+    dashServerUnavailable: "Платёжный сервер временно недоступен. Пожалуйста, попробуй через несколько минут.",
+    dashExpired: "Dash-платёж истёк или не получен. Пожалуйста, попробуй снова.",
+    failedToCreateDashInvoice: "Не удалось создать счёт Dash",
+    failedToCreatePayment: "Не удалось создать платёж",
+    paymentErrorGeneric: "Ошибка оплаты",
+  },
+
+  nl: {
+    pageTitle: "Abonneren — PNPtv!",
+    pageDescription: "Kies je PNPtv-plan. Ontgrendel exclusieve content, PRIME-videotoegang, ontdekking van gebruikers in de buurt en meer.",
+
+    chooseYourPlan: "Kies Je Plan",
+    subtitle: "Ontgrendel exclusieve content en functies met PNPTV PRIME",
+
+    showPricesInUSD: "Prijzen in USD weergeven",
+    showPricesInCOP: "Prijzen in COP weergeven",
+
+    communityMember: "Community-lid",
+    communityMemberDesc: "Toegang tot de app en sociale functies — geen PRIME of exclusieve content",
+    prime: "PRIME",
+    primeDesc: "Volledige toegang — PRIME-media, Nearby Premium, hangouts, exclusieve content & meer",
+
+    lifetime: "Levenslang",
+    monthly: "Maandelijks",
+    perMonth: "/mnd",
+
+    bestValue: "Beste Prijs-Kwaliteit",
+
+    featureMember1: "Volledige app-toegang",
+    featureMember2: "Sociale feed en hangout-kamers",
+    featureMember3: "Gebruikers in de buurt ontdekken",
+
+    featureWeek1: "7 dagen volledige PRIME-toegang",
+    featureWeek2: "Exclusieve PRIME-content",
+    featureWeek3: "Nearby-Premium-functies",
+    featureWeek4: "Community-hangouts",
+
+    featureThreeMonths1: "3 maanden volledige PRIME-toegang",
+    featureThreeMonths2: "Volledige toegang tot de PRIME-mediabibliotheek",
+    featureThreeMonths3: "Nearby-Premium-functies",
+    featureThreeMonths4: "Community-hangouts",
+    featureThreeMonths5: "Prioriteitsondersteuning",
+
+    featureCrystal1: "6 maanden volledige PRIME-toegang",
+    featureCrystal2: "Onbeperkte PRIME-content + vroege releases",
+    featureCrystal3: "Nearby-Premium-functies",
+    featureCrystal4: "VIP-communitystatus",
+    featureCrystal5: "Prioriteitsondersteuning",
+
+    featureYearly1: "1 jaar volledige PRIME-toegang",
+    featureYearly2: "Onbeperkte PRIME-content + exclusives",
+    featureYearly3: "Nearby-Premium-functies",
+    featureYearly4: "VIP-badge + prioriteitsondersteuning",
+    featureYearly5: "Toegang tot exclusieve evenementen",
+
+    featureLifetime1: "Levenslange PRIME-toegang — eenmalige betaling",
+    featureLifetime2: "Alles uit het jaarplan, voor altijd",
+    featureLifetime3: "Oprichterbadge",
+    featureLifetime4: "Prioriteitsverzoeken voor functies",
+    featureLifetime5: "Nooit meer betalen",
+
+    excludedMember1: "Geen PRIME-toegang",
+    excludedMember2: "Geen exclusieve content of video's",
+    excludedMember3: "Geen Telegram PRIME-kanaal",
+    excludedMember4: "Geen VIP-badge of prioriteitsondersteuning",
+
+    emailAddress: "E-mailadres",
+    emailDesc: "We sturen je inloggegevens en lidmaatschapsinformatie",
+    emailPlaceholder: "jij@voorbeeld.nl",
+    invalidEmail: "Vul een geldig e-mailadres in",
+
+    paymentMethod: "Betaalmethode",
+    cardPse: "Kaart / PSE",
+    cardPseDesc: "Krediet, Debet",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "Anoniem",
+    dashComingSoon: "Binnenkort beschikbaar",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "Betaal anoniem met Dash — geen creditcard, geen identiteit vereist. Je ontvangt een betaaladres + QR-code om te verzenden vanuit elke Dash-wallet.",
+    getDashWallet: "Dash-wallet ophalen ↗",
+    buyOnKraken: "Kopen op Kraken ↗",
+    buyOnUphold: "Kopen op Uphold ↗",
+
+    waitingForDashPayment: "Wachten op Dash-betaling —",
+    dashInvoiceDesc: "Voltooi je betaling op de BTCPay-checkoutpagina. Deze pagina wordt automatisch bijgewerkt na bevestiging.",
+    openDashCheckout: "Dash-checkout openen",
+    cancel: "Annuleren",
+
+    or: "of",
+    wantBestDeal: "Wil je de beste deal?",
+    lifetime100Desc: "Haal onze Lifetime100-promo — één betaling van $100 voor levenslange PRIME-toegang. Geen abonnementen, geen verlengingen, voor altijd van jou.",
+    checkoutLifetime100: "Bekijk de Lifetime100-deal",
+    haveMeruCode: "Heb je een Meru-code?",
+    meruCodePlaceholder: "Voer je Meru-code in",
+    activate: "Activeren",
+    verifying: "Verifiëren...",
+    verifyingPayment: "Betaling verifiëren... dit kan een paar seconden duren",
+    activationFailed: "Activering mislukt",
+    activationError: "Activeringsfout",
+    pleaseEnterValidEmailAbove: "Vul hierboven een geldig e-mailadres in",
+
+    waitingForPayment: "Wachten op betaling...",
+    completePaymentInWindow: "Voltooi de betaling in het checkoutvenster. Deze pagina wordt automatisch bijgewerkt.",
+
+    subscribeNow: "Nu Abonneren",
+    processingPayment: "Verwerken...",
+    goBack: "Terug",
+
+    paymentConfirmed: "Betaling Bevestigd!",
+    subscriptionNowActive: "Je abonnement is nu actief. Controleer je e-mail voor je factuur en onboardinggids.",
+    goToPNPtv: "Naar PNPtv!",
+
+    noPlansAvailable: "Geen plannen beschikbaar",
+    failedToLoadPlans: "Plannen konden niet worden geladen",
+    retry: "Opnieuw proberen",
+    paymentTimedOut: "Verificatie van de betaling is verlopen. Als je de betaling hebt voltooid, wordt je abonnement automatisch geactiveerd.",
+    paymentNotSuccessful: "De betaling is niet geslaagd. Probeer het opnieuw.",
+    dashNotConfigured: "Dash-betalingen zijn nog niet beschikbaar. Gebruik ePayco of Daimo.",
+    dashServerUnavailable: "De betalingsserver is tijdelijk niet beschikbaar. Probeer het over een paar minuten opnieuw.",
+    dashExpired: "Dash-betaling verlopen of niet ontvangen. Probeer het opnieuw.",
+    failedToCreateDashInvoice: "Dash-factuur kon niet worden aangemaakt",
+    failedToCreatePayment: "Betaling kon niet worden aangemaakt",
+    paymentErrorGeneric: "Betalingsfout",
+  },
+
+  vi: {
+    pageTitle: "Đăng ký — PNPtv!",
+    pageDescription: "Chọn gói PNPtv của bạn. Mở khóa nội dung độc quyền, truy cập video PRIME, tính năng khám phá người dùng lân cận và nhiều hơn nữa.",
+
+    chooseYourPlan: "Chọn Gói Của Bạn",
+    subtitle: "Mở khóa nội dung độc quyền và tính năng với PNPTV PRIME",
+
+    showPricesInUSD: "Hiển thị giá bằng USD",
+    showPricesInCOP: "Hiển thị giá bằng COP",
+
+    communityMember: "Thành viên Cộng đồng",
+    communityMemberDesc: "Truy cập ứng dụng và tính năng xã hội — không bao gồm PRIME hay nội dung độc quyền",
+    prime: "PRIME",
+    primeDesc: "Truy cập đầy đủ — phương tiện PRIME, Nearby Premium, hangouts, nội dung độc quyền và nhiều hơn",
+
+    lifetime: "Trọn đời",
+    monthly: "Hàng tháng",
+    perMonth: "/tháng",
+
+    bestValue: "Giá Trị Nhất",
+
+    featureMember1: "Truy cập đầy đủ ứng dụng",
+    featureMember2: "Bảng tin xã hội và phòng hangout",
+    featureMember3: "Khám phá người dùng lân cận",
+
+    featureWeek1: "7 ngày truy cập PRIME đầy đủ",
+    featureWeek2: "Nội dung PRIME độc quyền",
+    featureWeek3: "Tính năng Nearby Premium",
+    featureWeek4: "Hangouts cộng đồng",
+
+    featureThreeMonths1: "3 tháng truy cập PRIME đầy đủ",
+    featureThreeMonths2: "Truy cập đầy đủ thư viện phương tiện PRIME",
+    featureThreeMonths3: "Tính năng Nearby Premium",
+    featureThreeMonths4: "Hangouts cộng đồng",
+    featureThreeMonths5: "Hỗ trợ ưu tiên",
+
+    featureCrystal1: "6 tháng truy cập PRIME đầy đủ",
+    featureCrystal2: "Nội dung PRIME không giới hạn + phát hành sớm",
+    featureCrystal3: "Tính năng Nearby Premium",
+    featureCrystal4: "Trạng thái VIP trong cộng đồng",
+    featureCrystal5: "Hỗ trợ ưu tiên",
+
+    featureYearly1: "1 năm truy cập PRIME đầy đủ",
+    featureYearly2: "Nội dung PRIME không giới hạn + độc quyền",
+    featureYearly3: "Tính năng Nearby Premium",
+    featureYearly4: "Huy hiệu VIP + hỗ trợ ưu tiên",
+    featureYearly5: "Truy cập sự kiện độc quyền",
+
+    featureLifetime1: "Truy cập PRIME trọn đời — thanh toán một lần",
+    featureLifetime2: "Mọi thứ trong gói Hàng năm, mãi mãi",
+    featureLifetime3: "Huy hiệu Người sáng lập",
+    featureLifetime4: "Yêu cầu tính năng ưu tiên",
+    featureLifetime5: "Không bao giờ phải trả thêm",
+
+    excludedMember1: "Không có truy cập PRIME",
+    excludedMember2: "Không có nội dung độc quyền hoặc video",
+    excludedMember3: "Không có kênh PRIME Telegram",
+    excludedMember4: "Không có huy hiệu VIP hay hỗ trợ ưu tiên",
+
+    emailAddress: "Địa chỉ email",
+    emailDesc: "Chúng tôi sẽ gửi thông tin đăng nhập và thông tin thành viên của bạn",
+    emailPlaceholder: "ban@example.com",
+    invalidEmail: "Vui lòng nhập địa chỉ email hợp lệ",
+
+    paymentMethod: "Phương Thức Thanh Toán",
+    cardPse: "Thẻ / PSE",
+    cardPseDesc: "Tín dụng, Ghi nợ",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "Ẩn danh",
+    dashComingSoon: "Sắp ra mắt",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "Thanh toán ẩn danh bằng Dash — không cần thẻ tín dụng, không cần xác minh danh tính. Bạn sẽ nhận được địa chỉ thanh toán + mã QR để gửi từ bất kỳ ví Dash nào.",
+    getDashWallet: "Lấy Ví Dash ↗",
+    buyOnKraken: "Mua trên Kraken ↗",
+    buyOnUphold: "Mua trên Uphold ↗",
+
+    waitingForDashPayment: "Đang chờ thanh toán Dash —",
+    dashInvoiceDesc: "Hoàn tất thanh toán trên trang BTCPay checkout. Trang này sẽ tự động cập nhật sau khi xác nhận.",
+    openDashCheckout: "Mở Dash Checkout",
+    cancel: "Hủy",
+
+    or: "hoặc",
+    wantBestDeal: "Muốn giá tốt nhất?",
+    lifetime100Desc: "Nhận khuyến mãi Lifetime100 của chúng tôi — một lần thanh toán $100 cho quyền truy cập PRIME trọn đời. Không đăng ký, không gia hạn, mãi mãi của bạn.",
+    checkoutLifetime100: "Xem ưu đãi Lifetime100",
+    haveMeruCode: "Có mã Meru?",
+    meruCodePlaceholder: "Nhập mã Meru của bạn",
+    activate: "Kích hoạt",
+    verifying: "Đang xác minh...",
+    verifyingPayment: "Đang xác minh thanh toán... có thể mất vài giây",
+    activationFailed: "Kích hoạt thất bại",
+    activationError: "Lỗi kích hoạt",
+    pleaseEnterValidEmailAbove: "Vui lòng nhập địa chỉ email hợp lệ ở trên",
+
+    waitingForPayment: "Đang chờ thanh toán...",
+    completePaymentInWindow: "Hoàn tất thanh toán trong cửa sổ checkout. Trang này sẽ tự động cập nhật.",
+
+    subscribeNow: "Đăng Ký Ngay",
+    processingPayment: "Đang xử lý...",
+    goBack: "Quay Lại",
+
+    paymentConfirmed: "Thanh Toán Đã Xác Nhận!",
+    subscriptionNowActive: "Đăng ký của bạn đã được kích hoạt. Kiểm tra email để nhận hóa đơn và hướng dẫn bắt đầu.",
+    goToPNPtv: "Đến PNPtv!",
+
+    noPlansAvailable: "Không có gói nào",
+    failedToLoadPlans: "Tải gói thất bại",
+    retry: "Thử lại",
+    paymentTimedOut: "Xác minh thanh toán hết thời gian. Nếu bạn đã hoàn tất thanh toán, đăng ký sẽ tự động kích hoạt.",
+    paymentNotSuccessful: "Thanh toán không thành công. Vui lòng thử lại.",
+    dashNotConfigured: "Thanh toán Dash chưa có. Vui lòng sử dụng ePayco hoặc Daimo.",
+    dashServerUnavailable: "Máy chủ thanh toán tạm thời không khả dụng. Vui lòng thử lại sau vài phút.",
+    dashExpired: "Thanh toán Dash đã hết hạn hoặc không nhận được. Vui lòng thử lại.",
+    failedToCreateDashInvoice: "Tạo hóa đơn Dash thất bại",
+    failedToCreatePayment: "Tạo thanh toán thất bại",
+    paymentErrorGeneric: "Lỗi thanh toán",
+  },
+
+  ja: {
+    pageTitle: "購読 — PNPtv!",
+    pageDescription: "PNPtv のプランを選択。限定コンテンツ、PRIME 動画アクセス、近くのユーザー検索などをアンロックしよう。",
+
+    chooseYourPlan: "プランを選択",
+    subtitle: "PNPTV PRIME で限定コンテンツと機能をアンロック",
+
+    showPricesInUSD: "USD で価格を表示",
+    showPricesInCOP: "COP で価格を表示",
+
+    communityMember: "コミュニティメンバー",
+    communityMemberDesc: "アプリとソーシャル機能へのアクセス — PRIME や限定コンテンツは含まれません",
+    prime: "PRIME",
+    primeDesc: "完全アクセス — PRIME メディア、Nearby Premium、ハングアウト、限定コンテンツ等",
+
+    lifetime: "生涯",
+    monthly: "月払い",
+    perMonth: "/月",
+
+    bestValue: "最もお得",
+
+    featureMember1: "アプリへのフルアクセス",
+    featureMember2: "ソーシャルフィードとハングアウトルーム",
+    featureMember3: "近くのユーザー検索",
+
+    featureWeek1: "7 日間の完全 PRIME アクセス",
+    featureWeek2: "限定 PRIME コンテンツ",
+    featureWeek3: "Nearby Premium 機能",
+    featureWeek4: "コミュニティハングアウト",
+
+    featureThreeMonths1: "3 ヶ月間の完全 PRIME アクセス",
+    featureThreeMonths2: "PRIME メディアライブラリへの完全アクセス",
+    featureThreeMonths3: "Nearby Premium 機能",
+    featureThreeMonths4: "コミュニティハングアウト",
+    featureThreeMonths5: "優先サポート",
+
+    featureCrystal1: "6 ヶ月間の完全 PRIME アクセス",
+    featureCrystal2: "無制限 PRIME コンテンツ + 早期リリース",
+    featureCrystal3: "Nearby Premium 機能",
+    featureCrystal4: "コミュニティ VIP ステータス",
+    featureCrystal5: "優先サポート",
+
+    featureYearly1: "1 年間の完全 PRIME アクセス",
+    featureYearly2: "無制限 PRIME コンテンツ + 限定コンテンツ",
+    featureYearly3: "Nearby Premium 機能",
+    featureYearly4: "VIP バッジ + 優先サポート",
+    featureYearly5: "限定イベントへのアクセス",
+
+    featureLifetime1: "生涯 PRIME アクセス — 一回払い",
+    featureLifetime2: "年間プランのすべて、永久に",
+    featureLifetime3: "創設者バッジ",
+    featureLifetime4: "優先機能リクエスト",
+    featureLifetime5: "二度と支払い不要",
+
+    excludedMember1: "PRIME アクセスなし",
+    excludedMember2: "限定コンテンツや動画なし",
+    excludedMember3: "Telegram PRIME チャンネルなし",
+    excludedMember4: "VIP バッジまたは優先サポートなし",
+
+    emailAddress: "メールアドレス",
+    emailDesc: "ログイン情報とメンバーシップ情報をお送りします",
+    emailPlaceholder: "you@example.com",
+    invalidEmail: "有効なメールアドレスを入力してください",
+
+    paymentMethod: "支払い方法",
+    cardPse: "カード / PSE",
+    cardPseDesc: "クレジット、デビット",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "匿名",
+    dashComingSoon: "近日公開",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "Dash で匿名支払い — クレジットカード不要、身元確認不要。任意の Dash ウォレットから送金できる支払いアドレス + QR コードが届きます。",
+    getDashWallet: "Dash ウォレットを取得 ↗",
+    buyOnKraken: "Kraken で購入 ↗",
+    buyOnUphold: "Uphold で購入 ↗",
+
+    waitingForDashPayment: "Dash 支払いを待っています —",
+    dashInvoiceDesc: "BTCPay チェックアウトページで支払いを完了してください。確認後、このページは自動的に更新されます。",
+    openDashCheckout: "Dash チェックアウトを開く",
+    cancel: "キャンセル",
+
+    or: "または",
+    wantBestDeal: "最高のお得を求めますか？",
+    lifetime100Desc: "Lifetime100 プロモを手に入れよう — $100 の一回払いで生涯 PRIME アクセス。サブスクなし、更新なし、永遠にあなたのもの。",
+    checkoutLifetime100: "Lifetime100 ディールを見る",
+    haveMeruCode: "Meru コードをお持ちですか？",
+    meruCodePlaceholder: "Meru コードを入力",
+    activate: "有効化",
+    verifying: "確認中...",
+    verifyingPayment: "支払いを確認中...数秒かかる場合があります",
+    activationFailed: "有効化に失敗",
+    activationError: "有効化エラー",
+    pleaseEnterValidEmailAbove: "上に有効なメールアドレスを入力してください",
+
+    waitingForPayment: "支払いを待っています...",
+    completePaymentInWindow: "チェックアウトウィンドウで支払いを完了してください。このページは自動的に更新されます。",
+
+    subscribeNow: "今すぐ購読",
+    processingPayment: "処理中...",
+    goBack: "戻る",
+
+    paymentConfirmed: "支払い確認済み！",
+    subscriptionNowActive: "サブスクリプションが有効になりました。請求書とオンボーディングガイドについてはメールをご確認ください。",
+    goToPNPtv: "PNPtv! へ",
+
+    noPlansAvailable: "利用可能なプランがありません",
+    failedToLoadPlans: "プランの読み込みに失敗",
+    retry: "再試行",
+    paymentTimedOut: "支払い確認がタイムアウトしました。支払いが完了している場合、サブスクリプションは自動的に有効になります。",
+    paymentNotSuccessful: "支払いが成功しませんでした。もう一度お試しください。",
+    dashNotConfigured: "Dash 支払いはまだ利用できません。ePayco または Daimo をご利用ください。",
+    dashServerUnavailable: "支払いサーバーが一時的に利用できません。数分後に再試行してください。",
+    dashExpired: "Dash 支払いが期限切れまたは未受信です。もう一度お試しください。",
+    failedToCreateDashInvoice: "Dash 請求書の作成に失敗",
+    failedToCreatePayment: "支払いの作成に失敗",
+    paymentErrorGeneric: "支払いエラー",
+  },
+
+  id: {
+    pageTitle: "Berlangganan — PNPtv!",
+    pageDescription: "Pilih paket PNPtv kamu. Buka kunci konten eksklusif, akses video PRIME, penemuan pengguna terdekat dan lainnya.",
+
+    chooseYourPlan: "Pilih Paketmu",
+    subtitle: "Buka kunci konten eksklusif dan fitur dengan PNPTV PRIME",
+
+    showPricesInUSD: "Tampilkan harga dalam USD",
+    showPricesInCOP: "Tampilkan harga dalam COP",
+
+    communityMember: "Anggota Komunitas",
+    communityMemberDesc: "Akses ke aplikasi dan fitur sosial — tidak termasuk PRIME atau konten eksklusif",
+    prime: "PRIME",
+    primeDesc: "Akses penuh — media PRIME, Nearby Premium, hangouts, konten eksklusif & lebih",
+
+    lifetime: "Seumur Hidup",
+    monthly: "Bulanan",
+    perMonth: "/bln",
+
+    bestValue: "Nilai Terbaik",
+
+    featureMember1: "Akses penuh ke aplikasi",
+    featureMember2: "Feed sosial dan ruang hangout",
+    featureMember3: "Penemuan pengguna terdekat",
+
+    featureWeek1: "7 hari akses PRIME penuh",
+    featureWeek2: "Konten PRIME eksklusif",
+    featureWeek3: "Fitur Nearby Premium",
+    featureWeek4: "Hangout komunitas",
+
+    featureThreeMonths1: "3 bulan akses PRIME penuh",
+    featureThreeMonths2: "Akses penuh perpustakaan media PRIME",
+    featureThreeMonths3: "Fitur Nearby Premium",
+    featureThreeMonths4: "Hangout komunitas",
+    featureThreeMonths5: "Dukungan prioritas",
+
+    featureCrystal1: "6 bulan akses PRIME penuh",
+    featureCrystal2: "Konten PRIME tak terbatas + rilis awal",
+    featureCrystal3: "Fitur Nearby Premium",
+    featureCrystal4: "Status VIP di komunitas",
+    featureCrystal5: "Dukungan prioritas",
+
+    featureYearly1: "1 tahun akses PRIME penuh",
+    featureYearly2: "Konten PRIME tak terbatas + eksklusif",
+    featureYearly3: "Fitur Nearby Premium",
+    featureYearly4: "Lencana VIP + dukungan prioritas",
+    featureYearly5: "Akses acara eksklusif",
+
+    featureLifetime1: "Akses PRIME seumur hidup — bayar sekali",
+    featureLifetime2: "Semua dari paket Tahunan, selamanya",
+    featureLifetime3: "Lencana Pendiri",
+    featureLifetime4: "Permintaan fitur prioritas",
+    featureLifetime5: "Tidak perlu bayar lagi",
+
+    excludedMember1: "Tidak ada akses PRIME",
+    excludedMember2: "Tidak ada konten eksklusif atau video",
+    excludedMember3: "Tidak ada saluran PRIME Telegram",
+    excludedMember4: "Tidak ada lencana VIP atau dukungan prioritas",
+
+    emailAddress: "Alamat email",
+    emailDesc: "Kami akan mengirim kredensial login dan informasi keanggotaan kamu",
+    emailPlaceholder: "kamu@contoh.com",
+    invalidEmail: "Masukkan alamat email yang valid",
+
+    paymentMethod: "Metode Pembayaran",
+    cardPse: "Kartu / PSE",
+    cardPseDesc: "Kredit, Debit",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "Anonim",
+    dashComingSoon: "Segera hadir",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "Bayar secara anonim dengan Dash — tanpa kartu kredit, tanpa identitas. Kamu akan mendapat alamat pembayaran + kode QR untuk dikirim dari dompet Dash mana pun.",
+    getDashWallet: "Dapatkan Dompet Dash ↗",
+    buyOnKraken: "Beli di Kraken ↗",
+    buyOnUphold: "Beli di Uphold ↗",
+
+    waitingForDashPayment: "Menunggu pembayaran Dash —",
+    dashInvoiceDesc: "Selesaikan pembayaranmu di halaman checkout BTCPay. Halaman ini akan diperbarui otomatis setelah dikonfirmasi.",
+    openDashCheckout: "Buka Dash Checkout",
+    cancel: "Batal",
+
+    or: "atau",
+    wantBestDeal: "Ingin penawaran terbaik?",
+    lifetime100Desc: "Dapatkan promo Lifetime100 kami — satu kali pembayaran $100 untuk akses PRIME seumur hidup. Tanpa langganan, tanpa perpanjangan, milikmu selamanya.",
+    checkoutLifetime100: "Lihat penawaran Lifetime100",
+    haveMeruCode: "Punya kode Meru?",
+    meruCodePlaceholder: "Masukkan kode Meru kamu",
+    activate: "Aktifkan",
+    verifying: "Memverifikasi...",
+    verifyingPayment: "Memverifikasi pembayaran... ini mungkin memerlukan beberapa detik",
+    activationFailed: "Aktivasi gagal",
+    activationError: "Kesalahan aktivasi",
+    pleaseEnterValidEmailAbove: "Masukkan alamat email yang valid di atas",
+
+    waitingForPayment: "Menunggu pembayaran...",
+    completePaymentInWindow: "Selesaikan pembayaran di jendela checkout. Halaman ini akan diperbarui secara otomatis.",
+
+    subscribeNow: "Berlangganan Sekarang",
+    processingPayment: "Memproses...",
+    goBack: "Kembali",
+
+    paymentConfirmed: "Pembayaran Dikonfirmasi!",
+    subscriptionNowActive: "Langgananmu sekarang aktif. Periksa email untuk faktur dan panduan orientasi.",
+    goToPNPtv: "Ke PNPtv!",
+
+    noPlansAvailable: "Tidak ada paket tersedia",
+    failedToLoadPlans: "Gagal memuat paket",
+    retry: "Coba lagi",
+    paymentTimedOut: "Verifikasi pembayaran habis waktu. Jika kamu sudah menyelesaikan pembayaran, langgananmu akan aktif secara otomatis.",
+    paymentNotSuccessful: "Pembayaran tidak berhasil. Silakan coba lagi.",
+    dashNotConfigured: "Pembayaran Dash belum tersedia. Gunakan ePayco atau Daimo.",
+    dashServerUnavailable: "Server pembayaran sementara tidak tersedia. Coba lagi dalam beberapa menit.",
+    dashExpired: "Pembayaran Dash kedaluwarsa atau tidak diterima. Silakan coba lagi.",
+    failedToCreateDashInvoice: "Gagal membuat faktur Dash",
+    failedToCreatePayment: "Gagal membuat pembayaran",
+    paymentErrorGeneric: "Kesalahan pembayaran",
+  },
+
+  ar: {
+    pageTitle: "اشتراك — PNPtv!",
+    pageDescription: "اختر خطة PNPtv الخاصة بك. افتح المحتوى الحصري وصول PRIME للفيديو واكتشاف المستخدمين القريبين والمزيد.",
+
+    chooseYourPlan: "اختر خطتك",
+    subtitle: "افتح المحتوى الحصري والميزات مع PNPTV PRIME",
+
+    showPricesInUSD: "عرض الأسعار بالدولار الأمريكي",
+    showPricesInCOP: "عرض الأسعار بالبيزو الكولومبي",
+
+    communityMember: "عضو المجتمع",
+    communityMemberDesc: "الوصول إلى التطبيق والميزات الاجتماعية — لا يشمل PRIME أو المحتوى الحصري",
+    prime: "PRIME",
+    primeDesc: "وصول كامل — وسائط PRIME، Nearby Premium، hangouts، محتوى حصري والمزيد",
+
+    lifetime: "مدى الحياة",
+    monthly: "شهري",
+    perMonth: "/شهر",
+
+    bestValue: "أفضل قيمة",
+
+    featureMember1: "وصول كامل للتطبيق",
+    featureMember2: "التغذية الاجتماعية وغرف Hangout",
+    featureMember3: "اكتشاف المستخدمين القريبين",
+
+    featureWeek1: "7 أيام من الوصول الكامل إلى PRIME",
+    featureWeek2: "محتوى PRIME حصري",
+    featureWeek3: "ميزات Nearby Premium",
+    featureWeek4: "Hangouts المجتمعية",
+
+    featureThreeMonths1: "3 أشهر من الوصول الكامل إلى PRIME",
+    featureThreeMonths2: "الوصول الكامل إلى مكتبة وسائط PRIME",
+    featureThreeMonths3: "ميزات Nearby Premium",
+    featureThreeMonths4: "Hangouts المجتمعية",
+    featureThreeMonths5: "دعم ذو أولوية",
+
+    featureCrystal1: "6 أشهر من الوصول الكامل إلى PRIME",
+    featureCrystal2: "محتوى PRIME غير محدود + إصدارات مبكرة",
+    featureCrystal3: "ميزات Nearby Premium",
+    featureCrystal4: "مكانة VIP في المجتمع",
+    featureCrystal5: "دعم ذو أولوية",
+
+    featureYearly1: "سنة كاملة من الوصول إلى PRIME",
+    featureYearly2: "محتوى PRIME غير محدود + حصريات",
+    featureYearly3: "ميزات Nearby Premium",
+    featureYearly4: "شارة VIP + دعم ذو أولوية",
+    featureYearly5: "الوصول إلى فعاليات حصرية",
+
+    featureLifetime1: "وصول PRIME مدى الحياة — دفعة واحدة",
+    featureLifetime2: "كل ما في الخطة السنوية، إلى الأبد",
+    featureLifetime3: "شارة المؤسس",
+    featureLifetime4: "طلبات ميزات ذات أولوية",
+    featureLifetime5: "لن تدفع أبداً مجدداً",
+
+    excludedMember1: "لا وصول إلى PRIME",
+    excludedMember2: "لا محتوى حصري أو فيديو",
+    excludedMember3: "لا قناة PRIME على Telegram",
+    excludedMember4: "لا شارة VIP ولا دعم ذو أولوية",
+
+    emailAddress: "عنوان البريد الإلكتروني",
+    emailDesc: "سنرسل لك بيانات تسجيل الدخول ومعلومات العضوية",
+    emailPlaceholder: "you@example.com",
+    invalidEmail: "يرجى إدخال عنوان بريد إلكتروني صالح",
+
+    paymentMethod: "طريقة الدفع",
+    cardPse: "بطاقة / PSE",
+    cardPseDesc: "ائتمان، خصم",
+    usdc: "USDC",
+    usdcDesc: "Coinbase, MetaMask",
+    dash: "Dash",
+    dashAnonymous: "مجهول الهوية",
+    dashComingSoon: "قريباً",
+    dashAnonBadge: "ANON",
+
+    dashInfoText: "ادفع بشكل مجهول مع Dash — دون بطاقة ائتمان ودون إثبات هوية. ستحصل على عنوان دفع + رمز QR للإرسال من أي محفظة Dash.",
+    getDashWallet: "احصل على محفظة Dash ↗",
+    buyOnKraken: "اشتر على Kraken ↗",
+    buyOnUphold: "اشتر على Uphold ↗",
+
+    waitingForDashPayment: "في انتظار دفع Dash —",
+    dashInvoiceDesc: "أكمل دفعك على صفحة الدفع BTCPay. ستُحدَّث هذه الصفحة تلقائياً عند التأكيد.",
+    openDashCheckout: "فتح صفحة دفع Dash",
+    cancel: "إلغاء",
+
+    or: "أو",
+    wantBestDeal: "تريد أفضل صفقة؟",
+    lifetime100Desc: "احصل على عرضنا Lifetime100 — دفعة واحدة $100 للوصول إلى PRIME مدى الحياة. لا اشتراكات، لا تجديدات، ملكك إلى الأبد.",
+    checkoutLifetime100: "اطلع على عرض Lifetime100",
+    haveMeruCode: "لديك رمز Meru؟",
+    meruCodePlaceholder: "أدخل رمز Meru الخاص بك",
+    activate: "تفعيل",
+    verifying: "جارٍ التحقق...",
+    verifyingPayment: "جارٍ التحقق من الدفع... قد يستغرق هذا بضع ثوانٍ",
+    activationFailed: "فشل التفعيل",
+    activationError: "خطأ في التفعيل",
+    pleaseEnterValidEmailAbove: "يرجى إدخال عنوان بريد إلكتروني صالح أعلاه",
+
+    waitingForPayment: "في انتظار الدفع...",
+    completePaymentInWindow: "أكمل الدفع في نافذة الدفع. ستُحدَّث هذه الصفحة تلقائياً.",
+
+    subscribeNow: "اشترك الآن",
+    processingPayment: "جارٍ المعالجة...",
+    goBack: "العودة",
+
+    paymentConfirmed: "تم تأكيد الدفع!",
+    subscriptionNowActive: "اشتراكك الآن نشط. تحقق من بريدك الإلكتروني للحصول على الفاتورة ودليل الإعداد.",
+    goToPNPtv: "الذهاب إلى PNPtv!",
+
+    noPlansAvailable: "لا توجد خطط متاحة",
+    failedToLoadPlans: "فشل تحميل الخطط",
+    retry: "إعادة المحاولة",
+    paymentTimedOut: "انتهت مهلة التحقق من الدفع. إذا أكملت الدفع، سيتم تفعيل اشتراكك تلقائياً.",
+    paymentNotSuccessful: "لم يكن الدفع ناجحاً. يرجى المحاولة مجدداً.",
+    dashNotConfigured: "مدفوعات Dash غير متاحة بعد. يرجى استخدام ePayco أو Daimo.",
+    dashServerUnavailable: "خادم الدفع غير متاح مؤقتاً. يرجى المحاولة مجدداً بعد دقائق.",
+    dashExpired: "انتهت صلاحية دفع Dash أو لم يُستلم. يرجى المحاولة مجدداً.",
+    failedToCreateDashInvoice: "فشل إنشاء فاتورة Dash",
+    failedToCreatePayment: "فشل إنشاء الدفع",
+    paymentErrorGeneric: "خطأ في الدفع",
   },
 } as const;
 

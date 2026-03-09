@@ -670,6 +670,9 @@ const getHomeFeed = async (req, res) => {
 const getPublicProfile = async (req, res) => {
   let { userId } = req.params;
 
+  // Strip leading @ if present (e.g. @SantinoFurioso → SantinoFurioso)
+  if (userId.startsWith('@')) userId = userId.slice(1);
+
   // Resolve username to ID if the param looks like a username (not a numeric Telegram ID or UUID)
   const isNumericOrUuid = /^\d+$/.test(userId) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
   if (!isNumericOrUuid) {

@@ -5,6 +5,7 @@ import "@daimo/sdk/web/styles.css";
 import "@daimo/sdk/web/theme.css";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/hooks/useAuth";
+import { updatePaymentEmail } from "@/lib/api";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
@@ -32,6 +33,8 @@ export default function DaimoCheckout() {
   const [state, setState] = useState<CheckoutState>("loading");
   const [payment, setPayment] = useState<PaymentInfo | null>(null);
   const [error, setError] = useState("");
+  const [email, setEmail] = useState("");
+  const [emailError, setEmailError] = useState("");
 
   useEffect(() => {
     if (!paymentId) {
@@ -71,9 +74,17 @@ export default function DaimoCheckout() {
   }, [paymentId, t.errorNoPaymentId, t.errorPaymentNotFound, t.errorNotCrypto, t.errorSessionNotReady, t.errorCouldNotLoad]);
 
   const handlePaymentCompleted = useCallback(async () => {
+    // Send email to backend if provided
+    if (email.trim() && paymentId) {
+      try {
+        await updatePaymentEmail(paymentId, email.trim());
+      } catch {
+        // non-critical — payment still succeeded
+      }
+    }
     await refreshUser();
     setState("success");
-  }, [refreshUser]);
+  }, [refreshUser, email, paymentId]);
 
   return (
     <div
@@ -199,6 +210,54 @@ export default function DaimoCheckout() {
               <div style={{ fontSize: 11, color: "#8E8E93", marginTop: 6 }}>
                 {t.paymentRef} {payment.paymentRef}
               </div>
+            </div>
+
+            {/* Email field */}
+            <div style={{ marginBottom: 20 }}>
+              <label
+                htmlFor="checkout-email"
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  color: "#8E8E93",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.03em",
+                  marginBottom: 4,
+                }}
+              >
+                {t.emailLabel}
+              </label>
+              <p style={{ fontSize: 12, color: "#8E8E93", marginBottom: 8 }}>
+                {t.emailDesc}
+              </p>
+              <input
+                id="checkout-email"
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setEmailError("");
+                }}
+                placeholder={t.emailPlaceholder}
+                style={{
+                  width: "100%",
+                  padding: "12px 14px",
+                  borderRadius: 10,
+                  border: emailError
+                    ? "1px solid #FF453A"
+                    : "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.06)",
+                  fontFamily: "'Roboto Mono', monospace",
+                  fontSize: 14,
+                  color: "#fff",
+                  outline: "none",
+                }}
+              />
+              {emailError && (
+                <p style={{ color: "#FF453A", fontSize: 12, marginTop: 4 }}>
+                  {emailError}
+                </p>
+              )}
             </div>
 
             <p

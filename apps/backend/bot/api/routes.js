@@ -1357,7 +1357,50 @@ app.get('/api/payment/:paymentId', authenticateUser, asyncHandler(paymentControl
 // C5: getPaymentStatus is polled by the server-rendered payment-response page which has no
 // session cookies. We protect it with a dedicated rate limiter to prevent payment-ID enumeration.
 app.get('/api/payment/:paymentId/status', paymentStatusLimiter, asyncHandler(paymentController.getPaymentStatus));
-app.post('/api/payment/tokenized-charge', authenticateUser, asyncHandler(paymentController.processTokenizedCharge));
+
+// Update email for a payment (collected on checkout page instead of subscribe page)
+app.post('/api/payment/:paymentId/email', authenticateUser, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user?.id) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const { email } = req.body;
+  if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254) {
+    return res.status(400).json({ success: false, error: 'A valid email address is required' });
+  }
+
+  const userId = String(user.telegramId || user.telegram_id || user.id);
+  const language = user.language || 'es';
+
+  try {
+    await ensureEmailCredentials(userId, email.trim(), language);
+    req.session.user = { ...req.session.user, email: email.trim() };
+    res.json({ success: true });
+  } catch (credErr) {
+    if (credErr.message.includes('already associated')) {
+      return res.status(409).json({ success: false, error: credErr.message });
+    }
+    logger.warn('ensureEmailCredentials failed (non-critical)', { userId, error: credErr.message });
+    res.json({ success: true });
+  }
+}));
+
+app.post('/api/payment/tokenized-charge', authenticateUser, asyncHandler(async (req, res) => {
+  // After charge completes, provision email credentials from the card form email
+  const originalJson = res.json.bind(res);
+  res.json = function(data) {
+    // Fire-and-forget email credential provisioning after successful charge
+    if (data && data.success && req.body?.email && req.session?.user) {
+      const email = String(req.body.email).trim();
+      const userId = String(req.session.user.telegramId || req.session.user.telegram_id || req.session.user.id);
+      const language = req.session.user.language || 'es';
+      ensureEmailCredentials(userId, email, language)
+        .then(() => { req.session.user = { ...req.session.user, email }; })
+        .catch((err) => logger.warn('ensureEmailCredentials after tokenized-charge (non-critical)', { userId, error: err.message }));
+    }
+    return originalJson(data);
+  };
+  return paymentController.processTokenizedCharge(req, res);
+}));
 app.post('/api/payment/verify-2fa', authenticateUser, asyncHandler(paymentController.verify2FA));
 app.post('/api/payment/complete-3ds-2', authenticateUser, asyncHandler(paymentController.complete3DS2Authentication));
 app.get('/api/confirm-payment/:token', asyncHandler(paymentController.confirmPaymentToken));
@@ -2585,18 +2628,13 @@ app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {
   if (provider && !['epayco', 'daimo'].includes(provider)) {
     return res.status(400).json({ success: false, error: 'Invalid provider. Must be epayco or daimo' });
   }
-  if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254) {
-    return res.status(400).json({ success: false, error: 'A valid email address is required' });
+  if (email && (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254)) {
+    return res.status(400).json({ success: false, error: 'Invalid email address' });
   }
 
   const userId = String(user.telegramId || user.telegram_id || user.id);
   const language = user.language || 'es';
 
-  // Validate email association conflicts before creating the payment (read-only check),
-  // but defer actually provisioning credentials until after payment is confirmed.
-  // This prevents sending login credentials to a user whose payment creation then fails.
-  // NOTE (H9): Ideally credentials should be sent in the webhook handler after the
-  // payment provider confirms success. This is the safest achievable fix at route level.
   const result = await PaymentService.createPayment({
     userId,
     planId,
@@ -2605,18 +2643,17 @@ app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {
     creatorId: creatorId || null,
   });
 
-  // Only provision email credentials after payment record is successfully created
-  try {
-    await ensureEmailCredentials(userId, email.trim(), language);
-    req.session.user = { ...req.session.user, email: email.trim() };
-  } catch (credErr) {
-    if (credErr.message.includes('already associated')) {
-      // Payment was created but credential conflict detected — surface the conflict
-      // so the frontend can inform the user. Payment is not rolled back here because
-      // the record is pending and will expire without a confirmed webhook.
-      return res.status(409).json({ success: false, error: credErr.message });
+  // Only provision email credentials if email was provided
+  if (email) {
+    try {
+      await ensureEmailCredentials(userId, email.trim(), language);
+      req.session.user = { ...req.session.user, email: email.trim() };
+    } catch (credErr) {
+      if (credErr.message.includes('already associated')) {
+        return res.status(409).json({ success: false, error: credErr.message });
+      }
+      logger.warn('ensureEmailCredentials failed after payment creation (non-critical)', { userId, error: credErr.message });
     }
-    logger.warn('ensureEmailCredentials failed after payment creation (non-critical)', { userId, error: credErr.message });
   }
 
   res.json(result);

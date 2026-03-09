@@ -24,7 +24,7 @@
 // Postgres — all queries return empty by default; individual tests override via mockQuery
 const mockQuery = jest.fn();
 const mockGetClient = jest.fn();
-jest.mock('../../config/postgres', () => ({
+jest.mock('../config/postgres', () => ({
   query: (...args) => mockQuery(...args),
   getClient: (...args) => mockGetClient(...args),
 }));
@@ -44,13 +44,13 @@ const mockRedis = {
   acquireLock: jest.fn(async () => true),
   releaseLock: jest.fn(async () => {}),
 };
-jest.mock('../../config/redis', () => ({
+jest.mock('../config/redis', () => ({
   getRedis: () => mockRedis,
   cache: mockRedis,
 }));
 
 // Logger — silent
-jest.mock('../../utils/logger', () => ({
+jest.mock('../utils/logger', () => ({
   info: jest.fn(),
   warn: jest.fn(),
   error: jest.fn(),
@@ -276,7 +276,7 @@ describe('PNPLiveTipsService.getRecentTips — payment_status filter', () => {
 // ─── 6. markNotificationSent — SQL injection guard ────────────────────────────
 
 describe('PNPLiveNotificationService.markNotificationSent — column allowlist', () => {
-  const logger = require('../../utils/logger');
+  const logger = require('../utils/logger');
 
   afterEach(() => {
     mockQuery.mockReset();
@@ -336,7 +336,7 @@ describe('PNPLiveNotificationService.markNotificationSent — column allowlist',
 describe('webappLiveController.listStreams — refId sanitization', () => {
   let listStreams;
   let axios;
-  const logger = require('../../utils/logger');
+  const logger = require('../utils/logger');
 
   beforeAll(() => {
     jest.resetModules();
@@ -438,8 +438,8 @@ describe('getRtmpKey — per-user stream key isolation (IDOR)', () => {
     // Clear any state from previous test groups
     jest.resetModules();
     // Re-apply mocks
-    jest.mock('../../config/postgres', () => ({ query: mockQuery, getClient: mockGetClient }));
-    jest.mock('../../config/redis', () => ({ getRedis: () => mockRedis, cache: mockRedis }));
+    jest.mock('../config/postgres', () => ({ query: mockQuery, getClient: mockGetClient }));
+    jest.mock('../config/redis', () => ({ getRedis: () => mockRedis, cache: mockRedis }));
     ({ getRtmpKey } = require('../bot/api/controllers/webappLiveController'));
   });
 

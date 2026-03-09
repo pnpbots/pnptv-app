@@ -33,7 +33,7 @@ import { communityResources, type CommunityResourcesStrings } from "./communityR
 import { shop, type ShopStrings } from "./shop";
 import { notifications, type NotificationsStrings } from "./notifications";
 
-export type Lang = "en" | "es";
+export type Lang = "en" | "es" | "pt" | "zh" | "zhTW" | "fr" | "de" | "th" | "it" | "tr" | "ru" | "nl" | "vi" | "ja" | "id" | "ar";
 
 export interface I18n {
   lang: Lang;
@@ -99,9 +99,33 @@ function resolve(lang: Lang): I18n {
   };
 }
 
+/** Map from database/browser language codes to our Lang keys */
+const LANG_MAP: Record<string, Lang> = {
+  en: "en", es: "es", pt: "pt", "pt-br": "pt", fr: "fr", de: "de",
+  it: "it", ja: "ja", zh: "zh", "zh-hans": "zh", "zh-hant": "zhTW",
+  "zh-tw": "zhTW", ru: "ru", ar: "ar", th: "th", nl: "nl",
+  vi: "vi", id: "id", tr: "tr",
+};
+
+const SUPPORTED_LANGS = new Set<Lang>(["en","es","pt","zh","zhTW","fr","de","th","it","tr","ru","nl","vi","ja","id","ar"]);
+
 /** Get the current language from user profile or browser. */
 export function getLang(userLang?: string | null): Lang {
-  if (userLang === "es") return "es";
+  if (userLang) {
+    const lower = userLang.toLowerCase();
+    // Exact match
+    if (LANG_MAP[lower]) return LANG_MAP[lower];
+    // Try base language (e.g., "en-US" → "en")
+    const base = lower.split("-")[0];
+    if (LANG_MAP[base]) return LANG_MAP[base];
+  }
+  // Browser detection fallback
+  if (typeof navigator !== "undefined" && navigator.language) {
+    const browserLang = navigator.language.toLowerCase();
+    if (LANG_MAP[browserLang]) return LANG_MAP[browserLang];
+    const base = browserLang.split("-")[0];
+    if (LANG_MAP[base]) return LANG_MAP[base];
+  }
   return "en";
 }
 

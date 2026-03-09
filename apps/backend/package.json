@@ -6,7 +6,10 @@
   "main": "bot/core/bot.js",
   "scripts": {
     "start": "node bot/core/bot.js",
-    "dev": "nodemon bot/core/bot.js"
+    "dev": "nodemon bot/core/bot.js",
+    "test": "jest --config jest.config.js",
+    "test:coverage": "jest --config jest.config.js --coverage",
+    "test:watch": "jest --config jest.config.js --watch"
   },
   "dependencies": {
     "@atproto/api": "^0.19.0",
@@ -68,6 +71,7 @@
   },
   "devDependencies": {
     "axios-mock-adapter": "^2.1.0",
+    "jest": "^29.7.0",
     "supertest": "^7.2.2"
   }
 }

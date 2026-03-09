@@ -82,6 +82,10 @@ const listUsers = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page || '1'));
     const search = (req.query.search || '').trim();
+    const tierFilter = (req.query.tier || '').trim();
+    const statusFilter = (req.query.status || '').trim();
+    const planFilter = (req.query.plan || '').trim();
+    const roleFilter = (req.query.role || '').trim();
     const limit = 20;
     const offset = (page - 1) * limit;
 
@@ -90,21 +94,65 @@ const listUsers = async (req, res) => {
                             subscription_status, plan_id AS subscription_plan, plan_expiry, created_at
                      FROM users WHERE is_active = true`;
     const params = [];
+    const countParams = [];
 
     if (search) {
       const searchTerm = `%${search}%`;
-      // Include first_name and last_name — most Telegram users have no username, only a display name
-      const searchClause = ' AND (username ILIKE $1 OR email ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1 OR id::text = $2)';
+      const idx1 = params.length + 1;
+      const idx2 = params.length + 2;
+      const searchClause = ` AND (username ILIKE $${idx1} OR email ILIKE $${idx1} OR first_name ILIKE $${idx1} OR last_name ILIKE $${idx1} OR id::text = $${idx2})`;
       countQuery += searchClause;
       dataQuery += searchClause;
       params.push(searchTerm, search);
+      countParams.push(searchTerm, search);
+    }
+
+    if (tierFilter) {
+      const idx = params.length + 1;
+      const clause = ` AND tier = $${idx}`;
+      countQuery += clause;
+      dataQuery += clause;
+      params.push(tierFilter);
+      countParams.push(tierFilter);
+    }
+
+    if (statusFilter) {
+      const idx = params.length + 1;
+      const clause = ` AND subscription_status = $${idx}`;
+      countQuery += clause;
+      dataQuery += clause;
+      params.push(statusFilter);
+      countParams.push(statusFilter);
+    }
+
+    if (planFilter) {
+      const idx = params.length + 1;
+      let clause;
+      if (planFilter === '__none__') {
+        clause = ' AND (plan_id IS NULL OR plan_id = \'\')';
+      } else {
+        clause = ` AND plan_id = $${idx}`;
+        params.push(planFilter);
+        countParams.push(planFilter);
+      }
+      countQuery += clause;
+      dataQuery += clause;
+    }
+
+    if (roleFilter) {
+      const idx = params.length + 1;
+      const clause = ` AND role = $${idx}`;
+      countQuery += clause;
+      dataQuery += clause;
+      params.push(roleFilter);
+      countParams.push(roleFilter);
     }
 
     dataQuery += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
     params.push(limit, offset);
 
     const [countResult, dataResult] = await Promise.all([
-      query(countQuery, search ? [params[0], params[1]] : []),
+      query(countQuery, countParams),
       query(dataQuery, params),
     ]);
 

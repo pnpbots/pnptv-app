@@ -1572,16 +1572,28 @@ export function getSubscriptionPlans(): Promise<{
 export function createPayment(
   planId: string,
   provider: "epayco" | "daimo",
-  email: string
+  email?: string
 ): Promise<{
   success: boolean;
   paymentUrl: string;
   paymentId: string;
   error?: string;
 }> {
+  const body: Record<string, string> = { planId, provider };
+  if (email) body.email = email;
   return request("/api/webapp/payments/create", {
     method: "POST",
-    body: { planId, provider, email },
+    body,
+  });
+}
+
+export function updatePaymentEmail(
+  paymentId: string,
+  email: string
+): Promise<{ success: boolean; error?: string }> {
+  return request(`/api/payment/${encodeURIComponent(paymentId)}/email`, {
+    method: "POST",
+    body: { email },
   });
 }
 
@@ -1618,7 +1630,7 @@ export function getPaymentStatus(
 
 export function createDashSubscription(
   planId: string,
-  email: string
+  email?: string
 ): Promise<{
   success: boolean;
   invoiceId: string;
@@ -1627,9 +1639,11 @@ export function createDashSubscription(
   usdAmount?: number;
   error?: string;
 }> {
+  const body: Record<string, string> = { planId };
+  if (email) body.email = email;
   return request("/api/webapp/payments/dash/create", {
     method: "POST",
-    body: { planId, email },
+    body,
   });
 }
 
@@ -2686,12 +2700,24 @@ export function getAdminDemographics(): Promise<{ success: boolean; demographics
 }
 
 // Admin Users
+export interface AdminUserFilters {
+  tier?: string;
+  status?: string;
+  plan?: string;
+  role?: string;
+}
+
 export function getAdminUsers(
   page = 1,
-  search = ""
+  search = "",
+  filters?: AdminUserFilters
 ): Promise<{ success: boolean; users: AdminUser[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
   const params = new URLSearchParams({ page: String(page) });
   if (search) params.set("search", search);
+  if (filters?.tier) params.set("tier", filters.tier);
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.plan) params.set("plan", filters.plan);
+  if (filters?.role) params.set("role", filters.role);
   return request(`/api/webapp/admin/users?${params}`);
 }
 

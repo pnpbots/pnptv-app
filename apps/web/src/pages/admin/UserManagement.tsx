@@ -11,6 +11,7 @@ import {
   bulkUpdateMemberships,
   type AdminUser,
   type AdminPlan,
+  type AdminUserFilters,
 } from "@/lib/api";
 
 const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
@@ -55,7 +56,11 @@ export default function UserManagement() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Filters
+  const [filters, setFilters] = useState<AdminUserFilters>({});
 
   // Bulk action confirm modal state
   const [pendingAction, setPendingAction] = useState<BulkAction | null>(null);
@@ -67,12 +72,13 @@ export default function UserManagement() {
   const [upgradeForm, setUpgradeForm] = useState<UpgradeForm>({ planId: "", expiry: "" });
   const [showUpgradeForm, setShowUpgradeForm] = useState(false);
 
-  const load = useCallback(async (p: number, q: string) => {
+  const load = useCallback(async (p: number, q: string, f: AdminUserFilters) => {
     setLoading(true);
     try {
-      const res = await getAdminUsers(p, q);
+      const res = await getAdminUsers(p, q, f);
       setUsers(res.users);
       setTotalPages(res.pagination.totalPages);
+      setTotal(res.pagination.total);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load users");
@@ -82,8 +88,8 @@ export default function UserManagement() {
   }, []);
 
   useEffect(() => {
-    load(page, search);
-  }, [load, page, search]);
+    load(page, search, filters);
+  }, [load, page, search, filters]);
 
   useEffect(() => {
     getAdminPlans()
@@ -96,6 +102,28 @@ export default function UserManagement() {
     setPage(1);
     setSelectedIds(new Set());
   };
+
+  const handleFilterChange = (key: keyof AdminUserFilters, value: string) => {
+    setFilters((prev) => {
+      const next = { ...prev };
+      if (value) {
+        next[key] = value;
+      } else {
+        delete next[key];
+      }
+      return next;
+    });
+    setPage(1);
+    setSelectedIds(new Set());
+  };
+
+  const clearFilters = () => {
+    setFilters({});
+    setPage(1);
+    setSelectedIds(new Set());
+  };
+
+  const hasActiveFilters = Object.values(filters).some(Boolean);
 
   const handleSelectToggle = (id: string) => {
     setSelectedIds((prev) => {
@@ -146,7 +174,7 @@ export default function UserManagement() {
       );
       setBulkResult(`Updated ${res.updated} user(s). ${res.failed > 0 ? `${res.failed} failed.` : ""}`);
       setSelectedIds(new Set());
-      await load(page, search);
+      await load(page, search, filters);
     } catch (err) {
       setBulkResult(err instanceof Error ? err.message : "Bulk action failed");
     } finally {
@@ -276,6 +304,83 @@ export default function UserManagement() {
         onChange={handleSearch}
         placeholder="Search by username, email, or ID..."
       />
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex-1 min-w-[120px]">
+          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">Tier</label>
+          <select
+            value={filters.tier || ""}
+            onChange={(e) => handleFilterChange("tier", e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+          >
+            <option value="">All Tiers</option>
+            <option value="PRIME">PRIME</option>
+            <option value="member">Member</option>
+            <option value="creator">Creator</option>
+            <option value="free">Free</option>
+            <option value="banned">Banned</option>
+          </select>
+        </div>
+        <div className="flex-1 min-w-[120px]">
+          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">Status</label>
+          <select
+            value={filters.status || ""}
+            onChange={(e) => handleFilterChange("status", e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+          >
+            <option value="">All Statuses</option>
+            <option value="active">Active</option>
+            <option value="expired">Expired</option>
+            <option value="churned">Churned</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="free">Free</option>
+          </select>
+        </div>
+        <div className="flex-1 min-w-[120px]">
+          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">Plan</label>
+          <select
+            value={filters.plan || ""}
+            onChange={(e) => handleFilterChange("plan", e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+          >
+            <option value="">All Plans</option>
+            <option value="__none__">No Plan</option>
+            {plans.map((p) => (
+              <option key={p.id} value={p.id}>{p.display_name || p.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1 min-w-[120px]">
+          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">Role</label>
+          <select
+            value={filters.role || ""}
+            onChange={(e) => handleFilterChange("role", e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+          >
+            <option value="">All Roles</option>
+            <option value="superadmin">Superadmin</option>
+            <option value="admin">Admin</option>
+            <option value="user">User</option>
+          </select>
+        </div>
+        {hasActiveFilters && (
+          <button
+            onClick={clearFilters}
+            className="px-3 py-2 text-xs rounded-lg border border-pnp-border text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors whitespace-nowrap"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {/* Result count */}
+      {!loading && (
+        <p className="text-xs text-pnp-textSecondary">
+          {total} user{total !== 1 ? "s" : ""} found
+          {hasActiveFilters ? " (filtered)" : ""}
+        </p>
+      )}
 
       {/* Bulk Actions Toolbar */}
       {selectedIds.size > 0 && (
