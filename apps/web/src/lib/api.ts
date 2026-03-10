@@ -751,6 +751,10 @@ export function updateLanguage(lang: string): Promise<{ success: boolean }> {
   return updateProfile({ language: lang });
 }
 
+export function deleteAccount(): Promise<{ success: boolean }> {
+  return request("/api/webapp/profile/delete", { method: "DELETE" });
+}
+
 export async function uploadAvatar(file: File): Promise<{ success: boolean; photoUrl: string }> {
   const formData = new FormData();
   formData.append("avatar", file);
