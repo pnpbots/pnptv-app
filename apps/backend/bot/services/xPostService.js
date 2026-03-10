@@ -730,14 +730,24 @@ class XPostService {
     try {
       decrypted = PaymentSecurityService.decryptSensitiveData(account.encrypted_access_token);
     } catch (error) {
-      logger.warn('Failed to decrypt X access token, falling back to raw value', {
+      logger.error('Failed to decrypt X access token — cannot use encrypted blob as token', {
         accountId: account.account_id,
         error: error.message,
       });
-      decrypted = account.encrypted_access_token;
+      throw new Error(`X access token decryption failed for account ${account.account_id}: ${error.message}`);
     }
 
-    const accessToken = decrypted?.accessToken || decrypted?.token || decrypted;
+    if (!decrypted) {
+      logger.error('X access token decryption returned null — triggering token refresh', { accountId: account.account_id });
+      try {
+        const refreshed = await XOAuthService.refreshAccountTokens(account);
+        return refreshed.accessToken;
+      } catch (refreshErr) {
+        throw new Error(`X access token decryption failed and refresh also failed for account ${account.account_id}`);
+      }
+    }
+
+    const accessToken = decrypted?.accessToken || decrypted?.token;
     const expiresAt = decrypted?.expiresAt ? new Date(decrypted.expiresAt) : account.token_expires_at;
 
     if (expiresAt && expiresAt.getTime() - Date.now() <= X_TOKEN_EXPIRY_BUFFER_MS) {

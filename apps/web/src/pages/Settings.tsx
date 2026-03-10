@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type Lang } from "@/lib/i18n";
 import {
   getProfile,
   getMyReferral,
   updateProfile,
   updateLanguage,
+  deleteAccount,
   type ReferralStats,
 } from "@/lib/api";
 
@@ -85,7 +86,7 @@ export default function Settings() {
   const [profileLoading, setProfileLoading] = useState(true);
 
   // ── App Preferences state ─────────────────────────────────────────────────
-  const [lang, setLang] = useState<"en" | "es">("en");
+  const [lang, setLang] = useState<Lang>("en");
   const [langSaving, setLangSaving] = useState(false);
   const [langError, setLangError] = useState<string | null>(null);
 
@@ -100,6 +101,13 @@ export default function Settings() {
   type NotifPrefs = Record<string, ChannelPrefs | { enabled: boolean; start: string; end: string }>;
   const [notifPrefs, setNotifPrefs] = useState<NotifPrefs | null>(null);
   const [notifLoading, setNotifLoading] = useState(true);
+
+  // ── Delete account state ──────────────────────────────────────────────────
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteInputRef = useRef<HTMLInputElement>(null);
 
   // ── Referral state ────────────────────────────────────────────────────────
   const [referralStats, setReferralStats] = useState<ReferralStats | null>(null);
@@ -127,7 +135,7 @@ export default function Settings() {
         setMemberSince(profile.memberSince ?? null);
         setWofConsent(profile.wofPhotoConsent ?? false);
         setContentDisclaimer(profile.contentDisclaimer ?? false);
-        setLang((profile.language as "en" | "es") ?? user?.language ?? "en");
+        setLang((profile.language as Lang) ?? (user?.language as Lang) ?? "en");
 
         if (referralRes) {
           setReferralStats(referralRes);
@@ -153,7 +161,7 @@ export default function Settings() {
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   const handleLanguageChange = useCallback(
-    async (newLang: "en" | "es") => {
+    async (newLang: Lang) => {
       if (newLang === lang || langSaving) return;
       const prevLang = lang;
       setLangSaving(true);
@@ -174,6 +182,20 @@ export default function Settings() {
     },
     [lang, langSaving, refreshUser]
   );
+
+  const handleDeleteAccount = useCallback(async () => {
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteAccount();
+      setShowDeleteModal(false);
+      navigate("/");
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Failed to delete account");
+      setDeleting(false);
+    }
+  }, [deleting, navigate]);
 
   const handleWofConsentToggle = useCallback(async () => {
     const newValue = !wofConsent;
@@ -287,10 +309,10 @@ export default function Settings() {
       </button>
 
       {/* ── Page title ── */}
-      <h1 className="text-xl font-bold text-white mb-2">Settings</h1>
+      <h1 className="text-xl font-bold text-white mb-2">{p.settingsTitle}</h1>
 
       {/* ── Account ─────────────────────────────────────────────────────── */}
-      <Section title="Account">
+      <Section title={p.accountSection}>
         {profileLoading ? (
           <div className="space-y-3">
             <div className="h-4 rounded bg-white/10 animate-pulse w-40" />
@@ -336,35 +358,34 @@ export default function Settings() {
               {p.choosePreferredLanguage}
             </p>
           </div>
-          <div
-            className="flex items-center rounded-full p-0.5 flex-shrink-0"
-            style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}
+          <select
+            value={lang}
+            onChange={(e) => handleLanguageChange(e.target.value as Lang)}
+            disabled={langSaving}
+            className="rounded-lg px-3 py-2 text-sm flex-shrink-0 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-white/20"
+            style={{
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              color: "#fff",
+            }}
           >
-            <button
-              onClick={() => handleLanguageChange("en")}
-              disabled={langSaving}
-              aria-pressed={lang === "en"}
-              className="px-3 py-1 rounded-full text-xs font-semibold transition-all duration-200 disabled:opacity-50"
-              style={{
-                background: lang === "en" ? "linear-gradient(135deg, #5ED1C4, #D4007A)" : "transparent",
-                color: lang === "en" ? "#fff" : "#8E8E93",
-              }}
-            >
-              EN
-            </button>
-            <button
-              onClick={() => handleLanguageChange("es")}
-              disabled={langSaving}
-              aria-pressed={lang === "es"}
-              className="px-3 py-1 rounded-full text-xs font-semibold transition-all duration-200 disabled:opacity-50"
-              style={{
-                background: lang === "es" ? "linear-gradient(135deg, #5ED1C4, #D4007A)" : "transparent",
-                color: lang === "es" ? "#fff" : "#8E8E93",
-              }}
-            >
-              ES
-            </button>
-          </div>
+            <option value="en">English</option>
+            <option value="es">Español</option>
+            <option value="pt">Português</option>
+            <option value="fr">Français</option>
+            <option value="de">Deutsch</option>
+            <option value="it">Italiano</option>
+            <option value="zh">中文 (简)</option>
+            <option value="zhTW">中文 (繁)</option>
+            <option value="ja">日本語</option>
+            <option value="ru">Русский</option>
+            <option value="ar">العربية</option>
+            <option value="th">ไทย</option>
+            <option value="tr">Türkçe</option>
+            <option value="nl">Nederlands</option>
+            <option value="vi">Tiếng Việt</option>
+            <option value="id">Indonesia</option>
+          </select>
         </div>
         {langError && (
           <p className="text-xs mb-3" style={{ color: "#FF6B6B" }}>{langError}</p>
@@ -398,7 +419,7 @@ export default function Settings() {
             <p className="text-sm font-medium text-white">{p.contentDisclaimer}</p>
             <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
               {contentDisclaimer
-                ? "Accepted. This cannot be reverted."
+                ? p.contentDisclaimerAccepted
                 : p.contentDisclaimerDesc}
             </p>
           </div>
@@ -412,7 +433,7 @@ export default function Settings() {
       </Section>
 
       {/* ── Notifications ─────────────────────────────────────────────────── */}
-      <Section title="Notifications">
+      <Section title={p.notificationsSection}>
         {notifLoading ? (
           <div className="space-y-3">
             <div className="h-4 rounded bg-white/10 animate-pulse w-48" />
@@ -422,7 +443,7 @@ export default function Settings() {
         ) : notifPrefs ? (
           <>
             <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
-              Choose how you receive notifications. In-App is always on.
+              {p.notifChooseHow}
             </p>
 
             {/* Column headers */}
@@ -435,13 +456,13 @@ export default function Settings() {
 
             {/* Notification type rows */}
             {([
-              ["likes", "Likes"],
-              ["follows", "New Followers"],
-              ["replies", "Replies / Comments"],
-              ["dms", "Direct Messages"],
-              ["payments", "Payments"],
-              ["announcements", "Announcements"],
-              ["hangout_calls", "Hangout Calls"],
+              ["likes", p.notifLikes],
+              ["follows", p.notifFollowers],
+              ["replies", p.notifReplies],
+              ["dms", p.notifDms],
+              ["payments", p.notifPayments],
+              ["announcements", p.notifAnnouncements],
+              ["hangout_calls", p.notifHangoutCalls],
             ] as const).map(([key, label]) => {
               const pref = notifPrefs[key] as ChannelPrefs | undefined;
               if (!pref) return null;
@@ -483,9 +504,9 @@ export default function Settings() {
               style={{ background: "rgba(102,126,234,0.06)", border: "1px solid rgba(102,126,234,0.15)" }}
             >
               <div className="flex-1 min-w-0 mr-3">
-                <p className="text-sm font-medium text-white">Quiet Hours</p>
+                <p className="text-sm font-medium text-white">{p.quietHours}</p>
                 <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
-                  No push or bot notifications during quiet hours (11 PM - 8 AM)
+                  {p.quietHoursDesc}
                 </p>
               </div>
               <Toggle
@@ -567,7 +588,7 @@ export default function Settings() {
       </Section>
 
       {/* ── Data & Privacy ───────────────────────────────────────────────── */}
-      <Section title="Data & Privacy">
+      <Section title={p.dataPrivacySection}>
         <div
           className="rounded-xl p-4"
           style={{
@@ -593,10 +614,10 @@ export default function Settings() {
             </div>
             <div>
               <p className="text-sm font-semibold text-white mb-1">
-                Your PNPtv! Identity is Sovereign
+                {p.dataPrivacyTitle}
               </p>
               <p className="text-xs leading-relaxed" style={{ color: "rgba(255,255,255,0.6)" }}>
-                Your PNPtv! ID is your primary identity. All your data — posts, messages, connections — lives exclusively on our servers. Nothing is shared externally unless you explicitly choose to cross-post (e.g., Share to X). Your content, your control.
+                {p.dataPrivacyBody}
               </p>
             </div>
           </div>
@@ -604,7 +625,7 @@ export default function Settings() {
       </Section>
 
       {/* ── Danger Zone ──────────────────────────────────────────────────── */}
-      <Section title="Danger Zone">
+      <Section title={p.dangerZoneSection}>
         <div
           className="rounded-xl p-4"
           style={{
@@ -612,23 +633,107 @@ export default function Settings() {
             border: "1px solid rgba(255,59,48,0.15)",
           }}
         >
-          <p className="text-sm font-medium text-white mb-1">Delete Account</p>
+          <p className="text-sm font-medium text-white mb-1">{p.deleteAccount}</p>
           <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
-            Permanently delete your account and all associated data. This action cannot be undone.
+            {p.deleteAccountDesc}
           </p>
           <button
-            disabled
-            className="px-4 py-2 rounded-lg text-xs font-semibold opacity-40 cursor-not-allowed"
+            onClick={() => {
+              setDeleteConfirmText("");
+              setDeleteError(null);
+              setShowDeleteModal(true);
+            }}
+            className="px-4 py-2 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
             style={{
               background: "rgba(255,59,48,0.15)",
               color: "#FF3B30",
               border: "1px solid rgba(255,59,48,0.3)",
             }}
           >
-            Delete Account — Coming Soon
+            {p.deleteAccount}
           </button>
         </div>
       </Section>
+
+      {/* ── Delete Account Modal ──────────────────────────────────────────── */}
+      {showDeleteModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-modal-title"
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && !deleting) setShowDeleteModal(false);
+          }}
+          tabIndex={-1}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-6"
+            style={{ background: "#13131a", border: "1px solid rgba(255,59,48,0.25)" }}
+          >
+            <h2
+              id="delete-modal-title"
+              className="text-base font-bold text-white mb-3"
+            >
+              {p.deleteAccountConfirm}
+            </h2>
+            <p className="text-xs leading-relaxed mb-4" style={{ color: "#8E8E93" }}>
+              {p.deleteAccountWarning}
+            </p>
+            <p className="text-xs mb-2" style={{ color: "rgba(255,255,255,0.5)" }}>
+              {p.typeToConfirm.replace("{word}", p.deleteConfirmWord)}
+            </p>
+            <input
+              ref={deleteInputRef}
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              disabled={deleting}
+              autoFocus
+              className="w-full rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-500/50 disabled:opacity-50"
+              style={{
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,59,48,0.3)",
+                color: "#fff",
+              }}
+              placeholder={p.deleteConfirmWord}
+              aria-label={p.typeToConfirm.replace("{word}", p.deleteConfirmWord)}
+            />
+            {deleteError && (
+              <p className="text-xs mb-3" style={{ color: "#FF6B6B" }}>{deleteError}</p>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={() => !deleting && setShowDeleteModal(false)}
+                disabled={deleting}
+                className="flex-1 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-40"
+                style={{
+                  background: "rgba(255,255,255,0.08)",
+                  color: "#fff",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                }}
+              >
+                {p.cancel}
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={
+                  deleting ||
+                  deleteConfirmText.toUpperCase() !== p.deleteConfirmWord.toUpperCase()
+                }
+                className="flex-1 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-80 disabled:opacity-30 disabled:cursor-not-allowed"
+                style={{
+                  background: "rgba(255,59,48,0.25)",
+                  color: "#FF3B30",
+                  border: "1px solid rgba(255,59,48,0.4)",
+                }}
+              >
+                {deleting ? p.deletingAccount : p.deleteAccount}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

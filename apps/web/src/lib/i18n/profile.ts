@@ -278,6 +278,42 @@ const strings = {
     signatureRequired: "Signature is required",
     paymentAddressRequired: "Payment address is required",
     submissionFailed: "Submission failed",
+
+    // ── Settings page section titles ──────────────────────────────────────────
+    settingsTitle: "Settings",
+    accountSection: "Account",
+    notificationsSection: "Notifications",
+    dataPrivacySection: "Data & Privacy",
+    dangerZoneSection: "Danger Zone",
+
+    // ── Data & Privacy text ───────────────────────────────────────────────────
+    dataPrivacyTitle: "Your PNPtv! Identity is Sovereign",
+    dataPrivacyBody: "Your PNPtv! ID is your primary identity. All your data — posts, messages, connections — lives exclusively on our servers. Nothing is shared externally unless you explicitly choose to cross-post (e.g., Share to X). Your content, your control.",
+
+    // ── Notifications section ─────────────────────────────────────────────────
+    notifChooseHow: "Choose how you receive notifications. In-App is always on.",
+    notifLikes: "Likes",
+    notifFollowers: "New Followers",
+    notifReplies: "Replies / Comments",
+    notifDms: "Direct Messages",
+    notifPayments: "Payments",
+    notifAnnouncements: "Announcements",
+    notifHangoutCalls: "Hangout Calls",
+    quietHours: "Quiet Hours",
+    quietHoursDesc: "No push or bot notifications during quiet hours (11 PM - 8 AM)",
+
+    // ── Content disclaimer ────────────────────────────────────────────────────
+    contentDisclaimerAccepted: "Accepted. This cannot be reverted.",
+
+    // ── Account deletion ──────────────────────────────────────────────────────
+    deleteAccount: "Delete Account",
+    deleteAccountDesc: "Permanently delete your account and all associated data. This action cannot be undone.",
+    deleteAccountConfirm: "Confirm Account Deletion",
+    deleteAccountWarning: "This will permanently delete your account. You will lose all your posts, followers, and data. Type DELETE to confirm.",
+    deleteConfirmWord: "DELETE",
+    typeToConfirm: "Type {word} to confirm",
+    deletingAccount: "Deleting account...",
+    accountDeleted: "Account deleted successfully.",
   },
 
   es: {
@@ -559,6 +595,42 @@ const strings = {
     signatureRequired: "Se requiere firma",
     paymentAddressRequired: "Se requiere dirección de pago",
     submissionFailed: "Error al enviar",
+
+    // ── Settings page section titles ──────────────────────────────────────────
+    settingsTitle: "Configuración",
+    accountSection: "Cuenta",
+    notificationsSection: "Notificaciones",
+    dataPrivacySection: "Datos y Privacidad",
+    dangerZoneSection: "Zona de Peligro",
+
+    // ── Data & Privacy text ───────────────────────────────────────────────────
+    dataPrivacyTitle: "Tu identidad en PNPtv! es soberana",
+    dataPrivacyBody: "Tu ID de PNPtv! es tu identidad principal. Todos tus datos — publicaciones, mensajes, conexiones — viven exclusivamente en nuestros servidores. Nada se comparte externamente a menos que elijas explícitamente hacer una publicación cruzada (p.ej., Compartir en X). Tu contenido, tu control.",
+
+    // ── Notifications section ─────────────────────────────────────────────────
+    notifChooseHow: "Elige cómo recibes notificaciones. En la app siempre está activado.",
+    notifLikes: "Me gusta",
+    notifFollowers: "Nuevos seguidores",
+    notifReplies: "Respuestas / Comentarios",
+    notifDms: "Mensajes directos",
+    notifPayments: "Pagos",
+    notifAnnouncements: "Anuncios",
+    notifHangoutCalls: "Llamadas de Hangout",
+    quietHours: "Horas de silencio",
+    quietHoursDesc: "Sin notificaciones push o bot durante las horas de silencio (11 PM - 8 AM)",
+
+    // ── Content disclaimer ────────────────────────────────────────────────────
+    contentDisclaimerAccepted: "Aceptado. Esto no se puede revertir.",
+
+    // ── Account deletion ──────────────────────────────────────────────────────
+    deleteAccount: "Eliminar cuenta",
+    deleteAccountDesc: "Elimina permanentemente tu cuenta y todos los datos asociados. Esta acción no se puede deshacer.",
+    deleteAccountConfirm: "Confirmar eliminación de cuenta",
+    deleteAccountWarning: "Esto eliminará permanentemente tu cuenta. Perderás todas tus publicaciones, seguidores y datos. Escribe ELIMINAR para confirmar.",
+    deleteConfirmWord: "ELIMINAR",
+    typeToConfirm: "Escribe {word} para confirmar",
+    deletingAccount: "Eliminando cuenta...",
+    accountDeleted: "Cuenta eliminada exitosamente.",
   },
 } as const;
 
