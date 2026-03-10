@@ -203,6 +203,11 @@ class XPostScheduler {
       return false;
     }
 
+    // Token expired (set by getValidAccessToken) — not retryable, needs re-auth
+    if (error.tokenExpired) {
+      return false;
+    }
+
     // Server errors (5xx) are retryable
     if (error.response?.status >= 500 && error.response?.status < 600) {
       return true;

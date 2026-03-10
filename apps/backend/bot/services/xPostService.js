@@ -741,8 +741,43 @@ class XPostService {
     const expiresAt = decrypted?.expiresAt ? new Date(decrypted.expiresAt) : account.token_expires_at;
 
     if (expiresAt && expiresAt.getTime() - Date.now() <= X_TOKEN_EXPIRY_BUFFER_MS) {
-      const refreshed = await XOAuthService.refreshAccountTokens(account);
-      return refreshed.accessToken;
+      try {
+        const refreshed = await XOAuthService.refreshAccountTokens(account);
+        return refreshed.accessToken;
+      } catch (refreshErr) {
+        logger.error('X token refresh failed — deactivating account and pausing campaigns', {
+          accountId: account.account_id,
+          handle: account.handle,
+          error: refreshErr.message,
+        });
+
+        // Deactivate the account so no more posts are attempted
+        await db.query(
+          'UPDATE x_accounts SET is_active = FALSE, updated_at = NOW() WHERE account_id = $1',
+          [account.account_id]
+        );
+
+        // Auto-pause all active campaigns using this account
+        const paused = await db.query(
+          `UPDATE x_auto_campaigns
+           SET status = 'paused', next_run_at = NULL, updated_at = NOW()
+           WHERE account_id = $1 AND status = 'active'
+           RETURNING campaign_id, name`,
+          [account.account_id]
+        );
+        if (paused.rows.length) {
+          logger.warn('Auto-paused campaigns due to dead X token', {
+            handle: account.handle,
+            campaigns: paused.rows.map(r => r.name),
+          });
+        }
+
+        const err = new Error(
+          `Token de X expirado para @${account.handle}. Reconecta la cuenta desde Gestionar Cuentas.`
+        );
+        err.tokenExpired = true;
+        throw err;
+      }
     }
 
     if (!accessToken) {

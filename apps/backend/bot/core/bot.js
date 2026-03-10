@@ -794,6 +794,17 @@ const startBot = async () => {
       logger.warn(`X auto campaign scheduler initialization failed: ${error.message}`);
     }
 
+    // Initialize X token refresh scheduler (proactive refresh before expiry)
+    try {
+      const XTokenRefreshScheduler = require('./schedulers/xTokenRefreshScheduler');
+      const xTokenRefreshScheduler = new XTokenRefreshScheduler(bot);
+      xTokenRefreshScheduler.start();
+      global.xTokenRefreshScheduler = xTokenRefreshScheduler;
+      logger.info('✓ X token refresh scheduler initialized and started');
+    } catch (error) {
+      logger.warn(`X token refresh scheduler initialization failed: ${error.message}`);
+    }
+
     // Initialize proactive reminder service
     try {
       const ProactiveReminderService = require('../services/proactiveReminderService');

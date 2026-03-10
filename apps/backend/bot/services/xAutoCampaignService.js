@@ -144,7 +144,7 @@ class XAutoCampaignService {
     const result = await db.query(
       `UPDATE x_auto_campaigns
        SET status = 'active',
-           next_run_at = NOW() + (interval_minutes || ' minutes')::INTERVAL,
+           next_run_at = NOW() + (interval_minutes::integer * INTERVAL '1 minute'),
            updated_at = NOW()
        WHERE campaign_id = $1 AND status = 'paused'`,
       [campaignId]
@@ -191,19 +191,22 @@ class XAutoCampaignService {
   /**
    * Get due campaigns atomically (FOR UPDATE SKIP LOCKED).
    * Advances next_run_at immediately to prevent double-processing.
+   * Only returns campaigns whose X account is still active (has valid tokens).
    */
   static async getDueCampaigns() {
     const result = await db.query(`
       UPDATE x_auto_campaigns
-      SET next_run_at = NOW() + (interval_minutes || ' minutes')::INTERVAL,
+      SET next_run_at = NOW() + (interval_minutes::integer * INTERVAL '1 minute'),
           updated_at = NOW()
       WHERE campaign_id IN (
-        SELECT campaign_id FROM x_auto_campaigns
-        WHERE status = 'active'
-          AND next_run_at IS NOT NULL
-          AND next_run_at <= NOW()
-          AND EXTRACT(HOUR FROM NOW()) >= active_hours_start
-          AND EXTRACT(HOUR FROM NOW()) < active_hours_end
+        SELECT c.campaign_id FROM x_auto_campaigns c
+        JOIN x_accounts a ON a.account_id = c.account_id
+        WHERE c.status = 'active'
+          AND a.is_active = TRUE
+          AND c.next_run_at IS NOT NULL
+          AND c.next_run_at <= NOW()
+          AND EXTRACT(HOUR FROM NOW()) >= c.active_hours_start
+          AND EXTRACT(HOUR FROM NOW()) < c.active_hours_end
         FOR UPDATE SKIP LOCKED
       )
       RETURNING *
