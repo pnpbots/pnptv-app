@@ -28,15 +28,57 @@ function generatePlanId(name, addOns) {
 }
 
 /**
- * Generate a SKU for a plan.
- * Format: PNP-<SLUG>-LTF (lifetime) or PNP-<SLUG>-<DDD> (timed)
+ * Generate a structured SKU encoding the entitlements bundled in the plan.
+ *
+ * Format:
+ *   PNP-{member-days}-P-{prime-days}           (member + prime)
+ *   PNP-{member-days}                          (member only)
+ *   PNP-{member-days}-C-{creator-days}         (member + creator subscription)
+ *   PNP-{member-days}-P-{prime-days}-C-{days}  (all three)
+ *
+ * Day encoding:
+ *   000 = lifetime
+ *   030 = 30 days
+ *   007 = 7 days
+ *   etc.
+ *
+ * Examples:
+ *   PNP-030-P-007  → 30-day member + 7-day prime
+ *   PNP-000-P-000  → lifetime member + lifetime prime
+ *   PNP-030        → 30-day member only
+ *   PNP-030-C-030  → 30-day member + 30-day creator subscription
+ *
+ * @param {Array<{add_on_id: string, duration_days: number|null, is_lifetime: boolean}>} addOns
+ * @returns {string}
  */
-function generateSKU(planId, durationDays, isLifetime) {
-  const slug = planId.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
-  if (isLifetime || durationDays >= 36500) {
-    return `PNP-${slug}-LTF`;
+function generateSku(addOns) {
+  const memberAddon  = addOns.find(a => a.add_on_id === 'pnp-member');
+  const primeAddon   = addOns.find(a => a.add_on_id === 'prime');
+  const creatorAddon = addOns.find(a => a.add_on_id === 'creator-subscription');
+
+  const encodeDays = (addon) => {
+    if (!addon) return null;
+    if (addon.is_lifetime) return '000';
+    return String(addon.duration_days || 30).padStart(3, '0');
+  };
+
+  const memberDays  = encodeDays(memberAddon);
+  const primeDays   = encodeDays(primeAddon);
+  const creatorDays = encodeDays(creatorAddon);
+
+  let sku = 'PNP';
+  if (memberDays)  sku += `-${memberDays}`;
+  if (primeDays)   sku += `-P-${primeDays}`;
+  if (creatorDays) sku += `-C-${creatorDays}`;
+
+  // If the plan has no recognized add-ons, fall back to the old slug-based format
+  if (sku === 'PNP') {
+    const hasLifetime = addOns.some(a => a.is_lifetime);
+    const maxDays = Math.max(...addOns.filter(a => !a.is_lifetime && a.duration_days).map(a => a.duration_days), 0);
+    sku = hasLifetime ? 'PNP-000' : `PNP-${String(maxDays || 30).padStart(3, '0')}`;
   }
-  return `PNP-${slug}-${String(Math.round(durationDays)).padStart(3, '0')}`;
+
+  return sku;
 }
 
 /** Pre-built UI descriptions per add-on. */
@@ -47,7 +89,11 @@ const ADD_ON_DESCRIPTIONS = {
   'private-calls':        'One private video call credit with a creator',
 };
 
-/** Tier precedence derived from add-ons. */
+/**
+ * Derive backward-compat tier label from add-ons for the plans.tier column.
+ * plans.tier is a display/admin field only — it is NOT used for access control.
+ * Access control is exclusively through user_entitlements.
+ */
 function deriveTier(addOnIds) {
   if (addOnIds.includes('prime')) return 'PRIME';
   if (addOnIds.includes('pnp-member')) return 'member';
@@ -221,13 +267,17 @@ const planBuilderController = {
 
       // Derive metadata from add-ons
       const addOnIds = addOnsNorm.map(a => a.add_on_id);
+      // plans.tier is a backward-compat display field only — not used for access control.
+      // Access control is exclusively through user_entitlements.
       const tier = deriveTier(addOnIds);
       const hasLifetime = is_lifetime || addOnsNorm.some(a => a.is_lifetime);
       const durations = addOnsNorm.filter(a => !a.is_lifetime && a.duration_days).map(a => a.duration_days);
       const resolvedDuration = duration_days
         || (durations.length ? Math.max(...durations) : 30);
 
-      const sku = generateSKU(planId, resolvedDuration, hasLifetime);
+      // New structured SKU format encodes the entitlement composition of the plan.
+      // e.g. PNP-030-P-007 = 30-day member + 7-day prime
+      const sku = generateSku(addOnsNorm);
       const features = addOnIds.flatMap(id => ADD_ON_FEATURES[id] || []);
       const description = generateDescription(name.trim(), addOnsNorm, resolvedDuration, price);
 
@@ -350,13 +400,17 @@ const planBuilderController = {
           is_lifetime:   a.is_lifetime || false,
         }));
         const addOnIds = addOnsNorm.map(a => a.add_on_id);
-        const hasLifetime = addOnsNorm.some(a => a.is_lifetime);
         const durations = addOnsNorm.filter(a => !a.is_lifetime && a.duration_days).map(a => a.duration_days);
         const resolvedDuration = duration_days
           || (durations.length ? Math.max(...durations) : parseInt(cur.duration_days || cur.duration || 30, 10));
 
+        // Regenerate SKU with new structured format encoding the entitlement composition.
+        const newSku = generateSku(addOnsNorm);
+
         updateFields = {
+          // plans.tier is a backward-compat display field only — not used for access control.
           tier:         deriveTier(addOnIds),
+          sku:          newSku,
           features:     JSON.stringify(addOnIds.flatMap(id => ADD_ON_FEATURES[id] || [])),
           description:  generateDescription(
             (name || cur.name).trim(),
@@ -400,6 +454,7 @@ const planBuilderController = {
       if (price !== undefined) addField('price', price);
       if (is_active !== undefined) addField('active', is_active);
       if (updateFields.tier) addField('tier', updateFields.tier);
+      if (updateFields.sku) addField('sku', updateFields.sku);
       if (updateFields.features) addField('features', updateFields.features);
       if (updateFields.description) addField('description', updateFields.description);
       if (updateFields.duration_days) {

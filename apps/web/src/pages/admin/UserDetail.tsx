@@ -12,6 +12,8 @@ import {
   revokeAdminUserEntitlement,
   extendAdminUserEntitlement,
   getAddOns,
+  getUserLabel,
+  getLabelColor,
   type AdminUser,
   type AdminPlan,
   type AdminEntitlement,
@@ -905,9 +907,28 @@ export default function UserDetail() {
                 ? `${user.first_name}${user.last_name ? " " + user.last_name : ""}`
                 : user.username || "Unknown"}
             </h1>
-            {user.tier && (
-              <Badge variant={TIER_BADGE_VARIANTS[user.tier] ?? "default"}>{user.tier}</Badge>
-            )}
+            {user.tier && (() => {
+              const lbl = getUserLabel(user);
+              const legacyTier = user.tier.toLowerCase();
+              const showLegacy = lbl !== 'FREE' && legacyTier !== lbl.toLowerCase() && legacyTier !== 'banned';
+              return (
+                <>
+                  <span
+                    className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full border ${getLabelColor(lbl)}`}
+                  >
+                    {lbl}
+                  </span>
+                  {showLegacy && (
+                    <span className="text-xs text-pnp-textSecondary">
+                      (legacy: {user.tier})
+                    </span>
+                  )}
+                  {legacyTier === 'banned' && (
+                    <Badge variant="error">banned</Badge>
+                  )}
+                </>
+              );
+            })()}
             {user.subscription_status && (
               <Badge variant={STATUS_BADGE_VARIANTS[user.subscription_status] ?? "default"}>
                 {user.subscription_status}

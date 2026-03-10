@@ -60,6 +60,7 @@ export interface TelegramAuthResponse {
     age_verified: boolean;
     subscription_type: string;
     tier: string;
+    label?: 'PRIME' | 'BASIC' | 'FREE';
     role: string;
     photo_url?: string | null;
     creator_status?: string;
@@ -118,6 +119,7 @@ export interface TelegramWidgetAuthResponse {
     photoUrl: string | null;
     subscriptionStatus: string;
     tier: string;
+    label?: 'PRIME' | 'BASIC' | 'FREE';
     role: string;
     termsAccepted: boolean;
   };
@@ -252,6 +254,7 @@ export interface NearbyUser {
   distance_m?: number;
   accuracy_estimate: string;
   status: string;
+  is_followed?: boolean;
 }
 
 export interface NearbySearchResponse {
@@ -313,6 +316,9 @@ export interface NearbyPlace {
   instagram?: string;
   telegramUsername?: string;
   photoUrl?: string;
+  hoursOfOperation?: Record<string, string> | null;
+  favoriteCount?: number;
+  viewCount?: number;
 }
 
 export interface NearbyPlacesResponse {
@@ -358,6 +364,22 @@ export interface SubmitPlacePayload {
 
 export function submitNearbyPlace(payload: SubmitPlacePayload): Promise<{ success: boolean; message: string }> {
   return request("/api/webapp/nearby/places/submit", { method: "POST", body: payload });
+}
+
+export function favoritePlaceToggle(placeId: number): Promise<{ success: boolean; favorited: boolean }> {
+  return request(`/api/webapp/nearby/places/${placeId}/favorite`, { method: "POST" });
+}
+
+export function trackPlaceView(placeId: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/nearby/places/${placeId}/view`, { method: "POST" });
+}
+
+export function reportPlace(placeId: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/nearby/places/${placeId}/report`, { method: "POST" });
+}
+
+export function getPlaceFavorites(): Promise<{ success: boolean; placeIds: number[] }> {
+  return request("/api/webapp/nearby/places/favorites");
 }
 
 export interface ReferralStats {
@@ -539,6 +561,7 @@ export interface UserProfile {
   photoUrl: string | null;
   subscriptionStatus: string;
   tier: string;
+  label?: 'PRIME' | 'BASIC' | 'FREE';
   subscriptionPlan?: string;
   subscriptionExpires?: string;
   language?: string;
@@ -2638,6 +2661,7 @@ export interface AdminUser {
   bio?: string;
   role: string;
   tier: string;
+  label?: 'PRIME' | 'BASIC' | 'FREE';
   subscription_status: string;
   subscription_plan?: string;
   plan_expiry?: string;
@@ -3500,4 +3524,172 @@ export function startStreamAutoMessages(): Promise<{ success: boolean }> {
 
 export function stopStreamAutoMessages(): Promise<{ success: boolean }> {
   return request("/api/webapp/live/stream-auto-stop", { method: "POST" });
+}
+
+// ---------------------------------------------------------------------------
+// Entitlement-derived label utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a display label from the entitlement-derived `label` field (preferred)
+ * or fall back to the legacy `tier` column for backward compatibility.
+ */
+export function getUserLabel(user: { tier?: string; label?: string }): 'PRIME' | 'BASIC' | 'FREE' {
+  if (user.label === 'PRIME' || user.label === 'BASIC' || user.label === 'FREE') {
+    return user.label;
+  }
+  const t = (user.tier || '').toLowerCase();
+  if (t === 'prime') return 'PRIME';
+  if (t === 'member') return 'BASIC';
+  return 'FREE';
+}
+
+/**
+ * Return Tailwind classes for rendering a label badge consistently.
+ * Uses only preset `pnp-*` tokens plus standard Tailwind amber/blue utilities.
+ */
+export function getLabelColor(label: string): string {
+  switch (label) {
+    case 'PRIME': return 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+    case 'BASIC': return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+    default:      return 'bg-pnp-surfaceHover/60 text-pnp-textSecondary border-pnp-border';
+  }
+}
+
+// ─── Creator Subscription Admin ───────────────────────────────────────────────
+
+export interface CreatorSubscriptionSummary {
+  creator_id: string;
+  creator_username: string;
+  creator_first_name: string;
+  creator_avatar: string | null;
+  creator_type: string | null;
+  creator_price_usd: number;
+  active_subscribers: number;
+  total_revenue: number;
+  total_creator_earnings: number;
+  pending_payout: number;
+}
+
+export interface SubscriptionDetail {
+  id: string;
+  subscriber_id: string;
+  subscriber_username: string;
+  subscriber_first_name: string;
+  subscriber_avatar: string | null;
+  started_at: string;
+  expires_at: string;
+  status: "active" | "cancelled" | "expired";
+  price_usd: number;
+  auto_renew: boolean;
+  revenue: number;
+}
+
+export interface MonthlyRevenueRow {
+  month: string;
+  gross: number;
+  creator_share: number;
+  platform_share: number;
+  subscription_count: number;
+  pending_amount?: number;
+  active_creators?: number;
+}
+
+export interface CreatorPayoutSummary {
+  pending_total: number;
+  paid_total: number;
+  pending_count: number;
+}
+
+export interface CreatorDetailAdmin {
+  id: string;
+  username: string;
+  first_name: string;
+  avatar_url: string | null;
+  creator_type: string | null;
+  creator_price_usd: number;
+  creator_subscriber_count: number;
+  creator_wallet_address: string | null;
+  payout_method: string | null;
+  email: string | null;
+}
+
+export interface PlatformPayoutSummary {
+  total_pending: number;
+  paid_this_month: number;
+  creators_with_pending: number;
+  total_gross_all_time: number;
+  total_platform_revenue: number;
+}
+
+export function getCreatorSubscriptions(): Promise<{
+  success: boolean;
+  creators: CreatorSubscriptionSummary[];
+}> {
+  return request("/api/webapp/admin/creator-subscriptions");
+}
+
+export function getCreatorSubscriptionDetail(creatorId: string): Promise<{
+  success: boolean;
+  creator: CreatorDetailAdmin;
+  subscriptions: SubscriptionDetail[];
+  monthlyRevenue: MonthlyRevenueRow[];
+  payoutSummary: CreatorPayoutSummary;
+}> {
+  return request(`/api/webapp/admin/creator-subscriptions/${creatorId}`);
+}
+
+export function getCreatorSubscriptionPlatformSummary(): Promise<{
+  success: boolean;
+  summary: PlatformPayoutSummary;
+  monthlyRevenue: MonthlyRevenueRow[];
+}> {
+  return request("/api/webapp/admin/creator-subscriptions/summary");
+}
+
+export function processCreatorPayout(creatorId: string): Promise<{
+  success: boolean;
+  amount: number;
+  earningsCount: number;
+  creator: string;
+  method: string;
+  walletAddress: string | null;
+  message?: string;
+}> {
+  return request(`/api/webapp/admin/creator-subscriptions/${creatorId}/payout`, {
+    method: "POST",
+  });
+}
+
+export function processAllPayouts(): Promise<{
+  success: boolean;
+  creatorsCount: number;
+  totalAmount: number;
+  payouts: Array<{ creatorId: string; creatorUsername: string; amount: number }>;
+  message?: string;
+}> {
+  return request("/api/webapp/admin/creator-subscriptions/payouts/process-all", {
+    method: "POST",
+  });
+}
+
+export function adminCancelCreatorSubscription(
+  creatorId: string,
+  subscriptionId: string
+): Promise<{ success: boolean; message: string }> {
+  return request(
+    `/api/webapp/admin/creator-subscriptions/${creatorId}/subscriptions/${subscriptionId}/cancel`,
+    { method: "POST" }
+  );
+}
+
+export function adminExtendCreatorSubscription(
+  creatorId: string,
+  subscriptionId: string,
+  days: number
+): Promise<{ success: boolean; newExpiresAt: string }> {
+  return request(
+    `/api/webapp/admin/creator-subscriptions/${creatorId}/subscriptions/${subscriptionId}/extend`,
+    { method: "POST", body: { days } }
+  );
 }

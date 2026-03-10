@@ -10,6 +10,7 @@ import {
   getDashSubscriptionStatus,
   getDashAvailable,
   activateMeruCode,
+  getLabelColor,
   type SubscriptionPlan,
 } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -35,6 +36,15 @@ function durationLabel(days: number): string {
   if (days >= 365) return `${Math.round(days / 365)} Year`;
   if (days >= 30) return `${Math.round(days / 30)} Months`;
   return `${days} Days`;
+}
+
+function getPlanLabel(plan: SubscriptionPlan, isMemberPlan: boolean): 'PRIME' | 'BASIC' | 'FREE' {
+  if (plan.tier) {
+    const t = plan.tier.toLowerCase();
+    if (t === 'prime') return 'PRIME';
+    if (t === 'member') return 'BASIC';
+  }
+  return isMemberPlan ? 'BASIC' : 'PRIME';
 }
 
 export default function Subscribe() {
@@ -407,6 +417,7 @@ export default function Subscribe() {
           const isSelected = selectedPlan === plan.id;
           const features = PLAN_FEATURES[plan.id] || ["Member access"];
           const displayPrice = showCOP ? formatPrice(plan.priceCOP, "COP") : formatPrice(plan.priceUSD, "USD");
+          const planLabel = getPlanLabel(plan, true);
 
           return (
             <button
@@ -420,9 +431,14 @@ export default function Subscribe() {
             >
               <div className="flex items-start justify-between mb-2">
                 <div>
-                  <span className="font-semibold text-pnp-textPrimary">
-                    {plan.display_name || plan.name}
-                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-pnp-textPrimary">
+                      {plan.display_name || plan.name}
+                    </span>
+                    <span className={`inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${getLabelColor(planLabel)}`}>
+                      {planLabel}
+                    </span>
+                  </div>
                   <div className="text-xs text-pnp-textSecondary">{s.monthly}</div>
                 </div>
                 <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
@@ -467,6 +483,7 @@ export default function Subscribe() {
           const isRecommended = plan.id === RECOMMENDED_PLAN || plan.sku === RECOMMENDED_PLAN;
           const features = PLAN_FEATURES[plan.sku] || PLAN_FEATURES[plan.id] || ["PRIME access", "Exclusive content"];
           const displayPrice = showCOP ? formatPrice(plan.priceCOP, "COP") : formatPrice(plan.priceUSD, "USD");
+          const planLabel = getPlanLabel(plan, false);
 
           return (
             <button
@@ -480,9 +497,12 @@ export default function Subscribe() {
             >
               <div className="flex items-start justify-between mb-2">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-pnp-textPrimary">
                       {plan.display_name || plan.name}
+                    </span>
+                    <span className={`inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${getLabelColor(planLabel)}`}>
+                      {planLabel}
                     </span>
                     {isRecommended && (
                       <span className="text-[10px] font-bold uppercase tracking-wider bg-[#FFB454] text-[#1C1C1E] px-2 py-0.5 rounded-full">

@@ -4028,6 +4028,44 @@ class PaymentService {
           });
         }
       }
+
+      // After granting all add-ons: invalidate entitlement caches and sync
+      // users.tier to the derived label for backward-compatible admin views.
+      // This is non-critical — payment is already committed above.
+      if (result.granted > 0) {
+        try {
+          const EntitlementAccessService = require('./entitlementAccessService');
+          await EntitlementAccessService.invalidateCache(userId);
+
+          // Derive the backward-compat display tier from the user's new entitlements
+          const label = await EntitlementAccessService.getUserLabel(userId);
+          const displayTier = EntitlementAccessService.labelToDisplayTier(label);
+
+          // Update users.tier for admin visibility only — not used for access control.
+          // The lifetime-protection trigger will block this for lifetime-holders;
+          // wrap in try/catch so a trigger raise does not abort the payment flow.
+          try {
+            await query(
+              `UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2`,
+              [displayTier, userId]
+            );
+            logger.info('Display tier synced after entitlement grant', { userId, displayTier, label });
+          } catch (tierUpdateErr) {
+            // Lifetime-protection trigger raises for lifetime users — this is expected.
+            if (tierUpdateErr.message && tierUpdateErr.message.includes('Lifetime entitlements')) {
+              logger.debug('Display tier sync skipped for lifetime user', { userId });
+            } else {
+              logger.warn('Failed to sync display tier after entitlement grant (non-critical)', {
+                userId, planId, error: tierUpdateErr.message,
+              });
+            }
+          }
+        } catch (postGrantErr) {
+          logger.warn('Post-grant cache/tier sync failed (non-critical)', {
+            userId, planId, error: postGrantErr.message,
+          });
+        }
+      }
     } catch (err) {
       logger.error('grantEntitlementsForPlan failed', { userId, planId, error: err.message });
       result.errors++;

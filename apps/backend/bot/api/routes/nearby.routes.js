@@ -53,6 +53,12 @@ router.get('/stats', (req, res) => {
   NearbyController.getStats(req, res);
 });
 
+// Place interactions
+router.post('/places/:id/favorite', (req, res) => NearbyController.favoritePlace(req, res));
+router.post('/places/:id/view', (req, res) => NearbyController.trackView(req, res));
+router.post('/places/:id/report', (req, res) => NearbyController.reportPlace(req, res));
+router.get('/places/favorites', (req, res) => NearbyController.getFavorites(req, res));
+
 // Batch update locations (admin only)
 const requireAdmin = (req, res, next) => {
   const role = (req.user?.role || '').toLowerCase();

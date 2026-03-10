@@ -578,6 +578,70 @@ class NearbyPlaceModel {
   static toRad(deg) {
     return deg * (Math.PI / 180);
   }
+
+  /**
+   * Toggle favorite — returns { favorited: boolean }
+   */
+  static async toggleFavorite(userId, placeId) {
+    try {
+      const existing = await query(
+        'SELECT 1 FROM user_place_favorites WHERE user_id=$1 AND place_id=$2',
+        [userId, placeId]
+      );
+      if (existing.rows.length > 0) {
+        await query('DELETE FROM user_place_favorites WHERE user_id=$1 AND place_id=$2', [userId, placeId]);
+        await query(`UPDATE ${TABLE} SET favorite_count = GREATEST(0, favorite_count - 1) WHERE id=$1`, [placeId]);
+        return { favorited: false };
+      } else {
+        await query(
+          'INSERT INTO user_place_favorites (user_id, place_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+          [userId, placeId]
+        );
+        await query(`UPDATE ${TABLE} SET favorite_count = favorite_count + 1 WHERE id=$1`, [placeId]);
+        return { favorited: true };
+      }
+    } catch (error) {
+      logger.error('Error toggling favorite:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Report a place (idempotent per user)
+   */
+  static async reportPlace(userId, placeId) {
+    try {
+      const { rowCount } = await query(
+        'INSERT INTO place_reports (user_id, place_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+        [userId, placeId]
+      );
+      if (rowCount > 0) {
+        await query(`UPDATE ${TABLE} SET report_count = report_count + 1 WHERE id=$1`, [placeId]);
+        // Auto-suspend if 5+ unique reports
+        await query(`
+          UPDATE ${TABLE} SET status='suspended'
+          WHERE id=$1 AND status='approved'
+            AND (SELECT COUNT(*) FROM place_reports WHERE place_id=$1) >= 5
+        `, [placeId]);
+      }
+    } catch (error) {
+      logger.error('Error reporting place:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's favorited place IDs
+   */
+  static async getUserFavorites(userId) {
+    try {
+      const res = await query('SELECT place_id FROM user_place_favorites WHERE user_id=$1', [userId]);
+      return res.rows.map(r => r.place_id);
+    } catch (error) {
+      logger.error('Error getting user favorites:', error);
+      return [];
+    }
+  }
 }
 
 module.exports = NearbyPlaceModel;

@@ -116,6 +116,22 @@ class NearbyService {
         accuracy
       );
 
+      // Emit real-time nearby event to grid room
+      try {
+        const io = require('../bot/services/socketSingleton').get();
+        if (io) {
+          const gridLat = Math.floor(roundedLatitude * 10) / 10;
+          const gridLng = Math.floor(roundedLongitude * 10) / 10;
+          const room = `nearby:${gridLat}:${gridLng}`;
+          io.to(room).emit('nearby:location-updated', {
+            user_id: userId,
+            updated_at: Date.now(),
+          });
+        }
+      } catch (ioErr) {
+        // Non-fatal — real-time push is best-effort
+      }
+
       logger.info(`✅ Location updated for user ${userId}`);
 
       return {
@@ -216,6 +232,26 @@ class NearbyService {
         } catch (err) {
           logger.warn(`Failed to enrich nearby users with profiles: ${err.message}`);
         }
+      }
+
+      // Followers-first ordering: show followed users at the top
+      try {
+        const followRes = await query(
+          'SELECT followed_id FROM follows WHERE follower_id=$1',
+          [userId]
+        );
+        const followedIds = new Set(followRes.rows.map(r => String(r.followed_id)));
+        privacyFiltered.forEach(u => {
+          u.is_followed = followedIds.has(String(u.user_id));
+        });
+        privacyFiltered.sort((a, b) => {
+          const aF = a.is_followed ? 0 : 1;
+          const bF = b.is_followed ? 0 : 1;
+          if (aF !== bF) return aF - bF;
+          return (a.distance_km ?? 999) - (b.distance_km ?? 999);
+        });
+      } catch (err) {
+        logger.warn(`Failed to apply followers-first sorting: ${err.message}`);
       }
 
       logger.info(`✅ Found ${privacyFiltered.length} nearby users for ${userId}`);

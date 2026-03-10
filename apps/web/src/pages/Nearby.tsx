@@ -12,22 +12,40 @@ import {
   searchNearbyPlaces,
   getFallbackNearbyPlaces,
   submitNearbyPlace,
+  favoritePlaceToggle,
+  trackPlaceView,
+  reportPlace,
+  getPlaceFavorites,
   type NearbyUser,
   type NearbyPlace,
   type NearbySearchResponse,
   type SubmitPlacePayload,
 } from "@/lib/api";
+import { getSocket, connectSocket } from "@/lib/socket";
 import { MapContainer, TileLayer, Marker, Circle, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 const RADIUS_OPTIONS = [1, 5, 10, 25];
-const REFRESH_INTERVAL = 30_000;
+const REFRESH_INTERVAL = 15_000;
 const LAST_POS_KEY = "pnptv:nearbyLastPos";
+const FAV_PLACES_KEY = "pnptv:favPlaces";
 
 // ─── Filter types ───────────────────────────────────────────────────────────
 
 type FilterSegment = "all" | "users" | "places";
+
+const PLACE_CATEGORY_CHIPS = [
+  { slug: null, emoji: "All", label: "All" },
+  { slug: "wellness", emoji: "🧘", label: "Wellness" },
+  { slug: "cruising-spots", emoji: "🌙", label: "Cruising" },
+  { slug: "adult-entertainment", emoji: "🔞", label: "+18" },
+  { slug: "pnp-friendly", emoji: "💨", label: "PNP" },
+  { slug: "saunas", emoji: "🧖", label: "Saunas" },
+  { slug: "bars-clubs", emoji: "🍸", label: "Bars" },
+  { slug: "community-businesses", emoji: "🏪", label: "Community" },
+  { slug: "hotels-lodging", emoji: "🏨", label: "Hotels" },
+] as const;
 
 // ─── Custom marker icons ────────────────────────────────────────────────────
 
@@ -264,10 +282,14 @@ function UserDetailSheet({ user, onClose, onNavigate }: UserDetailSheetProps) {
 interface PlaceDetailSheetProps {
   place: NearbyPlace;
   onClose: () => void;
+  isFavorited: boolean;
+  onToggleFavorite: (placeId: number) => void;
 }
 
-function PlaceDetailSheet({ place, onClose }: PlaceDetailSheetProps) {
+function PlaceDetailSheet({ place, onClose, isFavorited, onToggleFavorite }: PlaceDetailSheetProps) {
   const t = useI18n();
+  const [reportSent, setReportSent] = useState(false);
+  const [showReportConfirm, setShowReportConfirm] = useState(false);
 
   function formatPlaceDist(p: NearbyPlace): string {
     if (p.distance < 1) {
@@ -276,10 +298,22 @@ function PlaceDetailSheet({ place, onClose }: PlaceDetailSheetProps) {
     return t.booking.kmAway(p.distance.toFixed(1));
   }
 
+  // Check if place is currently open
+  const isOpenNow = React.useMemo(() => {
+    const hours = place.hoursOfOperation;
+    if (!hours || Object.keys(hours).length === 0) return null;
+    const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    const now = new Date();
+    const dayKey = days[now.getDay()];
+    const todayHours = hours[dayKey];
+    if (!todayHours || todayHours.toLowerCase() === "closed") return false;
+    return true; // Simplified — has hours for today
+  }, [place.hoursOfOperation]);
+
   return (
     <div className="absolute inset-x-0 bottom-0 z-[1100] animate-slide-up">
       <div
-        className="mx-3 mb-3 rounded-2xl border border-white/10 overflow-hidden"
+        className="mx-3 mb-3 rounded-2xl border border-white/10 overflow-hidden max-h-[70vh] overflow-y-auto"
         style={{ background: "rgba(28,28,30,0.95)", backdropFilter: "blur(16px)" }}
       >
         {/* Handle bar */}
@@ -309,10 +343,29 @@ function PlaceDetailSheet({ place, onClose }: PlaceDetailSheetProps) {
               {place.categoryName && (
                 <p className="text-xs text-pnp-textSecondary">{place.categoryName}</p>
               )}
-              <p className="text-xs mt-0.5" style={{ color: "#34C85A" }}>
-                {formatPlaceDist(place)}
-              </p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-xs" style={{ color: "#34C85A" }}>
+                  {formatPlaceDist(place)}
+                </span>
+                {isOpenNow !== null && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                    isOpenNow ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                  }`}>
+                    {isOpenNow ? "Abierto" : "Cerrado"}
+                  </span>
+                )}
+              </div>
             </div>
+            {/* Favorite button */}
+            <button
+              onClick={() => onToggleFavorite(place.id)}
+              className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+              style={{ background: isFavorited ? "rgba(230,145,56,0.2)" : "rgba(255,255,255,0.05)" }}
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill={isFavorited ? "#E69138" : "none"} stroke={isFavorited ? "#E69138" : "#888"} strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+              </svg>
+            </button>
           </div>
 
           {/* Details */}
@@ -338,6 +391,25 @@ function PlaceDetailSheet({ place, onClose }: PlaceDetailSheetProps) {
               </div>
             )}
           </div>
+
+          {/* Hours of operation */}
+          {place.hoursOfOperation && Object.keys(place.hoursOfOperation).length > 0 && (
+            <div className="mb-3 bg-white/5 rounded-lg p-2.5">
+              <p className="text-[10px] font-semibold text-pnp-textSecondary uppercase tracking-wider mb-1.5">Horario</p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                {["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map((day) => {
+                  const label = { monday: "Lun", tuesday: "Mar", wednesday: "Mie", thursday: "Jue", friday: "Vie", saturday: "Sab", sunday: "Dom" }[day];
+                  const val = place.hoursOfOperation?.[day] || "Cerrado";
+                  return (
+                    <div key={day} className="flex justify-between text-[11px]">
+                      <span className="text-pnp-textSecondary">{label}</span>
+                      <span className="text-pnp-textPrimary">{val}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Action buttons */}
           <div className="flex gap-2">
@@ -380,6 +452,40 @@ function PlaceDetailSheet({ place, onClose }: PlaceDetailSheetProps) {
             >
               {t.booking.close}
             </button>
+          </div>
+
+          {/* Report link */}
+          <div className="mt-3 text-center">
+            {reportSent ? (
+              <p className="text-[11px] text-green-400">Reporte enviado. Gracias.</p>
+            ) : showReportConfirm ? (
+              <div className="flex items-center justify-center gap-2">
+                <span className="text-[11px] text-pnp-textSecondary">Reportar como inapropiado?</span>
+                <button
+                  onClick={() => { setShowReportConfirm(false); }}
+                  className="text-[11px] text-pnp-textSecondary underline"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    reportPlace(place.id).catch(() => {});
+                    setReportSent(true);
+                    setShowReportConfirm(false);
+                  }}
+                  className="text-[11px] text-red-400 underline font-medium"
+                >
+                  Reportar
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowReportConfirm(true)}
+                className="text-[11px] text-pnp-textSecondary/60 hover:text-pnp-textSecondary"
+              >
+                Reportar lugar
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -563,6 +669,14 @@ export default function Nearby() {
   const [selectedUser, setSelectedUser] = useState<NearbyUser | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<NearbyPlace | null>(null);
   const [submitPlaceOpen, setSubmitPlaceOpen] = useState(false);
+  const [placeCategory, setPlaceCategory] = useState<string | null>(null);
+  const [showUserList, setShowUserList] = useState(false);
+  const [favoritedPlaces, setFavoritedPlaces] = useState<Set<number>>(() => {
+    try {
+      const cached = localStorage.getItem(FAV_PLACES_KEY);
+      return cached ? new Set(JSON.parse(cached)) : new Set();
+    } catch { return new Set(); }
+  });
   const watchIdRef = useRef<number | null>(null);
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const myIconRef = useRef(createMyIcon());
@@ -571,6 +685,30 @@ export default function Nearby() {
   // Computed filtered counts
   const showUsers = filter === "all" || filter === "users";
   const showPlaces = filter === "all" || filter === "places";
+
+  // Category-filtered places
+  const filteredPlaces = placeCategory
+    ? nearbyPlaces.filter((p) => p.categorySlug === placeCategory)
+    : nearbyPlaces;
+
+  // Favorite toggle handler
+  const handleToggleFavorite = useCallback((placeId: number) => {
+    setFavoritedPlaces((prev) => {
+      const next = new Set(prev);
+      if (next.has(placeId)) next.delete(placeId);
+      else next.add(placeId);
+      try { localStorage.setItem(FAV_PLACES_KEY, JSON.stringify([...next])); } catch {}
+      return next;
+    });
+    favoritePlaceToggle(placeId).catch(() => {});
+  }, []);
+
+  // Track view when place detail opens
+  useEffect(() => {
+    if (selectedPlace) {
+      trackPlaceView(selectedPlace.id).catch(() => {});
+    }
+  }, [selectedPlace]);
 
   // Fetch nearby users and places
   const fetchNearby = useCallback(
@@ -626,6 +764,16 @@ export default function Nearby() {
     },
     [incognito]
   );
+
+  // Load favorites from server on mount
+  useEffect(() => {
+    getPlaceFavorites().then((data) => {
+      if (data.placeIds?.length) {
+        setFavoritedPlaces(new Set(data.placeIds));
+        try { localStorage.setItem(FAV_PLACES_KEY, JSON.stringify(data.placeIds)); } catch {}
+      }
+    }).catch(() => {});
+  }, []);
 
   // If we have a cached position, show map immediately as "offline"
   useEffect(() => {
@@ -683,21 +831,61 @@ export default function Nearby() {
     };
   }, [sendLocation, fetchNearby]);
 
-  // Auto-refresh nearby search
+  // Auto-refresh with Page Visibility API (pause when tab hidden)
   useEffect(() => {
     if (!myPos || pageState !== "ready") return;
 
-    refreshRef.current = setInterval(() => {
+    const doRefresh = () => {
       fetchNearby(myPos.lat, myPos.lng, radius);
-      if (!incognito) {
-        sendLocation(myPos.lat, myPos.lng, 50);
+      if (!incognito) sendLocation(myPos.lat, myPos.lng, 50);
+    };
+
+    const startInterval = () => {
+      if (refreshRef.current) clearInterval(refreshRef.current);
+      refreshRef.current = setInterval(doRefresh, REFRESH_INTERVAL);
+    };
+
+    const onVisChange = () => {
+      if (document.visibilityState === "visible") {
+        doRefresh(); // immediate refresh on return
+        startInterval();
+      } else {
+        if (refreshRef.current) { clearInterval(refreshRef.current); refreshRef.current = null; }
       }
-    }, REFRESH_INTERVAL);
+    };
+
+    startInterval();
+    document.addEventListener("visibilitychange", onVisChange);
 
     return () => {
       if (refreshRef.current) clearInterval(refreshRef.current);
+      document.removeEventListener("visibilitychange", onVisChange);
     };
   }, [myPos, radius, incognito, pageState, fetchNearby, sendLocation]);
+
+  // Socket.IO: join nearby grid room + listen for real-time updates
+  useEffect(() => {
+    if (!myPos) return;
+    const socket = connectSocket();
+    socket.emit("nearby:join-grid", { lat: myPos.lat, lng: myPos.lng });
+
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const handler = () => {
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        if (document.visibilityState === "visible" && myPos) {
+          fetchNearby(myPos.lat, myPos.lng, radius);
+        }
+      }, 2000);
+    };
+
+    socket.on("nearby:location-updated", handler);
+    return () => {
+      socket.off("nearby:location-updated", handler);
+      if (debounce) clearTimeout(debounce);
+      socket.emit("nearby:leave");
+    };
+  }, [myPos, radius, fetchNearby]);
 
   // Close detail sheet when filter changes
   useEffect(() => {
@@ -831,8 +1019,8 @@ export default function Nearby() {
               );
             })}
 
-            {/* Nearby places — category emoji markers */}
-            {showPlaces && nearbyPlaces.filter((p) => p.location !== null).map((p) => {
+            {/* Nearby places — category emoji markers (filtered by category) */}
+            {showPlaces && filteredPlaces.filter((p) => p.location !== null).map((p) => {
               const emoji = p.categoryEmoji || "📍";
               return (
                 <Marker
@@ -883,9 +1071,9 @@ export default function Nearby() {
                 {nearbyUsers.length} {nearbyUsers.length === 1 ? t.booking.userSingular : t.booking.userPlural}
               </Badge>
             )}
-            {showPlaces && nearbyPlaces.length > 0 && (
+            {showPlaces && filteredPlaces.length > 0 && (
               <Badge variant="default">
-                {nearbyPlaces.length} {nearbyPlaces.length === 1 ? t.booking.placeSingular : t.booking.placePlural}
+                {filteredPlaces.length} {filteredPlaces.length === 1 ? t.booking.placeSingular : t.booking.placePlural}
               </Badge>
             )}
           </div>
@@ -923,9 +1111,55 @@ export default function Nearby() {
           </div>
         </div>
 
+        {/* Category filter chips — shown when places are visible */}
+        {showPlaces && nearbyPlaces.length > 0 && (
+          <div className="flex justify-center px-4 pb-1">
+            <div
+              className="pointer-events-auto flex gap-1 overflow-x-auto scrollbar-none py-1 px-1"
+              style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+            >
+              {PLACE_CATEGORY_CHIPS.map((chip) => (
+                <button
+                  key={chip.slug ?? "all"}
+                  onClick={() => setPlaceCategory(chip.slug)}
+                  className={`flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors whitespace-nowrap ${
+                    placeCategory === chip.slug
+                      ? "bg-amber-500/20 border-amber-500/50 text-amber-400"
+                      : "bg-pnp-surface/70 border-white/10 text-pnp-textSecondary hover:text-pnp-textPrimary"
+                  }`}
+                >
+                  {chip.emoji} {chip.label}
+                  {chip.slug && ` (${nearbyPlaces.filter(p => p.categorySlug === chip.slug).length})`}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* List view toggle */}
+        {showUsers && nearbyUsers.length > 0 && (
+          <div className="flex justify-end px-4 pb-1">
+            <button
+              onClick={() => setShowUserList(!showUserList)}
+              className="pointer-events-auto p-1.5 rounded-lg bg-pnp-surface/80 border border-white/10 backdrop-blur-md"
+              title={showUserList ? "Map view" : "List view"}
+            >
+              {showUserList ? (
+                <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                </svg>
+              )}
+            </button>
+          </div>
+        )}
+
         {/* Nearest place ambient pill */}
-        {showPlaces && nearbyPlaces.length > 0 && (() => {
-          const nearest = [...nearbyPlaces]
+        {showPlaces && filteredPlaces.length > 0 && (() => {
+          const nearest = [...filteredPlaces]
             .filter((p) => p.location !== null)
             .sort((a, b) => a.distance - b.distance)[0];
           if (!nearest) return null;
@@ -944,6 +1178,49 @@ export default function Nearby() {
           );
         })()}
       </div>
+
+      {/* User list panel (below map overlay) */}
+      {showUserList && showUsers && nearbyUsers.length > 0 && !selectedUser && !selectedPlace && (
+        <div className="absolute bottom-44 left-0 right-0 z-[1001] max-h-[40vh] overflow-y-auto px-3">
+          <div className="bg-pnp-surface/90 backdrop-blur-md rounded-xl border border-white/10 p-2 space-y-1.5">
+            {nearbyUsers.slice(0, 20).map((u) => {
+              const displayName = u.name || u.username || `User #${u.user_id}`;
+              const dist = u.distance_m !== undefined && u.distance_m < 1000
+                ? `${Math.round(u.distance_m)}m`
+                : u.distance_km !== undefined ? `${u.distance_km.toFixed(1)}km` : "";
+              return (
+                <div
+                  key={u.user_id}
+                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 cursor-pointer active:bg-white/10 transition-colors"
+                  onClick={() => { setSelectedUser(u); setShowUserList(false); }}
+                >
+                  {isValidPhotoUrl(u.photo_url) ? (
+                    <img src={u.photo_url} className="w-9 h-9 rounded-full object-cover flex-shrink-0" alt="" />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                      style={{ background: "rgba(255,180,84,0.2)", color: "#FFB454" }}>
+                      {displayName[0].toUpperCase()}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs font-semibold text-pnp-textPrimary truncate">{displayName}</p>
+                      {u.is_followed && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 font-medium">Siguiendo</span>
+                      )}
+                    </div>
+                    {u.username && <p className="text-[11px] text-pnp-textSecondary">@{u.username}</p>}
+                  </div>
+                  {dist && <span className="text-[11px] text-amber-400 font-medium flex-shrink-0">{dist}</span>}
+                </div>
+              );
+            })}
+            {nearbyUsers.length > 20 && (
+              <p className="text-center text-[11px] text-pnp-textSecondary py-1">+{nearbyUsers.length - 20} more</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Submit place FAB */}
       {!submitPlaceOpen && (
@@ -978,6 +1255,8 @@ export default function Nearby() {
         <PlaceDetailSheet
           place={selectedPlace}
           onClose={() => setSelectedPlace(null)}
+          isFavorited={favoritedPlaces.has(selectedPlace.id)}
+          onToggleFavorite={handleToggleFavorite}
         />
       )}
 

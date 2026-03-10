@@ -370,6 +370,73 @@ class NearbyController {
       });
     }
   }
+  /**
+   * POST /api/nearby/places/:id/favorite
+   * Toggle favorite on a place
+   */
+  static async favoritePlace(req, res) {
+    try {
+      const userId = req.userId || req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+      const placeId = parseInt(req.params.id, 10);
+      if (!placeId || isNaN(placeId)) return res.status(400).json({ error: 'Invalid place ID' });
+      const result = await NearbyPlaceModel.toggleFavorite(userId, placeId);
+      return res.json({ success: true, ...result });
+    } catch (error) {
+      logger.error('favoritePlace error:', error);
+      return res.status(500).json({ error: 'Failed to toggle favorite' });
+    }
+  }
+
+  /**
+   * POST /api/nearby/places/:id/view
+   * Track place view
+   */
+  static async trackView(req, res) {
+    try {
+      const placeId = parseInt(req.params.id, 10);
+      if (!placeId || isNaN(placeId)) return res.status(400).json({ error: 'Invalid place ID' });
+      await NearbyPlaceModel.incrementViewCount(placeId);
+      return res.json({ success: true });
+    } catch (error) {
+      logger.error('trackView error:', error);
+      return res.status(500).json({ error: 'Failed to track view' });
+    }
+  }
+
+  /**
+   * POST /api/nearby/places/:id/report
+   * Report a place as inappropriate
+   */
+  static async reportPlace(req, res) {
+    try {
+      const userId = req.userId || req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+      const placeId = parseInt(req.params.id, 10);
+      if (!placeId || isNaN(placeId)) return res.status(400).json({ error: 'Invalid place ID' });
+      await NearbyPlaceModel.reportPlace(userId, placeId);
+      return res.json({ success: true });
+    } catch (error) {
+      logger.error('reportPlace error:', error);
+      return res.status(500).json({ error: 'Failed to report place' });
+    }
+  }
+
+  /**
+   * GET /api/nearby/places/favorites
+   * Get user's favorited place IDs
+   */
+  static async getFavorites(req, res) {
+    try {
+      const userId = req.userId || req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+      const placeIds = await NearbyPlaceModel.getUserFavorites(userId);
+      return res.json({ success: true, placeIds });
+    } catch (error) {
+      logger.error('getFavorites error:', error);
+      return res.status(500).json({ error: 'Failed to get favorites' });
+    }
+  }
 }
 
 module.exports = NearbyController;

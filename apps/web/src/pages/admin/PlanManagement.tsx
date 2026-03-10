@@ -24,16 +24,26 @@ const ADD_ON_META: Record<string, { description: string }> = {
 
 // ─── SKU/description generators ──────────────────────────────────────────────
 
-function generateSku(name: string, durationDays: string, isLifetime: boolean): string {
-  if (!name.trim()) return "";
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
-  const suffix = isLifetime ? "lifetime" : durationDays ? `${durationDays}d` : "";
-  return suffix ? `${slug}-${suffix}` : slug;
+function generateSku(addOns: Array<{ add_on_id: string; duration_days?: number; is_lifetime?: boolean }>): string {
+  const memberAddon  = addOns.find((a) => a.add_on_id === 'pnp-member');
+  const primeAddon   = addOns.find((a) => a.add_on_id === 'prime');
+  const creatorAddon = addOns.find((a) => a.add_on_id === 'creator-subscription');
+
+  if (!memberAddon && !primeAddon && !creatorAddon) return "";
+
+  const pad = (n: number) => String(n).padStart(3, '0');
+
+  let sku = 'PNP';
+  if (memberAddon) {
+    sku += `-${memberAddon.is_lifetime ? '000' : pad(memberAddon.duration_days ?? 30)}`;
+  }
+  if (primeAddon) {
+    sku += `-P-${primeAddon.is_lifetime ? '000' : pad(primeAddon.duration_days ?? 30)}`;
+  }
+  if (creatorAddon) {
+    sku += `-C-${creatorAddon.is_lifetime ? '000' : pad(creatorAddon.duration_days ?? 30)}`;
+  }
+  return sku;
 }
 
 function generateDescription(
@@ -315,10 +325,22 @@ export default function PlanManagement() {
     [allAddOns, addOnRows]
   );
 
-  const skuPreview = useMemo(
-    () => (!editingId ? generateSku(formState.display_name || formState.name, formState.duration_days, formState.is_lifetime) : ""),
-    [editingId, formState.display_name, formState.name, formState.duration_days, formState.is_lifetime]
-  );
+  const skuPreview = useMemo(() => {
+    if (editingId) return "";
+    const enabledAddOnsForSku = allAddOns
+      .filter((a) => addOnRows[a.id]?.enabled)
+      .map((a) => {
+        const row = addOnRows[a.id];
+        const parsedDays = parseInt(row.duration_days, 10);
+        const overrideDays = row.duration_days !== "" && !isNaN(parsedDays) ? parsedDays : undefined;
+        return {
+          add_on_id: a.name as string,
+          duration_days: row.is_lifetime ? undefined : (overrideDays ?? (parseInt(formState.duration_days, 10) || 30)),
+          is_lifetime: row.is_lifetime,
+        };
+      });
+    return generateSku(enabledAddOnsForSku);
+  }, [editingId, allAddOns, addOnRows, formState.duration_days]);
 
   const descriptionPreview = useMemo(
     () => (!editingId ? generateDescription(enabledAddOnNames, formState.duration_days, formState.is_lifetime) : ""),

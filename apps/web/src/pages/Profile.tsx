@@ -25,6 +25,8 @@ import {
   initiateCreatorSubscriptionPayment,
   searchUsers,
   getRtmpKey,
+  getUserLabel,
+  getLabelColor,
   type UserProfile,
   type SocialPostItem,
 } from "@/lib/api";
@@ -559,7 +561,8 @@ export default function Profile() {
   const photoUrl = resolvePhotoUrl(profile.photoUrl);
   const displayName = profile.firstName + (profile.lastName ? ` ${profile.lastName}` : "");
   const initial = displayName[0]?.toUpperCase() || "U";
-  const isPrime = profile.tier?.toLowerCase() === "prime";
+  const userLabel = getUserLabel(profile);
+  const isPrime = userLabel === 'PRIME';
   const isPerformer = !!profile.performerData;
 
   // Per-user profile themes & masked roles
@@ -762,8 +765,12 @@ export default function Profile() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-lg font-bold text-white truncate">{displayName}</h1>
-              {isPrime && (
-                <Badge variant="accent">PRIME</Badge>
+              {userLabel !== 'FREE' && (
+                <span
+                  className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full border ${getLabelColor(userLabel)}`}
+                >
+                  {userLabel}
+                </span>
               )}
               {customTheme?.roleBadge ? (
                 <span

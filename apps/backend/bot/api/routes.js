@@ -95,6 +95,9 @@ const requirePageAuth = (req, res, next) => {
 
 const { requireTier, isMemberOrAbove, isAdmin: isAdminTier } = require('../services/accessService');
 
+// Entitlement-based access control — replaces requireTier for all route middleware
+const EntitlementAccessService = require('../services/entitlementAccessService');
+
 /**
  * Thin session auth — returns 401 JSON if user is not authenticated.
  * Use this before multer on upload routes to reject unauthenticated
@@ -118,9 +121,12 @@ const softAuth = (req, res, next) => {
   next();
 };
 
-// Tier gates — sourced from centralized accessService
-const requirePrimeTier = requireTier('PRIME');
-const requireMemberTier = requireTier('member');
+// Entitlement gates — route middleware now uses entitlement-based checks.
+// requirePrimeTier gates routes that require an active 'prime' entitlement.
+// requireMemberTier gates routes that require an active 'pnp-member' entitlement.
+// Admins (role=admin|superadmin) always bypass. Banned users get 403 before the check.
+const requirePrimeTier = EntitlementAccessService.requireEntitlement('prime');
+const requireMemberTier = EntitlementAccessService.requireEntitlement('pnp-member');
 
 /**
  * DM rate limit for free tier users — uses Redis daily counter
@@ -286,6 +292,7 @@ const sessionMiddleware = session({
 });
 
 app.use(sessionMiddleware);
+app.use(ipTracker); // Log every authenticated request IP for security
 
 // express-session handles Set-Cookie automatically — no custom middleware needed
 
@@ -2740,6 +2747,18 @@ app.post('/api/webapp/admin/x-campaigns/:id/resume', adminGuard, asyncHandler(xA
 app.delete('/api/webapp/admin/x-campaigns/:id', adminGuard, asyncHandler(xAutoCampaignAdminController.deleteCampaign));
 app.get('/api/webapp/admin/x-campaigns/:id/history', adminGuard, asyncHandler(xAutoCampaignAdminController.getCampaignHistory));
 app.post('/api/webapp/admin/x-campaigns/:id/generate', adminGuard, asyncHandler(xAutoCampaignAdminController.triggerGenerate));
+
+// Creator Subscription management
+// NOTE: static-path routes (/summary, /payouts/process-all) MUST be registered
+// before the /:creatorId param route to prevent Express matching them as a creatorId.
+const creatorSubscriptionAdminController = require('./controllers/creatorSubscriptionAdminController');
+app.get('/api/webapp/admin/creator-subscriptions/summary', adminGuard, asyncHandler(creatorSubscriptionAdminController.getPlatformSummary));
+app.post('/api/webapp/admin/creator-subscriptions/payouts/process-all', adminGuard, asyncHandler(creatorSubscriptionAdminController.processAllPayouts));
+app.get('/api/webapp/admin/creator-subscriptions', adminGuard, asyncHandler(creatorSubscriptionAdminController.listCreators));
+app.get('/api/webapp/admin/creator-subscriptions/:creatorId', adminGuard, asyncHandler(creatorSubscriptionAdminController.getCreatorDetail));
+app.post('/api/webapp/admin/creator-subscriptions/:creatorId/payout', adminGuard, asyncHandler(creatorSubscriptionAdminController.processCreatorPayout));
+app.post('/api/webapp/admin/creator-subscriptions/:creatorId/subscriptions/:subscriptionId/cancel', adminGuard, asyncHandler(creatorSubscriptionAdminController.cancelSubscription));
+app.post('/api/webapp/admin/creator-subscriptions/:creatorId/subscriptions/:subscriptionId/extend', adminGuard, asyncHandler(creatorSubscriptionAdminController.extendSubscription));
 
 // Grok Social Media Manager chat
 app.post('/api/webapp/admin/grok/manager-chat', adminGuard, asyncHandler(async (req, res) => {

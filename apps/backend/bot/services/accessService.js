@@ -111,55 +111,32 @@ function hasAccess(user, requiredTier) {
 // ---------------------------------------------------------------------------
 
 /**
- * Validate a user's effective tier against the DB, bypassing a stale session.
+ * Validate a user's effective tier against live entitlements, bypassing a stale session.
  *
- * - Returns immediately for non-PRIME tiers (no DB/Redis overhead).
- * - Checks `tier_check:<userId>` in Redis (5-min TTL) before hitting DB.
- * - If plan_expiry has passed, returns 'free' and caches that result.
- * - Callers should update req.session.user.tier when the returned tier differs.
+ * Now delegates entirely to EntitlementAccessService.getUserLabel() so that the
+ * entitlement table is the single source of truth. The old plan_expiry / users.tier
+ * DB path is removed — those columns are now backward-compat display fields only.
+ *
+ * Returned values are lowercase and backward-compatible with all existing callers:
+ *   PRIME label → 'prime'
+ *   BASIC label → 'member'
+ *   FREE  label → 'free'
  *
  * @param {number|string} userId
- * @param {string} sessionTier - tier currently stored in the session
+ * @param {string} sessionTier - tier currently stored in the session (used as fallback only)
  * @returns {Promise<string>} effective tier (lowercase)
  */
 async function validateTierFresh(userId, sessionTier) {
-  const normalized = normalizeTier(sessionTier);
-
-  // Only PRIME is at risk of stale-session over-access; skip DB for others.
-  if (normalized !== 'prime') return normalized;
-
   try {
-    const redis = getRedis();
-    const cacheKey = `tier_check:${userId}`;
-
-    const cached = await redis.get(cacheKey);
-    if (cached) return cached;
-
-    const result = await query(
-      'SELECT tier, plan_expiry FROM users WHERE id = $1',
-      [userId]
-    );
-    const row = result.rows[0];
-    if (!row) {
-      await redis.set(cacheKey, 'free', 'EX', 300);
-      return 'free';
-    }
-
-    const isExpired = row.plan_expiry && new Date(row.plan_expiry) <= new Date();
-    let effectiveTier = isExpired ? 'free' : normalizeTier(row.tier);
-
-    // Entitlement fallback: if plan_expiry says expired but user has active prime entitlement, honor it
-    // (covers lifetime users and edge cases where tier/expiry got out of sync)
-    if (effectiveTier === 'free') {
-      const hasPrimeEntitlement = await hasEntitlement(userId, 'prime');
-      if (hasPrimeEntitlement) effectiveTier = 'prime';
-    }
-
-    await redis.set(cacheKey, effectiveTier, 'EX', 300);
-    return effectiveTier;
+    // Lazy-require to avoid circular dependency (entitlementAccessService → postgres → ...)
+    const EntitlementAccessService = require('./entitlementAccessService');
+    const label = await EntitlementAccessService.getUserLabel(userId);
+    if (label === 'PRIME') return 'prime';
+    if (label === 'BASIC') return 'member';
+    return 'free';
   } catch (err) {
     logger.warn(`validateTierFresh failed for user ${userId}: ${err.message}`);
-    // Fail closed: if we cannot confirm PRIME, treat as free.
+    // Fail closed: if entitlement check is unavailable, treat as free.
     return 'free';
   }
 }

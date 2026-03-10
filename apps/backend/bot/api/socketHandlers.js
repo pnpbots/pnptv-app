@@ -107,6 +107,26 @@ function initSocketIO(io) {
       hangoutGroupIds: new Set(),
     });
 
+    // ── Nearby Real-Time ────────────────────────────────────────────────────
+
+    socket.on('nearby:join-grid', ({ lat, lng } = {}) => {
+      if (typeof lat !== 'number' || typeof lng !== 'number') return;
+      const gridLat = Math.floor(lat * 10) / 10;
+      const gridLng = Math.floor(lng * 10) / 10;
+      const room = `nearby:${gridLat}:${gridLng}`;
+      // Leave any previous nearby rooms
+      for (const r of socket.rooms) {
+        if (r.startsWith('nearby:') && r !== room) socket.leave(r);
+      }
+      socket.join(room);
+    });
+
+    socket.on('nearby:leave', () => {
+      for (const r of socket.rooms) {
+        if (r.startsWith('nearby:')) socket.leave(r);
+      }
+    });
+
     // ── Group Chat ───────────────────────────────────────────────────────────
 
     // Allowed community chat rooms (non-hangout)
