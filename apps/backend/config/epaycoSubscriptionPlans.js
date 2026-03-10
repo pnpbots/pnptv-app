@@ -11,6 +11,7 @@
 const EPAYCO_SUBSCRIPTION_PLANS = {
   // PNP MEMBER - PNPMEMBER030 - $9.99 USD (monthly)
   'member-monthly': 'PNPMEMBER030',
+  'member_monthly': 'PNPMEMBER030', // DB uses underscores; ePayco extras use hyphens
 
   // PRIME Trial - 007PASS - $14.99 USD (7 days)
   'week-trial-pass': '007PASS',
@@ -54,8 +55,20 @@ function isSubscriptionPlan(planId) {
   return planId in EPAYCO_SUBSCRIPTION_PLANS;
 }
 
+/**
+ * Normalize plan ID from ePayco webhook extras (hyphen→underscore)
+ * ePayco extras may arrive as 'member-monthly' but DB stores 'member_monthly'
+ * @param {string} planId
+ * @returns {string} Normalized plan ID
+ */
+function normalizePlanId(planId) {
+  if (!planId) return planId;
+  return String(planId).replace(/-/g, '_');
+}
+
 module.exports = {
   EPAYCO_SUBSCRIPTION_PLANS,
   getEpaycoSubscriptionUrl,
   isSubscriptionPlan,
+  normalizePlanId,
 };

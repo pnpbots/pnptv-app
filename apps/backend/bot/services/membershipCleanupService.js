@@ -426,6 +426,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
       toChurned: 0,
       toFree: 0,
       alreadyCorrect: 0,
+      entitlementsConsumed: 0,
       errors: 0,
       startTime: new Date()
     };
@@ -433,7 +434,24 @@ Type /subscribe to view membership plans and reactivate your access!`;
     try {
       logger.info('Starting comprehensive membership status sync...');
 
-      // Step 1a: Activate member-tier users (member-monthly plan with valid expiry)
+      // ── Collect lifetime-protected user IDs from user_entitlements ──
+      // These users MUST NOT be modified by any sync step.
+      let lifetimeUserIds = [];
+      try {
+        const ltResult = await query(`
+          SELECT DISTINCT user_id FROM user_entitlements WHERE is_lifetime = true
+        `);
+        lifetimeUserIds = ltResult.rows.map(r => r.user_id);
+      } catch (e) {
+        // Table may not exist yet — fall back to plan_id-based exclusion only
+        logger.warn('user_entitlements table not available, falling back to plan_id lifetime check', { error: e.message });
+      }
+
+      const lifetimeExclusion = lifetimeUserIds.length > 0
+        ? `AND id NOT IN (${lifetimeUserIds.map(id => `'${id}'`).join(',')})`
+        : '';
+
+      // Step 1a: Activate member-tier users (member_monthly plan with valid expiry)
       const activateMemberResult = await query(`
         UPDATE users
         SET subscription_status = 'active',
@@ -443,6 +461,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND plan_expiry > NOW()
           AND plan_id = 'member_monthly'
           AND (subscription_status != 'active' OR tier != 'member')
+          ${lifetimeExclusion}
         RETURNING id, username
       `);
       results.toActive += activateMemberResult.rowCount;
@@ -460,6 +479,10 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND plan_expiry > NOW()
           AND (plan_id IS NULL OR plan_id != 'member_monthly')
           AND (subscription_status != 'active' OR tier != 'PRIME')
+          AND plan_id NOT ILIKE '%lifetime%'
+          AND plan_id NOT ILIKE '%life-time%'
+          AND plan_id != 'lifetime100'
+          ${lifetimeExclusion}
         RETURNING id, username
       `);
       results.toActive += activateResult.rowCount;
@@ -517,7 +540,35 @@ Type /subscribe to view membership plans and reactivate your access!`;
         logger.info(`Activated ${lifetimeResult.rowCount} lifetime users`);
       }
 
-      // Step 3: Update users with expired subscriptions to 'churned'
+      // Step 3: Mark expired entitlements as consumed
+      try {
+        const consumeResult = await query(`
+          UPDATE user_entitlements
+          SET is_consumed = true, updated_at = NOW()
+          WHERE is_lifetime = false
+            AND is_consumed = false
+            AND expires_at IS NOT NULL
+            AND expires_at <= NOW()
+          RETURNING id, user_id, add_on_id
+        `);
+        results.entitlementsConsumed = consumeResult.rowCount;
+        if (consumeResult.rowCount > 0) {
+          logger.info(`Marked ${consumeResult.rowCount} expired entitlements as consumed`);
+          // Log to subscription_audit_log
+          for (const row of consumeResult.rows) {
+            try {
+              await query(`
+                INSERT INTO subscription_audit_log (user_id, action, details)
+                VALUES ($1, 'entitlement_expired', $2)
+              `, [row.user_id, JSON.stringify({ add_on_id: row.add_on_id, entitlement_id: row.id })]);
+            } catch (_) { /* non-critical */ }
+          }
+        }
+      } catch (e) {
+        logger.warn('Could not consume expired entitlements (table may not exist)', { error: e.message });
+      }
+
+      // Step 4: Update users with expired subscriptions to 'churned'
       const churnResult = await query(`
         UPDATE users
         SET subscription_status = 'churned',
@@ -528,6 +579,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND plan_id NOT ILIKE '%lifetime%'
           AND plan_id NOT ILIKE '%life-time%'
           AND subscription_status NOT IN ('churned', 'free')
+          ${lifetimeExclusion}
         RETURNING id, username
       `);
       results.toChurned += churnResult.rowCount;
@@ -535,8 +587,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
         logger.info(`Churned ${churnResult.rowCount} users with expired subscriptions`);
       }
 
-      // Step 4: Ensure 'free' tier for all churned users
-      // Lifetime plan holders are explicitly excluded — they must never be downgraded here
+      // Step 5: Ensure 'free' tier for all churned users
       const fixChurnedTierResult = await query(`
         UPDATE users
         SET tier = 'free',
@@ -546,14 +597,14 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND plan_id NOT ILIKE '%lifetime%'
           AND plan_id NOT ILIKE '%life-time%'
           AND plan_id != 'lifetime100'
+          ${lifetimeExclusion}
         RETURNING id
       `);
       if (fixChurnedTierResult.rowCount > 0) {
         logger.info(`Fixed tier for ${fixChurnedTierResult.rowCount} churned/free users`);
       }
 
-      // Step 5: Convert old 'expired' status to 'churned' for consistency
-      // Lifetime plan holders are explicitly excluded — their status must never be changed here
+      // Step 6: Convert old 'expired' status to 'churned' for consistency
       const expiredToChurnedResult = await query(`
         UPDATE users
         SET subscription_status = 'churned',
@@ -562,6 +613,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND plan_id NOT ILIKE '%lifetime%'
           AND plan_id NOT ILIKE '%life-time%'
           AND plan_id != 'lifetime100'
+          ${lifetimeExclusion}
         RETURNING id
       `);
       if (expiredToChurnedResult.rowCount > 0) {
@@ -569,7 +621,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
         logger.info(`Converted ${expiredToChurnedResult.rowCount} 'expired' status to 'churned'`);
       }
 
-      // Step 6: Ensure users without any plan are set to 'free'
+      // Step 7: Ensure users without any plan are set to 'free'
       const freeResult = await query(`
         UPDATE users
         SET subscription_status = 'free',
@@ -578,6 +630,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
         WHERE plan_id IS NULL
           AND plan_expiry IS NULL
           AND subscription_status NOT IN ('free')
+          ${lifetimeExclusion}
         RETURNING id
       `);
       results.toFree += freeResult.rowCount;
@@ -585,7 +638,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
         logger.info(`Set ${freeResult.rowCount} users to 'free' status`);
       }
 
-      // Step 7: Tier↔Status consistency enforcement
+      // Step 8: Tier↔Status consistency enforcement
       // Rule: PRIME tier MUST have subscription_status='active'
       const fixPrimeStatus = await query(`
         UPDATE users
@@ -593,6 +646,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
             updated_at = NOW()
         WHERE tier = 'PRIME'
           AND subscription_status != 'active'
+          ${lifetimeExclusion}
         RETURNING id, username, subscription_status AS old_status
       `);
       if (fixPrimeStatus.rowCount > 0) {
@@ -609,6 +663,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
         WHERE subscription_status IN ('churned', 'free')
           AND tier IN ('PRIME', 'member')
           AND tier != 'banned'
+          ${lifetimeExclusion}
         RETURNING id, username, tier AS old_tier
       `);
       if (fixChurnedPrime.rowCount > 0) {
@@ -625,6 +680,8 @@ Type /subscribe to view membership plans and reactivate your access!`;
         toActive: results.toActive,
         toChurned: results.toChurned,
         toFree: results.toFree,
+        entitlementsConsumed: results.entitlementsConsumed,
+        lifetimeProtected: lifetimeUserIds.length,
         errors: results.errors
       });
 

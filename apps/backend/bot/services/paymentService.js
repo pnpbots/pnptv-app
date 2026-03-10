@@ -43,7 +43,7 @@ const PaymentNotificationService = require('./paymentNotificationService');
 const NotificationEmitter = require('./notificationEmitter');
 const BookingAvailabilityIntegration = require('./bookingAvailabilityIntegration');
 const PaymentSecurityService = require('./paymentSecurityService');
-const { isSubscriptionPlan, getEpaycoSubscriptionUrl } = require('../../config/epaycoSubscriptionPlans');
+const { isSubscriptionPlan, getEpaycoSubscriptionUrl, normalizePlanId } = require('../../config/epaycoSubscriptionPlans');
 const PaymentHistoryService = require('../../services/paymentHistoryService');
 const axios = require('axios');
 
@@ -930,6 +930,11 @@ class PaymentService {
       let paymentIdOrType = webhookData.x_extra3;
       let payment = null;
 
+      // Normalize plan ID: ePayco extras may use hyphens but DB uses underscores
+      if (planIdOrBookingId) {
+        planIdOrBookingId = normalizePlanId(planIdOrBookingId);
+      }
+
       // Validate required fields
       if (!x_ref_payco || !effectiveState) {
         logger.warn('Invalid ePayco webhook - missing required fields', {
@@ -1252,6 +1257,15 @@ class PaymentService {
               refPayco: x_ref_payco,
               renewed: !!(currentExpiry && new Date(currentExpiry) > new Date()),
             });
+
+            // Grant entitlements based on plan_add_ons mapping
+            try {
+              await PaymentService.grantEntitlementsForPlan(userId, planIdOrBookingId, 'epayco');
+            } catch (entitlementErr) {
+              logger.warn('Failed to grant entitlements (non-critical)', {
+                error: entitlementErr.message, userId, planId: planIdOrBookingId,
+              });
+            }
 
             // Record payment in history
             try {
@@ -2012,6 +2026,15 @@ class PaymentService {
               expiryDate,
               txHash: source?.txHash,
             });
+
+            // Grant entitlements based on plan_add_ons mapping
+            try {
+              await PaymentService.grantEntitlementsForPlan(userId, planId, 'daimo');
+            } catch (entitlementErr) {
+              logger.warn('Failed to grant entitlements via Daimo (non-critical)', {
+                error: entitlementErr.message, userId, planId,
+              });
+            }
 
             // Creator subscription activation
             if (planId === 'creator_monthly' && payment?.metadata?.creatorId) {
@@ -3917,6 +3940,99 @@ class PaymentService {
     } catch (err) {
       logger.warn('sendPostActivationEmails: payment history recording failed', { userId, error: err.message });
     }
+  }
+
+  /**
+   * Grant entitlements for a plan based on the plan_add_ons mapping table.
+   * Upserts into user_entitlements — extends expiry if already active, or creates new rows.
+   * Respects per-add-on duration overrides in plan_add_ons.duration_days.
+   * @param {string} userId - Telegram user ID
+   * @param {string} planId - Plan ID (e.g. 'monthly-pass', 'lifetime100')
+   * @param {string} [source='payment'] - Source for audit log
+   * @returns {Promise<{granted: number, errors: number}>}
+   */
+  static async grantEntitlementsForPlan(userId, planId, source = 'payment') {
+    const result = { granted: 0, errors: 0 };
+    try {
+      // Look up what add-ons this plan grants, with per-add-on duration overrides
+      const addOnsResult = await query(`
+        SELECT pa.add_on_id, pa.is_lifetime, pa.duration_days AS addon_duration_days,
+               p.duration_days AS plan_duration_days, a.name AS add_on_name
+        FROM plan_add_ons pa
+        JOIN add_ons a ON a.id = pa.add_on_id
+        JOIN plans p ON p.id = pa.plan_id
+        WHERE pa.plan_id = $1
+      `, [planId]);
+
+      if (addOnsResult.rows.length === 0) {
+        logger.debug('No plan_add_ons mapping found for plan, skipping entitlement grant', { planId, userId });
+        return result;
+      }
+
+      for (const row of addOnsResult.rows) {
+        try {
+          const isLifetime = row.is_lifetime || false;
+          // Per-add-on duration takes priority, then fall back to plan's duration
+          const durationDays = row.addon_duration_days || row.plan_duration_days || 30;
+
+          if (isLifetime) {
+            // Lifetime: upsert with no expiry
+            await query(`
+              INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, granted_by_plan, source)
+              VALUES ($1, $2, true, $3, $4)
+              ON CONFLICT (user_id, add_on_id)
+              DO UPDATE SET is_lifetime = true, is_consumed = false, updated_at = NOW()
+            `, [userId, row.add_on_id, planId, source]);
+          } else {
+            // Time-limited: extend from current expiry if still active, else from now
+            await query(`
+              INSERT INTO user_entitlements (user_id, add_on_id, expires_at, granted_by_plan, source)
+              VALUES ($1, $2, NOW() + ($3 || ' days')::interval, $4, $5)
+              ON CONFLICT (user_id, add_on_id)
+              DO UPDATE SET
+                expires_at = CASE
+                  WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
+                  WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
+                    THEN user_entitlements.expires_at + ($3 || ' days')::interval
+                  ELSE NOW() + ($3 || ' days')::interval
+                END,
+                is_consumed = false,
+                updated_at = NOW()
+              WHERE NOT user_entitlements.is_lifetime
+            `, [userId, row.add_on_id, String(durationDays), planId, source]);
+          }
+
+          result.granted++;
+          logger.info('Entitlement granted', {
+            userId, addOn: row.add_on_name, planId, isLifetime, durationDays
+          });
+
+          // Audit log
+          try {
+            await query(`
+              INSERT INTO subscription_audit_log (user_id, action, details)
+              VALUES ($1, 'entitlement_granted', $2)
+            `, [userId, JSON.stringify({
+              add_on_id: row.add_on_id,
+              add_on_name: row.add_on_name,
+              plan_id: planId,
+              is_lifetime: isLifetime,
+              duration_days: isLifetime ? null : durationDays,
+              source,
+            })]);
+          } catch (_) { /* non-critical */ }
+        } catch (addOnErr) {
+          result.errors++;
+          logger.error('Failed to grant entitlement for add-on', {
+            userId, planId, addOnId: row.add_on_id, error: addOnErr.message,
+          });
+        }
+      }
+    } catch (err) {
+      logger.error('grantEntitlementsForPlan failed', { userId, planId, error: err.message });
+      result.errors++;
+    }
+    return result;
   }
 }
 
