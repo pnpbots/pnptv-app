@@ -134,6 +134,15 @@ export default function Subscribe() {
     getDashAvailable()
       .then((res) => setDashAvailable(res.available))
       .catch(() => setDashAvailable(false));
+
+    // Resume polling if returning from same-tab Daimo checkout
+    try {
+      const pending = sessionStorage.getItem("pnp_pending_payment");
+      if (pending) {
+        sessionStorage.removeItem("pnp_pending_payment");
+        setPollingPaymentId(pending);
+      }
+    } catch {}
   }, []);
 
   // Poll payment status after Daimo checkout opens
@@ -142,7 +151,7 @@ export default function Subscribe() {
 
     let cancelled = false;
     let attempts = 0;
-    const maxAttempts = 60; // 5 minutes at 5s intervals
+    const maxAttempts = 120; // 10 minutes at 5s intervals
     const interval = 5000;
 
     const poll = async () => {
@@ -241,9 +250,16 @@ export default function Subscribe() {
       } else {
         const result = await createPayment(selectedPlan, provider);
         if (result.success && result.paymentUrl) {
-          window.open(result.paymentUrl, "_blank", "noopener,noreferrer");
-          if (result.paymentId) {
-            setPollingPaymentId(result.paymentId);
+          if (provider === "daimo" && result.paymentId) {
+            // Navigate in same tab for Daimo — avoids popup blockers
+            // Store paymentId so we can resume polling if user comes back
+            try { sessionStorage.setItem("pnp_pending_payment", result.paymentId); } catch {}
+            window.location.href = result.paymentUrl;
+          } else {
+            window.open(result.paymentUrl, "_blank", "noopener,noreferrer");
+            if (result.paymentId) {
+              setPollingPaymentId(result.paymentId);
+            }
           }
         } else {
           setError(result.error || s.failedToCreatePayment);
@@ -529,7 +545,7 @@ export default function Subscribe() {
                 : "border-white/10 bg-white/5 hover:border-white/20"
             }`}
           >
-            <div className="text-lg mb-1">🪙</div>
+            <div className="text-lg mb-1">💸</div>
             <div className="text-xs font-medium text-pnp-textPrimary">{s.usdc}</div>
             <div className="text-[10px] text-pnp-textSecondary">{s.usdcDesc}</div>
           </button>
@@ -554,6 +570,15 @@ export default function Subscribe() {
             )}
           </button>
         </div>
+
+        {/* Daimo info panel */}
+        {provider === "daimo" && (
+          <div className="mt-3 rounded-xl p-3 border border-[#D4007A]/30 bg-[#D4007A]/5">
+            <p className="text-xs text-pnp-textSecondary">
+              {s.daimoHint}
+            </p>
+          </div>
+        )}
 
         {/* Dash info panel */}
         {provider === "dash" && (

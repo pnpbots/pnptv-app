@@ -517,9 +517,14 @@ class UserModel {
    */
   static async updateSubscription(userId, subscription) {
     try {
-      // Protect banned users — subscription changes must not override a ban
+      // Guard: user must exist
       const existing = await this.getById(userId);
-      if (existing && existing.tier === TIER.BANNED) {
+      if (!existing) {
+        logger.error('Cannot update subscription: user not found', { userId });
+        return false;
+      }
+      // Protect banned users — subscription changes must not override a ban
+      if (existing.tier === TIER.BANNED) {
         logger.warn('Skipping subscription update for banned user', { userId });
         return false;
       }

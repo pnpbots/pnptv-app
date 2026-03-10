@@ -263,13 +263,35 @@ export default function DaimoCheckout() {
             <p
               style={{
                 textAlign: "center",
-                fontSize: 13,
-                color: "#8E8E93",
-                marginBottom: 16,
+                fontSize: 14,
+                fontWeight: 600,
+                color: "#fff",
+                marginBottom: 12,
               }}
             >
               {t.payWithWallet}
             </p>
+
+            {/* Step-by-step guide */}
+            <div
+              style={{
+                background: "rgba(212,0,122,0.08)",
+                border: "1px solid rgba(212,0,122,0.2)",
+                borderRadius: 12,
+                padding: 14,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#D4007A", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                {t.howItWorks}
+              </div>
+              {[t.step1, t.step2, t.step3].map((step, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: i < 2 ? 6 : 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#D4007A", minWidth: 18 }}>{i + 1}.</span>
+                  <span style={{ fontSize: 12, color: "#aaa" }}>{step}</span>
+                </div>
+              ))}
+            </div>
 
             {/* Daimo Modal — embedded mode renders inline */}
             <DaimoSDKProvider>
@@ -377,16 +399,33 @@ export default function DaimoCheckout() {
               {error}
             </p>
             <button
-              onClick={() => window.close()}
+              onClick={() => navigate("/subscribe")}
               style={{
                 width: "100%",
                 padding: "14px 24px",
                 borderRadius: 12,
-                border: "1px solid rgba(255,255,255,0.2)",
-                background: "transparent",
+                border: "none",
+                background: "linear-gradient(135deg, #D4007A, #E69138)",
                 color: "#fff",
                 fontWeight: 600,
                 fontSize: 14,
+                cursor: "pointer",
+                marginBottom: 8,
+              }}
+            >
+              {t.tryAgainBtn}
+            </button>
+            <button
+              onClick={() => { try { window.close(); } catch {} navigate("/subscribe"); }}
+              style={{
+                width: "100%",
+                padding: "10px 24px",
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.2)",
+                background: "transparent",
+                color: "#8E8E93",
+                fontWeight: 500,
+                fontSize: 13,
                 cursor: "pointer",
               }}
             >

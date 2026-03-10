@@ -1971,16 +1971,30 @@ class PaymentService {
             return { success: false, error: `Plan not found: ${planId}` };
           }
 
+          if (!user) {
+            logger.error('User not found for completed Daimo payment — subscription NOT activated', {
+              userId, paymentId, planId, txHash: source?.txHash,
+            });
+            return { success: false, error: `User not found: ${userId}` };
+          }
+
           {
             const durationDays = plan.duration_days || plan.duration || 30;
             const isLifetime = plan.isLifetime || plan.is_lifetime || (planId && planId.toString().toLowerCase().includes('lifetime'));
             const expiryDate = isLifetime ? null : (() => { const d = new Date(); d.setDate(d.getDate() + durationDays); return d; })();
 
-            await UserModel.updateSubscription(userId, {
+            const subscriptionUpdated = await UserModel.updateSubscription(userId, {
               status: 'active',
               planId,
               expiry: expiryDate,
             });
+
+            if (!subscriptionUpdated) {
+              logger.error('Daimo payment received but subscription update FAILED — payment NOT marked completed', {
+                userId, paymentId, planId, txHash: source?.txHash,
+              });
+              return { success: false, error: 'Subscription update failed' };
+            }
 
             // Mark payment completed only after subscription is activated
             if (paymentId) {

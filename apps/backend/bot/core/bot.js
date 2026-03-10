@@ -817,6 +817,21 @@ const startBot = async () => {
     } catch (error) {
       logger.warn(`Proactive reminder service initialization failed, continuing without reminders: ${error.message}`);
     }
+    // Initialize Daimo payment recovery scheduler (every 5 min)
+    try {
+      const PaymentRecoveryService = require('../services/paymentRecoveryService');
+      setInterval(() => PaymentRecoveryService.processStuckDaimoPayments().catch(err =>
+        logger.error('Daimo payment recovery error:', err)
+      ), 5 * 60 * 1000);
+      // Run once on startup after 30s delay
+      setTimeout(() => PaymentRecoveryService.processStuckDaimoPayments().catch(err =>
+        logger.error('Daimo payment recovery error:', err)
+      ), 30 * 1000);
+      logger.info('✓ Daimo payment recovery scheduler started (5min interval)');
+    } catch (error) {
+      logger.warn(`Daimo payment recovery scheduler failed: ${error.message}`);
+    }
+
     // Initialize Cristina proactive ticket worker
     try {
       cristinaTicketWorker.initialize(bot);

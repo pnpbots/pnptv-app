@@ -408,7 +408,7 @@ const handleDaimoWebhook = async (req, res) => {
 
     // Step 3: Acquire idempotency lock (safe now — auth verified, id validated)
     const idempotencyKey = `daimo_${id}_${status}`;
-    const acquired = await cache.acquireLock(idempotencyKey, 60);
+    const acquired = await cache.acquireLock(idempotencyKey, 300);
     if (!acquired) {
       logger.info('Duplicate Daimo webhook detected (already processed)', { eventId: id, status });
       return res.status(200).json({ success: true, duplicate: true });
