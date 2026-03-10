@@ -36,44 +36,44 @@ function dismiss() {
   );
 }
 
-export function PWAInstallBanner() {
+export function PWAInstallBanner({ forceShow = false }: { forceShow?: boolean } = {}) {
   const t = useI18n();
   const pwa = t.gates.pwa;
-  const [show, setShow] = useState(false);
+  const [show, setShow] = useState(forceShow);
   const [isIOSDevice, setIsIOSDevice] = useState(false);
   const [showIOSSteps, setShowIOSSteps] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showInterstitial, setShowInterstitial] = useState(false);
+  const [showInterstitial, setShowInterstitial] = useState(forceShow);
 
   useEffect(() => {
-    if (isStandalone() || isTelegramWebApp()) return;
+    if (!forceShow && (isStandalone() || isTelegramWebApp())) return;
 
     const ios = isIOS();
     setIsIOSDevice(ios);
 
     if (ios) {
-      if (!isDismissed()) setShow(true);
+      if (forceShow || !isDismissed()) setShow(true);
       return;
     }
 
     const handler = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      if (!isDismissed()) setShow(true);
+      if (forceShow || !isDismissed()) setShow(true);
     };
 
     window.addEventListener("beforeinstallprompt", handler);
 
-    // Full-screen interstitial after 4s for any browser visitor
+    // Full-screen interstitial after 4s for any browser visitor (immediate if forceShow)
     const timer = setTimeout(() => {
-      if (!isDismissed() && !isStandalone()) setShowInterstitial(true);
-    }, 4000);
+      if ((forceShow || !isDismissed()) && !isStandalone()) setShowInterstitial(true);
+    }, forceShow ? 0 : 4000);
 
     return () => {
       window.removeEventListener("beforeinstallprompt", handler);
       clearTimeout(timer);
     };
-  }, []);
+  }, [forceShow]);
 
   const handleInstall = useCallback(async () => {
     if (isIOSDevice) {
