@@ -222,6 +222,36 @@ function requireTier(requiredTier) {
   };
 }
 
+/**
+ * Check if a user has an active, non-consumed entitlement for a given add-on.
+ * Considers lifetime entitlements and time-limited entitlements (not expired).
+ * For creator-subscription add-ons, pass creatorId to check a specific creator's content.
+ *
+ * @param {string} userId
+ * @param {string} addOnId - e.g. 'prime', 'pnp-member', 'private-calls', 'creator-subscription'
+ * @param {Object} [opts]
+ * @param {string} [opts.creatorId] - required for 'creator-subscription' checks
+ * @returns {Promise<boolean>}
+ */
+async function hasEntitlement(userId, addOnId, { creatorId = null } = {}) {
+  if (!userId || !addOnId) return false;
+  try {
+    const { rows } = await query(`
+      SELECT 1 FROM user_entitlements
+      WHERE user_id = $1
+        AND add_on_id = $2
+        AND ($3::text IS NULL OR creator_id = $3)
+        AND is_consumed = false
+        AND (is_lifetime = true OR (expires_at IS NOT NULL AND expires_at > NOW()))
+      LIMIT 1
+    `, [String(userId), addOnId, creatorId ?? null]);
+    return rows.length > 0;
+  } catch (err) {
+    logger.error('hasEntitlement check failed', { userId, addOnId, error: err.message });
+    return false;
+  }
+}
+
 module.exports = {
   TIER,
   TIER_LEVEL,
@@ -236,4 +266,5 @@ module.exports = {
   hasAccess,
   validateTierFresh,
   requireTier,
+  hasEntitlement,
 };

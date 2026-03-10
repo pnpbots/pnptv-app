@@ -20,6 +20,46 @@ class MembershipCleanupService {
     logger.info('Membership cleanup service initialized', {
       primeChannelId: this.primeChannelId
     });
+    this.startScheduler();
+  }
+
+  /**
+   * Schedule runFullCleanup() to run daily at 03:00 UTC.
+   * On startup, syncAllMembershipStatuses() is called once to fix any
+   * consistency drift that accumulated while the service was offline.
+   * @returns {NodeJS.Timeout} The initial setTimeout ref (for graceful shutdown)
+   */
+  static startScheduler() {
+    // Run an immediate sync on startup to correct any drift
+    this.syncAllMembershipStatuses().catch((err) => {
+      logger.error('MembershipCleanupService: startup sync failed', { error: err.message });
+    });
+
+    const msUntilNextCleanupTime = () => {
+      const CLEANUP_HOUR_UTC = 3; // 03:00 UTC daily
+      const now  = new Date();
+      const next = new Date(Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        CLEANUP_HOUR_UTC, 0, 0, 0,
+      ));
+      if (next.getTime() <= now.getTime()) {
+        next.setUTCDate(next.getUTCDate() + 1);
+      }
+      return Math.max(next.getTime() - now.getTime(), 60_000);
+    };
+
+    const delay    = msUntilNextCleanupTime();
+    const nextFire = new Date(Date.now() + delay).toISOString();
+    logger.info(`MembershipCleanupService: daily cleanup scheduled at ${nextFire} (03:00 UTC)`);
+
+    const timeoutRef = setTimeout(() => {
+      MembershipCleanupService.runFullCleanup();
+      setInterval(() => MembershipCleanupService.runFullCleanup(), 24 * 60 * 60 * 1000);
+    }, delay);
+
+    return timeoutRef;
   }
 
   /**

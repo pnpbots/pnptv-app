@@ -557,6 +557,79 @@ class NotificationDigestScheduler {
 </body>
 </html>`;
   }
+  /**
+   * Send a digest email for a single user immediately (for admin SMTP testing).
+   * No time-window filter, no activity guard, no preference filter.
+   * @param {string|number} userId
+   * @returns {Promise<{sent: boolean, notificationCount?: number, reason?: string}>}
+   */
+  static async sendDigestForUser(userId) {
+    try {
+      const { rows: userRows } = await query(
+        `SELECT id, email, first_name, language, notification_preferences, email_verified
+         FROM users WHERE id = $1`,
+        [String(userId)],
+      );
+      if (!userRows[0]) return { sent: false, reason: 'user_not_found' };
+      const user = userRows[0];
+
+      if (!user.email || !user.email_verified) return { sent: false, reason: 'no_verified_email' };
+      if (!isValidEmail(user.email)) return { sent: false, reason: 'invalid_email_format' };
+
+      const { rows: notifRows } = await query(
+        `SELECT type, COUNT(*) AS cnt
+         FROM notifications
+         WHERE target_user_id = $1 AND is_read = FALSE
+         GROUP BY type ORDER BY cnt DESC LIMIT 20`,
+        [String(userId)],
+      );
+      if (notifRows.length === 0) return { sent: false, reason: 'no_unread_notifications' };
+
+      const typeCounts = {};
+      for (const row of notifRows) typeCounts[row.type] = parseInt(row.cnt, 10);
+
+      const enabledGroups = Object.entries(typeCounts)
+        .map(([type, count]) => ({ type, count }))
+        .filter(({ count }) => count > 0)
+        .sort((a, b) => b.count - a.count);
+
+      const totalCount = enabledGroups.reduce((sum, g) => sum + g.count, 0);
+      const lang = typeof user.language === 'string' && user.language.startsWith('es') ? 'es' : 'en';
+      const isSpanish = lang === 'es';
+
+      const subject = isSpanish
+        ? `[TEST] PNPtv! — Tienes ${totalCount} notificaci${totalCount !== 1 ? 'ones' : 'ón'} nueva${totalCount !== 1 ? 's' : ''}`
+        : `[TEST] PNPtv! — You have ${totalCount} new notification${totalCount !== 1 ? 's' : ''}`;
+
+      const html = NotificationDigestScheduler.generateDigestHtml(
+        { ...user, type_counts: typeCounts },
+        enabledGroups,
+        lang,
+      );
+
+      if (!emailService.transporters || !emailService.transporters.pnptv) {
+        return { sent: false, reason: 'smtp_not_configured' };
+      }
+
+      await emailService.transporters.pnptv.sendMail({
+        from: '"PNPtv" <noreply@pnptv.app>',
+        to: user.email,
+        subject,
+        html,
+      });
+
+      logger.info('NotificationDigestScheduler: test digest delivered', {
+        userId: user.id, email: user.email, total: totalCount,
+      });
+
+      return { sent: true, notificationCount: totalCount };
+    } catch (err) {
+      logger.error('NotificationDigestScheduler.sendDigestForUser failed', {
+        userId, error: err.message,
+      });
+      return { sent: false, reason: err.message };
+    }
+  }
 }
 
 module.exports = NotificationDigestScheduler;

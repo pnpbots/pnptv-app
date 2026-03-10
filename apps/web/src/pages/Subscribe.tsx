@@ -132,7 +132,7 @@ export default function Subscribe() {
       .finally(() => setLoading(false));
 
     getDashAvailable()
-      .then((res) => setDashAvailable(res.available))
+      .then((res) => setDashAvailable(res.available === true && res.configured === true))
       .catch(() => setDashAvailable(false));
 
     // Resume polling if returning from same-tab Daimo checkout

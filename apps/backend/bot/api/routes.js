@@ -3078,6 +3078,15 @@ app.get('/api/webapp/my-entitlements', requireSessionAuth, asyncHandler(webappAd
 // Admin push broadcast
 app.post('/api/webapp/admin/notifications/push', adminGuard, asyncHandler(webappAdminController.sendPushNotification));
 
+// POST /api/webapp/admin/notifications/digest/test — trigger digest email for a user (SMTP test)
+app.post('/api/webapp/admin/notifications/digest/test', adminGuard, asyncHandler(async (req, res) => {
+  const { userId } = req.body;
+  const targetUserId = userId || req.session.user.id;
+  const digestScheduler = require('../services/notificationDigestScheduler');
+  const result = await digestScheduler.sendDigestForUser(targetUserId);
+  return res.json({ success: true, result });
+}));
+
 // Push subscription management (any authenticated user)
 app.post('/api/webapp/push/subscribe', requireSessionAuth, asyncHandler(webappAdminController.subscribePush));
 app.delete('/api/webapp/push/unsubscribe', requireSessionAuth, asyncHandler(webappAdminController.unsubscribePush));
