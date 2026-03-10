@@ -261,7 +261,7 @@ function DateSeparator({ date }: { date: string }) {
 
 export default function Chat() {
   const { user } = useAuth();
-  const { isPrime, isMember, isFree, isAdmin } = useTier();
+  const { isPrime, isMember, isFree, isBanned, isAdmin } = useTier();
   const navigate = useNavigate();
   const t = useI18n();
   const { showTutorial, dismissTutorial } = useTutorial("hangouts");
@@ -496,6 +496,11 @@ export default function Chat() {
   // ─── Chat view open/close ──────────────────────────────────────────
 
   const openChat = async (group: HangoutGroup) => {
+    // Banned users cannot access hangouts
+    if (isBanned) {
+      setError("Your account has been suspended and you cannot access hangouts.");
+      return;
+    }
     // Free-tier users cannot enter hangout rooms — redirect to subscribe
     if (isFree) {
       navigate("/subscribe");

@@ -1,5 +1,6 @@
 const JaasService = require('../../services/jaasService');
 const UserService = require('../../services/userService');
+const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 
 /**
@@ -141,7 +142,6 @@ const generateModeratorToken = async (req, res) => {
     if (!isAdmin) {
       const ownChannel = user.live_channel || `pnptv-live-${userId}`;
       const isOwnChannel = roomName === ownChannel;
-      // Also allow moderating hangout group calls the user is a member of
       const isHangoutRoom = roomName.startsWith('hangout-');
       if (!isOwnChannel && !isHangoutRoom) {
         logger.warn('Moderator token for foreign room blocked', { userId, roomName });
@@ -149,6 +149,29 @@ const generateModeratorToken = async (req, res) => {
           success: false,
           error: 'Cannot moderate a room you do not own'
         });
+      }
+      if (isHangoutRoom && !isOwnChannel) {
+        // Extract groupId from room name pattern: "hangout-{groupId}-..."
+        const groupIdMatch = roomName.match(/^hangout-(\d+)/);
+        if (!groupIdMatch) {
+          logger.warn('Moderator token for malformed hangout room blocked', { userId, roomName });
+          return res.status(403).json({ success: false, error: 'Invalid hangout room name' });
+        }
+        const hGroupId = parseInt(groupIdMatch[1], 10);
+        const { rows: memberRows } = await query(
+          'SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+          [hGroupId, userId]
+        );
+        const isGroupOwner = memberRows.some(r => r.role === 'owner');
+        const { rows: callRows } = await query(
+          `SELECT 1 FROM hangout_video_calls WHERE room_name=$1 AND creator_id=$2 LIMIT 1`,
+          [roomName, userId]
+        );
+        const isCallCreator = callRows.length > 0;
+        if (!isGroupOwner && !isCallCreator) {
+          logger.warn('Moderator token for hangout room blocked — not owner or call creator', { userId, roomName, hGroupId });
+          return res.status(403).json({ success: false, error: 'Not authorized to moderate this hangout room' });
+        }
       }
     }
 

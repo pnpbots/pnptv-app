@@ -2670,23 +2670,31 @@ export interface AdminUser {
   phone_number?: string;
 }
 
+export interface PlanAddOnEntry {
+  id: string;
+  add_on_id: string;
+  name: string;
+  duration_days: number | null;
+  is_lifetime: boolean;
+}
+
 export interface AdminPlan {
   id: string;
   sku?: string;
   name: string;
   display_name: string;
-  nameEs?: string;
   tier: string;
   price: number;
   currency: string;
   duration: number;
+  duration_days?: number;
+  description?: string;
   features: string[];
-  featuresEs?: string[];
   active: boolean;
-  isLifetime?: boolean;
-  isPromo?: boolean;
-  createdAt?: string;
-  updatedAt?: string;
+  is_lifetime?: boolean;
+  add_ons?: PlanAddOnEntry[];
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface AdminPost {
@@ -2831,15 +2839,28 @@ export function getAdminPlans(): Promise<{ success: boolean; plans: AdminPlan[] 
 }
 
 export function createAdminPlan(
-  plan: Partial<AdminPlan> & { id: string }
+  plan: {
+    name: string;
+    price: number;
+    add_ons: { add_on_id: string; duration_days?: number; is_lifetime?: boolean }[];
+    display_name?: string;
+    is_active?: boolean;
+    id?: string;
+  }
 ): Promise<{ success: boolean; plan: AdminPlan }> {
   return request("/api/webapp/admin/plans", { method: "POST", body: plan });
 }
 
 export function updateAdminPlan(
   id: string,
-  plan: Partial<AdminPlan>
-): Promise<{ success: boolean; plan: AdminPlan }> {
+  plan: {
+    name?: string;
+    price?: number;
+    add_ons?: { add_on_id: string; duration_days?: number; is_lifetime?: boolean }[];
+    display_name?: string;
+    is_active?: boolean;
+  }
+): Promise<{ success: boolean }> {
   return request(`/api/webapp/admin/plans/${id}`, { method: "PUT", body: plan });
 }
 
@@ -2849,12 +2870,14 @@ export function deleteAdminPlan(id: string): Promise<{ success: boolean; message
 
 // Admin Plan Add-Ons
 export interface AddOn {
-  id: number;
+  id: string;
   name: string;
+  ui_description?: string;
+  features?: string[];
 }
 
 export interface PlanAddOn {
-  add_on_id: number;
+  add_on_id: string;
   name: string;
   duration_days: number | null;
   is_lifetime: boolean;
@@ -2870,7 +2893,7 @@ export function getPlanAddOns(planId: string): Promise<{ success: boolean; addOn
 
 export function setPlanAddOns(
   planId: string,
-  addOns: { add_on_id: number; duration_days: number | null; is_lifetime: boolean }[]
+  addOns: { add_on_id: string; duration_days: number | null; is_lifetime: boolean }[]
 ): Promise<{ success: boolean }> {
   return request(`/api/webapp/admin/plans/${planId}/add-ons`, { method: "PUT", body: { addOns } });
 }
@@ -3539,7 +3562,7 @@ export function getUserLabel(user: { tier?: string; label?: string }): 'PRIME' |
     return user.label;
   }
   const t = (user.tier || '').toLowerCase();
-  if (t === 'prime') return 'PRIME';
+  if (t === 'prime' || t === 'creator') return 'PRIME';
   if (t === 'member') return 'BASIC';
   return 'FREE';
 }

@@ -81,6 +81,16 @@ function initSocketIO(io) {
   io.use(async (socket, next) => {
     const user = await getUserFromSocket(socket);
     if (!user) return next(new Error('Unauthorized'));
+    try {
+      const { rows: banRows } = await query(
+        `SELECT 1 FROM users WHERE id = $1 AND tier = 'banned' LIMIT 1`,
+        [String(user.id)]
+      );
+      if (banRows.length > 0) return next(new Error('Account suspended'));
+    } catch (err) {
+      logger.error('Socket ban check failed', { userId: user.id, error: err.message });
+      return next(new Error('Authorization check failed'));
+    }
     socket.data.user = user;
     next();
   });
@@ -154,8 +164,8 @@ function initSocketIO(io) {
       } else if (room === 'prime') {
         // Prime room requires pnp-member entitlement (same as all community rooms)
         try {
-          const { hasEntitlement } = require('./services/accessService');
-          if (!await hasEntitlement(user.id, 'pnp-member')) {
+          const EntitlementAccessService = require('./services/entitlementAccessService');
+          if (!await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member')) {
             socket.emit('chat:error', { message: 'Member subscription required' });
             return;
           }
@@ -197,8 +207,8 @@ function initSocketIO(io) {
         if (rows.length === 0) return;
       } else if (room === 'prime') {
         try {
-          const { hasEntitlement } = require('./services/accessService');
-          if (!await hasEntitlement(user.id, 'pnp-member')) return;
+          const EntitlementAccessService = require('./services/entitlementAccessService');
+          if (!await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member')) return;
         } catch { return; }
       } else if (!ALLOWED_COMMUNITY_ROOMS.has(room)) {
         return;
@@ -260,8 +270,8 @@ function initSocketIO(io) {
       } else if (room === 'prime') {
         // Prime room requires pnp-member entitlement
         try {
-          const { hasEntitlement } = require('./services/accessService');
-          if (!await hasEntitlement(user.id, 'pnp-member')) {
+          const EntitlementAccessService = require('./services/entitlementAccessService');
+          if (!await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member')) {
             socket.emit('chat:error', { message: 'Access denied' });
             return;
           }
@@ -424,9 +434,25 @@ function initSocketIO(io) {
       const gid = parseInt(groupId, 10);
       if (!Number.isFinite(gid)) return;
 
-      if (!rateLimit(`hangout:${user.id}`, 30, 60000)) {
+      if (!rateLimit(`hangout:${user.id}:${gid}`, 30, 60000)) {
         socket.emit('hangout:error', { message: 'Too many messages. Slow down.' });
         return;
+      }
+
+      const userRole = (user.role || '').toLowerCase();
+      const isAdminUser = userRole === 'admin' || userRole === 'superadmin';
+      if (!isAdminUser) {
+        try {
+          const EntitlementAccessService = require('../services/entitlementAccessService');
+          const hasAccess = await EntitlementAccessService.hasEntitlement(String(user.id), 'pnp-member');
+          if (!hasAccess) {
+            socket.emit('hangout:error', { message: 'Member subscription required', code: 'MEMBER_REQUIRED' });
+            return;
+          }
+        } catch (err) {
+          logger.error('Hangout entitlement check failed', { userId: user.id, error: err.message });
+          // Fail open for entitlement check to not block existing members on service error
+        }
       }
 
       try {
@@ -468,8 +494,16 @@ function initSocketIO(io) {
       if (!Number.isFinite(gid)) return;
 
       // Verify membership before broadcasting typing indicator
-      const { rows } = await query('SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2', [gid, user.id]);
-      if (rows.length === 0) return;
+      try {
+        const { rows: typingMemberRows } = await query(
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+          [gid, user.id]
+        );
+        if (typingMemberRows.length === 0) return;
+      } catch (err) {
+        logger.error('hangout:typing membership check failed', { userId: user.id, groupId: gid, error: err.message });
+        return;
+      }
 
       // Rate limit: max 1 typing event per 2s per user per group
       if (!rateLimit(`typing:${user.id}:${gid}`, 1, 2000)) return;
@@ -542,9 +576,9 @@ function initSocketIO(io) {
       }
 
       // Free-tier daily DM limit — users without pnp-member entitlement are limited
-      const { hasEntitlement: _hasEntForDm } = require('./services/accessService');
+      const EntitlementAccessService = require('./services/entitlementAccessService');
       const role = user.role || '';
-      const hasDmMembership = role === 'admin' || role === 'superadmin' || await _hasEntForDm(user.id, 'pnp-member');
+      const hasDmMembership = role === 'admin' || role === 'superadmin' || await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member');
       const isFreeUser = !hasDmMembership;
       if (isFreeUser) {
         try {

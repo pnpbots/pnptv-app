@@ -24,6 +24,10 @@ const PushNotificationService = require('../../services/pushNotificationService'
 const NotificationEmitter = require('../../services/notificationEmitter');
 const jaasService = require('../../services/jaasService');
 
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const authGuard = (req, res) => {
@@ -59,8 +63,27 @@ const ensureMembership = async (groupId, userId) => {
 
   const { is_main, is_wall_of_fame, is_public } = groupRows[0];
 
-  // Auto-join main community groups and public groups
-  if (is_main || is_wall_of_fame || is_public) {
+  // Auto-join main and wall-of-fame groups unconditionally
+  if (is_main || is_wall_of_fame) {
+    await query(
+      `INSERT INTO hangout_group_members (group_id, user_id, role)
+       VALUES ($1, $2, 'member')
+       ON CONFLICT DO NOTHING`,
+      [groupId, userId]
+    );
+    return true;
+  }
+
+  // Public subgroups require a membership entitlement before auto-joining
+  if (is_public) {
+    try {
+      const EntitlementAccessService = require('../../services/entitlementAccessService');
+      const hasAccess = await EntitlementAccessService.hasEntitlement(String(userId), 'pnp-member');
+      if (!hasAccess) return false;
+    } catch (err) {
+      logger.error('Entitlement check failed in ensureMembership', { userId, groupId, error: err.message });
+      return false;
+    }
     await query(
       `INSERT INTO hangout_group_members (group_id, user_id, role)
        VALUES ($1, $2, 'member')
@@ -401,13 +424,9 @@ const getActiveCall = async (req, res) => {
       return res.status(403).json({ error: 'Not a member of this group' });
     }
 
-    // Clean up stale participants (joined >2 hours ago, never left)
-    await query(
-      `UPDATE hangout_call_participants SET left_at = NOW()
-       WHERE left_at IS NULL AND joined_at < NOW() - INTERVAL '2 hours'
-         AND call_id IN (SELECT id FROM hangout_video_calls WHERE group_id = $1)`,
-      [groupId]
-    );
+    // NOTE: Stale participant cleanup (joined >2 hours ago, left_at IS NULL) was removed
+    // from this per-request path to avoid write amplification on every GET.
+    // TODO: Move to a scheduled job (e.g. run every 30 minutes via the scheduler worker).
 
     let { rows } = await query(
       `SELECT hvc.id, hvc.room_name, hvc.creator_id, hvc.created_at, hvc.is_persistent,
@@ -520,8 +539,11 @@ const joinCall = async (req, res) => {
   const groupId = parseInt(req.params.id, 10);
   const callId = req.params.callId;
 
-  if (!Number.isFinite(groupId) || !callId) {
-    return res.status(400).json({ error: 'Invalid group ID or call ID' });
+  if (!Number.isFinite(groupId)) {
+    return res.status(400).json({ error: 'Invalid group ID' });
+  }
+  if (!callId || !UUID_RE.test(callId)) {
+    return res.status(400).json({ error: 'Invalid call ID format' });
   }
 
   try {
@@ -564,6 +586,14 @@ const joinCall = async (req, res) => {
        ON CONFLICT (call_id, user_id)
        DO UPDATE SET left_at = NULL, joined_at = NOW(), display_name = $3`,
       [callId, user.id, displayName]
+    );
+
+    // Keep participant_count column in sync with live participant rows
+    await query(
+      `UPDATE hangout_video_calls SET participant_count = (
+        SELECT COUNT(*)::int FROM hangout_call_participants WHERE call_id = $1 AND left_at IS NULL
+      ) WHERE id = $1`,
+      [callId]
     );
 
     const isModerator = String(call.creator_id) === String(user.id);
@@ -640,8 +670,11 @@ const endCall = async (req, res) => {
   const groupId = parseInt(req.params.id, 10);
   const callId = req.params.callId;
 
-  if (!Number.isFinite(groupId) || !callId) {
-    return res.status(400).json({ error: 'Invalid group ID or call ID' });
+  if (!Number.isFinite(groupId)) {
+    return res.status(400).json({ error: 'Invalid group ID' });
+  }
+  if (!callId || !UUID_RE.test(callId)) {
+    return res.status(400).json({ error: 'Invalid call ID format' });
   }
 
   const client = await getClient();
@@ -699,6 +732,12 @@ const endCall = async (req, res) => {
       [callId]
     );
 
+    // Reset participant_count to 0 — all participants have been marked as left
+    await client.query(
+      `UPDATE hangout_video_calls SET participant_count = 0 WHERE id = $1`,
+      [callId]
+    );
+
     await client.query('COMMIT');
 
     // Notify all group members
@@ -753,8 +792,11 @@ const leaveCall = async (req, res) => {
   const groupId = parseInt(req.params.id, 10);
   const callId = req.params.callId;
 
-  if (!Number.isFinite(groupId) || !callId) {
-    return res.status(400).json({ error: 'Invalid group ID or call ID' });
+  if (!Number.isFinite(groupId)) {
+    return res.status(400).json({ error: 'Invalid group ID' });
+  }
+  if (!callId || !UUID_RE.test(callId)) {
+    return res.status(400).json({ error: 'Invalid call ID format' });
   }
 
   try {
@@ -777,6 +819,14 @@ const leaveCall = async (req, res) => {
        SET left_at = NOW()
        WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL`,
       [callId, user.id]
+    );
+
+    // Keep participant_count column in sync with live participant rows
+    await query(
+      `UPDATE hangout_video_calls SET participant_count = (
+        SELECT COUNT(*)::int FROM hangout_call_participants WHERE call_id = $1 AND left_at IS NULL
+      ) WHERE id = $1`,
+      [callId]
     );
 
     if (rowCount > 0) {

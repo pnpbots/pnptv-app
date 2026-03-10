@@ -108,9 +108,14 @@ const createGroup = async (req, res) => {
   if (!name?.trim()) return res.status(400).json({ error: 'Group name is required' });
 
   try {
-    // Member+ check
-    if (!hasAccess(user, 'member')) {
-      return res.status(403).json({ error: 'Member subscription required to create hangout groups' });
+    // Member+ check via live entitlement (not stale session.tier)
+    const isAdminRole = (user.role || '').toLowerCase() === 'admin' || (user.role || '').toLowerCase() === 'superadmin';
+    if (!isAdminRole) {
+      const EntitlementAccessService = require('../../services/entitlementAccessService');
+      const hasMembership = await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member');
+      if (!hasMembership) {
+        return res.status(403).json({ error: 'Member subscription required to create hangout groups' });
+      }
     }
 
     // Monthly limit: max 3 user-created hangouts per PRIME user per calendar month
@@ -241,8 +246,8 @@ const joinGroup = async (req, res) => {
   const joinRole = user.role || req.session?.user?.role || '';
   const joinIsAdmin = joinRole === 'admin' || joinRole === 'superadmin';
   if (!joinIsAdmin) {
-    const { hasEntitlement } = require('../../services/accessService');
-    const joinHasMembership = await hasEntitlement(String(user.id || req.session?.user?.id), 'pnp-member');
+    const EntitlementAccessService = require('../../services/entitlementAccessService');
+    const joinHasMembership = await EntitlementAccessService.hasEntitlement(String(user.id || req.session?.user?.id), 'pnp-member');
     if (!joinHasMembership) {
       return res.status(403).json({
         success: false,
@@ -306,10 +311,10 @@ const leaveGroup = async (req, res) => {
   if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
-    // Can't leave public community groups
+    // Can't leave the main community group
     const { rows } = await query('SELECT is_main, is_public FROM hangout_groups WHERE id=$1', [groupId]);
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
-    if (rows[0].is_main || rows[0].is_public) return res.status(400).json({ error: 'Cannot leave a community group' });
+    if (rows[0].is_main) return res.status(400).json({ error: 'Cannot leave the main community group' });
 
     await query(
       'DELETE FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
@@ -332,7 +337,7 @@ const deleteGroup = async (req, res) => {
   try {
     const { rows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
-    if (rows[0].is_main || rows[0].is_public) return res.status(400).json({ error: 'Cannot delete a community group' });
+    if (rows[0].is_main) return res.status(400).json({ error: 'Cannot delete the main community group' });
     if (rows[0].creator_id !== String(user.id)) {
       return res.status(403).json({ error: 'Only the creator can delete this group' });
     }
@@ -346,6 +351,9 @@ const deleteGroup = async (req, res) => {
       `UPDATE hangout_video_calls SET status='ended', ended_at=NOW() WHERE group_id=$1 AND status='active'`,
       [groupId]
     );
+
+    // Clean up chat messages for this group before deleting (not covered by cascade)
+    await query('DELETE FROM chat_messages WHERE room = $1', [`hangout:${groupId}`]);
 
     // Delete group (cascade deletes members, participants, join requests)
     await query('DELETE FROM hangout_groups WHERE id=$1', [groupId]);
@@ -412,8 +420,8 @@ const sendMessage = async (req, res) => {
   const msgRole = user.role || req.session?.user?.role || '';
   const msgIsAdmin = msgRole === 'admin' || msgRole === 'superadmin';
   if (!msgIsAdmin) {
-    const { hasEntitlement } = require('../../services/accessService');
-    const msgHasMembership = await hasEntitlement(String(user.id || req.session?.user?.id), 'pnp-member');
+    const EntitlementAccessService = require('../../services/entitlementAccessService');
+    const msgHasMembership = await EntitlementAccessService.hasEntitlement(String(user.id || req.session?.user?.id), 'pnp-member');
     if (!msgHasMembership) {
       return res.status(403).json({
         success: false,
@@ -707,14 +715,20 @@ const handleJoinRequest = async (req, res) => {
 
     const joinRequest = rows[0];
 
-    // On accept, add as member
+    // On accept, add as member with capacity check
     if (action === 'accept') {
-      await query(
+      const { rowCount } = await query(
         `INSERT INTO hangout_group_members (group_id, user_id, role)
-         VALUES ($1, $2, 'member')
+         SELECT $1, $2, 'member'
+         WHERE (SELECT COUNT(*) FROM hangout_group_members WHERE group_id = $1) < (
+           SELECT max_members FROM hangout_groups WHERE id = $1
+         )
          ON CONFLICT DO NOTHING`,
         [groupId, joinRequest.user_id]
       );
+      if (rowCount === 0) {
+        return res.status(409).json({ error: 'Group is full or user is already a member' });
+      }
 
       // Notify the requester
       NotificationEmitter.emit({

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { searchNearby, getLiveStreams, type LiveStream, type GroupMessage } from "@/lib/api";
+import { useTier } from "@/hooks/useTier";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -178,6 +179,7 @@ function SidePanelChat({ groupId, userId, className, socketChat }: { groupId: nu
   const sendMessage = socketChat?.sendMessage ?? (() => {});
   const emitTyping = socketChat?.emitTyping ?? (() => {});
   const typingUsers = socketChat?.typingUsers ?? [];
+  const { isBanned, isFree } = useTier();
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevMsgCount = useRef(0);
@@ -191,10 +193,10 @@ function SidePanelChat({ groupId, userId, className, socketChat }: { groupId: nu
   }, [messages.length]);
 
   const handleSend = useCallback(() => {
-    if (!input.trim()) return;
+    if (!input.trim() || isBanned || isFree) return;
     sendMessage(input.trim());
     setInput("");
-  }, [input, sendMessage]);
+  }, [input, sendMessage, isBanned, isFree]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -276,7 +278,8 @@ function SidePanelChat({ groupId, userId, className, socketChat }: { groupId: nu
             onChange={(e) => { setInput(e.target.value); emitTyping(); }}
             onKeyDown={handleKeyDown}
             placeholder="Message..."
-            className="flex-1 min-w-0 text-xs bg-pnp-surface/50 border border-white/5 rounded-lg px-2.5 py-1.5 text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50"
+            disabled={isBanned || isFree}
+            className="flex-1 min-w-0 text-xs bg-pnp-surface/50 border border-white/5 rounded-lg px-2.5 py-1.5 text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 disabled:opacity-40 disabled:cursor-not-allowed"
             maxLength={2000}
           />
           <button

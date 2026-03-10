@@ -67,7 +67,7 @@ function Avatar({
   name: string;
   size?: "sm" | "md";
 }) {
-  const initials = (name ?? "?")[0].toUpperCase();
+  const initials = (name || "?")[0].toUpperCase();
   const cls =
     size === "md"
       ? "w-10 h-10 rounded-full object-cover flex-shrink-0 bg-pnp-surface flex items-center justify-center text-pnp-textSecondary font-bold text-sm"

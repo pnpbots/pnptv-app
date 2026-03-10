@@ -123,8 +123,14 @@ class EntitlementAccessService {
     if (!userId) return;
     try {
       const redis = getRedis();
-      // Scan for per-add-on entitlement cache keys
-      const entKeys = await redis.keys(`ent:${userId}:*`);
+      // Use SCAN instead of KEYS to avoid blocking Redis (O(N) scan)
+      const entKeys = [];
+      let cursor = '0';
+      do {
+        const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `ent:${userId}:*`, 'COUNT', 100);
+        cursor = nextCursor;
+        entKeys.push(...keys);
+      } while (cursor !== '0');
       const extraKeys = [`user_label:${userId}`, `tier_check:${userId}`];
       const allKeys = [...entKeys, ...extraKeys];
       if (allKeys.length > 0) {

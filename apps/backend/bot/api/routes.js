@@ -136,9 +136,19 @@ const requireFreeTierDmLimit = async (req, res, next) => {
   if (!user) {
     return res.status(401).json({ success: false, error: 'Authentication required', code: 'AUTH_REQUIRED' });
   }
-  // Member, prime, and admin bypass
-  if (isMemberOrAbove(user.tier) || isAdminTier(user)) {
+  // Admin bypass (no DB needed)
+  if (isAdminTier(user)) {
     return next();
+  }
+  // Member/Prime bypass via live entitlement check (not stale session.tier)
+  try {
+    const EntitlementAccessService = require('./services/entitlementAccessService');
+    if (await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member')) {
+      return next();
+    }
+  } catch (err) {
+    logger.warn(`requireFreeTierDmLimit entitlement check failed for user ${user.id}: ${err.message}`);
+    // Fall through to rate limit (fail closed)
   }
   try {
     const redis = getRedis();
@@ -2517,6 +2527,24 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
       [userId, primeExpiry.toISOString()]
     );
 
+    // 3b. Grant entitlements (pnp-member lifetime + prime 60 days) — sole source of truth for access
+    try {
+      const EntitlementModel = require('../../models/entitlementModel');
+      const EntitlementAccessService = require('./services/entitlementAccessService');
+      // Lifetime pnp-member
+      await EntitlementModel.grantEntitlement(userId, 'pnp-member', {
+        isLifetime: true, source: 'meru', actorId: 'system', reason: 'Meru lifetime100 activation',
+      });
+      // 60-day prime bonus
+      await EntitlementModel.grantEntitlement(userId, 'prime', {
+        isLifetime: false, durationDays: 60, source: 'meru', actorId: 'system', reason: 'Meru lifetime100 activation — 2 month PRIME bonus',
+      });
+      await EntitlementAccessService.invalidateCache(userId);
+    } catch (entErr) {
+      logger.error('Meru entitlement grant failed (user has tier but no entitlements)', { userId, error: entErr.message });
+      // Continue — users.tier is set, so legacy paths still work; entitlements will be synced by daily cleanup
+    }
+
     // 4. Invalidate the Meru link + mark activation code used (non-critical)
     try {
       await meruLinkService.invalidateLinkAfterActivation(meruCode, userId, username);
@@ -3357,6 +3385,7 @@ app.post('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, require
 app.post(
   '/api/webapp/hangouts/groups/:id/media',
   requireSessionAuth,
+  requireMemberTier,
   uploadLimiter,
   uploadHangoutMedia,
   asyncHandler(hangoutMediaController.uploadHangoutMedia)

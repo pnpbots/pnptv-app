@@ -3987,19 +3987,19 @@ class PaymentService {
             // Time-limited: extend from current expiry if still active, else from now
             await query(`
               INSERT INTO user_entitlements (user_id, add_on_id, expires_at, source_plan_id)
-              VALUES ($1, $2, NOW() + ($3 || ' days')::interval, $4)
+              VALUES ($1, $2, NOW() + ($3::integer * INTERVAL '1 day'), $4)
               ON CONFLICT (user_id, add_on_id, creator_id)
               DO UPDATE SET
                 expires_at = CASE
                   WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
                   WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
-                    THEN user_entitlements.expires_at + ($3 || ' days')::interval
-                  ELSE NOW() + ($3 || ' days')::interval
+                    THEN user_entitlements.expires_at + ($3::integer * INTERVAL '1 day')
+                  ELSE NOW() + ($3::integer * INTERVAL '1 day')
                 END,
                 is_consumed = false,
                 updated_at = NOW()
               WHERE NOT user_entitlements.is_lifetime
-            `, [userId, row.add_on_id, String(durationDays), planId]);
+            `, [userId, row.add_on_id, parseInt(durationDays, 10), planId]);
           }
 
           result.granted++;

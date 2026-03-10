@@ -221,9 +221,10 @@ export function useHangoutSocket(
   // Send message via socket
   const sendMessage = useCallback(
     (content: string) => {
-      if (!groupId || !content.trim()) return;
+      const trimmed = content.trim().slice(0, 2000);
+      if (!groupId || !trimmed) return;
       const socket = connectSocket();
-      socket.emit("hangout:message", { groupId, content: content.trim() });
+      socket.emit("hangout:message", { groupId, content: trimmed });
     },
     [groupId]
   );

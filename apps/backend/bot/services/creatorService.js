@@ -245,12 +245,10 @@ class CreatorService {
       throw new Error('Creator is not active');
     }
 
-    // Validate subscriber has PRIME
-    const subRes = await query(
-      'SELECT tier FROM users WHERE id = $1',
-      [subscriberId]
-    );
-    if (!subRes.rows[0] || (subRes.rows[0].tier || '').toLowerCase() !== 'prime') {
+    // Validate subscriber has PRIME entitlement (live check, not stale users.tier)
+    const EntitlementAccessService = require('./entitlementAccessService');
+    const hasPrime = await EntitlementAccessService.hasEntitlement(subscriberId, 'prime');
+    if (!hasPrime) {
       throw new Error('PRIME subscription required to subscribe to creators');
     }
 
@@ -458,16 +456,17 @@ class CreatorService {
     // Owner always sees their own exclusive content
     if (viewerId === creatorId) return { status: 'unlocked', reason: 'owner' };
 
-    // Check viewer's PRIME status via tier column
+    // Check viewer's PRIME status via live entitlement (not stale users.tier)
     const viewerRes = await query(
-      "SELECT tier, role FROM users WHERE id = $1",
+      "SELECT role FROM users WHERE id = $1",
       [viewerId]
     );
-    const viewerTier = (viewerRes.rows[0]?.tier || '').toLowerCase();
     const viewerRole = viewerRes.rows[0]?.role || '';
-    const isPrime = viewerTier === 'prime' || viewerRole === 'admin' || viewerRole === 'superadmin';
+    const isAdminRole = viewerRole === 'admin' || viewerRole === 'superadmin';
+    const EntitlementAccessService = require('./entitlementAccessService');
+    const hasPrimeEnt = isAdminRole || await EntitlementAccessService.hasEntitlement(viewerId, 'prime');
 
-    if (!isPrime) {
+    if (!hasPrimeEnt) {
       return { status: 'locked', reason: 'not_prime' };
     }
 

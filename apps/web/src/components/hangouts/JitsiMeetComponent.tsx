@@ -44,8 +44,13 @@ function parseMeetingUrl(url: string): { domain: string; room: string; jwt: stri
   }
 }
 
+const ALLOWED_JITSI_DOMAINS = new Set(["8x8.vc", "meet.jit.si"]);
+
 /** Load the Jitsi External API script if not already loaded */
 function loadJitsiScript(domain: string): Promise<void> {
+  if (!ALLOWED_JITSI_DOMAINS.has(domain)) {
+    return Promise.reject(new Error(`Untrusted Jitsi domain: ${domain}`));
+  }
   return new Promise((resolve, reject) => {
     if ((window as any).JitsiMeetExternalAPI) {
       resolve();
