@@ -233,6 +233,45 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [hasUnreadReply, setHasUnreadReply] = useState(false);
 
+  // FAB corner position: "br" (bottom-right) | "bl" (bottom-left)
+  const [fabCorner, setFabCorner] = useState<"br" | "bl">(() => {
+    try { return (localStorage.getItem("cristina_fab_corner") as "br" | "bl") || "br"; } catch { return "br"; }
+  });
+  const fabRef = useRef<HTMLDivElement>(null);
+  const dragState = useRef<{ startX: number; startY: number; dragging: boolean; moved: boolean }>({ startX: 0, startY: 0, dragging: false, moved: false });
+
+  const handleFabPointerDown = useCallback((e: React.PointerEvent) => {
+    dragState.current = { startX: e.clientX, startY: e.clientY, dragging: true, moved: false };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, []);
+
+  const handleFabPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragState.current.dragging) return;
+    const dx = e.clientX - dragState.current.startX;
+    const dy = e.clientY - dragState.current.startY;
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) dragState.current.moved = true;
+    if (!dragState.current.moved || !fabRef.current) return;
+    fabRef.current.style.transition = "none";
+    fabRef.current.style.transform = `translate(${dx}px, ${dy}px)`;
+  }, []);
+
+  const handleFabPointerUp = useCallback((e: React.PointerEvent) => {
+    if (!dragState.current.dragging) return;
+    const wasDragged = dragState.current.moved;
+    dragState.current.dragging = false;
+    if (!wasDragged) return; // let onClick handle tap
+    e.preventDefault();
+    e.stopPropagation();
+    if (fabRef.current) {
+      fabRef.current.style.transition = "";
+      fabRef.current.style.transform = "";
+    }
+    const midX = window.innerWidth / 2;
+    const newCorner = e.clientX < midX ? "bl" : "br";
+    setFabCorner(newCorner);
+    try { localStorage.setItem("cristina_fab_corner", newCorner); } catch { /* ignore */ }
+  }, []);
+
   // Tutorial state
   const [selectedTutorial, setSelectedTutorial] = useState<string | null>(null);
   const [tutorialStep, setTutorialStep] = useState(0);
@@ -523,10 +562,20 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
 
   // FAB button (widget mode only)
   if (mode === "widget" && !isOpen) {
+    const fabPositionClass = fabCorner === "bl"
+      ? "fixed bottom-20 left-3 z-[38] flex flex-col items-start gap-2 sm:bottom-24 sm:left-4 safe-area-bottom"
+      : "fixed bottom-20 right-3 z-[38] flex flex-col items-end gap-2 sm:bottom-24 sm:right-4 safe-area-bottom";
     return (
-      <div className="fixed bottom-20 right-3 z-[38] flex flex-col items-end gap-2 sm:bottom-24 sm:right-4 safe-area-bottom">
+      <div
+        ref={fabRef}
+        className={fabPositionClass}
+        style={{ transition: "left 0.3s ease, right 0.3s ease", touchAction: "none" }}
+        onPointerDown={handleFabPointerDown}
+        onPointerMove={handleFabPointerMove}
+        onPointerUp={handleFabPointerUp}
+      >
         <button
-          onClick={() => { setIsOpen(true); setHasUnreadReply(false); }}
+          onClick={() => { if (!dragState.current.moved) { setIsOpen(true); setHasUnreadReply(false); } }}
           className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-full shadow-lg flex items-center justify-center text-xl sm:text-2xl transition-transform hover:scale-110 active:scale-95"
           style={{
             background: "linear-gradient(135deg, #5BC8F5, #00D4E8)",
@@ -571,7 +620,9 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
           ? "flex flex-col h-[calc(100dvh-12rem)] max-h-[800px] glass-card-sm rounded-2xl overflow-hidden"
           : "fixed z-[42] flex flex-col overflow-hidden shadow-2xl " +
             "inset-0 w-full h-full " +
-            "sm:inset-auto sm:bottom-24 sm:right-4 sm:w-[400px] sm:h-[600px] sm:rounded-2xl"
+            (fabCorner === "bl"
+              ? "sm:inset-auto sm:bottom-24 sm:left-4 sm:w-[400px] sm:h-[600px] sm:rounded-2xl"
+              : "sm:inset-auto sm:bottom-24 sm:right-4 sm:w-[400px] sm:h-[600px] sm:rounded-2xl")
       }
       style={{
         background: "rgba(20, 20, 30, 0.98)",
