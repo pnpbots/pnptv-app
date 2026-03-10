@@ -131,6 +131,19 @@ function initSocketIO(io) {
           socket.emit('chat:error', { message: 'Failed to verify membership' });
           return;
         }
+      } else if (room === 'prime') {
+        // PRIME room requires PRIME tier
+        try {
+          const { rows: tierRows } = await query('SELECT tier FROM users WHERE id=$1', [user.id]);
+          if (tierRows.length === 0 || tierRows[0].tier?.toLowerCase() !== 'prime') {
+            socket.emit('chat:error', { message: 'PRIME membership required' });
+            return;
+          }
+        } catch (err) {
+          logger.error('chat:join prime tier check error', err);
+          socket.emit('chat:error', { message: 'Access denied' });
+          return;
+        }
       } else if (!ALLOWED_COMMUNITY_ROOMS.has(room)) {
         socket.emit('chat:error', { message: 'Invalid room' });
         return;
@@ -162,6 +175,13 @@ function initSocketIO(io) {
         const gid = parseInt(hangoutMatch[1], 10);
         const { rows } = await query('SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2', [gid, user.id]);
         if (rows.length === 0) return;
+      } else if (room === 'prime') {
+        try {
+          const { rows: tierRows } = await query('SELECT tier FROM users WHERE id=$1', [user.id]);
+          if (tierRows.length === 0 || tierRows[0].tier?.toLowerCase() !== 'prime') return;
+        } catch { return; }
+      } else if (!ALLOWED_COMMUNITY_ROOMS.has(room)) {
+        return;
       }
 
       if (!rateLimit(`chat:${user.id}`, 30, 60000)) {
@@ -486,6 +506,24 @@ function initSocketIO(io) {
       if (!recipientId || !content || !content.trim()) return;
       if (recipientId === user.id) return;
 
+      // Block list check — mirrors REST endpoint behaviour
+      try {
+        const { rows: blockRows } = await query(
+          `SELECT 1 FROM blocked_users
+           WHERE (user_id = $1 AND blocked_user_id = $2)
+              OR (user_id = $2 AND blocked_user_id = $1)
+           LIMIT 1`,
+          [recipientId, user.id]
+        );
+        if (blockRows.length > 0) {
+          socket.emit('dm:error', { message: 'Cannot send message to this user' });
+          return;
+        }
+      } catch (blockErr) {
+        logger.error('dm:send block check error', blockErr);
+        return; // fail closed
+      }
+
       // Free-tier daily DM limit (mirrors REST requireFreeTierDmLimit middleware)
       const tier = (user.tier || 'free').toLowerCase();
       const role = user.role || '';
@@ -567,8 +605,16 @@ function initSocketIO(io) {
       }
     });
 
-    socket.on('dm:typing', ({ recipientId } = {}) => {
+    socket.on('dm:typing', async ({ recipientId } = {}) => {
       if (!recipientId) return;
+      try {
+        const { rows } = await query(
+          `SELECT 1 FROM blocked_users
+           WHERE (user_id=$1 AND blocked_user_id=$2) OR (user_id=$2 AND blocked_user_id=$1) LIMIT 1`,
+          [recipientId, user.id]
+        );
+        if (rows.length > 0) return;
+      } catch { return; }
       io.to(`user:${recipientId}`).emit('dm:typing', { from: user.id });
     });
 
