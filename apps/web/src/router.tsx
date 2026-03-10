@@ -56,6 +56,7 @@ const Mono = lazy(() => import("@/pages/admin/Mono"));
 const Gamification = lazy(() => import("@/pages/admin/Gamification"));
 const StreamManagement = lazy(() => import("@/pages/admin/StreamManagement"));
 const SupportDashboard = lazy(() => import("@/pages/admin/SupportDashboard"));
+const AccessMatrix = lazy(() => import("@/pages/admin/AccessMatrix"));
 
 export const router = createBrowserRouter([
   {
@@ -399,6 +400,14 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <SupportDashboard />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "access-matrix",
+        element: (
+          <ModuleLoader>
+            <AccessMatrix />
           </ModuleLoader>
         ),
       },

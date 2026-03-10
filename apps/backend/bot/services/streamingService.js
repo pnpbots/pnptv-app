@@ -362,8 +362,10 @@ class StreamingService {
                 return { allowed: true };
             }
 
-            // Check tier for prime access
-            if ((viewer.tier || '').toLowerCase() !== 'prime') {
+            // Check prime entitlement for paid/subscribers-only streams
+            const { hasEntitlement } = require('./accessService');
+            const viewerHasPrime = await hasEntitlement(String(viewer.id || viewer.telegram_id), 'prime');
+            if (!viewerHasPrime) {
                 return {
                     allowed: false,
                     reason: 'You need a Prime membership to view this stream'

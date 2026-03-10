@@ -10,6 +10,7 @@ const { createChatInviteLink } = require('../../utils/telegramAdmin');
 const BusinessNotificationService = require('../../services/businessNotificationService');
 const PaymentHistoryService = require('../../../services/paymentHistoryService');
 const { cache } = require('../../../config/redis');
+const PlatformBanService = require('../../services/platformBanService');
 
 const PRIME_FALLBACK_LINK = 'https://t.me/PNPTV_PRIME';
 
@@ -133,10 +134,36 @@ const registerActivationHandlers = (bot) => {
       }
 
       if (activation.used) {
-        await ctx.reply(lang === 'es'
-          ? '❌ Este código ya ha sido utilizado.\n\nCada código solo puede ser activado una vez.'
-          : '❌ This code has already been used.\n\nEach code can only be activated once.');
+        // ── Used code attempt → immediate platform ban ────────────────────────
+        logger.warn('activation /activate — used code attempt, banning user', {
+          userId: String(ctx.from.id),
+          username: ctx.from.username,
+          code,
+          originalUsedBy: activation.used_by,
+        });
+        await logActivation({
+          userId: ctx.from.id,
+          username: ctx.from.username,
+          code,
+          product: activation.product || 'unknown',
+          success: false,
+        });
+        await PlatformBanService.ban({
+          userId:   String(ctx.from.id),
+          reason:   `Intentó activar código ya utilizado: ${code} (usado originalmente por ${activation.used_by || 'desconocido'} el ${activation.used_at || 'N/A'})`,
+          evidence: {
+            code,
+            product:          activation.product,
+            original_used_by: activation.used_by,
+            original_used_at: activation.used_at,
+            attempt_at:       new Date().toISOString(),
+            handler:          '/activate',
+          },
+          bannedBy:   'system:activation',
+          botContext: ctx,
+        });
         return;
+        // ─────────────────────────────────────────────────────────────────────
       }
 
       if (isExpired(activation.expires_at)) {
@@ -169,9 +196,18 @@ const registerActivationHandlers = (bot) => {
 
         const codeMarked = await markCodeUsed(code, ctx.from.id, ctx.from.username);
         if (!codeMarked) {
-          await ctx.reply(lang === 'es'
-            ? '❌ Este código ya ha sido utilizado.\n\nCada código solo puede ser activado una vez.'
-            : '❌ This code has already been used.\n\nEach code can only be activated once.');
+          // Race condition — another user claimed it between our read and write → ban
+          logger.warn('activation — race condition on code claim, banning user', {
+            userId: String(ctx.from.id), code,
+          });
+          await logActivation({ userId: ctx.from.id, username: ctx.from.username, code, product, success: false });
+          await PlatformBanService.ban({
+            userId:   String(ctx.from.id),
+            reason:   `Código ${code} ya reclamado por otro usuario (race condition detectada)`,
+            evidence: { code, product, attempt_at: new Date().toISOString(), handler: '/activate:race' },
+            bannedBy: 'system:activation',
+            botContext: ctx,
+          });
           return;
         }
 
@@ -271,10 +307,30 @@ const registerActivationHandlers = (bot) => {
       }
 
       if (activation.used) {
-        await ctx.reply(lang === 'es'
-          ? '❌ Este código ya ha sido utilizado.\n\nCada código solo puede ser activado una vez.'
-          : '❌ This code has already been used.\n\nEach code can only be activated once.');
+        // ── Used code attempt in /lifetime100 → immediate platform ban ────────
+        logger.warn('activation /lifetime100 — used code attempt, banning user', {
+          userId: String(ctx.from.id), username: ctx.from.username, code,
+          originalUsedBy: activation.used_by,
+        });
+        await logActivation({
+          userId: ctx.from.id, username: ctx.from.username,
+          code, product: activation.product || 'lifetime100', success: false,
+        });
+        await PlatformBanService.ban({
+          userId:   String(ctx.from.id),
+          reason:   `Intentó activar código ya utilizado: ${code} (usado originalmente por ${activation.used_by || 'desconocido'} el ${activation.used_at || 'N/A'})`,
+          evidence: {
+            code, product: activation.product,
+            original_used_by: activation.used_by,
+            original_used_at: activation.used_at,
+            attempt_at: new Date().toISOString(),
+            handler: '/lifetime100',
+          },
+          bannedBy:   'system:activation',
+          botContext: ctx,
+        });
         return;
+        // ─────────────────────────────────────────────────────────────────────
       }
 
       if (isExpired(activation.expires_at)) {

@@ -237,16 +237,19 @@ const joinGroup = async (req, res) => {
   const groupId = parseInt(req.params.id);
   if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
 
-  // Tier check: member subscription required to join subgroups
-  const joinTier = (user.tier || req.session?.user?.tier || 'free').toLowerCase();
+  // Entitlement check: pnp-member required to join subgroups
   const joinRole = user.role || req.session?.user?.role || '';
   const joinIsAdmin = joinRole === 'admin' || joinRole === 'superadmin';
-  if (!joinIsAdmin && joinTier === 'free') {
-    return res.status(403).json({
-      success: false,
-      error: 'Member subscription required',
-      code: 'MEMBER_REQUIRED',
-    });
+  if (!joinIsAdmin) {
+    const { hasEntitlement } = require('../../services/accessService');
+    const joinHasMembership = await hasEntitlement(String(user.id || req.session?.user?.id), 'pnp-member');
+    if (!joinHasMembership) {
+      return res.status(403).json({
+        success: false,
+        error: 'Member subscription required',
+        code: 'MEMBER_REQUIRED',
+      });
+    }
   }
 
   try {
@@ -405,16 +408,19 @@ const sendMessage = async (req, res) => {
 
   if (!content?.trim()) return res.status(400).json({ error: 'Content required' });
 
-  // Tier check: member subscription required to send messages in subgroups
-  const msgTier = (user.tier || req.session?.user?.tier || 'free').toLowerCase();
+  // Entitlement check: pnp-member required to send messages in subgroups
   const msgRole = user.role || req.session?.user?.role || '';
   const msgIsAdmin = msgRole === 'admin' || msgRole === 'superadmin';
-  if (!msgIsAdmin && msgTier === 'free') {
-    return res.status(403).json({
-      success: false,
-      error: 'Member subscription required',
-      code: 'MEMBER_REQUIRED',
-    });
+  if (!msgIsAdmin) {
+    const { hasEntitlement } = require('../../services/accessService');
+    const msgHasMembership = await hasEntitlement(String(user.id || req.session?.user?.id), 'pnp-member');
+    if (!msgHasMembership) {
+      return res.status(403).json({
+        success: false,
+        error: 'Member subscription required',
+        code: 'MEMBER_REQUIRED',
+      });
+    }
   }
 
   try {

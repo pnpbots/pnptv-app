@@ -2851,6 +2851,23 @@ export function setPlanAddOns(
   return request(`/api/webapp/admin/plans/${planId}/add-ons`, { method: "PUT", body: { addOns } });
 }
 
+/** Convenience alias — same as getAdminPlans */
+export const listAdminPlans = getAdminPlans;
+
+/** Named add-on identifiers used by the plan builder UI */
+export interface PlanAddOnConfig {
+  add_on_id: 'pnp-member' | 'prime' | 'creator-subscription' | 'private-calls';
+  duration_days?: number;
+  is_lifetime?: boolean;
+}
+
+/** Payload shape for the plan builder quick-create flow */
+export interface CreatePlanPayload {
+  name: string;
+  price_usd: number;
+  add_ons: PlanAddOnConfig[];
+}
+
 // Admin User Entitlements
 
 export interface AdminEntitlement {

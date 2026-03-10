@@ -828,6 +828,15 @@ const startBot = async () => {
         logger.error('Daimo payment recovery error:', err)
       ), 30 * 1000);
       logger.info('✓ Daimo payment recovery scheduler started (5min interval)');
+      // Cleanup abandoned Daimo payments every hour (marks 24h+ unpaid as abandoned)
+      setInterval(() => PaymentRecoveryService.cleanupAbandonedPayments().catch(err =>
+        logger.error('Daimo cleanup error:', err)
+      ), 60 * 60 * 1000);
+      // Run immediately on startup to clear existing stuck payments
+      PaymentRecoveryService.cleanupAbandonedPayments().catch(err =>
+        logger.error('Daimo cleanup (startup) error:', err)
+      );
+      logger.info('✓ Daimo abandoned payment cleanup scheduled (1h interval)');
     } catch (error) {
       logger.warn(`Daimo payment recovery scheduler failed: ${error.message}`);
     }

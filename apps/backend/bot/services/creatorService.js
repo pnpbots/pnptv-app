@@ -275,6 +275,22 @@ class CreatorService {
       [creatorId]
     );
 
+    // Write creator-subscription entitlement so entitlement-based access checks work
+    try {
+      await query(`
+        INSERT INTO user_entitlements (user_id, add_on_id, creator_id, expires_at, source_plan_id)
+        VALUES ($1, 'creator-subscription', $2, NOW() + INTERVAL '30 days', 'creator_monthly')
+        ON CONFLICT (user_id, add_on_id, creator_id)
+        DO UPDATE SET
+          expires_at = GREATEST(user_entitlements.expires_at, NOW() + INTERVAL '30 days'),
+          is_consumed = false,
+          updated_at = NOW()
+        WHERE NOT user_entitlements.is_lifetime
+      `, [String(subscriberId), String(creatorId)]);
+    } catch (entErr) {
+      logger.warn('subscribeToCreator: failed to write entitlement', { subscriberId, creatorId, error: entErr.message });
+    }
+
     // Record earnings (70/30 split)
     const amountCreator = Math.round(priceUsd * 0.70 * 100) / 100;
     const amountPlatform = Math.round(priceUsd * 0.30 * 100) / 100;

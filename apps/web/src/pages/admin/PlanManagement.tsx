@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { DataTable } from "@/components/admin/DataTable";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
 import { Badge } from "@pnptv/ui-kit";
@@ -13,6 +13,45 @@ import {
   type AdminPlan,
   type AddOn,
 } from "@/lib/api";
+
+// ─── Add-on display metadata ─────────────────────────────────────────────────
+
+const ADD_ON_META: Record<string, { description: string }> = {
+  "pnp-member": { description: "Full platform access — hangouts, live streams, DMs, tokens & calls" },
+  "prime": { description: "PRIME content — exclusive VOD, prime streams & creator subscriptions" },
+  "private-calls": { description: "One private video call credit" },
+};
+
+// ─── SKU/description generators ──────────────────────────────────────────────
+
+function generateSku(name: string, durationDays: string, isLifetime: boolean): string {
+  if (!name.trim()) return "";
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+  const suffix = isLifetime ? "lifetime" : durationDays ? `${durationDays}d` : "";
+  return suffix ? `${slug}-${suffix}` : slug;
+}
+
+function generateDescription(
+  enabledAddOnNames: string[],
+  durationDays: string,
+  isLifetime: boolean
+): string {
+  if (enabledAddOnNames.length === 0) return "";
+  const parts = enabledAddOnNames
+    .map((n) => ADD_ON_META[n.toLowerCase().replace(/\s+/g, "-")]?.description ?? n)
+    .join(". ");
+  const durationSuffix = isLifetime
+    ? " (Lifetime access)"
+    : durationDays
+    ? ` for ${durationDays} days`
+    : "";
+  return parts + durationSuffix + ".";
+}
 
 const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
   PRIME: "accent",
@@ -269,6 +308,23 @@ export default function PlanManagement() {
     }
   };
 
+  // ─── Derived previews (create mode only) ───────────────────────────────────
+
+  const enabledAddOnNames = useMemo(
+    () => allAddOns.filter((a) => addOnRows[a.id]?.enabled).map((a) => a.name),
+    [allAddOns, addOnRows]
+  );
+
+  const skuPreview = useMemo(
+    () => (!editingId ? generateSku(formState.display_name || formState.name, formState.duration_days, formState.is_lifetime) : ""),
+    [editingId, formState.display_name, formState.name, formState.duration_days, formState.is_lifetime]
+  );
+
+  const descriptionPreview = useMemo(
+    () => (!editingId ? generateDescription(enabledAddOnNames, formState.duration_days, formState.is_lifetime) : ""),
+    [editingId, enabledAddOnNames, formState.duration_days, formState.is_lifetime]
+  );
+
   const columns = [
     { key: "id", header: "ID", render: (row: AdminPlan) => <span className="font-mono text-xs text-pnp-textSecondary">{row.id}</span> },
     { key: "display_name", header: "Name", render: (row: AdminPlan) => <span className="font-medium text-pnp-textPrimary">{row.display_name}</span> },
@@ -423,6 +479,31 @@ export default function PlanManagement() {
                   className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
                 />
               </div>
+
+              {/* Auto-generated previews — create mode only */}
+              {!editingId && (skuPreview || descriptionPreview) && (
+                <div className="rounded-lg border border-pnp-border/60 bg-pnp-surface px-3 py-3 space-y-2">
+                  <p className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wide">
+                    Auto-generated preview
+                  </p>
+                  {skuPreview && (
+                    <div>
+                      <span className="text-xs text-pnp-textSecondary">SKU / slug</span>
+                      <p className="font-mono text-xs text-pnp-textPrimary bg-pnp-background rounded px-2 py-1 mt-0.5 break-all">
+                        {skuPreview}
+                      </p>
+                    </div>
+                  )}
+                  {descriptionPreview && (
+                    <div>
+                      <span className="text-xs text-pnp-textSecondary">Description</span>
+                      <p className="text-xs text-pnp-textPrimary mt-0.5 leading-relaxed">
+                        {descriptionPreview}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>

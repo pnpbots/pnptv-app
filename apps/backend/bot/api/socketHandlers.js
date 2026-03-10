@@ -132,15 +132,15 @@ function initSocketIO(io) {
           return;
         }
       } else if (room === 'prime') {
-        // PRIME room requires PRIME tier
+        // Prime room requires pnp-member entitlement (same as all community rooms)
         try {
-          const { rows: tierRows } = await query('SELECT tier FROM users WHERE id=$1', [user.id]);
-          if (tierRows.length === 0 || tierRows[0].tier?.toLowerCase() !== 'prime') {
-            socket.emit('chat:error', { message: 'PRIME membership required' });
+          const { hasEntitlement } = require('./services/accessService');
+          if (!await hasEntitlement(user.id, 'pnp-member')) {
+            socket.emit('chat:error', { message: 'Member subscription required' });
             return;
           }
         } catch (err) {
-          logger.error('chat:join prime tier check error', err);
+          logger.error('chat:join prime room check error', err);
           socket.emit('chat:error', { message: 'Access denied' });
           return;
         }
@@ -177,8 +177,8 @@ function initSocketIO(io) {
         if (rows.length === 0) return;
       } else if (room === 'prime') {
         try {
-          const { rows: tierRows } = await query('SELECT tier FROM users WHERE id=$1', [user.id]);
-          if (tierRows.length === 0 || tierRows[0].tier?.toLowerCase() !== 'prime') return;
+          const { hasEntitlement } = require('./services/accessService');
+          if (!await hasEntitlement(user.id, 'pnp-member')) return;
         } catch { return; }
       } else if (!ALLOWED_COMMUNITY_ROOMS.has(room)) {
         return;
@@ -238,18 +238,15 @@ function initSocketIO(io) {
           return;
         }
       } else if (room === 'prime') {
-        // Prime room requires prime tier
+        // Prime room requires pnp-member entitlement
         try {
-          const { rows: tierRows } = await query(
-            `SELECT tier FROM users WHERE id = $1`,
-            [user.id]
-          );
-          if (tierRows.length === 0 || tierRows[0].tier?.toLowerCase() !== 'prime') {
+          const { hasEntitlement } = require('./services/accessService');
+          if (!await hasEntitlement(user.id, 'pnp-member')) {
             socket.emit('chat:error', { message: 'Access denied' });
             return;
           }
         } catch (err) {
-          logger.error('chat:media prime tier check error', err);
+          logger.error('chat:media prime room check error', err);
           socket.emit('chat:error', { message: 'Access denied' });
           return;
         }
@@ -524,10 +521,11 @@ function initSocketIO(io) {
         return; // fail closed
       }
 
-      // Free-tier daily DM limit (mirrors REST requireFreeTierDmLimit middleware)
-      const tier = (user.tier || 'free').toLowerCase();
+      // Free-tier daily DM limit — users without pnp-member entitlement are limited
+      const { hasEntitlement: _hasEntForDm } = require('./services/accessService');
       const role = user.role || '';
-      const isFreeUser = tier === 'free' && role !== 'admin' && role !== 'superadmin';
+      const hasDmMembership = role === 'admin' || role === 'superadmin' || await _hasEntForDm(user.id, 'pnp-member');
+      const isFreeUser = !hasDmMembership;
       if (isFreeUser) {
         try {
           const redis = getRedis();

@@ -146,7 +146,14 @@ async function validateTierFresh(userId, sessionTier) {
     }
 
     const isExpired = row.plan_expiry && new Date(row.plan_expiry) <= new Date();
-    const effectiveTier = isExpired ? 'free' : normalizeTier(row.tier);
+    let effectiveTier = isExpired ? 'free' : normalizeTier(row.tier);
+
+    // Entitlement fallback: if plan_expiry says expired but user has active prime entitlement, honor it
+    // (covers lifetime users and edge cases where tier/expiry got out of sync)
+    if (effectiveTier === 'free') {
+      const hasPrimeEntitlement = await hasEntitlement(userId, 'prime');
+      if (hasPrimeEntitlement) effectiveTier = 'prime';
+    }
 
     await redis.set(cacheKey, effectiveTier, 'EX', 300);
     return effectiveTier;

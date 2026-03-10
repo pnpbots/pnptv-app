@@ -38,6 +38,7 @@ const { verifyAdminJWT } = require('./middleware/jwtAuth');
 // Middleware
 const { asyncHandler } = require('./middleware/errorHandler');
 const { authenticateUser } = require('./middleware/auth');
+const ipTracker = require('./middleware/ipTracker');
 const PermissionService = require('../services/permissionService');
 const referralService = require('../services/referralService');
 
@@ -3056,14 +3057,16 @@ app.patch('/api/webapp/admin/support/tickets/:userId', adminGuard, asyncHandler(
   res.json({ success: true, data: updated });
 }));
 
-// Plan management
-app.get('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminController.listPlans));
-app.post('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminController.createPlan));
-app.put('/api/webapp/admin/plans/:id', adminGuard, asyncHandler(webappAdminController.updatePlan));
-app.delete('/api/webapp/admin/plans/:id', adminGuard, asyncHandler(webappAdminController.deletePlan));
+// Plan Builder — create, list, update, deactivate plans with auto-derived metadata
+const planBuilderController = require('./controllers/planBuilderController');
+app.get('/api/webapp/admin/plans',        adminGuard, asyncHandler(planBuilderController.listPlans));
+app.post('/api/webapp/admin/plans',       adminGuard, asyncHandler(planBuilderController.createPlan));
+app.put('/api/webapp/admin/plans/:id',    adminGuard, asyncHandler(planBuilderController.updatePlan));
+app.patch('/api/webapp/admin/plans/:id',  adminGuard, asyncHandler(planBuilderController.updatePlan));
+app.delete('/api/webapp/admin/plans/:id', adminGuard, asyncHandler(planBuilderController.deactivatePlan));
 
 // Add-ons catalog
-app.get('/api/webapp/admin/add-ons', adminGuard, asyncHandler(webappAdminController.listAddOns));
+app.get('/api/webapp/admin/add-ons',      adminGuard, asyncHandler(planBuilderController.listAddOns));
 // Plan add-on mappings
 app.get('/api/webapp/admin/plans/:planId/add-ons', adminGuard, asyncHandler(webappAdminController.getPlanAddOns));
 app.put('/api/webapp/admin/plans/:planId/add-ons', adminGuard, asyncHandler(webappAdminController.setPlanAddOns));

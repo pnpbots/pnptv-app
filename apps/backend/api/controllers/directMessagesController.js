@@ -260,10 +260,12 @@ async function sendMessage(req, res) {
       isMine: true
     };
 
-    // Increment free-tier DM counter
-    const tier = (req.session?.user?.tier || 'free').toLowerCase();
+    // Increment free-tier DM counter (users without pnp-member entitlement are limited)
     const role = req.session?.user?.role || '';
-    if (tier === 'free' && role !== 'admin' && role !== 'superadmin') {
+    const { hasEntitlement } = require('../../bot/services/accessService');
+    const dmHasMembership = role === 'admin' || role === 'superadmin' ||
+      await hasEntitlement(String(req.session.user.id), 'pnp-member');
+    if (!dmHasMembership) {
       try {
         const redis = getRedis();
         const today = new Date().toISOString().slice(0, 10);
