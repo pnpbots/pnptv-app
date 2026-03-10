@@ -117,8 +117,9 @@ export async function translateText(
   targetLang: string
 ): Promise<string | null> {
   if (!text.trim()) return null;
-  const lang = targetLang || "en";
-  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=autodetect|${lang}`;
+  const ALLOWED_LANGS = new Set(["en","es","pt","zh","zhTW","fr","de","th","it","tr","ru","nl","vi","ja","id","ar"]);
+  const lang = ALLOWED_LANGS.has(targetLang) ? targetLang : "en";
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=autodetect|${encodeURIComponent(lang)}`;
   try {
     const res = await fetch(url);
     const data = await res.json();

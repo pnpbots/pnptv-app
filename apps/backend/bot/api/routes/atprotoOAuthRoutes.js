@@ -7,6 +7,7 @@ const { Agent } = require('@atproto/api');
 const logger = require('../../../utils/logger');
 const atproto = require('../../services/atprotoOAuthService');
 const { enforceDefaultFollows } = require('../../services/followService');
+const authGuard = require('../middleware/authGuard');
 
 const router = express.Router();
 
@@ -289,7 +290,7 @@ router.get('/oauth/callback', callbackLimiter, async (req, res) => {
 // POST /oauth/logout  — Revoke ATProto session
 // ---------------------------------------------------------------------------
 
-router.post('/oauth/logout', async (req, res) => {
+router.post('/oauth/logout', authGuard, async (req, res) => {
   const did = req.session?.user?.atproto_did;
 
   if (!did) {
@@ -345,7 +346,7 @@ router.post('/oauth/logout', async (req, res) => {
 // GET /oauth/session  — Get current ATProto session status
 // ---------------------------------------------------------------------------
 
-router.get('/oauth/session', async (req, res) => {
+router.get('/oauth/session', authGuard, async (req, res) => {
   const user = req.session?.user;
 
   if (!user?.atproto_did) {

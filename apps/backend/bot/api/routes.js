@@ -895,14 +895,38 @@ const postMediaFileFilter = (req, file, cb) => {
   cb(new Error('Unsupported file type. Supported: images (jpg/png/webp/gif/heic/avif) and videos (mp4/webm/mov)'));
 };
 
-// Helper: check if session user is an active creator (check session first, fallback to role)
-const isActiveCreator = (req) => {
-  const u = req.session?.user;
-  if (!u) return false;
-  if (u.creator_status === 'active') return true;
-  // Admins/superadmins also get creator-tier limits
-  if (u.role === 'admin' || u.role === 'superadmin') return true;
-  return false;
+// CRIT-4 FIX: Async DB middleware that resolves real-time creator status before
+// multer runs. Caches result on req.resolvedCreatorActive so the sync helpers below
+// can read it without touching session data.
+const attachCreatorStatus = async (req, res, next) => {
+  try {
+    const userId = req.session?.user?.id;
+    if (!userId) {
+      req.resolvedCreatorActive = false;
+      return next();
+    }
+    // Admins always get creator limits without a DB round-trip
+    const role = req.session.user.role || '';
+    if (role === 'admin' || role === 'superadmin') {
+      req.resolvedCreatorActive = true;
+      return next();
+    }
+    const { rows } = await getPool().query(
+      'SELECT creator_status FROM users WHERE id = $1 LIMIT 1',
+      [userId]
+    );
+    req.resolvedCreatorActive = rows[0]?.creator_status === 'active';
+    // Keep session in sync so subsequent non-upload requests stay accurate
+    if (req.session.user.creator_status !== rows[0]?.creator_status) {
+      req.session.user.creator_status = rows[0]?.creator_status || null;
+    }
+    return next();
+  } catch (err) {
+    logger.error('attachCreatorStatus error', err);
+    // Fail safe: deny creator limits on error rather than grant them
+    req.resolvedCreatorActive = false;
+    return next();
+  }
 };
 
 // Disk storage for large uploads (memory can't handle 3 GB)
@@ -911,10 +935,11 @@ const postMediaDiskStorage = multer.diskStorage({
   filename: (req, file, cb) => cb(null, `upload-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`),
 });
 
-// Dynamic single-file upload middleware — picks limit based on creator status
+// Dynamic single-file upload middleware — picks limit based on DB-verified creator status
 const postMediaUploadMiddleware = (req, res, next) => {
-  const limit = isActiveCreator(req) ? UPLOAD_LIMIT_CREATOR : UPLOAD_LIMIT_REGULAR;
-  const limitLabel = isActiveCreator(req) ? '3 GB' : '512 MB';
+  const isCreator = req.resolvedCreatorActive === true;
+  const limit = isCreator ? UPLOAD_LIMIT_CREATOR : UPLOAD_LIMIT_REGULAR;
+  const limitLabel = isCreator ? '3 GB' : '512 MB';
   const upload = multer({
     storage: postMediaDiskStorage,
     limits: { fileSize: limit },
@@ -927,10 +952,11 @@ const postMediaUploadMiddleware = (req, res, next) => {
   });
 };
 
-// Dynamic multi-file upload middleware
+// Dynamic multi-file upload middleware — picks limit based on DB-verified creator status
 const postMultiMediaUploadMiddleware = (req, res, next) => {
-  const limit = isActiveCreator(req) ? UPLOAD_LIMIT_CREATOR : UPLOAD_LIMIT_REGULAR;
-  const limitLabel = isActiveCreator(req) ? '3 GB' : '512 MB';
+  const isCreator = req.resolvedCreatorActive === true;
+  const limit = isCreator ? UPLOAD_LIMIT_CREATOR : UPLOAD_LIMIT_REGULAR;
+  const limitLabel = isCreator ? '3 GB' : '512 MB';
   const upload = multer({
     storage: postMediaDiskStorage,
     limits: { fileSize: limit, files: 4 },
@@ -3991,8 +4017,8 @@ app.get('/api/webapp/social/wof-feed', asyncHandler(socialController.getWofFeed)
 app.get('/api/webapp/social/wall/:userId', asyncHandler(socialController.getWall));
 app.get('/api/webapp/social/profile/:userId', asyncHandler(socialController.getPublicProfile));
 app.post('/api/webapp/social/posts', requireSessionAuth, socialPostLimiter, asyncHandler(socialController.createPost));
-app.post('/api/webapp/social/posts/with-media', requireSessionAuth, socialPostLimiter, uploadLimiter, postMediaUploadMiddleware, asyncHandler(socialController.createPostWithMedia));
-app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, socialPostLimiter, uploadLimiter, postMultiMediaUploadMiddleware, asyncHandler(socialController.createPostWithMultiMedia));
+app.post('/api/webapp/social/posts/with-media', requireSessionAuth, socialPostLimiter, uploadLimiter, attachCreatorStatus, postMediaUploadMiddleware, asyncHandler(socialController.createPostWithMedia));
+app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, socialPostLimiter, uploadLimiter, attachCreatorStatus, postMultiMediaUploadMiddleware, asyncHandler(socialController.createPostWithMultiMedia));
 app.post('/api/webapp/social/posts/bulk-videos', requireSessionAuth, bulkVideoLimiter, uploadPerformerVideos, asyncHandler(socialController.bulkCreateVideos));
 app.post('/api/webapp/social/posts/:postId/like', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.toggleLike));
 app.delete('/api/webapp/social/posts/:postId', requireSessionAuth, asyncHandler(socialController.deletePost));
@@ -4011,6 +4037,9 @@ app.post('/api/admin/social/sync-content', adminGuard, asyncHandler(contentFeedS
 
 // Users search
 app.get('/api/webapp/users/search', asyncHandler(usersController.searchUsers));
+
+// Account self-deletion
+app.delete('/api/webapp/account', requireSessionAuth, asyncHandler(usersController.deleteMyAccount));
 
 // ==========================================
 // SERVICE PROXY ENDPOINTS (Media, Live, Social)
@@ -4194,7 +4223,7 @@ async function getPdsAccessToken() {
   return _pdsAccessJwt;
 }
 
-app.get('/api/proxy/social/feed', asyncHandler(async (req, res) => {
+app.get('/api/proxy/social/feed', requireSessionAuth, asyncHandler(async (req, res) => {
   try {
     const pdsUrl = process.env.BLUESKY_PDS_URL || 'http://bluesky-pds:3000';
     const pdsHandle = process.env.PDS_ADMIN_HANDLE || '';

@@ -752,7 +752,7 @@ export function updateLanguage(lang: string): Promise<{ success: boolean }> {
 }
 
 export function deleteAccount(): Promise<{ success: boolean }> {
-  return request("/api/webapp/profile/delete", { method: "DELETE" });
+  return request("/api/webapp/account", { method: "DELETE" });
 }
 
 export async function uploadAvatar(file: File): Promise<{ success: boolean; photoUrl: string }> {

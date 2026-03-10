@@ -16,6 +16,94 @@ const X_TOKEN_EXPIRY_BUFFER_MS = 2 * 60 * 1000;
 const XOAuthService = require('./xOAuthService');
 const X_MEDIA_CHUNK_SIZE = 1 * 1024 * 1024; // 1MB (v2 limit)
 
+// ---------------------------------------------------------------------------
+// SSRF Protection — URL validation for outbound media downloads
+// ---------------------------------------------------------------------------
+
+const net = require('net');
+
+/**
+ * Validates a URL against SSRF attack vectors.
+ * Throws an error if the URL is not safe to fetch.
+ *
+ * Rules:
+ *   1. Only https:// scheme allowed.
+ *   2. Hostname must not be `localhost` or any loopback variant.
+ *   3. Hostname must not resolve to a private/link-local IP range:
+ *        127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12,
+ *        192.168.0.0/16, 169.254.0.0/16 (link-local), ::1 (IPv6 loopback).
+ */
+function validateUrlForSsrf(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error('URL inválida para descarga de media');
+  }
+
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Solo se permiten URLs HTTPS para descarga de media');
+  }
+
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, ''); // strip IPv6 brackets
+
+  // Block localhost by name
+  if (hostname === 'localhost' || hostname === 'ip6-localhost' || hostname === 'ip6-loopback') {
+    throw new Error('URL de media apunta a un destino privado no permitido');
+  }
+
+  // If hostname is a literal IP address, validate it against private ranges
+  if (net.isIP(hostname)) {
+    if (isPrivateIp(hostname)) {
+      throw new Error('URL de media apunta a un destino privado no permitido');
+    }
+  }
+  // Note: DNS-based SSRF (hostname that resolves to private IP) is not preventable
+  // purely at parse time without a DNS pre-resolution step. The Axios timeout and
+  // the explicit block of literal IPs + localhost covers the primary vectors for
+  // this application's threat model. A full solution would require a custom
+  // Axios adapter with DNS pre-resolution — out of scope for this patch.
+}
+
+/**
+ * Returns true if the given IP address (v4 or v6) falls within a private,
+ * loopback, or link-local range.
+ */
+function isPrivateIp(ip) {
+  if (net.isIPv4(ip)) {
+    const parts = ip.split('.').map(Number);
+    const [a, b, c] = parts; // eslint-disable-line no-unused-vars
+
+    // 127.0.0.0/8 — loopback
+    if (a === 127) return true;
+    // 10.0.0.0/8 — private
+    if (a === 10) return true;
+    // 172.16.0.0/12 — private (172.16.x.x – 172.31.x.x)
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    // 192.168.0.0/16 — private
+    if (a === 192 && b === 168) return true;
+    // 169.254.0.0/16 — link-local (APIPA / cloud metadata)
+    if (a === 169 && b === 254) return true;
+    // 0.0.0.0/8 — "this" network
+    if (a === 0) return true;
+    return false;
+  }
+
+  if (net.isIPv6(ip)) {
+    const lower = ip.toLowerCase();
+    // ::1 — loopback
+    if (lower === '::1' || lower === '0:0:0:0:0:0:0:1') return true;
+    // fc00::/7 — unique local (fd...)
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return true;
+    // fe80::/10 — link-local
+    if (lower.startsWith('fe80') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true;
+    return false;
+  }
+
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Detect MIME type from file magic bytes
 function detectMimeType(filePath) {
   const fd = fs.openSync(filePath, 'r');
@@ -374,6 +462,9 @@ class XPostService {
     if (!resolvedUrl) {
       throw new Error('Media URL inválida');
     }
+
+    // SSRF guard — reject private/local destinations and non-HTTPS schemes
+    validateUrlForSsrf(resolvedUrl);
 
     const tempName = `xmedia_${Date.now()}_${crypto.randomUUID()}`;
     const tempPath = path.join(os.tmpdir(), tempName);

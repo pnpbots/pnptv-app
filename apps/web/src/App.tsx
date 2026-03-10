@@ -5,6 +5,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import { NotificationProvider } from "@/hooks/useNotifications";
 import { MusicPlayerProvider } from "@/hooks/useMusicPlayer";
 import { router } from "@/router";
+import { useI18n } from "@/lib/i18n";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
@@ -114,8 +115,17 @@ function useScreenCaptureGuard() {
   }, []);
 }
 
+function useDocumentDir() {
+  const { lang } = useI18n();
+  useEffect(() => {
+    document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+    document.documentElement.lang = lang;
+  }, [lang]);
+}
+
 function AppOverlays() {
   const { isAuthenticated } = useAuth();
+  useDocumentDir();
   return (
     <>
       <PWAInstallBanner />

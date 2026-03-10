@@ -1,6 +1,7 @@
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const UserModel = require('../../../models/userModel');
+const emailService = require('../../../services/emailService');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -53,4 +54,53 @@ const searchUsers = async (req, res) => {
   }
 };
 
-module.exports = { searchUsers };
+// Delete own account (anonymise + deactivate, then fire confirmation email)
+const deleteMyAccount = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  try {
+    const { rows } = await query(
+      `SELECT email, first_name, language FROM users WHERE id = $1`,
+      [user.id]
+    );
+    const record = rows[0];
+    if (!record) return res.status(404).json({ error: 'User not found' });
+
+    const anonUsername = `deleted_${Date.now()}`;
+    await query(
+      `UPDATE users SET
+        username = $2,
+        first_name = 'Deleted',
+        last_name = 'User',
+        email = NULL,
+        photo_file_id = NULL,
+        photo_url = NULL,
+        bio = NULL,
+        location = NULL,
+        date_of_birth = NULL,
+        is_active = false
+      WHERE id = $1`,
+      [user.id, anonUsername]
+    );
+
+    // Destroy session
+    if (req.session) {
+      req.session.destroy(() => {});
+    }
+
+    // Send confirmation email (fire-and-forget)
+    if (record.email) {
+      emailService.sendAccountDeletionConfirmationEmail({
+        email: record.email,
+        userName: record.first_name || 'Member',
+        userLanguage: record.language || 'en',
+      }).catch(() => {});
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('deleteMyAccount error', err);
+    return res.status(500).json({ error: 'Failed to delete account' });
+  }
+};
+
+module.exports = { searchUsers, deleteMyAccount };

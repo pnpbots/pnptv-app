@@ -19,6 +19,7 @@ const LANG_OPTIONS: { code: Lang; flag: string; label: string }[] = [
   { code: "vi", flag: "\uD83C\uDDFB\uD83C\uDDF3", label: "Ti\u1EBFng Vi\u1EC7t" },
   { code: "id", flag: "\uD83C\uDDEE\uD83C\uDDE9", label: "Indonesia" },
   { code: "ar", flag: "\uD83C\uDDF8\uD83C\uDDE6", label: "\u0627\u0644\u0639\u0631\u0628\u064A\u0629" },
+  { code: "zhTW", flag: "\uD83C\uDDF9\uD83C\uDDFC", label: "\u4E2D\u6587\uFF08\u7E41\uFF09" },
 ];
 
 interface LanguageSelectorProps {

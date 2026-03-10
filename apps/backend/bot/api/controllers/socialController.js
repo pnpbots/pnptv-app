@@ -102,6 +102,45 @@ const getWofFeed = async (req, res) => {
   }
 };
 
+// ── Socket emission helper (CRIT-1: exclusive posts must not broadcast to all) ─
+
+/**
+ * Emit feed:new_post to the correct audience.
+ * - Non-exclusive posts: broadcast to all connected clients.
+ * - Exclusive posts: emit only to the post author and active subscribers of
+ *   that creator, using each user's personal Socket.IO room `user:<userId>`.
+ *
+ * We intentionally do NOT await the DB query on the hot path — a fire-and-forget
+ * Promise is sufficient because WebSocket delivery is best-effort anyway.
+ */
+function emitNewPost(io, post, authorId) {
+  if (!io) return;
+
+  const postTier = (post.content_tier || 'free').toLowerCase();
+  const isExclusive = post.is_exclusive === true || postTier === 'prime';
+
+  if (!isExclusive) {
+    io.emit('feed:new_post', post);
+    return;
+  }
+
+  // Exclusive: resolve subscribers asynchronously, then emit to each personal room
+  dbQuery(
+    `SELECT subscriber_id FROM creator_subscriptions
+     WHERE creator_id = $1 AND status = 'active' AND expires_at > NOW()`,
+    [authorId]
+  ).then(({ rows }) => {
+    const recipientIds = new Set(rows.map(r => String(r.subscriber_id)));
+    // Always include the author so they can see their own post in real time
+    recipientIds.add(String(authorId));
+    for (const uid of recipientIds) {
+      io.to(`user:${uid}`).emit('feed:new_post', post);
+    }
+  }).catch((err) => {
+    logger.error('emitNewPost: failed to resolve creator subscribers', { authorId, err });
+  });
+}
+
 // ── Create Post ───────────────────────────────────────────────────────────────
 
 const createPost = async (req, res) => {
@@ -126,6 +165,24 @@ const createPost = async (req, res) => {
       const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
       if (!parentCheck.rows.length) return res.status(404).json({ error: 'Parent post not found' });
       if (parentCheck.rows[0].reply_to_id !== null) return res.status(400).json({ error: 'Cannot reply to a reply' });
+
+      // CRIT-3: Bidirectional block check — neither party may reply if either has blocked the other
+      const parentAuthorId = parentCheck.rows[0].user_id;
+      if (String(parentAuthorId) !== String(user.id)) {
+        const [replierBlockedByAuthor, authorBlockedByReplier] = await Promise.all([
+          dbQuery(
+            `SELECT 1 FROM users WHERE id = $1 AND blocked @> ARRAY[$2::text] LIMIT 1`,
+            [parentAuthorId, String(user.id)]
+          ),
+          dbQuery(
+            `SELECT 1 FROM users WHERE id = $1 AND blocked @> ARRAY[$2::text] LIMIT 1`,
+            [user.id, String(parentAuthorId)]
+          ),
+        ]);
+        if (replierBlockedByAuthor.rows.length > 0 || authorBlockedByReplier.rows.length > 0) {
+          return res.status(403).json({ error: 'Cannot reply to this post', code: 'BLOCKED' });
+        }
+      }
     }
 
     // Validate creator status for exclusive posts
@@ -169,7 +226,7 @@ const createPost = async (req, res) => {
     };
 
     const io = req.app.get('io');
-    if (io) io.emit('feed:new_post', fullPost);
+    emitNewPost(io, fullPost, user.id);
 
     return res.json({ success: true, post: fullPost });
   } catch (err) {
@@ -317,6 +374,23 @@ const createPostWithMedia = async (req, res) => {
       const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
       if (!parentCheck.rows.length) return res.status(404).json({ error: 'Parent post not found' });
       if (parentCheck.rows[0].reply_to_id !== null) return res.status(400).json({ error: 'Cannot reply to a reply' });
+
+      // CRIT-3: Bidirectional block check
+      const parentAuthorId = parentCheck.rows[0].user_id;
+      if (String(parentAuthorId) !== String(user.id)) {
+        const replierBlockedByAuthor = await dbQuery(
+          `SELECT 1 FROM users WHERE id = $1 AND blocked @> ARRAY[$2::text] LIMIT 1`,
+          [parentAuthorId, String(user.id)]
+        );
+        const authorBlockedByReplier = await dbQuery(
+          `SELECT 1 FROM users WHERE id = $1 AND blocked @> ARRAY[$2::text] LIMIT 1`,
+          [user.id, String(parentAuthorId)]
+        );
+        if (replierBlockedByAuthor.rows.length > 0 || authorBlockedByReplier.rows.length > 0) {
+          if (finalFilePath) await fs.unlink(finalFilePath).catch(() => {});
+          return res.status(403).json({ error: 'Cannot reply to this post', code: 'BLOCKED' });
+        }
+      }
     }
 
     // Validate creator status for exclusive posts
@@ -453,7 +527,7 @@ const createPostWithMedia = async (req, res) => {
     };
 
     const io = req.app.get('io');
-    if (io) io.emit('feed:new_post', fullPost);
+    emitNewPost(io, fullPost, user.id);
 
     return res.json({ success: true, post: fullPost });
   } catch (err) {
@@ -513,6 +587,25 @@ const createPostWithMultiMedia = async (req, res) => {
       const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
       if (!parentCheck.rows.length) return res.status(404).json({ error: 'Parent post not found' });
       if (parentCheck.rows[0].reply_to_id !== null) return res.status(400).json({ error: 'Cannot reply to a reply' });
+
+      // CRIT-3: Bidirectional block check
+      const parentAuthorId = parentCheck.rows[0].user_id;
+      if (String(parentAuthorId) !== String(user.id)) {
+        const [replierBlockedByAuthor, authorBlockedByReplier] = await Promise.all([
+          dbQuery(
+            `SELECT 1 FROM users WHERE id = $1 AND blocked @> ARRAY[$2::text] LIMIT 1`,
+            [parentAuthorId, String(user.id)]
+          ),
+          dbQuery(
+            `SELECT 1 FROM users WHERE id = $1 AND blocked @> ARRAY[$2::text] LIMIT 1`,
+            [user.id, String(parentAuthorId)]
+          ),
+        ]);
+        if (replierBlockedByAuthor.rows.length > 0 || authorBlockedByReplier.rows.length > 0) {
+          await Promise.all(writtenFilePaths.map(p => fs.unlink(p).catch(() => {})));
+          return res.status(403).json({ error: 'Cannot reply to this post', code: 'BLOCKED' });
+        }
+      }
     }
 
     if (isExclusive === 'true' || isExclusive === true) {
@@ -659,7 +752,7 @@ const createPostWithMultiMedia = async (req, res) => {
     };
 
     const io = req.app.get('io');
-    if (io) io.emit('feed:new_post', fullPost);
+    emitNewPost(io, fullPost, user.id);
 
     return res.json({ success: true, post: fullPost });
   } catch (err) {
@@ -930,7 +1023,7 @@ const bulkCreateVideos = async (req, res) => {
       createdPosts.push(fullPost);
 
       const io = req.app.get('io');
-      if (io) io.emit('feed:new_post', fullPost);
+      emitNewPost(io, fullPost, user.id);
     } catch (err) {
       logger.error('bulkCreateVideos: error processing file', { userId: user.id, index: i, err });
       await fs.unlink(file.path).catch(() => {});

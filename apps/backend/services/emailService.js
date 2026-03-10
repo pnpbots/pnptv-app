@@ -187,6 +187,21 @@ class EmailService {
     }
 
     /**
+     * Send account deletion confirmation email
+     * @param {Object} data - { email, userName, userLanguage }
+     * @returns {Promise<Object>} Send result
+     */
+    async sendAccountDeletionConfirmationEmail(data) {
+        const { email, userName = 'Member', userLanguage = 'en' } = data;
+        const isEs = userLanguage === 'es';
+        const subject = isEs
+            ? 'Tu cuenta de PNPtv! ha sido eliminada'
+            : 'Your PNPtv! account has been deleted';
+        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head><body style="margin:0;padding:0;background:#0a0a0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"><table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0f;padding:40px 20px;"><tr><td align="center"><table width="600" cellpadding="0" cellspacing="0" style="background:#13131a;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);"><tr><td style="background:linear-gradient(135deg,#1a0a0a,#13131a);padding:32px;text-align:center;"><p style="margin:0;font-size:28px;font-weight:800;background:linear-gradient(135deg,#5ED1C4,#D4007A);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">PNPtv!</p></td></tr><tr><td style="padding:32px;"><h1 style="color:#fff;font-size:20px;font-weight:700;margin:0 0 16px;">${isEs ? 'Tu cuenta ha sido eliminada' : 'Your account has been deleted'}</h1><p style="color:rgba(255,255,255,0.7);font-size:14px;line-height:1.6;margin:0 0 16px;">${isEs ? `Hola ${userName},` : `Hi ${userName},`}</p><p style="color:rgba(255,255,255,0.7);font-size:14px;line-height:1.6;margin:0 0 16px;">${isEs ? 'Hemos procesado tu solicitud. Tu cuenta de PNPtv! y todos los datos asociados han sido eliminados permanentemente de nuestros servidores.' : 'We have processed your request. Your PNPtv! account and all associated data have been permanently deleted from our servers.'}</p><p style="color:rgba(255,255,255,0.7);font-size:14px;line-height:1.6;margin:0 0 24px;">${isEs ? 'Si tienes alguna pregunta, puedes contactarnos en support@pnptv.app.' : 'If you have any questions, you can reach us at support@pnptv.app.'}</p><p style="color:rgba(255,255,255,0.4);font-size:12px;margin:0;">${isEs ? '— El equipo de PNPtv!' : '— The PNPtv! Team'}</p></td></tr><tr><td style="padding:16px 32px;border-top:1px solid rgba(255,255,255,0.06);text-align:center;"><p style="color:rgba(255,255,255,0.3);font-size:11px;margin:0;">&copy; ${new Date().getFullYear()} PNPtv! &middot; support@pnptv.app</p></td></tr></table></td></tr></table></body></html>`;
+        return await this.send({ to: email, subject, html });
+    }
+
+    /**
      * Send broadcast email to user
      * @param {Object} data - Broadcast data
      * @returns {Promise<Object>} Send result

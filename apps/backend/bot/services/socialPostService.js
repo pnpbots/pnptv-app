@@ -448,14 +448,24 @@ class SocialPostService {
 
   static async getReplies(postId, viewerId, cursor) {
     const cursorId = cursor ? parseInt(cursor, 10) : null;
+    // CRIT-2 FIX: Exclude replies from users the viewer has blocked and from
+    // users who have blocked the viewer, using the users.blocked text[] column.
+    // $1 = viewerId, $2 = postId, $3 (optional) = cursorId
     const params = cursorId ? [viewerId, postId, cursorId] : [viewerId, postId];
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.likes_count, sp.replies_count, sp.created_at,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
               EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me
-       FROM social_posts sp JOIN users u ON sp.user_id = u.id
+       FROM social_posts sp
+       JOIN users u ON sp.user_id = u.id
+       -- Exclude replies where the viewer has blocked the reply author
+       LEFT JOIN users viewer ON viewer.id = $1::bigint
        WHERE sp.reply_to_id = $2 AND sp.is_deleted = false
+         -- Filter: viewer has not blocked the reply author
+         AND NOT (viewer.blocked @> ARRAY[u.id::text])
+         -- Filter: reply author has not blocked the viewer
+         AND NOT (u.blocked @> ARRAY[$1::text])
          ${cursorId ? 'AND sp.id > $3' : ''}
        ORDER BY sp.id ASC LIMIT 20`,
       params
