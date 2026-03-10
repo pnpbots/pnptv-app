@@ -73,16 +73,26 @@ export default function Stream() {
           const performer = (perfData.performers || []).find(
             (p) => p.id === streamId || (p.userId && String(p.userId) === streamId)
           );
-          if (performer && performer.isLive && performer.hlsUrl) {
-            const syntheticStream: LiveStream = {
-              id: performer.id,
-              name: performer.displayName,
-              description: performer.bio || "",
-              hlsUrl: performer.hlsUrl,
-              isLive: true,
-            };
-            setStream(syntheticStream);
-            setError(null);
+          if (performer && performer.isLive) {
+            // Use performer hlsUrl if available; fall back to constructing it
+            // from the streams list or the known public URL pattern.
+            const hlsUrl =
+              performer.hlsUrl ||
+              (stream ? stream.hlsUrl : null) ||
+              null;
+            if (hlsUrl) {
+              const syntheticStream: LiveStream = {
+                id: performer.id,
+                name: performer.displayName,
+                description: performer.bio || "",
+                hlsUrl,
+                isLive: true,
+              };
+              setStream(syntheticStream);
+              setError(null);
+            } else {
+              setError(t.live.streamNotFound);
+            }
           } else {
             setError(t.live.streamNotFound);
           }

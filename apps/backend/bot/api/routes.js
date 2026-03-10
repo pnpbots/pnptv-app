@@ -63,6 +63,9 @@ const atprotoOAuthRoutes = require('./routes/atprotoOAuthRoutes');
 // Community Room (Haus) — 24/7 open video room powered by JaaS
 const communityRoomController = require('./controllers/communityRoomController');
 
+// JaaS token generation (viewer, moderator, live streaming)
+const jaasController = require('./controllers/jaasController');
+
 // ATProto controller for profile fetching, unlinking, and cross-posting
 const atprotoController = require('./controllers/atprotoController');
 
@@ -5134,6 +5137,12 @@ app.get('/api/community-room/leaderboard', authenticateUser, asyncHandler(commun
 app.post('/api/community-room/moderation/mute', verifyAdminJWT, asyncHandler(communityRoomController.muteUser));
 app.post('/api/community-room/moderation/remove', verifyAdminJWT, asyncHandler(communityRoomController.removeUser));
 app.post('/api/community-room/moderation/clear-chat', verifyAdminJWT, asyncHandler(communityRoomController.clearChat));
+
+// ── JaaS Token Endpoints ────────────────────────────────────────────────────
+app.get('/api/jaas/status', asyncHandler(jaasController.getStatus));
+app.post('/api/jaas/token', requireSessionAuth, asyncHandler(jaasController.generateToken));
+app.post('/api/jaas/moderator-token', requireSessionAuth, asyncHandler(jaasController.generateModeratorToken));
+app.post('/api/jaas/live-token', requireSessionAuth, asyncHandler(jaasController.generateLiveToken));
 
 // ==========================================
 // ATProto / Bluesky OAuth Routes (PUBLIC — no session required)

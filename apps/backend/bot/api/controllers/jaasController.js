@@ -108,13 +108,16 @@ const generateModeratorToken = async (req, res) => {
       });
     }
 
-    // Check if user is admin or has special privileges
+    // Check if user is admin, active creator, or assigned performer
     const user = await UserService.getById(userId);
-    if (!user || (user.role !== 'admin' && user.role !== 'superadmin')) {
+    const isAdmin = user && (user.role === 'admin' || user.role === 'superadmin');
+    const isCreator = user && user.creator_status === 'active';
+    const hasChannel = user && user.live_channel;
+    if (!isAdmin && !isCreator && !hasChannel) {
       logger.warn('Unauthorized moderator token request', { userId });
       return res.status(403).json({
         success: false,
-        error: 'Only admins can request moderator tokens'
+        error: 'Only streamers and admins can request moderator tokens'
       });
     }
 
@@ -150,6 +153,72 @@ const generateModeratorToken = async (req, res) => {
 };
 
 /**
+ * Generate JaaS live streaming token for assigned channel
+ * POST /api/jaas/live-token
+ */
+const generateLiveToken = async (req, res) => {
+  try {
+    const sessionUser = req.session?.user || req.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const userId = String(sessionUser.id);
+
+    if (!JaasService.isConfigured()) {
+      return res.status(503).json({ success: false, error: 'Video service temporarily unavailable' });
+    }
+
+    const user = await UserService.getById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+    const isCreator = user.creator_status === 'active';
+    const hasChannel = !!user.live_channel;
+    if (!isAdmin && !isCreator && !hasChannel) {
+      return res.status(403).json({ success: false, error: 'Not authorized to livestream' });
+    }
+
+    const roomName = user.live_channel || `pnptv-live-${userId}`;
+    const displayName = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || 'Streamer';
+    const avatarUrl = user.photo_file_id
+      ? (user.photo_file_id.startsWith('/') ? user.photo_file_id : '/' + user.photo_file_id)
+      : '';
+
+    const token = JaasService.generateToken({
+      roomName,
+      userId,
+      userName: displayName,
+      userEmail: user.email || '',
+      userAvatar: avatarUrl,
+      isModerator: true,
+      enableLivestreaming: true,
+      enableRecording: false,
+      enableTranscription: false,
+      expiresIn: '4h'
+    });
+
+    const meetingUrl = JaasService.generateMeetingUrl(roomName, token);
+
+    logger.info('JaaS live streaming token generated', { userId, roomName, displayName });
+
+    res.json({
+      success: true,
+      token,
+      roomName,
+      meetingUrl,
+      domain: '8x8.vc',
+      role: 'moderator',
+      features: { livestreaming: true, recording: false }
+    });
+  } catch (error) {
+    logger.error('Error generating live token:', error);
+    res.status(500).json({ success: false, error: 'Failed to generate live streaming token' });
+  }
+};
+
+/**
  * Check JaaS configuration status
  * GET /api/jaas/status
  */
@@ -178,5 +247,6 @@ const getStatus = async (req, res) => {
 module.exports = {
   generateToken,
   generateModeratorToken,
+  generateLiveToken,
   getStatus
 };

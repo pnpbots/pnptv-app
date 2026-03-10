@@ -3332,3 +3332,20 @@ export function getCommunityRoomStats(): Promise<{
 }> {
   return request("/api/community-room/stats");
 }
+
+// ============================================================================
+// JaaS Live Streaming Token
+// ============================================================================
+
+export function getJaasLiveToken(): Promise<{
+  success: boolean;
+  token: string;
+  roomName: string;
+  meetingUrl: string;
+  domain: string;
+  role: string;
+  features: { livestreaming: boolean; recording: boolean };
+  error?: string;
+}> {
+  return request("/api/jaas/live-token", { method: "POST" });
+}

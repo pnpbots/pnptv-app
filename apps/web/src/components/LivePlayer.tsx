@@ -19,14 +19,26 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !src) return;
+    if (!video || !src) {
+      // No source provided — show offline instead of infinite spinner
+      if (!src) setStatus("offline");
+      return;
+    }
 
+    setStatus("loading");
     let hls: Hls | null = null;
 
     if (Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
+        // Retry faster on live streams to handle brief RTMP reconnects
+        manifestLoadingMaxRetry: 6,
+        manifestLoadingRetryDelay: 2000,
+        levelLoadingMaxRetry: 6,
+        levelLoadingRetryDelay: 2000,
+        fragLoadingMaxRetry: 6,
+        fragLoadingRetryDelay: 2000,
       });
 
       hls.loadSource(src);
@@ -38,16 +50,25 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
       });
 
       hls.on(Hls.Events.ERROR, (_, data) => {
+        console.warn("[LivePlayer] HLS error:", data.type, data.details, data.fatal ? "(FATAL)" : "");
         if (data.fatal) {
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            setStatus("offline");
+            // Try to recover once before showing offline
+            console.warn("[LivePlayer] Fatal network error, attempting recovery…");
+            hls!.startLoad();
+            // If recovery fails, the next fatal error will set offline
+            setTimeout(() => {
+              if (hls && hls.media && hls.media.readyState === 0) {
+                setStatus("offline");
+              }
+            }, 8000);
           } else {
             setStatus("error");
           }
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Fix #16: store listeners so we can remove them in cleanup (prevents memory leak)
+      // Safari native HLS
       const onMetadata = () => {
         setStatus("live");
         video.play().catch(() => {});

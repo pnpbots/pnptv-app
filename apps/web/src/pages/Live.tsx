@@ -241,8 +241,15 @@ export default function Live() {
     handleLoadWalletHistory();
   };
 
-  // Match a performer to their live stream by userId, display name, or slug
+  // Match a performer to their live stream by hlsUrl (injected by backend),
+  // userId, display name, or slug. The backend sets isLive + hlsUrl on the
+  // performer object when their assigned Restreamer channel is running.
   const findLiveStream = (p: FeaturedPerformer): LiveStream | undefined => {
+    // Fast path: backend already injected hlsUrl — find the matching stream
+    if (p.hlsUrl) {
+      const match = liveStreams.find((s) => s.hlsUrl === p.hlsUrl);
+      if (match) return match;
+    }
     const name = p.displayName.toLowerCase().split(/[^a-z]/)[0];
     const slug = p.slug?.toLowerCase();
     const userId = p.userId ? String(p.userId) : null;
@@ -251,8 +258,8 @@ export default function Live() {
       const sId = s.id.toLowerCase();
       return (
         (userId && (sId.includes(userId) || sName.includes(userId))) ||
-        (name && (sName.includes(name) || sId.includes(name))) ||
-        (slug && (sName.includes(slug) || sId.includes(slug)))
+        (name && name.length >= 3 && (sName.includes(name) || sId.includes(name))) ||
+        (slug && slug.length >= 3 && (sName.includes(slug) || sId.includes(slug)))
       );
     });
   };
