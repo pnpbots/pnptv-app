@@ -699,11 +699,6 @@ export default function StreamerDashboard({
     });
   }, [state.selectedPreset.id, state.fps, state.autoReconnect, state.lowLatency, state.hardwareAccel, saveSettings]);
 
-  // Auto-save local record + filter settings when they change
-  useEffect(() => {
-    saveSettings({ localRecord: localRecordEnabled });
-  }, [localRecordEnabled, saveSettings]);
-
   useEffect(() => {
     saveSettings(filterSettings);
   }, [filterSettings, saveSettings]);
@@ -715,6 +710,11 @@ export default function StreamerDashboard({
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
   const [bitrateSamples, setBitrateSamples] = useState<number[]>([]);
   const [localRecordEnabled, setLocalRecordEnabled] = useState(false);
+
+  // Auto-save local record settings when they change
+  useEffect(() => {
+    saveSettings({ localRecord: localRecordEnabled });
+  }, [localRecordEnabled, saveSettings]);
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
   const [cameraIndex, setCameraIndex] = useState(0);
 
@@ -761,9 +761,11 @@ export default function StreamerDashboard({
     }
   }, []);
 
-  // ── Start preview on mount ────────────────────────────────────────────────
+  // ── Start preview on mount (skip when using JaaS — it manages its own camera) ──
   useEffect(() => {
     if (!navigator.mediaDevices?.getUserMedia) return;
+    // Don't grab camera when JaaS is active — JaaS handles its own media
+    if (jaasUrl) return;
 
     const preset = state.selectedPreset;
     navigator.mediaDevices
@@ -783,7 +785,8 @@ export default function StreamerDashboard({
         enumerateCameras();
       })
       .catch(() => {
-        setStreamError("Camera or microphone permission denied. Check your browser settings.");
+        // Non-fatal when JaaS is available — camera access is optional for preview
+        setStreamError(null);
       });
 
     return () => {

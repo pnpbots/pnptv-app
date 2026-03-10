@@ -1563,9 +1563,12 @@ export default function Profile() {
                     key={post.id}
                     post={post}
                     isOwn={String(user?.id) === post.author_id}
+                    isAdmin={user?.role === "admin"}
                     isOwnProfile={isOwnProfile}
                     isSubscribed={isSubscribed}
                     creatorPriceUsd={profile.creatorPriceUsd}
+                    currentUserId={String(user?.id || "")}
+                    userLang={user?.language || "en"}
                     onLike={handleLike}
                     onDelete={handleDelete}
                     onAuthorTap={handleAuthorTap}

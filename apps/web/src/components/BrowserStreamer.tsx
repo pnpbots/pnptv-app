@@ -305,12 +305,12 @@ export default function BrowserStreamer() {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const cams = devices
-        .filter((d): d is MediaDeviceInfo =>
+        .filter((d) =>
           d.kind === "videoinput" && d.deviceId !== ""
         )
         .map((d) => ({ deviceId: d.deviceId, label: d.label, kind: d.kind as "videoinput" }));
       const mics = devices
-        .filter((d): d is MediaDeviceInfo =>
+        .filter((d) =>
           d.kind === "audioinput" && d.deviceId !== ""
         )
         .map((d) => ({ deviceId: d.deviceId, label: d.label, kind: d.kind as "audioinput" }));
@@ -1257,7 +1257,7 @@ export default function BrowserStreamer() {
           {(canGoLive || status === "live") && (
             <button
               onClick={handleToggleScreenShare}
-              disabled={isConnecting || status === "stopping"}
+              disabled={isConnecting}
               className={[
                 "flex items-center justify-center min-h-[52px] min-w-[52px] px-3 rounded-2xl",
                 "text-sm font-semibold transition-all duration-150",

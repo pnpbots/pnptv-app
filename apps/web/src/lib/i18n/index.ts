@@ -35,68 +35,82 @@ import { notifications, type NotificationsStrings } from "./notifications";
 
 export type Lang = "en" | "es" | "pt" | "zh" | "zhTW" | "fr" | "de" | "th" | "it" | "tr" | "ru" | "nl" | "vi" | "ja" | "id" | "ar";
 
+/** Widen literal string types to plain string for i18n compatibility across languages. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Widen<T> = T extends (...args: any[]) => any ? T
+  : T extends readonly (infer _)[] ? T
+  : T extends Record<string, unknown> ? { [K in keyof T]: Widen<T[K]> }
+  : T extends string ? string
+  : T;
+
 export interface I18n {
   lang: Lang;
-  common: CommonStrings;
-  nav: NavStrings;
-  login: LoginStrings;
-  join: JoinStrings;
-  welcome: WelcomeStrings;
-  profile: ProfileStrings;
-  subscribe: SubscribeStrings;
-  booking: BookingStrings;
-  chat: ChatStrings;
-  live: LiveStrings;
-  media: MediaStrings;
-  dm: DmStrings;
-  apply: ApplyStrings;
-  creator: CreatorStrings;
-  gates: GatesStrings;
-  checkout: CheckoutStrings;
-  support: SupportStrings;
-  feed: FeedStrings;
-  gamification: GamificationStrings;
-  becomeModel: BecomeModelStrings;
-  landing: LandingStrings;
-  blog: BlogStrings;
-  about: AboutStrings;
-  careers: CareersStrings;
-  communityResources: CommunityResourcesStrings;
-  shop: ShopStrings;
-  notifications: NotificationsStrings;
+  common: Widen<CommonStrings>;
+  nav: Widen<NavStrings>;
+  login: Widen<LoginStrings>;
+  join: Widen<JoinStrings>;
+  welcome: Widen<WelcomeStrings>;
+  profile: Widen<ProfileStrings>;
+  subscribe: Widen<SubscribeStrings>;
+  booking: Widen<BookingStrings>;
+  chat: Widen<ChatStrings>;
+  live: Widen<LiveStrings>;
+  media: Widen<MediaStrings>;
+  dm: Widen<DmStrings>;
+  apply: Widen<ApplyStrings>;
+  creator: Widen<CreatorStrings>;
+  gates: Widen<GatesStrings>;
+  checkout: Widen<CheckoutStrings>;
+  support: Widen<SupportStrings>;
+  feed: Widen<FeedStrings>;
+  gamification: Widen<GamificationStrings>;
+  becomeModel: Widen<BecomeModelStrings>;
+  landing: Widen<LandingStrings>;
+  blog: Widen<BlogStrings>;
+  about: Widen<AboutStrings>;
+  careers: Widen<CareersStrings>;
+  communityResources: Widen<CommunityResourcesStrings>;
+  shop: Widen<ShopStrings>;
+  notifications: Widen<NotificationsStrings>;
+}
+
+/** Safely index an i18n module, falling back to "en" for unsupported languages. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function pick(mod: Record<string, any>, lang: Lang): any {
+  return mod[lang] ?? mod.en;
 }
 
 function resolve(lang: Lang): I18n {
   return {
     lang,
-    common: common[lang],
-    nav: nav[lang],
-    login: login[lang],
-    join: join[lang],
-    welcome: welcome[lang],
-    profile: profile[lang],
-    subscribe: subscribe[lang],
-    booking: booking[lang],
-    chat: chat[lang],
-    live: live[lang],
-    media: media[lang],
-    dm: dm[lang],
-    apply: apply[lang],
-    creator: creator[lang],
-    gates: gates[lang],
-    checkout: checkout[lang],
-    support: support[lang],
-    feed: feed[lang],
-    gamification: gamification[lang],
-    becomeModel: becomeModel[lang],
-    landing: landing[lang],
-    blog: blog[lang],
-    about: about[lang],
-    careers: careers[lang],
-    communityResources: communityResources[lang],
-    shop: shop[lang],
-    notifications: notifications[lang],
-  };
+    common: pick(common, lang),
+    nav: pick(nav, lang),
+    login: pick(login, lang),
+    join: pick(join, lang),
+    welcome: pick(welcome, lang),
+    profile: pick(profile, lang),
+    subscribe: pick(subscribe, lang),
+    booking: pick(booking, lang),
+    chat: pick(chat, lang),
+    live: pick(live, lang),
+    media: pick(media, lang),
+    dm: pick(dm, lang),
+    apply: pick(apply, lang),
+    creator: pick(creator, lang),
+    gates: pick(gates, lang),
+    checkout: pick(checkout, lang),
+    support: pick(support, lang),
+    feed: pick(feed, lang),
+    gamification: pick(gamification, lang),
+    becomeModel: pick(becomeModel, lang),
+    landing: pick(landing, lang),
+    blog: pick(blog, lang),
+    about: pick(about, lang),
+    careers: pick(careers, lang),
+    communityResources: pick(communityResources, lang),
+    shop: pick(shop, lang),
+    notifications: pick(notifications, lang),
+  } as I18n;
 }
 
 /** Map from database/browser language codes to our Lang keys */

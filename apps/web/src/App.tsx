@@ -89,7 +89,7 @@ function useScreenCaptureGuard() {
     // ── 6. Block Screen Capture API (getDisplayMedia) ──
     if (navigator.mediaDevices) {
       const origGetDisplayMedia = navigator.mediaDevices.getDisplayMedia;
-      if (origGetDisplayMedia) {
+      if (typeof origGetDisplayMedia === "function") {
         navigator.mediaDevices.getDisplayMedia = () =>
           Promise.reject(new DOMException("Screen capture is not allowed", "NotAllowedError"));
       }

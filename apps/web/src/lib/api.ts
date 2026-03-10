@@ -707,7 +707,7 @@ export function updateProfile(
     youtubeHandle: string;
     wofPhotoConsent: boolean;
     contentDisclaimer: boolean;
-    language: "en" | "es";
+    language: string;
   }>
 ): Promise<{ success: boolean }> {
   return request("/api/webapp/profile", { method: "PUT", body: fields });
@@ -2138,7 +2138,7 @@ export interface ActiveCreator {
   last_name: string | null;
   photo_file_id: string | null;
   creator_type: string | null;
-  creator_status: "active" | "suspended";
+  creator_status: "active" | "suspended" | "pending_review" | "eligible";
   creator_strikes: number;
   creator_subscriber_count: number;
   creator_price_usd: string | null;
@@ -3209,7 +3209,7 @@ export interface SupportStats {
   slaBreaches: number;
 }
 
-export interface SupportTicket {
+export interface AdminSupportTicket {
   userId: number;
   username: string | null;
   firstName: string | null;
@@ -3239,7 +3239,7 @@ export function getAdminSupportStats(): Promise<{ success: boolean; stats: Suppo
 
 export function getAdminSupportTickets(
   params: Record<string, string>
-): Promise<{ success: boolean; tickets: SupportTicket[]; hasMore: boolean; total: number }> {
+): Promise<{ success: boolean; tickets: AdminSupportTicket[]; hasMore: boolean; total: number }> {
   const qs = new URLSearchParams(params).toString();
   return request(`/api/webapp/admin/support/tickets?${qs}`);
 }
@@ -3263,7 +3263,7 @@ export function sendAdminTicketReply(
 export function updateAdminTicket(
   userId: string,
   data: Record<string, string>
-): Promise<{ success: boolean; ticket: SupportTicket }> {
+): Promise<{ success: boolean; ticket: AdminSupportTicket }> {
   return request(`/api/webapp/admin/support/tickets/${userId}`, {
     method: "PATCH",
     body: data,

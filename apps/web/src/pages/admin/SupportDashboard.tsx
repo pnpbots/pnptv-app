@@ -8,7 +8,7 @@ import {
   sendAdminTicketReply,
   updateAdminTicket,
   type SupportStats,
-  type SupportTicket,
+  type AdminSupportTicket,
   type SupportMessage,
 } from "@/lib/api";
 
@@ -282,7 +282,7 @@ function TicketCard({
   selected,
   onClick,
 }: {
-  ticket: SupportTicket;
+  ticket: AdminSupportTicket;
   selected: boolean;
   onClick: () => void;
 }) {
@@ -356,8 +356,8 @@ function MessageBubble({ message }: { message: SupportMessage }) {
 // ── Ticket Detail Panel ────────────────────────────────────────────────────────
 
 interface TicketDetailProps {
-  ticket: SupportTicket;
-  onUpdate: (updated: Partial<SupportTicket>) => void;
+  ticket: AdminSupportTicket;
+  onUpdate: (updated: Partial<AdminSupportTicket>) => void;
 }
 
 function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
@@ -688,7 +688,7 @@ function NoTicketSelected() {
 const PRIORITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 const STATUS_ORDER: Record<string, number> = { open: 0, resolved: 1, closed: 2 };
 
-function sortTickets(tickets: SupportTicket[]): SupportTicket[] {
+function sortTickets(tickets: AdminSupportTicket[]): AdminSupportTicket[] {
   return [...tickets].sort((a, b) => {
     const pDiff = (PRIORITY_ORDER[a.priority] ?? 3) - (PRIORITY_ORDER[b.priority] ?? 3);
     if (pDiff !== 0) return pDiff;
@@ -703,7 +703,7 @@ export default function SupportDashboard() {
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
 
-  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [tickets, setTickets] = useState<AdminSupportTicket[]>([]);
   const [ticketsLoading, setTicketsLoading] = useState(true);
   const [ticketsError, setTicketsError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -717,7 +717,7 @@ export default function SupportDashboard() {
     search: "",
   });
 
-  const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
+  const [selectedTicket, setSelectedTicket] = useState<AdminSupportTicket | null>(null);
   const [showDetailMobile, setShowDetailMobile] = useState(false);
 
   // ── Load stats ──
@@ -784,12 +784,12 @@ export default function SupportDashboard() {
     loadTickets(nextPage, true);
   }, [page, loadTickets]);
 
-  const handleTicketSelect = useCallback((ticket: SupportTicket) => {
+  const handleTicketSelect = useCallback((ticket: AdminSupportTicket) => {
     setSelectedTicket(ticket);
     setShowDetailMobile(true);
   }, []);
 
-  const handleTicketUpdate = useCallback((patch: Partial<SupportTicket>) => {
+  const handleTicketUpdate = useCallback((patch: Partial<AdminSupportTicket>) => {
     setSelectedTicket((prev) => (prev ? { ...prev, ...patch } : prev));
     setTickets((prev) =>
       prev.map((t) =>

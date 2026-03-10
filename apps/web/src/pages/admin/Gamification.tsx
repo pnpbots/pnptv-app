@@ -186,7 +186,7 @@ function BadgeRow({
   onRevoke,
 }: {
   badge: GamificationBadge;
-  lang: "en" | "es";
+  lang: string;
   openHoldersSlug: string | null;
   onToggleHolders: (slug: string) => void;
   onRevoke: (telegramId: string, badgeSlug: string) => Promise<void>;
@@ -270,7 +270,7 @@ interface AwardFormState {
   error: string | null;
 }
 
-function AwardForm({ allBadges, lang }: { allBadges: GamificationBadge[]; lang: "en" | "es" }) {
+function AwardForm({ allBadges, lang }: { allBadges: GamificationBadge[]; lang: string }) {
   const t = useI18n();
   const g = t.gamification;
   const [form, setForm] = useState<AwardFormState>({
@@ -548,7 +548,7 @@ function CategorySection({
   onRevoke,
 }: {
   category: GamificationCategory;
-  lang: "en" | "es";
+  lang: string;
   openHoldersSlug: string | null;
   onToggleHolders: (slug: string) => void;
   onRevoke: (telegramId: string, badgeSlug: string) => Promise<void>;

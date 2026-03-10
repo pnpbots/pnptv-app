@@ -101,7 +101,7 @@ const strings = {
   },
 } as const;
 
-export type FeedStrings = typeof strings.en;
+export type FeedStrings = (typeof strings)["en"] | (typeof strings)["es"];
 
 export function useFeedI18n(lang?: string | null): FeedStrings {
   return strings[lang === "es" ? "es" : "en"];

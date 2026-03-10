@@ -1,6 +1,7 @@
 import React from "react";
 
 export interface StreamOverlayConfig {
+  is_active?: boolean;
   logo_url?: string | null;
   logo_position?: string;
   logo_size?: number;

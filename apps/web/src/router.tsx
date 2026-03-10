@@ -33,6 +33,7 @@ const AboutPage = lazy(() => import("@/pages/AboutPage"));
 const CareersPage = lazy(() => import("@/pages/CareersPage"));
 const CommunityResourcesPage = lazy(() => import("@/pages/CommunityResourcesPage"));
 const ShopPage = lazy(() => import("@/pages/ShopPage"));
+const DownloadPage = lazy(() => import("@/pages/DownloadPage"));
 const MainStage = lazy(() => import("@/pages/MainStage"));
 const PostDetail = lazy(() => import("@/pages/PostDetail"));
 const Settings = lazy(() => import("@/pages/Settings"));
@@ -476,6 +477,14 @@ export const router = createBrowserRouter([
     element: (
       <ModuleLoader>
         <ShopPage />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/download",
+    element: (
+      <ModuleLoader>
+        <DownloadPage />
       </ModuleLoader>
     ),
   },

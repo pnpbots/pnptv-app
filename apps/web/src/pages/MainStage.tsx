@@ -53,8 +53,8 @@ export default function MainStage() {
     setError("");
     try {
       const displayName =
-        user.first_name ||
-        user.display_name ||
+        user.firstName ||
+        user.displayName ||
         user.username ||
         "Guest";
       const res = await joinCommunityRoom(displayName);

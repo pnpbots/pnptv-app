@@ -530,9 +530,9 @@ export default function XAutoCampaigns() {
     }
     try {
       await createAdminXCampaign({
-        name: action.name,
+        name: action.name || "Untitled Campaign",
         accountId: account.account_id,
-        topic: action.topic,
+        topic: action.topic || "general",
         grokMode: "xPost",
         language: action.language || "en",
         customPrompt: action.customPrompt,
