@@ -1118,6 +1118,190 @@ const getDemographics = async (req, res) => {
   }
 };
 
+// ==========================================
+// Entitlement Management
+// ==========================================
+
+const EntitlementModel = require('../../../models/entitlementModel');
+
+const SUPERADMIN_IDS = ['8599671840', '8370209084'];
+
+/**
+ * GET /api/webapp/admin/add-ons
+ * List all add-on types.
+ */
+const listAddOns = async (req, res) => {
+  try {
+    const addOns = await EntitlementModel.getAllAddOns();
+    return res.json({ success: true, addOns });
+  } catch (error) {
+    logger.error('listAddOns error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * GET /api/webapp/admin/plans/:planId/add-ons
+ * Get plan_add_ons for a specific plan.
+ */
+const getPlanAddOns = async (req, res) => {
+  try {
+    const addOns = await EntitlementModel.getPlanAddOns(req.params.planId);
+    return res.json({ success: true, addOns });
+  } catch (error) {
+    logger.error('getPlanAddOns error:', error);
+    const status = error.status || 500;
+    return res.status(status).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * PUT /api/webapp/admin/plans/:planId/add-ons
+ * Replace all plan_add_ons for a plan.
+ */
+const setPlanAddOns = async (req, res) => {
+  try {
+    const { addOns } = req.body;
+    if (!Array.isArray(addOns)) {
+      return res.status(400).json({ success: false, error: 'addOns must be an array' });
+    }
+    const result = await EntitlementModel.setPlanAddOns(req.params.planId, addOns);
+    logger.info('Admin set plan add-ons', { adminId: req.user?.id, planId: req.params.planId, count: addOns.length });
+    return res.json({ success: true, addOns: result });
+  } catch (error) {
+    logger.error('setPlanAddOns error:', error);
+    const status = error.status || 500;
+    return res.status(status).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * GET /api/webapp/admin/users/:userId/entitlements
+ * Get a user's entitlements and recent audit log.
+ */
+const getUserEntitlements = async (req, res) => {
+  try {
+    const [entitlements, auditResult] = await Promise.all([
+      EntitlementModel.getUserEntitlements(req.params.userId),
+      EntitlementModel.getAuditLog(req.params.userId, { limit: 50 }),
+    ]);
+    return res.json({ success: true, entitlements, auditLog: auditResult.rows });
+  } catch (error) {
+    logger.error('getUserEntitlements error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * POST /api/webapp/admin/users/:userId/entitlements
+ * Grant an entitlement to a user.
+ */
+const grantUserEntitlement = async (req, res) => {
+  try {
+    const { addOnId, durationDays, isLifetime, reason } = req.body;
+    if (!addOnId) {
+      return res.status(400).json({ success: false, error: 'addOnId is required' });
+    }
+    const row = await EntitlementModel.grantEntitlement(
+      req.params.userId,
+      String(addOnId),
+      {
+        isLifetime: !!isLifetime,
+        durationDays: durationDays ? parseInt(durationDays, 10) : 30,
+        source: 'admin',
+        actorId: String(req.user?.id ?? 'admin'),
+        reason: reason || '',
+      }
+    );
+    logger.info('Admin granted entitlement', { adminId: req.user?.id, userId: req.params.userId, addOnId });
+    return res.json({ success: true, entitlement: row });
+  } catch (error) {
+    logger.error('grantUserEntitlement error:', error);
+    const status = error.status || 500;
+    return res.status(status).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * DELETE /api/webapp/admin/users/:userId/entitlements/:addOnId
+ * Revoke a user's entitlement. Lifetime revocation requires superadmin.
+ */
+const revokeUserEntitlement = async (req, res) => {
+  try {
+    const adminId = String(req.user?.id ?? '');
+    const isSuperadmin = SUPERADMIN_IDS.includes(adminId);
+
+    const row = await EntitlementModel.revokeEntitlement(
+      req.params.userId,
+      req.params.addOnId,
+      { isSuperadmin, revokedBy: adminId, reason: req.body?.reason || '' }
+    );
+    logger.info('Admin revoked entitlement', { adminId, userId: req.params.userId, addOnId: req.params.addOnId });
+    return res.json({ success: true, revoked: row });
+  } catch (error) {
+    logger.error('revokeUserEntitlement error:', error);
+    const status = error.status || 500;
+    return res.status(status).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * PUT /api/webapp/admin/users/:userId/entitlements/:addOnId/extend
+ * Extend an entitlement's expiry.
+ */
+const extendUserEntitlement = async (req, res) => {
+  try {
+    const { extraDays, reason } = req.body;
+    const days = parseInt(extraDays, 10);
+    if (!days || days < 1) {
+      return res.status(400).json({ success: false, error: 'extraDays must be a positive integer' });
+    }
+    const row = await EntitlementModel.extendEntitlement(
+      req.params.userId,
+      req.params.addOnId,
+      days,
+      { extendedBy: String(req.user?.id ?? 'admin'), reason: reason || '' }
+    );
+    logger.info('Admin extended entitlement', { adminId: req.user?.id, userId: req.params.userId, addOnId: req.params.addOnId, days });
+    return res.json({ success: true, entitlement: row });
+  } catch (error) {
+    logger.error('extendUserEntitlement error:', error);
+    const status = error.status || 500;
+    return res.status(status).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * GET /api/webapp/my-entitlements
+ * Return the logged-in user's active entitlements.
+ */
+const getMyEntitlements = async (req, res) => {
+  try {
+    const userId = String(req.user?.id ?? req.session?.user?.id ?? '');
+    if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+    const all = await EntitlementModel.getUserEntitlements(userId);
+    // Filter to active only (lifetime OR non-consumed with valid expiry)
+    const active = all.filter((e) =>
+      !e.is_consumed &&
+      (e.is_lifetime || e.expires_at == null || new Date(e.expires_at) > new Date())
+    );
+    return res.json({
+      success: true,
+      entitlements: active.map((e) => ({
+        add_on_id: e.add_on_id,
+        add_on_name: e.add_on_name,
+        is_lifetime: e.is_lifetime,
+        is_consumed: e.is_consumed,
+        expires_at: e.expires_at,
+      })),
+    });
+  } catch (error) {
+    logger.error('getMyEntitlements error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 module.exports = {
   getStats,
   getDemographics,
@@ -1142,4 +1326,13 @@ module.exports = {
   subscribePush,
   unsubscribePush,
   getVapidKey,
+  // Entitlement management
+  listAddOns,
+  getPlanAddOns,
+  setPlanAddOns,
+  getUserEntitlements,
+  grantUserEntitlement,
+  revokeUserEntitlement,
+  extendUserEntitlement,
+  getMyEntitlements,
 };

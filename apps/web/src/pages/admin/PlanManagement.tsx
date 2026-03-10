@@ -7,7 +7,11 @@ import {
   createAdminPlan,
   updateAdminPlan,
   deleteAdminPlan,
+  getAddOns,
+  getPlanAddOns,
+  setPlanAddOns,
   type AdminPlan,
+  type AddOn,
 } from "@/lib/api";
 
 const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
@@ -61,6 +65,13 @@ function planToForm(plan: AdminPlan): PlanFormState {
   };
 }
 
+// Per-add-on state tracked in the form
+interface AddOnRowState {
+  enabled: boolean;
+  duration_days: string; // "" means inherit plan duration
+  is_lifetime: boolean;
+}
+
 export default function PlanManagement() {
   const [plans, setPlans] = useState<AdminPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,6 +85,14 @@ export default function PlanManagement() {
 
   const [deleteTarget, setDeleteTarget] = useState<AdminPlan | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Add-ons catalogue — fetched once on mount
+  const [allAddOns, setAllAddOns] = useState<AddOn[]>([]);
+  const [addOnsLoading, setAddOnsLoading] = useState(false);
+
+  // Per-add-on state for the currently open form, keyed by add_on_id
+  const [addOnRows, setAddOnRows] = useState<Record<number, AddOnRowState>>({});
+  const [addOnsLoadError, setAddOnsLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,17 +111,60 @@ export default function PlanManagement() {
     load();
   }, [load]);
 
+  // Fetch the add-ons catalogue once when the component first mounts.
+  useEffect(() => {
+    setAddOnsLoading(true);
+    getAddOns()
+      .then((res) => setAllAddOns(res.addOns ?? []))
+      .catch(() => {
+        // Non-fatal — the add-ons section will just show empty.
+        setAllAddOns([]);
+      })
+      .finally(() => setAddOnsLoading(false));
+  }, []);
+
+  // Build the initial addOnRows map: all add-ons disabled with blank config.
+  const buildEmptyAddOnRows = useCallback(
+    (catalogue: AddOn[]): Record<number, AddOnRowState> => {
+      return Object.fromEntries(
+        catalogue.map((a) => [a.id, { enabled: false, duration_days: "", is_lifetime: false }])
+      );
+    },
+    []
+  );
+
   const openCreate = () => {
     setEditingId(null);
     setFormState(EMPTY_FORM);
     setFormError(null);
+    setAddOnsLoadError(null);
+    setAddOnRows(buildEmptyAddOnRows(allAddOns));
     setModalOpen(true);
   };
 
-  const openEdit = (plan: AdminPlan) => {
+  const openEdit = async (plan: AdminPlan) => {
     setEditingId(plan.id);
     setFormState(planToForm(plan));
     setFormError(null);
+    setAddOnsLoadError(null);
+
+    // Start with everything disabled, then overlay what the plan already has.
+    const base = buildEmptyAddOnRows(allAddOns);
+
+    try {
+      const res = await getPlanAddOns(plan.id);
+      for (const mapping of res.addOns ?? []) {
+        base[mapping.add_on_id] = {
+          enabled: true,
+          duration_days: mapping.duration_days != null ? String(mapping.duration_days) : "",
+          is_lifetime: mapping.is_lifetime ?? false,
+        };
+      }
+    } catch {
+      setAddOnsLoadError("Could not load existing add-on mappings. You can still save — existing mappings will be preserved unless you change them.");
+    }
+
+    setAddOnRows(base);
     setModalOpen(true);
   };
 
@@ -113,10 +175,33 @@ export default function PlanManagement() {
     setFormState((prev) => ({ ...prev, [key]: value }));
   };
 
+  const handleAddOnToggle = (id: number, enabled: boolean) => {
+    setAddOnRows((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], enabled },
+    }));
+  };
+
+  const handleAddOnDuration = (id: number, value: string) => {
+    setAddOnRows((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], duration_days: value },
+    }));
+  };
+
+  const handleAddOnLifetime = (id: number, is_lifetime: boolean) => {
+    setAddOnRows((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], is_lifetime },
+    }));
+  };
+
   const handleSubmit = async () => {
     setFormLoading(true);
     setFormError(null);
     try {
+      const planId = editingId ?? formState.id.trim();
+
       const payload: Partial<AdminPlan> & { id: string } = {
         id: formState.id.trim(),
         name: formState.name.trim(),
@@ -144,6 +229,21 @@ export default function PlanManagement() {
         }
         await createAdminPlan(payload as Partial<AdminPlan> & { id: string });
       }
+
+      // Persist add-on mappings for the plan that was just saved.
+      const enabledAddOns = allAddOns
+        .filter((a) => addOnRows[a.id]?.enabled)
+        .map((a) => {
+          const row = addOnRows[a.id];
+          const parsed = parseInt(row.duration_days, 10);
+          return {
+            add_on_id: a.id,
+            duration_days: !row.is_lifetime && row.duration_days !== "" && !isNaN(parsed) ? parsed : null,
+            is_lifetime: row.is_lifetime,
+          };
+        });
+
+      await setPlanAddOns(planId, enabledAddOns);
 
       setModalOpen(false);
       await load();
@@ -414,6 +514,90 @@ export default function PlanManagement() {
                   placeholder={"Full access to PRIME content\nPriority support\nExclusive hangouts"}
                   className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent resize-none"
                 />
+              </div>
+
+              {/* Plan Add-Ons section */}
+              <div className="pt-2">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-sm font-semibold text-pnp-textPrimary">Plan Add-Ons</span>
+                  <span className="text-xs text-pnp-textSecondary">— entitlements granted alongside this plan</span>
+                </div>
+
+                {addOnsLoadError && (
+                  <div className="mb-2 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
+                    {addOnsLoadError}
+                  </div>
+                )}
+
+                {addOnsLoading ? (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="h-10 rounded-lg bg-pnp-surface animate-pulse" />
+                    ))}
+                  </div>
+                ) : allAddOns.length === 0 ? (
+                  <p className="text-xs text-pnp-textSecondary py-2">
+                    No add-ons defined yet. Add entitlement add-ons in the system first.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {allAddOns.map((addOn) => {
+                      const row = addOnRows[addOn.id] ?? { enabled: false, duration_days: "", is_lifetime: false };
+                      return (
+                        <div
+                          key={addOn.id}
+                          className={`rounded-lg border transition-colors ${
+                            row.enabled
+                              ? "border-pnp-accent/40 bg-pnp-surface"
+                              : "border-pnp-border bg-pnp-surface/50"
+                          }`}
+                        >
+                          {/* Add-on toggle row */}
+                          <label className="flex items-center gap-3 px-3 py-2 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={row.enabled}
+                              onChange={(e) => handleAddOnToggle(addOn.id, e.target.checked)}
+                              className="rounded border-pnp-border flex-shrink-0"
+                            />
+                            <span className="text-sm text-pnp-textPrimary font-medium min-w-0 flex-1 truncate">
+                              {addOn.name}
+                            </span>
+                          </label>
+
+                          {/* Expanded config when enabled */}
+                          {row.enabled && (
+                            <div className="px-3 pb-3 pt-0 flex flex-wrap items-center gap-4 border-t border-pnp-border/50">
+                              <div className="flex items-center gap-2 mt-2">
+                                <label className="text-xs text-pnp-textSecondary whitespace-nowrap">Duration (days)</label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={row.duration_days}
+                                  onChange={(e) => handleAddOnDuration(addOn.id, e.target.value)}
+                                  disabled={row.is_lifetime}
+                                  placeholder="Inherit"
+                                  className="w-24 px-2 py-1 rounded border border-pnp-border bg-pnp-background text-pnp-textPrimary text-xs focus:outline-none focus:border-pnp-accent disabled:opacity-40 disabled:cursor-not-allowed"
+                                />
+                                <span className="text-xs text-pnp-textSecondary">empty = inherit plan duration</span>
+                              </div>
+
+                              <label className="flex items-center gap-2 cursor-pointer mt-2">
+                                <input
+                                  type="checkbox"
+                                  checked={row.is_lifetime}
+                                  onChange={(e) => handleAddOnLifetime(addOn.id, e.target.checked)}
+                                  className="rounded border-pnp-border"
+                                />
+                                <span className="text-xs text-pnp-textPrimary">Lifetime</span>
+                              </label>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 

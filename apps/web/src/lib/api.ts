@@ -2823,6 +2823,93 @@ export function deleteAdminPlan(id: string): Promise<{ success: boolean; message
   return request(`/api/webapp/admin/plans/${id}`, { method: "DELETE" });
 }
 
+// Admin Plan Add-Ons
+export interface AddOn {
+  id: number;
+  name: string;
+}
+
+export interface PlanAddOn {
+  add_on_id: number;
+  name: string;
+  duration_days: number | null;
+  is_lifetime: boolean;
+}
+
+export function getAddOns(): Promise<{ success: boolean; addOns: AddOn[] }> {
+  return request("/api/webapp/admin/add-ons");
+}
+
+export function getPlanAddOns(planId: string): Promise<{ success: boolean; addOns: PlanAddOn[] }> {
+  return request(`/api/webapp/admin/plans/${planId}/add-ons`);
+}
+
+export function setPlanAddOns(
+  planId: string,
+  addOns: { add_on_id: number; duration_days: number | null; is_lifetime: boolean }[]
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/plans/${planId}/add-ons`, { method: "PUT", body: { addOns } });
+}
+
+// Admin User Entitlements
+
+export interface AdminEntitlement {
+  id: number;
+  add_on_id: number;
+  add_on_name: string;
+  is_lifetime: boolean;
+  is_consumed: boolean;
+  expires_at: string | null;
+  granted_by_plan: string | null;
+  source: string | null;
+  created_at: string;
+}
+
+export interface EntitlementAuditEntry {
+  id: number;
+  action: string;
+  details: unknown;
+  created_at: string;
+}
+
+export function getAdminUserEntitlements(userId: string): Promise<{
+  success: boolean;
+  entitlements: AdminEntitlement[];
+  auditLog: EntitlementAuditEntry[];
+}> {
+  return request(`/api/webapp/admin/users/${userId}/entitlements`);
+}
+
+export function grantAdminUserEntitlement(
+  userId: string,
+  data: { addOnId: number; durationDays?: number; isLifetime?: boolean; reason?: string }
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/users/${userId}/entitlements`, {
+    method: "POST",
+    body: data,
+  });
+}
+
+export function revokeAdminUserEntitlement(
+  userId: string,
+  addOnId: number
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/users/${userId}/entitlements/${addOnId}`, {
+    method: "DELETE",
+  });
+}
+
+export function extendAdminUserEntitlement(
+  userId: string,
+  addOnId: number,
+  data: { extraDays: number; reason?: string }
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/users/${userId}/entitlements/${addOnId}/extend`, {
+    method: "PUT",
+    body: data,
+  });
+}
+
 // Admin Nearby Places
 export interface AdminPlace {
   id: string;

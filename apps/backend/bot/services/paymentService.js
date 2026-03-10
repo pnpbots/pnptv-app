@@ -3978,17 +3978,17 @@ class PaymentService {
           if (isLifetime) {
             // Lifetime: upsert with no expiry
             await query(`
-              INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, granted_by_plan, source)
-              VALUES ($1, $2, true, $3, $4)
-              ON CONFLICT (user_id, add_on_id)
+              INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, source_plan_id)
+              VALUES ($1, $2, true, $3)
+              ON CONFLICT (user_id, add_on_id, creator_id)
               DO UPDATE SET is_lifetime = true, is_consumed = false, updated_at = NOW()
-            `, [userId, row.add_on_id, planId, source]);
+            `, [userId, row.add_on_id, planId]);
           } else {
             // Time-limited: extend from current expiry if still active, else from now
             await query(`
-              INSERT INTO user_entitlements (user_id, add_on_id, expires_at, granted_by_plan, source)
-              VALUES ($1, $2, NOW() + ($3 || ' days')::interval, $4, $5)
-              ON CONFLICT (user_id, add_on_id)
+              INSERT INTO user_entitlements (user_id, add_on_id, expires_at, source_plan_id)
+              VALUES ($1, $2, NOW() + ($3 || ' days')::interval, $4)
+              ON CONFLICT (user_id, add_on_id, creator_id)
               DO UPDATE SET
                 expires_at = CASE
                   WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
@@ -3999,7 +3999,7 @@ class PaymentService {
                 is_consumed = false,
                 updated_at = NOW()
               WHERE NOT user_entitlements.is_lifetime
-            `, [userId, row.add_on_id, String(durationDays), planId, source]);
+            `, [userId, row.add_on_id, String(durationDays), planId]);
           }
 
           result.granted++;
@@ -4010,8 +4010,8 @@ class PaymentService {
           // Audit log
           try {
             await query(`
-              INSERT INTO subscription_audit_log (user_id, action, details)
-              VALUES ($1, 'entitlement_granted', $2)
+              INSERT INTO subscription_audit_log (user_id, actor_id, actor_type, action, new_values)
+              VALUES ($1, 'system', 'payment', 'grant', $2::jsonb)
             `, [userId, JSON.stringify({
               add_on_id: row.add_on_id,
               add_on_name: row.add_on_name,

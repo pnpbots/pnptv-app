@@ -3062,6 +3062,19 @@ app.post('/api/webapp/admin/plans', adminGuard, asyncHandler(webappAdminControll
 app.put('/api/webapp/admin/plans/:id', adminGuard, asyncHandler(webappAdminController.updatePlan));
 app.delete('/api/webapp/admin/plans/:id', adminGuard, asyncHandler(webappAdminController.deletePlan));
 
+// Add-ons catalog
+app.get('/api/webapp/admin/add-ons', adminGuard, asyncHandler(webappAdminController.listAddOns));
+// Plan add-on mappings
+app.get('/api/webapp/admin/plans/:planId/add-ons', adminGuard, asyncHandler(webappAdminController.getPlanAddOns));
+app.put('/api/webapp/admin/plans/:planId/add-ons', adminGuard, asyncHandler(webappAdminController.setPlanAddOns));
+// User entitlement management
+app.get('/api/webapp/admin/users/:userId/entitlements', adminGuard, asyncHandler(webappAdminController.getUserEntitlements));
+app.post('/api/webapp/admin/users/:userId/entitlements', adminGuard, asyncHandler(webappAdminController.grantUserEntitlement));
+app.delete('/api/webapp/admin/users/:userId/entitlements/:addOnId', adminGuard, asyncHandler(webappAdminController.revokeUserEntitlement));
+app.put('/api/webapp/admin/users/:userId/entitlements/:addOnId/extend', adminGuard, asyncHandler(webappAdminController.extendUserEntitlement));
+// User-facing entitlements
+app.get('/api/webapp/my-entitlements', requireSessionAuth, asyncHandler(webappAdminController.getMyEntitlements));
+
 // Admin push broadcast
 app.post('/api/webapp/admin/notifications/push', adminGuard, asyncHandler(webappAdminController.sendPushNotification));
 
