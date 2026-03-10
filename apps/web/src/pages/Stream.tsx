@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 import { useI18n } from "@/lib/i18n";
 import { LivePlayer } from "@/components/LivePlayer";
+import { LiveRulesModal } from "@/components/LiveRulesModal";
 import { connectSocket } from "@/lib/socket";
 import {
   getLiveStreams,
@@ -13,6 +14,8 @@ import {
   sendTip,
   TIP_AMOUNTS,
   getStreamOverlayPublic,
+  getLiveRulesStatus,
+  acknowledgeLiveRules,
   type LiveStream,
   type RecentTip,
   type StreamOverlay,
@@ -34,6 +37,10 @@ export default function Stream() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<StreamOverlay | null>(null);
+
+  // Live rules gate — only enforced for authenticated users
+  const [rulesAcknowledged, setRulesAcknowledged] = useState(false);
+  const [rulesLoading, setRulesLoading] = useState(true);
 
   // Chat & tips
   const [chatInput, setChatInput] = useState("");
@@ -138,6 +145,42 @@ export default function Stream() {
     };
   }, [streamId]);
 
+  // Live rules acknowledgment check — only for authenticated users
+  useEffect(() => {
+    if (!isAuthenticated) {
+      // Unauthenticated users can watch; they'll be prompted to log in when they try to interact
+      setRulesLoading(false);
+      setRulesAcknowledged(true);
+      return;
+    }
+    setRulesLoading(true);
+    getLiveRulesStatus()
+      .then((data) => {
+        if (data.success) {
+          setRulesAcknowledged(data.acknowledged);
+        } else {
+          // On unexpected API error, fail open so the user isn't permanently blocked
+          setRulesAcknowledged(true);
+        }
+      })
+      .catch(() => {
+        // Network failure — fail open
+        setRulesAcknowledged(true);
+      })
+      .finally(() => {
+        setRulesLoading(false);
+      });
+  }, [isAuthenticated]);
+
+  const handleAcknowledgeRules = useCallback(async () => {
+    try {
+      await acknowledgeLiveRules();
+    } catch {
+      // Persist locally even if the network call fails — the user has seen the rules
+    }
+    setRulesAcknowledged(true);
+  }, []);
+
   // Load recent tips
   const loadTips = useCallback(() => {
     getRecentTips()
@@ -215,7 +258,7 @@ export default function Stream() {
     return `${Math.floor(hrs / 24)}d`;
   };
 
-  if (loading) {
+  if (loading || rulesLoading) {
     return (
       <div className="page-container">
         <Skeleton className="w-full rounded-xl" style={{ aspectRatio: "16/9" }} />
@@ -242,6 +285,11 @@ export default function Stream() {
         <title>{stream.name} — PNPtv Live</title>
         <meta name="description" content={stream.description || `Watch ${stream.name} live on PNPtv`} />
       </Helmet>
+
+      {/* Rules acknowledgment gate — shown to authenticated users who have not yet agreed */}
+      {!rulesAcknowledged && (
+        <LiveRulesModal onAcknowledge={handleAcknowledgeRules} />
+      )}
 
       {/* Back link */}
       <button onClick={() => navigate("/live")} className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors">

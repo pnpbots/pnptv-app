@@ -3349,3 +3349,17 @@ export function getJaasLiveToken(): Promise<{
 }> {
   return request("/api/jaas/live-token", { method: "POST" });
 }
+
+// Live Rules Acknowledgment Gate
+
+export function getLiveRulesStatus(): Promise<{
+  success: boolean;
+  acknowledged: boolean;
+  version: number;
+}> {
+  return request("/api/webapp/live/rules-status");
+}
+
+export function acknowledgeLiveRules(): Promise<{ success: boolean }> {
+  return request("/api/webapp/live/acknowledge-rules", { method: "POST" });
+}

@@ -2247,6 +2247,11 @@ app.post('/api/webapp/hangouts/join/:callId', requireSessionAuth, asyncHandler(w
 app.post('/api/webapp/hangouts/leave/:callId', requireSessionAuth, asyncHandler(webappHangoutsController.leaveRoom));
 app.delete('/api/webapp/hangouts/:callId', requireSessionAuth, asyncHandler(webappHangoutsController.endRoom));
 
+// Live Rules Acknowledgment Gate
+const liveRulesController = require('./controllers/liveRulesController');
+app.get('/api/webapp/live/rules-status', requireSessionAuth, asyncHandler(liveRulesController.getRulesStatus));
+app.post('/api/webapp/live/acknowledge-rules', requireSessionAuth, asyncHandler(liveRulesController.acknowledgeRules));
+
 // Web App Live Streaming Routes
 const webappLiveController = require('./controllers/webappLiveController');
 app.get('/api/webapp/live/streams', requireSessionAuth, requireMemberTier, asyncHandler(webappLiveController.listStreams));
