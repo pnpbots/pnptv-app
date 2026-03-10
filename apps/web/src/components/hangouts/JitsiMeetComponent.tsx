@@ -17,6 +17,8 @@ interface JitsiMeetComponentProps {
   fullScreen?: boolean;
   /** Admin/superadmin gets full toolbar access */
   isAdmin?: boolean;
+  /** Force-disable Jitsi's built-in chat (use when external chat is provided) */
+  disableChat?: boolean;
   /** Callback when Jitsi External API is ready */
   onApiReady?: (api: any) => void;
   /** Optional className for the container */
@@ -94,6 +96,7 @@ export function JitsiMeetComponent({
   onParticipantLeft,
   fullScreen = false,
   isAdmin = false,
+  disableChat = false,
   onApiReady,
   className,
 }: JitsiMeetComponentProps) {
@@ -156,16 +159,25 @@ export function JitsiMeetComponent({
           filmstrip: {
             disableResizable: true,
           },
-          ...(isAdmin ? {} : {
-            toolbarButtons: [
-              'participants-pane',
-              'closedcaptions',
-              'noisesuppression',
-              'fullscreen',
-              'settings',
-            ],
-            startWithAudioMuted: true,
-          }),
+          ...(isAdmin
+            ? (disableChat ? {
+                toolbarButtons: [
+                  'camera', 'microphone', 'desktop', 'participants-pane',
+                  'closedcaptions', 'noisesuppression', 'fullscreen',
+                  'settings', 'videoquality', 'tileview', 'select-background',
+                  'mute-everyone', 'security',
+                ],
+              } : {})
+            : {
+                toolbarButtons: [
+                  'participants-pane',
+                  'closedcaptions',
+                  'noisesuppression',
+                  'fullscreen',
+                  'settings',
+                ],
+                startWithAudioMuted: true,
+              }),
         },
         interfaceConfigOverwrite: {
           MOBILE_APP_PROMO: false,

@@ -112,10 +112,18 @@ class AmpacheService {
    */
   static async getStreamUrl(type, id) {
     try {
+      const safeId = String(id).replace(/[^0-9]/g, '');
+      if (!safeId) throw new Error('Invalid media ID');
+      const safeType = type === 'video' ? 'video' : 'song';
       const token = await this.getAuthToken();
-      const streamUrl = `${AMPACHE_BASE}/server/json.server.php?action=stream&type=${type}&id=${id}&auth=${token}&format=mp3`;
-      logger.debug(`Generated stream URL for ${type} ${id}`);
-      return streamUrl;
+      const url = new URL(`${AMPACHE_BASE}/server/json.server.php`);
+      url.searchParams.set('action', 'stream');
+      url.searchParams.set('type', safeType);
+      url.searchParams.set('id', safeId);
+      url.searchParams.set('auth', token);
+      url.searchParams.set('format', 'mp3');
+      logger.debug(`Generated stream URL for ${safeType} ${safeId}`);
+      return url.toString();
     } catch (error) {
       logger.error(`Ampache getStreamUrl error: ${error.message}`);
       throw error;

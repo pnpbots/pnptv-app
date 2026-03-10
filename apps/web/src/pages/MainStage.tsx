@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { PermissionGate } from "@/components/PermissionGate";
 import { JitsiMeetComponent, VideoCallSidePanel, VideoCallModBot, MobileBottomBar } from "@/components/hangouts";
+import { useOrientation } from "@/hooks/useOrientation";
 import {
   joinCommunityRoom,
   getCommunityRoomOccupancy,
@@ -29,6 +30,7 @@ export default function MainStage() {
   const [showPermGate, setShowPermGate] = useState(false);
   const [jitsiApi, setJitsiApi] = useState<any>(null);
   const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
+  const isLandscape = useOrientation();
 
   useEffect(() => {
     getCommunityRoomOccupancy()
@@ -168,13 +170,14 @@ export default function MainStage() {
             </Button>
           </div>
 
-          {/* Jitsi embed */}
+          {/* Jitsi embed — chat disabled (we use hangout chat instead) */}
           <div className="flex-1 w-full">
             <JitsiMeetComponent
               meetingUrl={iframeSrc}
               roomName={roomInfo?.roomName}
               onCallEnd={handleLeave}
               isAdmin={isAdmin}
+              disableChat
               onApiReady={handleApiReady}
             />
           </div>
@@ -187,8 +190,8 @@ export default function MainStage() {
           </div>
         )}
 
-        {/* Mobile bottom bar */}
-        {userId && (
+        {/* Mobile panels — only visible in landscape orientation */}
+        {userId && isLandscape && (
           <div className="sm:hidden">
             <MobileBottomBar
               groupId={1}
