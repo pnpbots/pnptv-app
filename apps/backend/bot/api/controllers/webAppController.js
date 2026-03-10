@@ -1513,8 +1513,9 @@ const updateProfile = async (req, res) => {
   }
 
   // Validate language if provided
-  if (req.body.language !== undefined && !['en', 'es'].includes(req.body.language)) {
-    return res.status(400).json({ error: 'Language must be en or es' });
+  const VALID_LANGS = ['en', 'es', 'pt', 'zh', 'zhTW', 'fr', 'de', 'th', 'it', 'tr', 'ru', 'nl', 'vi', 'ja', 'id', 'ar'];
+  if (req.body.language !== undefined && !VALID_LANGS.includes(req.body.language)) {
+    return res.status(400).json({ error: 'Unsupported language code' });
   }
 
   // Validate dateOfBirth if provided
