@@ -8,7 +8,8 @@ import React, {
   Suspense,
 } from "react";
 import { connectSocket } from "@/lib/socket";
-import { getMyChannel } from "@/lib/api";
+import { getMyChannel, getStreamerSettings, updateStreamerSettings } from "@/lib/api";
+import type { StreamerSettings } from "@/lib/api";
 import type { Socket } from "socket.io-client";
 
 // ─── Inline SVG icons (avoids lucide-react dependency) ────────────────────────
@@ -303,7 +304,7 @@ function healthColor(status: HealthStatus): string {
 
 function PlaceholderPanel({ label, description }: { label: string; description: string }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+    <div className="flex flex-col items-center justify-center gap-3 py-12 text-center mx-4 my-4 rounded-2xl border border-pnp-border bg-pnp-surface">
       <div className="w-12 h-12 rounded-2xl bg-pnp-surface border border-pnp-border flex items-center justify-center">
         <LayersIcon className="w-6 h-6 text-pnp-textSecondary" aria-hidden="true" />
       </div>
@@ -615,6 +616,96 @@ export default function StreamerDashboard({
     hardwareAccel: false,
     fps: 30,
   });
+
+  // ── Persistent settings (load on mount, debounced save on change) ──────
+  const [filterSettings, setFilterSettings] = useState<{
+    filterPreset: string;
+    filterBrightness: number;
+    filterContrast: number;
+    filterSaturation: number;
+    filterWarmth: number;
+    filterSharpness: number;
+    beautyMode: boolean;
+  }>({
+    filterPreset: "None",
+    filterBrightness: 0,
+    filterContrast: 0,
+    filterSaturation: 0,
+    filterWarmth: 0,
+    filterSharpness: 0,
+    beautyMode: false,
+  });
+  const settingsLoadedRef = useRef(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load saved settings on mount
+  useEffect(() => {
+    getStreamerSettings()
+      .then((res) => {
+        if (!res.success || !res.settings) return;
+        const s = res.settings;
+        // Apply dashboard settings
+        const preset = QUALITY_PRESETS.find((p) => p.id === s.qualityPreset) || QUALITY_PRESETS[0];
+        dispatch({ type: "SET_PRESET", payload: preset });
+        if (s.fps === 24 || s.fps === 30 || s.fps === 60) {
+          dispatch({ type: "SET_FPS", payload: s.fps });
+        }
+        if (!s.autoReconnect !== !state.autoReconnect) dispatch({ type: "TOGGLE_AUTO_RECONNECT" });
+        if (!s.lowLatency !== !state.lowLatency) dispatch({ type: "TOGGLE_LOW_LATENCY" });
+        if (!s.hardwareAccel !== !state.hardwareAccel) dispatch({ type: "TOGGLE_HW_ACCEL" });
+        setLocalRecordEnabled(s.localRecord);
+        // Apply filter settings (passed to VideoFilters as props)
+        setFilterSettings({
+          filterPreset: s.filterPreset,
+          filterBrightness: s.filterBrightness,
+          filterContrast: s.filterContrast,
+          filterSaturation: s.filterSaturation,
+          filterWarmth: s.filterWarmth,
+          filterSharpness: s.filterSharpness,
+          beautyMode: s.beautyMode,
+        });
+        settingsLoadedRef.current = true;
+      })
+      .catch(() => {
+        // Non-fatal — use defaults
+        settingsLoadedRef.current = true;
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Debounced auto-save when persistable settings change
+  const saveSettings = useCallback((partial: Partial<StreamerSettings>) => {
+    if (!settingsLoadedRef.current) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      updateStreamerSettings(partial).catch(() => {});
+    }, 800);
+  }, []);
+
+  // Cleanup save timer
+  useEffect(() => {
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, []);
+
+  // Auto-save dashboard settings when they change
+  useEffect(() => {
+    saveSettings({
+      qualityPreset: state.selectedPreset.id,
+      fps: state.fps,
+      autoReconnect: state.autoReconnect,
+      lowLatency: state.lowLatency,
+      hardwareAccel: state.hardwareAccel,
+    });
+  }, [state.selectedPreset.id, state.fps, state.autoReconnect, state.lowLatency, state.hardwareAccel, saveSettings]);
+
+  // Auto-save local record + filter settings when they change
+  useEffect(() => {
+    saveSettings({ localRecord: localRecordEnabled });
+  }, [localRecordEnabled, saveSettings]);
+
+  useEffect(() => {
+    saveSettings(filterSettings);
+  }, [filterSettings, saveSettings]);
 
   // ── Local UI state ────────────────────────────────────────────────────────
   const [showStopConfirm, setShowStopConfirm] = useState(false);
@@ -1034,9 +1125,9 @@ export default function StreamerDashboard({
 
   // ── Settings tab content ──────────────────────────────────────────────────
   const SettingsTab = () => (
-    <div className="space-y-6 p-4">
+    <div className="space-y-4 p-4">
       {/* Quality presets */}
-      <div>
+      <div className="rounded-2xl border border-pnp-border bg-pnp-surface p-4">
         <p className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider mb-3">
           Quality Preset
         </p>
@@ -1070,7 +1161,7 @@ export default function StreamerDashboard({
       </div>
 
       {/* FPS */}
-      <div>
+      <div className="rounded-2xl border border-pnp-border bg-pnp-surface p-4">
         <p className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider mb-3">
           Frame Rate
         </p>
@@ -1104,7 +1195,7 @@ export default function StreamerDashboard({
       </div>
 
       {/* Toggles */}
-      <div className="space-y-4">
+      <div className="rounded-2xl border border-pnp-border bg-pnp-surface p-4 space-y-4">
         <Toggle
           checked={state.autoReconnect}
           onChange={() => dispatch({ type: "TOGGLE_AUTO_RECONNECT" })}
@@ -1481,7 +1572,7 @@ export default function StreamerDashboard({
 
         {/* ── Right / Hidden-on-mobile: Health Panel ───────────────────────── */}
         {isDesktopLayout && (
-          <div className="w-[40%] flex flex-col gap-4 p-4 overflow-y-auto border-l border-pnp-border">
+          <div className="w-[40%] flex flex-col gap-4 p-4 overflow-y-auto border-l border-pnp-border" style={{ background: "rgba(18,18,18,0.6)" }}>
             <HealthPanel />
           </div>
         )}
@@ -1554,7 +1645,7 @@ export default function StreamerDashboard({
         </div>
 
         {/* Tab content */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto" style={{ background: "rgba(18,18,18,0.6)" }}>
           <div
             id="tabpanel-scenes"
             role="tabpanel"
@@ -1604,6 +1695,8 @@ export default function StreamerDashboard({
                   height={state.selectedPreset.height}
                   fps={state.fps}
                   compact
+                  initialSettings={filterSettings}
+                  onSettingsChange={setFilterSettings}
                 />
               </TabPanel>
             )}

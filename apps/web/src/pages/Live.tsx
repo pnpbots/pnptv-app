@@ -521,7 +521,7 @@ export default function Live() {
             </div>
             <div className="embed-frame overflow-hidden" style={{ minHeight: "500px" }}>
               <Cal
-                calLink="admin/private-session"
+                calLink="pnptv/private-session"
                 config={{ theme: "dark" }}
                 calOrigin={CALCOM_URL}
                 embedJsUrl={`${CALCOM_URL}/embed/embed.js`}

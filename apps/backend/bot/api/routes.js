@@ -2252,6 +2252,11 @@ app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLive
 app.get('/api/webapp/admin/live/channels', requireSessionAuth, asyncHandler(webappLiveController.listChannels));
 app.post('/api/webapp/admin/live/assign-channel', requireSessionAuth, asyncHandler(webappLiveController.assignChannel));
 
+// Streamer Settings: persistent encoder + filter preferences
+const streamerSettingsController = require('./controllers/streamerSettingsController');
+app.get('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.getSettings));
+app.put('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.updateSettings));
+
 // Stream Bridge: browser → RTMP via WebSocket+FFmpeg
 const streamBridgeController = require('./controllers/streamBridgeController');
 app.get('/api/webapp/live/my-channel', requireSessionAuth, asyncHandler(streamBridgeController.getMyChannel));

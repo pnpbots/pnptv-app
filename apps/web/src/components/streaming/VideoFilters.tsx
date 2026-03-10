@@ -89,6 +89,16 @@ const AlertTriangle = (p: React.SVGProps<SVGSVGElement>) => (
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface FilterSettingsState {
+  filterPreset: string;
+  filterBrightness: number;
+  filterContrast: number;
+  filterSaturation: number;
+  filterWarmth: number;
+  filterSharpness: number;
+  beautyMode: boolean;
+}
+
 export interface VideoFiltersProps {
   inputStream: MediaStream | null;
   onFilteredOutput?: (stream: MediaStream) => void;
@@ -97,6 +107,8 @@ export interface VideoFiltersProps {
   height: number;
   fps: number;
   compact?: boolean;
+  initialSettings?: FilterSettingsState;
+  onSettingsChange?: (settings: FilterSettingsState) => void;
 }
 
 interface AdjustmentValues {
@@ -553,14 +565,58 @@ export default function VideoFilters({
   height,
   fps,
   compact = false,
+  initialSettings,
+  onSettingsChange,
 }: VideoFiltersProps) {
   // UI state
   const [isOpen, setIsOpen] = useState(false);
-  const [activePreset, setActivePreset] = useState<PresetName>("None");
-  const [adj, setAdj] = useState<AdjustmentValues>({ ...DEFAULT_ADJUSTMENTS });
-  const [beautyMode, setBeautyMode] = useState(false);
+  const [activePreset, setActivePreset] = useState<PresetName>(
+    (initialSettings?.filterPreset as PresetName) || "None"
+  );
+  const [adj, setAdj] = useState<AdjustmentValues>(
+    initialSettings
+      ? {
+          brightness: initialSettings.filterBrightness,
+          contrast: initialSettings.filterContrast,
+          saturation: initialSettings.filterSaturation,
+          warmth: initialSettings.filterWarmth,
+          sharpness: initialSettings.filterSharpness,
+        }
+      : { ...DEFAULT_ADJUSTMENTS }
+  );
+  const [beautyMode, setBeautyMode] = useState(initialSettings?.beautyMode ?? false);
   const [webGlAvailable, setWebGlAvailable] = useState(true);
   const [webGlError, setWebGlError] = useState<string | null>(null);
+  const initializedRef = useRef(false);
+
+  // Apply initialSettings when they arrive (after async load)
+  useEffect(() => {
+    if (!initialSettings || initializedRef.current) return;
+    initializedRef.current = true;
+    setActivePreset((initialSettings.filterPreset as PresetName) || "None");
+    setAdj({
+      brightness: initialSettings.filterBrightness,
+      contrast: initialSettings.filterContrast,
+      saturation: initialSettings.filterSaturation,
+      warmth: initialSettings.filterWarmth,
+      sharpness: initialSettings.filterSharpness,
+    });
+    setBeautyMode(initialSettings.beautyMode);
+  }, [initialSettings]);
+
+  // Notify parent when filter settings change (for persistence)
+  useEffect(() => {
+    if (!onSettingsChange) return;
+    onSettingsChange({
+      filterPreset: activePreset,
+      filterBrightness: adj.brightness,
+      filterContrast: adj.contrast,
+      filterSaturation: adj.saturation,
+      filterWarmth: adj.warmth,
+      filterSharpness: adj.sharpness,
+      beautyMode,
+    });
+  }, [activePreset, adj, beautyMode, onSettingsChange]);
 
   // Refs
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);

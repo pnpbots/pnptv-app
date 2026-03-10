@@ -498,6 +498,35 @@ export function getMyChannel(): Promise<{
   return request("/api/webapp/live/my-channel");
 }
 
+// Streamer settings
+export interface StreamerSettings {
+  qualityPreset: string;
+  fps: number;
+  autoReconnect: boolean;
+  lowLatency: boolean;
+  hardwareAccel: boolean;
+  localRecord: boolean;
+  filterPreset: string;
+  filterBrightness: number;
+  filterContrast: number;
+  filterSaturation: number;
+  filterWarmth: number;
+  filterSharpness: number;
+  beautyMode: boolean;
+}
+
+export function getStreamerSettings(): Promise<{ success: boolean; settings: StreamerSettings }> {
+  return request("/api/webapp/live/settings");
+}
+
+export function updateStreamerSettings(settings: Partial<StreamerSettings>): Promise<{ success: boolean; settings: StreamerSettings }> {
+  return request("/api/webapp/live/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+}
+
 // Profile
 export interface UserProfile {
   id: string;

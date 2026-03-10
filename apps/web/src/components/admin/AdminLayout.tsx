@@ -50,7 +50,7 @@ export function AdminLayout() {
   }
 
   const sidebar = (
-    <nav className="flex flex-col h-full">
+    <nav className="flex flex-col h-screen">
       <div className="flex items-center gap-3 px-4 h-16 border-b border-pnp-border">
         <img src="/Logo2-50.png" alt="PNPTV" className="h-7 w-auto" />
         <span className="text-sm font-bold text-pnp-accent">Admin</span>
