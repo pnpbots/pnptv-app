@@ -2269,6 +2269,13 @@ app.put('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSe
 const streamBridgeController = require('./controllers/streamBridgeController');
 app.get('/api/webapp/live/my-channel', requireSessionAuth, asyncHandler(streamBridgeController.getMyChannel));
 
+// Stream Auto-Chat (Grok-generated messages that post to live chat at intervals)
+const streamAutoController = require('./controllers/streamAutoController');
+app.get('/api/webapp/live/stream-profile', requireSessionAuth, asyncHandler(streamAutoController.getStreamProfile));
+app.post('/api/webapp/live/stream-profile', requireSessionAuth, asyncHandler(streamAutoController.saveStreamProfile));
+app.post('/api/webapp/live/stream-auto-start', requireSessionAuth, asyncHandler(streamAutoController.startAutoMessages));
+app.post('/api/webapp/live/stream-auto-stop', requireSessionAuth, asyncHandler(streamAutoController.stopAutoMessages));
+
 // Stream Overlay Management (admin CRUD + public viewer endpoint)
 // Socket.IO access uses socketSingleton.get() directly inside the controller —
 // no wiring step needed here.

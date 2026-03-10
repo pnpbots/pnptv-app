@@ -18,6 +18,7 @@ function getModeConfig(mode, hasMedia) {
     videoDescription: { temperature: 0.7, defaultTokens: 350, mediaTokens: 300 },
     salesPost: { temperature: 0.7, defaultTokens: 400, mediaTokens: 350 },
     xPost: { temperature: 0.7, defaultTokens: 450, mediaTokens: 450 },
+    streamChat: { temperature: 0.85, defaultTokens: 800, mediaTokens: 800 },
   };
 
   const fallback = { temperature: 0.7, defaultTokens: 300, mediaTokens: 240 };
@@ -177,6 +178,10 @@ OUTPUT EN EL IDIOMA SOLICITADO. Sin mezcla de idiomas. Transcreación cultural, 
 
   if (mode === 'xPost') {
     return `${methDaddyPersona}\n\n${xPostBasePrompt}\n\n${langHint}\n\nOUTPUT RULES:\n\n⚠️ REGLA #1 — LÍMITE DE CARACTERES (NO NEGOCIABLE):\nCada opción debe tener MÁXIMO 250 CARACTERES de texto (sin contar el link). El link pnptv.app/join se añade automáticamente al final — NO lo incluyas tú. X tiene un límite estricto de 280 caracteres y el link ocupa 23 caracteres + 1 salto de línea = 24 caracteres reservados. Si tu texto supera 250 caracteres, el post se CORTARÁ y no se publicará completo. CUENTA LOS CARACTERES antes de generar cada opción. Prioriza BREVEDAD y PEGADA.\n\n- Genera EXACTAMENTE 3 opciones (A, B, C) como se describe arriba.\n- No agregues explicaciones ni texto extra, solo las 3 opciones.\n- MÁXIMO 250 CARACTERES por opción (texto solamente, sin el link). CUENTA CADA CARÁCTER.\n- NO incluyas links ni URLs en el texto. El link pnptv.app/join se añade automáticamente después.\n- Aplica algospeak automáticamente cuando el contexto sea promocional de alto riesgo.\n- Rota el tipo de CTA entre las 3 opciones: A=comunidad, B=exclusividad, C=curiosidad.\n- ABSOLUTAMENTE NADA DE MARKDOWN: no asteriscos (*), no guiones bajos (_), no backticks, no headers (#), no listas con guiones. SOLO TEXTO PLANO.\n- CRÍTICO: Write ALL post content EXCLUSIVELY in ${language}. ZERO language mixing. No Spanglish. Every single word must be in ${language} only. Slang and expressions must also be in ${language}.\n- IMPORTANT: Each option block must contain ONLY the tweet text itself. Do NOT include the option label (e.g. "OPCIÓN A", "OPTION A", "(El Gancho Directo)", etc.) inside the tweet body. The label goes on its own line as a header, then the tweet text follows.\n\nRECUERDA: 250 CARACTERES MÁXIMO por opción. Posts más largos serán cortados por el sistema.`;
+  }
+
+  if (mode === 'streamChat') {
+    return `${methDaddyPersona}\n\n${langHint}\n\nOUTPUT FORMAT FOR STREAM CHAT MESSAGES:\nGenerate exactly 12 short chat messages for a live stream. These will be posted automatically in the stream chat every few minutes.\n\nRULES:\n- Each message MUST be under 150 characters\n- Make them fun, flirty, sexy, playful, and in the PNP community vibe\n- Encourage viewers to: send tips, book a private call, engage with the model\n- Reference the model's preferences naturally (what they like, their stream goal)\n- Mix English and Spanish naturally (Spanglish is OK for chat)\n- Use emojis sparingly (1-2 per message max)\n- NO markdown, NO hashtags, NO links\n- Vary the tone: some teasing, some encouraging, some playful questions\n- Output ONLY the 12 messages, one per line, numbered 1-12\n- PLAIN TEXT ONLY`;
   }
 
   return `${methDaddyPersona}\n\n${langHint}\n\nOutput rules:\n- Return ONLY the final message text in Meth Daddy style\n- ABSOLUTELY NO MARKDOWN: no asterisks, no underscores, no backticks, no # headers, no bullet dashes. PLAIN TEXT ONLY.\n- CRITICAL: Keep text UNDER 450 characters total\n- End with hashtags`;

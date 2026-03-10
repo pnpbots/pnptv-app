@@ -3363,3 +3363,36 @@ export function getLiveRulesStatus(): Promise<{
 export function acknowledgeLiveRules(): Promise<{ success: boolean }> {
   return request("/api/webapp/live/acknowledge-rules", { method: "POST" });
 }
+
+// Stream Profile + Grok Auto-Chat
+
+export function getStreamProfile(): Promise<{
+  success: boolean;
+  profile?: {
+    boundaries: string;
+    turnOns: string;
+    streamGoal: string;
+    messages: string[];
+  } | null;
+}> {
+  return request("/api/webapp/live/stream-profile");
+}
+
+export function saveStreamProfile(data: {
+  boundaries: string;
+  turnOns: string;
+  streamGoal: string;
+}): Promise<{ success: boolean; messages: string[] }> {
+  return request("/api/webapp/live/stream-profile", {
+    method: "POST",
+    body: data,
+  });
+}
+
+export function startStreamAutoMessages(): Promise<{ success: boolean }> {
+  return request("/api/webapp/live/stream-auto-start", { method: "POST" });
+}
+
+export function stopStreamAutoMessages(): Promise<{ success: boolean }> {
+  return request("/api/webapp/live/stream-auto-stop", { method: "POST" });
+}
