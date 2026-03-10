@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTelegram } from "@/hooks/useTelegram";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { CristinaWidget } from "@/components/CristinaWidget";
+import { RadioWidget } from "@/components/RadioWidget";
 import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
 import { getMessageThreads } from "@/lib/api";
@@ -431,6 +432,9 @@ export function Layout() {
         <MobilePlayer />
         <BottomNav />
       </div>
+
+      {/* PNP Radio floating widget */}
+      {isAuthenticated && <RadioWidget />}
 
       {/* Cristina AI Support Widget */}
       {isAuthenticated && <CristinaWidget />}

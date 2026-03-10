@@ -11,6 +11,7 @@ const WebSocket = require('ws');
 const logger = require('../../utils/logger');
 const roomWebSocketService = require('../../services/websocket/roomWebSocketService');
 const { resolveTelegramUser } = require('../services/telegramWebAppAuth');
+const { getRedis } = require('../../config/redis');
 
 /**
  * Setup WebSocket server for room updates
@@ -41,19 +42,37 @@ function setupRoomWebSocketServer(server) {
  * @param {WebSocket} socket - WebSocket connection
  * @param {http.IncomingMessage} request - HTTP request
  */
-function handleWebSocketConnection(socket, request) {
+async function handleWebSocketConnection(socket, request) {
   try {
-    // Extract userId from URL query params or auth header
-    const url = new URL(request.url, `http://${request.headers.host}`);
-    const userId = url.searchParams.get('userId');
-    const token = url.searchParams.get('token');
-
-    if (!userId) {
-      logger.warn('WebSocket connection without userId');
-      socket.close(1008, 'Missing userId');
+    // Authenticate via session cookie — do NOT trust userId from query string
+    const cookieHeader = request.headers.cookie || '';
+    const match = cookieHeader.match(/(?:^|;\s*)__pnptv_sid=([^;]+)/);
+    if (!match) {
+      logger.warn('WebSocket /ws/rooms: no session cookie', { ip: request.socket.remoteAddress });
+      socket.close(1008, 'Unauthorized');
       return;
     }
 
+    const raw = decodeURIComponent(match[1]);
+    const sid = raw.startsWith('s:') ? raw.slice(2).split('.')[0] : raw.split('.')[0];
+
+    const redis = getRedis();
+    const sessionData = await redis.get(`sess:${sid}`);
+    if (!sessionData) {
+      logger.warn('WebSocket /ws/rooms: invalid or expired session', { ip: request.socket.remoteAddress });
+      socket.close(1008, 'Unauthorized');
+      return;
+    }
+
+    const session = JSON.parse(sessionData);
+    const sessionUser = session?.user;
+    if (!sessionUser || !sessionUser.id) {
+      logger.warn('WebSocket /ws/rooms: session has no user', { ip: request.socket.remoteAddress });
+      socket.close(1008, 'Unauthorized');
+      return;
+    }
+
+    const userId = String(sessionUser.id);
     logger.info('WebSocket client connected', { userId, ip: request.socket.remoteAddress });
 
     // Handle incoming messages

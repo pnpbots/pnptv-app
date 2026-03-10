@@ -14,7 +14,9 @@ class VisaCybersourceWebhookController {
   static async handleWebhook(req, res) {
     try {
       const { body, headers } = req;
-      const signature = headers['x-signature'] || headers['signature'];
+      // v-c-signature is the canonical Cybersource webhook header name.
+      // x-signature is kept as a fallback for legacy/test environments.
+      const signature = headers['v-c-signature'] || headers['x-signature'];
 
       if (!signature) {
         logger.warn('Visa Cybersource webhook: Missing signature header');
@@ -24,8 +26,10 @@ class VisaCybersourceWebhookController {
         });
       }
 
-      // Process the webhook
-      const result = await VisaCybersourceService.handleWebhook(body, signature);
+      // Process the webhook — pass rawBody so HMAC is computed against the exact bytes
+      // received, not a re-serialized JSON string (key ordering / whitespace differ).
+      const rawBody = req.rawBody || null;
+      const result = await VisaCybersourceService.handleWebhook(body, signature, rawBody);
 
       if (result.success) {
         logger.info('Visa Cybersource webhook processed successfully', {

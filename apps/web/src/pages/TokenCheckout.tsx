@@ -173,10 +173,11 @@ interface EPaycoWidgetProps {
   config: EPaycoConfig;
   tokens: number;
   usd: number;
-  onSuccess: () => void;
+  purchaseId: string;
+  onStartPolling: (id: string) => void;
 }
 
-function EPaycoWidget({ config, tokens, usd, onSuccess }: EPaycoWidgetProps) {
+function EPaycoWidget({ config, tokens, usd, purchaseId, onStartPolling }: EPaycoWidgetProps) {
   const [sdkReady, setSdkReady] = useState(false);
   const [sdkError, setSdkError] = useState("");
   const [opening, setOpening] = useState(false);
@@ -214,14 +215,17 @@ function EPaycoWidget({ config, tokens, usd, onSuccess }: EPaycoWidgetProps) {
         setSdkError(msg);
       });
 
-    // Listen for the ePayco postMessage response so we can detect success
-    // inside the popup without relying solely on the redirect.
+    // Listen for the ePayco postMessage response so we can detect that the
+    // user completed the payment form. We do NOT trust this event as final
+    // confirmation — instead we hand off to the server-side polling loop.
     function onMessage(evt: MessageEvent) {
       if (!EPAYCO_ORIGINS.has(evt.origin)) return;
       try {
         const data = typeof evt.data === "string" ? JSON.parse(evt.data) : evt.data;
         if (data?.status === "Aceptada" || data?.x_transaction_state === "Aceptada") {
-          onSuccess();
+          // Start polling backend for authoritative confirmation; do NOT call
+          // onSuccess directly — the popup signal cannot be trusted alone.
+          onStartPolling(purchaseId);
         }
       } catch {
         // Not a JSON message — ignore
@@ -229,7 +233,7 @@ function EPaycoWidget({ config, tokens, usd, onSuccess }: EPaycoWidgetProps) {
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [config, onSuccess]);
+  }, [config, purchaseId, onStartPolling]);
 
   const handleOpen = useCallback(() => {
     if (!handlerRef.current) return;
@@ -331,13 +335,14 @@ function EPaycoWidget({ config, tokens, usd, onSuccess }: EPaycoWidgetProps) {
 // ── Daimo widget component ────────────────────────────────────────────────────
 interface DaimoWidgetProps {
   sessionId: string;
-  clientSecret: string;
+  // clientSecret is passed via ref to keep it out of React's state tree.
+  clientSecretRef: React.RefObject<string>;
   tokens: number;
   usd: number;
   onSuccess: () => void;
 }
 
-function DaimoWidget({ sessionId, clientSecret, tokens, usd, onSuccess }: DaimoWidgetProps) {
+function DaimoWidget({ sessionId, clientSecretRef, tokens, usd, onSuccess }: DaimoWidgetProps) {
   return (
     <div>
       <div style={SUMMARY_BOX}>
@@ -361,7 +366,7 @@ function DaimoWidget({ sessionId, clientSecret, tokens, usd, onSuccess }: DaimoW
       <DaimoSDKProvider>
         <DaimoModal
           sessionId={sessionId}
-          clientSecret={clientSecret}
+          clientSecret={clientSecretRef.current ?? ""}
           defaultOpen
           embedded
           onPaymentCompleted={onSuccess}
@@ -384,6 +389,8 @@ export default function TokenCheckout() {
   const [error, setError] = useState("");
   const [pollElapsed, setPollElapsed] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Keep Daimo clientSecret out of React's state tree — store in a ref.
+  const daimoClientSecretRef = useRef<string>("");
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -447,6 +454,9 @@ export default function TokenCheckout() {
           setError("This payment link has expired. Please start a new purchase from the app.");
           setState("error");
           return;
+        }
+        if (res.provider === "daimo" && res.daimo?.clientSecret) {
+          daimoClientSecretRef.current = res.daimo.clientSecret;
         }
         setData(res);
         setState("ready");
@@ -556,18 +566,22 @@ export default function TokenCheckout() {
         {/* Ready — render provider-specific widget */}
         {state === "ready" && data && (
           <>
-            {data.provider === "epayco" && data.epayco && (
+            {data.provider === "epayco" && data.epayco && purchaseId && (
               <EPaycoWidget
                 config={data.epayco}
                 tokens={data.tokens}
                 usd={data.usd}
-                onSuccess={handleSuccess}
+                purchaseId={purchaseId}
+                onStartPolling={(id) => {
+                  setState("pending");
+                  startPolling(id);
+                }}
               />
             )}
             {data.provider === "daimo" && data.daimo && (
               <DaimoWidget
                 sessionId={data.daimo.sessionId}
-                clientSecret={data.daimo.clientSecret}
+                clientSecretRef={daimoClientSecretRef}
                 tokens={data.tokens}
                 usd={data.usd}
                 onSuccess={handleSuccess}

@@ -693,6 +693,7 @@ export default function Apply() {
               className="w-full border-0"
               style={{ minHeight: "600px" }}
               title={t.calendarIframeTitle}
+              sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox"
             />
           </div>
           <p className="text-xs text-pnp-textSecondary text-center">

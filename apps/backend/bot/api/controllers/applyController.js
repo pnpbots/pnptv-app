@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const sharp = require('sharp');
+const FileType = require('file-type');
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 // Lazy-loaded to avoid circular dependency warning (bot.js -> routes -> applyController -> bot.js)
@@ -90,6 +91,11 @@ class ApplyController {
         return res.status(400).json({ success: false, error: 'No photo uploaded' });
       }
 
+      const detected = await FileType.fromBuffer(req.file.buffer);
+      if (!detected || !['image/jpeg', 'image/png', 'image/webp'].includes(detected.mime)) {
+        return res.status(400).json({ success: false, error: 'Only JPEG, PNG, or WebP images allowed.' });
+      }
+
       const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'model-applications', String(userId), 'profile');
       fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -97,6 +103,8 @@ class ApplyController {
       const filePath = path.join(uploadDir, filename);
 
       await sharp(req.file.buffer)
+        .rotate()
+        .withMetadata(false)
         .resize(800, 800, { fit: 'cover' })
         .webp({ quality: 85 })
         .toFile(filePath);
@@ -128,6 +136,18 @@ class ApplyController {
         return res.status(400).json({ success: false, error: 'Both front and back ID photos are required' });
       }
 
+      const [detectedFront, detectedBack] = await Promise.all([
+        FileType.fromBuffer(front.buffer),
+        FileType.fromBuffer(back.buffer),
+      ]);
+      const allowedIdMimes = ['image/jpeg', 'image/png', 'image/webp'];
+      if (!detectedFront || !allowedIdMimes.includes(detectedFront.mime)) {
+        return res.status(400).json({ success: false, error: 'Front ID: only JPEG, PNG, or WebP images allowed.' });
+      }
+      if (!detectedBack || !allowedIdMimes.includes(detectedBack.mime)) {
+        return res.status(400).json({ success: false, error: 'Back ID: only JPEG, PNG, or WebP images allowed.' });
+      }
+
       const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'model-applications', String(userId), 'id');
       fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -137,10 +157,14 @@ class ApplyController {
 
       await Promise.all([
         sharp(front.buffer)
+          .rotate()
+          .withMetadata(false)
           .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 90 })
           .toFile(path.join(uploadDir, frontFilename)),
         sharp(back.buffer)
+          .rotate()
+          .withMetadata(false)
           .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 90 })
           .toFile(path.join(uploadDir, backFilename)),

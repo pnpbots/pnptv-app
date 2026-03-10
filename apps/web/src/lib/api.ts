@@ -3716,3 +3716,164 @@ export function adminExtendCreatorSubscription(
     { method: "POST", body: { days } }
   );
 }
+
+// ─── Ampache Media Management ─────────────────────────────────────────────────
+
+export interface AmpacheFile {
+  name: string;
+  size: number;
+  modified: string;
+  category: string;
+}
+
+export function getAmpacheFiles(): Promise<{
+  success: boolean;
+  files: { music: AmpacheFile[]; podcasts: AmpacheFile[]; videos: AmpacheFile[] };
+}> {
+  return request("/api/webapp/admin/ampache/files");
+}
+
+export async function uploadAmpacheFiles(
+  category: string,
+  files: File[]
+): Promise<{ success: boolean; uploaded: { name: string; size: number; category: string }[] }> {
+  const formData = new FormData();
+  formData.append("category", category);
+  files.forEach((f) => formData.append("files", f));
+
+  const res = await fetch(`${API_BASE}/api/webapp/admin/ampache/files/upload`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error || `Upload failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export function deleteAmpacheFile(
+  category: string,
+  filename: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/ampache/files/${category}/${encodeURIComponent(filename)}`, {
+    method: "DELETE",
+  });
+}
+
+// ─── Overlay Asset Direct Upload ─────────────────────────────────────────────
+
+export interface UploadedOverlayAsset {
+  success: boolean;
+  url: string;
+  name: string;
+  type: "logo" | "banner";
+  filename: string;
+}
+
+export interface LocalOverlayAsset {
+  name: string;
+  url: string;
+  size: number;
+  modified: string;
+  type: "logo" | "banner";
+}
+
+export async function uploadOverlayAsset(
+  type: "logo" | "banner",
+  file: File
+): Promise<UploadedOverlayAsset> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("type", type);
+
+  const res = await fetch(`${API_BASE}/api/webapp/admin/overlay-assets/upload`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error || `Upload failed (${res.status})`);
+  }
+
+  return res.json();
+}
+
+export function getOverlayAssets(
+  type?: "logo" | "banner"
+): Promise<{ success: boolean; assets: LocalOverlayAsset[] }> {
+  const params = type ? `?type=${type}` : "";
+  return request(`/api/webapp/admin/overlay-assets${params}`);
+}
+
+export function deleteOverlayAsset(
+  type: "logos" | "banners",
+  filename: string
+): Promise<{ success: boolean }> {
+  return request(
+    `/api/webapp/admin/overlay-assets/${type}/${encodeURIComponent(filename)}`,
+    { method: "DELETE" }
+  );
+}
+
+// ─── Media Library Video Management ──────────────────────────────────────────
+
+export interface MediaLibraryVideo {
+  id: string;
+  title: string;
+  artist: string;
+  url: string;
+  type: string;
+  category: string;
+  cover_url: string | null;
+  duration: number;
+  is_prime: boolean;
+  is_public: boolean;
+  ampache_song_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getMediaLibraryVideos(): Promise<{
+  success: boolean;
+  videos: MediaLibraryVideo[];
+}> {
+  return request("/api/webapp/admin/media-library/videos");
+}
+
+export function syncVideoToMediaLibrary(data: {
+  filename: string;
+  title: string;
+  category?: string;
+}): Promise<{ success: boolean; video: MediaLibraryVideo; isNew: boolean }> {
+  return request("/api/webapp/admin/media-library/sync-video", {
+    method: "POST",
+    body: data,
+  });
+}
+
+export function toggleVideoPrime(
+  id: string,
+  isPrime: boolean
+): Promise<{ success: boolean; video: MediaLibraryVideo }> {
+  return request(`/api/webapp/admin/media-library/${encodeURIComponent(id)}/prime`, {
+    method: "PUT",
+    body: { is_prime: isPrime },
+  });
+}
+
+/**
+ * Validates that a payment redirect URL is an absolute HTTPS URL before the
+ * caller navigates to it.  Throws if the value is missing or uses any other
+ * scheme, preventing open-redirect and mixed-content attacks.
+ */
+export function assertPaymentUrl(url: unknown): string {
+  if (typeof url !== "string" || !url.startsWith("https://")) {
+    throw new Error("Invalid payment URL — must be https://");
+  }
+  return url;
+}

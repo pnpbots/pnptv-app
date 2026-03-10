@@ -105,14 +105,44 @@ const sendMessage = async (req, res) => {
   if (!recipientId) return res.status(404).json({ error: 'Recipient not found' });
   if (recipientId === user.id) return res.status(400).json({ error: 'Cannot message yourself' });
   try {
-    // Check if sender is blocked by recipient
+    // Check if either party has blocked the other (bidirectional)
     const { rows: blockRows } = await query(
-      'SELECT 1 FROM blocked_users WHERE user_id=$1 AND blocked_user_id=$2',
+      `SELECT 1 FROM blocked_users
+       WHERE (user_id = $1 AND blocked_user_id = $2)
+          OR (user_id = $2 AND blocked_user_id = $1)
+       LIMIT 1`,
       [recipientId, user.id]
     );
     if (blockRows.length > 0) {
       return res.status(403).json({ error: 'Cannot send message to this user' });
     }
+
+    // Check recipient's allowMessages privacy setting.
+    // privacy.allowMessages = true  → anyone may message (default)
+    // privacy.allowMessages = false → only followers of the recipient may message
+    // Admins and superadmins bypass this restriction.
+    const senderRole = user.role || '';
+    const isAdminSender = senderRole === 'admin' || senderRole === 'superadmin';
+    if (!isAdminSender) {
+      const { rows: recipientRows } = await query(
+        'SELECT privacy FROM users WHERE id = $1',
+        [recipientId]
+      );
+      const recipientPrivacy = recipientRows[0]?.privacy || {};
+      const allowMessages = recipientPrivacy.allowMessages !== undefined ? recipientPrivacy.allowMessages : true;
+
+      if (!allowMessages) {
+        // Sender must be a follower of the recipient to bypass the restriction
+        const { rowCount: followCount } = await query(
+          'SELECT 1 FROM user_follows WHERE follower_id = $1 AND following_id = $2 LIMIT 1',
+          [user.id, recipientId]
+        );
+        if (followCount === 0) {
+          return res.status(403).json({ error: 'This user is not accepting messages' });
+        }
+      }
+    }
+
     const text = content.trim().slice(0, 4000);
     const { rows } = await query(
       `INSERT INTO direct_messages (sender_id, recipient_id, content)

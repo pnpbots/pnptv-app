@@ -1,6 +1,8 @@
 const fs = require('fs');
+const fsPromises = require('fs').promises;
 const path = require('path');
 const multer = require('multer');
+const FileType = require('file-type');
 
 const UPLOAD_DIR = path.join(__dirname, '../../../../public/uploads/podcasts');
 
@@ -50,6 +52,17 @@ const upload = multer({
 async function uploadAudio(req, res) {
   if (!req.file) {
     return res.status(400).json({ success: false, message: 'No file received' });
+  }
+
+  const headerBuf = Buffer.alloc(4100);
+  const fd = await fsPromises.open(req.file.path, 'r');
+  await fd.read(headerBuf, 0, 4100, 0);
+  await fd.close();
+  const detected = await FileType.fromBuffer(headerBuf);
+  const ALLOWED_AUDIO = new Set(['audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/aac', 'audio/mp4', 'audio/x-m4a', 'audio/flac']);
+  if (!detected || !ALLOWED_AUDIO.has(detected.mime)) {
+    await fsPromises.unlink(req.file.path).catch(() => {});
+    return res.status(400).json({ success: false, message: 'Only audio files are allowed.' });
   }
 
   const publicUrl = `/uploads/podcasts/${encodeURIComponent(req.file.filename)}`;

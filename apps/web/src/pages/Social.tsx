@@ -370,7 +370,14 @@ function PostCard({
               {/* Promoted CTA button */}
               {post.is_promoted && post.promoted_link && (
                 <button
-                  onClick={() => onNavigate(post.promoted_link!)}
+                  onClick={() => {
+                    const link = post.promoted_link!;
+                    if (link.startsWith('/')) {
+                      onNavigate(link);
+                    } else if (link.startsWith('https://')) {
+                      window.open(link, '_blank', 'noopener,noreferrer');
+                    }
+                  }}
                   className="mt-3 w-full text-sm font-semibold py-2.5 rounded-lg transition-opacity hover:opacity-90"
                   style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
                 >

@@ -8,6 +8,14 @@ const authGuard = (req, res) => {
   return user;
 };
 
+/**
+ * Escape LIKE/ILIKE metacharacters in a user-supplied search string.
+ * PostgreSQL treats % (any sequence), _ (any single char), and \ (escape char)
+ * as special. Without escaping, user-supplied values can widen or distort pattern matches.
+ * The escaped value must be used with ESCAPE '\' in the SQL clause.
+ */
+const escapeLike = (str) => str.replace(/[%_\\]/g, '\\$&');
+
 // Search users
 const searchUsers = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
@@ -27,15 +35,16 @@ const searchUsers = async (req, res) => {
     const blockedByOthers = reverseBlockResult.rows.map(r => String(r.id));
     const excludeIds = [...new Set([...viewerBlocked, ...blockedByOthers])];
 
+    const safeQ = escapeLike(q);
     const { rows } = await query(
       `SELECT id, username, first_name, last_name, photo_file_id, pnptv_id
        FROM users
        WHERE id != $1
-         AND (username ILIKE $2 OR first_name ILIKE $2 OR pnptv_id ILIKE $2)
+         AND (username ILIKE $2 ESCAPE '\\' OR first_name ILIKE $2 ESCAPE '\\' OR pnptv_id ILIKE $2 ESCAPE '\\')
          AND NOT (id = ANY($4::text[]))
        ORDER BY first_name ASC
        LIMIT $3`,
-      [user.id, `%${q}%`, lim, excludeIds]
+      [user.id, `%${safeQ}%`, lim, excludeIds]
     );
     return res.json({ success: true, users: rows });
   } catch (err) {

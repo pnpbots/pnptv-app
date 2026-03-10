@@ -27,6 +27,7 @@ import {
   getRtmpKey,
   getUserLabel,
   getLabelColor,
+  assertPaymentUrl,
   type UserProfile,
   type SocialPostItem,
 } from "@/lib/api";
@@ -415,7 +416,7 @@ export default function Profile() {
       const creatorId = profile.id || paramUserId!;
       const result = await initiateCreatorSubscriptionPayment(creatorId, subscribeProvider, trimmed);
       if (result.success && result.paymentUrl) {
-        window.open(result.paymentUrl, "_blank", "noopener,noreferrer");
+        window.open(assertPaymentUrl(result.paymentUrl), "_blank", "noopener,noreferrer");
         setSubscribePaymentId(result.paymentId);
         setSubscribeAwaitingPayment(true);
       } else {

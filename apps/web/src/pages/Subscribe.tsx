@@ -11,6 +11,7 @@ import {
   getDashAvailable,
   activateMeruCode,
   getLabelColor,
+  assertPaymentUrl,
   type SubscriptionPlan,
 } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -243,7 +244,7 @@ export default function Subscribe() {
         if (result.success && result.checkoutUrl) {
           setDashInvoice({
             invoiceId: result.invoiceId,
-            checkoutUrl: result.checkoutUrl,
+            checkoutUrl: assertPaymentUrl(result.checkoutUrl),
             planName: result.planName || "subscription",
           });
           setDashPolling(true);
@@ -264,9 +265,9 @@ export default function Subscribe() {
             // Navigate in same tab for Daimo — avoids popup blockers
             // Store paymentId so we can resume polling if user comes back
             try { sessionStorage.setItem("pnp_pending_payment", result.paymentId); } catch {}
-            window.location.href = result.paymentUrl;
+            window.location.href = assertPaymentUrl(result.paymentUrl);
           } else {
-            window.open(result.paymentUrl, "_blank", "noopener,noreferrer");
+            window.open(assertPaymentUrl(result.paymentUrl), "_blank", "noopener,noreferrer");
             if (result.paymentId) {
               setPollingPaymentId(result.paymentId);
             }

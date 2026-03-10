@@ -22,6 +22,7 @@ import {
   buyTokensWallet,
   linkDPNS,
   getWalletHistory,
+  assertPaymentUrl,
   type FeaturedPerformer,
   type LiveStream,
   type TokenPackage,
@@ -153,16 +154,16 @@ export default function Live() {
       let openedPopup: Window | null = null;
       if (buyMethod === 'card') {
         const result = await buyTokensCard(pkg.id);
-        checkoutUrl = result.checkoutUrl;
+        checkoutUrl = assertPaymentUrl(result.checkoutUrl);
         openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
       } else if (buyMethod === 'wallet') {
         const result = await buyTokensWallet(pkg.id);
-        checkoutUrl = result.checkoutUrl;
+        checkoutUrl = assertPaymentUrl(result.checkoutUrl);
         openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
       } else {
         // Dash — BTCPay has its own checkout page
         const result = await buyTokens(pkg.id);
-        checkoutUrl = result.checkoutUrl;
+        checkoutUrl = assertPaymentUrl(result.checkoutUrl);
         openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
       }
       if (!openedPopup) {

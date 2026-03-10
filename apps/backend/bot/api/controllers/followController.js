@@ -29,6 +29,18 @@ const followUser = async (req, res) => {
     if (!targetRes.rows.length) return res.status(404).json({ error: 'User not found' });
     const target = targetRes.rows[0];
 
+    // Block check — bidirectional: neither party can follow the other if a block exists
+    const blockRes = await query(
+      `SELECT 1 FROM blocked_users
+       WHERE (user_id = $1 AND blocked_user_id = $2)
+          OR (user_id = $2 AND blocked_user_id = $1)
+       LIMIT 1`,
+      [actor.id, targetId]
+    );
+    if (blockRes.rowCount > 0) {
+      return res.status(403).json({ error: 'Cannot follow this user' });
+    }
+
     // Insert follow — ON CONFLICT DO NOTHING makes this idempotent
     const { rowCount } = await query(
       'INSERT INTO user_follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',

@@ -324,13 +324,27 @@ function verifyEpaycoSignature(req) {
     if (hmacResult.valid) {
       return { valid: true, method: 'hmac_header' };
     }
-    // HMAC header present but invalid — fall through to body signature check
-    logger.warn('ePayco x-signature header HMAC verification failed, trying body signature', {
+    // HMAC header present but verification failed — fail closed, do NOT fall through.
+    // Allowing a failed HMAC to downgrade to the weaker body SHA256 check would let an
+    // attacker forge requests by presenting any x-signature header value and then crafting
+    // a body with a matching x_signature hash.
+    logger.error('ePayco x-signature header HMAC verification failed — rejecting request', {
       transactionId: req.body?.x_ref_payco,
     });
+    return { valid: false, reason: 'invalid_hmac_header', error: 'Invalid HMAC signature' };
   }
 
   // Fallback: Check x_signature in body (existing SHA256 hash method)
+  // H5: In strict HMAC mode, reject any request that did not supply an x-signature header.
+  // Set EPAYCO_REQUIRE_HMAC=true in production once ePayco has been configured to send
+  // the x-signature header on every webhook delivery.
+  if (process.env.EPAYCO_REQUIRE_HMAC === 'true') {
+    logger.error('ePayco webhook rejected: EPAYCO_REQUIRE_HMAC is set but no x-signature header was present', {
+      transactionId: req.body?.x_ref_payco,
+    });
+    return { valid: false, reason: 'hmac_required', error: 'HMAC header required in strict mode' };
+  }
+
   const hasSignature = Boolean(req.body?.x_signature);
   if (!hasSignature) {
     logger.error('ePayco webhook rejected: missing signature', {
@@ -338,6 +352,12 @@ function verifyEpaycoSignature(req) {
     });
     return { valid: false, reason: 'missing_signature', error: 'Missing signature' };
   }
+
+  // H5: Log a warning every time the weaker body SHA256 path is used so operators
+  // can detect when ePayco switches to sending HMAC headers.
+  logger.warn('ePayco webhook verified via body SHA256 (weaker path) — consider enabling EPAYCO_REQUIRE_HMAC', {
+    transactionId: req.body?.x_ref_payco,
+  });
 
   const signatureResult = PaymentService.verifyEpaycoSignature(req.body);
   const isValid = typeof signatureResult === 'object' && signatureResult !== null

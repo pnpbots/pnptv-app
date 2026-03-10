@@ -544,6 +544,30 @@ class PaymentController {
         return res.status(404).json({ success: false, error: 'Payment not found' });
       }
 
+      // C1 — Ownership enforcement
+      // When a session exists, the requesting user must own this payment.
+      // The 3DS browser redirect page has no session — for that unauthenticated path we
+      // return a status-only response (no plan details, no recovery trigger).
+      const sessionUserId = req.session?.user?.id || req.session?.userId || null;
+      const paymentOwner = String(payment.userId || payment.user_id || '');
+      if (sessionUserId) {
+        if (String(sessionUserId) !== paymentOwner) {
+          logger.warn('Payment status ownership check failed', {
+            paymentId,
+            sessionUserId,
+            paymentOwner,
+          });
+          return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+      } else {
+        // No session — unauthenticated 3DS browser page. Return status only; no plan
+        // details, no recovery trigger, no sensitive metadata.
+        const safeStatus = ['pending', 'completed', 'failed', 'refunded'].includes(payment.status)
+          ? payment.status
+          : 'pending';
+        return res.json({ success: true, status: safeStatus });
+      }
+
       const refPayco = PaymentController.resolveEpaycoRef(payment)
         || await PaymentController.resolveEpaycoRefFromDb(paymentId);
 

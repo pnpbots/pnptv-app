@@ -310,6 +310,7 @@ const createPostWithMedia = async (req, res) => {
 
   let mediaUrl = null;
   let mediaType = null;
+  let finalFilePath = null;
 
   try {
     if (replyToId) {
@@ -386,10 +387,13 @@ const createPostWithMedia = async (req, res) => {
         // Images are small enough for memory — read from buffer or disk
         const imgBuffer = hasBuffer ? req.file.buffer : await fs.readFile(tempPath);
         await sharp(imgBuffer)
+          .rotate()
+          .withMetadata(false)
           .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 70, progressive: true })
           .toFile(filePath);
         if (tempPath) await fs.unlink(tempPath).catch(() => {});
+        finalFilePath = filePath;
         mediaUrl = `/uploads/posts/${filename}`;
       } else {
         const VIDEO_EXT = { 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/3gpp': '3gp', 'video/hevc': 'mp4' };
@@ -407,6 +411,7 @@ const createPostWithMedia = async (req, res) => {
         } else {
           await fs.writeFile(filePath, req.file.buffer);
         }
+        finalFilePath = filePath;
         mediaUrl = `/uploads/posts/${filename}`;
       }
     }
@@ -453,6 +458,7 @@ const createPostWithMedia = async (req, res) => {
     return res.json({ success: true, post: fullPost });
   } catch (err) {
     logger.error('createPostWithMedia error', err);
+    if (finalFilePath) await fs.unlink(finalFilePath).catch(() => {});
     return res.status(500).json({ error: 'Failed to create post' });
   }
 };
@@ -499,6 +505,8 @@ const createPostWithMultiMedia = async (req, res) => {
   const files = req.files || [];
   if (files.length === 0) return res.status(400).json({ error: 'At least one media file required' });
   if (files.length > 4) return res.status(400).json({ error: 'Maximum 4 files per post' });
+
+  const writtenFilePaths = [];
 
   try {
     if (replyToId) {
@@ -557,10 +565,13 @@ const createPostWithMultiMedia = async (req, res) => {
         const destPath = path.join(uploadDir, filename);
         const imgBuffer = hasBuffer ? file.buffer : await fs.readFile(fileTempPath);
         await sharp(imgBuffer)
+          .rotate()
+          .withMetadata(false)
           .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 70, progressive: true })
           .toFile(destPath);
         if (fileTempPath) await fs.unlink(fileTempPath).catch(() => {});
+        writtenFilePaths.push(destPath);
         mediaItems.push({ url: `/uploads/posts/${filename}`, type: 'image' });
       } else {
         const ext = VIDEO_EXT_MAP[detectedMime] || 'mp4';
@@ -575,6 +586,7 @@ const createPostWithMultiMedia = async (req, res) => {
         } else {
           await fs.writeFile(destPath, file.buffer);
         }
+        writtenFilePaths.push(destPath);
         mediaItems.push({ url: `/uploads/posts/${filename}`, type: 'video' });
       }
     }
@@ -652,6 +664,7 @@ const createPostWithMultiMedia = async (req, res) => {
     return res.json({ success: true, post: fullPost });
   } catch (err) {
     logger.error('createPostWithMultiMedia error', err);
+    await Promise.all(writtenFilePaths.map(p => fs.unlink(p).catch(() => {})));
     return res.status(500).json({ error: 'Failed to create post' });
   }
 };
@@ -862,10 +875,10 @@ const bulkCreateVideos = async (req, res) => {
     }
 
     try {
-      // Validate magic bytes from first 256 bytes
-      const headerBuf = Buffer.alloc(256);
+      // Validate magic bytes from first 4100 bytes
+      const headerBuf = Buffer.alloc(4100);
       const fd = await fs.open(file.path, 'r');
-      await fd.read(headerBuf, 0, 256, 0);
+      await fd.read(headerBuf, 0, 4100, 0);
       await fd.close();
 
       const detected = await FileType.fromBuffer(headerBuf);

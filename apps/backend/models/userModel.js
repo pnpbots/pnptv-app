@@ -125,7 +125,8 @@ class UserModel {
       city: row.city || null,
       country: row.country || null,
       // Recurring subscription fields
-      cardToken: row.card_token || null,
+      // card_token is intentionally excluded — it must never appear in the generic user
+      // object. Code that needs the live token must query recurring_subscriptions directly.
       cardTokenMask: row.card_token_mask || null,
       cardFranchise: row.card_franchise || null,
       autoRenew: row.auto_renew || false,

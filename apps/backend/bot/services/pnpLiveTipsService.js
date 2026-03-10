@@ -45,19 +45,20 @@ class PNPLiveTipsService {
   static async confirmTipPayment(tipId, transactionId) {
     try {
       const result = await query(
-        `UPDATE pnp_tips 
-         SET payment_status = 'completed', 
+        `UPDATE pnp_tips
+         SET payment_status = 'completed',
              transaction_id = $1,
              completed_at = NOW()
-         WHERE id = $2
+         WHERE id = $2 AND payment_status = 'pending'
          RETURNING *`,
         [transactionId, tipId]
       );
-      
-      if (result.rows.length === 0) {
-        throw new Error('Tip not found');
+
+      if (result.rowCount === 0) {
+        logger.info('confirmTipPayment: already confirmed or not found — idempotent no-op', { tipId });
+        return null;
       }
-      
+
       return result.rows[0];
     } catch (error) {
       logger.error('Error confirming tip payment:', error);

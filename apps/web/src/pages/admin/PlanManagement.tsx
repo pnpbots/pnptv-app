@@ -58,6 +58,35 @@ interface PlanFormState {
 
 const EMPTY_FORM: PlanFormState = { name: "", price: "", active: true };
 
+// ─── Filter types ─────────────────────────────────────────────────────────────
+
+type StatusFilter = "all" | "active" | "inactive";
+type PriceFilter = "all" | "free" | "paid" | "price_asc" | "price_desc";
+type LabelFilter = "all" | "PRIME" | "BASIC" | "FREE";
+
+interface FilterState {
+  search: string;
+  status: StatusFilter;
+  price: PriceFilter;
+  label: LabelFilter;
+}
+
+const EMPTY_FILTERS: FilterState = {
+  search: "",
+  status: "all",
+  price: "all",
+  label: "all",
+};
+
+function filtersAreDefault(f: FilterState): boolean {
+  return (
+    f.search === "" &&
+    f.status === "all" &&
+    f.price === "all" &&
+    f.label === "all"
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function PlanManagement() {
@@ -76,6 +105,60 @@ export default function PlanManagement() {
 
   const [allAddOns, setAllAddOns] = useState<AddOn[]>([]);
   const [addOnRows, setAddOnRows] = useState<Record<string, AddOnRowState>>({});
+
+  // ── Filter state ──────────────────────────────────────────────────────────
+
+  const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
+
+  const setFilter = <K extends keyof FilterState>(key: K, val: FilterState[K]) =>
+    setFilters((prev) => ({ ...prev, [key]: val }));
+
+  const clearFilters = () => setFilters(EMPTY_FILTERS);
+
+  // ── Filtered + sorted plans ───────────────────────────────────────────────
+
+  const filteredPlans = useMemo(() => {
+    let result = [...plans];
+
+    // Search: name, display_name, sku
+    if (filters.search.trim() !== "") {
+      const q = filters.search.trim().toLowerCase();
+      result = result.filter((p) => {
+        const name = (p.display_name || p.name || "").toLowerCase();
+        const sku = (p.sku || "").toLowerCase();
+        return name.includes(q) || sku.includes(q);
+      });
+    }
+
+    // Status filter
+    if (filters.status === "active") {
+      result = result.filter((p) => p.active);
+    } else if (filters.status === "inactive") {
+      result = result.filter((p) => !p.active);
+    }
+
+    // Price filter / sort
+    if (filters.price === "free") {
+      result = result.filter((p) => (typeof p.price === "number" ? p.price : 0) === 0);
+    } else if (filters.price === "paid") {
+      result = result.filter((p) => (typeof p.price === "number" ? p.price : 0) > 0);
+    } else if (filters.price === "price_asc") {
+      result = result.sort(
+        (a, b) => (typeof a.price === "number" ? a.price : 0) - (typeof b.price === "number" ? b.price : 0)
+      );
+    } else if (filters.price === "price_desc") {
+      result = result.sort(
+        (a, b) => (typeof b.price === "number" ? b.price : 0) - (typeof a.price === "number" ? a.price : 0)
+      );
+    }
+
+    // Label (plan type) filter
+    if (filters.label !== "all") {
+      result = result.filter((p) => deriveLabel(p.add_ons ?? []) === filters.label);
+    }
+
+    return result;
+  }, [plans, filters]);
 
   // ── Data loading ──────────────────────────────────────────────────────────
 
@@ -313,6 +396,8 @@ export default function PlanManagement() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  const hasActiveFilters = !filtersAreDefault(filters);
+
   return (
     <div className="page-container space-y-4">
       {/* Header */}
@@ -338,11 +423,122 @@ export default function PlanManagement() {
         </div>
       )}
 
+      {/* ─── Filter bar ─────────────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-pnp-border bg-pnp-surface px-4 py-3 space-y-3">
+        {/* Row 1: search + clear */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[200px]">
+            <svg
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pnp-textSecondary"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M16.5 10.5a6 6 0 11-12 0 6 6 0 0112 0z" />
+            </svg>
+            <input
+              type="text"
+              value={filters.search}
+              onChange={(e) => setFilter("search", e.target.value)}
+              placeholder="Search by name or SKU…"
+              className="w-full pl-9 pr-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent transition-colors"
+            />
+          </div>
+
+          {/* Clear filters */}
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-pnp-border text-xs text-pnp-textSecondary hover:text-pnp-textPrimary hover:border-pnp-accent/50 transition-colors whitespace-nowrap"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              Clear filters
+            </button>
+          )}
+        </div>
+
+        {/* Row 2: dropdowns */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Status */}
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-pnp-textSecondary whitespace-nowrap">Status</label>
+            <select
+              value={filters.status}
+              onChange={(e) => setFilter("status", e.target.value as StatusFilter)}
+              className="px-2 py-1.5 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-xs focus:outline-none focus:border-pnp-accent transition-colors"
+            >
+              <option value="all">All</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+
+          {/* Price */}
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-pnp-textSecondary whitespace-nowrap">Price</label>
+            <select
+              value={filters.price}
+              onChange={(e) => setFilter("price", e.target.value as PriceFilter)}
+              className="px-2 py-1.5 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-xs focus:outline-none focus:border-pnp-accent transition-colors"
+            >
+              <option value="all">All</option>
+              <option value="free">Free ($0)</option>
+              <option value="paid">Paid (&gt; $0)</option>
+              <option value="price_asc">Price: Low → High</option>
+              <option value="price_desc">Price: High → Low</option>
+            </select>
+          </div>
+
+          {/* Plan type / label */}
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-pnp-textSecondary whitespace-nowrap">Type</label>
+            <select
+              value={filters.label}
+              onChange={(e) => setFilter("label", e.target.value as LabelFilter)}
+              className="px-2 py-1.5 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-xs focus:outline-none focus:border-pnp-accent transition-colors"
+            >
+              <option value="all">All</option>
+              <option value="PRIME">PRIME</option>
+              <option value="BASIC">BASIC</option>
+              <option value="FREE">FREE</option>
+            </select>
+          </div>
+
+          {/* Results count */}
+          <span className="ml-auto text-xs text-pnp-textSecondary whitespace-nowrap">
+            {loading ? (
+              "Loading…"
+            ) : hasActiveFilters ? (
+              <>
+                Showing{" "}
+                <span className="font-semibold text-pnp-textPrimary">{filteredPlans.length}</span>
+                {" "}of{" "}
+                <span className="font-semibold text-pnp-textPrimary">{plans.length}</span>
+                {" "}plans
+              </>
+            ) : (
+              <>
+                <span className="font-semibold text-pnp-textPrimary">{plans.length}</span>
+                {" "}plan{plans.length !== 1 ? "s" : ""}
+              </>
+            )}
+          </span>
+        </div>
+      </div>
+
       <DataTable
         columns={columns}
-        data={plans}
+        data={filteredPlans}
         loading={loading}
-        emptyMessage="No plans yet. Click '+ New Plan' to create one."
+        emptyMessage={
+          hasActiveFilters
+            ? "No plans match the current filters."
+            : "No plans yet. Click '+ New Plan' to create one."
+        }
         getRowId={(row) => row.id}
       />
 

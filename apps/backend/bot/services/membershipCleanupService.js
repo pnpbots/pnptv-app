@@ -487,12 +487,37 @@ Type /subscribe to view membership plans and reactivate your access!`;
         logger.warn('user_entitlements table not available, falling back to plan_id lifetime check', { error: e.message });
       }
 
-      const lifetimeExclusion = lifetimeUserIds.length > 0
-        ? `AND id NOT IN (${lifetimeUserIds.map(id => `'${id}'`).join(',')})`
+      // Build parameterized lifetime exclusion.
+      // lifetimeUserIds is a plain JS array of user ID strings. Passing the array as a
+      // single bound parameter with the ANY($N::text[]) construct is safe against injection.
+      // When the array is empty we skip the clause entirely — ALL($N::text[]) on an empty
+      // array would erroneously match every row.
+      const hasLifetimeIds = lifetimeUserIds.length > 0;
+      // Param index placeholder is substituted per-query below. We use a sentinel token
+      // $LIFETIME_IDS that each query replaces with its actual bind-parameter index.
+      const lifetimeExclusionTemplate = hasLifetimeIds
+        ? `AND id != ALL($LIFETIME_IDS::text[])`
         : '';
 
+      /**
+       * Build a safe parameterized query with the lifetime exclusion clause.
+       * @param {string} sql - SQL string containing '$LIFETIME_IDS' as a placeholder token
+       * @param {Array}  baseParams - Bound parameters that appear before the lifetime array
+       * @returns {{ text: string, values: Array }}
+       */
+      const buildQuery = (sql, baseParams = []) => {
+        if (!hasLifetimeIds) {
+          return { text: sql.replace('$LIFETIME_IDS', ''), values: baseParams };
+        }
+        const nextIdx = baseParams.length + 1;
+        return {
+          text: sql.replace('$LIFETIME_IDS', String(nextIdx)),
+          values: [...baseParams, lifetimeUserIds],
+        };
+      };
+
       // Step 1a: Activate member-tier users (member_monthly plan with valid expiry)
-      const activateMemberResult = await query(`
+      const q1a = buildQuery(`
         UPDATE users
         SET subscription_status = 'active',
             tier = 'member',
@@ -501,16 +526,17 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND plan_expiry > NOW()
           AND plan_id = 'member_monthly'
           AND (subscription_status != 'active' OR tier != 'member')
-          ${lifetimeExclusion}
+          ${lifetimeExclusionTemplate}
         RETURNING id, username
       `);
+      const activateMemberResult = await query(q1a.text, q1a.values);
       results.toActive += activateMemberResult.rowCount;
       if (activateMemberResult.rowCount > 0) {
         logger.info(`Activated ${activateMemberResult.rowCount} member-tier users`);
       }
 
       // Step 1b: Activate PRIME users (non-member plans with valid expiry)
-      const activateResult = await query(`
+      const q1b = buildQuery(`
         UPDATE users
         SET subscription_status = 'active',
             tier = 'PRIME',
@@ -522,9 +548,10 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND plan_id NOT ILIKE '%lifetime%'
           AND plan_id NOT ILIKE '%life-time%'
           AND plan_id != 'lifetime100'
-          ${lifetimeExclusion}
+          ${lifetimeExclusionTemplate}
         RETURNING id, username
       `);
+      const activateResult = await query(q1b.text, q1b.values);
       results.toActive += activateResult.rowCount;
       if (activateResult.rowCount > 0) {
         logger.info(`Activated ${activateResult.rowCount} PRIME users with valid subscriptions`);
@@ -609,7 +636,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
       }
 
       // Step 4: Update users with expired subscriptions to 'churned'
-      const churnResult = await query(`
+      const q4 = buildQuery(`
         UPDATE users
         SET subscription_status = 'churned',
             tier = 'free',
@@ -619,16 +646,17 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND plan_id NOT ILIKE '%lifetime%'
           AND plan_id NOT ILIKE '%life-time%'
           AND subscription_status NOT IN ('churned', 'free')
-          ${lifetimeExclusion}
+          ${lifetimeExclusionTemplate}
         RETURNING id, username
       `);
+      const churnResult = await query(q4.text, q4.values);
       results.toChurned += churnResult.rowCount;
       if (churnResult.rowCount > 0) {
         logger.info(`Churned ${churnResult.rowCount} users with expired subscriptions`);
       }
 
       // Step 5: Ensure 'free' tier for all churned users
-      const fixChurnedTierResult = await query(`
+      const q5 = buildQuery(`
         UPDATE users
         SET tier = 'free',
             updated_at = NOW()
@@ -637,15 +665,16 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND plan_id NOT ILIKE '%lifetime%'
           AND plan_id NOT ILIKE '%life-time%'
           AND plan_id != 'lifetime100'
-          ${lifetimeExclusion}
+          ${lifetimeExclusionTemplate}
         RETURNING id
       `);
+      const fixChurnedTierResult = await query(q5.text, q5.values);
       if (fixChurnedTierResult.rowCount > 0) {
         logger.info(`Fixed tier for ${fixChurnedTierResult.rowCount} churned/free users`);
       }
 
       // Step 6: Convert old 'expired' status to 'churned' for consistency
-      const expiredToChurnedResult = await query(`
+      const q6 = buildQuery(`
         UPDATE users
         SET subscription_status = 'churned',
             updated_at = NOW()
@@ -653,16 +682,17 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND plan_id NOT ILIKE '%lifetime%'
           AND plan_id NOT ILIKE '%life-time%'
           AND plan_id != 'lifetime100'
-          ${lifetimeExclusion}
+          ${lifetimeExclusionTemplate}
         RETURNING id
       `);
+      const expiredToChurnedResult = await query(q6.text, q6.values);
       if (expiredToChurnedResult.rowCount > 0) {
         results.toChurned += expiredToChurnedResult.rowCount;
         logger.info(`Converted ${expiredToChurnedResult.rowCount} 'expired' status to 'churned'`);
       }
 
       // Step 7: Ensure users without any plan are set to 'free'
-      const freeResult = await query(`
+      const q7 = buildQuery(`
         UPDATE users
         SET subscription_status = 'free',
             tier = 'free',
@@ -670,9 +700,10 @@ Type /subscribe to view membership plans and reactivate your access!`;
         WHERE plan_id IS NULL
           AND plan_expiry IS NULL
           AND subscription_status NOT IN ('free')
-          ${lifetimeExclusion}
+          ${lifetimeExclusionTemplate}
         RETURNING id
       `);
+      const freeResult = await query(q7.text, q7.values);
       results.toFree += freeResult.rowCount;
       if (freeResult.rowCount > 0) {
         logger.info(`Set ${freeResult.rowCount} users to 'free' status`);
@@ -680,15 +711,16 @@ Type /subscribe to view membership plans and reactivate your access!`;
 
       // Step 8: Tier↔Status consistency enforcement
       // Rule: PRIME tier MUST have subscription_status='active'
-      const fixPrimeStatus = await query(`
+      const q8a = buildQuery(`
         UPDATE users
         SET subscription_status = 'active',
             updated_at = NOW()
         WHERE tier = 'PRIME'
           AND subscription_status != 'active'
-          ${lifetimeExclusion}
+          ${lifetimeExclusionTemplate}
         RETURNING id, username, subscription_status AS old_status
       `);
+      const fixPrimeStatus = await query(q8a.text, q8a.values);
       if (fixPrimeStatus.rowCount > 0) {
         logger.warn(`Fixed ${fixPrimeStatus.rowCount} PRIME users with wrong subscription_status`, {
           users: fixPrimeStatus.rows.map(r => ({ id: r.id, oldStatus: r.old_status }))
@@ -696,16 +728,17 @@ Type /subscribe to view membership plans and reactivate your access!`;
       }
 
       // Rule: churned/free status MUST NOT have PRIME or member tier
-      const fixChurnedPrime = await query(`
+      const q8b = buildQuery(`
         UPDATE users
         SET tier = 'free',
             updated_at = NOW()
         WHERE subscription_status IN ('churned', 'free')
           AND tier IN ('PRIME', 'member')
           AND tier != 'banned'
-          ${lifetimeExclusion}
+          ${lifetimeExclusionTemplate}
         RETURNING id, username, tier AS old_tier
       `);
+      const fixChurnedPrime = await query(q8b.text, q8b.values);
       if (fixChurnedPrime.rowCount > 0) {
         logger.warn(`Fixed ${fixChurnedPrime.rowCount} churned/free users with wrong tier`, {
           users: fixChurnedPrime.rows.map(r => ({ id: r.id, oldTier: r.old_tier }))

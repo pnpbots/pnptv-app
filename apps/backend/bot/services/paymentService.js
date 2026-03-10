@@ -475,10 +475,19 @@ class PaymentService {
           paymentUrl,
         });
 
+        // C3: Persist the expected COP amount so validateWebhookAmountCurrency can verify
+        // the webhook amount even when the charge is completed via the checkout UI.
+        // ePayco webhooks report amounts in COP regardless of the plan's USD price.
+        // Exchange rate approximation: 1 USD ≈ 4000 COP (overridden by EPAYCO_USD_TO_COP env var).
+        const usdToCopRate = parseFloat(process.env.EPAYCO_USD_TO_COP || '4000');
+        const expectedCOP = String(Math.round(paymentAmount * usdToCopRate));
+
         await PaymentModel.updateStatus(payment.id, 'pending', {
           paymentUrl,
           provider,
           reference: paymentRef,
+          expected_epayco_amount: expectedCOP,
+          expected_epayco_currency: 'COP',
         });
       } else if (provider === 'daimo') {
         // Create Daimo payment using official API
@@ -894,12 +903,23 @@ class PaymentService {
    * @returns {Object} { success: boolean, error?: string }
    */
   static async processEpaycoWebhook(webhookData) {
-    // Idempotency lock using ePayco's unique transaction reference
-    const lockKey = `epayco_webhook:${webhookData.x_ref_payco}`;
+    // H3: Include state code in the inner lock key so a Pendiente webhook and a subsequent
+    // Aceptada webhook for the same x_ref_payco do not block each other.  Without the state
+    // code the outer (webhook controller) idempotency key already differentiates them, but a
+    // parallel recovery call that replays the webhook would deadlock on the same bare key.
+    const stateCode = webhookData.x_cod_transaction_state
+      || this.normalizeEpaycoTransactionState(
+           webhookData.x_transaction_state,
+           webhookData.x_cod_transaction_state,
+         )
+      || webhookData.x_transaction_state
+      || 'unknown';
+    const lockKey = `epayco_webhook:${webhookData.x_ref_payco}:${stateCode}`;
     const acquired = await cache.acquireLock(lockKey, 120); // 2-minute lock
     if (!acquired) {
       logger.warn('ePayco webhook processing skipped, already in progress', {
         refPayco: webhookData.x_ref_payco,
+        stateCode,
       });
       return { success: true, alreadyProcessed: true };
     }
@@ -1006,28 +1026,16 @@ class PaymentService {
           }
         }
 
-        // If recovery failed, log an error but do NOT return early for accepted payments —
-        // instead continue with userId+planId from the webhook extras so the subscription
-        // can still be activated even without a matching local payment record.
+        // Recovery failed — always reject. Falling through with attacker-supplied userId+planId
+        // from webhook extras (x_extra1/x_extra2) would allow an adversary to craft a webhook
+        // with any userId and planId and activate a subscription without a real payment record.
         if (!payment) {
-          logger.error('ePayco webhook references unknown internal payment id and recovery failed', {
-            externalPaymentId: paymentIdOrType,
+          logger.error('ePayco webhook: payment not found, recovery failed — rejecting', {
+            x_ref_payco,
             userId,
             planId: planIdOrBookingId,
-            refPayco: x_ref_payco,
           });
-          // Only abort if we also lack userId and planId (nothing to work with).
-          // If we have both userId and planId, fall through to state processing below
-          // so that accepted webhooks can still activate the subscription.
-          if (!userId || !planIdOrBookingId) {
-            return {
-              success: false,
-              code: 'PAYMENT_NOT_FOUND',
-              message: 'Webhook paymentId was not found in local records and userId/planId missing',
-            };
-          }
-          // Clear paymentIdOrType so downstream updateStatus calls are skipped gracefully
-          paymentIdOrType = null;
+          return { success: false, code: 'PAYMENT_NOT_FOUND', message: 'No matching payment record found' };
         }
       }
 
@@ -1106,6 +1114,17 @@ class PaymentService {
             code: 'AMOUNT_CURRENCY_MISMATCH',
             message: 'Webhook amount/currency does not match payment record',
           };
+        }
+        // C3: Log a warning when the amount check was skipped due to missing stored values.
+        // This means we cannot verify the webhook amount — a gap that should be investigated.
+        if (amountCurrencyCheck.skipped) {
+          logger.warn('ePayco webhook amount/currency check skipped — no stored expected values', {
+            paymentId: payment.id,
+            refPayco: x_ref_payco,
+            reason: amountCurrencyCheck.reason,
+            receivedAmount: webhookData.x_amount,
+            receivedCurrency: webhookData.x_currency_code,
+          });
         }
       }
 
@@ -1259,12 +1278,23 @@ class PaymentService {
             });
 
             // Grant entitlements based on plan_add_ons mapping
+            // C2: If the grant produces 0 grants on a paid plan, surface the failure so
+            // ePayco will retry the webhook rather than silently losing the entitlement.
+            let grantResult;
             try {
-              await PaymentService.grantEntitlementsForPlan(userId, planIdOrBookingId, 'epayco');
+              grantResult = await PaymentService.grantEntitlementsForPlan(userId, planIdOrBookingId, 'epayco');
             } catch (entitlementErr) {
-              logger.warn('Failed to grant entitlements (non-critical)', {
+              logger.error('grantEntitlementsForPlan threw unexpectedly — ePayco will retry', {
                 error: entitlementErr.message, userId, planId: planIdOrBookingId,
               });
+              return { success: false, code: 'ENTITLEMENT_GRANT_FAILED', error: entitlementErr.message };
+            }
+            const isPaidPlan = plan && (parseFloat(plan.price) > 0);
+            if (isPaidPlan && grantResult && grantResult.granted === 0) {
+              logger.error('grantEntitlementsForPlan returned 0 grants on a paid plan — ePayco will retry', {
+                userId, planId: planIdOrBookingId, grantResult,
+              });
+              return { success: false, code: 'ENTITLEMENT_GRANT_FAILED', error: 'No entitlements were granted for paid plan' };
             }
 
             // Record payment in history
@@ -1649,6 +1679,35 @@ class PaymentService {
           }
         }
 
+        // H2: Revoke entitlements granted by this plan when a payment is reversed.
+        // Expire all user_entitlements that were sourced from this plan, and invalidate
+        // the entitlement cache so the next access check reflects the revocation immediately.
+        if (userId && planIdOrBookingId) {
+          try {
+            await query(
+              `UPDATE user_entitlements
+                 SET expires_at = NOW(), is_lifetime = false, updated_at = NOW()
+               WHERE user_id = $1 AND source_plan_id = $2`,
+              [userId, planIdOrBookingId]
+            );
+            logger.info('Entitlements revoked due to payment reversal', {
+              userId, planId: planIdOrBookingId, refPayco: x_ref_payco,
+            });
+            try {
+              const EntitlementAccessService = require('./entitlementAccessService');
+              await EntitlementAccessService.invalidateCache(userId);
+            } catch (cacheErr) {
+              logger.warn('Failed to invalidate entitlement cache after reversal', {
+                userId, error: cacheErr.message,
+              });
+            }
+          } catch (revokeEntitlementErr) {
+            logger.error('Failed to revoke entitlements after payment reversal', {
+              userId, planId: planIdOrBookingId, error: revokeEntitlementErr.message,
+            });
+          }
+        }
+
         // H3: Notify the user their payment has been reversed/refunded.
         if (userId) {
           try {
@@ -1951,6 +2010,26 @@ class PaymentService {
         return { success: true, type: 'token_purchase' };
       }
 
+      // Fix 2.1: Tip payments — planId is prefixed with 'tip-' during Daimo payment creation.
+      // Confirm the tip and return immediately without touching subscription logic.
+      if (planId && planId.startsWith('tip-')) {
+        const tipId = parseInt(planId.split('-')[1], 10);
+        if (!isNaN(tipId) && (status === 'payment_completed' || status === 'succeeded')) {
+          try {
+            const PNPLiveTipsService = require('./pnpLiveTipsService');
+            const confirmed = await PNPLiveTipsService.confirmTipPayment(tipId, source?.txHash || id);
+            if (confirmed) {
+              logger.info('Daimo tip payment confirmed', { tipId, txHash: source?.txHash || id, userId });
+            } else {
+              logger.info('Daimo tip already confirmed — idempotent', { tipId });
+            }
+          } catch (tipErr) {
+            logger.error('Daimo tip confirmation failed', { tipId, error: tipErr.message });
+          }
+        }
+        return { success: true, type: 'tip' };
+      }
+
       if (!planId) {
         return { success: false, error: 'Missing planId for subscription' };
       }
@@ -1990,6 +2069,27 @@ class PaymentService {
               userId, paymentId, planId, txHash: source?.txHash,
             });
             return { success: false, error: `User not found: ${userId}` };
+          }
+
+          // Fix 1.2: Hard block on underpayment — log only was insufficient.
+          // Resolves the webhook amount and compares against the expected plan price.
+          const webhookAmountCheck = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
+          const expectedAmountCheck = parseFloat(plan.price || '0');
+          if (webhookAmountCheck > 0 && expectedAmountCheck > 0 && webhookAmountCheck < expectedAmountCheck - 0.10) {
+            logger.error('Daimo processDaimoWebhook: underpayment detected — aborting subscription activation', {
+              userId, paymentId, planId,
+              expected: expectedAmountCheck,
+              received: webhookAmountCheck,
+              shortfall: expectedAmountCheck - webhookAmountCheck,
+              txHash: source?.txHash,
+            });
+            if (paymentId) {
+              await PaymentModel.updateStatus(paymentId, 'underpaid', {
+                transaction_id: source?.txHash || id,
+                daimo_event_id: id,
+              });
+            }
+            return { success: false, error: 'Underpayment detected' };
           }
 
           {
@@ -2342,6 +2442,23 @@ class PaymentService {
               logger.info('User tier revoked due to Daimo refund', { userId, transactionId: id });
             } catch (revokeErr) {
               logger.error('Failed to revoke tier after Daimo refund', { userId, error: revokeErr.message });
+            }
+          }
+
+          // Fix 1.3: Revoke user_entitlements on Daimo refund.
+          // Tier downgrade alone is insufficient — entitlements row must be deleted and cache cleared.
+          if (userId && planId) {
+            try {
+              const { query: dbQuery } = require('../../config/postgres');
+              await dbQuery(
+                `DELETE FROM user_entitlements WHERE user_id = $1 AND source_plan_id = $2 AND is_lifetime = false`,
+                [userId, planId]
+              );
+              const EntitlementAccessService = require('./entitlementAccessService');
+              await EntitlementAccessService.invalidateCache(userId);
+              logger.info('Entitlements revoked on Daimo refund', { userId, planId });
+            } catch (revokeErr) {
+              logger.error('Failed to revoke entitlements on Daimo refund', { userId, planId, error: revokeErr.message });
             }
           }
 
@@ -3965,8 +4082,8 @@ class PaymentService {
       `, [planId]);
 
       if (addOnsResult.rows.length === 0) {
-        logger.debug('No plan_add_ons mapping found for plan, skipping entitlement grant', { planId, userId });
-        return result;
+        logger.error('grantEntitlementsForPlan: no plan_add_ons mapping found — entitlements NOT granted', { planId, userId });
+        return { granted: 0, errors: 0, warning: 'NO_PLAN_ADDONS' };
       }
 
       for (const row of addOnsResult.rows) {

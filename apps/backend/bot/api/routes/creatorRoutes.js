@@ -6,6 +6,7 @@ const creatorController = require('../controllers/creatorController');
 const cmsCreatorController = require('../controllers/cmsCreatorController');
 const authGuard = require('../middleware/authGuard');
 const roleGuard = require('../middleware/roleGuard');
+const { adminGuard } = require('../../../middleware/guards');
 
 const router = express.Router();
 
@@ -37,8 +38,8 @@ router.get('/eligibility', authGuard, creatorController.getEligibility);
 router.post('/enroll', authGuard, enrollmentUpload.single('idDocument'), creatorController.submitEnrollment);
 router.get('/enrollment', authGuard, creatorController.getEnrollment);
 
-// Legacy direct activation (kept for admin/script use)
-router.post('/activate', authGuard, creatorController.activateCreator);
+// Legacy direct activation — admin-only; bypasses KYC enrollment flow
+router.post('/activate', adminGuard, creatorController.activateCreator);
 
 router.get('/dashboard', authGuard, creatorController.getDashboard);
 

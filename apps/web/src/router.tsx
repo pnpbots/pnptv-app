@@ -58,6 +58,7 @@ const StreamManagement = lazy(() => import("@/pages/admin/StreamManagement"));
 const SupportDashboard = lazy(() => import("@/pages/admin/SupportDashboard"));
 const AccessMatrix = lazy(() => import("@/pages/admin/AccessMatrix"));
 const CreatorSubscriptions = lazy(() => import("@/pages/admin/CreatorSubscriptions"));
+const AmpacheMedia = lazy(() => import("@/pages/admin/AmpacheMedia"));
 
 export const router = createBrowserRouter([
   {
@@ -420,6 +421,14 @@ export const router = createBrowserRouter([
           </ModuleLoader>
         ),
       },
+      {
+        path: "ampache-media",
+        element: (
+          <ModuleLoader>
+            <AmpacheMedia />
+          </ModuleLoader>
+        ),
+      },
     ],
   },
   {
@@ -534,7 +543,9 @@ export const router = createBrowserRouter([
     path: "/checkout/:paymentId",
     element: (
       <ModuleLoader>
-        <DaimoCheckout />
+        <VerificationGate>
+          <DaimoCheckout />
+        </VerificationGate>
       </ModuleLoader>
     ),
   },
@@ -542,7 +553,9 @@ export const router = createBrowserRouter([
     path: "/token-checkout/:purchaseId",
     element: (
       <ModuleLoader>
-        <TokenCheckout />
+        <VerificationGate>
+          <TokenCheckout />
+        </VerificationGate>
       </ModuleLoader>
     ),
   },

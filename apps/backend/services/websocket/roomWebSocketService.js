@@ -8,6 +8,7 @@
  * - Broadcast to all connected clients
  */
 
+const WebSocket = require('ws');
 const logger = require('../../utils/logger');
 
 class RoomWebSocketService {

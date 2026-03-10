@@ -226,6 +226,46 @@
   }
 }
 
+/* ── Radio Widget — Equalizer bar animation ──────────────────────────── */
+
+@keyframes radio-eq-bar {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+
+.radio-eq-bar-1 {
+  animation: radio-eq-bar 0.8s ease-in-out infinite;
+}
+
+.radio-eq-bar-2 {
+  animation: radio-eq-bar 0.8s ease-in-out infinite 0.2s;
+}
+
+.radio-eq-bar-3 {
+  animation: radio-eq-bar 0.8s ease-in-out infinite 0.4s;
+}
+
+/* Volume slider track fill (WebKit) */
+.radio-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #D946EF;
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(217, 70, 239, 0.5);
+}
+
+.radio-volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 50%;
+  background: #D946EF;
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(217, 70, 239, 0.5);
+}
+
 @keyframes subtleGlow {
   0%, 100% {
     box-shadow: 0 0 30px rgba(212, 0, 122, 0.15), 0 0 60px rgba(230, 145, 56, 0.1);

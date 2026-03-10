@@ -26,6 +26,7 @@ const fs = require('fs').promises;
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const sharp = require('sharp');
+const FileType = require('file-type');
 const logger = require('../../utils/logger');
 const { resolveMediaType } = require('./chatMediaService');
 
@@ -203,6 +204,17 @@ async function processHangoutMedia(file, hangoutId, userId) {
   if (!file || !file.buffer || !file.mimetype) {
     const err = new Error('No file uploaded');
     err.userMessage = 'No file was received. Please try again.';
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const detected = await FileType.fromBuffer(file.buffer);
+  const MAGIC_ALLOWED = new Set([
+    'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+    'video/mp4', 'video/webm',
+  ]);
+  if (!detected || !MAGIC_ALLOWED.has(detected.mime)) {
+    const err = new Error(`Rejected file: detected ${detected?.mime || 'unknown'} type`);
     err.statusCode = 400;
     throw err;
   }

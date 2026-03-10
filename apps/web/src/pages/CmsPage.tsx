@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Helmet } from "react-helmet-async";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
+import DOMPurify from "dompurify";
 import { getPage, type Page } from "@/lib/directus";
 
 export default function CmsPage() {
@@ -70,7 +71,13 @@ export default function CmsPage() {
                 prose-headings:text-white prose-p:text-white/70 prose-li:text-white/70
                 prose-a:text-[#D4007A] prose-strong:text-white
                 prose-ul:list-disc prose-ol:list-decimal"
-              dangerouslySetInnerHTML={{ __html: page.content }}
+              dangerouslySetInnerHTML={{
+                __html: DOMPurify.sanitize(page.content || '', {
+                  ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'a', 'blockquote', 'code', 'pre', 'hr', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img', 'span', 'div'],
+                  ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'class'],
+                  ALLOW_DATA_ATTR: false,
+                }),
+              }}
             />
           )}
         </div>

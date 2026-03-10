@@ -30,6 +30,42 @@ const MAX_FANOUT = 500;
 // Types that should NOT trigger a bot DM (would double-notify)
 const SKIP_BOT_TYPES = new Set(['dm', 'group_message']);
 
+// Notification types that originate from a specific user action toward another user.
+// These must be suppressed when a block relationship exists between actor and target.
+const USER_TO_USER_TYPES = new Set(['follow', 'like', 'reply', 'dm', 'hangout_call', 'hangout_creator_joined', 'group_join']);
+
+// Redis key for caching block check results (short TTL — blocks can be added/removed)
+const BLOCK_CHECK_TTL = 60; // 1 minute
+
+/**
+ * Returns true if a block relationship exists between actorId and targetUserId
+ * in either direction. Results are cached in Redis for BLOCK_CHECK_TTL seconds.
+ */
+async function isBlockedBetween(actorId, targetUserId) {
+  const cacheKey = `notif:block_check:${actorId}:${targetUserId}`;
+  try {
+    const cached = await cache.get(cacheKey);
+    if (cached !== null) return cached === true || cached === 'true';
+  } catch (_) { /* non-fatal */ }
+
+  try {
+    const { rowCount } = await query(
+      `SELECT 1 FROM blocked_users
+       WHERE (user_id = $1 AND blocked_user_id = $2)
+          OR (user_id = $2 AND blocked_user_id = $1)
+       LIMIT 1`,
+      [actorId, targetUserId]
+    );
+    const blocked = rowCount > 0;
+    cache.set(cacheKey, blocked, BLOCK_CHECK_TTL).catch(() => {});
+    return blocked;
+  } catch (err) {
+    logger.warn('NotificationEmitter: block check query failed', { actorId, targetUserId, error: err.message });
+    // Fail open — do not suppress notifications when the DB check itself errors
+    return false;
+  }
+}
+
 let _io = null;
 
 function prefKey(userId) {
@@ -132,6 +168,12 @@ const NotificationEmitter = {
 
       // No self-notifications
       if (actorId && String(actorId) === String(targetUserId)) return;
+
+      // ── Block gate — silently drop user-to-user notifications when a block exists ──
+      if (actorId && USER_TO_USER_TYPES.has(type)) {
+        const blocked = await isBlockedBetween(actorId, targetUserId);
+        if (blocked) return;
+      }
 
       // ── Preference check (Redis-cached, 5 min TTL) ──
       const prefKey2 = TYPE_TO_PREF[type];

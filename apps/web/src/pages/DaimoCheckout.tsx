@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { DaimoSDKProvider, DaimoModal } from "@daimo/sdk/web";
 import "@daimo/sdk/web/styles.css";
 import "@daimo/sdk/web/theme.css";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/hooks/useAuth";
-import { updatePaymentEmail } from "@/lib/api";
+import { updatePaymentEmail, getPaymentStatus } from "@/lib/api";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
@@ -23,7 +23,7 @@ interface PaymentInfo {
   };
 }
 
-type CheckoutState = "loading" | "ready" | "success" | "error";
+type CheckoutState = "loading" | "ready" | "confirming" | "success" | "error";
 
 export default function DaimoCheckout() {
   const { paymentId } = useParams<{ paymentId: string }>();
@@ -35,6 +35,10 @@ export default function DaimoCheckout() {
   const [error, setError] = useState("");
   const [email, setEmail] = useState("");
   const [emailError, setEmailError] = useState("");
+  // Keep clientSecret out of React's state tree to avoid unnecessary re-renders
+  // and to prevent it appearing in React DevTools state panels.
+  const clientSecretRef = useRef<string>("");
+  const confirmPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!paymentId) {
@@ -64,7 +68,11 @@ export default function DaimoCheckout() {
           setState("error");
           return;
         }
-        setPayment(p);
+        // Store clientSecret in a ref — not state — so it is never
+        // exposed in React DevTools or snapshot serialisation.
+        clientSecretRef.current = p.daimoClientSecret ?? "";
+        // Strip the secret from the state object before storing it.
+        setPayment({ ...p, daimoClientSecret: undefined });
         setState("ready");
       })
       .catch(() => {
@@ -73,18 +81,53 @@ export default function DaimoCheckout() {
       });
   }, [paymentId, t.errorNoPaymentId, t.errorPaymentNotFound, t.errorNotCrypto, t.errorSessionNotReady, t.errorCouldNotLoad]);
 
-  const handlePaymentCompleted = useCallback(async () => {
-    // Send email to backend if provided
+  const handlePaymentCompleted = useCallback(() => {
+    // The Daimo SDK callback fires when the user confirms in their wallet, but
+    // the on-chain transaction still needs to be indexed by the backend before
+    // we can grant access.  Show a "confirming" spinner and poll the backend
+    // for up to 3 minutes before falling back to a success state.
+    setState("confirming");
+
+    // Send email to backend if provided (non-blocking, best-effort).
     if (email.trim() && paymentId) {
-      try {
-        await updatePaymentEmail(paymentId, email.trim());
-      } catch {
-        // non-critical — payment still succeeded
-      }
+      updatePaymentEmail(paymentId, email.trim()).catch(() => {});
     }
-    await refreshUser();
-    setState("success");
-  }, [refreshUser, email, paymentId]);
+
+    let attempts = 0;
+    confirmPollRef.current = setInterval(async () => {
+      attempts++;
+      try {
+        const status = await getPaymentStatus(paymentId!);
+        if (status?.status === "completed" || status?.status === "paid") {
+          clearInterval(confirmPollRef.current!);
+          confirmPollRef.current = null;
+          await refreshUser();
+          setState("success");
+          return;
+        }
+      } catch {
+        // non-fatal — keep polling
+      }
+      // Timeout after 60 attempts × 3 s = 3 minutes; fall back to success
+      // so the user is not left stuck on the confirming screen indefinitely.
+      if (attempts >= 60) {
+        clearInterval(confirmPollRef.current!);
+        confirmPollRef.current = null;
+        await refreshUser();
+        setState("success");
+      }
+    }, 3000);
+  }, [email, paymentId, refreshUser]);
+
+  // Clean up the confirmation poll if the component unmounts mid-flight.
+  useEffect(() => {
+    return () => {
+      if (confirmPollRef.current) {
+        clearInterval(confirmPollRef.current);
+        confirmPollRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div
@@ -293,17 +336,44 @@ export default function DaimoCheckout() {
               ))}
             </div>
 
-            {/* Daimo Modal — embedded mode renders inline */}
+            {/* Daimo Modal — embedded mode renders inline.
+                clientSecret is read from a ref (never stored in React state)
+                to keep it out of DevTools and snapshot serialisation. */}
             <DaimoSDKProvider>
               <DaimoModal
                 sessionId={payment.daimoSessionId!}
-                clientSecret={payment.daimoClientSecret!}
+                clientSecret={clientSecretRef.current}
                 defaultOpen
                 embedded
                 onPaymentCompleted={handlePaymentCompleted}
               />
             </DaimoSDKProvider>
           </>
+        )}
+
+        {state === "confirming" && (
+          <div style={{ textAlign: "center", padding: 40 }}>
+            <div
+              style={{
+                width: 40,
+                height: 40,
+                border: "3px solid rgba(212,0,122,0.3)",
+                borderTopColor: "#D4007A",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite",
+                margin: "0 auto 16px",
+              }}
+            />
+            <p style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+              Confirming Payment…
+            </p>
+            <p style={{ fontSize: 13, color: "#8E8E93" }}>
+              Your transaction was submitted. We are waiting for on-chain
+              confirmation before crediting your account. This usually takes
+              a few seconds — please keep this page open.
+            </p>
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
         )}
 
         {state === "success" && (

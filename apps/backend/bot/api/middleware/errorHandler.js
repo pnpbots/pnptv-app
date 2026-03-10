@@ -3,6 +3,17 @@ const multer = require('multer');
 const logger = require('../../../utils/logger');
 const { isOperationalError } = require('../../../utils/errors');
 
+const REDACTED_FIELDS = ['password', 'cardToken', 'token', 'secret', 'authorization', 'code', 'otp', 'cardNumber', 'cvc', 'cvv'];
+const sanitizeBody = (body) => {
+  if (!body || typeof body !== 'object') return body;
+  return Object.fromEntries(
+    Object.entries(body).map(([k, v]) => [
+      k,
+      REDACTED_FIELDS.some(f => k.toLowerCase().includes(f.toLowerCase())) ? '[REDACTED]' : v,
+    ])
+  );
+};
+
 /**
  * Centralized Error Handler Middleware for Express
  * Handles all errors thrown in routes and controllers
@@ -20,7 +31,7 @@ function errorHandler(err, req, res, _next) {
     stack: err.stack,
     url: req.url,
     method: req.method,
-    body: req.body,
+    body: sanitizeBody(req.body),
     params: req.params,
     query: req.query,
     ip: req.ip,
@@ -32,7 +43,7 @@ function errorHandler(err, req, res, _next) {
       extra: {
         url: req.url,
         method: req.method,
-        body: req.body,
+        body: sanitizeBody(req.body),
         params: req.params,
         query: req.query,
       },
@@ -72,7 +83,7 @@ function errorHandler(err, req, res, _next) {
 function notFoundHandler(req, res) {
   res.status(404).json({
     error: 'NOT_FOUND',
-    message: `Route not found: ${req.method} ${req.url}`,
+    message: `Route not found: ${req.method} ${req.path}`,
   });
 }
 

@@ -40,6 +40,8 @@ class AuthController {
       const user = result.rows[0];
 
       if (!user) {
+        // Constant-time dummy compare to prevent timing oracle revealing valid emails
+        await bcrypt.compare(password, '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012');
         logger.warn('Admin login failed - user not found', { email });
         return res.status(401).json({
           success: false,
@@ -70,7 +72,12 @@ class AuthController {
         [user.id]
       );
 
-      // Set session
+      // Regenerate session to prevent session fixation
+      await new Promise((resolve, reject) => {
+        req.session.regenerate((err) => (err ? reject(err) : resolve()));
+      });
+
+      // Set session on the fresh session object
       req.session.user = {
         id: user.id,
         email: user.email,
@@ -85,6 +92,10 @@ class AuthController {
       // Session duration: 365 days with remember me, 90 days default
       const dayMs = 24 * 60 * 60 * 1000;
       req.session.cookie.maxAge = rememberMe ? 365 * dayMs : 90 * dayMs;
+
+      await new Promise((resolve, reject) => {
+        req.session.save((err) => (err ? reject(err) : resolve()));
+      });
 
       logger.info('Admin login successful', {
         userId: user.id,
@@ -171,7 +182,12 @@ class AuthController {
         [user.id]
       );
 
-      // Set session
+      // Regenerate session to prevent session fixation
+      await new Promise((resolve, reject) => {
+        req.session.regenerate((err) => (err ? reject(err) : resolve()));
+      });
+
+      // Set session on the fresh session object
       req.session.user = {
         id: user.id,
         email: user.email,
@@ -184,6 +200,10 @@ class AuthController {
       };
       req.session.cookie.maxAge = 90 * 24 * 60 * 60 * 1000;
       enforceDefaultFollows(user.id).catch(() => {});
+
+      await new Promise((resolve, reject) => {
+        req.session.save((err) => (err ? reject(err) : resolve()));
+      });
 
       logger.info('Model login successful', {
         userId: user.id,
@@ -232,6 +252,7 @@ class AuthController {
           logger.info('User logged out', { userId });
         }
 
+        res.clearCookie('__pnptv_sid', { path: '/' });
         res.json({
           success: true,
           data: {

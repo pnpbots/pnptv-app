@@ -24,6 +24,7 @@
  */
 
 const { query } = require('../../config/postgres');
+const { cache } = require('../../config/redis');
 const logger = require('../../utils/logger');
 const NotificationEmitter = require('./notificationEmitter');
 const fetch = require('node-fetch');
@@ -189,6 +190,15 @@ class CreatorPayoutService {
     const displayName = username || first_name || String(creator_id);
     const amountUsd = parseFloat(total_creator);
 
+    // Acquire a per-creator Redis lock to prevent concurrent payout runs (e.g. two overlapping
+    // cron triggers or an admin-triggered run racing with the scheduled run) from double-paying.
+    const payoutLockKey = `payout_lock:${creator_id}`;
+    const lockAcquired = await cache.acquireLock(payoutLockKey, 120).catch(() => false);
+    if (!lockAcquired) {
+      logger.warn('CreatorPayoutService: payout skipped — lock already held for creator', { creatorId: creator_id });
+      return { skipped: true };
+    }
+
     // Creators without a wallet address are skipped — earnings roll over
     if (!creator_wallet_address) {
       logger.warn('CreatorPayoutService: creator has no wallet address, skipping', { creatorId: creator_id });
@@ -223,8 +233,11 @@ class CreatorPayoutService {
       throw new Error(`Daimo transfer failed: ${transferResult.error}`);
     }
 
-    // Mark earnings as paid_out in one atomic UPDATE
-    await query(`
+    // Mark earnings as paid_out with an atomic UPDATE...RETURNING.
+    // The WHERE guard (status='available' AND paid_at IS NULL) acts as a second fence against
+    // double-payment: if a concurrent run already paid these rows the UPDATE matches 0 rows
+    // and we treat it as a skipped (no-op) condition to avoid double-crediting.
+    const { rows: paidRows } = await query(`
       UPDATE creator_earnings
       SET
         status   = 'paid_out',
@@ -233,10 +246,20 @@ class CreatorPayoutService {
       WHERE id = ANY($2)
         AND status  = 'available'
         AND paid_at IS NULL
+      RETURNING amount_creator
     `, [
       JSON.stringify({ daimo_transfer_id: transferResult.transferId }),
       earning_ids,
     ]);
+
+    if (paidRows.length === 0) {
+      // All rows were already paid by a concurrent run — skip notification to avoid confusion.
+      logger.warn('CreatorPayoutService: earnings already marked paid by concurrent run, skipping', {
+        creatorId: creator_id,
+        transferId: transferResult.transferId,
+      });
+      return { skipped: true };
+    }
 
     // Notify creator
     await NotificationEmitter.emit({
@@ -440,7 +463,11 @@ class CreatorPayoutService {
     }
 
     // Extend the subscription by 30 days from its current expires_at (not from now,
-    // so no gap forms if the cron runs a day early)
+    // so no gap forms if the cron runs a day early).
+    // NOTE: earnings are NOT recorded here. They will be inserted only after the Daimo
+    // webhook confirms the payment (via CreatorService.subscribeToCreator called from
+    // the webhook handler). Recording earnings before payment confirmation would credit
+    // the creator for money that has not yet been received.
     await query(`
       UPDATE creator_subscriptions
       SET
@@ -449,16 +476,6 @@ class CreatorPayoutService {
       WHERE id    = $2
         AND status = 'active'
     `, [newPaymentId, subscription_id]);
-
-    // Record earnings for the upcoming period (70/30 split)
-    const amountCreator  = Math.round(priceUsd * 0.70 * 100) / 100;
-    const amountPlatform = Math.round(priceUsd * 0.30 * 100) / 100;
-
-    await query(`
-      INSERT INTO creator_earnings
-        (creator_id, subscription_id, amount_gross, amount_creator, amount_platform, period_month)
-      VALUES ($1, $2, $3, $4, $5, date_trunc('month', CURRENT_DATE)::date)
-    `, [creator_id, subscription_id, priceUsd, amountCreator, amountPlatform]);
 
     // Notify subscriber with the checkout link so they complete the Daimo payment
     await NotificationEmitter.emit({

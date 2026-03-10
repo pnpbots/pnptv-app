@@ -544,18 +544,22 @@ router.get('/callback', callbackLimiter, async (req, res) => {
   }
 
   // ---------------------------------------------------------------------------
-  // Build and persist session
+  // Build and persist session — regenerate first to prevent session fixation
   // ---------------------------------------------------------------------------
 
-  req.session.user = buildXSession(user);
+  const sessionData = buildXSession(user);
   enforceDefaultFollows(user.id).catch(() => {});
 
   try {
     await new Promise((resolve, reject) => {
+      req.session.regenerate((err) => (err ? reject(err) : resolve()));
+    });
+    req.session.user = sessionData;
+    await new Promise((resolve, reject) => {
       req.session.save((err) => (err ? reject(err) : resolve()));
     });
   } catch (sessionErr) {
-    logger.error('[X OAuth] Session save failed:', sessionErr);
+    logger.error('[X OAuth] Session regenerate/save failed:', sessionErr);
     return res.redirect('/?x_error=session_failed');
   }
 

@@ -250,7 +250,10 @@ router.get('/oauth/callback', callbackLimiter, async (req, res) => {
       return res.redirect(`${APP_URL}?atproto_error=session_failed`);
     }
 
-    // Store in express session (same session cookie as Telegram auth)
+    // Regenerate session to prevent session fixation, then store hybrid session
+    await new Promise((resolve, reject) => {
+      req.session.regenerate((err) => (err ? reject(err) : resolve()));
+    });
     req.session.user = hybridSession;
 
     // Force session save before redirect

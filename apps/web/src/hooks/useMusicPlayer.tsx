@@ -129,18 +129,6 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
     });
   }, [currentTrack]);
 
-  // Fix 7: MediaSession action handlers — separate effect so prev/next are fresh
-  useEffect(() => {
-    if (!("mediaSession" in navigator)) return;
-    navigator.mediaSession.setActionHandler("play", () => audioRef.current?.play());
-    navigator.mediaSession.setActionHandler("pause", () => audioRef.current?.pause());
-    navigator.mediaSession.setActionHandler("previoustrack", () => prev());
-    navigator.mediaSession.setActionHandler("nexttrack", () => next());
-  }, [prev, next]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Fix 2: keep nextRef current so handleTrackEnd always calls the latest next()
-  useEffect(() => { nextRef.current = next; }, [next]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Fix 1+2: handleTrackEnd uses nextRef — no stale closure on next()
   const handleTrackEnd = useCallback(() => {
     if (repeat === "one") {
@@ -256,6 +244,18 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
     setCurrentIndex(prevIdx);
     playTrack(tracks[prevIdx]);
   }, [tracks, currentIndex, repeat, playTrack]);
+
+  // Fix 2: keep nextRef current so handleTrackEnd always calls the latest next()
+  useEffect(() => { nextRef.current = next; }, [next]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fix 7: MediaSession action handlers — must be after prev/next declarations
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.setActionHandler("play", () => audioRef.current?.play());
+    navigator.mediaSession.setActionHandler("pause", () => audioRef.current?.pause());
+    navigator.mediaSession.setActionHandler("previoustrack", () => prev());
+    navigator.mediaSession.setActionHandler("nexttrack", () => next());
+  }, [prev, next]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const seek = useCallback((time: number) => {
     const audio = audioRef.current;

@@ -404,7 +404,11 @@ const telegramCheckToken = async (req, res) => {
     }
 
     query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'deep_link', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
-    req.session.user = buildSession(user, { photoUrl: telegramUser.photo_url || user.photo_file_id, last_login_method: 'deep_link' });
+    const deepLinkSessionData = buildSession(user, { photoUrl: telegramUser.photo_url || user.photo_file_id, last_login_method: 'deep_link' });
+    await new Promise((resolve, reject) =>
+      req.session.regenerate(err => (err ? reject(err) : resolve()))
+    );
+    req.session.user = deepLinkSessionData;
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );
@@ -542,7 +546,11 @@ const telegramCallback = async (req, res) => {
     }
 
     query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'deep_link', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
-    req.session.user = buildSession(user, { photoUrl: telegramUser.photo_url || user.photo_file_id, last_login_method: 'deep_link' });
+    const callbackSessionData = buildSession(user, { photoUrl: telegramUser.photo_url || user.photo_file_id, last_login_method: 'deep_link' });
+    await new Promise((resolve, reject) =>
+      req.session.regenerate(err => (err ? reject(err) : resolve()))
+    );
+    req.session.user = callbackSessionData;
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );
@@ -616,8 +624,11 @@ const telegramLogin = async (req, res) => {
     }
 
     query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'telegram', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
-    req.session.user = buildSession(user, { photoUrl: telegramUser.photo_url || user.photo_file_id, last_login_method: 'telegram' });
-
+    const telegramLoginSessionData = buildSession(user, { photoUrl: telegramUser.photo_url || user.photo_file_id, last_login_method: 'telegram' });
+    await new Promise((resolve, reject) =>
+      req.session.regenerate(err => (err ? reject(err) : resolve()))
+    );
+    req.session.user = telegramLoginSessionData;
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );
@@ -772,14 +783,14 @@ const emailLogin = async (req, res) => {
     }
 
     query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'email', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
-    req.session.user = buildSession(user, { last_login_method: 'email' });
+    const emailLoginSessionData = buildSession(user, { last_login_method: 'email' });
     enforceDefaultFollows(user.id).catch(() => {});
-    setSessionCookieDuration(
-      req.session,
-      rememberMe === true || rememberMe === 'true'
+    const rememberMeFlag = rememberMe === true || rememberMe === 'true';
+    await new Promise((resolve, reject) =>
+      req.session.regenerate(err => (err ? reject(err) : resolve()))
     );
-
-    // Save session
+    req.session.user = emailLoginSessionData;
+    setSessionCookieDuration(req.session, rememberMeFlag);
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );
@@ -845,8 +856,12 @@ const verifyEmail = async (req, res) => {
 
       if (userResult.rows.length > 0) {
         const u = userResult.rows[0];
-        req.session.user = buildSession(u);
+        const alreadyVerifiedSessionData = buildSession(u);
         enforceDefaultFollows(u.id).catch(() => {});
+        await new Promise((resolve, reject) =>
+          req.session.regenerate(err => (err ? reject(err) : resolve()))
+        );
+        req.session.user = alreadyVerifiedSessionData;
         await new Promise((resolve, reject) =>
           req.session.save(err => (err ? reject(err) : resolve()))
         );
@@ -900,8 +915,12 @@ const verifyEmail = async (req, res) => {
     await query('UPDATE users SET email_verified = TRUE, updated_at = NOW() WHERE id = $1', [tokenRow.user_id]);
 
     // Create session
-    req.session.user = buildSession(row);
+    const verifyEmailSessionData = buildSession(row);
     enforceDefaultFollows(row.id).catch(() => {});
+    await new Promise((resolve, reject) =>
+      req.session.regenerate(err => (err ? reject(err) : resolve()))
+    );
+    req.session.user = verifyEmailSessionData;
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );
@@ -1240,7 +1259,11 @@ const xLoginCallback = async (req, res) => {
       );
       const user = updated[0];
       query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'x', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
-      req.session.user = buildSession(user, { xHandle, last_login_method: 'x' });
+      const xLinkSessionData = buildSession(user, { xHandle, last_login_method: 'x' });
+      await new Promise((resolve, reject) =>
+        req.session.regenerate(err => (err ? reject(err) : resolve()))
+      );
+      req.session.user = xLinkSessionData;
       await new Promise((resolve, reject) =>
         req.session.save(err => (err ? reject(err) : resolve()))
       );
@@ -1264,7 +1287,11 @@ const xLoginCallback = async (req, res) => {
     }
 
     query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'x', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
-    req.session.user = buildSession(user, { xHandle, last_login_method: 'x' });
+    const xLoginSessionData = buildSession(user, { xHandle, last_login_method: 'x' });
+    await new Promise((resolve, reject) =>
+      req.session.regenerate(err => (err ? reject(err) : resolve()))
+    );
+    req.session.user = xLoginSessionData;
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );
@@ -1713,6 +1740,8 @@ const uploadAvatar = async (req, res) => {
 
     // Step 1: Process image with sharp and write to disk
     await sharp(buffer)
+      .rotate()
+      .withMetadata(false)
       .resize(256, 256, { fit: 'cover', position: 'center' })
       .webp({ quality: 75, progressive: true })
       .toFile(filePath);

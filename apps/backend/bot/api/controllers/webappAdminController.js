@@ -222,6 +222,29 @@ const updateUser = async (req, res) => {
       return res.status(400).json({ error: `Invalid subscriptionStatus. Must be one of: ${VALID_STATUSES.join(', ')}` });
     }
 
+    // Validate subscriptionPlan against the active plans in the DB to prevent
+    // arbitrary plan_id injection (e.g. pointing a user at a non-existent or
+    // inactive plan that could grant unintended entitlements downstream).
+    if (subscriptionPlan !== undefined && subscriptionPlan !== null) {
+      const planCheck = await query(
+        'SELECT id FROM plans WHERE id = $1 AND active = true',
+        [subscriptionPlan]
+      );
+      if (planCheck.rows.length === 0) {
+        return res.status(400).json({ error: `Invalid subscriptionPlan: plan '${subscriptionPlan}' does not exist or is inactive` });
+      }
+    }
+
+    // Validate planExpiry — must be a parseable date string or null/empty.
+    // Reject strings that produce an Invalid Date (e.g. garbage input) so
+    // we never write NaN/Invalid Date to the DB timestamp column.
+    if (planExpiry !== undefined && planExpiry !== null && planExpiry !== '') {
+      const parsed = new Date(planExpiry);
+      if (isNaN(parsed.getTime())) {
+        return res.status(400).json({ error: 'Invalid planExpiry: must be a valid ISO date string or null' });
+      }
+    }
+
     const queryParts = [];
     const values = [userId];
     let paramIndex = 2;
@@ -248,6 +271,7 @@ const updateUser = async (req, res) => {
     }
     if (planExpiry !== undefined) {
       queryParts.push(`plan_expiry = $${paramIndex++}`);
+      // Empty string is treated as null (clear the expiry)
       values.push(planExpiry ? new Date(planExpiry) : null);
     }
 

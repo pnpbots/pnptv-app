@@ -6,6 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 const { v4: uuidv4 } = require('uuid');
+const FileType = require('file-type');
 
 /**
  * Media and Radio Admin Controller
@@ -132,16 +133,24 @@ const uploadMedia = async (req, res) => {
       return res.status(400).json({ error: 'No file provided' });
     }
 
+    const detected = await FileType.fromBuffer(req.file.buffer);
+    const ALLOWED_MEDIA = new Set(['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/aac', 'audio/mp4', 'video/mp4', 'video/webm', 'video/quicktime']);
+    if (!detected || !ALLOWED_MEDIA.has(detected.mime)) {
+      return res.status(400).json({ error: 'Invalid file type detected.' });
+    }
+
     const { title, artist, description, category = 'general', isExplicit = false, type = 'audio' } = req.body;
 
     if (!title) {
       return res.status(400).json({ error: 'Title is required' });
     }
 
-    // TODO: In production, upload to S3 or persistent storage
-    // For now, we'll store the file path as a placeholder
+    const MIME_TO_EXT = {
+      'audio/mpeg': '.mp3', 'audio/wav': '.wav', 'audio/ogg': '.ogg', 'audio/aac': '.aac',
+      'audio/mp4': '.m4a', 'video/mp4': '.mp4', 'video/webm': '.webm', 'video/quicktime': '.mov',
+    };
     const mediaId = uuidv4();
-    const fileExt = path.extname(req.file.originalname);
+    const fileExt = MIME_TO_EXT[detected.mime] || path.extname(req.file.originalname);
     const fileName = `${mediaId}${fileExt}`;
     const uploadDir = path.join(__dirname, '../../../../../public/uploads/media');
 

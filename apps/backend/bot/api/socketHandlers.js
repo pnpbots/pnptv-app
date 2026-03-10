@@ -28,6 +28,46 @@ async function getUserFromSocket(socket) {
   }
 }
 
+// Extract the session ID from the socket's cookie header (no Redis lookup).
+// Returns null if the cookie is absent or malformed.
+function getSidFromSocket(socket) {
+  try {
+    const cookieHeader = socket.handshake.headers.cookie || '';
+    const match = cookieHeader.match(/(?:^|;\s*)__pnptv_sid=([^;]+)/);
+    if (!match) return null;
+    const raw = decodeURIComponent(match[1]);
+    return raw.startsWith('s:') ? raw.slice(2).split('.')[0] : raw.split('.')[0];
+  } catch {
+    return null;
+  }
+}
+
+// Re-validate that the session still exists in Redis and belongs to the same
+// user stored on socket.data.user.  Returns the fresh user object on success,
+// or null if the session is gone / belongs to a different user (TOCTOU guard).
+async function revalidateSession(socket) {
+  try {
+    const sid = getSidFromSocket(socket);
+    if (!sid) return null;
+    const redis = getRedis();
+    const data = await redis.get(`sess:${sid}`);
+    if (!data) return null;
+    const session = JSON.parse(data);
+    const freshUser = session?.user || null;
+    if (!freshUser) return null;
+    // Ensure the session still belongs to the same user that connected
+    if (String(freshUser.id) !== String(socket.data.user?.id)) return null;
+    return freshUser;
+  } catch {
+    return null;
+  }
+}
+
+// SESSION_REVALIDATION_INTERVAL_MS — how often to re-check the session while
+// the socket is connected.  5 minutes is a reasonable balance between security
+// (catching revoked sessions promptly) and Redis load.
+const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
+
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 
 // In-process rate limit: allow maxCount per windowMs per key
@@ -107,6 +147,41 @@ function initSocketIO(io) {
       _activityRedis.set(_activityKey, '1', 'EX', 300).catch(() => {});
     });
 
+    // ── Periodic session re-validation (TOCTOU guard) ────────────────────────
+    // The session was validated at connection time and stored in socket.data.user.
+    // During a 90-day session TTL the user's session can be revoked (logout,
+    // admin ban, password change) without the socket handler knowing.  Re-check
+    // the Redis session every SESSION_REVALIDATION_INTERVAL_MS and disconnect
+    // the socket if the session is gone or has been reassigned to a different user.
+    const _sessionRevalidationTimer = setInterval(async () => {
+      try {
+        const freshUser = await revalidateSession(socket);
+        if (!freshUser) {
+          logger.warn(`Socket session expired or revoked for user ${user.id} — disconnecting`);
+          socket.emit('auth:session_expired', { message: 'Your session has expired. Please log in again.' });
+          socket.disconnect(true);
+          return;
+        }
+        // Also re-check ban status on every revalidation tick
+        const { rows: banRows } = await query(
+          `SELECT 1 FROM users WHERE id = $1 AND tier = 'banned' LIMIT 1`,
+          [String(freshUser.id)]
+        );
+        if (banRows.length > 0) {
+          logger.warn(`Socket revalidation: banned user ${user.id} disconnected`);
+          socket.emit('auth:suspended', { message: 'Your account has been suspended.' });
+          socket.disconnect(true);
+        }
+      } catch (err) {
+        logger.error('Periodic session revalidation error', { userId: user.id, error: err.message });
+        // Do NOT disconnect on transient Redis/DB errors — fail open for availability
+      }
+    }, SESSION_REVALIDATION_INTERVAL_MS);
+
+    // Clear the revalidation timer when the socket disconnects so we don't
+    // accumulate timers for dead connections.
+    socket.once('disconnect', () => clearInterval(_sessionRevalidationTimer));
+
     // Join personal room for DMs and targeted notifications
     socket.join(`user:${user.id}`);
 
@@ -121,6 +196,7 @@ function initSocketIO(io) {
 
     socket.on('nearby:join-grid', ({ lat, lng } = {}) => {
       if (typeof lat !== 'number' || typeof lng !== 'number') return;
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
       const gridLat = Math.floor(lat * 10) / 10;
       const gridLng = Math.floor(lng * 10) / 10;
       const room = `nearby:${gridLat}:${gridLng}`;
@@ -286,8 +362,16 @@ function initSocketIO(io) {
       }
       // ── End room validation ─────────────────────────────────────────────────
 
-      // Enforce a 20 MB cap over Socket.IO (images only — videos should use REST)
-      const MAX_SOCKET_MEDIA_BYTES = 20 * 1024 * 1024;
+      // Enforce a 10 MB cap over Socket.IO (images only — videos should use REST).
+      // Check the base64 string length BEFORE decoding to prevent memory exhaustion
+      // attacks. Decoded size is approximately len * 0.75, so for 10 MB the base64
+      // string must be at most ceil(10 * 1024 * 1024 / 0.75) = 13_981_013 chars.
+      const MAX_SOCKET_MEDIA_BYTES = 10 * 1024 * 1024;
+      const MAX_BASE64_LENGTH = Math.ceil(MAX_SOCKET_MEDIA_BYTES / 0.75);
+      if (typeof file.buffer !== 'string' || file.buffer.length > MAX_BASE64_LENGTH) {
+        socket.emit('chat:error', { message: 'File too large. Use the upload button for videos.' });
+        return;
+      }
       const buffer = Buffer.from(file.buffer, 'base64');
       if (buffer.length > MAX_SOCKET_MEDIA_BYTES) {
         socket.emit('chat:error', { message: 'File too large. Use the upload button for videos.' });
@@ -451,7 +535,8 @@ function initSocketIO(io) {
           }
         } catch (err) {
           logger.error('Hangout entitlement check failed', { userId: user.id, error: err.message });
-          // Fail open for entitlement check to not block existing members on service error
+          socket.emit('hangout:error', { message: 'Access check unavailable. Please try again.', code: 'ENTITLEMENT_CHECK_FAILED' });
+          return;
         }
       }
 
@@ -529,6 +614,21 @@ function initSocketIO(io) {
         );
         if (senderRows.length === 0) return;
 
+        // Block check — do not deliver invitations between users who have blocked
+        // each other (in either direction).  Uses the same blocked_users schema
+        // as the DM and REST endpoints.
+        const { rows: blockRows } = await query(
+          `SELECT 1 FROM blocked_users
+           WHERE (user_id = $1 AND blocked_user_id = $2)
+              OR (user_id = $2 AND blocked_user_id = $1)
+           LIMIT 1`,
+          [user.id, targetUserId]
+        );
+        if (blockRows.length > 0) {
+          // Silently drop — do not reveal to the sender that the target has blocked them
+          return;
+        }
+
         // Get group name
         const { rows: groupRows } = await query(
           'SELECT name FROM hangout_groups WHERE id=$1',
@@ -599,7 +699,9 @@ function initSocketIO(io) {
             return;
           }
         } catch (limErr) {
-          logger.warn('dm:send tier limit check failed (fail-open)', { userId: user.id, error: limErr.message });
+          logger.error('dm:send tier limit check failed (fail-closed)', { userId: user.id, error: limErr.message });
+          socket.emit('dm:error', { message: 'Unable to verify message limit. Please try again shortly.', code: 'LIMIT_CHECK_FAILED' });
+          return;
         }
       }
 
@@ -684,6 +786,51 @@ function initSocketIO(io) {
         return;
       }
       try {
+        // Verify the stream exists before allowing join.
+        // A valid streamId is either:
+        //   (a) a record in the live_streams table (DB-tracked stream), OR
+        //   (b) a channel ref currently assigned to a user in users.live_channel
+        //       (Restreamer slug-based stream, e.g. 'pnptv-frank'), OR
+        //   (c) a numeric Directus performer ID that resolves to a live_channel.
+        // Reject anything that matches none of these to prevent resource exhaustion
+        // from arbitrary room creation.
+        const isNumericId = /^\d+$/.test(String(streamId));
+        const isSlug = /^[a-zA-Z][a-zA-Z0-9-]*$/.test(String(streamId));
+
+        let streamVerified = false;
+
+        // Check live_streams table (handles DB-backed streams + numeric Directus IDs)
+        const dbStream = await LiveStreamModel.getById(String(streamId));
+        if (dbStream) {
+          streamVerified = true;
+        }
+
+        // Check users.live_channel for Restreamer slug-based streams
+        if (!streamVerified && isSlug) {
+          const { rows: channelRows } = await query(
+            'SELECT 1 FROM users WHERE live_channel = $1 LIMIT 1',
+            [String(streamId)]
+          );
+          if (channelRows.length > 0) streamVerified = true;
+        }
+
+        // Check performers.directus_id → users.live_channel for numeric Directus IDs
+        if (!streamVerified && isNumericId) {
+          const { rows: performerRows } = await query(
+            `SELECT 1 FROM performers p
+             JOIN users u ON u.id = p.user_id
+             WHERE p.directus_id = $1 AND u.live_channel IS NOT NULL
+             LIMIT 1`,
+            [String(streamId)]
+          );
+          if (performerRows.length > 0) streamVerified = true;
+        }
+
+        if (!streamVerified) {
+          socket.emit('live:error', { message: 'Stream not found', code: 'STREAM_NOT_FOUND' });
+          return;
+        }
+
         socket.join(`live:${streamId}`);
         socket.data.liveRooms = socket.data.liveRooms || new Set();
         socket.data.liveRooms.add(streamId);
@@ -877,6 +1024,17 @@ function initSocketIO(io) {
         const assignedChannel = rows[0]?.live_channel ?? null;
         const isAdmin = user.role === 'admin' || user.role === 'superadmin';
 
+        if (!isAdmin) {
+          const { rows: performerRows } = await query(
+            `SELECT 1 FROM performers WHERE user_id = $1 AND status = 'active' LIMIT 1`,
+            [user.id]
+          );
+          if (performerRows.length === 0) {
+            socket.emit('stream:error', { message: 'Creator account required to stream.' });
+            return;
+          }
+        }
+
         if (!assignedChannel) {
           socket.emit('stream:error', { message: 'No streaming channel assigned to your account.' });
           return;
@@ -964,6 +1122,15 @@ function initSocketIO(io) {
     });
 
     socket.on('stream:data', (data) => {
+      // 30 chunks × 512 KB = ~15 MB/sec max throughput, which is more than
+      // sufficient for a 6 Mbps H.264 stream with headroom.  The previous
+      // limit of 300 chunks/sec (150 MB/sec) was excessively high and could
+      // allow a single client to overwhelm the server's memory and I/O.
+      if (!rateLimit(`stream:data:${user.id}`, 30, 1000)) {
+        return;
+      }
+      const MAX_CHUNK_BYTES = 512 * 1024;
+
       const ffmpeg = socket.data.ffmpegProcess;
       if (!ffmpeg || !ffmpeg.stdin || ffmpeg.stdin.destroyed) return;
 
@@ -991,6 +1158,11 @@ function initSocketIO(io) {
         }
 
         if (!buf || buf.length === 0) return;
+
+        if (buf.length > MAX_CHUNK_BYTES) {
+          logger.warn(`stream:data oversized chunk from user ${user.id}: ${buf.length} bytes`);
+          return;
+        }
 
         socket.data.streamDataChunks = (socket.data.streamDataChunks || 0) + 1;
         socket.data.streamDataBytes = (socket.data.streamDataBytes || 0) + buf.length;

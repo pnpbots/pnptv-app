@@ -36,7 +36,7 @@ class RoleService {
       const actorRank = actorResult.rows[0]?.rank || 0;
       const targetRank = ROLE_HIERARCHY[roleName] || 0;
 
-      if (actorRank <= targetRank && assignedBy !== userId) {
+      if (actorRank <= targetRank) {
         throw new Error('No puedes asignar roles de igual o mayor rango');
       }
 

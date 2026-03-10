@@ -132,14 +132,15 @@ class VisaCybersourceService {
     planId,
     cardToken,
     email,
-    trialDays = 0,
   }) {
     try {
-      // Get plan details
+      // Get plan details — trialDays comes from the plan record, NEVER from client input.
       const plan = await PlanModel.getById(planId);
       if (!plan) {
         throw new Error(`Plan ${planId} not found`);
       }
+      // Read trial configuration from the plan record only.
+      const trialDays = typeof plan.trialDays === 'number' ? Math.max(0, plan.trialDays) : 0;
 
       // Get user details
       const user = await UserModel.getById(userId);
@@ -147,8 +148,17 @@ class VisaCybersourceService {
         throw new Error(`User ${userId} not found`);
       }
 
-      // Use provided token or user's default token
-      const token = cardToken || user.cardToken;
+      // Resolve the card token: use the caller-supplied token first.
+      // If none was provided, fetch the user's default token directly from the DB
+      // (card_token is intentionally stripped from the UserModel generic object).
+      let token = cardToken;
+      if (!token) {
+        const tokenRow = await query(
+          `SELECT card_token FROM users WHERE id = $1`,
+          [userId]
+        );
+        token = tokenRow.rows[0]?.card_token || null;
+      }
       if (!token) {
         throw new Error('No card token available. Please add a payment method first.');
       }
@@ -319,9 +329,14 @@ class VisaCybersourceService {
    */
   static async processRecurringPayment(subscriptionId) {
     try {
-      // Get subscription details
+      // Get subscription details — card_token is fetched here because it is required for
+      // charging, but it is destructured out immediately so it never appears in log objects.
       const subResult = await query(
-        `SELECT * FROM recurring_subscriptions WHERE id = $1`,
+        `SELECT id, user_id, plan_id, card_token, card_token_mask, card_franchise,
+                status, amount, currency, billing_interval, billing_interval_count,
+                current_period_start, current_period_end, next_billing_date,
+                trial_end, billing_failures, cancel_at_period_end, metadata
+         FROM recurring_subscriptions WHERE id = $1`,
         [subscriptionId]
       );
 
@@ -329,7 +344,8 @@ class VisaCybersourceService {
         throw new Error(`Subscription ${subscriptionId} not found`);
       }
 
-      const subscription = subResult.rows[0];
+      // Destructure card_token out so the loggable `subscription` object never contains it.
+      const { card_token: subCardToken, ...subscription } = subResult.rows[0];
 
       if (subscription.status !== 'active' && subscription.status !== 'past_due') {
         logger.info('Subscription not eligible for billing', {
@@ -365,9 +381,9 @@ class VisaCybersourceService {
         periodEnd.setFullYear(periodEnd.getFullYear() + intervalCount);
       }
 
-      // Attempt to charge
+      // Attempt to charge — use the destructured token, not the sanitized subscription object.
       const chargeResult = await this._chargeCard({
-        token: subscription.card_token,
+        token: subCardToken,
         amount: parseFloat(subscription.amount),
         description: `PNPtv Recurring subscription - ${subscription.plan_id}`,
         subscriptionId,
@@ -539,9 +555,12 @@ class VisaCybersourceService {
    */
   static async cancelRecurringSubscription(userId, immediately = false) {
     try {
-      // Get active subscription
+      // Get active subscription — exclude card_token; it is not needed for cancellation.
       const subResult = await query(
-        `SELECT * FROM recurring_subscriptions
+        `SELECT id, user_id, plan_id, card_token_mask, card_franchise, status,
+                amount, currency, current_period_start, current_period_end,
+                next_billing_date, trial_end, billing_failures, cancel_at_period_end
+         FROM recurring_subscriptions
          WHERE user_id = $1 AND status IN ('active', 'trialing', 'past_due')
          ORDER BY created_at DESC LIMIT 1`,
         [userId]
@@ -580,6 +599,22 @@ class VisaCybersourceService {
            WHERE id = $1`,
           [userId]
         );
+        // Revoke entitlements for immediate cancellation
+        if (subscription.plan_id) {
+          try {
+            await query(
+              `UPDATE user_entitlements SET expires_at = NOW(), updated_at = NOW()
+               WHERE user_id = $1 AND source_plan_id = $2 AND is_lifetime = false`,
+              [String(userId), subscription.plan_id]
+            );
+            const EntitlementAccessService = require('./entitlementAccessService');
+            await EntitlementAccessService.invalidateCache(String(userId));
+            logger.info('Entitlements revoked on immediate Visa subscription cancel', { userId, planId: subscription.plan_id });
+          } catch (revokeErr) {
+            logger.error('Failed to revoke entitlements on immediate Visa cancel', { userId, error: revokeErr.message });
+          }
+        }
+
         await cache.del(`user:${userId}`);
 
         // Send notification
@@ -644,9 +679,12 @@ class VisaCybersourceService {
    */
   static async reactivateSubscription(userId) {
     try {
-      // Get subscription that was cancelled but still in period
+      // Get subscription that was cancelled but still in period — exclude card_token.
       const subResult = await query(
-        `SELECT * FROM recurring_subscriptions
+        `SELECT id, user_id, plan_id, card_token_mask, card_franchise, status,
+                amount, currency, current_period_start, current_period_end,
+                next_billing_date, trial_end, cancel_at_period_end
+         FROM recurring_subscriptions
          WHERE user_id = $1 AND cancel_at_period_end = TRUE AND current_period_end > NOW()
          ORDER BY created_at DESC LIMIT 1`,
         [userId]
@@ -761,6 +799,17 @@ class VisaCybersourceService {
    * @returns {Promise<Object>} Processing summary
    */
   static async processDuePayments() {
+    // Distributed lock — prevents concurrent cron runs (e.g. overlapping Docker restarts,
+    // dual-scheduler bug) from double-charging subscriptions.
+    // TTL of 1800s (30 min) is intentionally generous: the job processes each sub with a
+    // 500ms inter-charge delay, so even 1000 subs would finish well inside 30 minutes.
+    const lockKey = 'processDuePayments:global';
+    const acquired = await cache.acquireLock(lockKey, 1800);
+    if (!acquired) {
+      logger.warn('processDuePayments: lock not acquired — another instance is running, skipping');
+      return { skipped: true };
+    }
+
     try {
       // Get all subscriptions due for billing
       const dueSubscriptions = await query(
@@ -808,6 +857,8 @@ class VisaCybersourceService {
     } catch (error) {
       logger.error('Error processing due payments:', { error: error.message });
       throw error;
+    } finally {
+      await cache.releaseLock(lockKey);
     }
   }
 
@@ -1077,6 +1128,13 @@ Thank you for staying with us! 🙏`;
    */
   static async _handleSubscriptionCancelled({ subscriptionId, userId, reason }) {
     try {
+      // Look up plan_id for entitlement revocation
+      const subRow = await query(
+        `SELECT plan_id FROM recurring_subscriptions WHERE id = $1`,
+        [subscriptionId]
+      );
+      const planId = subRow.rows[0]?.plan_id || null;
+
       await query(
         `UPDATE recurring_subscriptions SET
            status = 'cancelled',
@@ -1098,6 +1156,23 @@ Thank you for staying with us! 🙏`;
          WHERE id = $1`,
         [userId]
       );
+
+      // Revoke entitlements granted by this plan
+      if (planId) {
+        try {
+          await query(
+            `UPDATE user_entitlements SET expires_at = NOW(), updated_at = NOW()
+             WHERE user_id = $1 AND source_plan_id = $2 AND is_lifetime = false`,
+            [String(userId), planId]
+          );
+          const EntitlementAccessService = require('./entitlementAccessService');
+          await EntitlementAccessService.invalidateCache(String(userId));
+          logger.info('Entitlements revoked on Visa subscription cancellation', { userId, planId, subscriptionId });
+        } catch (revokeErr) {
+          logger.error('Failed to revoke entitlements on Visa cancellation', { userId, planId, error: revokeErr.message });
+        }
+      }
+
       await cache.del(`user:${userId}`);
 
       await this._sendSubscriptionNotification(userId, 'cancelled', {});
@@ -1117,23 +1192,32 @@ Thank you for staying with us! 🙏`;
 
   /**
    * Handle Visa Cybersource webhook notifications
-   * @param {Object} webhookData - Webhook payload
+   * @param {Object} webhookData - Parsed webhook payload (req.body)
    * @param {string} signature - Webhook signature for verification
+   * @param {Buffer|string|null} rawBody - Raw request body bytes for HMAC computation
    * @returns {Promise<Object>} Webhook processing result
    */
-  static async handleWebhook(webhookData, signature) {
-    // H2: idempotency lock — prevent duplicate processing of the same event
-    const eventId = webhookData?.id || webhookData?.eventId || webhookData?.eventType;
+  static async handleWebhook(webhookData, signature, rawBody = null) {
+    // Idempotency lock — prevent duplicate processing of the same event.
+    // A missing eventId is treated as an error (not a lock bypass) — accepting events
+    // without a stable identity would allow replay attacks with no deduplication.
+    const eventId = webhookData?.id || webhookData?.eventId;
+    if (!eventId) {
+      logger.warn('Cybersource webhook: missing event id, rejecting', {
+        eventType: webhookData?.eventType,
+      });
+      return { success: false, error: 'Missing event id', statusCode: 400 };
+    }
     const lockKey = `cybersource_webhook:${eventId}`;
-    const acquired = eventId ? await cache.acquireLock(lockKey, 120) : true;
+    const acquired = await cache.acquireLock(lockKey, 120);
     if (!acquired) {
       logger.warn('Cybersource webhook already being processed, skipping', { eventId });
       return { success: true, alreadyProcessed: true };
     }
 
     try {
-      // Verify webhook signature
-      const isValid = this._verifyWebhookSignature(webhookData, signature);
+      // Verify webhook signature using raw body to avoid JSON serialization differences
+      const isValid = this._verifyWebhookSignature(webhookData, signature, rawBody);
       if (!isValid) {
         throw new Error('Invalid webhook signature');
       }
@@ -1157,8 +1241,34 @@ Thank you for staying with us! 🙏`;
       }
 
       switch (eventType) {
-        case 'subscription.cancelled':
-          return await this._handleSubscriptionCancelled(webhookData.data);
+        case 'subscription.cancelled': {
+          // Validate required fields before acting on unvalidated webhook payload.
+          const { subscriptionId, userId: webhookUserId } = webhookData.data || {};
+          if (!subscriptionId || !webhookUserId) {
+            logger.warn('Cybersource webhook subscription.cancelled: missing subscriptionId or userId', {
+              eventId,
+              dataKeys: Object.keys(webhookData.data || {}),
+            });
+            return { success: false, error: 'Missing subscriptionId or userId in webhook payload', statusCode: 400 };
+          }
+          // Ownership check: verify the subscription actually belongs to the userId in the payload.
+          const ownerCheck = await query(
+            `SELECT id FROM recurring_subscriptions WHERE id = $1 AND user_id = $2`,
+            [subscriptionId, webhookUserId]
+          );
+          if (ownerCheck.rows.length === 0) {
+            logger.warn('Cybersource webhook subscription.cancelled: ownership mismatch or subscription not found', {
+              subscriptionId,
+              webhookUserId,
+            });
+            return { success: false, error: 'Subscription not found or ownership mismatch', statusCode: 403 };
+          }
+          return await this._handleSubscriptionCancelled({
+            subscriptionId,
+            userId: webhookUserId,
+            reason: webhookData.data.reason || 'webhook',
+          });
+        }
         default:
           logger.warn('Unhandled Visa Cybersource webhook event:', { eventType });
           return { success: true, message: 'Event type not handled' };
@@ -1171,17 +1281,22 @@ Thank you for staying with us! 🙏`;
         message: 'Failed to process webhook',
       };
     } finally {
-      if (eventId) {
-        await cache.releaseLock(lockKey);
-      }
+      // eventId is guaranteed non-null here (we returned early above if it was missing).
+      await cache.releaseLock(lockKey);
     }
   }
 
   /**
    * Verify webhook signature
+   * Uses rawBody when available to ensure byte-exact HMAC matching.
+   * JSON.stringify(data) is NOT equivalent to the original request body because key
+   * ordering and whitespace differ between implementations, producing a different HMAC.
    * @private
+   * @param {Object} data - Parsed payload (only used as fallback when rawBody absent)
+   * @param {string} signature - Expected HMAC hex digest from request header
+   * @param {Buffer|string|null} rawBody - Raw request bytes captured before JSON parsing
    */
-  static _verifyWebhookSignature(data, signature) {
+  static _verifyWebhookSignature(data, signature, rawBody = null) {
     const configData = config.visaCybersource;
     if (!configData.webhookSecret) {
       // P11: never fail open — if no secret is configured, reject all requests
@@ -1190,7 +1305,12 @@ Thank you for staying with us! 🙏`;
 
     try {
       const hmac = crypto.createHmac('sha256', configData.webhookSecret);
-      const computedSignature = hmac.update(JSON.stringify(data)).digest('hex');
+      // Prefer raw body bytes for HMAC to avoid JSON serialization differences.
+      // Fall back to JSON.stringify only when rawBody was not captured (non-webhook paths).
+      const bodyToSign = rawBody != null
+        ? (Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody))
+        : Buffer.from(JSON.stringify(data));
+      const computedSignature = hmac.update(bodyToSign).digest('hex');
       return crypto.timingSafeEqual(
         Buffer.from(computedSignature),
         Buffer.from(signature || '')

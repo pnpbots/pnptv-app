@@ -12,6 +12,7 @@ const RedisStore = require('connect-redis').default;
 const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
+const FileType = require('file-type');
 const { getRedis, cache } = require('../../config/redis');
 const { getPool } = require('../../config/postgres');
 const logger = require('../../utils/logger');
@@ -28,7 +29,7 @@ const healthController = require('./controllers/healthController');
 const hangoutsController = require('./controllers/hangoutsController');
 const xOAuthRoutes = require('./xOAuthRoutes');
 const xFollowersRoutes = require('./xFollowersRoutes');
-const { adminGuard: xOAuthAdminGuard } = require('../../middleware/guards');
+const { adminGuard: xOAuthAdminGuard, adminGuard } = require('../../middleware/guards');
 const adminUserRoutes = require('./routes/adminUserRoutes');
 const userManagementRoutes = require('./routes/userManagementRoutes');
 const nearbyRoutes = require('./routes/nearby.routes');
@@ -187,8 +188,8 @@ const requireFreeTierDmLimit = async (req, res, next) => {
     req.dmLimit = { limit, used: newCount, remaining: limit - newCount };
     return next();
   } catch (err) {
-    logger.error('DM limit check error', { error: err.message });
-    return next(); // fail open
+    logger.error('DM limit check error (Redis unavailable — failing closed)', { error: err.message });
+    return res.status(503).json({ success: false, error: 'Service temporarily unavailable. Please try again.', code: 'SERVICE_UNAVAILABLE' });
   }
 };
 
@@ -413,7 +414,8 @@ app.use(conditionalMiddleware(cors({
 app.use(conditionalMiddleware(compression()));
 
 // Logging (before other middleware for accurate request tracking)
-app.use(morgan('combined', { stream: logger.stream }));
+// 'short' omits the Authorization header that 'combined' would include in logs
+app.use(morgan('short', { stream: logger.stream }));
 
 // Track user last_active — throttled to once per hour per user via Redis
 app.use((req, res, next) => {
@@ -887,7 +889,7 @@ const PERFORMER_VIDEO_TEMP_DIR = '/tmp/pnptv-videos';
 fsSyncMkdir.mkdirSync(PERFORMER_VIDEO_TEMP_DIR, { recursive: true });
 
 const postMediaFileFilter = (req, file, cb) => {
-  const isAllowed = /^(application\/octet-stream|image\/(jpeg|jpg|png|webp|gif|heic|heif|avif|tiff|bmp|x-ms-bmp)|video\/(mp4|webm|quicktime|3gpp|hevc|x-m4v))$/i.test(file.mimetype || '');
+  const isAllowed = /^(image\/(jpeg|jpg|png|webp|gif|heic|heif|avif|tiff|bmp|x-ms-bmp)|video\/(mp4|webm|quicktime|3gpp|hevc|x-m4v))$/i.test(file.mimetype || '');
   if (isAllowed) return cb(null, true);
   logger.warn('postMediaUpload rejected mime', { mime: file.mimetype, originalname: file.originalname, ip: req.ip });
   cb(new Error('Unsupported file type. Supported: images (jpg/png/webp/gif/heic/avif) and videos (mp4/webm/mov)'));
@@ -1183,11 +1185,10 @@ const uploadLimiter = rateLimit({
 });
 
 // C5: Dedicated rate limiter for payment status polling endpoint
-// Higher limit than webhookLimiter because the client-rendered payment-response page polls this
-// without session cookies. Per-IP limiting prevents enumeration abuse.
+// Tightened to max 10/min per IP to prevent payment-ID enumeration.
 const paymentStatusLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 40, // 40 polls per minute per IP (client polls every 3 s for up to 40 attempts)
+  max: 10, // 10 polls per minute per IP — prevents payment-ID enumeration
   keyGenerator: (req) => req.ip,
   handler: (req, res) => res.status(429).json({ error: 'Too many status requests, please wait.' }),
   standardHeaders: true,
@@ -1275,11 +1276,27 @@ const authStatusLimiter = rateLimit({
 app.get('/api/auth-status', authStatusLimiter, checkAuthStatus);
 
 // Admin check endpoint (for frontend role gate)
-app.get('/api/admin/check', (req, res) => {
-  const user = req.session?.user;
-  if (!user) return res.json({ isAdmin: false });
-  const role = user.role || 'user';
-  res.json({ isAdmin: role === 'admin' || role === 'superadmin' });
+// Uses adminGuard which queries DB — never trusts the stale session role.
+// adminGuard returns 403 for non-admins; frontend treats any non-200 as isAdmin: false.
+const adminCheckLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, keyGenerator: (req) => req.ip, standardHeaders: true, legacyHeaders: false });
+app.get('/api/admin/check', adminCheckLimiter, adminGuard, (req, res) => {
+  res.json({ isAdmin: true });
+});
+
+// Audit log middleware — registered here so it covers ALL /api/admin/* routes,
+// including those defined before the RBAC block further down the file.
+// NOTE: superadminGuard and roleController are required again in the RBAC section
+// below for clarity but the auditLog registration must live here to fire first.
+const { auditLog } = require('../../middleware/auditLogger');
+app.use('/api/admin/', auditLog);
+
+// Client error logging endpoint (used by ErrorBoundary)
+app.post('/api/log-error', limiter, (req, res) => {
+  const { error, stack, componentStack } = req.body || {};
+  if (error) {
+    logger.error('Client error:', { error, stack: stack?.slice(0, 2000), componentStack: componentStack?.slice(0, 2000) });
+  }
+  res.json({ ok: true });
 });
 
 // Logout endpoint
@@ -1289,7 +1306,13 @@ app.post('/api/logout', (req, res) => {
       logger.error('Logout error:', err);
       return res.status(500).json({ error: 'Logout failed' });
     }
-    res.clearCookie('__pnptv_sid');
+    res.clearCookie('__pnptv_sid', {
+      path: '/',
+      domain: process.env.NODE_ENV === 'production' ? '.pnptv.app' : undefined,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+    });
     logger.info('User logged out successfully');
     res.json({ success: true });
   });
@@ -1368,7 +1391,7 @@ app.post('/checkout/pnp/confirmation', webhookLimiter, webhookController.handleE
 // Main Daimo webhook handler
 app.post('/api/webhooks/daimo', webhookLimiter, webhookController.handleDaimoWebhook);
 app.post('/api/webhooks/visa-cybersource', webhookLimiter, require('./controllers/visaCybersourceWebhookController').handleWebhook);
-app.get('/api/webhooks/visa-cybersource/health', require('./controllers/visaCybersourceWebhookController').healthCheck);
+app.get('/api/webhooks/visa-cybersource/health', adminGuard, require('./controllers/visaCybersourceWebhookController').healthCheck);
 app.get('/api/payment-response', webhookController.handlePaymentResponse);
 
 // Payment API routes
@@ -1532,6 +1555,7 @@ app.delete('/api/playlists/:playlistId', authenticateUser, asyncHandler(playlist
 app.post(
   '/api/podcasts/upload',
   authenticateUser,
+  uploadLimiter,
   podcastController.upload.single('audio'),
   asyncHandler(podcastController.uploadAudio)
 );
@@ -1563,29 +1587,49 @@ app.post('/api/recurring/tokenize', authenticateUser, bindAuthenticatedUserId, a
     return res.status(400).json({ success: false, error: 'Missing required fields: userId and cardToken' });
   }
 
-  // Token should be a pre-generated token from ePayco.js frontend tokenization
+  // Token should be a pre-generated token from ePayco.js frontend tokenization.
+  // The token is never echoed back in the response — doing so would expose it to
+  // any MitM observer or browser extension that captures XHR responses.
   try {
-    // Store or process the pre-generated token securely
-    // The actual service call depends on your token storage/subscription flow
-    const result = {
-      success: true,
-      message: 'Token received successfully',
-      token: cardToken
-    };
-
-    res.json(result);
+    res.json({ success: true, message: 'Token received' });
   } catch (error) {
     logger.error('Error processing tokenized card:', error);
     res.status(500).json({ success: false, error: 'Failed to process token' });
   }
 }));
 
-// Create recurring subscription
-app.post('/api/recurring/subscribe', authenticateUser, bindAuthenticatedUserId, asyncHandler(async (req, res) => {
-  const { userId, planId, cardToken, email, trialDays } = req.body;
+// Rate limiter for recurring subscribe — 2 attempts per 10 minutes per user.
+// Prevents automated subscription-creation loops and trial-period abuse where
+// an attacker rapidly creates/cancels subscriptions to probe billing logic.
+const recurringSubscribeLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 2,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  handler: (req, res) => res.status(429).json({
+    success: false,
+    error: 'Too many subscription attempts. Please wait 10 minutes before trying again.',
+  }),
+});
 
-  if (!userId || !planId) {
-    return res.status(400).json({ success: false, error: 'Missing required fields' });
+// Create recurring subscription
+app.post('/api/recurring/subscribe', recurringSubscribeLimiter, authenticateUser, bindAuthenticatedUserId, asyncHandler(async (req, res) => {
+  // Security: userId is always taken from the authenticated session — never from req.body.
+  // bindAuthenticatedUserId middleware already overwrites req.body.userId with the session
+  // value, but we read directly from the session here as an explicit defence-in-depth
+  // measure so that the auth source is unambiguous even if middleware order changes.
+  const userId = getActorId(req);
+  if (!userId) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+
+  // trialDays is intentionally NOT accepted from the client body — trial duration is
+  // determined server-side from the plan record to prevent free-trial abuse.
+  const { planId, cardToken, email } = req.body;
+
+  if (!planId) {
+    return res.status(400).json({ success: false, error: 'Missing required field: planId' });
   }
 
   const result = await VisaCybersourceService.createRecurringSubscription({
@@ -1593,7 +1637,6 @@ app.post('/api/recurring/subscribe', authenticateUser, bindAuthenticatedUserId, 
     planId,
     cardToken,
     email,
-    trialDays: trialDays || 0,
   });
 
   res.json(result);
@@ -2112,8 +2155,8 @@ app.use('/api/x/followers', xFollowersRoutes);
 
 // Health Check and Monitoring Endpoints
 app.get('/api/health', healthLimiter, asyncHandler(healthController.healthCheck));
-app.get('/api/metrics', healthLimiter, asyncHandler(healthController.performanceMetrics));
-app.post('/api/metrics/reset', healthLimiter, asyncHandler(healthController.resetMetrics));
+app.get('/api/metrics', healthLimiter, adminGuard, asyncHandler(healthController.performanceMetrics));
+app.post('/api/metrics/reset', healthLimiter, adminGuard, asyncHandler(healthController.resetMetrics));
 
 // ==========================================
 // PRIME Hub Web App API Routes
@@ -2134,27 +2177,45 @@ const telegramWidgetLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Rate limiter for /api/webapp/auth/telegram/check — prevents auth probing, 10 req/min per IP
+const telegramCheckLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  handler: (req, res) => res.status(429).json({ error: 'Too many auth check attempts. Try again in a minute.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Rate limiter for /api/webapp/auth/verify-email — 5 req per 15 minutes per IP
+const verifyEmailLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  handler: (req, res) => res.status(429).json({ error: 'Too many verification attempts. Try again later.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Web App Authentication
 app.get('/api/webapp/auth/telegram/start', asyncHandler(webAppController.telegramStart));
 app.get('/api/webapp/auth/telegram/callback', asyncHandler(webAppController.telegramCallback));
 app.post('/api/webapp/auth/telegram', authLimiter, asyncHandler(webAppController.telegramLogin));
 app.post('/api/webapp/auth/telegram/token', authLimiter, asyncHandler(webAppController.telegramGenerateToken));
-app.get('/api/webapp/auth/telegram/check', asyncHandler(webAppController.telegramCheckToken));
+app.get('/api/webapp/auth/telegram/check', telegramCheckLimiter, asyncHandler(webAppController.telegramCheckToken));
 app.post('/api/webapp/auth/telegram/widget', telegramWidgetLimiter, asyncHandler(webAppController.telegramWidgetAuth));
 app.post('/api/webapp/auth/email/register', authLimiter, asyncHandler(webAppController.emailRegister));
 app.post('/api/webapp/auth/email/login', authLimiter, asyncHandler(webAppController.emailLogin));
-app.get('/api/webapp/auth/verify-email', asyncHandler(webAppController.verifyEmail));
+app.get('/api/webapp/auth/verify-email', verifyEmailLimiter, asyncHandler(webAppController.verifyEmail));
 app.post('/api/webapp/auth/resend-verification', authLimiter, asyncHandler(webAppController.resendVerification));
 app.get('/api/webapp/auth/x/start', asyncHandler(webAppController.xLoginStart));
 app.get('/api/webapp/auth/x/callback', asyncHandler(webAppController.xLoginCallback));
-app.post('/api/webapp/auth/x/unlink', asyncHandler(webAppController.unlinkX));
+app.post('/api/webapp/auth/x/unlink', requireSessionAuth, asyncHandler(webAppController.unlinkX));
 app.get('/api/me', asyncHandler(webAppController.authStatus));
 app.post('/api/webapp/auth/logout', asyncHandler(webAppController.logout));
 app.post('/api/webapp/auth/forgot-password', authLimiter, asyncHandler(webAppController.forgotPassword));
 app.post('/api/webapp/auth/reset-password', authLimiter, asyncHandler(webAppController.resetPassword));
 
 // Web App Profile
-app.get('/api/webapp/profile', asyncHandler(webAppController.getProfile));
+app.get('/api/webapp/profile', requireSessionAuth, asyncHandler(webAppController.getProfile));
 app.put('/api/webapp/profile', requireSessionAuth, asyncHandler(webAppController.updateProfile));
 app.post('/api/webapp/profile/avatar', requireSessionAuth, uploadLimiter, avatarUpload.single('avatar'), asyncHandler(webAppController.uploadAvatar));
 
@@ -2206,8 +2267,8 @@ app.patch('/api/webapp/privacy', asyncHandler(async (req, res) => {
 
 // Model Application File Uploads
 const applyController = require('./controllers/applyController');
-app.post('/api/apply/profile-photo', authenticateUser, uploadModelProfilePhoto, asyncHandler(applyController.uploadProfilePhoto));
-app.post('/api/apply/id-documents', authenticateUser, uploadModelIdDocuments, asyncHandler(applyController.uploadIdDocuments));
+app.post('/api/apply/profile-photo', authenticateUser, uploadLimiter, uploadModelProfilePhoto, asyncHandler(applyController.uploadProfilePhoto));
+app.post('/api/apply/id-documents', authenticateUser, uploadLimiter, uploadModelIdDocuments, asyncHandler(applyController.uploadIdDocuments));
 
 // Web App User Location
 app.get('/api/webapp/profile/location', asyncHandler(userLocationController.getUserLocation));
@@ -2216,10 +2277,10 @@ app.delete('/api/webapp/profile/location', asyncHandler(userLocationController.d
 app.get('/api/webapp/users/nearby', asyncHandler(userLocationController.getNearbyUsers));
 
 // Web App Block/Unblock Users
-app.post('/api/webapp/users/block', asyncHandler(blockedUsersController.blockUser));
-app.delete('/api/webapp/users/unblock/:blockedUserId', asyncHandler(blockedUsersController.unblockUser));
-app.get('/api/webapp/users/blocked', asyncHandler(blockedUsersController.getBlockedUsers));
-app.get('/api/webapp/users/is-blocked/:userId', asyncHandler(blockedUsersController.isUserBlocked));
+app.post('/api/webapp/users/block', requireSessionAuth, asyncHandler(blockedUsersController.blockUser));
+app.delete('/api/webapp/users/unblock/:blockedUserId', requireSessionAuth, asyncHandler(blockedUsersController.unblockUser));
+app.get('/api/webapp/users/blocked', requireSessionAuth, asyncHandler(blockedUsersController.getBlockedUsers));
+app.get('/api/webapp/users/is-blocked/:userId', requireSessionAuth, asyncHandler(blockedUsersController.isUserBlocked));
 
 // Web App Follow System
 const followController = require('./controllers/followController');
@@ -2231,11 +2292,11 @@ app.get('/api/webapp/users/:userId/following',         asyncHandler(followContro
 app.get('/api/webapp/social/feed/following',           requireSessionAuth, asyncHandler(followController.getFollowingFeed));
 
 // Web App Direct Messages
-app.get('/api/webapp/messages/threads', asyncHandler(directMessagesController.getThreads));
-app.get('/api/webapp/messages/thread/:otherUserId', asyncHandler(directMessagesController.getMessages));
+app.get('/api/webapp/messages/threads', requireSessionAuth, asyncHandler(directMessagesController.getThreads));
+app.get('/api/webapp/messages/thread/:otherUserId', requireSessionAuth, asyncHandler(directMessagesController.getMessages));
 app.post('/api/webapp/messages/send', requireFreeTierDmLimit, asyncHandler(directMessagesController.sendMessage));
-app.delete('/api/webapp/messages/:messageId', asyncHandler(directMessagesController.deleteMessage));
-app.put('/api/webapp/messages/thread/:otherUserId/read', asyncHandler(directMessagesController.markThreadAsRead));
+app.delete('/api/webapp/messages/:messageId', requireSessionAuth, asyncHandler(directMessagesController.deleteMessage));
+app.put('/api/webapp/messages/thread/:otherUserId/read', requireSessionAuth, asyncHandler(directMessagesController.markThreadAsRead));
 
 // Rate limiter for notification read endpoints (60 req/min per authenticated user)
 const notificationLimiter = rateLimit({
@@ -2275,8 +2336,8 @@ const webappLiveController = require('./controllers/webappLiveController');
 app.get('/api/webapp/live/streams', requireSessionAuth, requireMemberTier, asyncHandler(webappLiveController.listStreams));
 app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLiveController.getRtmpKey));
 // Admin: manage Restreamer channel assignments
-app.get('/api/webapp/admin/live/channels', requireSessionAuth, asyncHandler(webappLiveController.listChannels));
-app.post('/api/webapp/admin/live/assign-channel', requireSessionAuth, asyncHandler(webappLiveController.assignChannel));
+app.get('/api/webapp/admin/live/channels', adminGuard, asyncHandler(webappLiveController.listChannels));
+app.post('/api/webapp/admin/live/assign-channel', adminGuard, asyncHandler(webappLiveController.assignChannel));
 
 // Streamer Settings: persistent encoder + filter preferences
 const streamerSettingsController = require('./controllers/streamerSettingsController');
@@ -2306,15 +2367,132 @@ app.post('/api/webapp/live/stream-auto-stop', requireSessionAuth, asyncHandler(s
 // Socket.IO access uses socketSingleton.get() directly inside the controller —
 // no wiring step needed here.
 const streamOverlayController = require('./controllers/streamOverlayController');
-app.get('/api/webapp/admin/stream-overlays', requireSessionAuth, asyncHandler(streamOverlayController.listOverlays));
-app.get('/api/webapp/admin/stream-overlays/:channelRef', requireSessionAuth, asyncHandler(streamOverlayController.getOverlay));
-app.put('/api/webapp/admin/stream-overlays/:channelRef', requireSessionAuth, asyncHandler(streamOverlayController.updateOverlay));
+app.get('/api/webapp/admin/stream-overlays', adminGuard, asyncHandler(streamOverlayController.listOverlays));
+app.get('/api/webapp/admin/stream-overlays/:channelRef', adminGuard, asyncHandler(streamOverlayController.getOverlay));
+app.put('/api/webapp/admin/stream-overlays/:channelRef', adminGuard, asyncHandler(streamOverlayController.updateOverlay));
 // Public overlay endpoint — no auth, short cache, used by the frontend LivePlayer
 app.get('/api/proxy/live/overlay/:channelRef', asyncHandler(streamOverlayController.getPublicOverlay));
 
 // Overlay Asset Library (CMS-managed logos & banners)
 const overlayLibraryController = require('./controllers/overlayLibraryController');
-app.get('/api/webapp/admin/overlay-library', requireSessionAuth, asyncHandler(overlayLibraryController.listAssets));
+app.get('/api/webapp/admin/overlay-library', adminGuard, asyncHandler(overlayLibraryController.listAssets));
+
+// ─── Direct Overlay Asset Upload (logos & banners stored on disk) ─────────────
+// Ensure upload directories exist at startup
+const OVERLAY_LOGOS_DIR = '/opt/pnptvapp/public/uploads/overlays/logos';
+const OVERLAY_BANNERS_DIR = '/opt/pnptvapp/public/uploads/overlays/banners';
+fs.mkdirSync(OVERLAY_LOGOS_DIR, { recursive: true });
+fs.mkdirSync(OVERLAY_BANNERS_DIR, { recursive: true });
+
+const overlayAssetStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const type = (req.body.type || '').toLowerCase();
+    if (type === 'logo') return cb(null, OVERLAY_LOGOS_DIR);
+    if (type === 'banner') return cb(null, OVERLAY_BANNERS_DIR);
+    cb(new Error('type must be logo or banner'));
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, '') || '.png';
+    const base = path.basename(file.originalname, path.extname(file.originalname))
+      .replace(/[^a-z0-9_-]/gi, '_')
+      .slice(0, 40)
+      .toLowerCase();
+    cb(null, `${base}-${Date.now()}${ext}`);
+  },
+});
+const overlayAssetUpload = multer({
+  storage: overlayAssetStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB max
+  fileFilter: (req, file, cb) => {
+    const allowed = /^image\/(jpeg|jpg|png|webp|gif|svg\+xml)$/i.test(file.mimetype || '');
+    if (allowed) return cb(null, true);
+    cb(new Error('Only image files are allowed for overlay assets (jpg/png/webp/gif/svg)'));
+  },
+});
+const uploadOverlayAsset = (req, res, next) => {
+  overlayAssetUpload.single('file')(req, res, (err) => {
+    if (!err) return next();
+    const status = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    return res.status(status).json({ success: false, error: err.message || 'Upload error' });
+  });
+};
+
+// POST /api/webapp/admin/overlay-assets/upload — Upload a logo or banner image
+app.post('/api/webapp/admin/overlay-assets/upload', adminGuard, uploadLimiter, uploadOverlayAsset, asyncHandler(async (req, res) => {
+  const { type } = req.body;
+  if (!type || !['logo', 'banner'].includes(type)) {
+    return res.status(400).json({ success: false, error: 'type must be logo or banner' });
+  }
+  if (!req.file) {
+    return res.status(400).json({ success: false, error: 'No file uploaded' });
+  }
+  const dir = type === 'logo' ? 'logos' : 'banners';
+  const url = `/uploads/overlays/${dir}/${req.file.filename}`;
+  return res.json({ success: true, url, name: req.file.originalname, type, filename: req.file.filename });
+}));
+
+// GET /api/webapp/admin/overlay-assets?type=logo|banner — List uploaded overlay assets
+app.get('/api/webapp/admin/overlay-assets', adminGuard, asyncHandler(async (req, res) => {
+  const { type } = req.query;
+  try {
+    const collectDir = async (dirPath, dirSlug, typeLabel) => {
+      if (!fs.existsSync(dirPath)) return [];
+      const entries = fs.readdirSync(dirPath);
+      return entries
+        .filter(name => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(name))
+        .map(name => {
+          const filePath = path.join(dirPath, name);
+          let stat;
+          try { stat = fs.statSync(filePath); } catch { return null; }
+          return {
+            name,
+            url: `/uploads/overlays/${dirSlug}/${name}`,
+            size: stat.size,
+            modified: stat.mtime.toISOString(),
+            type: typeLabel,
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => new Date(b.modified) - new Date(a.modified));
+    };
+
+    let assets = [];
+    if (!type || type === 'logo') {
+      assets = assets.concat(await collectDir(OVERLAY_LOGOS_DIR, 'logos', 'logo'));
+    }
+    if (!type || type === 'banner') {
+      assets = assets.concat(await collectDir(OVERLAY_BANNERS_DIR, 'banners', 'banner'));
+    }
+    return res.json({ success: true, assets });
+  } catch (error) {
+    logger.error('overlay-assets list error', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to list overlay assets' });
+  }
+}));
+
+// DELETE /api/webapp/admin/overlay-assets/:type/:filename — Delete an overlay asset
+app.delete('/api/webapp/admin/overlay-assets/:type/:filename', adminGuard, asyncHandler(async (req, res) => {
+  const { type, filename } = req.params;
+  if (!['logos', 'banners'].includes(type)) {
+    return res.status(400).json({ success: false, error: 'type must be logos or banners' });
+  }
+  // Sanitize filename — must not contain path traversal characters
+  if (!filename || /[/\\]/.test(filename) || filename.startsWith('.')) {
+    return res.status(400).json({ success: false, error: 'Invalid filename' });
+  }
+  const baseDir = type === 'logos' ? OVERLAY_LOGOS_DIR : OVERLAY_BANNERS_DIR;
+  const filePath = path.join(baseDir, path.basename(filename));
+  try {
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, error: 'File not found' });
+    }
+    fs.unlinkSync(filePath);
+    return res.json({ success: true });
+  } catch (error) {
+    logger.error('overlay-assets delete error', { error: error.message, filePath });
+    return res.status(500).json({ success: false, error: 'Failed to delete overlay asset' });
+  }
+}));
 
 // Web App Support Chat (Cristina AI)
 const supportController = require('./controllers/supportController');
@@ -2728,7 +2906,6 @@ app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {
 // Web App Admin Routes (session auth + role check)
 const webappAdminController = require('./controllers/webappAdminController');
 const primeController = require('./controllers/primeController');
-const { adminGuard } = require('../../middleware/guards');
 
 // Admin endpoints with session-based authentication
 app.get('/api/webapp/admin/stats', adminGuard, asyncHandler(webappAdminController.getStats));
@@ -3196,7 +3373,7 @@ app.put('/api/admin/radio/requests/:requestId', verifyAdminJWT, asyncHandler(med
 // ==========================================
 
 // Browse Ampache catalog
-app.get('/api/webapp/admin/ampache/catalog', verifyAdminJWT, asyncHandler(async (req, res) => {
+app.get('/api/webapp/admin/ampache/catalog', adminGuard, asyncHandler(async (req, res) => {
   try {
     const AmpacheService = require('../services/ampacheService');
     const { type = 'songs', offset = 0, limit = 50 } = req.query;
@@ -3213,7 +3390,7 @@ app.get('/api/webapp/admin/ampache/catalog', verifyAdminJWT, asyncHandler(async 
 }));
 
 // Import single Ampache item to media_library
-app.post('/api/webapp/admin/ampache/import', verifyAdminJWT, asyncHandler(async (req, res) => {
+app.post('/api/webapp/admin/ampache/import', adminGuard, asyncHandler(async (req, res) => {
   try {
     const AmpacheService = require('../services/ampacheService');
     const pool = getPool();
@@ -3240,7 +3417,7 @@ app.post('/api/webapp/admin/ampache/import', verifyAdminJWT, asyncHandler(async 
 }));
 
 // Bulk sync Ampache catalog to media_library
-app.post('/api/webapp/admin/ampache/sync', verifyAdminJWT, asyncHandler(async (req, res) => {
+app.post('/api/webapp/admin/ampache/sync', adminGuard, asyncHandler(async (req, res) => {
   try {
     const AmpacheService = require('../services/ampacheService');
     const pool = getPool();
@@ -3279,7 +3456,7 @@ app.post('/api/webapp/admin/ampache/sync', verifyAdminJWT, asyncHandler(async (r
 }));
 
 // Set current radio track from Ampache
-app.post('/api/webapp/admin/ampache/set-radio', verifyAdminJWT, asyncHandler(async (req, res) => {
+app.post('/api/webapp/admin/ampache/set-radio', adminGuard, asyncHandler(async (req, res) => {
   try {
     const pool = getPool();
     const { ampache_id, title, artist, cover_url, duration } = req.body;
@@ -3302,7 +3479,7 @@ app.post('/api/webapp/admin/ampache/set-radio', verifyAdminJWT, asyncHandler(asy
 }));
 
 // Ampache server health check
-app.get('/api/webapp/admin/ampache/ping', verifyAdminJWT, asyncHandler(async (req, res) => {
+app.get('/api/webapp/admin/ampache/ping', adminGuard, asyncHandler(async (req, res) => {
   try {
     const AmpacheService = require('../services/ampacheService');
     const result = await AmpacheService.ping();
@@ -3314,15 +3491,271 @@ app.get('/api/webapp/admin/ampache/ping', verifyAdminJWT, asyncHandler(async (re
 }));
 
 // ==========================================
+// Ampache Media File Management
+// ==========================================
+const AMPACHE_MEDIA_DIR = '/var/www/pnptvbot-sandbox/public/media';
+const AMPACHE_VALID_CATEGORIES = ['music', 'podcasts', 'videos'];
+
+// GET /api/webapp/admin/ampache/files — List files in all 3 categories (or filter by ?category=)
+app.get('/api/webapp/admin/ampache/files', adminGuard, asyncHandler(async (req, res) => {
+  const { category } = req.query;
+  if (category && !AMPACHE_VALID_CATEGORIES.includes(category)) {
+    return res.status(400).json({ success: false, error: 'Invalid category. Must be music, podcasts, or videos.' });
+  }
+  const categoriesToList = category ? [category] : AMPACHE_VALID_CATEGORIES;
+  const result = { music: [], podcasts: [], videos: [] };
+  try {
+    await Promise.all(categoriesToList.map(async (cat) => {
+      const dirPath = `${AMPACHE_MEDIA_DIR}/${cat}`;
+      let entries;
+      try {
+        entries = await fs.promises.readdir(dirPath);
+      } catch (err) {
+        if (err.code === 'ENOENT') return;
+        throw err;
+      }
+      const stats = await Promise.all(
+        entries.map(async (name) => {
+          try {
+            const stat = await fs.promises.lstat(`${dirPath}/${name}`);
+            if (!stat.isFile() || stat.isSymbolicLink()) return null;
+            return { name, size: stat.size, modified: stat.mtime.toISOString(), category: cat };
+          } catch {
+            return null;
+          }
+        })
+      );
+      result[cat] = stats.filter(Boolean);
+    }));
+    res.json({ success: true, files: result });
+  } catch (error) {
+    logger.error('Ampache list files error:', error);
+    res.status(500).json({ success: false, error: 'Failed to list media files' });
+  }
+}));
+
+// POST /api/webapp/admin/ampache/files/upload — Upload file(s) to a category directory
+
+// Rate limiter: 10 uploads per 15 minutes per IP (admin-only route, but belt-and-suspenders)
+const ampacheUploadRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ success: false, error: 'Too many uploads. Limit is 10 per 15 minutes.' }),
+});
+
+// Allowed magic bytes for audio and video uploads
+const AMPACHE_ALLOWED_AUDIO_MIMES = new Set([
+  'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/flac', 'audio/wav',
+  'audio/x-flac', 'audio/aac', 'audio/x-m4a',
+]);
+const AMPACHE_ALLOWED_VIDEO_MIMES = new Set([
+  'video/mp4', 'video/webm', 'video/x-matroska', 'video/quicktime',
+]);
+
+const ampacheUploadStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const { category } = req.body;
+    if (!category || !AMPACHE_VALID_CATEGORIES.includes(category)) {
+      return cb(new Error('Invalid or missing category'));
+    }
+    cb(null, `${AMPACHE_MEDIA_DIR}/${category}`);
+  },
+  filename: (req, file, cb) => {
+    const sanitized = file.originalname.replace(/[^a-zA-Z0-9._\-]/g, '_');
+    const stamp = Date.now();
+    cb(null, `${stamp}-${sanitized}`);
+  },
+});
+const ampacheUpload = multer({
+  storage: ampacheUploadStorage,
+  limits: { fileSize: 500 * 1024 * 1024, files: 10 },
+  fileFilter: (req, file, cb) => {
+    const { category } = req.body;
+    const audioMimes = ['audio/mpeg', 'audio/flac', 'audio/ogg', 'audio/wav', 'audio/aac', 'audio/mp4', 'audio/x-m4a'];
+    const videoMimes = ['video/mp4', 'video/webm', 'video/x-matroska', 'video/quicktime'];
+    const audioExts = /\.(mp3|flac|ogg|wav|aac|m4a)$/i;
+    const videoExts = /\.(mp4|webm|mkv|mov)$/i;
+    if (category === 'videos') {
+      if (videoMimes.includes(file.mimetype) && videoExts.test(file.originalname)) return cb(null, true);
+      return cb(new Error('Videos category only accepts mp4, webm, mkv, mov files'));
+    }
+    if (category === 'music' || category === 'podcasts') {
+      if (audioMimes.includes(file.mimetype) && audioExts.test(file.originalname)) return cb(null, true);
+      return cb(new Error(`${category} category only accepts mp3, flac, ogg, wav, aac, m4a files`));
+    }
+    cb(new Error('Invalid category'));
+  },
+});
+app.post('/api/webapp/admin/ampache/files/upload', adminGuard, ampacheUploadRateLimit, (req, res, next) => {
+  ampacheUpload.array('files', 10)(req, res, (err) => {
+    if (err) {
+      const status = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({ success: false, error: err.message });
+    }
+    next();
+  });
+}, asyncHandler(async (req, res) => {
+  const { category } = req.body;
+  if (!category || !AMPACHE_VALID_CATEGORIES.includes(category)) {
+    return res.status(400).json({ success: false, error: 'Invalid or missing category. Must be music, podcasts, or videos.' });
+  }
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ success: false, error: 'No files uploaded' });
+  }
+
+  // Magic byte validation — read the first 4100 bytes of each uploaded file from disk
+  const allowedMimes = category === 'videos' ? AMPACHE_ALLOWED_VIDEO_MIMES : AMPACHE_ALLOWED_AUDIO_MIMES;
+  const rejectedFiles = [];
+  const acceptedFiles = [];
+  await Promise.all(req.files.map(async (f) => {
+    try {
+      const fd = await fs.promises.open(f.path, 'r');
+      const headerBuf = Buffer.alloc(4100);
+      const { bytesRead } = await fd.read(headerBuf, 0, 4100, 0);
+      await fd.close();
+      const detected = await FileType.fromBuffer(headerBuf.slice(0, bytesRead));
+      if (!detected || !allowedMimes.has(detected.mime)) {
+        logger.warn(`Ampache upload: rejected file ${f.filename} — magic bytes mismatch (detected: ${detected?.mime ?? 'unknown'}, claimed: ${f.mimetype})`, { adminId: req.user?.id });
+        await fs.promises.unlink(f.path).catch(() => {});
+        rejectedFiles.push({ name: f.originalname, reason: 'Magic bytes do not match allowed media types for this category' });
+      } else {
+        acceptedFiles.push({ name: f.filename, size: f.size, category });
+      }
+    } catch (magicErr) {
+      logger.error(`Ampache upload: magic byte check failed for ${f.filename}:`, magicErr);
+      await fs.promises.unlink(f.path).catch(() => {});
+      rejectedFiles.push({ name: f.originalname, reason: 'Could not verify file type' });
+    }
+  }));
+
+  if (acceptedFiles.length === 0) {
+    return res.status(400).json({ success: false, error: 'All uploaded files were rejected due to invalid file types', rejected: rejectedFiles });
+  }
+
+  logger.info(`Ampache upload: ${acceptedFiles.length} file(s) accepted, ${rejectedFiles.length} rejected for category ${category} by admin userId=${req.user?.id}`);
+  res.json({ success: true, uploaded: acceptedFiles, ...(rejectedFiles.length > 0 && { rejected: rejectedFiles }) });
+}));
+
+// DELETE /api/webapp/admin/ampache/files/:category/:filename — Delete a single media file
+app.delete('/api/webapp/admin/ampache/files/:category/:filename', adminGuard, asyncHandler(async (req, res) => {
+  const { category, filename } = req.params;
+  if (!AMPACHE_VALID_CATEGORIES.includes(category)) {
+    return res.status(400).json({ success: false, error: 'Invalid category. Must be music, podcasts, or videos.' });
+  }
+  if (!filename || filename.includes('\0')) {
+    return res.status(400).json({ success: false, error: 'Invalid filename' });
+  }
+  const filePath = path.resolve(AMPACHE_MEDIA_DIR, category, filename);
+  const expectedBase = path.resolve(AMPACHE_MEDIA_DIR, category);
+  if (!filePath.startsWith(expectedBase + path.sep) && filePath !== expectedBase) {
+    return res.status(400).json({ success: false, error: 'Invalid filename' });
+  }
+  try {
+    const stat = await fs.promises.lstat(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      return res.status(400).json({ success: false, error: 'Invalid filename' });
+    }
+    await fs.promises.unlink(filePath);
+    logger.info(`Ampache delete: ${category}/${filename} by admin userId=${req.user?.id}`);
+    res.json({ success: true });
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return res.status(404).json({ success: false, error: 'File not found' });
+    }
+    logger.error('Ampache delete file error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete file' });
+  }
+}));
+
+// ─── Media Library Video Management (Prime toggle for Ampache videos) ─────────
+
+// GET /api/webapp/admin/media-library/videos — List all videos from media_library
+app.get('/api/webapp/admin/media-library/videos', adminGuard, asyncHandler(async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.query(
+      `SELECT id, title, artist, url, type, category, cover_url, duration, is_prime, is_public,
+              ampache_song_id, created_at, updated_at
+       FROM media_library
+       WHERE type = 'video'
+       ORDER BY created_at DESC`
+    );
+    return res.json({ success: true, videos: result.rows });
+  } catch (error) {
+    logger.error('media-library/videos list error', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to fetch media library videos' });
+  }
+}));
+
+// POST /api/webapp/admin/media-library/sync-video — Sync an Ampache video into media_library
+app.post('/api/webapp/admin/media-library/sync-video', adminGuard, asyncHandler(async (req, res) => {
+  try {
+    const { filename, title, category } = req.body;
+    if (!filename || typeof filename !== 'string' || !filename.trim()) {
+      return res.status(400).json({ success: false, error: 'filename is required' });
+    }
+    if (!title || typeof title !== 'string' || !title.trim()) {
+      return res.status(400).json({ success: false, error: 'title is required' });
+    }
+    const pool = getPool();
+    // Check if already in library by filename match against title or url
+    const existing = await pool.query(
+      `SELECT id, title, is_prime, is_public, category FROM media_library
+       WHERE type = 'video' AND (url ILIKE $1 OR title = $2)
+       LIMIT 1`,
+      [`%${filename.trim()}%`, title.trim()]
+    );
+    if (existing.rows.length > 0) {
+      return res.json({ success: true, video: existing.rows[0], isNew: false });
+    }
+    const inserted = await pool.query(
+      `INSERT INTO media_library (title, artist, url, type, category, is_prime, is_public)
+       VALUES ($1, '', $2, 'video', $3, false, true)
+       RETURNING id, title, artist, url, type, category, is_prime, is_public, created_at, updated_at`,
+      [title.trim(), filename.trim(), (category || 'general').trim()]
+    );
+    return res.json({ success: true, video: inserted.rows[0], isNew: true });
+  } catch (error) {
+    logger.error('media-library/sync-video error', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to sync video to media library' });
+  }
+}));
+
+// PUT /api/webapp/admin/media-library/:id/prime — Toggle is_prime for a media_library record
+app.put('/api/webapp/admin/media-library/:id/prime', adminGuard, asyncHandler(async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { is_prime } = req.body;
+    if (typeof is_prime !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'is_prime must be a boolean' });
+    }
+    const pool = getPool();
+    const result = await pool.query(
+      `UPDATE media_library SET is_prime = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, title, artist, url, type, category, is_prime, is_public, created_at, updated_at`,
+      [is_prime, id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Media library record not found' });
+    }
+    return res.json({ success: true, video: result.rows[0] });
+  } catch (error) {
+    logger.error('media-library/:id/prime error', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to update prime status' });
+  }
+}));
+
+// ==========================================
 // Role-Based Access Control (RBAC) Routes
 // ==========================================
 const { superadminGuard } = require('../../middleware/guards');
-const { auditLog } = require('../../middleware/auditLogger');
 const roleController = require('./controllers/roleController');
 const auditLogController = require('./controllers/auditLogController');
-
-// Apply middleware to all admin routes
-app.use('/api/admin/', auditLog);
+// Note: auditLog middleware is registered earlier (after /api/admin/check) to cover
+// all /api/admin/* routes from the start. No duplicate app.use needed here.
 
 // Role Management Endpoints
 app.put('/api/admin/users/role', adminGuard, asyncHandler((req, res) => roleController.assignRole(req, res)));
@@ -3353,8 +3786,8 @@ const contentFeedSyncController = require('./controllers/contentFeedSyncControll
 const usersController = require('./controllers/usersController');
 
 // ── Community Chat (REST fallback + media) ──────────────────────────────────
-app.get('/api/webapp/chat/:room/history', asyncHandler(chatController.getChatHistory));
-app.post('/api/webapp/chat/:room/send', asyncHandler(chatController.sendMessage));
+app.get('/api/webapp/chat/:room/history', requireSessionAuth, asyncHandler(chatController.getChatHistory));
+app.post('/api/webapp/chat/:room/send', requireSessionAuth, asyncHandler(chatController.sendMessage));
 // Media upload for community chat rooms (images 20 MB / videos 100 MB)
 app.post(
   '/api/webapp/chat/:room/media',
@@ -4547,8 +4980,8 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
         paymentId: `TIP-${tip.id}`,
         description: `Tip for ${performerName}`,
       });
-      if (daimoResult.success) {
-        paymentUrl = daimoResult.paymentUrl;
+      if (daimoResult.success && daimoResult.daimoPaymentId) {
+        paymentUrl = `https://pay.daimo.com/checkout?session=${daimoResult.daimoPaymentId}`;
       }
     } catch (daimoErr) {
       logger.warn(`Daimo payment creation failed for tip, falling back: ${daimoErr.message}`);
@@ -4694,7 +5127,7 @@ const DashTokenService = require('../services/dashTokenService');
 const { createDashInvoice, validateWebhookSignature, checkBtcpayHealth, isConfigured: btcpayConfigured } = require('../../config/btcpay');
 
 // GET /api/webapp/dash/btcpay-status — check if BTCPay is configured and reachable
-app.get('/api/webapp/dash/btcpay-status', asyncHandler(async (req, res) => {
+app.get('/api/webapp/dash/btcpay-status', requireSessionAuth, asyncHandler(async (req, res) => {
   const health = await checkBtcpayHealth();
   res.json({ success: true, ...health });
 }));
@@ -4803,7 +5236,7 @@ app.post('/api/wallet/buy-wallet', asyncHandler(async (req, res) => {
 }));
 
 // GET /api/token-checkout/:purchaseId — return checkout page data (ePayco widget config or Daimo session)
-app.get('/api/token-checkout/:purchaseId', asyncHandler(async (req, res) => {
+app.get('/api/token-checkout/:purchaseId', requireSessionAuth, asyncHandler(async (req, res) => {
   const { purchaseId } = req.params;
   if (!purchaseId || !/^[0-9a-f-]{36}$/i.test(purchaseId)) {
     return res.status(400).json({ success: false, error: 'Invalid purchaseId' });
@@ -4844,16 +5277,15 @@ app.post('/api/wallet/link-dpns', asyncHandler(async (req, res) => {
 }));
 
 // GET /api/webapp/payments/dash/available — check if Dash/BTCPay is configured & reachable
-app.get('/api/webapp/payments/dash/available', asyncHandler(async (req, res) => {
+app.get('/api/webapp/payments/dash/available', requireSessionAuth, asyncHandler(async (req, res) => {
   const { checkBtcpayHealth } = require('../../config/btcpay');
   const health = await checkBtcpayHealth();
   return res.json({ available: health.configured && health.reachable, ...health });
 }));
 
 // POST /api/webapp/payments/dash/create — create a BTCPay Dash invoice for a subscription plan
-app.post('/api/webapp/payments/dash/create', asyncHandler(async (req, res) => {
-  const user = req.session?.user;
-  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+app.post('/api/webapp/payments/dash/create', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session.user;
 
   const { planId, email } = req.body;
   if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
@@ -4920,8 +5352,12 @@ app.get('/api/webapp/payments/dash/status/:invoiceId', asyncHandler(async (req, 
 // POST /api/webhooks/btcpay — BTCPay Server webhook (Dash payment confirmed)
 app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) => {
     const signature = req.headers['btcpay-sig'];
-    // Use rawBody captured by express.json verify callback for HMAC
-    const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
+    // Require rawBody captured by express.json verify callback — fallback silently breaks HMAC
+    if (!req.rawBody) {
+      logger.error('BTCPay webhook rejected: rawBody missing — express.json verify callback not firing', { ip: req.ip });
+      return res.status(400).json({ success: false, error: 'Raw body unavailable' });
+    }
+    const rawBody = req.rawBody.toString('utf8');
 
     if (!validateWebhookSignature(rawBody, signature)) {
       logger.warn('BTCPay webhook rejected: invalid signature', { ip: req.ip });
@@ -4959,12 +5395,100 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       return res.json({ success: true, type: terminalStatus, rowsUpdated: affected });
     }
 
+    // Fix 1.4: InvoiceMarkedInvalid — revoke entitlements for any completed subscription order.
+    // Handles manual admin invalidations and chargeback-equivalent scenarios on BTCPay.
+    if (event.type === 'InvoiceMarkedInvalid') {
+      const { query: dbQuery } = require('../../config/postgres');
+
+      const markedResult = await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'invalid', notes = 'invoice_marked_invalid'
+         WHERE btcpay_invoice_id = $1 AND status IN ('pending', 'completed')
+         RETURNING id, user_id, plan_id, status AS old_status`,
+        [invoiceId]
+      );
+
+      if (markedResult.rows.length > 0) {
+        const { user_id: invalidUserId, plan_id: invalidPlanId } = markedResult.rows[0];
+
+        // Revoke user_entitlements granted by this plan payment
+        try {
+          await dbQuery(
+            `DELETE FROM user_entitlements WHERE user_id = $1 AND source_plan_id = $2 AND is_lifetime = false`,
+            [invalidUserId, invalidPlanId]
+          );
+          logger.info('BTCPay InvoiceMarkedInvalid: entitlements revoked', { userId: invalidUserId, planId: invalidPlanId, invoiceId });
+        } catch (revokeEntErr) {
+          logger.error('BTCPay InvoiceMarkedInvalid: entitlement revocation failed', { userId: invalidUserId, planId: invalidPlanId, error: revokeEntErr.message });
+        }
+
+        // Invalidate entitlement cache
+        try {
+          const EntitlementAccessService = require('../services/entitlementAccessService');
+          await EntitlementAccessService.invalidateCache(invalidUserId);
+        } catch (cacheErr) {
+          logger.warn('BTCPay InvoiceMarkedInvalid: cache invalidation failed', { error: cacheErr.message });
+        }
+
+        // Downgrade tier
+        try {
+          await dbQuery(
+            `UPDATE users SET tier = 'free', subscription_status = 'churned', plan_id = NULL, plan_expiry = NOW(), updated_at = NOW()
+             WHERE id = $1 OR telegram = $1`,
+            [invalidUserId]
+          );
+          logger.info('BTCPay InvoiceMarkedInvalid: user tier downgraded', { userId: invalidUserId });
+        } catch (tierErr) {
+          logger.error('BTCPay InvoiceMarkedInvalid: tier downgrade failed', { userId: invalidUserId, error: tierErr.message });
+        }
+      } else {
+        logger.info('BTCPay InvoiceMarkedInvalid: no pending/completed order found — no action taken', { invoiceId });
+      }
+
+      return res.json({ success: true, type: 'marked_invalid', rowsUpdated: markedResult.rowCount || 0 });
+    }
+
     // Only process successful invoice settlements beyond this point
     if (event.type !== 'InvoiceSettled') {
       return res.json({ success: true, ignored: true });
     }
 
+    // Idempotency: acquire a Redis lock to prevent duplicate delivery race conditions.
+    const settleLock = await cache.acquireLock(`btcpay:settled:${invoiceId}`, 120).catch(() => false);
+    if (!settleLock) {
+      logger.info('BTCPay InvoiceSettled duplicate delivery blocked', { invoiceId });
+      return res.json({ success: true, duplicate: true });
+    }
+
+    try {
+
     const { query: dbQuery } = require('../../config/postgres');
+
+    // Fix 1.1: Verify paid amount against invoice before granting access.
+    // Prevents attackers from underpaying (e.g., $0.01) and receiving full entitlements.
+    try {
+      const { getInvoice } = require('../../config/btcpay');
+      const invoiceDetails = await getInvoice(invoiceId);
+      const paidAmount = parseFloat(invoiceDetails.amount || invoiceDetails.paidAmount || '0');
+      const invoicedAmount = parseFloat(invoiceDetails.amount || '0');
+      // BTCPay's settled invoice has `amount` (original) and `paidAmount` (actual crypto paid in currency-equivalent)
+      // Use paidAmount if available, else fall back to amount (already-settled invoices may match)
+      const actualPaid = parseFloat(invoiceDetails.paidAmount ?? invoiceDetails.amount ?? '0');
+      const expectedAmount = parseFloat(invoiceDetails.amount ?? '0');
+      if (actualPaid > 0 && expectedAmount > 0 && actualPaid < expectedAmount - 0.01) {
+        logger.error('BTCPay InvoiceSettled: underpayment detected — aborting entitlement grant', {
+          invoiceId,
+          expectedAmount,
+          actualPaid,
+          shortfall: expectedAmount - actualPaid,
+        });
+        return res.status(200).json({ success: false, error: 'underpayment', invoiceId });
+      }
+    } catch (invoiceCheckErr) {
+      // Log but do NOT block — if BTCPay API is unreachable we still trust the webhook signature
+      logger.warn('BTCPay InvoiceSettled: could not fetch invoice for amount verification (proceeding)', {
+        invoiceId, error: invoiceCheckErr.message,
+      });
+    }
 
     // --- 1. Check if this is a subscription order ---
     const subResult = await dbQuery(
@@ -5012,6 +5536,22 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       );
 
       logger.info('BTCPay: subscription activated', { userId: order.user_id, planId: order.plan_id, invoiceId });
+
+      // Grant entitlements — sole source of truth for access control (users.tier is display only).
+      // This matches the post-payment flow used by ePayco and Daimo.
+      try {
+        const PaymentService = require('../services/paymentService');
+        await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'btcpay');
+        logger.info('BTCPay: entitlements granted', { userId: order.user_id, planId: order.plan_id });
+      } catch (entErr) {
+        // Non-fatal: users.tier is already set so legacy access paths still work.
+        // Entitlements will be reconciled by the daily cleanup cron.
+        logger.error('BTCPay: entitlement grant failed (non-fatal, tier already set)', {
+          userId: order.user_id,
+          planId: order.plan_id,
+          error: entErr.message,
+        });
+      }
 
       // PAY-006: Invalidate Redis user cache after raw SQL tier update.
       try {
@@ -5145,6 +5685,10 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
     }
 
     res.json({ success: true, alreadyProcessed });
+
+    } finally {
+      await cache.releaseLock(`btcpay:settled:${invoiceId}`);
+    }
   })
 );
 

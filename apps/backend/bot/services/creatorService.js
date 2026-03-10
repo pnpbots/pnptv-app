@@ -365,6 +365,23 @@ class CreatorService {
       [creatorId]
     );
 
+    // Revoke creator-subscription entitlement immediately on cancellation
+    try {
+      const { query: dbQuery } = require('../../config/postgres');
+      await dbQuery(
+        `DELETE FROM user_entitlements
+         WHERE user_id = $1 AND add_on_id = 'creator-subscription' AND creator_id = $2`,
+        [String(subscriberId), String(creatorId)]
+      );
+      try {
+        const EntitlementAccessService = require('./entitlementAccessService');
+        await EntitlementAccessService.invalidateCache(String(subscriberId));
+      } catch (_) { /* non-critical */ }
+      logger.info('Entitlement revoked on creator subscription cancel', { subscriberId, creatorId });
+    } catch (err) {
+      logger.error('Failed to revoke entitlement on cancel', { subscriberId, creatorId, error: err.message });
+    }
+
     // Notify creator that a subscriber left
     try {
       NotificationEmitter.emit({
