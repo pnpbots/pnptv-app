@@ -130,12 +130,12 @@ export function VideoCallOverlay({
           </div>
         </div>
 
-        <iframe
-          src={meetingUrl}
-          className="w-full h-full border-0"
-          allow="camera; microphone; display-capture; autoplay; clipboard-write; speaker-selection; fullscreen"
-          allowFullScreen
-          title="Video call (mini)"
+        <JitsiMeetComponent
+          meetingUrl={meetingUrl}
+          roomName={roomName}
+          onCallEnd={onClose}
+          isAdmin={isAdmin}
+          onApiReady={handleApiReady}
         />
       </div>
     );

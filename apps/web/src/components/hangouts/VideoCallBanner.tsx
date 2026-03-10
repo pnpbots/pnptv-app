@@ -25,6 +25,8 @@ interface VideoCallBannerProps {
   onDismiss?: () => void;
   /** Whether join action is in progress */
   isJoining?: boolean;
+  /** Call ID — used to scope dismiss state so new calls show the banner again */
+  callId?: string | null;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -36,13 +38,17 @@ export function VideoCallBanner({
   onJoin,
   onDismiss,
   isJoining = false,
+  callId,
 }: VideoCallBannerProps) {
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissedCallId, setDismissedCallId] = useState<string | null>(null);
 
-  if (!isActive || dismissed) return null;
+  // Reset dismissed state when a new call starts (different callId)
+  const isDismissed = !!callId && dismissedCallId === callId;
+
+  if (!isActive || isDismissed) return null;
 
   const handleDismiss = () => {
-    setDismissed(true);
+    if (callId) setDismissedCallId(callId);
     onDismiss?.();
   };
 

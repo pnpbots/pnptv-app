@@ -115,10 +115,11 @@ export function VideoCallModBot({ jitsiApi, isAdmin }: VideoCallModBotProps) {
     [jitsiApi]
   );
 
-  // Kick a participant
+  // Kick a participant (with confirmation)
   const kickParticipant = useCallback(
-    (participantId: string) => {
+    (participantId: string, displayName: string) => {
       if (!jitsiApi) return;
+      if (!window.confirm(`Kick "${displayName}" from the call?`)) return;
       try {
         jitsiApi.executeCommand("kickParticipant", participantId);
       } catch {
@@ -164,6 +165,26 @@ export function VideoCallModBot({ jitsiApi, isAdmin }: VideoCallModBotProps) {
       rotationTimer.current = null;
     }
   }, []);
+
+  // Restart rotation with new interval when it changes while active
+  useEffect(() => {
+    if (isRotating && participants.length > 0) {
+      if (rotationTimer.current) clearInterval(rotationTimer.current);
+      const rotate = () => {
+        const pList = participantsRef.current;
+        if (pList.length === 0) return;
+        const nextIdx = (stageIdxRef.current + 1) % pList.length;
+        setCurrentStageIdx(nextIdx);
+        stageIdxRef.current = nextIdx;
+        try {
+          const pid = pList[nextIdx]?.participantId;
+          if (pid) pinToStage(pid);
+        } catch { /* silent */ }
+      };
+      rotationTimer.current = setInterval(rotate, rotationInterval * 1000);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rotationInterval]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -348,7 +369,7 @@ export function VideoCallModBot({ jitsiApi, isAdmin }: VideoCallModBotProps) {
                   </button>
                   {/* Kick */}
                   <button
-                    onClick={() => kickParticipant(p.participantId)}
+                    onClick={() => kickParticipant(p.participantId, p.displayName)}
                     className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 active:scale-90 transition-all"
                     title="Kick"
                   >

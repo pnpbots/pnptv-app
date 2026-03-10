@@ -45,6 +45,8 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
   // ── Always-on: personal event bus (wallet updates, connection state) ─────────
   // Runs once on mount — connects the socket regardless of streamId so that
   // wallet:updated events are received even on non-stream pages (e.g. Live lobby).
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     const socket = connectSocket();
 
@@ -64,7 +66,8 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     };
     const onLiveError = (data: { message: string }) => {
       setSocketError(data.message);
-      setTimeout(() => setSocketError(null), 5000);
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+      errorTimerRef.current = setTimeout(() => setSocketError(null), 5000);
     };
 
     if (socket.connected) {
@@ -78,6 +81,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     socket.on("live:error", onLiveError);
 
     return () => {
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onError);

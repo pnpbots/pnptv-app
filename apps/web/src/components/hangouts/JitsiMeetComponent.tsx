@@ -51,8 +51,18 @@ function loadJitsiScript(domain: string): Promise<void> {
       resolve();
       return;
     }
-    const existing = document.querySelector(`script[src*="external_api"]`);
+    const existing = document.querySelector(`script[src*="external_api"]`) as HTMLScriptElement | null;
     if (existing) {
+      // Script previously failed — don't hang waiting for an event that already fired
+      if ((existing as any).dataset.loadFailed === "true") {
+        reject(new Error("Jitsi script previously failed to load"));
+        return;
+      }
+      // Already loaded but API not set (shouldn't happen, but handle it)
+      if ((window as any).JitsiMeetExternalAPI) {
+        resolve();
+        return;
+      }
       existing.addEventListener("load", () => resolve());
       existing.addEventListener("error", () => reject(new Error("Failed to load Jitsi API")));
       return;
@@ -61,7 +71,10 @@ function loadJitsiScript(domain: string): Promise<void> {
     script.src = `https://${domain}/external_api.js`;
     script.async = true;
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Failed to load Jitsi API"));
+    script.onerror = () => {
+      (script as any).dataset.loadFailed = "true";
+      reject(new Error("Failed to load Jitsi API"));
+    };
     document.head.appendChild(script);
   });
 }
@@ -96,6 +109,7 @@ export function JitsiMeetComponent({
 
   useEffect(() => {
     let disposed = false;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
     const init = async () => {
       const { domain, room, jwt, displayName } = parseMeetingUrl(meetingUrl);
@@ -146,7 +160,6 @@ export function JitsiMeetComponent({
               'settings',
             ],
             startWithAudioMuted: true,
-            startSilent: true,
           }),
         },
         interfaceConfigOverwrite: {
@@ -172,7 +185,10 @@ export function JitsiMeetComponent({
       onApiReadyRef.current?.(api);
 
       api.addListener("videoConferenceJoined", () => {
-        if (!disposed) setIsLoading(false);
+        if (!disposed) {
+          setIsLoading(false);
+          if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
+        }
       });
 
       api.addListener("videoConferenceLeft", () => {
@@ -194,7 +210,7 @@ export function JitsiMeetComponent({
       });
 
       // Fallback: if videoConferenceJoined never fires, remove loading after 5s
-      setTimeout(() => {
+      fallbackTimer = setTimeout(() => {
         if (!disposed) setIsLoading(false);
       }, 5000);
     };
@@ -203,6 +219,7 @@ export function JitsiMeetComponent({
 
     return () => {
       disposed = true;
+      if (fallbackTimer) clearTimeout(fallbackTimer);
       if (apiRef.current) {
         try { apiRef.current.dispose(); } catch { /* ignore */ }
         apiRef.current = null;

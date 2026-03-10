@@ -163,10 +163,23 @@ export function MediaLightbox({
     }
   };
 
-  // Download handler
+  // Download handler — validates URL origin before creating anchor
   const handleDownload = () => {
+    let safeSrc: string;
+    try {
+      const url = new URL(src, window.location.origin);
+      const trusted = ["app.pnptv.app", "cms.pnptv.app", window.location.hostname];
+      if (!trusted.some((h) => url.hostname === h)) {
+        return; // Block downloads from untrusted origins
+      }
+      safeSrc = url.href;
+    } catch {
+      // Not parseable — only allow relative paths starting with /
+      if (!src.startsWith("/")) return;
+      safeSrc = src;
+    }
     const a = document.createElement("a");
-    a.href = src;
+    a.href = safeSrc;
     a.download = src.split("/").pop() || "media";
     a.target = "_blank";
     a.rel = "noopener noreferrer";

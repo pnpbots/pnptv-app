@@ -177,6 +177,7 @@ export default function Stream() {
       await acknowledgeLiveRules();
     } catch {
       // Persist locally even if the network call fails — the user has seen the rules
+      console.warn("[LiveRules] Failed to persist acknowledgment — session may have expired");
     }
     setRulesAcknowledged(true);
   }, []);

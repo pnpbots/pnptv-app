@@ -403,8 +403,8 @@ export default function Chat() {
         await requestJoinGroup(group.id);
         loadDiscover();
       }
-    } catch {
-      // silent fail
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Failed to join group");
     }
   };
 
@@ -424,8 +424,8 @@ export default function Chat() {
       await handleJoinRequest(groupId, requestId, action);
       loadJoinRequests(groupId);
       if (action === "accept") loadGroups();
-    } catch {
-      // silent fail
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : `Failed to ${action} request`);
     }
   };
 
@@ -698,8 +698,8 @@ export default function Chat() {
     try {
       await leaveHangoutGroup(gid);
       closeChat();
-    } catch {
-      /* silent */
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Failed to leave group");
     }
   };
 
@@ -708,8 +708,8 @@ export default function Chat() {
     try {
       await deleteHangoutGroup(gid);
       closeChat();
-    } catch {
-      /* silent */
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Failed to delete group");
     }
   };
 
@@ -895,6 +895,7 @@ export default function Chat() {
             onJoin={handleStartCall}
             isJoining={callLoading}
             participantCount={callState.participantCount}
+            callId={callState.callId}
           />
         )}
 
