@@ -1,6 +1,7 @@
 const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const PDSProvisioningService = require('../../bot/services/PDSProvisioningService');
+const PlatformBanService = require('../../bot/services/platformBanService');
 const { isAdminUser } = require('../../bot/utils/helpers');
 const crypto = require('crypto');
 
@@ -149,6 +150,31 @@ const handleTelegramAuth = async (req, res) => {
     }
 
     let user = userQuery.rows[0];
+
+    // ── Platform ban check — block ALL banned identities at login ─────────────
+    if (user.tier === 'banned') {
+      logger.warn('Telegram auth: banned user attempted login', { userId: user.id });
+      return res.status(403).json({
+        error: 'account_banned',
+        message: 'Tu cuenta ha sido suspendida permanentemente de la plataforma PNPtv.',
+      });
+    }
+
+    const ban = await PlatformBanService.isBanned({
+      userId:     String(user.id),
+      telegramId: String(telegramUser.id),
+      pnptvId:    user.pnptv_id || undefined,
+      email:      user.email    || undefined,
+    });
+
+    if (ban) {
+      logger.warn('Telegram auth: platform-banned user attempted login', { userId: user.id, banId: ban.id });
+      return res.status(403).json({
+        error: 'account_banned',
+        message: 'Tu cuenta ha sido suspendida permanentemente de la plataforma PNPtv.',
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Check for subscription migration: if user has 'free' tier but should have 'active'
     // tier is the source of truth for access control; subscription_status tracks lifecycle

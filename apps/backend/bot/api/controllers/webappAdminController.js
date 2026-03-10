@@ -587,38 +587,56 @@ const listPlans = async (req, res) => {
 
 /**
  * POST /api/webapp/admin/plans
- * Create a new plan.
+ * Create a new plan. If id is omitted, it is auto-generated from name.
+ * Accepts optional addOns array to wire plan_add_ons and auto-derive tier/features/description.
  */
 const createPlan = async (req, res) => {
   const admin = req.user;
   try {
-    const { id: planId, ...rest } = req.body;
-    if (!planId) {
-      return res.status(400).json({ error: 'Plan id is required' });
+    const { id: rawId, addOns, ...planData } = req.body;
+
+    if (!planData.name && !planData.display_name) {
+      return res.status(400).json({ error: 'Plan name is required' });
     }
-    const plan = await Plan.createOrUpdate(planId, req.body);
-    logger.info('Admin created plan', { adminId: admin.id, planId });
+
+    // planId may be empty — createOrUpdate will slugify the name if so
+    const planId = rawId && String(rawId).trim() ? String(rawId).trim() : null;
+
+    const plan = await Plan.createOrUpdate(planId, planData, addOns);
+    logger.info('Admin created plan', { adminId: admin.id, planId: plan.id });
     return res.status(201).json({ success: true, plan });
   } catch (error) {
     logger.error('Error creating plan:', error);
-    return res.status(500).json({ error: error.message });
+    const status = error.status || 500;
+    return res.status(status).json({ error: error.message });
   }
 };
 
 /**
  * PUT /api/webapp/admin/plans/:id
  * Update an existing plan.
+ * Accepts optional addOns array to atomically replace plan_add_ons and
+ * re-derive tier/features/description. If addOns is omitted, existing
+ * plan_add_ons mappings are preserved.
  */
 const updatePlan = async (req, res) => {
   const admin = req.user;
   try {
     const { id: planId } = req.params;
-    const plan = await Plan.createOrUpdate(planId, { ...req.body, id: planId });
+    const { addOns, ...planData } = req.body;
+
+    // Only forward addOns when the caller explicitly sent the field
+    const resolvedAddOns = Object.prototype.hasOwnProperty.call(req.body, 'addOns')
+      ? addOns
+      : undefined;
+
+    const plan = await Plan.createOrUpdate(planId, { ...planData, id: planId }, resolvedAddOns);
     logger.info('Admin updated plan', { adminId: admin.id, planId });
     return res.json({ success: true, plan });
   } catch (error) {
     logger.error('Error updating plan:', error);
-    return res.status(500).json({ error: error.message });
+    const status = error.status || 500;
+    return res.status(status).json({ error: error.message });
   }
 };
 

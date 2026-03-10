@@ -1,56 +1,73 @@
-const ModerationModel = require('../../../models/moderationModel');
-const UserModel = require('../../../models/userModel');
-const logger = require('../../../utils/logger');
+const PlatformBanService = require('../../services/platformBanService');
+const ModerationModel    = require('../../../models/moderationModel');
+const UserModel          = require('../../../models/userModel');
+const logger             = require('../../../utils/logger');
+
+const BAN_MESSAGE =
+  '🚫 *Tu cuenta ha sido suspendida permanentemente.*\n\n' +
+  'Valoramos profundamente a nuestra comunidad y trabajamos cada día para mantenerla ' +
+  'segura, respetuosa e íntegra para todos nuestros miembros. 💛\n\n' +
+  'Lamentablemente, esta decisión es *definitiva y sin apelación*. ' +
+  'No existen segundas oportunidades para quienes comprometen la confianza de nuestra comunidad.\n\n' +
+  '_PNPtv Team_ 🏳️‍🌈';
 
 /**
  * Global ban check middleware
- * Blocks banned users from using the bot entirely
- * Checks both the banned_users table AND the users.tier='banned' column
- * @returns {Function} Middleware function
+ * Blocks banned users from using the bot entirely.
+ * Checks platform_bans (all identity vectors), users.tier='banned',
+ * AND the legacy banned_users table.
  */
 const globalBanCheck = () => async (ctx, next) => {
   try {
-    const userId = ctx.from?.id;
+    const userId     = ctx.from?.id;
+    const telegramId = String(userId || '');
 
-    // Skip if no user ID (system messages, etc.)
-    if (!userId) {
-      return next();
+    if (!userId) return next();
+
+    // ── Fast path: users.tier='banned' ───────────────────────────────────────
+    const user = await UserModel.getById(userId);
+    if (user?.tier === 'banned') {
+      await _sendBanMessage(ctx);
+      return;
     }
 
-    // Check tier-based ban first (fast, single row lookup from cache)
-    const user = await UserModel.getById(userId);
-    const tierBanned = user && user.tier === 'banned';
+    // ── Platform bans (all identity vectors) ─────────────────────────────────
+    const ban = await PlatformBanService.isBanned({
+      userId:     telegramId,
+      telegramId: telegramId,
+      pnptvId:    user?.pnptv_id    || undefined,
+      email:      user?.email       || undefined,
+      xId:        user?.x_id        || undefined,
+      blueskyDid: user?.bluesky_did || undefined,
+    });
 
-    // Also check the banned_users table (legacy/moderation bans)
-    const isBanned = tierBanned || await ModerationModel.isUserBanned(userId, 'global');
+    if (ban) {
+      logger.warn('globalBanCheck — platform ban hit', { userId, banId: ban.id });
+      await _sendBanMessage(ctx);
+      return;
+    }
 
-    if (isBanned) {
-      logger.info('Blocked banned user from using bot', { userId });
-
-      // Only respond in private chats to avoid spam in groups
-      if (ctx.chat?.type === 'private') {
-        try {
-          await ctx.reply(
-            '⛔ **Acceso Denegado**\n\n' +
-            'Tu cuenta ha sido suspendida y no puedes usar este bot.\n\n' +
-            'Si crees que esto es un error, contacta al soporte.',
-            { parse_mode: 'Markdown' }
-          );
-        } catch (replyError) {
-          logger.debug('Could not send ban message to user:', replyError.message);
-        }
-      }
-
-      // Don't call next() - stop processing for banned users
+    // ── Legacy banned_users table ─────────────────────────────────────────────
+    if (await ModerationModel.isUserBanned(userId, 'global')) {
+      logger.info('globalBanCheck — legacy ban hit', { userId });
+      await _sendBanMessage(ctx);
       return;
     }
 
     return next();
   } catch (error) {
-    logger.error('Error in global ban check middleware:', error);
-    // On error, allow through to avoid blocking legitimate users
-    return next();
+    logger.error('globalBanCheck — error', { error: error.message });
+    return next(); // fail open
   }
 };
+
+async function _sendBanMessage(ctx) {
+  if (ctx.chat?.type !== 'private') return;
+  try {
+    await ctx.reply(BAN_MESSAGE, { parse_mode: 'Markdown' });
+  } catch (e) {
+    logger.debug('globalBanCheck — could not send ban message', { error: e.message });
+  }
+}
 
 module.exports = globalBanCheck;

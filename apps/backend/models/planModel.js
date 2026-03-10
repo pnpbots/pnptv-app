@@ -2,12 +2,39 @@ const { query } = require('../config/postgres');
 const { cache } = require('../config/redis');
 const promotionalPlans = require('../config/promotionalPlans');
 const logger = require('../utils/logger');
+const EntitlementModel = require('./entitlementModel');
 
 /**
  * Plan Model - Handles subscription plan data with PostgreSQL
  */
 class Plan {
   static TABLE = 'plans';
+
+  static ADD_ON_FEATURES = {
+    'pnp-member': [
+      'Social feed, posts & reactions',
+      'DMs & messaging',
+      'Hangouts — group video rooms',
+      'PNP Live — watch streams & tip',
+      'PNP Radio — music & audio',
+      'Videorama — VOD & series',
+      'Nearby — map, places & people',
+      'Creator profiles & subscriptions',
+    ],
+    'prime': [
+      'PRIME exclusive live shows',
+      'PRIME-only Videorama VOD',
+      'PRIME-exclusive posts & content',
+      'Early access & priority queue',
+    ],
+    'creator-subscription': [
+      'Exclusive creator content',
+      'Direct creator messaging',
+    ],
+    'private-calls': [
+      '1 private video call credit',
+    ],
+  };
 
   /**
    * Get all active plans (with caching)
@@ -21,7 +48,24 @@ class Plan {
         cacheKey,
         async () => {
           const result = await query(
-            `SELECT * FROM ${this.TABLE} WHERE active = true ORDER BY price ASC`
+            `SELECT p.*,
+               COALESCE(
+                 json_agg(
+                   json_build_object(
+                     'id', pa.add_on_id,
+                     'name', ao.name,
+                     'duration_days', pa.duration_days,
+                     'is_lifetime', pa.is_lifetime
+                   ) ORDER BY pa.add_on_id
+                 ) FILTER (WHERE pa.add_on_id IS NOT NULL),
+                 '[]'::json
+               ) AS add_ons
+             FROM ${this.TABLE} p
+             LEFT JOIN plan_add_ons pa ON pa.plan_id = p.id
+             LEFT JOIN add_ons ao ON ao.id = pa.add_on_id
+             WHERE p.active = true
+             GROUP BY p.id
+             ORDER BY p.price ASC`
           );
 
           const plans = result.rows.map((row) => this.mapRowToPlan(row));
@@ -54,7 +98,23 @@ class Plan {
   static async getAdminPlans() {
     try {
       const result = await query(
-        `SELECT * FROM ${this.TABLE} ORDER BY price ASC`
+        `SELECT p.*,
+           COALESCE(
+             json_agg(
+               json_build_object(
+                 'id', pa.add_on_id,
+                 'name', ao.name,
+                 'duration_days', pa.duration_days,
+                 'is_lifetime', pa.is_lifetime
+               ) ORDER BY pa.add_on_id
+             ) FILTER (WHERE pa.add_on_id IS NOT NULL),
+             '[]'::json
+           ) AS add_ons
+         FROM ${this.TABLE} p
+         LEFT JOIN plan_add_ons pa ON pa.plan_id = p.id
+         LEFT JOIN add_ons ao ON ao.id = pa.add_on_id
+         GROUP BY p.id
+         ORDER BY p.price ASC`
       );
       const plans = result.rows.map((row) => this.mapRowToPlan(row));
       return this.mergePlans(plans, this.getPromotionalPlans());
@@ -77,7 +137,23 @@ class Plan {
         cacheKey,
         async () => {
           const result = await query(
-            `SELECT * FROM ${this.TABLE} WHERE id = $1`,
+            `SELECT p.*,
+               COALESCE(
+                 json_agg(
+                   json_build_object(
+                     'id', pa.add_on_id,
+                     'name', ao.name,
+                     'duration_days', pa.duration_days,
+                     'is_lifetime', pa.is_lifetime
+                   ) ORDER BY pa.add_on_id
+                 ) FILTER (WHERE pa.add_on_id IS NOT NULL),
+                 '[]'::json
+               ) AS add_ons
+             FROM ${this.TABLE} p
+             LEFT JOIN plan_add_ons pa ON pa.plan_id = p.id
+             LEFT JOIN add_ons ao ON ao.id = pa.add_on_id
+             WHERE p.id = $1
+             GROUP BY p.id`,
             [planId]
           );
 
@@ -108,6 +184,13 @@ class Plan {
    * @returns {Object} Plan object
    */
   static mapRowToPlan(row) {
+    let addOns = [];
+    if (Array.isArray(row.add_ons)) {
+      addOns = row.add_ons;
+    } else if (row.add_ons && typeof row.add_ons === 'string') {
+      try { addOns = JSON.parse(row.add_ons); } catch (_) { addOns = []; }
+    }
+
     return {
       id: row.id,
       sku: row.sku,
@@ -120,7 +203,9 @@ class Plan {
       // Both may be set; prefer duration_days, fall back to duration.
       duration: parseInt(row.duration_days || row.duration || 30, 10),
       duration_days: parseInt(row.duration_days || row.duration || 30, 10),
+      description: row.description || null,
       features: this.normalizeFeatures(row.features),
+      addOns,
       active: row.active,
       isLifetime: row.is_lifetime || false,
       // is_promo does not exist as a DB column; derive from the plan id convention.
@@ -193,25 +278,52 @@ class Plan {
   }
 
   /**
-   * Create or update plan
-   * @param {string} planId - Plan ID
+   * Create or update plan.
+   * @param {string|null|undefined} planId - Plan ID (auto-generated from name if falsy)
    * @param {Object} planData - Plan data
+   * @param {Array<{add_on_id: string, duration_days?: number|null, is_lifetime?: boolean}>} [addOns] - Optional add-ons to set
    * @returns {Promise<Object>} Created/updated plan
    */
-  static async createOrUpdate(planId, planData) {
+  static async createOrUpdate(planId, planData, addOns) {
     try {
-      // Auto-generate SKU if not provided
       const data = { ...planData };
-      if (!data.sku && data.duration) {
-        data.sku = this.generateSKU(planId, data.duration);
-        logger.info(`Auto-generated SKU: ${data.sku} for plan: ${planId}`);
-      }
 
+      // Auto-generate id from name if not provided
+      const resolvedPlanId = (planId && planId.trim())
+        ? planId.trim()
+        : this.slugify(data.name || data.display_name || 'plan');
+
+      const isLifetime = data.isLifetime !== undefined
+        ? data.isLifetime
+        : (data.is_lifetime || false);
       const durationDays = parseInt(data.duration || data.duration_days || 30, 10);
 
+      // If addOns provided, derive tier / features / description from them
+      if (Array.isArray(addOns) && addOns.length > 0) {
+        const derived = this.deriveFromAddOns(
+          addOns,
+          data.name || data.display_name || resolvedPlanId,
+          data.price,
+          durationDays,
+          isLifetime
+        );
+        data.tier = derived.tier;
+        data.features = derived.features;
+        data.description = derived.description;
+        logger.info('Derived plan metadata from addOns', {
+          planId: resolvedPlanId, tier: derived.tier, featureCount: derived.features.length,
+        });
+      }
+
+      // Auto-generate SKU
+      if (!data.sku) {
+        data.sku = this.generateSKU(resolvedPlanId, durationDays, isLifetime);
+        logger.info(`Auto-generated SKU: ${data.sku} for plan: ${resolvedPlanId}`);
+      }
+
       const sql = `
-        INSERT INTO ${this.TABLE} (id, sku, name, display_name, tier, price, currency, duration, duration_days, features, is_lifetime, active, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+        INSERT INTO ${this.TABLE} (id, sku, name, display_name, tier, price, currency, duration, duration_days, description, features, is_lifetime, active, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
         ON CONFLICT (id) DO UPDATE SET
           sku = EXCLUDED.sku,
           name = EXCLUDED.name,
@@ -221,6 +333,7 @@ class Plan {
           currency = EXCLUDED.currency,
           duration = EXCLUDED.duration,
           duration_days = EXCLUDED.duration_days,
+          description = EXCLUDED.description,
           features = EXCLUDED.features,
           is_lifetime = EXCLUDED.is_lifetime,
           active = EXCLUDED.active,
@@ -229,7 +342,7 @@ class Plan {
       `;
 
       const result = await query(sql, [
-        planId,
+        resolvedPlanId,
         data.sku,
         data.name,
         data.display_name || data.displayName || data.name,
@@ -238,16 +351,23 @@ class Plan {
         data.currency || 'USD',
         durationDays,       // duration — NOT NULL column
         durationDays,       // duration_days — nullable but kept in sync
+        data.description || null,
         JSON.stringify(data.features || []),
-        data.isLifetime !== undefined ? data.isLifetime : (data.is_lifetime || false),
+        isLifetime,
         data.active !== undefined ? data.active : true,
       ]);
 
+      // Persist add-on mappings if provided
+      if (Array.isArray(addOns) && addOns.length > 0) {
+        await EntitlementModel.setPlanAddOns(resolvedPlanId, addOns);
+        logger.info('Plan add-ons set', { planId: resolvedPlanId, count: addOns.length });
+      }
+
       // Invalidate cache
-      await cache.del(`plan:${planId}`);
+      await cache.del(`plan:${resolvedPlanId}`);
       await cache.del('plans:all');
 
-      logger.info('Plan created/updated', { planId, sku: data.sku });
+      logger.info('Plan created/updated', { planId: resolvedPlanId, sku: data.sku });
       return this.mapRowToPlan(result.rows[0]);
     } catch (error) {
       logger.error('Error creating/updating plan:', error);
@@ -272,22 +392,79 @@ class Plan {
   }
 
   /**
-   * Generate SKU for a plan
-   * SKU format: EASYBOTS-PNP-XXX where XXX is duration in days (3 digits)
-   * Example: EASYBOTS-PNP-007 (7 days), EASYBOTS-PNP-030 (30 days), EASYBOTS-PNP-000 (lifetime)
-   * @param {string} planId - Plan ID
-   * @param {number} duration - Duration in days
-   * @returns {string} Generated SKU
+   * Convert a human-readable plan name to a URL-safe slug.
+   * Example: "Gold Pass" → "gold-pass"
+   * @param {string} name
+   * @returns {string}
    */
-  static generateSKU(planId, duration) {
-    // For lifetime plans (very large duration), use 000
-    if (duration >= 36500 || planId.includes('lifetime')) {
-      return 'EASYBOTS-PNP-000';
+  static slugify(name) {
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  /**
+   * Generate a unique SKU for a plan.
+   * Format: PNP-<SLUG>-LTF (lifetime) or PNP-<SLUG>-<DDD> (timed)
+   * @param {string} planId
+   * @param {number} duration - duration in days
+   * @param {boolean} isLifetime
+   * @returns {string}
+   */
+  static generateSKU(planId, duration, isLifetime) {
+    const slug = planId.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+    if (isLifetime || duration >= 36500) {
+      return `PNP-${slug}-LTF`;
+    }
+    return `PNP-${slug}-${String(Math.round(duration)).padStart(3, '0')}`;
+  }
+
+  /**
+   * Derive tier, features, and description automatically from an addOns array.
+   * @param {Array<{add_on_id?: string, id?: string}>} addOns
+   * @param {string} planName
+   * @param {number|string} price
+   * @param {number} duration - duration in days
+   * @param {boolean} isLifetime
+   * @returns {{ tier: string, features: string[], description: string }}
+   */
+  static deriveFromAddOns(addOns, planName, price, duration, isLifetime) {
+    const ids = addOns.map((a) => a.add_on_id || a.id).filter(Boolean);
+
+    // Tier precedence: prime > pnp-member > creator-subscription > free
+    let tier = 'free';
+    if (ids.includes('prime')) {
+      tier = 'PRIME';
+    } else if (ids.includes('pnp-member')) {
+      tier = 'member';
+    } else if (ids.includes('creator-subscription')) {
+      tier = 'creator';
     }
 
-    // Convert duration to 3-digit format with zero padding
-    const durationStr = String(duration).padStart(3, '0');
-    return `EASYBOTS-PNP-${durationStr}`;
+    // Collect features in the order the add-ons appear
+    const features = [];
+    for (const id of ids) {
+      const addonFeatures = this.ADD_ON_FEATURES[id];
+      if (addonFeatures) {
+        features.push(...addonFeatures);
+      }
+    }
+
+    // Build human-readable description
+    const addOnLabels = {
+      'pnp-member': 'Platform Access',
+      'prime': 'PRIME Content',
+      'creator-subscription': 'Creator Content',
+      'private-calls': 'Private Call Credit',
+    };
+    const parts = ids
+      .map((id) => addOnLabels[id] || id)
+      .filter(Boolean);
+    const durationText = isLifetime ? 'Lifetime' : `${duration} days`;
+    const description = `${planName} — ${parts.join(' + ')} — ${durationText} — $${parseFloat(price).toFixed(2)} USD`;
+
+    return { tier, features, description };
   }
 
   /**
