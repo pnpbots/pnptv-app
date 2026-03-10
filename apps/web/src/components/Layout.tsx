@@ -9,6 +9,7 @@ import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
 import { getMessageThreads } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { LanguageSelector } from "@/components/LanguageSelector";
 import { LandingPage } from "@/pages/LandingPage";
 
 // ── HamburgerIcon / CloseIcon ─────────────────────────────────────────────────
@@ -225,22 +226,25 @@ export function Layout() {
           ))}
         </nav>
 
-        {/* User profile card */}
+        {/* User profile card + language */}
         <div className="p-4 border-t border-pnp-border">
-          <button
-            onClick={() => navigate("/profile")}
-            className="flex items-center gap-3 w-full px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors"
-          >
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate("/profile")}
+              className="flex items-center gap-3 flex-1 min-w-0 px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors"
             >
-              {(user?.displayName || t.nav.user)[0].toUpperCase()}
-            </div>
-            <span className="text-sm text-pnp-textSecondary truncate">
-              {user?.displayName || t.nav.user}
-            </span>
-          </button>
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+              >
+                {(user?.displayName || t.nav.user)[0].toUpperCase()}
+              </div>
+              <span className="text-sm text-pnp-textSecondary truncate">
+                {user?.displayName || t.nav.user}
+              </span>
+            </button>
+            <LanguageSelector position="sidebar" />
+          </div>
         </div>
       </aside>
 
@@ -287,6 +291,7 @@ export function Layout() {
             )}
           </button>
           <NotificationBell />
+          <LanguageSelector position="topbar" />
           <button
             onClick={() => navigate("/profile")}
             className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"

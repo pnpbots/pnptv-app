@@ -6,7 +6,7 @@ import { useTier } from "@/hooks/useTier";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useDirectus } from "@/hooks/useDirectus";
-import { useI18n, setGuestLang, type Lang } from "@/lib/i18n";
+import { useI18n } from "@/lib/i18n";
 import { PostComposer } from "@/components/PostComposer";
 import { SharePostModal } from "@/components/SharePostModal";
 import {
@@ -15,7 +15,6 @@ import {
   getFeaturedPerformers,
   togglePostLike,
   updateProfile,
-  updateLanguage,
   type SocialPostItem,
   type FeaturedPerformer,
 } from "@/lib/api";
@@ -51,7 +50,7 @@ function isValidPhotoUrl(photo: string | null | undefined): photo is string {
 export default function Home() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const { feed: t, lang: currentLangFromI18n } = useI18n();
+  const { feed: t } = useI18n();
   const [posts, setPosts] = useState<SocialPostItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [translatedPosts, setTranslatedPosts] = useState<Record<number, string>>({});
@@ -146,36 +145,6 @@ export default function Home() {
   const { tier, isPrime, isMember } = useTier();
   const { showTutorial, dismissTutorial } = useTutorial("home");
 
-  // Language selector
-  const [showLangMenu, setShowLangMenu] = useState(false);
-  const currentLang = currentLangFromI18n;
-
-  const LANG_OPTIONS: { code: Lang; flag: string; label: string }[] = [
-    { code: "en", flag: "\uD83C\uDDFA\uD83C\uDDF8", label: "English" },
-    { code: "es", flag: "\uD83C\uDDEA\uD83C\uDDF8", label: "Espa\u00f1ol" },
-    { code: "pt", flag: "\uD83C\uDDE7\uD83C\uDDF7", label: "Portugu\u00eas" },
-    { code: "fr", flag: "\uD83C\uDDEB\uD83C\uDDF7", label: "Fran\u00e7ais" },
-    { code: "de", flag: "\uD83C\uDDE9\uD83C\uDDEA", label: "Deutsch" },
-    { code: "it", flag: "\uD83C\uDDEE\uD83C\uDDF9", label: "Italiano" },
-    { code: "nl", flag: "\uD83C\uDDF3\uD83C\uDDF1", label: "Nederlands" },
-    { code: "ru", flag: "\uD83C\uDDF7\uD83C\uDDFA", label: "\u0420\u0443\u0441\u0441\u043A\u0438\u0439" },
-    { code: "tr", flag: "\uD83C\uDDF9\uD83C\uDDF7", label: "T\u00fcrk\u00e7e" },
-    { code: "th", flag: "\uD83C\uDDF9\uD83C\uDDED", label: "\u0E44\u0E17\u0E22" },
-    { code: "zh", flag: "\uD83C\uDDE8\uD83C\uDDF3", label: "\u4E2D\u6587" },
-    { code: "ja", flag: "\uD83C\uDDEF\uD83C\uDDF5", label: "\u65E5\u672C\u8A9E" },
-    { code: "vi", flag: "\uD83C\uDDFB\uD83C\uDDF3", label: "Ti\u1EBFng Vi\u1EC7t" },
-    { code: "id", flag: "\uD83C\uDDEE\uD83C\uDDE9", label: "Indonesia" },
-    { code: "ar", flag: "\uD83C\uDDF8\uD83C\uDDE6", label: "\u0627\u0644\u0639\u0631\u0628\u064A\u0629" },
-  ];
-
-  const handleLangSelect = useCallback(async (code: Lang) => {
-    setShowLangMenu(false);
-    setGuestLang(code);
-    if (isAuthenticated) {
-      try { await updateLanguage(code as "en" | "es"); } catch { /* silent */ }
-    }
-    window.location.reload();
-  }, [isAuthenticated]);
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
@@ -198,45 +167,6 @@ export default function Home() {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Language selector */}
-            <div className="relative">
-              <button
-                onClick={() => setShowLangMenu((v) => !v)}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
-                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
-                aria-label="Change language"
-              >
-                <svg className="w-4 h-4" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5a17.92 17.92 0 01-8.716-2.247m0 0A9.015 9.015 0 003 12c0-1.605.42-3.113 1.157-4.418" />
-                </svg>
-              </button>
-              {showLangMenu && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowLangMenu(false)} />
-                  <div
-                    className="absolute right-0 top-10 z-50 rounded-xl py-1.5 max-h-64 overflow-y-auto scrollbar-hide"
-                    style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.12)", minWidth: "160px", boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}
-                  >
-                    {LANG_OPTIONS.map((l) => (
-                      <button
-                        key={l.code}
-                        onClick={() => handleLangSelect(l.code)}
-                        className="w-full px-3 py-2 flex items-center gap-2.5 text-left text-sm transition-colors hover:bg-white/5"
-                        style={{ color: l.code === currentLang ? "#D4007A" : "#ccc" }}
-                      >
-                        <span className="text-base">{l.flag}</span>
-                        <span className="truncate">{l.label}</span>
-                        {l.code === currentLang && (
-                          <svg className="w-3.5 h-3.5 ml-auto flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                          </svg>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
             <span
               className="text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider"
               style={

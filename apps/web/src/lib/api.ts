@@ -724,7 +724,7 @@ export function updatePrivacy(settings: {
   return request("/api/webapp/privacy", { method: "PATCH", body: settings });
 }
 
-export function updateLanguage(lang: "en" | "es"): Promise<{ success: boolean }> {
+export function updateLanguage(lang: string): Promise<{ success: boolean }> {
   return updateProfile({ language: lang });
 }
 
