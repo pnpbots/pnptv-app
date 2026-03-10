@@ -757,6 +757,52 @@ export default function StreamerDashboard({
   const frameTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // ── Processed stream refs (scene → filters → audio → final) ─────────────
+  const sceneStreamRef = useRef<MediaStream | null>(null);
+  const filteredStreamRef = useRef<MediaStream | null>(null);
+  const mixedAudioNodeRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+
+  /**
+   * Build the final MediaStream to send to the recorder.
+   * Priority chain: filtered video > scene video > raw camera video
+   * Audio: mixed audio > raw mic audio
+   */
+  const getFinalStream = useCallback((): MediaStream | null => {
+    const videoSource = filteredStreamRef.current || sceneStreamRef.current || streamRef.current;
+    const audioSource = mixedAudioNodeRef.current?.stream || streamRef.current;
+
+    if (!videoSource) return streamRef.current;
+
+    const finalStream = new MediaStream();
+
+    // Add video tracks from the best available source
+    videoSource.getVideoTracks().forEach((t) => finalStream.addTrack(t));
+
+    // Add audio tracks — prefer mixed audio, fall back to raw mic
+    if (audioSource) {
+      audioSource.getAudioTracks().forEach((t) => finalStream.addTrack(t));
+    }
+
+    return finalStream;
+  }, []);
+
+  // ── Callbacks for sub-component outputs ─────────────────────────────────
+  const handleSceneStream = useCallback((stream: MediaStream) => {
+    sceneStreamRef.current = stream;
+  }, []);
+
+  const handleFilteredOutput = useCallback((stream: MediaStream) => {
+    filteredStreamRef.current = stream;
+    // Update preview with filtered output
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
+  }, []);
+
+  const handleMixedAudioOutput = useCallback((destination: MediaStreamAudioDestinationNode) => {
+    mixedAudioNodeRef.current = destination;
+  }, []);
+
   // ── Orientation detection ─────────────────────────────────────────────────
   useEffect(() => {
     const mq = window.matchMedia("(orientation: landscape)");
@@ -941,6 +987,9 @@ export default function StreamerDashboard({
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
       }
+      sceneStreamRef.current = null;
+      filteredStreamRef.current = null;
+      mixedAudioNodeRef.current = null;
     };
   }, []);
 
@@ -971,10 +1020,13 @@ export default function StreamerDashboard({
       fps: state.fps,
     });
 
+    // Use processed stream (scene→filters→audio) when available, else raw camera
+    const finalStream = getFinalStream() || streamRef.current;
+
     // Main stream recorder (sends data over socket)
     let recorder: MediaRecorder;
     try {
-      recorder = new MediaRecorder(streamRef.current, {
+      recorder = new MediaRecorder(finalStream, {
         mimeType,
         videoBitsPerSecond: state.selectedPreset.videoBitrate,
         audioBitsPerSecond: state.selectedPreset.audioBitrate,
@@ -1003,14 +1055,15 @@ export default function StreamerDashboard({
     recorder.start(250); // 250ms chunks for low latency
     recorderRef.current = recorder;
 
-    // Local recording (optional)
-    if (localRecordEnabled && streamRef.current) {
+    // Local recording (optional) — also uses processed stream
+    const recordStream = finalStream;
+    if (localRecordEnabled && recordStream) {
       dispatch({ type: "SET_RECORDING", payload: true });
       localChunksRef.current = [];
       setRecordingBlob(null);
 
       try {
-        const localRecorder = new MediaRecorder(streamRef.current, { mimeType });
+        const localRecorder = new MediaRecorder(recordStream, { mimeType });
         localRecorder.ondataavailable = (e: BlobEvent) => {
           if (e.data && e.data.size > 0) {
             localChunksRef.current.push(e.data);
@@ -1027,7 +1080,7 @@ export default function StreamerDashboard({
         dispatch({ type: "SET_RECORDING", payload: false });
       }
     }
-  }, [channel, socket, state.selectedPreset, state.stats.droppedFrames, localRecordEnabled]);
+  }, [channel, socket, state.selectedPreset, state.stats.droppedFrames, localRecordEnabled, getFinalStream]);
 
   // ── Stop Stream ───────────────────────────────────────────────────────────
   const handleStop = useCallback(() => {
@@ -1938,6 +1991,7 @@ export default function StreamerDashboard({
               <TabPanel label="Scene Manager">
                 <SceneManager
                   videoDevices={availableCameras}
+                  onCanvasStream={handleSceneStream}
                   micStream={streamRef.current}
                   isLive={state.isLive}
                   compact
@@ -1956,6 +2010,7 @@ export default function StreamerDashboard({
               <TabPanel label="Audio Mixer">
                 <AudioMixer
                   micStream={streamRef.current}
+                  onMixedOutput={handleMixedAudioOutput}
                   isLive={state.isLive}
                 />
               </TabPanel>
@@ -1971,7 +2026,8 @@ export default function StreamerDashboard({
             {state.activeTab === "filters" && (
               <TabPanel label="Video Filters">
                 <VideoFilters
-                  inputStream={streamRef.current}
+                  inputStream={sceneStreamRef.current || streamRef.current}
+                  onFilteredOutput={handleFilteredOutput}
                   isLive={state.isLive}
                   width={state.selectedPreset.width}
                   height={state.selectedPreset.height}

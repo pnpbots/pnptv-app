@@ -3373,6 +3373,7 @@ export function getStreamProfile(): Promise<{
     turnOns: string;
     streamGoal: string;
     messages: string[];
+    isActive?: boolean;
   } | null;
 }> {
   return request("/api/webapp/live/stream-profile");
