@@ -149,12 +149,21 @@ const NotificationEmitter = {
       }
 
       // ── DB insert (combined INSERT + actor lookup in single CTE) ──
+      // The notifications table has two partial unique indexes:
+      //   uq_notif_dedup_with_actor  — WHERE actor_id IS NOT NULL
+      //   uq_notif_dedup_system      — WHERE actor_id IS NULL
+      // ON CONFLICT must reference the correct one based on whether actor_id is set.
+      const hasActor = actorId != null;
+      const conflictClause = hasActor
+        ? 'ON CONFLICT ON CONSTRAINT uq_notif_dedup_with_actor'
+        : 'ON CONFLICT ON CONSTRAINT uq_notif_dedup_system';
+
       const { rows: resultRows } = await query(
         `WITH upserted AS (
            INSERT INTO notifications
              (type, category, priority, actor_id, target_user_id, entity_type, entity_id, message, metadata)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-           ON CONFLICT (type, actor_id, target_user_id, entity_type, entity_id)
+           ${conflictClause}
            DO UPDATE SET
              is_read    = FALSE,
              created_at = NOW(),
