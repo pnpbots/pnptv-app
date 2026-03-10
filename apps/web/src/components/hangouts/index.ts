@@ -9,5 +9,5 @@ export { VideoCallButton } from "./VideoCallButton";
 export { VideoCallBanner } from "./VideoCallBanner";
 export { JitsiMeetComponent } from "./JitsiMeetComponent";
 export { VideoCallOverlay } from "./VideoCallOverlay";
-export { VideoCallSidePanel } from "./VideoCallSidePanel";
+export { VideoCallSidePanel, MobileBottomBar } from "./VideoCallSidePanel";
 export { VideoCallModBot } from "./VideoCallModBot";

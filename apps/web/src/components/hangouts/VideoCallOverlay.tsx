@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { JitsiMeetComponent } from "./JitsiMeetComponent";
-import { VideoCallSidePanel } from "./VideoCallSidePanel";
+import { VideoCallSidePanel, MobileBottomBar } from "./VideoCallSidePanel";
 import { VideoCallModBot } from "./VideoCallModBot";
 import { PermissionGate } from "@/components/PermissionGate";
 
@@ -209,6 +209,17 @@ export function VideoCallOverlay({
             <VideoCallModBot jitsiApi={jitsiApi} isAdmin={isAdmin} />
           </div>
         )}
+
+        {/* Mobile bottom bar */}
+        {hasSidePanel && (
+          <div className="sm:hidden">
+            <MobileBottomBar
+              groupId={groupId!}
+              userId={userId!}
+              isAdmin={isAdmin}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -311,6 +322,17 @@ export function VideoCallOverlay({
           </div>
         )}
       </div>
+
+      {/* Mobile bottom bar */}
+      {hasSidePanel && (
+        <div className="lg:hidden">
+          <MobileBottomBar
+            groupId={groupId!}
+            userId={userId!}
+            isAdmin={isAdmin}
+          />
+        </div>
+      )}
     </div>
   );
 }

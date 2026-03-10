@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { PermissionGate } from "@/components/PermissionGate";
-import { JitsiMeetComponent, VideoCallSidePanel, VideoCallModBot } from "@/components/hangouts";
+import { JitsiMeetComponent, VideoCallSidePanel, VideoCallModBot, MobileBottomBar } from "@/components/hangouts";
 import {
   joinCommunityRoom,
   getCommunityRoomOccupancy,
@@ -184,6 +184,17 @@ export default function MainStage() {
         {isAdmin && (
           <div className="hidden sm:flex flex-shrink-0 p-2">
             <VideoCallModBot jitsiApi={jitsiApi} isAdmin={isAdmin} />
+          </div>
+        )}
+
+        {/* Mobile bottom bar */}
+        {userId && (
+          <div className="sm:hidden">
+            <MobileBottomBar
+              groupId={1}
+              userId={userId}
+              isAdmin={isAdmin}
+            />
           </div>
         )}
       </div>
