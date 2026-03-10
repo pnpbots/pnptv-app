@@ -88,7 +88,7 @@ function buildNotificationUrl(type, entityType, entityId) {
       return entityId ? `/dm/${entityId}` : '/dm';
     case 'hangout_call':
     case 'hangout_creator_joined':
-      return '/haus';
+      return '/main-stage';
     case 'wof_winner':
       return '/social';
     case 'payment':

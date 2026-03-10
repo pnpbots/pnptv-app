@@ -1015,7 +1015,7 @@ export default function Profile() {
                   Become a Model
                 </button>
                 <button
-                  onClick={() => navigate("/haus")}
+                  onClick={() => navigate("/main-stage")}
                   className="flex-1 py-1.5 rounded-lg text-xs text-white/50 hover:text-white/80 transition-colors"
                   style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
                 >

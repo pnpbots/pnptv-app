@@ -49,7 +49,7 @@ export function Layout() {
     { to: "/live", label: t.nav.live },
     { to: "/nearby", label: t.nav.nearby },
     { to: "/dm", label: t.nav.messages },
-    { to: "/haus", label: t.nav.theHaus },
+    { to: "/main-stage", label: t.nav.mainStage },
     { to: "/become-a-model", label: t.nav.becomeModel },
   ];
 

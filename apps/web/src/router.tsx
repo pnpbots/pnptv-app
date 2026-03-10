@@ -33,7 +33,7 @@ const AboutPage = lazy(() => import("@/pages/AboutPage"));
 const CareersPage = lazy(() => import("@/pages/CareersPage"));
 const CommunityResourcesPage = lazy(() => import("@/pages/CommunityResourcesPage"));
 const ShopPage = lazy(() => import("@/pages/ShopPage"));
-const Haus = lazy(() => import("@/pages/Haus"));
+const MainStage = lazy(() => import("@/pages/MainStage"));
 const PostDetail = lazy(() => import("@/pages/PostDetail"));
 const Settings = lazy(() => import("@/pages/Settings"));
 
@@ -126,11 +126,11 @@ export const router = createBrowserRouter([
         ),
       },
       {
-        path: "haus",
+        path: "main-stage",
         element: (
           <ModuleLoader>
             <VerificationGate>
-              <Haus />
+              <MainStage />
             </VerificationGate>
           </ModuleLoader>
         ),

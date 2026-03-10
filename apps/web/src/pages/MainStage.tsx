@@ -5,14 +5,14 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { PermissionGate } from "@/components/PermissionGate";
-import { JitsiMeetComponent } from "@/components/hangouts/JitsiMeetComponent";
+import { JitsiMeetComponent, VideoCallSidePanel, VideoCallModBot } from "@/components/hangouts";
 import {
   joinCommunityRoom,
   getCommunityRoomOccupancy,
   type CommunityRoomInfo,
 } from "@/lib/api";
 
-export default function Haus() {
+export default function MainStage() {
   const { user, isAuthenticated } = useAuth();
   const { isFree, isAdmin } = useTier();
   const navigate = useNavigate();
@@ -27,6 +27,8 @@ export default function Haus() {
   const [error, setError] = useState("");
   const [occupancyError, setOccupancyError] = useState(false);
   const [showPermGate, setShowPermGate] = useState(false);
+  const [jitsiApi, setJitsiApi] = useState<any>(null);
+  const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
 
   useEffect(() => {
     getCommunityRoomOccupancy()
@@ -73,7 +75,7 @@ export default function Haus() {
     setJoined(false);
     setIframeSrc("");
     setRoomInfo(null);
-    // Refresh occupancy count after leaving
+    setJitsiApi(null);
     getCommunityRoomOccupancy()
       .then((res) => {
         setOccupancy(res.occupancy?.activeUsers ?? 0);
@@ -81,6 +83,12 @@ export default function Haus() {
       })
       .catch(() => {});
   };
+
+  const handleApiReady = useCallback((api: any) => {
+    setJitsiApi(api);
+  }, []);
+
+  // ─── Free tier gate ────────────────────────────────────────────────────
 
   if (isAuthenticated && isFree) {
     return (
@@ -113,43 +121,76 @@ export default function Haus() {
     );
   }
 
+  // ─── Joined: fullscreen with side panel + mod bot ──────────────────────
+
   if (joined && iframeSrc) {
+    const userId = user?.id ? String(user.id) : undefined;
+
     return (
-      <div className="fixed inset-0 z-50 bg-black flex flex-col">
+      <div className="fixed inset-0 z-50 bg-black flex">
         <Helmet>
           <title>Main Stage | PNPtv</title>
         </Helmet>
-        <div className="flex items-center justify-between px-4 py-2 bg-pnp-surface border-b border-pnp-border">
-          <div className="flex items-center gap-3">
-            <svg className="w-5 h-5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-            <div>
-              <h2 className="text-pnp-textPrimary font-bold text-base leading-tight">
-                Main Stage
-              </h2>
-              {roomInfo && (
-                <p className="text-pnp-textSecondary text-xs">
-                  {roomInfo.room.description}
-                </p>
-              )}
-            </div>
+
+        {/* Side panel (left) — desktop only */}
+        {userId && (
+          <div className="hidden sm:flex flex-shrink-0 p-2">
+            <VideoCallSidePanel
+              groupId={1}
+              userId={userId}
+              collapsed={sidePanelCollapsed}
+              onToggleCollapse={() => setSidePanelCollapsed((p) => !p)}
+            />
           </div>
-          <Button variant="secondary" size="sm" onClick={handleLeave}>
-            Leave Room
-          </Button>
+        )}
+
+        {/* Center: header + Jitsi */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Header bar */}
+          <div className="flex items-center justify-between px-4 py-2 bg-pnp-surface border-b border-pnp-border flex-shrink-0">
+            <div className="flex items-center gap-3">
+              <svg className="w-5 h-5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              <div>
+                <h2 className="text-pnp-textPrimary font-bold text-base leading-tight">
+                  Main Stage
+                </h2>
+                {roomInfo && (
+                  <p className="text-pnp-textSecondary text-xs">
+                    {roomInfo.room.description}
+                  </p>
+                )}
+              </div>
+            </div>
+            <Button variant="secondary" size="sm" onClick={handleLeave}>
+              Leave Room
+            </Button>
+          </div>
+
+          {/* Jitsi embed */}
+          <div className="flex-1 w-full">
+            <JitsiMeetComponent
+              meetingUrl={iframeSrc}
+              roomName={roomInfo?.roomName}
+              onCallEnd={handleLeave}
+              isAdmin={isAdmin}
+              onApiReady={handleApiReady}
+            />
+          </div>
         </div>
-        <div className="flex-1 w-full">
-          <JitsiMeetComponent
-            meetingUrl={iframeSrc}
-            roomName={roomInfo?.roomName}
-            onCallEnd={handleLeave}
-            isAdmin={isAdmin}
-          />
-        </div>
+
+        {/* Mod Bot (right) — admin only, desktop */}
+        {isAdmin && (
+          <div className="hidden sm:flex flex-shrink-0 p-2">
+            <VideoCallModBot jitsiApi={jitsiApi} isAdmin={isAdmin} />
+          </div>
+        )}
       </div>
     );
   }
+
+  // ─── Pre-join lobby ────────────────────────────────────────────────────
 
   return (
     <div className="p-4 pb-24 max-w-2xl mx-auto space-y-6">

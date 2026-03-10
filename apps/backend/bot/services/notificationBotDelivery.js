@@ -59,7 +59,7 @@ function buildUrl(type, entityType, entityId) {
       return entityId ? `${base}/dm/${entityId}` : `${base}/dm`;
     case 'hangout_call':
     case 'hangout_creator_joined':
-      return `${base}/haus`;
+      return `${base}/main-stage`;
     case 'wof_winner':
       return `${base}/social`;
     case 'payment':

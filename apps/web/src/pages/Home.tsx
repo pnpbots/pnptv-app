@@ -353,7 +353,7 @@ export default function Home() {
       {/* Main Stage — 24/7 community video room */}
       <div
         className="glass-card-sm p-4 mb-5 cursor-pointer hover:border-white/15 transition-colors"
-        onClick={() => navigate("/haus")}
+        onClick={() => navigate("/main-stage")}
         style={{ borderLeft: "3px solid rgba(94, 209, 196, 0.5)" }}
       >
         <div className="flex items-center gap-3">

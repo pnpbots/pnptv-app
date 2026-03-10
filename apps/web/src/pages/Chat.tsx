@@ -849,7 +849,7 @@ export default function Chat() {
           {/* Video call: Main Stage link for main group, regular call button for others */}
           {activeGroup.isMain ? (
             <button
-              onClick={() => navigate("/haus")}
+              onClick={() => navigate("/main-stage")}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
               style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
             >
