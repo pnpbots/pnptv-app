@@ -901,6 +901,9 @@ export default function Chat() {
             groupName={activeGroup.name}
             onClose={handleEndCall}
             initialMode="embedded"
+            isAdmin={isAdmin}
+            groupId={activeGroup.id}
+            userId={user?.id ? String(user.id) : undefined}
           />
         )}
 

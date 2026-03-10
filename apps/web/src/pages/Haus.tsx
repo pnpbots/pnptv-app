@@ -14,7 +14,7 @@ import {
 
 export default function Haus() {
   const { user, isAuthenticated } = useAuth();
-  const { isFree } = useTier();
+  const { isFree, isAdmin } = useTier();
   const navigate = useNavigate();
   const [occupancy, setOccupancy] = useState<number>(0);
   const [occupancyUsers, setOccupancyUsers] = useState<
@@ -144,6 +144,7 @@ export default function Haus() {
             meetingUrl={iframeSrc}
             roomName={roomInfo?.roomName}
             onCallEnd={handleLeave}
+            isAdmin={isAdmin}
           />
         </div>
       </div>

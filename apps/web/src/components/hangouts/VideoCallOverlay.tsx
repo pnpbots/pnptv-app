@@ -1,5 +1,7 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { JitsiMeetComponent } from "./JitsiMeetComponent";
+import { VideoCallSidePanel } from "./VideoCallSidePanel";
+import { VideoCallModBot } from "./VideoCallModBot";
 import { PermissionGate } from "@/components/PermissionGate";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -17,6 +19,12 @@ interface VideoCallOverlayProps {
   onClose: () => void;
   /** Initial view mode */
   initialMode?: ViewMode;
+  /** Admin/superadmin gets full toolbar */
+  isAdmin?: boolean;
+  /** Group ID for side panel chat */
+  groupId?: number;
+  /** User ID for side panel chat */
+  userId?: string;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -27,12 +35,15 @@ export function VideoCallOverlay({
   groupName,
   onClose,
   initialMode = "embedded",
+  isAdmin = false,
+  groupId,
+  userId,
 }: VideoCallOverlayProps) {
   const [viewMode, setViewMode] = useState<ViewMode>(initialMode);
   const [participantCount, setParticipantCount] = useState(0);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isCameraOff, setIsCameraOff] = useState(false);
   const [permsGranted, setPermsGranted] = useState(false);
+  const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
+  const [jitsiApi, setJitsiApi] = useState<any>(null);
 
   // Prevent body scroll in fullscreen mode
   useEffect(() => {
@@ -66,9 +77,11 @@ export function VideoCallOverlay({
     setParticipantCount(count);
   }, []);
 
-  // Note: mute/camera controls are handled natively inside the Jitsi iframe.
-  // These local states are visual indicators; actual toggling happens in Jitsi.
-  // In a future iteration, we can use Jitsi External API for fine-grained control.
+  const handleApiReady = useCallback((api: any) => {
+    setJitsiApi(api);
+  }, []);
+
+  const hasSidePanel = !!(groupId && userId);
 
   // ─── PiP (Picture-in-Picture) mode ────────────────────────────────────
 
@@ -123,55 +136,79 @@ export function VideoCallOverlay({
   if (viewMode === "fullscreen") {
     return (
       <div
-        className="fixed inset-0 z-50 bg-pnp-background flex flex-col"
+        className="fixed inset-0 z-50 bg-pnp-background flex"
         role="dialog"
         aria-modal="true"
         aria-label="Video call fullscreen"
       >
-        <JitsiMeetComponent
-          meetingUrl={meetingUrl}
-          roomName={roomName}
-          onCallEnd={onClose}
-          onParticipantJoined={handleParticipantJoined}
-          onParticipantLeft={handleParticipantLeft}
-          fullScreen
-        />
+        {/* Side panel (left) */}
+        {hasSidePanel && (
+          <div className="hidden sm:flex flex-shrink-0 p-2">
+            <VideoCallSidePanel
+              groupId={groupId!}
+              userId={userId!}
+              collapsed={sidePanelCollapsed}
+              onToggleCollapse={() => setSidePanelCollapsed((p) => !p)}
+            />
+          </div>
+        )}
 
-        {/* Bottom control bar */}
-        <div className="absolute bottom-0 inset-x-0 z-20 flex items-center justify-center gap-4 p-4 bg-gradient-to-t from-black/80 to-transparent">
-          {/* Minimize to PiP */}
-          <button
-            onClick={() => setViewMode("pip")}
-            className="w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
-            aria-label="Minimize to picture-in-picture"
-          >
-            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
-            </svg>
-          </button>
+        {/* Video area */}
+        <div className="flex-1 flex flex-col min-w-0 relative">
+          <JitsiMeetComponent
+            meetingUrl={meetingUrl}
+            roomName={roomName}
+            onCallEnd={onClose}
+            onParticipantJoined={handleParticipantJoined}
+            onParticipantLeft={handleParticipantLeft}
+            isAdmin={isAdmin}
+            onApiReady={handleApiReady}
+            fullScreen
+          />
 
-          {/* Exit fullscreen */}
-          <button
-            onClick={() => setViewMode("embedded")}
-            className="w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
-            aria-label="Exit fullscreen"
-          >
-            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
-            </svg>
-          </button>
+          {/* Bottom control bar */}
+          <div className="absolute bottom-0 inset-x-0 z-20 flex items-center justify-center gap-4 p-4 bg-gradient-to-t from-black/80 to-transparent">
+            {/* Minimize to PiP */}
+            <button
+              onClick={() => setViewMode("pip")}
+              className="w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              aria-label="Minimize to picture-in-picture"
+            >
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+              </svg>
+            </button>
 
-          {/* End call */}
-          <button
-            onClick={onClose}
-            className="w-14 h-14 flex items-center justify-center rounded-full bg-pnp-error hover:bg-pnp-error/80 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-error"
-            aria-label="End video call"
-          >
-            <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
-            </svg>
-          </button>
+            {/* Exit fullscreen */}
+            <button
+              onClick={() => setViewMode("embedded")}
+              className="w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              aria-label="Exit fullscreen"
+            >
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+              </svg>
+            </button>
+
+            {/* End call */}
+            <button
+              onClick={onClose}
+              className="w-14 h-14 flex items-center justify-center rounded-full bg-pnp-error hover:bg-pnp-error/80 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-error"
+              aria-label="End video call"
+            >
+              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
+              </svg>
+            </button>
+          </div>
         </div>
+
+        {/* Mod Bot (right, admin only) */}
+        {isAdmin && (
+          <div className="hidden sm:flex flex-shrink-0 p-2">
+            <VideoCallModBot jitsiApi={jitsiApi} isAdmin={isAdmin} />
+          </div>
+        )}
       </div>
     );
   }
@@ -240,14 +277,40 @@ export function VideoCallOverlay({
         </div>
       </div>
 
-      {/* Jitsi embed */}
-      <JitsiMeetComponent
-        meetingUrl={meetingUrl}
-        roomName={roomName}
-        onCallEnd={onClose}
-        onParticipantJoined={handleParticipantJoined}
-        onParticipantLeft={handleParticipantLeft}
-      />
+      {/* Embedded layout with side panel */}
+      <div className="flex">
+        {/* Side panel (desktop only in embedded mode) */}
+        {hasSidePanel && (
+          <div className="hidden lg:flex flex-shrink-0 border-r border-white/5">
+            <VideoCallSidePanel
+              groupId={groupId!}
+              userId={userId!}
+              collapsed={sidePanelCollapsed}
+              onToggleCollapse={() => setSidePanelCollapsed((p) => !p)}
+            />
+          </div>
+        )}
+
+        {/* Jitsi embed */}
+        <div className="flex-1 min-w-0">
+          <JitsiMeetComponent
+            meetingUrl={meetingUrl}
+            roomName={roomName}
+            onCallEnd={onClose}
+            onParticipantJoined={handleParticipantJoined}
+            onParticipantLeft={handleParticipantLeft}
+            isAdmin={isAdmin}
+            onApiReady={handleApiReady}
+          />
+        </div>
+
+        {/* Mod Bot (desktop, admin only) */}
+        {isAdmin && (
+          <div className="hidden lg:flex flex-shrink-0 p-2 border-l border-white/5">
+            <VideoCallModBot jitsiApi={jitsiApi} isAdmin={isAdmin} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

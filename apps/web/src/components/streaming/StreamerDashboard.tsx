@@ -8,9 +8,10 @@ import React, {
   Suspense,
 } from "react";
 import { connectSocket } from "@/lib/socket";
-import { getMyChannel, getStreamerSettings, updateStreamerSettings } from "@/lib/api";
+import { getMyChannel, getStreamerSettings, updateStreamerSettings, getJaasLiveToken } from "@/lib/api";
 import type { StreamerSettings } from "@/lib/api";
 import type { Socket } from "socket.io-client";
+import { JitsiMeetComponent } from "@/components/hangouts/JitsiMeetComponent";
 
 // ─── Inline SVG icons (avoids lucide-react dependency) ────────────────────────
 
@@ -717,6 +718,11 @@ export default function StreamerDashboard({
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
   const [cameraIndex, setCameraIndex] = useState(0);
 
+  // ── JaaS live state ───────────────────────────────────────────────────────
+  const [jaasUrl, setJaasUrl] = useState<string | null>(null);
+  const [jaasLoading, setJaasLoading] = useState(false);
+  const [jaasError, setJaasError] = useState<string | null>(null);
+
   // ── Refs ──────────────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -1123,6 +1129,29 @@ export default function StreamerDashboard({
     }
   }, [state.isLive, state.isConnecting, handleGoLive]);
 
+  // ── JaaS Go Live ──────────────────────────────────────────────────────────
+  const handleStartJaasLive = useCallback(async () => {
+    setJaasLoading(true);
+    setJaasError(null);
+    try {
+      const result = await getJaasLiveToken();
+      if (result.success && result.meetingUrl) {
+        setJaasUrl(result.meetingUrl);
+      } else {
+        setJaasError((result as any).error ?? "Failed to start live session");
+      }
+    } catch (err) {
+      setJaasError(err instanceof Error ? err.message : "Failed to connect to JaaS");
+    } finally {
+      setJaasLoading(false);
+    }
+  }, []);
+
+  const handleEndJaasLive = useCallback(() => {
+    setJaasUrl(null);
+    setJaasError(null);
+  }, []);
+
   // ── Settings tab content ──────────────────────────────────────────────────
   const SettingsTab = () => (
     <div className="space-y-4 p-4">
@@ -1347,7 +1376,15 @@ export default function StreamerDashboard({
           <h1 className="text-sm font-bold text-pnp-textPrimary tracking-wide">
             Stream Dashboard
           </h1>
-          {state.isLive && (
+          {jaasUrl ? (
+            <span
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-white"
+              style={{ background: "rgba(239,68,68,0.9)" }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" aria-hidden="true" />
+              LIVE via JaaS
+            </span>
+          ) : state.isLive ? (
             <span
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-white"
               style={{ background: "rgba(239,68,68,0.9)" }}
@@ -1355,7 +1392,7 @@ export default function StreamerDashboard({
               <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" aria-hidden="true" />
               LIVE
             </span>
-          )}
+          ) : null}
         </div>
 
         {/* Health dot + Go Live button */}
@@ -1418,88 +1455,143 @@ export default function StreamerDashboard({
             className="relative w-full bg-black overflow-hidden"
             style={{ aspectRatio: isDesktopLayout ? "auto" : "16/9", flex: isDesktopLayout ? "1" : undefined }}
           >
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-              style={{ transform: state.isCameraOff ? "none" : undefined }}
-              aria-label="Camera preview"
-            />
+            {jaasUrl ? (
+              /* ── JaaS live embed (replaces camera preview when live via JaaS) ── */
+              <JitsiMeetComponent
+                meetingUrl={jaasUrl}
+                onCallEnd={handleEndJaasLive}
+                fullScreen={false}
+                isAdmin={true}
+                className="w-full h-full"
+              />
+            ) : (
+              <>
+                {/* ── Camera preview (default, shown when not live via JaaS) ── */}
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover"
+                  style={{ transform: state.isCameraOff ? "none" : undefined }}
+                  aria-label="Camera preview"
+                />
 
-            {/* Camera off overlay */}
-            {state.isCameraOff && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black">
-                <VideoOffIcon className="w-10 h-10 text-pnp-textSecondary" aria-hidden="true" />
-                <p className="text-xs text-pnp-textSecondary font-medium">Camera Off</p>
-              </div>
-            )}
+                {/* Camera off overlay */}
+                {state.isCameraOff && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black">
+                    <VideoOffIcon className="w-10 h-10 text-pnp-textSecondary" aria-hidden="true" />
+                    <p className="text-xs text-pnp-textSecondary font-medium">Camera Off</p>
+                  </div>
+                )}
 
-            {/* Status badge — top-left */}
-            <div className="absolute top-3 left-3 flex items-center gap-2">
-              {state.isLive ? (
-                <span
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white"
-                  style={{ background: "rgba(239,68,68,0.9)", backdropFilter: "blur(4px)" }}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" aria-hidden="true" />
-                  LIVE
-                </span>
-              ) : (
-                <span
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-white/70"
-                  style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
-                >
-                  PREVIEW
-                </span>
-              )}
+                {/* ── Go Live with JaaS CTA (shown when not live) ── */}
+                {!state.isLive && !state.isConnecting && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60">
+                    {jaasError && (
+                      <p className="text-xs text-red-400 bg-red-900/40 px-3 py-1.5 rounded-lg max-w-xs text-center">
+                        {jaasError}
+                      </p>
+                    )}
+                    <button
+                      onClick={handleStartJaasLive}
+                      disabled={jaasLoading}
+                      className="
+                        flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-bold text-white
+                        transition-all duration-150 hover:opacity-90 active:scale-[0.97]
+                        disabled:opacity-50 disabled:cursor-not-allowed
+                        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent
+                      "
+                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                      aria-label="Go Live with JaaS"
+                    >
+                      {jaasLoading ? (
+                        <>
+                          <span
+                            className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin"
+                            aria-hidden="true"
+                          />
+                          Connecting…
+                        </>
+                      ) : (
+                        <>
+                          <Radio className="w-4 h-4" aria-hidden="true" />
+                          Go Live with JaaS
+                        </>
+                      )}
+                    </button>
+                    <p className="text-[10px] text-white/50 text-center max-w-[200px]">
+                      JaaS Pro — use the in-call "Start Livestream" button to broadcast
+                    </p>
+                  </div>
+                )}
 
-              {state.isRecording && (
-                <span
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold text-white"
-                  style={{ background: "rgba(255,69,58,0.8)" }}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" aria-hidden="true" />
-                  REC
-                </span>
-              )}
-            </div>
+                {/* Status badge — top-left (only when not in JaaS mode) */}
+                <div className="absolute top-3 left-3 flex items-center gap-2">
+                  {state.isLive ? (
+                    <span
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white"
+                      style={{ background: "rgba(239,68,68,0.9)", backdropFilter: "blur(4px)" }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" aria-hidden="true" />
+                      LIVE
+                    </span>
+                  ) : (
+                    <span
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-white/70"
+                      style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+                    >
+                      PREVIEW
+                    </span>
+                  )}
 
-            {/* Viewer count — top-right */}
-            {state.isLive && (
-              <div className="absolute top-3 right-3">
-                <span
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-white"
-                  style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
-                >
-                  <UsersIcon className="w-3.5 h-3.5" aria-hidden="true" />
-                  {state.viewerCount}
-                </span>
-              </div>
-            )}
+                  {state.isRecording && (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold text-white"
+                      style={{ background: "rgba(255,69,58,0.8)" }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" aria-hidden="true" />
+                      REC
+                    </span>
+                  )}
+                </div>
 
-            {/* Duration — bottom-left when live */}
-            {state.isLive && (
-              <div className="absolute bottom-3 left-3">
-                <span
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-white tabular-nums"
-                  style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
-                >
-                  {formatDuration(durationSec)}
-                </span>
-              </div>
-            )}
+                {/* Viewer count — top-right */}
+                {state.isLive && (
+                  <div className="absolute top-3 right-3">
+                    <span
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-white"
+                      style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
+                    >
+                      <UsersIcon className="w-3.5 h-3.5" aria-hidden="true" />
+                      {state.viewerCount}
+                    </span>
+                  </div>
+                )}
 
-            {/* Portrait hint for mobile */}
-            {!isDesktopLayout && state.orientation === "portrait" && (
-              <div
-                className="absolute bottom-3 right-3 flex items-center gap-1 px-2 py-1 rounded-lg"
-                style={{ background: "rgba(0,0,0,0.5)" }}
-              >
-                <RotateCwIcon className="w-3 h-3 text-pnp-textSecondary" aria-hidden="true" />
-                <span className="text-[9px] text-pnp-textSecondary">Landscape for more</span>
-              </div>
+                {/* Duration — bottom-left when live */}
+                {state.isLive && (
+                  <div className="absolute bottom-3 left-3">
+                    <span
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-white tabular-nums"
+                      style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
+                    >
+                      {formatDuration(durationSec)}
+                    </span>
+                  </div>
+                )}
+
+                {/* Portrait hint for mobile */}
+                {!isDesktopLayout && state.orientation === "portrait" && (
+                  <div
+                    className="absolute bottom-3 right-3 flex items-center gap-1 px-2 py-1 rounded-lg"
+                    style={{ background: "rgba(0,0,0,0.5)" }}
+                  >
+                    <RotateCwIcon className="w-3 h-3 text-pnp-textSecondary" aria-hidden="true" />
+                    <span className="text-[9px] text-pnp-textSecondary">Landscape for more</span>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

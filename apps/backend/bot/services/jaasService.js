@@ -8,6 +8,15 @@ const logger = require('../../utils/logger');
  * JaaS (Jitsi as a Service) Service
  * Handles JWT token generation for authenticated Jitsi sessions with live streaming
  */
+/** Resolve a photo path to a full URL for Jitsi avatar display */
+function resolveAvatarUrl(photoPath) {
+    if (!photoPath) return '';
+    if (photoPath.startsWith('http')) return photoPath;
+    const base = (process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app').replace(/\/$/, '');
+    const path = photoPath.startsWith('/') ? photoPath : '/' + photoPath;
+    return base + path;
+}
+
 class JaaSService {
     constructor() {
         // JaaS Configuration from environment variables
@@ -112,7 +121,7 @@ class JaaSService {
                     id: userId,
                     name: userName,
                     email: userEmail,
-                    avatar: userAvatar,
+                    avatar: resolveAvatarUrl(userAvatar),
                     moderator: isModerator ? 'true' : 'false',
                     'hidden-from-recorder': 'false'
                 },
@@ -152,8 +161,8 @@ class JaaSService {
             userEmail,
             userAvatar,
             isModerator: true,
-            enableLivestreaming: false,
-            enableRecording: false, // NO RECORDING - Privacy First
+            enableLivestreaming: true,
+            enableRecording: false,
             enableTranscription: false,
             expiresIn: '4h'
         });
@@ -191,9 +200,9 @@ class JaaSService {
             userId: `model-${bookingId}`,
             userName: `${modelName} (Model)`,
             isModerator: true,
-            enableLivestreaming: false,
-            enableRecording: false, // NO RECORDING - Privacy First
-            enableTranscription: false, // Model doesn't see transcription
+            enableLivestreaming: true,
+            enableRecording: false,
+            enableTranscription: false,
             expiresIn: '4h'
         });
 
@@ -230,7 +239,7 @@ class JaaSService {
             userEmail,
             userAvatar,
             isModerator: true,
-            enableLivestreaming: false,
+            enableLivestreaming: true,
             enableRecording: false,
             enableTranscription: false,
             expiresIn: '4h'
@@ -278,7 +287,7 @@ class JaaSService {
             url,
             role: 'moderator',
             features: {
-                livestreaming: false,
+                livestreaming: true,
                 recording: false,
                 chat: true,
                 raiseHand: true,

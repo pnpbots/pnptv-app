@@ -58,7 +58,7 @@ class CommunityRoomService {
   /**
    * Generate a token for the community room
    */
-  async generateCommunityToken(userId, displayName, email = '', isModerator = false) {
+  async generateCommunityToken(userId, displayName, email = '', isModerator = false, avatar = '') {
     try {
       if (isModerator) {
         return JaasService.generateModeratorToken(
@@ -66,7 +66,7 @@ class CommunityRoomService {
           userId,
           displayName,
           email,
-          ''
+          avatar
         );
       } else {
         return JaasService.generateViewerToken(
@@ -74,7 +74,7 @@ class CommunityRoomService {
           userId,
           displayName,
           email,
-          ''
+          avatar
         );
       }
     } catch (error) {

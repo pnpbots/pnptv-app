@@ -15,6 +15,10 @@ interface JitsiMeetComponentProps {
   onParticipantLeft?: (count: number) => void;
   /** Whether to display in full-screen mode */
   fullScreen?: boolean;
+  /** Admin/superadmin gets full toolbar access */
+  isAdmin?: boolean;
+  /** Callback when Jitsi External API is ready */
+  onApiReady?: (api: any) => void;
   /** Optional className for the container */
   className?: string;
 }
@@ -71,6 +75,8 @@ export function JitsiMeetComponent({
   onParticipantJoined,
   onParticipantLeft,
   fullScreen = false,
+  isAdmin = false,
+  onApiReady,
   className,
 }: JitsiMeetComponentProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -85,6 +91,8 @@ export function JitsiMeetComponent({
   useEffect(() => { onCallEndRef.current = onCallEnd; }, [onCallEnd]);
   useEffect(() => { onParticipantJoinedRef.current = onParticipantJoined; }, [onParticipantJoined]);
   useEffect(() => { onParticipantLeftRef.current = onParticipantLeft; }, [onParticipantLeft]);
+  const onApiReadyRef = useRef(onApiReady);
+  useEffect(() => { onApiReadyRef.current = onApiReady; }, [onApiReady]);
 
   useEffect(() => {
     let disposed = false;
@@ -115,7 +123,6 @@ export function JitsiMeetComponent({
         height: "100%",
         configOverwrite: {
           prejoinPageEnabled: false,
-          startWithAudioMuted: false,
           startWithVideoMuted: false,
           disableDeepLinking: true,
           disableThirdPartyRequests: true,
@@ -125,6 +132,22 @@ export function JitsiMeetComponent({
           lobbyModeEnabled: false,
           requireDisplayName: false,
           enableInsecureRoomNameWarning: false,
+          startInTileView: false,
+          maxFullResolutionParticipants: 4,
+          filmstrip: {
+            disableResizable: true,
+          },
+          ...(isAdmin ? {} : {
+            toolbarButtons: [
+              'participants-pane',
+              'closedcaptions',
+              'noisesuppression',
+              'fullscreen',
+              'settings',
+            ],
+            startWithAudioMuted: true,
+            startSilent: true,
+          }),
         },
         interfaceConfigOverwrite: {
           MOBILE_APP_PROMO: false,
@@ -146,6 +169,7 @@ export function JitsiMeetComponent({
       const api = new JitsiMeetExternalAPI(domain, apiOptions);
 
       apiRef.current = api;
+      onApiReadyRef.current?.(api);
 
       api.addListener("videoConferenceJoined", () => {
         if (!disposed) setIsLoading(false);

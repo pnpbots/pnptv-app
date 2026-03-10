@@ -47,7 +47,8 @@ const joinCommunityRoom = async (req, res) => {
       userId,
       displayName,
       '',
-      true // all users get moderator token in community room
+      true, // all users get moderator token in community room
+      sessionUser.photoUrl || ''
     );
 
     const meetingUrl = jaasService.generateMeetingUrl(CommunityRoomService.COMMUNITY_ROOM_NAME, token);
