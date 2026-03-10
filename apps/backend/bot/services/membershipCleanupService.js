@@ -495,8 +495,10 @@ Type /subscribe to view membership plans and reactivate your access!`;
       const hasLifetimeIds = lifetimeUserIds.length > 0;
       // Param index placeholder is substituted per-query below. We use a sentinel token
       // $LIFETIME_IDS that each query replaces with its actual bind-parameter index.
+      // Ensure all IDs are strings so node-pg doesn't infer integer[]
+      const lifetimeUserIdStrings = lifetimeUserIds.map(String);
       const lifetimeExclusionTemplate = hasLifetimeIds
-        ? `AND id != ALL($LIFETIME_IDS::text[])`
+        ? `AND id != ALL($LIFETIME_IDS)`
         : '';
 
       /**
@@ -512,7 +514,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
         const nextIdx = baseParams.length + 1;
         return {
           text: sql.replace('$LIFETIME_IDS', String(nextIdx)),
-          values: [...baseParams, lifetimeUserIds],
+          values: [...baseParams, lifetimeUserIdStrings],
         };
       };
 
