@@ -8,23 +8,23 @@ const logger = require('../../../utils/logger');
 /**
  * Module-level map of active auto-chat timers.
  * Key: userId (string)
- * Value: { timeoutId: ReturnType<setTimeout>, messageIndex: number, messages: string[], streamId: string }
+ * Value: { timeoutId, messageIndex, messages, streamId }
  */
 const activeTimers = new Map();
 
 /** Returns a random delay in milliseconds between 3 and 5 minutes. */
 function randomDelayMs() {
-  return (3 * 60 + Math.floor(Math.random() * 2 * 60)) * 1000;
+  return (3 * 60 + Math.floor(Math.random() * 121)) * 1000;
 }
 
 /**
  * Derives the stream room ID for a user.
- * Uses live_channel (e.g. "pnptv-frank") if set, otherwise falls back to pnptv-live-<userId>.
+ * Uses live_channel if set, otherwise falls back to pnptv-live-<userId>.
  */
 async function resolveStreamId(userId) {
   const pool = getPool();
   const { rows } = await pool.query(
-    'SELECT live_channel FROM users WHERE id = $1 OR telegram = $1 LIMIT 1',
+    'SELECT live_channel FROM users WHERE id = $1 LIMIT 1',
     [String(userId)]
   );
   const row = rows[0];
@@ -40,39 +40,59 @@ function scheduleNext(userId, state) {
   const delay = randomDelayMs();
   const timeoutId = setTimeout(async () => {
     // Check still active in map (might have been stopped)
-    if (!activeTimers.has(userId)) return;
+    const currentState = activeTimers.get(userId);
+    if (!currentState) return;
 
     const io = socketSingleton.get();
     if (!io) {
-      logger.warn('streamAutoController: io not available for auto-chat emission', { userId });
-    } else {
-      const { messages, messageIndex, streamId } = activeTimers.get(userId);
-      const content = messages[messageIndex % messages.length];
-      const nextIndex = (messageIndex + 1) % messages.length;
-
-      io.to(`live:${streamId}`).emit('live:message', {
-        id: `auto-${Date.now()}-${userId}`,
-        streamId,
-        userId: 'bot',
-        username: 'PNPtv',
-        content,
-        createdAt: new Date(),
-        isBot: true,
-      });
-
-      logger.info('streamAutoController: emitted auto-chat message', { userId, streamId, messageIndex, content });
-
-      // Advance index in stored state
-      activeTimers.set(userId, {
-        ...activeTimers.get(userId),
-        messageIndex: nextIndex,
-      });
+      logger.warn('streamAutoController: io not available, stopping auto-chat', { userId });
+      activeTimers.delete(userId);
+      return;
     }
 
-    // Schedule the next one
-    const current = activeTimers.get(userId);
-    if (current) {
-      scheduleNext(userId, current);
+    const { messages, messageIndex, streamId } = currentState;
+    const content = messages[messageIndex % messages.length];
+    const nextIndex = (messageIndex + 1) % messages.length;
+
+    io.to(`live:${streamId}`).emit('live:message', {
+      id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${userId}`,
+      streamId,
+      userId: 'bot',
+      username: 'PNPtv',
+      content,
+      createdAt: new Date(),
+      isBot: true,
+    });
+
+    logger.info('streamAutoController: emitted auto-chat message', { userId, streamId, messageIndex, content });
+
+    // Persist to Redis for chat history
+    try {
+      const { getRedis } = require('../../../config/redis');
+      const redis = getRedis();
+      if (redis) {
+        const msgJson = JSON.stringify({
+          id: `auto-${Date.now()}-${userId}`,
+          streamId,
+          userId: 'bot',
+          username: 'PNPtv',
+          content,
+          createdAt: new Date(),
+          isBot: true,
+        });
+        await redis.lpush(`live:chat:${streamId}`, msgJson);
+        await redis.ltrim(`live:chat:${streamId}`, 0, 199);
+        await redis.expire(`live:chat:${streamId}`, 86400);
+      }
+    } catch (redisErr) {
+      logger.warn('streamAutoController: failed to persist auto-message to Redis', { userId, error: redisErr.message });
+    }
+
+    // Only reschedule if still active (stop may have fired during emit)
+    if (activeTimers.has(userId)) {
+      const updatedState = { ...currentState, messageIndex: nextIndex };
+      activeTimers.set(userId, updatedState);
+      scheduleNext(userId, updatedState);
     }
   }, delay);
 
@@ -99,21 +119,29 @@ function parseGrokMessages(rawText) {
     }
   }
 
-  // Return up to 12 valid messages; if parsing failed return raw lines capped at 12
-  if (messages.length >= 1) return messages.slice(0, 12);
+  return messages.slice(0, 12);
+}
 
-  return lines.slice(0, 12);
+/** Extract userId safely from session */
+function getUserId(req) {
+  const user = req.session?.user;
+  if (!user) return null;
+  const id = String(user.id || user.telegramId || '');
+  if (!id || id === 'undefined' || id === 'null') return null;
+  return id;
 }
 
 // ── GET /api/webapp/live/stream-profile ─────────────────────────────────────
 
 async function getStreamProfile(req, res) {
-  const userId = String(req.session.user.id || req.session.user.telegram_id);
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
   const pool = getPool();
 
   try {
     const { rows } = await pool.query(
-      `SELECT boundaries, turn_ons, stream_goal, messages
+      `SELECT boundaries, turn_ons, stream_goal, messages, is_active
        FROM stream_auto_messages
        WHERE user_id = $1
        ORDER BY created_at DESC
@@ -133,6 +161,7 @@ async function getStreamProfile(req, res) {
         turnOns: row.turn_ons,
         streamGoal: row.stream_goal,
         messages: Array.isArray(row.messages) ? row.messages : [],
+        isActive: row.is_active,
       },
     });
   } catch (err) {
@@ -144,7 +173,9 @@ async function getStreamProfile(req, res) {
 // ── POST /api/webapp/live/stream-profile ────────────────────────────────────
 
 async function saveStreamProfile(req, res) {
-  const userId = String(req.session.user.id || req.session.user.telegram_id);
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
   const { boundaries, turnOns, streamGoal } = req.body || {};
 
   if (!boundaries || !turnOns || !streamGoal) {
@@ -161,12 +192,15 @@ async function saveStreamProfile(req, res) {
     });
   }
 
+  // Sanitize inputs for prompt (strip newlines to prevent injection)
+  const sanitize = (s) => String(s).replace(/\n/g, ' ').slice(0, 500);
+
   const prompt = `Generate exactly 12 short chat messages for a live stream on pnptv.app.
 
 Model's stream profile:
-- Not comfortable with: ${boundaries}
-- What turns them on: ${turnOns}
-- Stream goal: ${streamGoal}
+- Not comfortable with: """${sanitize(boundaries)}"""
+- What turns them on: """${sanitize(turnOns)}"""
+- Stream goal: """${sanitize(streamGoal)}"""
 
 Output the 12 messages numbered 1-12, one per line. Each message under 150 characters. Mix of English and Spanish (Spanglish OK). Fun, flirty, playful PNP community vibe. Encourage tips, private calls, engagement.`;
 
@@ -187,23 +221,24 @@ Output the 12 messages numbered 1-12, one per line. Each message under 150 chara
     return res.status(502).json({ success: false, error: 'Failed to generate messages. Try again.' });
   }
 
+  // Stop any active timer before saving (prevents orphaned timers)
+  if (activeTimers.has(userId)) {
+    clearTimeout(activeTimers.get(userId).timeoutId);
+    activeTimers.delete(userId);
+  }
+
   const pool = getPool();
   try {
     await pool.query(
       `INSERT INTO stream_auto_messages (user_id, boundaries, turn_ons, stream_goal, messages, is_active, created_at)
        VALUES ($1, $2, $3, $4, $5::jsonb, false, NOW())
-       ON CONFLICT DO NOTHING`,
-      [userId, String(boundaries), String(turnOns), String(streamGoal), JSON.stringify(messages)]
-    );
-
-    // Upsert: delete old and insert fresh so we always have one active profile
-    await pool.query(
-      `DELETE FROM stream_auto_messages WHERE user_id = $1`,
-      [userId]
-    );
-    await pool.query(
-      `INSERT INTO stream_auto_messages (user_id, boundaries, turn_ons, stream_goal, messages, is_active, created_at)
-       VALUES ($1, $2, $3, $4, $5::jsonb, false, NOW())`,
+       ON CONFLICT (user_id) DO UPDATE SET
+         boundaries = EXCLUDED.boundaries,
+         turn_ons = EXCLUDED.turn_ons,
+         stream_goal = EXCLUDED.stream_goal,
+         messages = EXCLUDED.messages,
+         is_active = false,
+         created_at = NOW()`,
       [userId, String(boundaries), String(turnOns), String(streamGoal), JSON.stringify(messages)]
     );
 
@@ -218,7 +253,9 @@ Output the 12 messages numbered 1-12, one per line. Each message under 150 chara
 // ── POST /api/webapp/live/stream-auto-start ─────────────────────────────────
 
 async function startAutoMessages(req, res) {
-  const userId = String(req.session.user.id || req.session.user.telegram_id);
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
   const pool = getPool();
 
   try {
@@ -236,7 +273,7 @@ async function startAutoMessages(req, res) {
 
     const messages = rows[0].messages;
 
-    // Clear any existing timer for this user
+    // Clear any existing timer for this user (idempotent restart)
     if (activeTimers.has(userId)) {
       clearTimeout(activeTimers.get(userId).timeoutId);
       activeTimers.delete(userId);
@@ -265,7 +302,9 @@ async function startAutoMessages(req, res) {
 // ── POST /api/webapp/live/stream-auto-stop ──────────────────────────────────
 
 async function stopAutoMessages(req, res) {
-  const userId = String(req.session.user.id || req.session.user.telegram_id);
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
   const pool = getPool();
 
   try {
@@ -287,9 +326,19 @@ async function stopAutoMessages(req, res) {
   }
 }
 
+/** Graceful shutdown — clear all active timers */
+function shutdownAllTimers() {
+  for (const [userId, state] of activeTimers) {
+    clearTimeout(state.timeoutId);
+    logger.info('streamAutoController: cleared timer on shutdown', { userId });
+  }
+  activeTimers.clear();
+}
+
 module.exports = {
   getStreamProfile,
   saveStreamProfile,
   startAutoMessages,
   stopAutoMessages,
+  shutdownAllTimers,
 };

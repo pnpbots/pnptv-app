@@ -1186,6 +1186,7 @@ export default function StreamerDashboard({
             streamGoal: res.profile.streamGoal,
           });
           setAutoMessages(res.profile.messages || []);
+          setAutoActive(res.profile.isActive ?? false);
         }
       })
       .catch(() => {
@@ -1210,7 +1211,9 @@ export default function StreamerDashboard({
     }
   }, [streamProfile]);
 
+  const [autoError, setAutoError] = useState<string | null>(null);
   const handleToggleAuto = useCallback(async () => {
+    setAutoError(null);
     try {
       if (autoActive) {
         await stopStreamAutoMessages();
@@ -1219,8 +1222,8 @@ export default function StreamerDashboard({
         await startStreamAutoMessages();
         setAutoActive(true);
       }
-    } catch {
-      // Silently ignore — state stays unchanged so user can retry
+    } catch (err) {
+      setAutoError(err instanceof Error ? err.message : "Failed to toggle auto-chat");
     }
   }, [autoActive]);
 
@@ -1431,6 +1434,9 @@ export default function StreamerDashboard({
                   {autoActive ? "Stop Auto-Chat" : "Start Auto-Chat"}
                 </button>
               </div>
+              {autoError && (
+                <p className="text-[10px] text-red-400">{autoError}</p>
+              )}
               <div
                 className="max-h-40 overflow-y-auto space-y-1 pr-1"
                 style={{ scrollbarWidth: "thin" }}

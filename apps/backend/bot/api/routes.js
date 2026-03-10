@@ -2271,8 +2271,16 @@ app.get('/api/webapp/live/my-channel', requireSessionAuth, asyncHandler(streamBr
 
 // Stream Auto-Chat (Grok-generated messages that post to live chat at intervals)
 const streamAutoController = require('./controllers/streamAutoController');
+const grokStreamChatLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+  message: { success: false, error: 'Too many generation requests. Wait before regenerating.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 app.get('/api/webapp/live/stream-profile', requireSessionAuth, asyncHandler(streamAutoController.getStreamProfile));
-app.post('/api/webapp/live/stream-profile', requireSessionAuth, asyncHandler(streamAutoController.saveStreamProfile));
+app.post('/api/webapp/live/stream-profile', requireSessionAuth, grokStreamChatLimiter, asyncHandler(streamAutoController.saveStreamProfile));
 app.post('/api/webapp/live/stream-auto-start', requireSessionAuth, asyncHandler(streamAutoController.startAutoMessages));
 app.post('/api/webapp/live/stream-auto-stop', requireSessionAuth, asyncHandler(streamAutoController.stopAutoMessages));
 
