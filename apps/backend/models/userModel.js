@@ -486,6 +486,32 @@ class UserModel {
   static MEMBER_PLAN_IDS = new Set(['member-monthly', 'lifetime100']);
 
   /**
+   * Enforce tier↔status consistency rule:
+   *   PRIME  → subscription_status MUST be 'active'
+   *   churned/free status → tier MUST NOT be 'PRIME'
+   *   member → subscription_status MUST be 'active'
+   * Returns { tier, status } with any corrections applied.
+   */
+  static enforceTierStatusRule(tier, status) {
+    // Rule 1: PRIME tier forces active status
+    if (tier === TIER.PRIME && status !== 'active') {
+      logger.warn('enforceTierStatusRule: PRIME tier with non-active status — forcing active', { tier, status });
+      return { tier, status: 'active' };
+    }
+    // Rule 2: member tier forces active status
+    if (tier === TIER.MEMBER && status !== 'active') {
+      logger.warn('enforceTierStatusRule: member tier with non-active status — forcing active', { tier, status });
+      return { tier, status: 'active' };
+    }
+    // Rule 3: churned/free status forces free tier (not PRIME or member)
+    if ((status === 'churned' || status === 'free') && (tier === TIER.PRIME || tier === TIER.MEMBER)) {
+      logger.warn('enforceTierStatusRule: churned/free status with paid tier — forcing free tier', { tier, status });
+      return { tier: TIER.FREE, status };
+    }
+    return { tier, status };
+  }
+
+  /**
    * Update user subscription
    * Unified logic: prime/active = membership active, churned/expired/free = membership not active
    */
@@ -503,14 +529,17 @@ class UserModel {
       // Determine tier based on status and plan
       const isActive = status === 'active' || status === 'prime';
       const isMemberPlan = this.MEMBER_PLAN_IDS.has(subscription.planId);
-      const tier = isActive
+      let tier = isActive
         ? (isMemberPlan ? TIER.MEMBER : TIER.PRIME)
         : TIER.FREE;
 
       // Normalize status for lifecycle tracking
-      const normalizedStatus = isActive
+      let normalizedStatus = isActive
         ? 'active'
         : (status === 'churned' || status === 'expired' ? 'churned' : 'free');
+
+      // Enforce tier↔status consistency
+      ({ tier, status: normalizedStatus } = this.enforceTierStatusRule(tier, normalizedStatus));
 
       await query(
         `UPDATE ${TABLE} SET subscription_status = $2, plan_id = $3, plan_expiry = $4, tier = $5, updated_at = NOW() WHERE id = $1`,

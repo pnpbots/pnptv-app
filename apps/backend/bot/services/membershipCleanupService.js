@@ -585,6 +585,38 @@ Type /subscribe to view membership plans and reactivate your access!`;
         logger.info(`Set ${freeResult.rowCount} users to 'free' status`);
       }
 
+      // Step 7: Tier↔Status consistency enforcement
+      // Rule: PRIME tier MUST have subscription_status='active'
+      const fixPrimeStatus = await query(`
+        UPDATE users
+        SET subscription_status = 'active',
+            updated_at = NOW()
+        WHERE tier = 'PRIME'
+          AND subscription_status != 'active'
+        RETURNING id, username, subscription_status AS old_status
+      `);
+      if (fixPrimeStatus.rowCount > 0) {
+        logger.warn(`Fixed ${fixPrimeStatus.rowCount} PRIME users with wrong subscription_status`, {
+          users: fixPrimeStatus.rows.map(r => ({ id: r.id, oldStatus: r.old_status }))
+        });
+      }
+
+      // Rule: churned/free status MUST NOT have PRIME or member tier
+      const fixChurnedPrime = await query(`
+        UPDATE users
+        SET tier = 'free',
+            updated_at = NOW()
+        WHERE subscription_status IN ('churned', 'free')
+          AND tier IN ('PRIME', 'member')
+          AND tier != 'banned'
+        RETURNING id, username, tier AS old_tier
+      `);
+      if (fixChurnedPrime.rowCount > 0) {
+        logger.warn(`Fixed ${fixChurnedPrime.rowCount} churned/free users with wrong tier`, {
+          users: fixChurnedPrime.rows.map(r => ({ id: r.id, oldTier: r.old_tier }))
+        });
+      }
+
       results.endTime = new Date();
       const duration = (results.endTime - results.startTime) / 1000;
 

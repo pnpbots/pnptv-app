@@ -77,10 +77,11 @@ class AdminUserController {
         logger.info('Admin updated user subscription', { adminId, userId, subscriptionStatus });
       }
 
-      // Update tier (PRIME/free) — also sync subscription_status for consistency
+      // Update tier (PRIME/free) — use enforceTierStatusRule for consistency
       if (isPrime !== undefined || tier !== undefined) {
-        const newTier = isPrime ? 'PRIME' : 'free';
-        const newStatus = isPrime ? 'active' : 'free';
+        const rawTier = isPrime ? 'PRIME' : 'free';
+        const rawStatus = isPrime ? 'active' : 'free';
+        const { tier: newTier, status: newStatus } = UserModel.enforceTierStatusRule(rawTier, rawStatus);
         await query(
           'UPDATE users SET tier = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3',
           [newTier, newStatus, userId.toString()]
@@ -128,8 +129,10 @@ class AdminUserController {
             [userId.toString()]
           );
         } else {
+          // Unban: set tier to free AND sync subscription_status to free
+          // (tier↔status rule: free tier cannot have 'active' status)
           await query(
-            'UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2',
+            'UPDATE users SET tier = $1, subscription_status = \'free\', updated_at = NOW() WHERE id = $2',
             [newTier, userId.toString()]
           );
         }
