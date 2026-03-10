@@ -541,9 +541,23 @@ class UserModel {
       // Enforce tier↔status consistency
       ({ tier, status: normalizedStatus } = this.enforceTierStatusRule(tier, normalizedStatus));
 
+      // Safeguard: non-lifetime active plans MUST have an expiry date
+      let expiry = subscription.expiry;
+      const planId = subscription.planId || '';
+      const isLifetime = planId.toLowerCase().includes('lifetime');
+      if (isActive && !isLifetime && !expiry) {
+        expiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // default 30 days
+        logger.warn('updateSubscription: active non-lifetime plan missing expiry — defaulting to 30 days', { userId, planId, expiry });
+      }
+      // Lifetime plans should never have an expiry
+      if (isLifetime && expiry) {
+        logger.warn('updateSubscription: lifetime plan had expiry — clearing it', { userId, planId });
+        expiry = null;
+      }
+
       await query(
         `UPDATE ${TABLE} SET subscription_status = $2, plan_id = $3, plan_expiry = $4, tier = $5, updated_at = NOW() WHERE id = $1`,
-        [userId.toString(), normalizedStatus, subscription.planId, subscription.expiry, tier]
+        [userId.toString(), normalizedStatus, planId, expiry, tier]
       );
       await cache.del(`user:${userId}`);
       await cache.delPattern('nearby:*');
