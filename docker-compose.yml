@@ -177,6 +177,8 @@ services:
       AUTH_AUTHENTIK_LABEL: "Sign in with PNPTV"
       CORS_ENABLED: "true"
       CORS_ORIGIN: "true"
+      FILES_MAX_SIZE: "2147483648"
+      MAX_PAYLOAD_SIZE: "2gb"
     networks:
       - pnptvapp_net
     depends_on:
