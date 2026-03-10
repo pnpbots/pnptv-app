@@ -3293,22 +3293,22 @@ app.post(
 );
 
 // ── Hangout Groups ───────────────────────────────────────────────────────────
-app.get('/api/webapp/hangouts/groups', asyncHandler(hangoutGroupController.listGroups));
-app.post('/api/webapp/hangouts/groups', asyncHandler(hangoutGroupController.createGroup));
+app.get('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutGroupController.listGroups));
+app.post('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutGroupController.createGroup));
 // Discover must be before /:id to avoid route collision
-app.get('/api/webapp/hangouts/groups/discover', asyncHandler(hangoutGroupController.discoverGroups));
-app.get('/api/webapp/hangouts/groups/:id', asyncHandler(hangoutGroupController.getGroup));
-app.post('/api/webapp/hangouts/groups/:id/join', requireMemberTier, asyncHandler(hangoutGroupController.joinGroup));
-app.post('/api/webapp/hangouts/groups/:id/leave', asyncHandler(hangoutGroupController.leaveGroup));
-app.delete('/api/webapp/hangouts/groups/:id', asyncHandler(hangoutGroupController.deleteGroup));
+app.get('/api/webapp/hangouts/groups/discover', requireSessionAuth, asyncHandler(hangoutGroupController.discoverGroups));
+app.get('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.getGroup));
+app.post('/api/webapp/hangouts/groups/:id/join', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.joinGroup));
+app.post('/api/webapp/hangouts/groups/:id/leave', requireSessionAuth, asyncHandler(hangoutGroupController.leaveGroup));
+app.delete('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.deleteGroup));
 // Join requests for private groups
-app.post('/api/webapp/hangouts/groups/:id/request-join', asyncHandler(hangoutGroupController.requestJoinGroup));
-app.get('/api/webapp/hangouts/groups/:id/requests', asyncHandler(hangoutGroupController.getJoinRequests));
-app.post('/api/webapp/hangouts/groups/:id/requests/:requestId/:action', asyncHandler(hangoutGroupController.handleJoinRequest));
+app.post('/api/webapp/hangouts/groups/:id/request-join', requireSessionAuth, asyncHandler(hangoutGroupController.requestJoinGroup));
+app.get('/api/webapp/hangouts/groups/:id/requests', requireSessionAuth, asyncHandler(hangoutGroupController.getJoinRequests));
+app.post('/api/webapp/hangouts/groups/:id/requests/:requestId/:action', requireSessionAuth, asyncHandler(hangoutGroupController.handleJoinRequest));
 
 // ── Hangout Group Chat ───────────────────────────────────────────────────────
-app.get('/api/webapp/hangouts/groups/:id/messages', requireMemberTier, asyncHandler(hangoutGroupController.getMessages));
-app.post('/api/webapp/hangouts/groups/:id/messages', requireMemberTier, asyncHandler(hangoutGroupController.sendMessage));
+app.get('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.getMessages));
+app.post('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.sendMessage));
 // Media upload for hangout group chat (images 10 MB / videos 50 MB, per-hangout dirs)
 app.post(
   '/api/webapp/hangouts/groups/:id/media',
@@ -3318,12 +3318,12 @@ app.post(
   asyncHandler(hangoutMediaController.uploadHangoutMedia)
 );
 // Mark group messages as read
-app.post('/api/webapp/hangouts/groups/:id/read', asyncHandler(hangoutGroupController.markAsRead));
+app.post('/api/webapp/hangouts/groups/:id/read', requireSessionAuth, asyncHandler(hangoutGroupController.markAsRead));
 // Legacy single-call endpoint (kept for backward compatibility)
-app.post('/api/webapp/hangouts/groups/:id/call', asyncHandler(hangoutGroupController.startCall));
+app.post('/api/webapp/hangouts/groups/:id/call', requireSessionAuth, asyncHandler(hangoutGroupController.startCall));
 
 // ── Hangout Video Calls (JaaS) ──────────────────────────────────────────────
-app.use('/api/webapp/hangouts/groups', hangoutVideoCallRoutes);
+app.use('/api/webapp/hangouts/groups', requireSessionAuth, hangoutVideoCallRoutes);
 
 // ── DM Media ────────────────────────────────────────────────────────────────
 // Send an image or video as a direct message
@@ -5159,7 +5159,7 @@ app.post('/api/community-room/moderation/remove', verifyAdminJWT, asyncHandler(c
 app.post('/api/community-room/moderation/clear-chat', verifyAdminJWT, asyncHandler(communityRoomController.clearChat));
 
 // ── JaaS Token Endpoints ────────────────────────────────────────────────────
-app.get('/api/jaas/status', asyncHandler(jaasController.getStatus));
+app.get('/api/jaas/status', requireSessionAuth, asyncHandler(jaasController.getStatus));
 app.post('/api/jaas/token', requireSessionAuth, asyncHandler(jaasController.generateToken));
 app.post('/api/jaas/moderator-token', requireSessionAuth, asyncHandler(jaasController.generateModeratorToken));
 app.post('/api/jaas/live-token', requireSessionAuth, asyncHandler(jaasController.generateLiveToken));

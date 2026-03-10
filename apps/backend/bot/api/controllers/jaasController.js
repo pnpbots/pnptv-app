@@ -26,6 +26,14 @@ const generateToken = async (req, res) => {
       });
     }
 
+    // Validate room name format (alphanumeric, hyphens, underscores only)
+    if (!JaasService.validateRoomName(roomName)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid room name format'
+      });
+    }
+
     // Verify JaaS is configured
     if (!JaasService.isConfigured()) {
       logger.error('JaaS not configured for token generation');
@@ -99,6 +107,14 @@ const generateModeratorToken = async (req, res) => {
       });
     }
 
+    // Validate room name format (alphanumeric, hyphens, underscores only)
+    if (!JaasService.validateRoomName(roomName)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid room name format'
+      });
+    }
+
     // Verify JaaS is configured
     if (!JaasService.isConfigured()) {
       logger.error('JaaS not configured for token generation');
@@ -119,6 +135,21 @@ const generateModeratorToken = async (req, res) => {
         success: false,
         error: 'Only streamers and admins can request moderator tokens'
       });
+    }
+
+    // HG-05: Verify room ownership — non-admin creators can only moderate their own rooms
+    if (!isAdmin) {
+      const ownChannel = user.live_channel || `pnptv-live-${userId}`;
+      const isOwnChannel = roomName === ownChannel;
+      // Also allow moderating hangout group calls the user is a member of
+      const isHangoutRoom = roomName.startsWith('hangout-');
+      if (!isOwnChannel && !isHangoutRoom) {
+        logger.warn('Moderator token for foreign room blocked', { userId, roomName });
+        return res.status(403).json({
+          success: false,
+          error: 'Cannot moderate a room you do not own'
+        });
+      }
     }
 
     // Generate JWT token for moderator (with all features)

@@ -8,6 +8,13 @@ import { PermissionGate } from "@/components/PermissionGate";
 
 type ViewMode = "fullscreen" | "embedded" | "pip";
 
+interface SocketChatData {
+  messages: import("@/lib/api").GroupMessage[];
+  sendMessage: (content: string) => void;
+  emitTyping: () => void;
+  typingUsers: string[];
+}
+
 interface VideoCallOverlayProps {
   /** The full Jitsi meeting URL (with JWT token) */
   meetingUrl: string;
@@ -25,6 +32,8 @@ interface VideoCallOverlayProps {
   groupId?: number;
   /** User ID for side panel chat */
   userId?: string;
+  /** Pre-wired socket data from parent — avoids duplicate useHangoutSocket */
+  socketChat?: SocketChatData;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -38,6 +47,7 @@ export function VideoCallOverlay({
   isAdmin = false,
   groupId,
   userId,
+  socketChat,
 }: VideoCallOverlayProps) {
   const [viewMode, setViewMode] = useState<ViewMode>(initialMode);
   const [participantCount, setParticipantCount] = useState(0);
@@ -149,6 +159,7 @@ export function VideoCallOverlay({
               userId={userId!}
               collapsed={sidePanelCollapsed}
               onToggleCollapse={() => setSidePanelCollapsed((p) => !p)}
+              socketChat={socketChat}
             />
           </div>
         )}
@@ -217,6 +228,7 @@ export function VideoCallOverlay({
               groupId={groupId!}
               userId={userId!}
               isAdmin={isAdmin}
+              socketChat={socketChat}
             />
           </div>
         )}
@@ -298,6 +310,7 @@ export function VideoCallOverlay({
               userId={userId!}
               collapsed={sidePanelCollapsed}
               onToggleCollapse={() => setSidePanelCollapsed((p) => !p)}
+              socketChat={socketChat}
             />
           </div>
         )}

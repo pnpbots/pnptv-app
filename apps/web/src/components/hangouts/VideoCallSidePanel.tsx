@@ -1,9 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { useHangoutSocket } from "@/hooks/useHangoutSocket";
-import { searchNearby, getLiveStreams, type LiveStream } from "@/lib/api";
+import { searchNearby, getLiveStreams, type LiveStream, type GroupMessage } from "@/lib/api";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
+
+interface SocketChatData {
+  messages: GroupMessage[];
+  sendMessage: (content: string) => void;
+  emitTyping: () => void;
+  typingUsers: string[];
+}
 
 interface VideoCallSidePanelProps {
   groupId: number;
@@ -11,6 +17,8 @@ interface VideoCallSidePanelProps {
   /** Collapse to icon tabs on mobile */
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  /** Pre-wired socket data from parent — avoids duplicate useHangoutSocket */
+  socketChat?: SocketChatData;
 }
 
 interface MobileBottomBarProps {
@@ -18,6 +26,8 @@ interface MobileBottomBarProps {
   userId: string;
   isAdmin?: boolean;
   onOpenModBot?: () => void;
+  /** Pre-wired socket data from parent — avoids duplicate useHangoutSocket */
+  socketChat?: SocketChatData;
 }
 
 // ─── Shared hooks ────────────────────────────────────────────────────────────
@@ -162,8 +172,12 @@ function MiniLiveWidget() {
 
 // ─── Side Panel Chat ─────────────────────────────────────────────────────────
 
-function SidePanelChat({ groupId, userId, className }: { groupId: number; userId: string; className?: string }) {
-  const { messages, sendMessage, emitTyping, typingUsers } = useHangoutSocket(groupId, userId);
+function SidePanelChat({ groupId, userId, className, socketChat }: { groupId: number; userId: string; className?: string; socketChat?: SocketChatData }) {
+  // Use pre-wired socket data when available (avoids duplicate hangout:join)
+  const messages = socketChat?.messages ?? [];
+  const sendMessage = socketChat?.sendMessage ?? (() => {});
+  const emitTyping = socketChat?.emitTyping ?? (() => {});
+  const typingUsers = socketChat?.typingUsers ?? [];
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevMsgCount = useRef(0);
@@ -284,7 +298,7 @@ function SidePanelChat({ groupId, userId, className }: { groupId: number; userId
 
 type MobileTab = "nearby" | "live" | "chat" | "mod" | null;
 
-export function MobileBottomBar({ groupId, userId, isAdmin = false, onOpenModBot }: MobileBottomBarProps) {
+export function MobileBottomBar({ groupId, userId, isAdmin = false, onOpenModBot, socketChat }: MobileBottomBarProps) {
   const [activeTab, setActiveTab] = useState<MobileTab>(null);
   const { count: nearbyCount } = useNearbyCount();
   const { liveCount } = useLiveCount();
@@ -333,7 +347,7 @@ export function MobileBottomBar({ groupId, userId, isAdmin = false, onOpenModBot
             )}
 
             {activeTab === "chat" && (
-              <SidePanelChat groupId={groupId} userId={userId} />
+              <SidePanelChat groupId={groupId} userId={userId} socketChat={socketChat} />
             )}
           </div>
         </div>
@@ -420,6 +434,7 @@ export function VideoCallSidePanel({
   userId,
   collapsed = false,
   onToggleCollapse,
+  socketChat,
 }: VideoCallSidePanelProps) {
   if (collapsed) {
     return (
@@ -465,7 +480,7 @@ export function VideoCallSidePanel({
       <div className="h-px bg-white/5 mx-2" />
 
       {/* Chat takes remaining space */}
-      <SidePanelChat groupId={groupId} userId={userId} />
+      <SidePanelChat groupId={groupId} userId={userId} socketChat={socketChat} />
     </div>
   );
 }

@@ -667,6 +667,7 @@ export default function Chat() {
   // Global invite listener — works regardless of which group is active
   useEffect(() => {
     const socket = connectSocket();
+    let dismissTimer: ReturnType<typeof setTimeout> | null = null;
     const onInvite = (data: {
       groupId: number;
       groupName: string;
@@ -680,11 +681,14 @@ export default function Chat() {
         fromName: data.fromName,
         fromPhotoUrl: data.fromPhotoUrl,
       });
-      // Auto-dismiss after 8s
-      setTimeout(() => setInviteNotif(null), 8000);
+      if (dismissTimer) clearTimeout(dismissTimer);
+      dismissTimer = setTimeout(() => setInviteNotif(null), 8000);
     };
     socket.on("hangout:invite:received", onInvite);
-    return () => { socket.off("hangout:invite:received", onInvite); };
+    return () => {
+      socket.off("hangout:invite:received", onInvite);
+      if (dismissTimer) clearTimeout(dismissTimer);
+    };
   }, []);
 
   // ─── Group management ──────────────────────────────────────────────
@@ -904,6 +908,7 @@ export default function Chat() {
             isAdmin={isAdmin}
             groupId={activeGroup.id}
             userId={user?.id ? String(user.id) : undefined}
+            socketChat={{ messages, sendMessage, emitTyping, typingUsers }}
           />
         )}
 

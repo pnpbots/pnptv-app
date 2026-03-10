@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useI18n } from "@/lib/i18n";
 
 interface LiveRulesModalProps {
@@ -82,14 +82,51 @@ const MODAL_STRINGS: Record<"en" | "es", ModalStrings> = {
   },
 };
 
-const RULE_ICONS = ["✋", "🔒", "🚫", "💰", "⚖️", "🚩"] as const;
+const RULE_ICONS = ["\u270b", "\ud83d\udd12", "\ud83d\udEab", "\ud83d\udcb0", "\u2696\ufe0f", "\ud83d\udea9"] as const;
 
 export function LiveRulesModal({ onAcknowledge }: LiveRulesModalProps) {
   const t = useI18n();
   const [acknowledging, setAcknowledging] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const strings: ModalStrings =
     MODAL_STRINGS[t.lang as "en" | "es"] ?? MODAL_STRINGS.en;
+
+  // Focus the acknowledge button on mount
+  useEffect(() => {
+    buttonRef.current?.focus();
+  }, []);
+
+  // Focus trap: keep focus within modal
+  useEffect(() => {
+    const modal = modalRef.current;
+    if (!modal) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const focusable = modal.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last?.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const handleAcknowledge = async () => {
     if (acknowledging) return;
@@ -102,8 +139,17 @@ export function LiveRulesModal({ onAcknowledge }: LiveRulesModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="w-full sm:max-w-lg bg-pnp-surface border border-pnp-border rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[90dvh]">
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm"
+      role="presentation"
+    >
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="live-rules-title"
+        className="w-full sm:max-w-lg bg-pnp-surface border border-pnp-border rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[90dvh]"
+      >
         {/* Header */}
         <div className="flex-shrink-0 px-5 pt-5 pb-3 border-b border-pnp-border">
           <div className="flex items-center gap-3">
@@ -123,7 +169,10 @@ export function LiveRulesModal({ onAcknowledge }: LiveRulesModalProps) {
                 />
               </svg>
             </div>
-            <h2 className="text-sm font-semibold text-pnp-textPrimary leading-snug">
+            <h2
+              id="live-rules-title"
+              className="text-sm font-semibold text-pnp-textPrimary leading-snug"
+            >
               {strings.title}
             </h2>
           </div>
@@ -137,7 +186,7 @@ export function LiveRulesModal({ onAcknowledge }: LiveRulesModalProps) {
                 className="flex-shrink-0 w-8 h-8 rounded-full bg-pnp-background border border-pnp-border flex items-center justify-center text-base leading-none"
                 aria-hidden="true"
               >
-                {RULE_ICONS[idx]}
+                {RULE_ICONS[idx] ?? "\u2022"}
               </span>
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-pnp-textPrimary mb-0.5">
@@ -157,6 +206,7 @@ export function LiveRulesModal({ onAcknowledge }: LiveRulesModalProps) {
             {strings.footer}
           </p>
           <button
+            ref={buttonRef}
             onClick={handleAcknowledge}
             disabled={acknowledging}
             className="w-full py-3 rounded-xl btn-gradient text-white text-sm font-semibold disabled:opacity-60 transition-opacity active:scale-[0.98] transition-transform"

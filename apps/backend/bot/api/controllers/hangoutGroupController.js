@@ -254,21 +254,25 @@ const joinGroup = async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
     if (!rows[0].is_public) return res.status(403).json({ error: 'This group is invite-only' });
 
-    // Check member count
-    const { rows: countRows } = await query(
-      'SELECT COUNT(*)::int as cnt FROM hangout_group_members WHERE group_id=$1',
-      [groupId]
-    );
-    if (countRows[0].cnt >= rows[0].max_members) {
-      return res.status(409).json({ error: 'Group is full' });
-    }
-
-    await query(
+    // Atomic capacity-checked insert (prevents race condition)
+    const { rowCount } = await query(
       `INSERT INTO hangout_group_members (group_id, user_id, role)
-       VALUES ($1, $2, 'member')
+       SELECT $1, $2, 'member'
+       WHERE (SELECT COUNT(*) FROM hangout_group_members WHERE group_id=$1) < $3
        ON CONFLICT DO NOTHING`,
-      [groupId, user.id]
+      [groupId, user.id, rows[0].max_members]
     );
+    if (rowCount === 0) {
+      // Either already a member (ON CONFLICT) or group is full
+      const { rows: checkRows } = await query(
+        'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+        [groupId, user.id]
+      );
+      if (checkRows.length === 0) {
+        return res.status(409).json({ error: 'Group is full' });
+      }
+      // Already a member — proceed silently
+    }
 
     // Touch activity timestamp
     await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
