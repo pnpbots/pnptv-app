@@ -285,7 +285,7 @@ if (!resolvedSessionSecret) {
 }
 // Session middleware with explicit response hooks to ensure Set-Cookie header is set
 const sessionMiddleware = session({
-  store: new RedisStore({ client: redisClient, prefix: 'sess:' }),
+  store: new RedisStore({ client: redisClient, prefix: 'sess:', ttl: 90 * 86400 }),
   secret: resolvedSessionSecret,
   resave: false,
   saveUninitialized: false,
@@ -1959,7 +1959,7 @@ app.post('/api/radio/request', authenticateUser, asyncHandler(async (req, res) =
 }));
 
 // Audio stream proxy (streams current radio track from Ampache)
-app.get('/api/radio/stream', asyncHandler(async (req, res) => {
+app.get('/api/radio/stream', requireSessionAuth, asyncHandler(async (req, res) => {
   try {
     const AmpacheService = require('../services/ampacheService');
     const pool = getPool();
@@ -3585,46 +3585,90 @@ app.get('/api/webapp/users/search', asyncHandler(usersController.searchUsers));
 // ==========================================
 
 // --- Ampache Media Proxy ---
-app.get('/api/proxy/media/tracks', asyncHandler(async (req, res) => {
+// Fix 2: requireSessionAuth on all three routes (tokens must not be exposed to unauthenticated callers)
+// Fix 3: Strip Ampache session token from outgoing track objects (never expose internal auth tokens to clients)
+// Fix 4: Validate songId as numeric only (SSRF prevention)
+// Fix 5: Proxy the audio stream through Express (browser cannot reach http://ampache:80)
+// Fix 6: Use parseInt for offset/limit (unary + coerces NaN to 0 silently; parseInt + bounds enforced)
+app.get('/api/proxy/media/tracks', requireSessionAuth, asyncHandler(async (req, res) => {
   try {
     const AmpacheService = require('../services/ampacheService');
-    const { offset = 0, limit = 20 } = req.query;
-    const songs = await AmpacheService.getSongs({ offset: +offset, limit: +limit });
-    res.json({ success: true, tracks: songs });
+    const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 20), 100);
+    const songs = await AmpacheService.getSongs({ offset, limit });
+    const safeTracks = (songs || []).map(s => ({
+      id: s.id,
+      title: s.title,
+      artist: s.artist,
+      album: s.album,
+      art: s.art,
+      time: s.time,
+    }));
+    res.json({ success: true, tracks: safeTracks });
   } catch (error) {
     logger.error(`Media proxy tracks error: ${error.message}`);
     res.json({ success: true, tracks: [] });
   }
 }));
 
-app.get('/api/proxy/media/search', asyncHandler(async (req, res) => {
+app.get('/api/proxy/media/search', requireSessionAuth, asyncHandler(async (req, res) => {
   try {
     const AmpacheService = require('../services/ampacheService');
-    const { q = '', limit = 20 } = req.query;
-    if (!q.trim()) {
+    const q = (req.query.q || '').trim();
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 20), 100);
+    if (!q) {
       return res.json({ success: true, tracks: [] });
     }
     const token = await AmpacheService.getAuthToken();
     const resp = await axios.get(`${process.env.AMPACHE_URL || 'http://ampache:80'}/server/json.server.php`, {
-      params: { action: 'search_songs', auth: token, filter: q, limit: +limit },
+      params: { action: 'search_songs', auth: token, filter: q, limit },
       timeout: 10000,
     });
     const songs = resp.data.song || [];
-    res.json({ success: true, tracks: Array.isArray(songs) ? songs : [songs] });
+    const raw = Array.isArray(songs) ? songs : [songs];
+    const safeTracks = raw.map(s => ({
+      id: s.id,
+      title: s.title,
+      artist: s.artist,
+      album: s.album,
+      art: s.art,
+      time: s.time,
+    }));
+    res.json({ success: true, tracks: safeTracks });
   } catch (error) {
     logger.error(`Media proxy search error: ${error.message}`);
     res.json({ success: true, tracks: [] });
   }
 }));
 
-app.get('/api/proxy/media/stream/:songId', asyncHandler(async (req, res) => {
+app.get('/api/proxy/media/stream/:songId', requireSessionAuth, asyncHandler(async (req, res) => {
+  const id = req.params.songId;
+  if (!/^\d+$/.test(id)) {
+    return res.status(400).json({ success: false, error: 'Invalid song ID' });
+  }
   try {
     const AmpacheService = require('../services/ampacheService');
-    const streamUrl = await AmpacheService.getStreamUrl('song', req.params.songId);
-    res.json({ success: true, url: streamUrl });
+    const streamUrl = await AmpacheService.getStreamUrl('song', id);
+    const rangeHeader = req.headers.range;
+    const upstream = await axios.get(streamUrl, {
+      responseType: 'stream',
+      timeout: 30000,
+      headers: rangeHeader ? { Range: rangeHeader } : {},
+    });
+    res.setHeader('Content-Type', upstream.headers['content-type'] || 'audio/mpeg');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Accept-Ranges', 'bytes');
+    if (upstream.headers['content-length']) {
+      res.setHeader('Content-Length', upstream.headers['content-length']);
+    }
+    if (upstream.status === 206) res.status(206);
+    upstream.data.pipe(res);
+    upstream.data.on('error', () => {
+      if (!res.headersSent) res.status(500).end();
+    });
   } catch (error) {
     logger.error(`Media proxy stream error: ${error.message}`);
-    res.status(500).json({ success: false, error: 'Stream unavailable' });
+    if (!res.headersSent) res.status(500).json({ success: false, error: 'Stream unavailable' });
   }
 }));
 
