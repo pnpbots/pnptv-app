@@ -140,16 +140,16 @@ export default function PlanManagement() {
 
     // Price filter / sort
     if (filters.price === "free") {
-      result = result.filter((p) => (typeof p.price === "number" ? p.price : 0) === 0);
+      result = result.filter((p) => (Number(p.price) || 0) === 0);
     } else if (filters.price === "paid") {
-      result = result.filter((p) => (typeof p.price === "number" ? p.price : 0) > 0);
+      result = result.filter((p) => (Number(p.price) || 0) > 0);
     } else if (filters.price === "price_asc") {
       result = [...result].sort(
-        (a, b) => (typeof a.price === "number" ? a.price : 0) - (typeof b.price === "number" ? b.price : 0)
+        (a, b) => (Number(a.price) || 0) - (Number(b.price) || 0)
       );
     } else if (filters.price === "price_desc") {
       result = [...result].sort(
-        (a, b) => (typeof b.price === "number" ? b.price : 0) - (typeof a.price === "number" ? a.price : 0)
+        (a, b) => (Number(b.price) || 0) - (Number(a.price) || 0)
       );
     }
 
@@ -360,7 +360,7 @@ export default function PlanManagement() {
       header: "Price",
       render: (row: AdminPlan) => (
         <span className="text-pnp-textPrimary font-medium">
-          ${(typeof row.price === "number" ? row.price : 0).toFixed(2)}
+          ${(Number(row.price) || 0).toFixed(2)}
         </span>
       ),
     },

@@ -4069,7 +4069,15 @@ app.post('/api/admin/social/sync-content', adminGuard, asyncHandler(contentFeedS
 app.get('/api/webapp/users/search', asyncHandler(usersController.searchUsers));
 
 // Account self-deletion
-app.delete('/api/webapp/account', requireSessionAuth, asyncHandler(usersController.deleteMyAccount));
+const deleteAccountLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 1,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `delete-acct:${req.session?.user?.id || req.ip}`,
+  handler: (_req, res) => res.status(429).json({ error: 'Too many requests' }),
+});
+app.delete('/api/webapp/account', requireSessionAuth, deleteAccountLimiter, asyncHandler(usersController.deleteMyAccount));
 
 // ==========================================
 // SERVICE PROXY ENDPOINTS (Media, Live, Social)
