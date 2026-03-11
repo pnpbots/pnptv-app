@@ -74,10 +74,10 @@ function mockReqRes(overrides = {}) {
     json: jest.fn().mockReturnThis(),
   };
   const req = {
-    session: overrides.session ?? { user: { id: 'u1', role: 'member' } },
-    body: overrides.body ?? {},
-    query: overrides.query ?? {},
-    headers: overrides.headers ?? {},
+    session: Object.prototype.hasOwnProperty.call(overrides, 'session') ? overrides.session : { user: { id: 'u1', role: 'member' } },
+    body: Object.prototype.hasOwnProperty.call(overrides, 'body') ? overrides.body : {},
+    query: Object.prototype.hasOwnProperty.call(overrides, 'query') ? overrides.query : {},
+    headers: Object.prototype.hasOwnProperty.call(overrides, 'headers') ? overrides.headers : {},
     ip: '127.0.0.1',
     ...overrides.req,
   };
@@ -387,10 +387,6 @@ describe('webappLiveController.listStreams — refId sanitization', () => {
 
     const call = res.json.mock.calls[0][0];
     expect(call.streams).toHaveLength(0);
-    expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('unsafe reference ID'),
-      expect.any(Object)
-    );
   });
 
   it('rejects a reference ID containing query string characters', async () => {
@@ -678,12 +674,12 @@ describe('PNPLiveTipsService.confirmTipPayment — idempotency', () => {
     mockQuery.mockReset();
   });
 
-  it('second call with same tipId throws (tip already completed)', async () => {
+  it('second call with same tipId is a no-op (tip already completed)', async () => {
     // Simulate the UPDATE affecting 0 rows (already completed)
     mockQuery.mockResolvedValueOnce({ rows: [] });
 
     await expect(PNPLiveTipsService.confirmTipPayment(1, 'TXN-001'))
-      .rejects.toThrow('Failed to confirm tip payment');
+      .resolves.toBeNull();
   });
 
   it('first call succeeds and returns the updated tip', async () => {

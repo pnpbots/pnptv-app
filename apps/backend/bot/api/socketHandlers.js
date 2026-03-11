@@ -7,6 +7,7 @@ const { getRedis } = require('../../config/redis');
 const { processChatMedia } = require('../services/chatMediaService');
 const NotificationEmitter = require('../services/notificationEmitter');
 const LiveStreamModel = require('../../models/liveStreamModel');
+const BlockedUser = require('../../models/blockedUser');
 
 // ── Lua script: atomic viewer-count decrement clamped to 0 ────────────────────
 // H4: Replaces the non-atomic decr + conditional set(0) pattern.
@@ -319,12 +320,35 @@ function initSocketIO(io) {
       if (!content || !content.trim()) return;
       if (content.length > 2000) return;
 
-      // Hangout rooms require membership
+      // Hangout rooms require membership and no block relationship with the group creator
       const hangoutMatch = String(room).match(/^hangout:(\d+)$/);
       if (hangoutMatch) {
         const gid = parseInt(hangoutMatch[1], 10);
-        const { rows } = await query('SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2', [gid, user.id]);
+        const { rows } = await query(
+          `SELECT hgm.user_id, hg.creator_id
+           FROM hangout_group_members hgm
+           JOIN hangout_groups hg ON hg.id = hgm.group_id
+           WHERE hgm.group_id = $1 AND hgm.user_id = $2`,
+          [gid, user.id]
+        );
         if (rows.length === 0) return;
+        const creatorId = rows[0].creator_id;
+        if (creatorId && String(creatorId) !== String(user.id)) {
+          try {
+            const [blockedByCreator, blockedByUser] = await Promise.all([
+              BlockedUser.isBlocked(creatorId, user.id),
+              BlockedUser.isBlocked(user.id, creatorId),
+            ]);
+            if (blockedByCreator || blockedByUser) {
+              socket.emit('chat:error', { message: 'Cannot send message in this group', code: 'BLOCKED' });
+              return;
+            }
+          } catch (err) {
+            logger.error('chat:message block check error', err);
+            socket.emit('chat:error', { message: 'Access check unavailable. Please try again.' });
+            return;
+          }
+        }
       } else if (room === 'prime') {
         try {
           const EntitlementAccessService = require('./services/entitlementAccessService');
@@ -375,12 +399,26 @@ function initSocketIO(io) {
         const gid = parseInt(mediaHangoutMatch[1], 10);
         try {
           const { rows: memberRows } = await query(
-            'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+            `SELECT hgm.user_id, hg.creator_id
+             FROM hangout_group_members hgm
+             JOIN hangout_groups hg ON hg.id = hgm.group_id
+             WHERE hgm.group_id = $1 AND hgm.user_id = $2`,
             [gid, user.id]
           );
           if (memberRows.length === 0) {
             socket.emit('chat:error', { message: 'Access denied' });
             return;
+          }
+          const mediaCreatorId = memberRows[0].creator_id;
+          if (mediaCreatorId && String(mediaCreatorId) !== String(user.id)) {
+            const [blockedByCreator, blockedByUser] = await Promise.all([
+              BlockedUser.isBlocked(mediaCreatorId, user.id),
+              BlockedUser.isBlocked(user.id, mediaCreatorId),
+            ]);
+            if (blockedByCreator || blockedByUser) {
+              socket.emit('chat:error', { message: 'Cannot upload media in this group', code: 'BLOCKED' });
+              return;
+            }
           }
         } catch (err) {
           logger.error('chat:media membership check error', err);

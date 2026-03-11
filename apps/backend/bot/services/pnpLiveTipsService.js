@@ -54,12 +54,15 @@ class PNPLiveTipsService {
         [transactionId, tipId]
       );
 
-      if (result.rowCount === 0) {
+      const updatedRows = Array.isArray(result.rows) ? result.rows : [];
+      const updatedCount = typeof result.rowCount === 'number' ? result.rowCount : updatedRows.length;
+
+      if (updatedCount === 0) {
         logger.info('confirmTipPayment: already confirmed or not found — idempotent no-op', { tipId });
         return null;
       }
 
-      return result.rows[0];
+      return updatedRows[0] || null;
     } catch (error) {
       logger.error('Error confirming tip payment:', error);
       throw new Error('Failed to confirm tip payment');

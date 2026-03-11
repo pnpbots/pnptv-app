@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
+import Cal, { getCalApi } from "@calcom/embed-react";
 import { Button, Card, Input } from "@pnptv/ui-kit";
 import { useI18n } from "@/lib/i18n";
 import {
@@ -55,8 +56,9 @@ const INITIAL_DATA: WizardData = {
   termsAgreed: false,
 };
 
-const CAL_EMBED_URL = "https://booking.pnptv.app/santino/model-interview?embed=true";
-const CAL_LINK_URL = "https://booking.pnptv.app/santino/model-interview";
+const CAL_INTERVIEW_SLUG = import.meta.env.VITE_CALCOM_INTERVIEW_SLUG ?? "santino/model-interview";
+const CAL_BOOKING_BASE = import.meta.env.VITE_CALCOM_URL ?? "https://booking.pnptv.app";
+const CAL_LINK_URL = `${CAL_BOOKING_BASE}/${CAL_INTERVIEW_SLUG}`;
 
 function ProgressBar({ step, labels }: { step: number; labels: string[] }) {
   return (
@@ -364,12 +366,12 @@ export default function Apply() {
   // Step 5: mark call scheduled
   async function handleMarkScheduled() {
     setSubmitting(true);
+    setError(null);
     try {
       await markCallScheduled(appId || undefined);
       goNext();
-    } catch {
-      // Still allow proceeding
-      goNext();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t.errorSubmit);
     } finally {
       setSubmitting(false);
     }
@@ -687,13 +689,13 @@ export default function Apply() {
           <p className="text-sm text-pnp-textSecondary">
             {t.step5Subtitle}
           </p>
-          <div className="rounded-xl border border-pnp-border overflow-hidden bg-white">
-            <iframe
-              src={CAL_EMBED_URL}
-              className="w-full border-0"
-              style={{ minHeight: "600px" }}
-              title={t.calendarIframeTitle}
-              sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+          <div className="rounded-xl border border-pnp-border overflow-hidden">
+            <Cal
+              calLink={CAL_INTERVIEW_SLUG}
+              config={{ theme: "dark" }}
+              calOrigin={CAL_BOOKING_BASE}
+              embedJsUrl={`${CAL_BOOKING_BASE}/embed/embed.js`}
+              style={{ width: "100%", minHeight: "600px" }}
             />
           </div>
           <p className="text-xs text-pnp-textSecondary text-center">

@@ -328,8 +328,10 @@ async function resolveUserId(userId) {
 
   const isNumeric = /^\d+$/.test(userId);
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+  const isHyphenatedId = userId.includes('-');
 
   if (isNumeric) return userId; // telegram IDs are used as-is
+  if (isHyphenatedId) return userId; // usernames do not allow hyphens, so treat these as canonical IDs
 
   const { query } = require('../../config/postgres');
   if (isUuid) {

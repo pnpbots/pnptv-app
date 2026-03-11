@@ -82,8 +82,10 @@ export function useHangoutSocket(
 
     const onConnect = () => {
       setIsConnected(true);
-      // (Re)join hangout room on connect/reconnect
-      socket.emit("hangout:join", { groupId });
+      // (Re)join hangout room on connect/reconnect — only if userId is known
+      if (userId) {
+        socket.emit("hangout:join", { groupId });
+      }
     };
     const onDisconnect = () => setIsConnected(false);
 
@@ -124,11 +126,14 @@ export function useHangoutSocket(
       setOnlineMembers(data.online);
     };
 
+    const ROOM_NAME_PATTERN = /^[\w\-\/]+$/;
+
     const onCallActive = (data: {
       callId: string;
       roomName: string;
       participantCount: number;
     }) => {
+      if (!ROOM_NAME_PATTERN.test(data.roomName ?? "")) return;
       setCallState({
         isActive: true,
         participantCount: data.participantCount || 0,
@@ -145,12 +150,14 @@ export function useHangoutSocket(
       callId?: string;
       roomName?: string;
     }) => {
+      const roomName = data.call?.roomName ?? data.roomName ?? null;
+      if (roomName && !ROOM_NAME_PATTERN.test(roomName)) return;
       setCallState({
         isActive: true,
         participantCount: 0,
         participants: [],
         callId: data.call?.id ?? data.callId ?? null,
-        roomName: data.call?.roomName ?? data.roomName ?? null,
+        roomName,
         endReason: null,
       });
     };
@@ -191,9 +198,12 @@ export function useHangoutSocket(
     socket.on("hangout:call:participant:left", onParticipantLeft);
 
     // Now emit join — if already connected, emit directly; otherwise onConnect handles it
+    // Guard behind userId: an unauthenticated socket must not join a private room
     if (socket.connected) {
       setIsConnected(true);
-      socket.emit("hangout:join", { groupId });
+      if (userId) {
+        socket.emit("hangout:join", { groupId });
+      }
     }
 
     return () => {

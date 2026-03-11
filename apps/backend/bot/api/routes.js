@@ -27,6 +27,7 @@ const podcastController = require('./controllers/podcastController');
 const ageVerificationController = require('./controllers/ageVerificationController');
 const healthController = require('./controllers/healthController');
 const hangoutsController = require('./controllers/hangoutsController');
+const eventsController = require('./controllers/eventsController');
 const xOAuthRoutes = require('./xOAuthRoutes');
 const xFollowersRoutes = require('./xFollowersRoutes');
 const { adminGuard: xOAuthAdminGuard, adminGuard } = require('../../middleware/guards');
@@ -61,6 +62,9 @@ const canvaRoutes = require('./routes/canvaRoutes');
 
 // ATProto / Bluesky OAuth routes (public endpoints served at the monorepo root)
 const atprotoOAuthRoutes = require('./routes/atprotoOAuthRoutes');
+
+// Courtesy invite links — admin/model create, any authenticated user redeems
+const courtesyInviteRoutes = require('./routes/courtesyInviteRoutes');
 
 // Community Room (Haus) — 24/7 open video room powered by JaaS
 const communityRoomController = require('./controllers/communityRoomController');
@@ -4990,6 +4994,31 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
 // --- Live Tips Proxy (PNP Live tipping system) ---
 const PNPLiveTipsService = require('../services/pnpLiveTipsService');
 
+// ─── Events ──────────────────────────────────────────────────────────────────
+// GET /api/proxy/events/upcoming — Public upcoming events feed
+app.get('/api/proxy/events/upcoming', asyncHandler(eventsController.getUpcoming));
+// GET /api/proxy/events/featured — Featured/pinned upcoming events
+app.get('/api/proxy/events/featured', asyncHandler(eventsController.getFeatured));
+// GET /api/proxy/events/:id — Single event detail
+app.get('/api/proxy/events/:id', asyncHandler(eventsController.getEvent));
+
+// POST /api/webapp/events — Create event (authenticated)
+app.post('/api/webapp/events', requireSessionAuth, asyncHandler(eventsController.createEvent));
+// GET /api/webapp/events/mine — Creator's own events
+app.get('/api/webapp/events/mine', requireSessionAuth, asyncHandler(eventsController.myEvents));
+// GET /api/webapp/events/my-rsvps — Events the user has RSVP'd to
+app.get('/api/webapp/events/my-rsvps', requireSessionAuth, asyncHandler(eventsController.myRsvps));
+// PUT /api/webapp/events/:id — Update event (creator only)
+app.put('/api/webapp/events/:id', requireSessionAuth, asyncHandler(eventsController.updateEvent));
+// DELETE /api/webapp/events/:id — Cancel event (creator only)
+app.delete('/api/webapp/events/:id', requireSessionAuth, asyncHandler(eventsController.cancelEvent));
+// POST /api/webapp/events/:id/rsvp — RSVP to event
+app.post('/api/webapp/events/:id/rsvp', requireSessionAuth, asyncHandler(eventsController.rsvpEvent));
+// DELETE /api/webapp/events/:id/rsvp — Un-RSVP
+app.delete('/api/webapp/events/:id/rsvp', requireSessionAuth, asyncHandler(eventsController.unrsvpEvent));
+// PUT /api/webapp/admin/events/:id/feature — Feature/unfeature event (admin)
+app.put('/api/webapp/admin/events/:id/feature', requireSessionAuth, adminGuard, asyncHandler(eventsController.featureEvent));
+
 // GET /api/proxy/live/performers — List performers from Directus for tip picker
 app.get('/api/proxy/live/performers', asyncHandler(async (req, res) => {
   try {
@@ -6203,6 +6232,16 @@ app.get('/api/webapp/auth/verify', authenticateUser, (req, res) => {
 // ── Auto-sync promoted posts from Directus CMS ──────────────────────────────
 promotedPostController.startAutoSync();
 contentFeedSyncController.startContentFeedSync();
+
+// ==========================================
+// COURTESY INVITE LINKS
+// GET  /api/courtesy-invites/check/:code  — public, no auth
+// GET  /api/courtesy-invites              — list (admin/model auth)
+// POST /api/courtesy-invites              — create (admin/model auth)
+// DELETE /api/courtesy-invites/:id        — deactivate (creator or admin)
+// POST /api/courtesy-invites/:code/redeem — redeem (any authenticated user)
+// ==========================================
+app.use('/api/courtesy-invites', courtesyInviteRoutes);
 
 // ==========================================
 // PUBLIC ENDPOINTS (no auth required)

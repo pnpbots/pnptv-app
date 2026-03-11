@@ -199,7 +199,28 @@ const QUICK_ACTIONS = [
   { label: "Fix failing posts", prompt: "Why are my posts failing? What do you recommend to fix it?" },
   { label: "Improve prompts", prompt: "Review my campaign custom prompts and rewrite them for better X algorithm performance." },
   { label: "Add random video", prompt: "I want to add a random video from our media library to boost engagement. Suggest adding one and explain why video content performs better on X." },
+  { label: "🔥 Lifetime100 campaign", prompt: "Create a Lifetime100 campaign that posts in this exact format: [EMOJI] [HOOK IN ALL CAPS] [EMOJI] / [body mentioning Lex, Santino, clouds, slams, live shows] / 👉 pnptv.app/lifetime100. Use the example: '🔥 $100 LIFETIME ACCESS to PNPtv IS HERE! 🔥 Raw Latino slams, clouds that never stop, and Lex + Santino taking you deep into the spun fire. One payment = forever pig paradise.' Give me the full campaign config." },
 ];
+
+const LIFETIME100_TEMPLATE = {
+  name: "Lifetime100 Promo",
+  topic: "Promote the $100 lifetime access deal at pnptv.app/lifetime100. Highlight Lex & Santino, clouds, slams, live shows, zoom calls, and forever access for one payment.",
+  customPrompt: `MANDATORY FORMAT — follow this exact structure for every post:
+[EMOJI] [HOOK IN ALL CAPS] [EMOJI]
+[1-2 sentences: specific benefits — Lex, Santino, clouds, slams, live shows, zoom calls]
+👉 pnptv.app/lifetime100 [optional emojis]
+
+Example A: 🔥 $100 LIFETIME ACCESS to PNPtv IS HERE! 🔥 Raw Latino slams, clouds that never stop, and Lex + Santino taking you deep into the spun fire. One payment = forever pig paradise. Don't sleep on this! 👉 pnptv.app/lifetime100 💨🐷
+
+Example B: 💎 PNPtv LIFETIME100 DROPPED! 💎 $100 unlocks forever access to Lex & Santino's world: live performances, slam sessions, pounding playlists and chemsex zoom calls. Best investment you'll ever make, pig. 👉 pnptv.app/lifetime100
+
+Always include $100 and lifetime/forever. Hook must be ALL CAPS. CTA must use 👉 pnptv.app/lifetime100.`,
+  grokMode: "xPost",
+  language: "en",
+  intervalMinutes: 240,
+  activeHoursStart: 14,
+  activeHoursEnd: 23,
+};
 
 type CampaignStatus = "all" | "active" | "paused" | "completed";
 
@@ -727,6 +748,17 @@ export default function XAutoCampaigns() {
             {showForm ? "Cancel" : "New Campaign"}
           </button>
           <button
+            onClick={() => {
+              setEditingCampaign(null);
+              setForm((f) => ({ ...defaultForm, ...LIFETIME100_TEMPLATE }));
+              setShowForm(true);
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-orange-500/20 border border-orange-500/40 text-orange-400 hover:bg-orange-500/30 transition-colors"
+          >
+            🔥 Lifetime100 Template
+          </button>
+          <button
             onClick={async () => {
               try {
                 const res = await startXOAuth();
@@ -786,7 +818,7 @@ export default function XAutoCampaigns() {
                 value={form.topic}
                 onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
                 className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none min-h-[80px]"
-                placeholder="Promote PNP Latino TV lifetime membership, highlight community features..."
+                placeholder="e.g. Promote the $100 lifetime deal at pnptv.app/lifetime100. Highlight Lex & Santino, clouds, slams, live shows and forever access."
                 required
               />
             </div>
@@ -870,8 +902,14 @@ export default function XAutoCampaigns() {
                 value={form.customPrompt}
                 onChange={(e) => setForm((f) => ({ ...f, customPrompt: e.target.value }))}
                 className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none min-h-[60px]"
-                placeholder="Additional instructions for Grok..."
+                placeholder="Additional instructions for Grok, e.g. force the lifetime100 format..."
               />
+              <div className="mt-2 p-2.5 rounded-lg bg-orange-500/10 border border-orange-500/20 text-xs text-orange-300/90">
+                <p className="font-semibold mb-1">🔥 Lifetime100 Required Format</p>
+                <p className="font-mono whitespace-pre-wrap leading-relaxed text-orange-200/70">{`[EMOJI] [HOOK IN ALL CAPS] [EMOJI]
+[Benefits: Lex, Santino, clouds, slams, live shows]
+👉 pnptv.app/lifetime100 [emojis]`}</p>
+              </div>
             </div>
 
             <div className="flex items-center gap-3">

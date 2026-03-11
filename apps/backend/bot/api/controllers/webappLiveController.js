@@ -103,9 +103,9 @@ function extractRtmpName(address) {
  */
 function sanitizeRefId(refId) {
   if (typeof refId !== 'string') return null;
-  const clean = refId.replace(/[^a-zA-Z0-9\-_.]/g, '');
-  if (!clean || clean.includes('..')) return null;
-  return clean;
+  if (!/^[a-zA-Z0-9\-_.]+$/.test(refId)) return null;
+  if (refId.includes('..')) return null;
+  return refId;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +160,12 @@ const listStreams = async (req, res) => {
 // ---------------------------------------------------------------------------
 const getRtmpKey = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
+  if (!['creator', 'admin', 'superadmin'].includes(user.role)) {
+    return res.status(403).json({
+      success: false,
+      error: 'Creator or admin access required to retrieve a stream key',
+    });
+  }
 
   if (process.env.RESTREAMER_USER === undefined || process.env.RESTREAMER_PASSWORD === undefined) {
     return res.status(503).json({ success: false, error: 'Live streaming not configured' });

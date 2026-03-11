@@ -2923,7 +2923,7 @@ export interface CreatePlanPayload {
 
 export interface AdminEntitlement {
   id: number;
-  add_on_id: number;
+  add_on_id: string;
   add_on_name: string;
   is_lifetime: boolean;
   is_consumed: boolean;
@@ -2950,7 +2950,7 @@ export function getAdminUserEntitlements(userId: string): Promise<{
 
 export function grantAdminUserEntitlement(
   userId: string,
-  data: { addOnId: number; durationDays?: number; isLifetime?: boolean; reason?: string }
+  data: { addOnId: string; durationDays?: number; isLifetime?: boolean; reason?: string }
 ): Promise<{ success: boolean }> {
   return request(`/api/webapp/admin/users/${userId}/entitlements`, {
     method: "POST",
@@ -2960,7 +2960,7 @@ export function grantAdminUserEntitlement(
 
 export function revokeAdminUserEntitlement(
   userId: string,
-  addOnId: number
+  addOnId: string
 ): Promise<{ success: boolean }> {
   return request(`/api/webapp/admin/users/${userId}/entitlements/${addOnId}`, {
     method: "DELETE",
@@ -2969,7 +2969,7 @@ export function revokeAdminUserEntitlement(
 
 export function extendAdminUserEntitlement(
   userId: string,
-  addOnId: number,
+  addOnId: string,
   data: { extraDays: number; reason?: string }
 ): Promise<{ success: boolean }> {
   return request(`/api/webapp/admin/users/${userId}/entitlements/${addOnId}/extend`, {
@@ -3921,4 +3921,155 @@ export function assertPaymentUrl(url: unknown): string {
     throw new Error("Invalid payment URL — must be https://");
   }
   return url;
+}
+
+// ─── Events ──────────────────────────────────────────────────────────────────
+
+export interface EventItem {
+  id: string;
+  type: "live_stream" | "hangout_event";
+  title: string;
+  description?: string;
+  coverImage?: string;
+  scheduledAt: string;
+  durationMinutes: number;
+  status: "upcoming" | "live" | "ended" | "cancelled";
+  isFeatured: boolean;
+  maxAttendees?: number;
+  rsvpCount: number;
+  userRsvpd: boolean;
+  creatorId: string;
+  creatorName?: string;
+  creatorPhoto?: string;
+  tags?: string[];
+}
+
+export function getUpcomingEvents(params?: {
+  type?: "live_stream" | "hangout_event";
+  limit?: number;
+  hangoutGroupId?: number;
+}): Promise<{ success: boolean; events: EventItem[] }> {
+  const qs = new URLSearchParams();
+  if (params?.type) qs.set("type", params.type);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.hangoutGroupId) qs.set("hangout_group_id", String(params.hangoutGroupId));
+  const q = qs.toString();
+  return request(`/api/proxy/events/upcoming${q ? `?${q}` : ""}`);
+}
+
+export function getFeaturedEvents(): Promise<{ success: boolean; events: EventItem[] }> {
+  return request("/api/proxy/events/featured");
+}
+
+export function getEvent(id: string): Promise<{ success: boolean; event: EventItem }> {
+  return request(`/api/proxy/events/${encodeURIComponent(id)}`);
+}
+
+export function createEvent(data: {
+  type: "live_stream" | "hangout_event";
+  title: string;
+  description?: string;
+  coverImage?: string;
+  scheduledAt: string;
+  durationMinutes?: number;
+  maxAttendees?: number;
+  hangoutGroupId?: number;
+  tags?: string[];
+}): Promise<{ success: boolean; event: EventItem }> {
+  return request("/api/webapp/events", { method: "POST", body: data });
+}
+
+export function updateEvent(
+  id: string,
+  data: Partial<{
+    title: string;
+    description: string;
+    coverImage: string;
+    scheduledAt: string;
+    durationMinutes: number;
+    maxAttendees: number;
+    tags: string[];
+    status: string;
+  }>
+): Promise<{ success: boolean; event: EventItem }> {
+  return request(`/api/webapp/events/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+}
+
+export function cancelEvent(id: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/events/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function rsvpEvent(id: string): Promise<{ success: boolean; rsvpCount: number; userRsvpd: boolean }> {
+  return request(`/api/webapp/events/${encodeURIComponent(id)}/rsvp`, { method: "POST" });
+}
+
+export function unrsvpEvent(id: string): Promise<{ success: boolean; rsvpCount: number; userRsvpd: boolean }> {
+  return request(`/api/webapp/events/${encodeURIComponent(id)}/rsvp`, { method: "DELETE" });
+}
+
+export function getMyRsvps(): Promise<{ success: boolean; events: EventItem[] }> {
+  return request("/api/webapp/events/my-rsvps");
+}
+
+export function getMyEvents(): Promise<{ success: boolean; events: EventItem[] }> {
+  return request("/api/webapp/events/mine");
+}
+
+// ─── Courtesy Invite Links ────────────────────────────────────────────────────
+
+export interface CourtesyInvite {
+  id: number;
+  code: string;
+  created_by: string;
+  label: string | null;
+  max_uses: number;
+  uses_count: number;
+  grant_days: number;
+  is_active: boolean;
+  expires_at: string | null;
+  created_at: string;
+  invite_url: string;
+  redemption_count?: number;
+  creator_username?: string | null;
+  creator_first_name?: string | null;
+}
+
+export interface CourtesyInviteCheckResult {
+  valid: boolean;
+  grant_days?: number;
+  label?: string | null;
+  creator_name?: string;
+  uses_remaining?: number | null;
+  error?: string;
+}
+
+export function checkCourtesyInvite(code: string): Promise<CourtesyInviteCheckResult> {
+  return request(`/api/courtesy-invites/check/${encodeURIComponent(code)}`);
+}
+
+export function redeemCourtesyInvite(code: string): Promise<{
+  success: boolean;
+  grant_days?: number;
+  expires_at?: string;
+  message?: string;
+  error?: string;
+}> {
+  return request(`/api/courtesy-invites/${encodeURIComponent(code)}/redeem`, { method: "POST" });
+}
+
+export function createCourtesyInvite(data: {
+  label?: string;
+  max_uses?: number;
+  grant_days?: number;
+  expires_at?: string;
+}): Promise<{ success: boolean; invite: CourtesyInvite }> {
+  return request("/api/courtesy-invites", { method: "POST", body: data });
+}
+
+export function listCourtesyInvites(): Promise<{ success: boolean; invites: CourtesyInvite[] }> {
+  return request("/api/courtesy-invites");
+}
+
+export function deactivateCourtesyInvite(id: number): Promise<{ success: boolean }> {
+  return request(`/api/courtesy-invites/${id}`, { method: "DELETE" });
 }

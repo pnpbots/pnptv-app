@@ -119,28 +119,29 @@ class MeruLinkInitializer {
 
   async initializeKnownLinks() {
     try {
+      // These links are for both lifetime100 and lifetimepass products.
       const knownLinks = [
-        { code: 'eEnWer', url: 'https://pay.getmeru.com/eEnWer' },
-        { code: 'UBKonc', url: 'https://pay.getmeru.com/UBKonc' },
-        { code: '5gJF8u', url: 'https://pay.getmeru.com/5gJF8u' },
-        { code: 'rVuKhL', url: 'https://pay.getmeru.com/rVuKhL' },
         { code: '9x9bhA', url: 'https://pay.getmeru.com/9x9bhA' },
         { code: 'QrHN40', url: 'https://pay.getmeru.com/QrHN40' },
-        { code: 'CEc_tE', url: 'https://pay.getmeru.com/CEc_tE' },
-        { code: 'ONYdvU', url: 'https://pay.getmeru.com/ONYdvU' },
         { code: 'AhWBch', url: 'https://pay.getmeru.com/AhWBch' },
+        { code: 'ONYdvU', url: 'https://pay.getmeru.com/ONYdvU' },
         { code: 'YNLiew', url: 'https://pay.getmeru.com/YNLiew' },
+        { code: 'ke-46U', url: 'https://pay.getmeru.com/ke-46U' },
+        { code: 'FpKln2', url: 'https://pay.getmeru.com/FpKln2' },
         { code: 'hfFBA-', url: 'https://pay.getmeru.com/hfFBA-' },
-        { code: 'mzETr3', url: 'https://pay.getmeru.com/mzETr3' },
-        { code: 'f9C1EZ', url: 'https://pay.getmeru.com/f9C1EZ' },
-        { code: 'FfaRGs', url: 'https://pay.getmeru.com/FfaRGs' },
-        { code: 'fllJfg', url: 'https://pay.getmeru.com/fllJfg' },
         { code: 'gnXNVP', url: 'https://pay.getmeru.com/gnXNVP' },
         { code: 'eS8-wC', url: 'https://pay.getmeru.com/eS8-wC' },
-        { code: 'RTUt9o', url: 'https://pay.getmeru.com/RTUt9o' },
-        { code: 'KJYYNr', url: 'https://pay.getmeru.com/KJYYNr' },
+        { code: 'fllJfg', url: 'https://pay.getmeru.com/fllJfg' },
+        { code: 'UV0ZQo', url: 'https://pay.getmeru.com/UV0ZQo' },
+        { code: 'W1zWVq', url: 'https://pay.getmeru.com/W1zWVq' },
+        { code: '9hwKaF', url: 'https://pay.getmeru.com/9hwKaF' },
         { code: '1EVaWX', url: 'https://pay.getmeru.com/1EVaWX' },
-        { code: 'hSd8W4', url: 'https://pay.getmeru.com/hSd8W4' },
+        { code: 'KJYYNr', url: 'https://pay.getmeru.com/KJYYNr' },
+        { code: 'RTUt9o', url: 'https://pay.getmeru.com/RTUt9o' },
+        { code: 'uD8-u_', url: 'https://pay.getmeru.com/uD8-u_' },
+        { code: 'nDVlJs', url: 'https://pay.getmeru.com/nDVlJs' },
+        { code: 'Xhrw5x', url: 'https://pay.getmeru.com/Xhrw5x' },
+        { code: 'AwBwet', url: 'https://pay.getmeru.com/AwBwet' },
       ];
 
       let addedCount = 0;

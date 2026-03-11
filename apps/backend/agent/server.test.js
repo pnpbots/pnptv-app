@@ -28,7 +28,8 @@ class MockRedis {
   }
   async lRange(key, start, end) {
     const arr = this.lists.get(key) || [];
-    return arr.slice(start, end + 1);
+    const normalizedEnd = end < 0 ? arr.length + end + 1 : end + 1;
+    return arr.slice(start, normalizedEnd);
   }
   async set(key, value) { this.store.set(key, value); return 'OK'; }
   async get(key) { return this.store.get(key) || null; }

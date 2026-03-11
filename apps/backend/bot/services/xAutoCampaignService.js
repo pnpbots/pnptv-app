@@ -6,6 +6,7 @@ const GrokService = require('./grokService');
 const XPostService = require('./xPostService');
 
 const DIRECTUS_URL = process.env.DIRECTUS_URL || 'http://directus:8055';
+const DIRECTUS_PUBLIC_URL = process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app';
 const DIRECTUS_TOKEN = process.env.DIRECTUS_ADMIN_TOKEN;
 
 let _cachedMediaFolderId = null;
@@ -465,7 +466,7 @@ class XAutoCampaignService {
     }
 
     const chosen = available[Math.floor(Math.random() * available.length)];
-    return `${DIRECTUS_URL}/assets/${chosen}`;
+    return `${DIRECTUS_PUBLIC_URL}/assets/${chosen}`;
   }
 
   // ---------------------------------------------------------------------------

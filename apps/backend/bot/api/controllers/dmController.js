@@ -41,7 +41,7 @@ const getThreads = async (req, res) => {
 // Get conversation messages with a specific user
 const getConversation = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const partnerId = await resolveUserId(req.params.partnerId);
+  const partnerId = await resolveUserId(req.params.partnerId) || req.params.partnerId;
   const { cursor } = req.query;
   try {
     const { rows } = await query(
@@ -61,16 +61,20 @@ const getConversation = async (req, res) => {
     );
     // Reset unread count in thread
     const [a, b] = [user.id, partnerId].sort();
-    if (user.id === a) {
-      await query(
-        'UPDATE dm_threads SET unread_for_a = 0 WHERE user_a=$1 AND user_b=$2',
-        [a, b]
-      ).catch(() => {});
-    } else {
-      await query(
-        'UPDATE dm_threads SET unread_for_b = 0 WHERE user_a=$1 AND user_b=$2',
-        [a, b]
-      ).catch(() => {});
+    try {
+      if (user.id === a) {
+        await query(
+          'UPDATE dm_threads SET unread_for_a = 0 WHERE user_a=$1 AND user_b=$2',
+          [a, b]
+        );
+      } else {
+        await query(
+          'UPDATE dm_threads SET unread_for_b = 0 WHERE user_a=$1 AND user_b=$2',
+          [a, b]
+        );
+      }
+    } catch (_err) {
+      // Best-effort thread counter reset; the conversation payload is still valid.
     }
     return res.json({ success: true, messages: rows.reverse() });
   } catch (err) {
@@ -99,20 +103,23 @@ const getPartnerInfo = async (req, res) => {
 // Send a DM via REST (fallback when Socket.IO is unavailable)
 const sendMessage = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const recipientId = await resolveUserId(req.params.recipientId);
+  const requestedRecipientId = req.params.recipientId;
   const { content } = req.body;
   if (!content?.trim()) return res.status(400).json({ error: 'Content required' });
+  if (requestedRecipientId === user.id) return res.status(400).json({ error: 'Cannot message yourself' });
+  const recipientId = await resolveUserId(requestedRecipientId);
   if (!recipientId) return res.status(404).json({ error: 'Recipient not found' });
   if (recipientId === user.id) return res.status(400).json({ error: 'Cannot message yourself' });
   try {
     // Check if either party has blocked the other (bidirectional)
-    const { rows: blockRows } = await query(
+    const blockResult = await query(
       `SELECT 1 FROM blocked_users
        WHERE (user_id = $1 AND blocked_user_id = $2)
           OR (user_id = $2 AND blocked_user_id = $1)
        LIMIT 1`,
       [recipientId, user.id]
     );
+    const blockRows = Array.isArray(blockResult?.rows) ? blockResult.rows : [];
     if (blockRows.length > 0) {
       return res.status(403).json({ error: 'Cannot send message to this user' });
     }
@@ -124,19 +131,23 @@ const sendMessage = async (req, res) => {
     const senderRole = user.role || '';
     const isAdminSender = senderRole === 'admin' || senderRole === 'superadmin';
     if (!isAdminSender) {
-      const { rows: recipientRows } = await query(
+      const recipientResult = await query(
         'SELECT privacy FROM users WHERE id = $1',
         [recipientId]
       );
+      const recipientRows = Array.isArray(recipientResult?.rows) ? recipientResult.rows : [];
       const recipientPrivacy = recipientRows[0]?.privacy || {};
       const allowMessages = recipientPrivacy.allowMessages !== undefined ? recipientPrivacy.allowMessages : true;
 
       if (!allowMessages) {
         // Sender must be a follower of the recipient to bypass the restriction
-        const { rowCount: followCount } = await query(
+        const followResult = await query(
           'SELECT 1 FROM user_follows WHERE follower_id = $1 AND following_id = $2 LIMIT 1',
           [user.id, recipientId]
         );
+        const followCount = typeof followResult?.rowCount === 'number'
+          ? followResult.rowCount
+          : (Array.isArray(followResult?.rows) ? followResult.rows.length : 0);
         if (followCount === 0) {
           return res.status(403).json({ error: 'This user is not accepting messages' });
         }

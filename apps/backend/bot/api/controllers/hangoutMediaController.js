@@ -17,6 +17,7 @@
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { processHangoutMedia } = require('../../services/hangoutMediaService');
+const BlockedUser = require('../../../models/blockedUser');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -61,6 +62,22 @@ const uploadHangoutMedia = async (req, res) => {
     );
     if (memberRows.length === 0) {
       return res.status(403).json({ error: 'Not a member of this group' });
+    }
+
+    // Block check: group creator blocked uploader OR uploader blocked group creator
+    const { rows: groupCreatorRows } = await query(
+      'SELECT creator_id FROM hangout_groups WHERE id = $1',
+      [groupId]
+    );
+    const creatorId = groupCreatorRows[0]?.creator_id;
+    if (creatorId && String(creatorId) !== String(user.id)) {
+      const [blockedByCreator, blockedByUser] = await Promise.all([
+        BlockedUser.isBlocked(creatorId, user.id),
+        BlockedUser.isBlocked(user.id, creatorId),
+      ]);
+      if (blockedByCreator || blockedByUser) {
+        return res.status(403).json({ error: 'Cannot upload media in this group' });
+      }
     }
 
     // Process the media into per-hangout directory

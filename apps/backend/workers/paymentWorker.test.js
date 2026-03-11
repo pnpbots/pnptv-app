@@ -8,8 +8,10 @@ jest.mock('../../config/worker.config', () => ({
 }), { virtual: true });
 
 jest.mock('../../config/payment.config', () => ({
-  apiUrl: 'http://localhost:3001',
-  retryAttempts: 1,
+  daimoPayments: {
+    endpoint: 'http://localhost:3001',
+    apiKey: 'test-daimo-key',
+  },
 }), { virtual: true });
 
 const PaymentWorker = require('./paymentWorker');

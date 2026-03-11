@@ -533,16 +533,24 @@ class XPostService {
 
     try {
       this.validateMediaSize(mimeType, size);
-      return await this.uploadMediaToXV2({ accessToken, filePath, mimeType, size });
-    } catch (error) {
-      const status = error.response?.status;
-      const data = error.response?.data;
-      logger.error('X media upload failed', {
-        status,
-        data,
-        message: error.message,
-      });
-      throw error;
+      try {
+        return await this.uploadMediaToXV2({ accessToken, filePath, mimeType, size });
+      } catch (v2Error) {
+        const v2Status = v2Error.response?.status;
+        if (v2Status === 401 || v2Status === 403) {
+          logger.warn('X v2 media upload failed with auth error — falling back to v1.1', {
+            status: v2Status,
+            data: v2Error.response?.data,
+          });
+          return await this.uploadMediaToXV1({ accessToken, filePath, mimeType, size });
+        }
+        logger.error('X media upload failed (v2)', {
+          status: v2Status,
+          data: v2Error.response?.data,
+          message: v2Error.message,
+        });
+        throw v2Error;
+      }
     } finally {
       try {
         await fs.promises.unlink(filePath);

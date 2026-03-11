@@ -133,7 +133,7 @@ export default function EditProfileModal({
             value={bio}
             onChange={(e) => setBio(e.target.value.slice(0, 160))}
             placeholder={p.bioPlaceholder}
-            className="w-full rounded-lg border border-pnp-border bg-pnp-bg text-pnp-textPrimary text-sm p-3 resize-none outline-none focus:border-pnp-accent"
+            className="w-full rounded-lg border border-white/20 bg-white/10 text-pnp-textPrimary text-sm p-3 resize-none outline-none focus:border-pnp-accent placeholder:text-white/50"
             rows={3}
           />
           <span className="text-xs text-pnp-textSecondary float-right">{bio.length}/160</span>

@@ -190,6 +190,8 @@ function EPaycoWidget({ config, tokens, usd, purchaseId, onStartPolling }: EPayc
           setSdkError("ePayco checkout SDK failed to initialise.");
           return;
         }
+        const logoUrl = `${window.location.origin}/Logo2-50.png`;
+        const ogImageUrl = `${window.location.origin}/og-image.png`;
         handlerRef.current = window.ePayco.checkout.configure({
           key: config.publicKey,
           test: config.test,
@@ -197,7 +199,7 @@ function EPaycoWidget({ config, tokens, usd, purchaseId, onStartPolling }: EPayc
           invoice: config.invoice,
           ...(config.signature ? { p_hash_key: config.signature } : {}),
           amount: String(config.amount),
-          name: config.description,
+          name: "PNPtv!",
           description: config.description,
           currency: config.currency,
           country: "CO",
@@ -207,6 +209,10 @@ function EPaycoWidget({ config, tokens, usd, purchaseId, onStartPolling }: EPayc
           extra3: config.extra3,
           response: config.response,
           confirmation: config.confirmation,
+          // Brand identity — shown inside the ePayco popup
+          logo: logoUrl,
+          img_logo: logoUrl,
+          img: ogImageUrl,
         });
         setSdkReady(true);
       })

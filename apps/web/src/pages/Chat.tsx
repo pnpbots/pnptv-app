@@ -46,6 +46,7 @@ import {
 } from "@/components/hangouts";
 import { connectSocket } from "@/lib/socket";
 import { translateText } from "@/lib/feedI18n";
+import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -323,7 +324,11 @@ export default function Chat() {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   // Video call
+  // callUrl stores the base meeting URL with the JWT token stripped out.
+  // callJwt stores the token separately so it is not embedded in a plain URL string in state.
+  // They are recombined only at the moment the URL is passed to VideoCallOverlay.
   const [callUrl, setCallUrl] = useState<string | null>(null);
+  const [callJwt, setCallJwt] = useState<string | null>(null);
   const [callId, setCallId] = useState<string | null>(null);
   const [callLoading, setCallLoading] = useState(false);
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -513,6 +518,7 @@ export default function Chat() {
     setActiveGroup(group);
     setView("chat");
     setCallUrl(null);
+    setCallJwt(null);
     setCallId(null);
     setMessagesLoading(true);
     clearMedia();
@@ -547,6 +553,7 @@ export default function Chat() {
     setView("list");
     setActiveGroup(null);
     setCallUrl(null);
+    setCallJwt(null);
     setCallId(null);
     setShowOnline(false);
     clearMedia();
@@ -608,10 +615,13 @@ export default function Chat() {
    * Extract a usable meeting URL and call ID from either a startGroupCall or
    * getActiveGroupCall response.  The backend nests the URL inside `jaas.meetingUrl`
    * and the call ID inside `call.id`.
+   *
+   * The JWT token is stripped from the URL before returning so that callers can
+   * store the base URL and token separately in state.
    */
   const resolveCallData = (
     data: StartCallResponse | GetActiveCallResponse
-  ): { url: string; callId: string } | null => {
+  ): { url: string; jwt: string; callId: string } | null => {
     const meetingUrl = data.jaas?.meetingUrl ?? null;
     const callId = data.call?.id ?? null;
 
@@ -625,7 +635,16 @@ export default function Chat() {
       return null;
     }
 
-    return { url: meetingUrl, callId };
+    try {
+      const parsed = new URL(meetingUrl);
+      const jwt = parsed.searchParams.get("token") ?? parsed.searchParams.get("jwt") ?? "";
+      parsed.searchParams.delete("token");
+      parsed.searchParams.delete("jwt");
+      return { url: parsed.toString(), jwt, callId };
+    } catch {
+      // URL constructor failed — return original with empty token
+      return { url: meetingUrl, jwt: "", callId };
+    }
   };
 
   const handleStartCall = async () => {
@@ -636,6 +655,7 @@ export default function Chat() {
       const resolved = resolveCallData(data);
       if (resolved) {
         setCallUrl(resolved.url);
+        setCallJwt(resolved.jwt);
         setCallId(resolved.callId);
       } else if (data.jaas === null) {
         // JaaS not configured on the server
@@ -657,6 +677,7 @@ export default function Chat() {
       leaveGroupCall(activeGroup.id, resolvedCallId).catch(() => {});
     }
     setCallUrl(null);
+    setCallJwt(null);
     setCallId(null);
   }, [activeGroup, callId, callState.callId]);
 
@@ -665,6 +686,7 @@ export default function Chat() {
     if (callState.endReason === "creator_left") {
       setUploadError(t.chat.callEndedHostLeft);
       setCallUrl(null);
+      setCallJwt(null);
       setCallId(null);
     }
   }, [callState.endReason, t.chat]);
@@ -905,18 +927,33 @@ export default function Chat() {
         )}
 
         {/* Embedded video call (not for main group) */}
-        {callUrl && !activeGroup.isMain && (
-          <VideoCallOverlay
-            meetingUrl={callUrl}
-            groupName={activeGroup.name}
-            onClose={handleEndCall}
-            initialMode="embedded"
-            isAdmin={isAdmin}
-            groupId={activeGroup.id}
-            userId={user?.id ? String(user.id) : undefined}
-            socketChat={{ messages, sendMessage, emitTyping, typingUsers }}
-          />
-        )}
+        {callUrl && !activeGroup.isMain && (() => {
+          // Reconstruct the full meeting URL with the JWT token only at render
+          // time — keeping the token out of the plain callUrl state string.
+          let fullMeetingUrl = callUrl;
+          if (callJwt) {
+            try {
+              const u = new URL(callUrl);
+              u.searchParams.set("jwt", callJwt);
+              fullMeetingUrl = u.toString();
+            } catch {
+              // fallback: append raw (URL was already validated in resolveCallData)
+              fullMeetingUrl = callJwt ? `${callUrl}?jwt=${callJwt}` : callUrl;
+            }
+          }
+          return (
+            <VideoCallOverlay
+              meetingUrl={fullMeetingUrl}
+              groupName={activeGroup.name}
+              onClose={handleEndCall}
+              initialMode="embedded"
+              isAdmin={isAdmin}
+              groupId={activeGroup.id}
+              userId={user?.id ? String(user.id) : undefined}
+              socketChat={{ messages, sendMessage, emitTyping, typingUsers }}
+            />
+          );
+        })()}
 
         {/* Online Members Panel */}
         {showOnline && (
@@ -996,6 +1033,11 @@ export default function Chat() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Hangout event reminder — shown for non-main groups that have upcoming events */}
+        {!activeGroup.isMain && !activeGroup.isWallOfFame && (
+          <HangoutEventReminder groupId={activeGroup.id} />
         )}
 
         {/* Messages area */}

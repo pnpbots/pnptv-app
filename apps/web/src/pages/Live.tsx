@@ -9,6 +9,9 @@ import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 import { useI18n } from "@/lib/i18n";
+import { UpcomingEvents } from "@/components/events/UpcomingEvents";
+import { CreateEventModal } from "@/components/events/CreateEventModal";
+import type { EventItem } from "@/components/events/EventCard";
 
 const StreamerDashboard = lazy(() => import("@/components/streaming/StreamerDashboard"));
 import {
@@ -30,6 +33,9 @@ import {
 } from "@/lib/api";
 
 const CALCOM_URL = import.meta.env.VITE_CALCOM_URL || "https://booking.pnptv.app";
+if (!CALCOM_URL.startsWith("https://")) {
+  throw new Error(`Invalid CALCOM_URL: must start with https:// (got: ${CALCOM_URL})`);
+}
 
 const ALLOWED_IMAGE_HOSTS = ["cms.pnptv.app", "app.pnptv.app", "pnptv.app"];
 function isValidPhotoUrl(photo: string | null | undefined): photo is string {
@@ -52,6 +58,9 @@ export default function Live() {
   const t = useI18n();
   const navigate = useNavigate();
   const { showTutorial, dismissTutorial } = useTutorial("live");
+  const canCreateLive = isAuthenticated && (user?.role === "model" || user?.role === "creator" || user?.role === "admin" || user?.role === "superadmin");
+  const [showCreateEvent, setShowCreateEvent] = useState(false);
+  const [liveEventsKey, setLiveEventsKey] = useState(0);
 
   // Performers & streams
   const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
@@ -335,6 +344,17 @@ export default function Live() {
         <p className="text-[10px] text-pnp-error mb-2">{goLiveError}</p>
       )}
 
+      {/* ── Upcoming Live Events ── */}
+      <UpcomingEvents
+        key={liveEventsKey}
+        type="live_stream"
+        limit={6}
+        title="Scheduled Live Events"
+        canCreate={canCreateLive}
+        onCreateClick={() => setShowCreateEvent(true)}
+        className="mb-2"
+      />
+
       {/* ── Performer Grid ── */}
       {performersLoading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
@@ -506,7 +526,7 @@ export default function Live() {
       {/* Book a Session */}
       <div className="mt-4">
         <button
-          onClick={() => setShowBooking(!showBooking)}
+          onClick={() => isAuthenticated && setShowBooking(!showBooking)}
           className="w-full flex items-center justify-between py-3 border-t border-white/5"
         >
           <div className="flex items-center gap-2">
@@ -520,7 +540,23 @@ export default function Live() {
           </svg>
         </button>
 
-        {showBooking && (
+        {!isAuthenticated ? (
+          <div className="mt-2 flex items-center gap-3 p-4 rounded-xl border border-pnp-border bg-pnp-surface">
+            <svg className="w-5 h-5 text-pnp-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-pnp-textPrimary">Sign in to book a session</p>
+              <p className="text-xs text-pnp-textSecondary mt-0.5">You must be logged in to book a private session with a performer.</p>
+            </div>
+            <button
+              onClick={login}
+              className="flex-shrink-0 px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-semibold"
+            >
+              Sign in
+            </button>
+          </div>
+        ) : showBooking && (
           <div className="mt-2">
             <div className="flex gap-2 mb-3">
               <Button variant="secondary" size="sm" onClick={() => window.open(CALCOM_URL, "_blank")}>
@@ -865,6 +901,18 @@ export default function Live() {
         }>
           <StreamerDashboard onClose={() => setShowBrowserStreamer(false)} />
         </Suspense>
+      )}
+
+      {showCreateEvent && (
+        <CreateEventModal
+          defaultType="live_stream"
+          canCreateLive={canCreateLive}
+          onClose={() => setShowCreateEvent(false)}
+          onCreated={(_event: EventItem) => {
+            setShowCreateEvent(false);
+            setLiveEventsKey((k) => k + 1);
+          }}
+        />
       )}
     </div>
   );

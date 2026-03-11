@@ -40,7 +40,14 @@ jest.mock('../config/redis', () => {
 });
 
 const mockQuery = jest.fn();
-jest.mock('../config/postgres', () => ({ query: mockQuery }));
+jest.mock('../config/postgres', () => ({
+  query: mockQuery,
+  getPool: () => ({ query: mockQuery }),
+}));
+
+jest.mock('../bot/services/platformBanService', () => ({
+  isBanned: jest.fn(async () => false),
+}));
 
 jest.mock('../utils/logger', () => ({
   info:  jest.fn(),
@@ -72,6 +79,18 @@ function buildApp(sessionData, routeFn) {
   });
   routeFn(app);
   return app;
+}
+
+function configureSecurityMocks(sessionData) {
+  mockQuery.mockImplementation(async (sql) => {
+    if (sql.includes('SELECT is_active, is_deleted FROM users')) {
+      return { rows: [{ is_active: true, is_deleted: false }] };
+    }
+    if (sql.includes('SELECT role FROM users')) {
+      return { rows: [{ role: sessionData?.user?.role ?? 'user' }] };
+    }
+    return { rows: [] };
+  });
 }
 
 /** Make a minimal valid session object. */
@@ -116,6 +135,7 @@ beforeEach(() => {
 
 describe('authGuard', () => {
   function buildGuardApp(sessionData) {
+    configureSecurityMocks(sessionData);
     return buildApp(sessionData, (app) => {
       app.get('/protected', authGuard, (req, res) => {
         res.json({ success: true, userId: req.user.id });
@@ -197,6 +217,7 @@ describe('authGuard', () => {
 
 describe('roleGuard', () => {
   function buildRoleApp(sessionData, ...allowedRoles) {
+    configureSecurityMocks(sessionData);
     return buildApp(sessionData, (app) => {
       app.get('/admin', roleGuard(...allowedRoles), (req, res) => {
         res.json({ success: true });
@@ -504,6 +525,7 @@ describe('authenticateUser — JWT_SECRET not configured', () => {
 
 describe('authGuard + roleGuard in series', () => {
   function buildComposedApp(sessionData, ...allowedRoles) {
+    configureSecurityMocks(sessionData);
     return buildApp(sessionData, (app) => {
       app.get('/admin-only', authGuard, roleGuard(...allowedRoles), (req, res) => {
         res.json({ success: true, userId: req.user.id });
@@ -546,6 +568,7 @@ describe('Auth middleware resilience when Redis throws', () => {
     const { getRedis } = require('../config/redis');
     getRedis().get.mockRejectedValueOnce(new Error('ECONNREFUSED'));
 
+    configureSecurityMocks(makeSession(USER_ID));
     const app = buildApp(makeSession(USER_ID), (app) => {
       app.get('/protected', authGuard, (req, res) => res.json({ success: true }));
     });

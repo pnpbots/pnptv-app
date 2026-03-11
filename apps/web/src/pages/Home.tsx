@@ -9,14 +9,19 @@ import { useDirectus } from "@/hooks/useDirectus";
 import { useI18n } from "@/lib/i18n";
 import { PostComposer } from "@/components/PostComposer";
 import { SharePostModal } from "@/components/SharePostModal";
+import { UpcomingEvents } from "@/components/events/UpcomingEvents";
+import { CreateEventModal } from "@/components/events/CreateEventModal";
+import type { EventItem } from "@/components/events/EventCard";
 import {
   getHomeFeedPosts,
   getSocialFeedPosts,
   getFeaturedPerformers,
+  getHangoutGroups,
   togglePostLike,
   updateProfile,
   type SocialPostItem,
   type FeaturedPerformer,
+  type HangoutGroup,
 } from "@/lib/api";
 import { translateText } from "@/lib/feedI18n";
 
@@ -61,6 +66,8 @@ export default function Home() {
   const [pendingSharePostId, setPendingSharePostId] = useState<number | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareModalPostId, setShareModalPostId] = useState<number | null>(null);
+  const [showCreateEvent, setShowCreateEvent] = useState(false);
+  const [eventKey, setEventKey] = useState(0);
 
   const { data: announcements } = useDirectus<Announcement>({
     collection: "announcements",
@@ -72,6 +79,7 @@ export default function Home() {
   });
 
   const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
+  const [userGroups, setUserGroups] = useState<HangoutGroup[]>([]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -88,6 +96,14 @@ export default function Home() {
         if (res.success) setPerformers(res.performers);
       })
       .catch(() => {});
+
+    if (isAuthenticated) {
+      getHangoutGroups()
+        .then((res) => {
+          if (res.success) setUserGroups(res.groups);
+        })
+        .catch(() => {});
+    }
   }, [authLoading, isAuthenticated]);
 
   const handleLike = useCallback(async (postId: number) => {
@@ -142,8 +158,9 @@ export default function Home() {
   }, [translatingId, translatedPosts, user?.language]);
 
   const username = user?.username || user?.displayName || "user";
-  const { tier, isPrime, isMember } = useTier();
+  const { tier, isPrime, isMember, isAdmin } = useTier();
   const { showTutorial, dismissTutorial } = useTutorial("home");
+  const canCreateLive = isAdmin || user?.role === "model" || user?.role === "creator";
 
 
   return (
@@ -245,6 +262,17 @@ export default function Home() {
           ))}
         </div>
       )}
+
+      {/* Upcoming Events */}
+      <UpcomingEvents
+        key={eventKey}
+        limit={8}
+        title="Upcoming Events"
+        canCreate={isAuthenticated && (canCreateLive || isPrime || isMember)}
+        onCreateClick={() => setShowCreateEvent(true)}
+        currentUserId={user?.dbId}
+        isAdmin={isAdmin}
+      />
 
       {/* Featured Performers */}
       {performers.length > 0 && (
@@ -545,6 +573,18 @@ export default function Home() {
           isOpen={showShareModal}
           onClose={() => { setShowShareModal(false); setShareModalPostId(null); }}
           contentDisclaimerAccepted={contentDisclaimer}
+        />
+      )}
+
+      {showCreateEvent && (
+        <CreateEventModal
+          canCreateLive={canCreateLive}
+          userGroups={userGroups}
+          onClose={() => setShowCreateEvent(false)}
+          onCreated={(_event: EventItem) => {
+            setShowCreateEvent(false);
+            setEventKey((k) => k + 1);
+          }}
         />
       )}
     </div>

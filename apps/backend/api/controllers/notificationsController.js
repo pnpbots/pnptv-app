@@ -1,5 +1,5 @@
 const { query } = require('../../config/postgres');
-const { cache } = require('../../config/redis');
+const { cache, getRedis } = require('../../config/redis');
 const logger = require('../../utils/logger');
 const NotificationEmitter = require('../../bot/services/notificationEmitter');
 
@@ -19,6 +19,7 @@ const ALLOWED_PREF_KEYS = new Set([
 ]);
 
 const CHANNEL_KEYS = ['inApp', 'bot', 'email', 'push'];
+const unreadCountDefaults = { social: 0, messaging: 0, hangouts: 0, commerce: 0, system: 0, total: 0 };
 
 const HH_MM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -212,10 +213,13 @@ async function getNotifications(req, res) {
  */
 async function getUnreadCounts(userId) {
   const cacheKey = unreadCacheKey(userId);
+  const redisCache = cache || (typeof getRedis === 'function' ? getRedis() : null);
 
   // Check cache first
-  const cached = await cache.get(cacheKey);
-  if (cached !== null) return cached;
+  if (redisCache && typeof redisCache.get === 'function') {
+    const cached = await redisCache.get(cacheKey);
+    if (cached !== null) return cached;
+  }
 
   try {
     const { rows } = await query(
@@ -226,7 +230,7 @@ async function getUnreadCounts(userId) {
       [userId]
     );
 
-    const counts = { social: 0, messaging: 0, hangouts: 0, commerce: 0, system: 0, total: 0 };
+    const counts = { ...unreadCountDefaults };
     for (const row of rows) {
       if (counts[row.category] !== undefined) {
         counts[row.category] = row.count;
@@ -235,11 +239,13 @@ async function getUnreadCounts(userId) {
     }
 
     // Populate cache
-    await cache.set(cacheKey, counts, UNREAD_COUNT_TTL);
+    if (redisCache && typeof redisCache.set === 'function') {
+      await redisCache.set(cacheKey, counts, UNREAD_COUNT_TTL);
+    }
     return counts;
   } catch (error) {
     logger.error('Get unread counts error:', error);
-    return { social: 0, messaging: 0, hangouts: 0, commerce: 0, system: 0, total: 0 };
+    return { ...unreadCountDefaults };
   }
 }
 
@@ -436,6 +442,10 @@ async function updatePreferences(req, res) {
 
 function formatNotification(row) {
   const meta = row.metadata || {};
+  const actorPhotoUrl = typeof row.actor_photo_url === 'string'
+    && (row.actor_photo_url.startsWith('/') || /^https?:\/\//i.test(row.actor_photo_url))
+    ? row.actor_photo_url
+    : null;
   return {
     id: row.id,
     type: row.type,
@@ -444,7 +454,7 @@ function formatNotification(row) {
     actorId: row.actor_id,
     actorUsername: row.actor_username,
     actorFirstName: row.actor_first_name,
-    actorPhotoUrl: row.actor_photo_url,
+    actorPhotoUrl,
     entityType: row.entity_type,
     entityId: row.entity_id,
     message: row.message,

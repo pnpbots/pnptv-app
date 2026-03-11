@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { acceptTerms, verifyAgeSelf } from "@/lib/api";
 import { Button, Card } from "@pnptv/ui-kit";
@@ -22,9 +23,9 @@ export function VerificationGate({ children }: VerificationGateProps) {
     return <div className="flex items-center justify-center min-h-screen"><div className="animate-spin w-8 h-8 border-2 border-white/20 border-t-white rounded-full" /></div>;
   }
 
-  // Not authenticated: show children (Layout handles login)
+  // Not authenticated: redirect to login — never expose gated content
   if (!isAuthenticated || !user) {
-    return <>{children}</>;
+    return <Navigate to="/login" replace />;
   }
 
   // Both verified: show content

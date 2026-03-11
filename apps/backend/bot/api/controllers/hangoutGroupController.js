@@ -8,6 +8,7 @@ const { buildJitsiHangoutsUrl } = require('../../utils/jitsiHangoutsWebApp');
 const jaasService = require('../../services/jaasService');
 const NotificationEmitter = require('../../services/notificationEmitter');
 const { hasAccess } = require('../../services/accessService');
+const BlockedUser = require('../../../models/blockedUser');
 // Check if a photo path is a valid web URL (not a Telegram file ID)
 const isValidPhotoUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
 
@@ -262,6 +263,18 @@ const joinGroup = async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
     if (!rows[0].is_public) return res.status(403).json({ error: 'This group is invite-only' });
 
+    // Block check: creator blocked joiner OR joiner blocked creator
+    const group = rows[0];
+    if (group.creator_id && String(group.creator_id) !== String(user.id)) {
+      const [blockedByCreator, blockedByUser] = await Promise.all([
+        BlockedUser.isBlocked(group.creator_id, user.id),
+        BlockedUser.isBlocked(user.id, group.creator_id),
+      ]);
+      if (blockedByCreator || blockedByUser) {
+        return res.status(403).json({ error: 'Cannot join this group' });
+      }
+    }
+
     // Atomic capacity-checked insert (prevents race condition)
     const { rowCount } = await query(
       `INSERT INTO hangout_group_members (group_id, user_id, role)
@@ -286,7 +299,6 @@ const joinGroup = async (req, res) => {
     await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
 
     // Notify group creator about new member
-    const group = rows[0];
     if (group.creator_id && String(group.creator_id) !== String(user.id)) {
       NotificationEmitter.emit({
         type: 'group_join', category: 'hangouts', priority: 'normal',
@@ -434,6 +446,22 @@ const sendMessage = async (req, res) => {
   try {
     if (!(await isMember(groupId, user.id))) {
       return res.status(403).json({ error: 'Not a member of this group' });
+    }
+
+    // Block check: group creator blocked sender OR sender blocked group creator
+    const { rows: groupCreatorRows } = await query(
+      'SELECT creator_id FROM hangout_groups WHERE id = $1',
+      [groupId]
+    );
+    const creatorId = groupCreatorRows[0]?.creator_id;
+    if (creatorId && String(creatorId) !== String(user.id)) {
+      const [blockedByCreator, blockedByUser] = await Promise.all([
+        BlockedUser.isBlocked(creatorId, user.id),
+        BlockedUser.isBlocked(user.id, creatorId),
+      ]);
+      if (blockedByCreator || blockedByUser) {
+        return res.status(403).json({ error: 'Cannot send message in this group' });
+      }
     }
 
     const room = `hangout:${groupId}`;
@@ -607,6 +635,17 @@ const requestJoinGroup = async (req, res) => {
     if (group.is_public) return res.status(400).json({ error: 'This group is public, use join instead' });
     if (await isMember(groupId, user.id)) return res.status(409).json({ error: 'Already a member' });
 
+    // Block check: creator blocked requester OR requester blocked creator
+    if (group.creator_id && String(group.creator_id) !== String(user.id)) {
+      const [blockedByCreator, blockedByUser] = await Promise.all([
+        BlockedUser.isBlocked(group.creator_id, user.id),
+        BlockedUser.isBlocked(user.id, group.creator_id),
+      ]);
+      if (blockedByCreator || blockedByUser) {
+        return res.status(403).json({ error: 'Cannot request to join this group' });
+      }
+    }
+
     // Upsert: reset rejected requests to pending
     const { rows } = await query(
       `INSERT INTO hangout_join_requests (group_id, user_id, status)
@@ -715,8 +754,25 @@ const handleJoinRequest = async (req, res) => {
 
     const joinRequest = rows[0];
 
-    // On accept, add as member with capacity check
+    // On accept, re-check block status in case a block was placed after the request
     if (action === 'accept') {
+      if (joinRequest.user_id && String(joinRequest.user_id) !== String(user.id)) {
+        const [blockedByCreator, blockedByRequester] = await Promise.all([
+          BlockedUser.isBlocked(user.id, joinRequest.user_id),
+          BlockedUser.isBlocked(joinRequest.user_id, user.id),
+        ]);
+        if (blockedByCreator || blockedByRequester) {
+          // Silently reject: revert the accept we just wrote
+          await query(
+            `UPDATE hangout_join_requests
+             SET status = 'rejected', resolved_at = NOW(), resolved_by = $1
+             WHERE id = $2`,
+            [user.id, requestId]
+          );
+          return res.status(403).json({ error: 'Cannot accept this request' });
+        }
+      }
+
       const { rowCount } = await query(
         `INSERT INTO hangout_group_members (group_id, user_id, role)
          SELECT $1, $2, 'member'

@@ -239,16 +239,17 @@ class ApplyController {
         return res.status(400).json({ success: false, error: 'You must agree to the creator terms' });
       }
 
-      // Validate age >= 18
-      const dob = new Date(dateOfBirth);
-      const today = new Date();
-      let age = today.getFullYear() - dob.getFullYear();
-      const monthDiff = today.getMonth() - dob.getMonth();
-      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
-        age--;
+      // Validate age >= 18 (2257 compliance — server-side enforcement)
+      if (!dateOfBirth) {
+        return res.status(400).json({ success: false, error: 'Valid date of birth is required' });
       }
+      const dobTs = new Date(dateOfBirth).getTime();
+      if (isNaN(dobTs)) {
+        return res.status(400).json({ success: false, error: 'Valid date of birth is required' });
+      }
+      const age = Math.floor((Date.now() - dobTs) / (365.25 * 24 * 60 * 60 * 1000));
       if (age < 18) {
-        return res.status(400).json({ success: false, error: 'You must be at least 18 years old to apply' });
+        return res.status(400).json({ success: false, error: 'You must be 18 or older to apply' });
       }
 
       // Check for duplicate pending application

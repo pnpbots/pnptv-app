@@ -171,7 +171,7 @@ function EntitlementStatusPill({ entitlement }: EntitlementStatusPillProps) {
 // ---------------------------------------------------------------------------
 
 interface ExtendFormProps {
-  addOnId: number;
+  addOnId: string;
   addOnName: string;
   userId: string;
   onDone: () => void;
@@ -286,11 +286,6 @@ function GrantEntitlementForm({ userId, availableAddOns, onGranted }: GrantFormP
       setErr("Please select an add-on.");
       return;
     }
-    const addOnId = parseInt(selectedAddOnId, 10);
-    if (isNaN(addOnId)) {
-      setErr("Invalid add-on selection.");
-      return;
-    }
     const days = isLifetime ? undefined : parseInt(durationDays, 10);
     if (!isLifetime && (!days || isNaN(days) || days < 1)) {
       setErr("Enter a valid duration in days (minimum 1).");
@@ -301,12 +296,12 @@ function GrantEntitlementForm({ userId, availableAddOns, onGranted }: GrantFormP
     setSuccessMsg(null);
     try {
       await grantAdminUserEntitlement(userId, {
-        addOnId,
+        addOnId: selectedAddOnId,
         durationDays: isLifetime ? undefined : days,
         isLifetime,
         reason: reason || undefined,
       });
-      const addOnName = availableAddOns.find((a) => a.id === addOnId)?.name ?? String(addOnId);
+      const addOnName = availableAddOns.find((a) => a.id === selectedAddOnId)?.name ?? selectedAddOnId;
       setSuccessMsg(`"${addOnName}" granted successfully.`);
       setSelectedAddOnId("");
       setIsLifetime(false);
@@ -471,7 +466,7 @@ function EntitlementsSection({ userId }: EntitlementsSectionProps) {
   const [auditOpen, setAuditOpen] = useState(false);
 
   // Per-row extend form tracking
-  const [extendingAddOnId, setExtendingAddOnId] = useState<number | null>(null);
+  const [extendingAddOnId, setExtendingAddOnId] = useState<string | null>(null);
 
   // Revoke confirmation
   const [revokeTarget, setRevokeTarget] = useState<AdminEntitlement | null>(null);

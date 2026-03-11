@@ -352,10 +352,7 @@ describe('directMessagesController.sendMessage', () => {
     await request(app).post(`/dm/send/${BOB_ID}`)
       .send({ content: 'hi' });
 
-    // Expect first query to be the block check
-    const blockQuery = mockQuery.mock.calls[0][0];
-    // This test FAILS with the current code because the column names are wrong
-    // When the bug is fixed, blocker_id will be replaced with user_id
+    const blockQuery = (mockQuery.mock.calls.find(([sql]) => sql.includes('blocked_users')) || [])[0] || '';
     expect(blockQuery).toMatch(/user_id|blocked_user_id/);
   });
 });
@@ -842,15 +839,9 @@ describe('dmController.sendMessage', () => {
       app.post('/dm/send/:recipientId', dmController.sendMessage);
     });
 
-    // With the current bug, the query uses blocker_id/blocked_id which don't exist.
-    // After fix, it uses user_id/blocked_user_id.
     await request(app).post(`/dm/send/${BOB_ID}`).send({ content: 'hi' });
 
-    if (mockQuery.mock.calls.length > 0) {
-      const blockQuery = mockQuery.mock.calls[0][0];
-      // Document the broken state — after fix this must be:
-      // expect(blockQuery).toContain('user_id');
-      console.log('[DM-1 regression check] block query:', blockQuery);
-    }
+    const blockQuery = (mockQuery.mock.calls.find(([sql]) => sql.includes('blocked_users')) || [])[0] || '';
+    expect(blockQuery).toMatch(/user_id|blocked_user_id/);
   });
 });

@@ -10,7 +10,9 @@ import { useOrientation } from "@/hooks/useOrientation";
 import {
   joinCommunityRoom,
   getCommunityRoomOccupancy,
+  getUpcomingEvents,
   type CommunityRoomInfo,
+  type EventItem,
 } from "@/lib/api";
 
 export default function MainStage() {
@@ -31,6 +33,13 @@ export default function MainStage() {
   const [jitsiApi, setJitsiApi] = useState<any>(null);
   const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
   const isLandscape = useOrientation();
+  const [upcomingHangoutEvents, setUpcomingHangoutEvents] = useState<EventItem[]>([]);
+
+  useEffect(() => {
+    getUpcomingEvents({ type: "hangout_event", limit: 3 })
+      .then((res) => { if (res.success) setUpcomingHangoutEvents(res.events); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     getCommunityRoomOccupancy()
@@ -48,6 +57,8 @@ export default function MainStage() {
     setShowPermGate(true);
   };
 
+  const ALLOWED_CALL_ORIGINS = ["https://8x8.vc/", "https://meet.jit.si/"];
+
   const handlePermGranted = useCallback(async () => {
     setShowPermGate(false);
     if (!user) return;
@@ -61,6 +72,15 @@ export default function MainStage() {
         "Guest";
       const res = await joinCommunityRoom(displayName);
       const src = res.meetingUrl;
+
+      const isValidOrigin = ALLOWED_CALL_ORIGINS.some((prefix) =>
+        src?.startsWith(prefix)
+      );
+      if (!src || !isValidOrigin) {
+        setError("Video room is temporarily unavailable. Please try again.");
+        return;
+      }
+
       setRoomInfo(res);
       setIframeSrc(src);
       setJoined(true);
@@ -301,6 +321,38 @@ export default function MainStage() {
           </p>
         )}
       </Card>
+
+      {/* Upcoming Hangout Events reminder */}
+      {upcomingHangoutEvents.length > 0 && (
+        <Card className="p-4 space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide" style={{ color: "#5ED1C4" }}>
+            Upcoming Hangout Events
+          </h2>
+          <div className="space-y-2">
+            {upcomingHangoutEvents.map((ev) => {
+              const d = new Date(ev.scheduledAt);
+              const timeStr = d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })
+                + " · " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              return (
+                <div key={ev.id} className="flex items-center gap-3 py-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(94,209,196,0.1)" }}>
+                    <svg className="w-4 h-4" style={{ color: "#5ED1C4" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white truncate">{ev.title}</p>
+                    <p className="text-xs" style={{ color: "#8E8E93" }}>{timeStr}</p>
+                  </div>
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>
+                    {ev.rsvpCount} going
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       {/* Stage Rules */}
       <Card className="p-6 space-y-3">

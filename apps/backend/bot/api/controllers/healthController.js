@@ -15,11 +15,11 @@ class HealthController {
   static async healthCheck(req, res) {
     try {
       const startTime = process.hrtime();
-      
+
       // Check database connection
       let dbStatus = 'unknown';
       let redisStatus = 'unknown';
-      
+
       try {
         const pool = getPool();
         if (pool) {
@@ -44,9 +44,11 @@ class HealthController {
 
       const diff = process.hrtime(startTime);
       const responseTimeMs = (diff[0] * 1000) + (diff[1] / 1000000);
+      const dependencyStatuses = [dbStatus, redisStatus];
+      const isDegraded = dependencyStatuses.some((status) => status !== 'healthy');
 
       const healthData = {
-        status: 'healthy',
+        status: isDegraded ? 'degraded' : 'healthy',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         memoryUsage: process.memoryUsage(),
@@ -58,7 +60,7 @@ class HealthController {
         queryCache: getQueryCacheStats()
       };
 
-      res.status(200).json(healthData);
+      res.status(isDegraded ? 503 : 200).json(healthData);
     } catch (error) {
       logger.error('Health check failed:', error);
       res.status(503).json({

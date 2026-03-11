@@ -23,6 +23,7 @@ const logger = require('../../../utils/logger');
 const PushNotificationService = require('../../services/pushNotificationService');
 const NotificationEmitter = require('../../services/notificationEmitter');
 const jaasService = require('../../services/jaasService');
+const BlockedUser = require('../../../models/blockedUser');
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -103,6 +104,26 @@ const ensureMembership = async (groupId, userId) => {
 
   return false;
 };
+
+/**
+ * Check if userId is blocked by or has blocked the group's creator.
+ * Returns true when a block relationship exists and the action must be denied.
+ * Skips the check when the user IS the creator (no self-block scenario).
+ */
+async function isBlockedFromGroup(groupId, userId) {
+  const { rows } = await query(
+    'SELECT creator_id FROM hangout_groups WHERE id = $1',
+    [groupId]
+  );
+  const creatorId = rows[0]?.creator_id;
+  if (!creatorId || String(creatorId) === String(userId)) return false;
+
+  const [blockedByCreator, blockedByUser] = await Promise.all([
+    BlockedUser.isBlocked(creatorId, userId),
+    BlockedUser.isBlocked(userId, creatorId),
+  ]);
+  return blockedByCreator || blockedByUser;
+}
 
 /**
  * Generate a room name for a hangout call.
@@ -236,6 +257,11 @@ const startCall = async (req, res) => {
     // Verify / auto-join membership (main + public groups auto-enroll callers)
     if (!(await ensureMembership(groupId, user.id))) {
       return res.status(403).json({ error: 'Not a member of this group' });
+    }
+
+    // Block check: group creator blocked caller OR caller blocked group creator
+    if (await isBlockedFromGroup(groupId, user.id)) {
+      return res.status(403).json({ error: 'Cannot start a call in this group' });
     }
 
     // Determine if this is a persistent (24/7) group
@@ -432,6 +458,11 @@ const getActiveCall = async (req, res) => {
       return res.status(403).json({ error: 'Not a member of this group' });
     }
 
+    // Block check: group creator blocked requester OR requester blocked group creator
+    if (await isBlockedFromGroup(groupId, user.id)) {
+      return res.status(403).json({ error: 'Cannot access calls in this group' });
+    }
+
     // NOTE: Stale participant cleanup (joined >2 hours ago, left_at IS NULL) was removed
     // from this per-request path to avoid write amplification on every GET.
     // TODO: Move to a scheduled job (e.g. run every 30 minutes via the scheduler worker).
@@ -558,6 +589,11 @@ const joinCall = async (req, res) => {
     // Auto-join main/public groups so membership never blocks joining a call
     if (!(await ensureMembership(groupId, user.id))) {
       return res.status(403).json({ error: 'Not a member of this group' });
+    }
+
+    // Block check: group creator blocked joiner OR joiner blocked group creator
+    if (await isBlockedFromGroup(groupId, user.id)) {
+      return res.status(403).json({ error: 'Cannot join a call in this group' });
     }
 
     // Fetch the call (must belong to this group and be active)
