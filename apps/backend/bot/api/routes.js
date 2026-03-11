@@ -86,7 +86,7 @@ const requirePageAuth = (req, res, next) => {
   if (!user) {
     // Redirect unauthenticated users to home page to login
     logger.info(`Unauthenticated access to ${req.originalUrl}, redirecting to home`);
-    return res.redirect('/');
+    return res.redirect('https://app.pnptv.app');
   }
 
   // User is authenticated
@@ -640,18 +640,13 @@ app.use((req, res, next) => {
 });
 
 // Landing page routes
-// Home page — serve login page directly; if already authenticated send to React SPA
+// Home page — always redirect to the modern React SPA, which handles landing/home logic based on auth status.
 app.get('/', (req, res) => {
-  // Authenticated → go to the React SPA
-  if (req.session?.user) {
-    return res.redirect(302, 'https://app.pnptv.app');
-  }
-  // Not authenticated → show login
-  return res.sendFile(path.join(__dirname, '../../../public/login.html'));
+  return res.redirect(302, 'https://app.pnptv.app');
 });
 
-// /login → redirect to /
-app.get('/login', (req, res) => res.redirect(301, '/'));
+// /login → redirect to React SPA
+app.get('/login', (req, res) => res.redirect(301, 'https://app.pnptv.app'));
 
 // PNPtv Haus page
 app.get('/community-room', (req, res) => {
@@ -6096,15 +6091,12 @@ app.use('/assets', express.static(path.join(appPath, 'assets'), {
 
 // /app → canonical post-login destination → redirect to React SPA
 app.get('/app', (req, res) => {
-  if (!req.session?.user) {
-    return res.redirect('/');
-  }
   return res.redirect(302, 'https://app.pnptv.app');
 });
 
 app.get('/app/*', (req, res) => {
   if (!req.session?.user) {
-    return res.redirect('/');
+    return res.redirect('https://app.pnptv.app');
   }
   const requestedPath = req.path.replace('/app', '');
   const filePath = path.join(appPath, requestedPath);

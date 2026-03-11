@@ -416,9 +416,9 @@ const startBot = async () => {
       await ctx.reply(
         '🌐 PNPtv! has moved to the web!\n\n' +
         'Visit our app for the full experience:\n' +
-        '👉 https://pnptv.app\n\n' +
+        '👉 https://app.pnptv.app\n\n' +
         'All features are now available on the web app.',
-        { reply_markup: { inline_keyboard: [[{ text: '🚀 Open PNPtv!', url: 'https://pnptv.app' }]] } }
+        { reply_markup: { inline_keyboard: [[{ text: '🚀 Open PNPtv!', url: 'https://app.pnptv.app' }]] } }
       );
     });
 
@@ -551,8 +551,8 @@ const startBot = async () => {
         const user = await UserService.getOrCreateFromContext(ctx);
         if (!user?.onboardingComplete && !isWaitingForEmail) {
           await ctx.reply(
-            '🌐 PNPtv! has moved to the web!\n\nVisit https://pnptv.app to get started.',
-            { reply_markup: { inline_keyboard: [[{ text: '🚀 Open PNPtv!', url: 'https://pnptv.app' }]] } }
+            '🌐 PNPtv! has moved to the web!\n\nVisit https://app.pnptv.app to get started.',
+            { reply_markup: { inline_keyboard: [[{ text: '🚀 Open PNPtv!', url: 'https://app.pnptv.app' }]] } }
           );
           return;
         }
