@@ -1,5 +1,6 @@
 const JaasService = require('../../services/jaasService');
 const UserService = require('../../services/userService');
+const EntitlementAccessService = require('../../services/entitlementAccessService');
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 
@@ -44,13 +45,13 @@ const generateToken = async (req, res) => {
       });
     }
 
-    // Verify user has active subscription
-    const hasAccess = await UserService.hasActiveSubscription(userId);
+    // Verify user has active membership entitlement
+    const hasAccess = await EntitlementAccessService.hasEntitlement(String(userId), 'pnp-member');
     if (!hasAccess) {
       logger.warn('Unauthorized video room access attempt', { userId });
       return res.status(403).json({
         success: false,
-        error: 'Premium subscription required for video rooms'
+        error: 'Active membership required'
       });
     }
 

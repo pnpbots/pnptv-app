@@ -569,9 +569,10 @@ const registerPrivateCallsProntoHandlers = (bot) => {
       await ctx.answerCbQuery();
       const lang = getLanguage(ctx);
       const booking = ctx.session.privateCallBooking;
+      const userId = String(ctx.from.id);
 
       if (booking?.bookingId) {
-        await PrivateCallBookingService.cancelBooking(booking.bookingId, 'user_cancelled', 'user');
+        await PrivateCallBookingService.cancelBooking(booking.bookingId, 'user_cancelled', 'user', userId);
       }
 
       ctx.session.privateCallBooking = null;
@@ -593,9 +594,10 @@ const registerPrivateCallsProntoHandlers = (bot) => {
       await ctx.answerCbQuery();
       const lang = getLanguage(ctx);
       const booking = ctx.session.privateCallBooking;
+      const userId = String(ctx.from.id);
 
       if (booking?.bookingId) {
-        await PrivateCallBookingService.cancelBooking(booking.bookingId, 'user_cancelled', 'user');
+        await PrivateCallBookingService.cancelBooking(booking.bookingId, 'user_cancelled', 'user', userId);
       }
 
       ctx.session.privateCallBooking = null;
@@ -788,8 +790,9 @@ const registerPrivateCallsProntoHandlers = (bot) => {
       await ctx.answerCbQuery();
       const lang = getLanguage(ctx);
       const bookingId = ctx.match[1];
+      const userId = String(ctx.from.id);
 
-      await PrivateCallBookingService.cancelBooking(bookingId, 'user_cancelled', 'user');
+      await PrivateCallBookingService.cancelBooking(bookingId, 'user_cancelled', 'user', userId);
 
       await ctx.editMessageText(
         lang === 'es' ? '✅ Reserva cancelada exitosamente.' : '✅ Booking cancelled successfully.',

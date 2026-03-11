@@ -136,7 +136,7 @@ class BookingAvailabilityIntegration {
   static async cancelBooking(bookingId, availabilityId, userId, reason) {
     try {
       // Cancel the booking
-      const cancelledResult = await BookingModel.cancel(bookingId, reason, userId);
+      const cancelledResult = await BookingModel.cancel(bookingId, reason, 'user', userId);
       if (!cancelledResult.success) {
         throw new Error(cancelledResult.error || 'Failed to cancel booking');
       }

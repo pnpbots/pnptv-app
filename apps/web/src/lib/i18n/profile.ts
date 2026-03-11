@@ -314,6 +314,17 @@ const strings = {
     typeToConfirm: "Type {word} to confirm",
     deletingAccount: "Deleting account...",
     accountDeleted: "Account deleted successfully.",
+    deleteAccountFailed: "Failed to delete account",
+
+    // ── Notification channel column headers ───────────────────────────────────
+    notifChannelPush: "Push",
+    notifChannelBot: "Bot",
+    notifChannelEmail: "Email",
+
+    // ── Error fallbacks ───────────────────────────────────────────────────────
+    notifLoadError: "Unable to load notification preferences.",
+    referralLoadError: "Unable to load referral data.",
+    langUpdateError: "Failed to update language",
   },
 
   es: {
@@ -631,6 +642,17 @@ const strings = {
     typeToConfirm: "Escribe {word} para confirmar",
     deletingAccount: "Eliminando cuenta...",
     accountDeleted: "Cuenta eliminada exitosamente.",
+    deleteAccountFailed: "Error al eliminar la cuenta",
+
+    // ── Notification channel column headers ───────────────────────────────────
+    notifChannelPush: "Push",
+    notifChannelBot: "Bot",
+    notifChannelEmail: "Email",
+
+    // ── Error fallbacks ───────────────────────────────────────────────────────
+    notifLoadError: "No se pudieron cargar las preferencias de notificación.",
+    referralLoadError: "No se pudieron cargar los datos de referidos.",
+    langUpdateError: "Error al actualizar el idioma",
   },
 } as const;
 

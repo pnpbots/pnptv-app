@@ -285,6 +285,8 @@ class CreatorService {
           updated_at = NOW()
         WHERE NOT user_entitlements.is_lifetime
       `, [String(subscriberId), String(creatorId)]);
+      const EntitlementAccessService = require('./entitlementAccessService');
+      await EntitlementAccessService.invalidateCache(String(subscriberId));
     } catch (entErr) {
       logger.warn('subscribeToCreator: failed to write entitlement', { subscriberId, creatorId, error: entErr.message });
     }

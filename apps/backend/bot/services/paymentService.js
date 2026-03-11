@@ -9,7 +9,7 @@ const SubscriberModel = require('../../models/subscriberModel');
 const ModelService = require('./modelService');
 const PNPLiveService = require('./pnpLiveService');
 const { cache } = require('../../config/redis');
-const { query } = require('../../config/postgres');
+const { query, getClient } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const crypto = require('crypto');
 const { Telegraf } = require('telegraf');
@@ -1290,11 +1290,11 @@ class PaymentService {
               return { success: false, code: 'ENTITLEMENT_GRANT_FAILED', error: entitlementErr.message };
             }
             const isPaidPlan = plan && (parseFloat(plan.price) > 0);
-            if (isPaidPlan && grantResult && grantResult.granted === 0) {
-              logger.error('grantEntitlementsForPlan returned 0 grants on a paid plan — ePayco will retry', {
+            if (isPaidPlan && grantResult && (grantResult.granted === 0 || grantResult.errors > 0)) {
+              logger.error('grantEntitlementsForPlan returned partial/zero grants on a paid plan — ePayco will retry', {
                 userId, planId: planIdOrBookingId, grantResult,
               });
-              return { success: false, code: 'ENTITLEMENT_GRANT_FAILED', error: 'No entitlements were granted for paid plan' };
+              return { success: false, code: 'ENTITLEMENT_GRANT_FAILED', error: 'Entitlement grant failed or incomplete for paid plan' };
             }
 
             // Record payment in history
@@ -1694,7 +1694,7 @@ class PaymentService {
             await query(
               `UPDATE user_entitlements
                  SET expires_at = NOW(), is_lifetime = false, updated_at = NOW()
-               WHERE user_id = $1 AND source_plan_id = $2`,
+               WHERE user_id = $1 AND source_plan_id = $2 AND is_lifetime = false`,
               [userId, planIdOrBookingId]
             );
             logger.info('Entitlements revoked due to payment reversal', {
@@ -2147,11 +2147,11 @@ class PaymentService {
               throw entitlementErr;
             }
             const isDaimoPaidPlan = plan && (parseFloat(plan.price) > 0);
-            if (isDaimoPaidPlan && daimoGrantResult && daimoGrantResult.granted === 0) {
-              logger.error('grantEntitlementsForPlan returned 0 grants on paid Daimo plan — Daimo will retry', {
+            if (isDaimoPaidPlan && daimoGrantResult && (daimoGrantResult.granted === 0 || daimoGrantResult.errors > 0)) {
+              logger.error('grantEntitlementsForPlan returned partial/zero grants on paid Daimo plan — Daimo will retry', {
                 userId, planId, daimoGrantResult,
               });
-              throw new Error('No entitlements were granted for paid Daimo plan');
+              throw new Error('Entitlement grant failed or incomplete for paid Daimo plan');
             }
 
             // Creator subscription activation
@@ -4122,15 +4122,18 @@ class PaymentService {
         return { granted: 0, errors: 0, warning: 'NO_PLAN_ADDONS' };
       }
 
-      for (const row of addOnsResult.rows) {
-        try {
+      const txClient = await getClient();
+      try {
+        await txClient.query('BEGIN');
+
+        for (const row of addOnsResult.rows) {
           const isLifetime = row.is_lifetime || false;
           // Per-add-on duration takes priority, then fall back to plan's duration
           const durationDays = row.addon_duration_days || row.plan_duration_days || 30;
 
           if (isLifetime) {
             // Lifetime: upsert with no expiry
-            await query(`
+            await txClient.query(`
               INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, source_plan_id)
               VALUES ($1, $2, true, $3)
               ON CONFLICT (user_id, add_on_id, creator_id)
@@ -4138,7 +4141,7 @@ class PaymentService {
             `, [userId, row.add_on_id, planId]);
           } else {
             // Time-limited: extend from current expiry if still active, else from now
-            await query(`
+            await txClient.query(`
               INSERT INTO user_entitlements (user_id, add_on_id, expires_at, source_plan_id)
               VALUES ($1, $2, NOW() + ($3::integer * INTERVAL '1 day'), $4)
               ON CONFLICT (user_id, add_on_id, creator_id)
@@ -4159,27 +4162,38 @@ class PaymentService {
           logger.info('Entitlement granted', {
             userId, addOn: row.add_on_name, planId, isLifetime, durationDays
           });
-
-          // Audit log
-          try {
-            await query(`
-              INSERT INTO subscription_audit_log (user_id, actor_id, actor_type, action, new_values)
-              VALUES ($1, 'system', 'payment', 'grant', $2::jsonb)
-            `, [userId, JSON.stringify({
-              add_on_id: row.add_on_id,
-              add_on_name: row.add_on_name,
-              plan_id: planId,
-              is_lifetime: isLifetime,
-              duration_days: isLifetime ? null : durationDays,
-              source,
-            })]);
-          } catch (_) { /* non-critical */ }
-        } catch (addOnErr) {
-          result.errors++;
-          logger.error('Failed to grant entitlement for add-on', {
-            userId, planId, addOnId: row.add_on_id, error: addOnErr.message,
-          });
         }
+
+        await txClient.query('COMMIT');
+      } catch (txErr) {
+        await txClient.query('ROLLBACK');
+        logger.error('grantEntitlementsForPlan transaction rolled back', {
+          userId, planId, error: txErr.message,
+        });
+        result.errors = addOnsResult.rows.length;
+        result.granted = 0;
+        throw txErr;
+      } finally {
+        txClient.release();
+      }
+
+      // Audit log written outside the transaction — non-critical, must not block payment flow
+      for (const row of addOnsResult.rows) {
+        try {
+          const isLifetime = row.is_lifetime || false;
+          const durationDays = row.addon_duration_days || row.plan_duration_days || 30;
+          await query(`
+            INSERT INTO subscription_audit_log (user_id, actor_id, actor_type, action, new_values)
+            VALUES ($1, 'system', 'payment', 'grant', $2::jsonb)
+          `, [userId, JSON.stringify({
+            add_on_id: row.add_on_id,
+            add_on_name: row.add_on_name,
+            plan_id: planId,
+            is_lifetime: isLifetime,
+            duration_days: isLifetime ? null : durationDays,
+            source,
+          })]);
+        } catch (_) { /* non-critical */ }
       }
 
       // After granting all add-ons: invalidate entitlement caches and sync

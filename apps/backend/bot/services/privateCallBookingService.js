@@ -4,6 +4,7 @@ const CallSessionModel = require('../../models/callSessionModel');
 const BookingNotificationModel = require('../../models/bookingNotificationModel');
 const PerformerModel = require('../../models/performerModel');
 const UserService = require('./userService');
+const jaasService = require('./jaasService');
 const logger = require('../../utils/logger');
 
 /**
@@ -293,9 +294,9 @@ class PrivateCallBookingService {
   /**
    * Cancel a booking
    */
-  static async cancelBooking(bookingId, reason, cancelledBy = 'user') {
+  static async cancelBooking(bookingId, reason, cancelledBy = 'user', userId = null) {
     try {
-      const result = await BookingModel.cancel(bookingId, reason, cancelledBy);
+      const result = await BookingModel.cancel(bookingId, reason, cancelledBy, userId);
 
       if (result.success) {
         // Cancel any scheduled notifications
@@ -486,18 +487,47 @@ class PrivateCallBookingService {
         return { success: false, error: 'booking_not_found' };
       }
 
-      // Generate room ID and URLs
-      const roomId = `pnptv-${bookingId.slice(0, 8)}`;
-      const baseUrl = process.env.JITSI_DOMAIN || 'meet.jit.si';
+      // Require JaaS — no public fallback for private calls
+      if (!jaasService.isConfigured()) {
+        logger.error('JaaS is not configured — cannot create private call session', { bookingId });
+        return { success: false, error: 'video_service_unavailable' };
+      }
+
+      // Generate a cryptographically unpredictable room ID using a full UUID suffix
+      const roomId = `pnptv-priv-${uuidv4()}`;
+
+      // Generate per-participant JaaS JWTs (2 h TTL, no recording)
+      const userToken = jaasService.generateToken({
+        roomName: roomId,
+        userId: String(booking.userId),
+        userName: booking.userName || 'User',
+        isModerator: false,
+        enableLivestreaming: false,
+        enableRecording: false,
+        expiresIn: '2h',
+      });
+
+      const performerToken = jaasService.generateToken({
+        roomName: roomId,
+        userId: `performer-${booking.performerId}`,
+        userName: booking.performerName || 'Performer',
+        isModerator: true,
+        enableLivestreaming: false,
+        enableRecording: false,
+        expiresIn: '2h',
+      });
+
+      const joinUrlUser = jaasService.generateMeetingUrl(roomId, userToken);
+      const joinUrlPerformer = jaasService.generateMeetingUrl(roomId, performerToken);
 
       // Create session
       const session = await CallSessionModel.create({
         bookingId,
-        roomProvider: 'jitsi',
+        roomProvider: 'jaas',
         roomId,
         roomName: `Private Call - ${booking.performerName}`,
-        joinUrlUser: `https://${baseUrl}/${roomId}`,
-        joinUrlPerformer: `https://${baseUrl}/${roomId}`,
+        joinUrlUser,
+        joinUrlPerformer,
         maxParticipants: 2,
         recordingDisabled: true,
       });

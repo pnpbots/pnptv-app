@@ -2,6 +2,7 @@ const JitsiRoomModel = require('../../models/jitsiRoomModel');
 const User = require('../../models/userModel');
 const logger = require('../../utils/logger');
 const PermissionService = require('./permissionService');
+const pool = require('../../config/postgres');
 
 /**
  * Jitsi Service
@@ -182,6 +183,26 @@ class JitsiService {
      */
     static async getUserRooms(userId, options = {}) {
         return await JitsiRoomModel.getByHostUserId(userId, options);
+    }
+
+    /**
+     * Check if a user is a member of a room (has joined at any point).
+     * Used to gate access to private room details.
+     * @param {number|string} roomId - jitsi_rooms.id
+     * @param {number|string} userId - users.id
+     * @returns {Promise<boolean>}
+     */
+    static async isRoomMember(roomId, userId) {
+        try {
+            const result = await pool.query(
+                'SELECT 1 FROM jitsi_participants WHERE room_id = $1 AND user_id = $2 LIMIT 1',
+                [roomId, String(userId)]
+            );
+            return result.rows.length > 0;
+        } catch (error) {
+            logger.error('Error checking room membership:', error);
+            return false;
+        }
     }
 
     /**

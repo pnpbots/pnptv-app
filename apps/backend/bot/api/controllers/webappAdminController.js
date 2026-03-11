@@ -1,5 +1,6 @@
 const logger = require('../../../utils/logger');
 const { query, getClient } = require('../../../config/postgres');
+const { cache } = require('../../../config/redis');
 const AdminDashboardService = require('../../../services/adminDashboardService');
 const VideoCallModel = require('../../../models/videoCallModel');
 const SocialPostService = require('../../services/socialPostService');
@@ -1169,7 +1170,7 @@ const getDemographics = async (req, res) => {
 
 const EntitlementModel = require('../../../models/entitlementModel');
 
-const SUPERADMIN_IDS = ['8599671840', '8370209084'];
+const SUPERADMIN_IDS = (process.env.SUPERADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 /**
  * GET /api/webapp/admin/add-ons
@@ -1210,8 +1211,11 @@ const setPlanAddOns = async (req, res) => {
     if (!Array.isArray(addOns)) {
       return res.status(400).json({ success: false, error: 'addOns must be an array' });
     }
-    const result = await EntitlementModel.setPlanAddOns(req.params.planId, addOns);
-    logger.info('Admin set plan add-ons', { adminId: req.user?.id, planId: req.params.planId, count: addOns.length });
+    const planId = req.params.planId;
+    const result = await EntitlementModel.setPlanAddOns(planId, addOns);
+    await cache.del('plans:all');
+    await cache.del(`plan:${planId}`);
+    logger.info('Admin set plan add-ons', { adminId: req.user?.id, planId, count: addOns.length });
     return res.json({ success: true, addOns: result });
   } catch (error) {
     logger.error('setPlanAddOns error:', error);
@@ -1241,11 +1245,19 @@ const getUserEntitlements = async (req, res) => {
  * POST /api/webapp/admin/users/:userId/entitlements
  * Grant an entitlement to a user.
  */
+const MAX_GRANT_DAYS = 3650;
+
 const grantUserEntitlement = async (req, res) => {
   try {
     const { addOnId, durationDays, isLifetime, reason } = req.body;
     if (!addOnId) {
       return res.status(400).json({ success: false, error: 'addOnId is required' });
+    }
+    if (!isLifetime) {
+      const parsedDays = durationDays ? parseInt(durationDays, 10) : 30;
+      if (!parsedDays || parsedDays < 1 || parsedDays > MAX_GRANT_DAYS) {
+        return res.status(400).json({ success: false, error: `durationDays must be between 1 and ${MAX_GRANT_DAYS}` });
+      }
     }
     const row = await EntitlementModel.grantEntitlement(
       req.params.userId,
@@ -1274,7 +1286,7 @@ const grantUserEntitlement = async (req, res) => {
 const revokeUserEntitlement = async (req, res) => {
   try {
     const adminId = String(req.user?.id ?? '');
-    const isSuperadmin = SUPERADMIN_IDS.includes(adminId);
+    const isSuperadmin = SUPERADMIN_IDS.includes(adminId) || req.user?.role === 'superadmin';
 
     const row = await EntitlementModel.revokeEntitlement(
       req.params.userId,
@@ -1294,12 +1306,14 @@ const revokeUserEntitlement = async (req, res) => {
  * PUT /api/webapp/admin/users/:userId/entitlements/:addOnId/extend
  * Extend an entitlement's expiry.
  */
+const MAX_EXTEND_DAYS = 3650;
+
 const extendUserEntitlement = async (req, res) => {
   try {
     const { extraDays, reason } = req.body;
     const days = parseInt(extraDays, 10);
-    if (!days || days < 1) {
-      return res.status(400).json({ success: false, error: 'extraDays must be a positive integer' });
+    if (!days || days < 1 || days > MAX_EXTEND_DAYS) {
+      return res.status(400).json({ success: false, error: `extraDays must be between 1 and ${MAX_EXTEND_DAYS}` });
     }
     const row = await EntitlementModel.extendEntitlement(
       req.params.userId,

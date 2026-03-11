@@ -33,6 +33,7 @@ function deriveLabel(addOns: Array<{ add_on_id: string }>): string {
   const ids = addOns.map((a) => a.add_on_id);
   if (ids.includes("prime")) return "PRIME";
   if (ids.includes("pnp-member")) return "BASIC";
+  if (ids.includes("creator-subscription") || ids.includes("private-calls")) return "CREATOR";
   return "FREE";
 }
 
@@ -124,9 +125,9 @@ export default function PlanManagement() {
     if (filters.search.trim() !== "") {
       const q = filters.search.trim().toLowerCase();
       result = result.filter((p) => {
-        const name = (p.display_name || p.name || "").toLowerCase();
+        const searchTarget = `${(p.display_name || "").toLowerCase()} ${(p.name || "").toLowerCase()}`;
         const sku = (p.sku || "").toLowerCase();
-        return name.includes(q) || sku.includes(q);
+        return searchTarget.includes(q) || sku.includes(q);
       });
     }
 
@@ -143,11 +144,11 @@ export default function PlanManagement() {
     } else if (filters.price === "paid") {
       result = result.filter((p) => (typeof p.price === "number" ? p.price : 0) > 0);
     } else if (filters.price === "price_asc") {
-      result = result.sort(
+      result = [...result].sort(
         (a, b) => (typeof a.price === "number" ? a.price : 0) - (typeof b.price === "number" ? b.price : 0)
       );
     } else if (filters.price === "price_desc") {
-      result = result.sort(
+      result = [...result].sort(
         (a, b) => (typeof b.price === "number" ? b.price : 0) - (typeof a.price === "number" ? a.price : 0)
       );
     }
@@ -257,13 +258,13 @@ export default function PlanManagement() {
   // ── Submit ────────────────────────────────────────────────────────────────
 
   const handleSubmit = async () => {
-    if (!form.name.trim()) { setFormError("Plan name is required"); return; }
-    const price = parseFloat(form.price);
-    if (isNaN(price) || price <= 0) { setFormError("Price must be a positive number"); return; }
-    if (enabledAddOns.length === 0) { setFormError("Select at least one add-on"); return; }
-
     setFormLoading(true);
     setFormError(null);
+    if (!form.name.trim()) { setFormLoading(false); setFormError("Plan name is required"); return; }
+    if (form.name.trim().length > 100) { setFormLoading(false); setFormError("Plan name must be 100 characters or fewer"); return; }
+    const price = parseFloat(form.price);
+    if (isNaN(price) || price < 0) { setFormLoading(false); setFormError("Price must be 0 or a positive number"); return; }
+    if (enabledAddOns.length === 0) { setFormLoading(false); setFormError("Select at least one add-on"); return; }
     try {
       const addOnsPayload = enabledAddOns.map(({ add_on_id, duration_days, is_lifetime }) => ({
         add_on_id,
@@ -410,7 +411,8 @@ export default function PlanManagement() {
         </div>
         <button
           onClick={openCreate}
-          className="px-4 py-2 rounded-lg bg-pnp-accent text-white text-sm font-medium hover:bg-pnp-accent/80 transition-colors"
+          disabled={allAddOns.length === 0}
+          className="px-4 py-2 rounded-lg bg-pnp-accent text-white text-sm font-medium hover:bg-pnp-accent/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           + New Plan
         </button>
@@ -569,6 +571,7 @@ export default function PlanManagement() {
                   value={form.name}
                   onChange={(e) => setField("name", e.target.value)}
                   placeholder="e.g. PRIME Monthly"
+                  maxLength={100}
                   className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
                 />
               </div>
@@ -638,6 +641,7 @@ export default function PlanManagement() {
                                 <input
                                   type="number"
                                   min="1"
+                                  max="3650"
                                   value={row.duration_days}
                                   onChange={(e) => setAddOnDuration(addOn.id, e.target.value)}
                                   disabled={row.is_lifetime}

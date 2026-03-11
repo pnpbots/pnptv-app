@@ -255,6 +255,16 @@ const planBuilderController = {
         is_lifetime:   a.is_lifetime || false,
       }));
 
+      const PLAN_ID_RE = /^[a-z0-9][a-z0-9-]{0,58}[a-z0-9]$/;
+      if (rawId && String(rawId).trim()) {
+        const candidateId = String(rawId).trim();
+        if (!PLAN_ID_RE.test(candidateId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'id must be 2-60 characters, lowercase alphanumeric and hyphens only, and must not start or end with a hyphen',
+          });
+        }
+      }
       let planId = rawId && String(rawId).trim()
         ? String(rawId).trim()
         : generatePlanId(name.trim(), addOnsNorm);
@@ -379,6 +389,12 @@ const planBuilderController = {
 
       const { name, price, is_active, add_ons, duration_days, display_name } = req.body;
       const hasAddOns = Object.prototype.hasOwnProperty.call(req.body, 'add_ons');
+
+      if (price !== undefined) {
+        if (typeof price !== 'number' || !Number.isFinite(price) || price < 0 || price > 9999.99) {
+          return res.status(400).json({ success: false, error: 'price must be a finite number between 0 and 9999.99' });
+        }
+      }
 
       if (hasAddOns) {
         const validation = validateAddOns(add_ons);

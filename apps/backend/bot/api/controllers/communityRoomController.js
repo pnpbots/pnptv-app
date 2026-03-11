@@ -2,6 +2,7 @@ const CommunityRoomService = require('../../services/communityRoomService');
 const jaasService = require('../../services/jaasService');
 const logger = require('../../../utils/logger');
 const { resolveUserId } = require('../../utils/helpers');
+const EntitlementAccessService = require('../../services/entitlementAccessService');
 
 /**
  * Get community room info and generate token
@@ -25,15 +26,37 @@ const joinCommunityRoom = async (req, res) => {
       });
     }
 
+    // Ban check — banned users cannot join any room
+    const banned = await EntitlementAccessService.isBanned(userId);
+    if (banned) {
+      return res.status(403).json({
+        success: false,
+        error: 'Account suspended',
+        code: 'ACCOUNT_SUSPENDED'
+      });
+    }
+
     let isTrueModerator = false;
     try {
       const UserModel = require('../../../models/userModel');
       const user = await UserModel.getById(userId);
       isTrueModerator = user && (user.role === 'admin' || user.role === 'superadmin');
     } catch (e) {
-      // If user lookup fails, allow as guest
-      logger.warn('Could not verify user role, allowing as guest', { userId });
+      logger.warn('Could not verify user role for community room join', { userId });
       isTrueModerator = false;
+    }
+
+    // Membership check — only pnp-member (or higher) entitlement holders may join
+    // Admins/superadmins bypass entitlement gate
+    if (!isTrueModerator) {
+      const hasMembership = await EntitlementAccessService.hasEntitlement(userId, 'pnp-member');
+      if (!hasMembership) {
+        return res.status(403).json({
+          success: false,
+          error: 'A PNPtv membership is required to join the community room',
+          code: 'MEMBERSHIP_REQUIRED'
+        });
+      }
     }
 
     // Get or create community room
@@ -42,12 +65,12 @@ const joinCommunityRoom = async (req, res) => {
     // Track user join
     CommunityRoomService.trackUserJoin(userId, displayName, isTrueModerator ? 'moderator' : 'member');
 
-    // Generate JaaS JWT — everyone gets moderator token in the 24/7 room
+    // Generate JaaS JWT — admins/superadmins get moderator token; all others get viewer token
     const token = await CommunityRoomService.generateCommunityToken(
       userId,
       displayName,
       '',
-      true, // all users get moderator token in community room
+      isTrueModerator,
       sessionUser.photoUrl || ''
     );
 
@@ -56,7 +79,7 @@ const joinCommunityRoom = async (req, res) => {
     logger.info('User joined community room (24/7 open)', {
       userId,
       displayName,
-      isModerator: true,
+      isModerator: isTrueModerator,
     });
 
     res.json({

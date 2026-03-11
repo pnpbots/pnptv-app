@@ -44,6 +44,12 @@ const strings = {
     // WoF removal
     remove: "Remove",
     removing: "Removing...",
+    // X cross-post
+    alsoPostX: "Also post to X",
+    crosspostXTimeline: "This post will also appear on your X timeline",
+    // Upload hint
+    uploadHint: "Up to {max} photos or 1 video \u00b7 Max 50 MB",
+    uploadHintDragDrop: "Drag & drop supported",
     // Home page
     socialFeed: "Social Feed",
     viewAll: "View all",
@@ -88,6 +94,13 @@ const strings = {
     noCommentsYet: "Aún no hay comentarios",
     remove: "Eliminar",
     removing: "Eliminando...",
+    // X cross-post
+    alsoPostX: "También publicar en X",
+    crosspostXTimeline: "Esta publicación también aparecerá en tu línea de tiempo de X",
+    // Upload hint
+    uploadHint: "Hasta {max} fotos o 1 video \u00b7 Máx. 50 MB",
+    uploadHintDragDrop: "Arrastrar y soltar disponible",
+    // Home page
     socialFeed: "Feed Social",
     viewAll: "Ver todo",
     viewAllPosts: "Ver todas las publicaciones",

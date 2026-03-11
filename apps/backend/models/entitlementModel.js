@@ -501,8 +501,7 @@ class EntitlementModel {
          AND is_consumed = false
          AND (
            is_lifetime = true
-           OR expires_at IS NULL
-           OR expires_at > NOW()
+           OR (expires_at IS NOT NULL AND expires_at > NOW())
          )
        LIMIT 1`,
       [userId, addOnSlug, creatorId]

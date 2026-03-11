@@ -1420,6 +1420,23 @@ app.post('/api/webhooks/visa-cybersource', webhookLimiter, require('./controller
 app.get('/api/webhooks/visa-cybersource/health', adminGuard, require('./controllers/visaCybersourceWebhookController').healthCheck);
 app.get('/api/payment-response', webhookController.handlePaymentResponse);
 
+// Cal.com webhook — booking lifecycle events (C-03)
+// Rate-limited at 10 req/min; verified via HMAC-SHA256 (no session auth).
+// express.raw() preserves the raw body required for signature verification.
+const calcomWebhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: 'Too many Cal.com webhook requests.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.post(
+  '/api/webhooks/calcom',
+  calcomWebhookLimiter,
+  express.raw({ type: 'application/json' }),
+  require('./controllers/calcomWebhookController').handleCalcomWebhook
+);
+
 // Payment API routes
 // C5: getPaymentInfo exposes ePayco keys, signatures, and userId — requires authentication.
 // Only the owner of the payment (or an admin) may load checkout data.
@@ -1781,7 +1798,7 @@ app.delete('/api/audio/:filename', verifyAdminJWT, asyncHandler(async (req, res)
 // ==========================================
 // Hangouts API (PROTECTED: create/join require authentication)
 // ==========================================
-app.get('/api/hangouts/public', asyncHandler(hangoutsController.listPublic));
+app.get('/api/hangouts/public', requireSessionAuth, asyncHandler(hangoutsController.listPublic));
 app.post('/api/hangouts/create', authenticateUser, asyncHandler(hangoutsController.create));
 app.post('/api/hangouts/join/:callId', authenticateUser, asyncHandler(hangoutsController.join));
 
@@ -2346,8 +2363,8 @@ app.get('/api/webapp/mastodon/feed', requireSessionAuth, asyncHandler(webAppCont
 
 // Web App Hangouts (session auth)
 const webappHangoutsController = require('./controllers/webappHangoutsController');
-app.get('/api/webapp/hangouts/public', asyncHandler(webappHangoutsController.listPublic));
-app.post('/api/webapp/hangouts/create', requireSessionAuth, asyncHandler(webappHangoutsController.createRoom));
+app.get('/api/webapp/hangouts/public', requireSessionAuth, asyncHandler(webappHangoutsController.listPublic));
+app.post('/api/webapp/hangouts/create', requireSessionAuth, requireMemberTier, asyncHandler(webappHangoutsController.createRoom));
 app.post('/api/webapp/hangouts/join/:callId', requireSessionAuth, asyncHandler(webappHangoutsController.joinRoom));
 app.post('/api/webapp/hangouts/leave/:callId', requireSessionAuth, asyncHandler(webappHangoutsController.leaveRoom));
 app.delete('/api/webapp/hangouts/:callId', requireSessionAuth, asyncHandler(webappHangoutsController.endRoom));
@@ -4382,13 +4399,26 @@ app.post('/api/proxy/hangouts/rooms', asyncHandler(async (req, res) => {
   }
 }));
 
-// GET /api/proxy/hangouts/rooms/:code — Get room details by code
-app.get('/api/proxy/hangouts/rooms/:code', asyncHandler(async (req, res) => {
+// GET /api/proxy/hangouts/rooms/:code — Get room details by code (auth required)
+app.get('/api/proxy/hangouts/rooms/:code', requireSessionAuth, asyncHandler(async (req, res) => {
   try {
     const room = await JitsiService.getRoom(req.params.code);
     if (!room) {
       return res.status(404).json({ success: false, error: 'Room not found' });
     }
+
+    const userId = req.session.user?.id;
+    const isPublic = room.is_public !== false;
+    const isHost = room.host_user_id && String(room.host_user_id) === String(userId);
+
+    // For private rooms, verify the requesting user is the host or a member
+    if (!isPublic && !isHost) {
+      const isMember = await JitsiService.isRoomMember(room.id, userId).catch(() => false);
+      if (!isMember) {
+        return res.status(403).json({ success: false, error: 'Access denied' });
+      }
+    }
+
     res.json({
       success: true,
       room: {
@@ -4398,7 +4428,7 @@ app.get('/api/proxy/hangouts/rooms/:code', asyncHandler(async (req, res) => {
         tier: room.tier,
         host_name: room.host_name,
         host_user_id: room.host_user_id,
-        is_public: room.is_public !== false,
+        is_public: isPublic,
         max_participants: room.max_participants,
         current_participants: room.current_participants || 0,
         status: room.status,
@@ -5857,21 +5887,31 @@ app.use('/api/canva', canvaRoutes);
 // ==========================================
 // Community Room (Haus) — 24/7 open video room powered by JaaS
 // ==========================================
-app.post('/api/community-room/join', authenticateUser, asyncHandler(communityRoomController.joinCommunityRoom));
-app.get('/api/community-room/occupancy', authenticateUser, asyncHandler(communityRoomController.getRoomOccupancy));
-app.get('/api/community-room/chat-history', authenticateUser, asyncHandler(communityRoomController.getChatHistory));
-app.post('/api/community-room/message', authenticateUser, asyncHandler(communityRoomController.addMessage));
-app.get('/api/community-room/stats', authenticateUser, asyncHandler(communityRoomController.getRoomStats));
-app.get('/api/community-room/leaderboard', authenticateUser, asyncHandler(communityRoomController.getLeaderboard));
+app.post('/api/community-room/join', requireSessionAuth, asyncHandler(communityRoomController.joinCommunityRoom));
+app.get('/api/community-room/occupancy', requireSessionAuth, asyncHandler(communityRoomController.getRoomOccupancy));
+app.get('/api/community-room/chat-history', requireSessionAuth, asyncHandler(communityRoomController.getChatHistory));
+app.post('/api/community-room/message', requireSessionAuth, asyncHandler(communityRoomController.addMessage));
+app.get('/api/community-room/stats', requireSessionAuth, asyncHandler(communityRoomController.getRoomStats));
+app.get('/api/community-room/leaderboard', requireSessionAuth, asyncHandler(communityRoomController.getLeaderboard));
 app.post('/api/community-room/moderation/mute', verifyAdminJWT, asyncHandler(communityRoomController.muteUser));
 app.post('/api/community-room/moderation/remove', verifyAdminJWT, asyncHandler(communityRoomController.removeUser));
 app.post('/api/community-room/moderation/clear-chat', verifyAdminJWT, asyncHandler(communityRoomController.clearChat));
 
 // ── JaaS Token Endpoints ────────────────────────────────────────────────────
+const jaasTokenLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+  handler: (req, res) => res.status(429).json({ error: 'Too many token requests. Please wait before generating another token.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipFailedRequests: false,
+});
+
 app.get('/api/jaas/status', requireSessionAuth, asyncHandler(jaasController.getStatus));
-app.post('/api/jaas/token', requireSessionAuth, asyncHandler(jaasController.generateToken));
-app.post('/api/jaas/moderator-token', requireSessionAuth, asyncHandler(jaasController.generateModeratorToken));
-app.post('/api/jaas/live-token', requireSessionAuth, asyncHandler(jaasController.generateLiveToken));
+app.post('/api/jaas/token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.generateToken));
+app.post('/api/jaas/moderator-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.generateModeratorToken));
+app.post('/api/jaas/live-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.generateLiveToken));
 
 // ==========================================
 // ATProto / Bluesky OAuth Routes (PUBLIC — no session required)

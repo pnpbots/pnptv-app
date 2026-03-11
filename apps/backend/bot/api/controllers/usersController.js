@@ -1,4 +1,5 @@
 const { query } = require('../../../config/postgres');
+const { cache } = require('../../../config/redis');
 const logger = require('../../../utils/logger');
 const UserModel = require('../../../models/userModel');
 const emailService = require('../../../services/emailService');
@@ -66,21 +67,67 @@ const deleteMyAccount = async (req, res) => {
     if (!record) return res.status(404).json({ error: 'User not found' });
 
     const anonUsername = `deleted_${Date.now()}`;
+    // Anonymise the record in-place (soft delete + PII wipe).
+    // Columns set here must exist on users — confirmed against live schema 2026-03-11:
+    //   - photo_url and location do NOT exist; the real columns are photo_file_id,
+    //     location_lat, location_lng, location_name, location_geohash.
+    //   - is_deleted and deleted_at exist and must be set so feed/search queries
+    //     using WHERE is_deleted = false exclude this record automatically.
+    //   - Social media handles (instagram, twitter, x_id, x_username, etc.) are also
+    //     PII that must be cleared.
+    //   - PDS/Bluesky credentials contain private keys and must be cleared.
     await query(
       `UPDATE users SET
-        username = $2,
-        first_name = 'Deleted',
-        last_name = 'User',
-        email = NULL,
-        photo_file_id = NULL,
-        photo_url = NULL,
-        bio = NULL,
-        location = NULL,
-        date_of_birth = NULL,
-        is_active = false
+        username            = $2,
+        first_name          = 'Deleted',
+        last_name           = 'User',
+        email               = NULL,
+        photo_file_id       = NULL,
+        bio                 = NULL,
+        location_lat        = NULL,
+        location_lng        = NULL,
+        location_name       = NULL,
+        location_geohash    = NULL,
+        date_of_birth       = NULL,
+        city                = NULL,
+        country             = NULL,
+        instagram           = NULL,
+        twitter             = NULL,
+        facebook            = NULL,
+        tiktok              = NULL,
+        youtube             = NULL,
+        telegram            = NULL,
+        x_id                = NULL,
+        x_user_id           = NULL,
+        x_username          = NULL,
+        x_access_token_encrypted  = NULL,
+        x_refresh_token_encrypted = NULL,
+        atproto_password    = NULL,
+        canva_access_token_encrypted  = NULL,
+        canva_refresh_token_encrypted = NULL,
+        card_token          = NULL,
+        card_token_mask     = NULL,
+        password_hash       = NULL,
+        is_active           = false,
+        is_deleted          = true,
+        deleted_at          = NOW(),
+        updated_at          = NOW()
       WHERE id = $1`,
       [user.id, anonUsername]
     );
+
+    // Flush all Redis keys that cache this user's data.
+    // Without this, profile caches and geo presence survive for up to 10 minutes
+    // after deletion, meaning the deleted account continues to appear in search
+    // results and the nearby-users feed.
+    await Promise.allSettled([
+      cache.del(`user:${user.id}`),
+      cache.del(`user:subscriptions:${user.id}`),
+      // Remove from geo ZSET and per-user geo hash so the account disappears
+      // from the Nearby feature immediately.
+      cache.del(`geo:user:${user.id}`),
+      cache.zrem('geo:users:online', user.id),
+    ]);
 
     // Destroy session
     if (req.session) {

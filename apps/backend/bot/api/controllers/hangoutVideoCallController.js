@@ -63,8 +63,16 @@ const ensureMembership = async (groupId, userId) => {
 
   const { is_main, is_wall_of_fame, is_public } = groupRows[0];
 
-  // Auto-join main and wall-of-fame groups unconditionally
+  // Auto-join main and wall-of-fame groups — but only for members with a valid entitlement
   if (is_main || is_wall_of_fame) {
+    try {
+      const EntitlementAccessService = require('../../services/entitlementAccessService');
+      const hasMembership = await EntitlementAccessService.hasEntitlement(String(userId), 'pnp-member');
+      if (!hasMembership) return false;
+    } catch (err) {
+      logger.error('Entitlement check failed in ensureMembership (main group)', { userId, groupId, error: err.message });
+      return false;
+    }
     await query(
       `INSERT INTO hangout_group_members (group_id, user_id, role)
        VALUES ($1, $2, 'member')

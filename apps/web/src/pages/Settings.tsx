@@ -16,8 +16,8 @@ import {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("en-US", {
+function formatDate(dateStr: string, lang: string): string {
+  return new Date(dateStr).toLocaleDateString(lang, {
     month: "long",
     year: "numeric",
   });
@@ -80,13 +80,16 @@ export default function Settings() {
   const { tier, isPrime } = useTier();
   const t = useI18n();
   const p = t.profile;
+  const uiLang = t.lang; // current UI language (drives i18n strings)
 
   // ── Profile data ──────────────────────────────────────────────────────────
   const [memberSince, setMemberSince] = useState<string | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
 
   // ── App Preferences state ─────────────────────────────────────────────────
-  const [lang, setLang] = useState<Lang>("en");
+  // selectedLang: the value shown in the language <select> (may briefly differ
+  // from uiLang while a save is in-flight, reverted on error)
+  const [selectedLang, setSelectedLang] = useState<Lang>("en");
   const [langSaving, setLangSaving] = useState(false);
   const [langError, setLangError] = useState<string | null>(null);
 
@@ -108,6 +111,16 @@ export default function Settings() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deleteInputRef = useRef<HTMLInputElement>(null);
+  const deleteModalRef = useRef<HTMLDivElement>(null); // backdrop element for focus trap root
+
+  // ── Focus management: move focus into modal when it opens ─────────────────
+  useEffect(() => {
+    if (showDeleteModal) {
+      // autoFocus on the input handles initial focus; the modal container
+      // captures global keydown for Escape so we also focus it as a trap root
+      deleteInputRef.current?.focus();
+    }
+  }, [showDeleteModal]);
 
   // ── Referral state ────────────────────────────────────────────────────────
   const [referralStats, setReferralStats] = useState<ReferralStats | null>(null);
@@ -135,7 +148,7 @@ export default function Settings() {
         setMemberSince(profile.memberSince ?? null);
         setWofConsent(profile.wofPhotoConsent ?? false);
         setContentDisclaimer(profile.contentDisclaimer ?? false);
-        setLang((profile.language as Lang) ?? (user?.language as Lang) ?? "en");
+        setSelectedLang((profile.language as Lang) ?? (user?.language as Lang) ?? "en");
 
         if (referralRes) {
           setReferralStats(referralRes);
@@ -162,25 +175,25 @@ export default function Settings() {
 
   const handleLanguageChange = useCallback(
     async (newLang: Lang) => {
-      if (newLang === lang || langSaving) return;
-      const prevLang = lang;
+      if (newLang === selectedLang || langSaving) return;
+      const prevLang = selectedLang;
       setLangSaving(true);
       setLangError(null);
-      setLang(newLang);
+      setSelectedLang(newLang);
       try {
         await updateLanguage(newLang);
         await refreshUser();
       } catch (err) {
-        setLang(prevLang);
+        setSelectedLang(prevLang);
         setLangError(
-          err instanceof Error ? err.message : "Failed to update language"
+          err instanceof Error ? err.message : p.langUpdateError
         );
         setTimeout(() => setLangError(null), 4000);
       } finally {
         setLangSaving(false);
       }
     },
-    [lang, langSaving, refreshUser]
+    [selectedLang, langSaving, refreshUser]
   );
 
   const handleDeleteAccount = useCallback(async () => {
@@ -192,7 +205,7 @@ export default function Settings() {
       setShowDeleteModal(false);
       navigate("/");
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Failed to delete account");
+      setDeleteError(err instanceof Error ? err.message : p.deleteAccountFailed);
       setDeleting(false);
     }
   }, [deleting, navigate]);
@@ -292,7 +305,7 @@ export default function Settings() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 pb-24">
       <Helmet>
-        <title>Settings — PNPtv!</title>
+        <title>{p.settingsTitle} — PNPtv!</title>
         <meta name="description" content="Manage your PNPtv! account preferences and settings." />
       </Helmet>
 
@@ -338,7 +351,7 @@ export default function Settings() {
                 <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
                 </svg>
-                {p.joined} {formatDate(memberSince)}
+                {p.joined} {formatDate(memberSince, uiLang)}
               </p>
             )}
           </div>
@@ -359,7 +372,7 @@ export default function Settings() {
             </p>
           </div>
           <select
-            value={lang}
+            value={selectedLang}
             onChange={(e) => handleLanguageChange(e.target.value as Lang)}
             disabled={langSaving}
             className="rounded-lg px-3 py-2 text-sm flex-shrink-0 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-white/20"
@@ -449,9 +462,9 @@ export default function Settings() {
             {/* Column headers */}
             <div className="flex items-center gap-1 mb-2 px-1">
               <div className="flex-1" />
-              <div className="w-11 text-center text-[10px] font-medium" style={{ color: "#8E8E93" }}>Push</div>
-              <div className="w-11 text-center text-[10px] font-medium" style={{ color: "#8E8E93" }}>Bot</div>
-              <div className="w-11 text-center text-[10px] font-medium" style={{ color: "#8E8E93" }}>Email</div>
+              <div className="w-11 text-center text-[10px] font-medium" style={{ color: "#8E8E93" }}>{p.notifChannelPush}</div>
+              <div className="w-11 text-center text-[10px] font-medium" style={{ color: "#8E8E93" }}>{p.notifChannelBot}</div>
+              <div className="w-11 text-center text-[10px] font-medium" style={{ color: "#8E8E93" }}>{p.notifChannelEmail}</div>
             </div>
 
             {/* Notification type rows */}
@@ -518,7 +531,7 @@ export default function Settings() {
           </>
         ) : (
           <p className="text-xs" style={{ color: "#8E8E93" }}>
-            Unable to load notification preferences.
+            {p.notifLoadError}
           </p>
         )}
       </Section>
@@ -582,7 +595,7 @@ export default function Settings() {
           </>
         ) : (
           <p className="text-xs" style={{ color: "#8E8E93" }}>
-            Unable to load referral data.
+            {p.referralLoadError}
           </p>
         )}
       </Section>
@@ -662,10 +675,12 @@ export default function Settings() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-modal-title"
+          aria-describedby="delete-modal-desc"
           onKeyDown={(e) => {
             if (e.key === "Escape" && !deleting) setShowDeleteModal(false);
           }}
           tabIndex={-1}
+          ref={deleteModalRef}
         >
           <div
             className="w-full max-w-sm rounded-2xl p-6"
@@ -677,7 +692,7 @@ export default function Settings() {
             >
               {p.deleteAccountConfirm}
             </h2>
-            <p className="text-xs leading-relaxed mb-4" style={{ color: "#8E8E93" }}>
+            <p id="delete-modal-desc" className="text-xs leading-relaxed mb-4" style={{ color: "#8E8E93" }}>
               {p.deleteAccountWarning}
             </p>
             <p className="text-xs mb-2" style={{ color: "rgba(255,255,255,0.5)" }}>

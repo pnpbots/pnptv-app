@@ -427,9 +427,9 @@ class BookingModel {
   /**
    * Cancel booking
    */
-  static async cancel(bookingId, reason, cancelledBy = 'user') {
+  static async cancel(bookingId, reason, cancelledBy = 'user', userId = null) {
     try {
-      const sql = `
+      let sql = `
         UPDATE ${BOOKINGS_TABLE}
         SET status = 'cancelled',
             cancel_reason = $2,
@@ -437,15 +437,23 @@ class BookingModel {
             cancelled_at = NOW(),
             hold_expires_at = NULL
         WHERE id = $1 AND status NOT IN ('completed', 'cancelled', 'expired')
-        RETURNING *
       `;
-      const result = await query(sql, [bookingId, reason, cancelledBy]);
+      const params = [bookingId, reason, cancelledBy];
+
+      if (userId !== null) {
+        sql += ` AND (user_id = $4 OR performer_id = $4)`;
+        params.push(String(userId));
+      }
+
+      sql += ` RETURNING *`;
+
+      const result = await query(sql, params);
 
       if (result.rows.length === 0) {
         return { success: false, error: 'booking_not_found_or_already_final' };
       }
 
-      logger.info('Booking cancelled', { bookingId, reason, cancelledBy });
+      logger.info('Booking cancelled', { bookingId, reason, cancelledBy, userId });
       return { success: true, booking: this.mapRowToBooking(result.rows[0]) };
     } catch (error) {
       logger.error('Error cancelling booking:', error);

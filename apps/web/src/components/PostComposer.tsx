@@ -942,7 +942,7 @@ export function PostComposer({
                 onChange={setCrossPostX}
                 disabled={isPosting}
                 activeColor="#FFFFFF"
-                label="Also post to X"
+                label={tFeed.alsoPostX}
                 icon={
                   <svg
                     viewBox="0 0 1200 1227"
@@ -956,7 +956,7 @@ export function PostComposer({
               />
               {crossPostX && (
                 <p className="text-[11px] mt-1 px-1" style={{ color: "#555" }}>
-                  This post will also appear on your X timeline
+                  {tFeed.crosspostXTimeline}
                 </p>
               )}
             </div>
@@ -965,9 +965,8 @@ export function PostComposer({
           {/* Format hint — shown when no files attached and not uploading */}
           {files.length === 0 && !isPosting && (
             <p className="text-[11px] mt-2 text-center" style={{ color: "#555" }}>
-              {/* "Up to 4 photos or 1 video · Max 50 MB" */}
-              Up to {MAX_IMAGES} photos or 1 video &bull; Max 50 MB
-              {!compact && " \u00b7 Drag & drop supported"}
+              {tFeed.uploadHint.replace("{max}", String(MAX_IMAGES))}
+              {!compact && ` \u00b7 ${tFeed.uploadHintDragDrop}`}
             </p>
           )}
         </div>
