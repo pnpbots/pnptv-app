@@ -128,7 +128,7 @@ async function findOrLinkUser({ telegramId, twitterHandle, xId, email, firstName
   if (telegramId) {
     // First: look up by telegram column (new-style users)
     const { rows: byTelegram } = await query(
-      `SELECT ${RETURN_COLS} FROM users WHERE telegram = $1 LIMIT 1`,
+      `SELECT ${RETURN_COLS} FROM users WHERE telegram = $1 AND is_deleted = false LIMIT 1`,
       [String(telegramId)]
     );
     if (byTelegram.length > 0) {
@@ -136,7 +136,7 @@ async function findOrLinkUser({ telegramId, twitterHandle, xId, email, firstName
     } else {
       // Legacy: old bot users had the Telegram numeric ID as their primary key (id column)
       const { rows: byId } = await query(
-        `SELECT ${RETURN_COLS} FROM users WHERE id = $1 LIMIT 1`,
+        `SELECT ${RETURN_COLS} FROM users WHERE id = $1 AND is_deleted = false LIMIT 1`,
         [String(telegramId)]
       );
       if (byId.length > 0) {
@@ -154,17 +154,17 @@ async function findOrLinkUser({ telegramId, twitterHandle, xId, email, firstName
   }
 
   if (!user && xId) {
-    const { rows } = await query(`SELECT ${RETURN_COLS} FROM users WHERE x_id = $1`, [String(xId)]);
+    const { rows } = await query(`SELECT ${RETURN_COLS} FROM users WHERE x_id = $1 AND is_deleted = false`, [String(xId)]);
     if (rows.length > 0) user = rows[0];
   }
 
   if (!user && twitterHandle) {
-    const { rows } = await query(`SELECT ${RETURN_COLS} FROM users WHERE twitter = $1`, [twitterHandle]);
+    const { rows } = await query(`SELECT ${RETURN_COLS} FROM users WHERE twitter = $1 AND is_deleted = false`, [twitterHandle]);
     if (rows.length > 0) user = rows[0];
   }
 
   if (!user && email) {
-    const { rows } = await query(`SELECT ${RETURN_COLS} FROM users WHERE email = $1`, [email.toLowerCase().trim()]);
+    const { rows } = await query(`SELECT ${RETURN_COLS} FROM users WHERE email = $1 AND is_deleted = false`, [email.toLowerCase().trim()]);
     if (rows.length > 0) user = rows[0];
   }
 
@@ -755,7 +755,7 @@ const emailLogin = async (req, res) => {
     const result = await query(
       `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status,
               terms_accepted, photo_file_id, bio, language, password_hash, email, role, email_verified
-       FROM users WHERE email = $1`,
+       FROM users WHERE email = $1 AND is_deleted = false`,
       [emailLower]
     );
 

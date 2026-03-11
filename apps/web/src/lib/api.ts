@@ -3767,6 +3767,47 @@ export function deleteAmpacheFile(
   });
 }
 
+export function renameAmpacheFile(
+  category: string,
+  filename: string,
+  newName: string
+): Promise<{ success: boolean; newName: string }> {
+  return request(
+    `/api/webapp/admin/ampache/files/${category}/${encodeURIComponent(filename)}/rename`,
+    { method: "PUT", body: { newName } }
+  );
+}
+
+export interface AmpacheFileTags {
+  title: string;
+  artist: string;
+  album: string;
+  genre: string;
+  year: number | null;
+  track: number | null;
+  duration: number;
+}
+
+export function getAmpacheFileTags(
+  category: string,
+  filename: string
+): Promise<{ success: boolean; tags: AmpacheFileTags }> {
+  return request(
+    `/api/webapp/admin/ampache/files/${category}/${encodeURIComponent(filename)}/tags`
+  );
+}
+
+export function updateAmpacheFileTags(
+  category: string,
+  filename: string,
+  tags: { title?: string; artist?: string; album?: string; genre?: string; year?: string; trackNumber?: string }
+): Promise<{ success: boolean }> {
+  return request(
+    `/api/webapp/admin/ampache/files/${category}/${encodeURIComponent(filename)}/tags`,
+    { method: "PUT", body: tags }
+  );
+}
+
 // ─── Overlay Asset Direct Upload ─────────────────────────────────────────────
 
 export interface UploadedOverlayAsset {

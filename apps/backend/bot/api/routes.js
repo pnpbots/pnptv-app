@@ -3725,6 +3725,182 @@ app.delete('/api/webapp/admin/ampache/files/:category/:filename', adminGuard, as
   }
 }));
 
+// GET /api/webapp/admin/ampache/files/:category/:filename/tags — Read metadata tags
+app.get('/api/webapp/admin/ampache/files/:category/:filename/tags', adminGuard, asyncHandler(async (req, res) => {
+  const { category, filename } = req.params;
+  if (!AMPACHE_VALID_CATEGORIES.includes(category)) {
+    return res.status(400).json({ success: false, error: 'Invalid category' });
+  }
+  if (!filename || filename.includes('\0')) {
+    return res.status(400).json({ success: false, error: 'Invalid filename' });
+  }
+  const filePath = path.resolve(AMPACHE_MEDIA_DIR, category, filename);
+  const expectedBase = path.resolve(AMPACHE_MEDIA_DIR, category);
+  if (!filePath.startsWith(expectedBase + path.sep)) {
+    return res.status(400).json({ success: false, error: 'Invalid filename' });
+  }
+  try {
+    const mm = require('music-metadata');
+    const metadata = await mm.parseFile(filePath);
+    const { title, artist, album, genre, year, track } = metadata.common;
+    const duration = metadata.format.duration || 0;
+    res.json({
+      success: true,
+      tags: {
+        title: title || '',
+        artist: artist || '',
+        album: album || '',
+        genre: (genre || [])[0] || '',
+        year: year || null,
+        track: track?.no || null,
+        duration: Math.round(duration),
+      },
+    });
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return res.status(404).json({ success: false, error: 'File not found' });
+    }
+    logger.error('Ampache read tags error:', error);
+    res.status(500).json({ success: false, error: 'Failed to read metadata' });
+  }
+}));
+
+// PUT /api/webapp/admin/ampache/files/:category/:filename/tags — Update metadata tags (MP3 only)
+app.put('/api/webapp/admin/ampache/files/:category/:filename/tags', adminGuard, asyncHandler(async (req, res) => {
+  const { category, filename } = req.params;
+  if (!AMPACHE_VALID_CATEGORIES.includes(category)) {
+    return res.status(400).json({ success: false, error: 'Invalid category' });
+  }
+  if (!filename || filename.includes('\0')) {
+    return res.status(400).json({ success: false, error: 'Invalid filename' });
+  }
+  const filePath = path.resolve(AMPACHE_MEDIA_DIR, category, filename);
+  const expectedBase = path.resolve(AMPACHE_MEDIA_DIR, category);
+  if (!filePath.startsWith(expectedBase + path.sep)) {
+    return res.status(400).json({ success: false, error: 'Invalid filename' });
+  }
+
+  // Only MP3 files support tag writing via node-id3
+  const ext = path.extname(filename).toLowerCase();
+  if (ext !== '.mp3') {
+    return res.status(400).json({ success: false, error: 'Tag editing is only supported for MP3 files. For other formats, rename the file instead.' });
+  }
+
+  try {
+    await fs.promises.access(filePath);
+  } catch {
+    return res.status(404).json({ success: false, error: 'File not found' });
+  }
+
+  const { title, artist, album, genre, year, trackNumber } = req.body;
+  if (!title && !artist && !album && !genre && year === undefined && trackNumber === undefined) {
+    return res.status(400).json({ success: false, error: 'No tags to update' });
+  }
+
+  try {
+    const NodeID3 = require('node-id3');
+    const tags = {};
+    if (title !== undefined) tags.title = String(title).slice(0, 256);
+    if (artist !== undefined) tags.artist = String(artist).slice(0, 256);
+    if (album !== undefined) tags.album = String(album).slice(0, 256);
+    if (genre !== undefined) tags.genre = String(genre).slice(0, 128);
+    if (year !== undefined) tags.year = String(year).slice(0, 4);
+    if (trackNumber !== undefined) tags.trackNumber = String(trackNumber).slice(0, 8);
+
+    const result = NodeID3.update(tags, filePath);
+    if (result !== true) {
+      throw new Error('Failed to write ID3 tags');
+    }
+
+    logger.info(`Ampache tags updated: ${category}/${filename} by admin userId=${req.user?.id}`, tags);
+
+    // Trigger Ampache catalog rescan so changes reflect in radio
+    try {
+      const AmpacheService = require('../services/ampacheService');
+      const token = await AmpacheService.getAuthToken();
+      const scanUrl = `${process.env.AMPACHE_URL || 'http://ampache:80'}/server/json.server.php?action=catalog_action&auth=${encodeURIComponent(token)}&task=add_to_catalog&catalog=1`;
+      axios.get(scanUrl).catch(() => {});
+    } catch (scanErr) {
+      logger.warn('Could not trigger Ampache catalog scan after tag update:', scanErr.message);
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    logger.error('Ampache write tags error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update tags' });
+  }
+}));
+
+// PUT /api/webapp/admin/ampache/files/:category/:filename/rename — Rename a media file
+app.put('/api/webapp/admin/ampache/files/:category/:filename/rename', adminGuard, asyncHandler(async (req, res) => {
+  const { category, filename } = req.params;
+  const { newName } = req.body;
+
+  if (!AMPACHE_VALID_CATEGORIES.includes(category)) {
+    return res.status(400).json({ success: false, error: 'Invalid category' });
+  }
+  if (!filename || filename.includes('\0') || !newName || newName.includes('\0')) {
+    return res.status(400).json({ success: false, error: 'Invalid filename' });
+  }
+
+  // Validate newName: must preserve extension, no path separators, reasonable length
+  const oldExt = path.extname(filename).toLowerCase();
+  const newExt = path.extname(newName).toLowerCase();
+  if (oldExt !== newExt) {
+    return res.status(400).json({ success: false, error: `File extension must remain ${oldExt}` });
+  }
+  if (newName.includes('/') || newName.includes('\\') || newName.length > 255) {
+    return res.status(400).json({ success: false, error: 'Invalid new filename' });
+  }
+  // Sanitize: remove any characters that could cause filesystem issues
+  const sanitized = newName.replace(/[<>:"|?*\x00-\x1F]/g, '');
+  if (!sanitized || sanitized !== newName) {
+    return res.status(400).json({ success: false, error: 'Filename contains invalid characters' });
+  }
+
+  const oldPath = path.resolve(AMPACHE_MEDIA_DIR, category, filename);
+  const newPath = path.resolve(AMPACHE_MEDIA_DIR, category, sanitized);
+  const expectedBase = path.resolve(AMPACHE_MEDIA_DIR, category);
+
+  if (!oldPath.startsWith(expectedBase + path.sep) || !newPath.startsWith(expectedBase + path.sep)) {
+    return res.status(400).json({ success: false, error: 'Invalid filename' });
+  }
+
+  try {
+    await fs.promises.access(oldPath);
+  } catch {
+    return res.status(404).json({ success: false, error: 'File not found' });
+  }
+
+  // Check if target name already exists
+  try {
+    await fs.promises.access(newPath);
+    return res.status(409).json({ success: false, error: 'A file with that name already exists' });
+  } catch {
+    // Good — target doesn't exist
+  }
+
+  try {
+    await fs.promises.rename(oldPath, newPath);
+    logger.info(`Ampache rename: ${category}/${filename} → ${sanitized} by admin userId=${req.user?.id}`);
+
+    // Trigger Ampache catalog rescan
+    try {
+      const AmpacheService = require('../services/ampacheService');
+      const token = await AmpacheService.getAuthToken();
+      const scanUrl = `${process.env.AMPACHE_URL || 'http://ampache:80'}/server/json.server.php?action=catalog_action&auth=${encodeURIComponent(token)}&task=add_to_catalog&catalog=1`;
+      axios.get(scanUrl).catch(() => {});
+    } catch (scanErr) {
+      logger.warn('Could not trigger Ampache catalog scan after rename:', scanErr.message);
+    }
+
+    res.json({ success: true, newName: sanitized });
+  } catch (error) {
+    logger.error('Ampache rename file error:', error);
+    res.status(500).json({ success: false, error: 'Failed to rename file' });
+  }
+}));
+
 // ─── Media Library Video Management (Prime toggle for Ampache videos) ─────────
 
 // GET /api/webapp/admin/media-library/videos — List all videos from media_library

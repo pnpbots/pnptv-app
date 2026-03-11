@@ -42,6 +42,7 @@ const searchUsers = async (req, res) => {
       `SELECT id, username, first_name, last_name, photo_file_id, pnptv_id
        FROM users
        WHERE id != $1
+         AND is_deleted = false
          AND (username ILIKE $2 ESCAPE '\\' OR first_name ILIKE $2 ESCAPE '\\' OR pnptv_id ILIKE $2 ESCAPE '\\')
          AND NOT (id = ANY($4::text[]))
        ORDER BY first_name ASC
@@ -103,11 +104,25 @@ const deleteMyAccount = async (req, res) => {
         x_access_token_encrypted  = NULL,
         x_refresh_token_encrypted = NULL,
         atproto_password    = NULL,
+        atproto_did         = NULL,
+        atproto_handle      = NULL,
+        atproto_pds_url     = NULL,
         canva_access_token_encrypted  = NULL,
         canva_refresh_token_encrypted = NULL,
+        canva_user_id       = NULL,
+        canva_display_name  = NULL,
+        canva_connected_at  = NULL,
+        canva_token_expires_at = NULL,
+        x_token_expires_at  = NULL,
         card_token          = NULL,
         card_token_mask     = NULL,
         password_hash       = NULL,
+        interests           = NULL,
+        looking_for         = NULL,
+        tribe               = NULL,
+        ref_code            = NULL,
+        last_login_method   = NULL,
+        last_login_at       = NULL,
         is_active           = false,
         is_deleted          = true,
         deleted_at          = NOW(),
@@ -129,12 +144,7 @@ const deleteMyAccount = async (req, res) => {
       cache.zrem('geo:users:online', user.id),
     ]);
 
-    // Destroy session
-    if (req.session) {
-      req.session.destroy(() => {});
-    }
-
-    // Send confirmation email (fire-and-forget)
+    // Send confirmation email (fire-and-forget, before session destruction)
     if (record.email) {
       emailService.sendAccountDeletionConfirmationEmail({
         email: record.email,
@@ -143,7 +153,26 @@ const deleteMyAccount = async (req, res) => {
       }).catch(() => {});
     }
 
-    return res.json({ success: true });
+    // Destroy session, clear cookie, then respond
+    const sendResponse = () => {
+      res.clearCookie('__pnptv_sid', {
+        path: '/',
+        domain: process.env.NODE_ENV === 'production' ? '.pnptv.app' : undefined,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+      });
+      return res.json({ success: true });
+    };
+
+    if (req.session) {
+      req.session.destroy((err) => {
+        if (err) logger.error('deleteMyAccount: session destroy error', { userId: user.id, err: err.message });
+        sendResponse();
+      });
+    } else {
+      sendResponse();
+    }
   } catch (err) {
     logger.error('deleteMyAccount error', err);
     return res.status(500).json({ error: 'Failed to delete account' });

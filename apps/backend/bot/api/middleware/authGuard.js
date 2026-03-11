@@ -1,11 +1,11 @@
 const logger = require('../../../utils/logger');
+const { query } = require('../../../config/postgres');
 const PlatformBanService = require('../../services/platformBanService');
 
 /**
  * Auth Guard Middleware
  * Protects routes requiring authentication.
- * Also enforces platform bans — no banned identity vector can reach any
- * protected endpoint regardless of which login method they used.
+ * Also enforces platform bans and account deactivation/deletion.
  */
 const authGuard = async (req, res, next) => {
   const user = req.session?.user;
@@ -19,6 +19,27 @@ const authGuard = async (req, res, next) => {
     return res.status(401).json({
       success: false,
       error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+    });
+  }
+
+  // ── Active account check (defense-in-depth for deleted/deactivated users) ──
+  try {
+    const { rows } = await query(
+      `SELECT is_active, is_deleted FROM users WHERE id = $1`,
+      [String(user.id)]
+    );
+    if (!rows[0] || !rows[0].is_active || rows[0].is_deleted) {
+      req.session?.destroy?.(() => {});
+      return res.status(401).json({
+        success: false,
+        error: { code: 'ACCOUNT_DEACTIVATED', message: 'Account not found or deactivated.' },
+      });
+    }
+  } catch (dbErr) {
+    logger.error('authGuard — account status check failed (fail closed)', { error: dbErr.message });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
     });
   }
 
