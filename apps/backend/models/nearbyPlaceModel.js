@@ -2,6 +2,9 @@ const { query } = require('../config/postgres');
 const { cache } = require('../config/redis');
 const logger = require('../utils/logger');
 
+// Escape LIKE/ILIKE metacharacters so user input cannot widen search patterns
+const escapeLike = (str) => str.replace(/[%_\\]/g, '\\$&');
+
 const TABLE = 'nearby_places';
 const CACHE_PREFIX = 'nearby_place';
 const CACHE_TTL = 300; // 5 minutes
@@ -422,13 +425,13 @@ class NearbyPlaceModel {
       }
 
       if (filters.city) {
-        sql += ` AND LOWER(p.city) LIKE LOWER($${paramIndex++})`;
-        params.push(`%${filters.city}%`);
+        sql += ` AND p.city ILIKE $${paramIndex++} ESCAPE '\\'`;
+        params.push(`%${escapeLike(filters.city)}%`);
       }
 
       if (filters.search) {
-        sql += ` AND (LOWER(p.name) LIKE LOWER($${paramIndex}) OR LOWER(p.city) LIKE LOWER($${paramIndex}) OR LOWER(p.address) LIKE LOWER($${paramIndex}))`;
-        params.push(`%${filters.search}%`);
+        sql += ` AND (p.name ILIKE $${paramIndex} ESCAPE '\\' OR p.city ILIKE $${paramIndex} ESCAPE '\\' OR p.address ILIKE $${paramIndex} ESCAPE '\\')`;
+        params.push(`%${escapeLike(filters.search)}%`);
         paramIndex++;
       }
 
@@ -465,12 +468,12 @@ class NearbyPlaceModel {
         params.push(filters.placeType);
       }
       if (filters.city) {
-        sql += ` AND LOWER(city) LIKE LOWER($${paramIndex++})`;
-        params.push(`%${filters.city}%`);
+        sql += ` AND city ILIKE $${paramIndex++} ESCAPE '\\'`;
+        params.push(`%${escapeLike(filters.city)}%`);
       }
       if (filters.search) {
-        sql += ` AND (LOWER(name) LIKE LOWER($${paramIndex}) OR LOWER(city) LIKE LOWER($${paramIndex}) OR LOWER(address) LIKE LOWER($${paramIndex}))`;
-        params.push(`%${filters.search}%`);
+        sql += ` AND (name ILIKE $${paramIndex} ESCAPE '\\' OR city ILIKE $${paramIndex} ESCAPE '\\' OR address ILIKE $${paramIndex} ESCAPE '\\')`;
+        params.push(`%${escapeLike(filters.search)}%`);
         paramIndex++;
       }
 

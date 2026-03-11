@@ -54,8 +54,7 @@ const ENHANCED_LINK_PATTERNS = [
   /t\.me\/[a-zA-Z0-9_]+/gi,
   // IP addresses
   /\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g,
-  // Email addresses
-  /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
+  // NOTE: email pattern removed — matching user@domain caused permanent bans on innocent messages
 ];
 
 /**
@@ -285,6 +284,20 @@ const autoModerationMiddleware = () => async (ctx, next) => {
     // Only process messages in groups
     if (!ctx.message || ctx.chat.type === 'private') {
       return next();
+    }
+
+    // Guard against unbounded Map growth during peak usage: if more than 10 000 users
+    // are tracked, evict the oldest half to keep memory stable.
+    if (userMessageHistory.size > 10000) {
+      const entries = Array.from(userMessageHistory.keys());
+      const evictCount = Math.floor(entries.length / 2);
+      for (let i = 0; i < evictCount; i++) {
+        userMessageHistory.delete(entries[i]);
+      }
+      logger.warn('autoModeration: userMessageHistory exceeded 10 000 entries, evicted oldest half', {
+        evicted: evictCount,
+        remaining: userMessageHistory.size,
+      });
     }
 
     // Skip if user is exempt

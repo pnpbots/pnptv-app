@@ -2,6 +2,7 @@ const { getBroadcastTypeMenu, getConfirmationMenu, getBackButton } = require('..
 const { getLanguage } = require('../../utils/helpers');
 const adminService = require('../../services/adminService');
 const logger = require('../../../utils/logger');
+const PermissionService = require('../../services/permissionService');
 
 /**
  * Handle broadcast menu
@@ -81,6 +82,12 @@ async function handleBroadcastType(ctx) {
  */
 async function handleBroadcastInput(ctx, bot) {
   try {
+    // Re-verify platform admin status at execution time (state-carrying handler bypass protection)
+    if (!(await PermissionService.isAdmin(ctx.from?.id))) {
+      logger.warn('handleBroadcastInput: non-admin caller rejected', { userId: ctx.from?.id });
+      return false;
+    }
+
     const session = ctx.session || {};
 
     if (!session.waitingForBroadcast) {
@@ -146,6 +153,13 @@ async function handleBroadcastInput(ctx, bot) {
  */
 async function handleBroadcastConfirm(ctx, bot) {
   try {
+    // Re-verify platform admin status at execution time (state-carrying handler bypass protection)
+    if (!(await PermissionService.isAdmin(ctx.from?.id))) {
+      logger.warn('handleBroadcastConfirm: non-admin caller rejected', { userId: ctx.from?.id });
+      await ctx.answerCbQuery('⛔ Unauthorized');
+      return;
+    }
+
     const lang = getLanguage(ctx);
     const session = ctx.session || {};
     const confirmed = ctx.callbackQuery.data === 'confirm_broadcast';

@@ -4,6 +4,9 @@ const AdminDashboardService = require('../../../services/adminDashboardService')
 const VideoCallModel = require('../../../models/videoCallModel');
 const SocialPostService = require('../../services/socialPostService');
 
+// Escape LIKE/ILIKE metacharacters so user input cannot widen search patterns
+const escapeLike = (str) => str.replace(/[%_\\]/g, '\\$&');
+
 // Note: Admin guard is now handled by JWT middleware (verifyAdminJWT in routes.js)
 // req.user is populated by the middleware and contains user data
 
@@ -97,10 +100,10 @@ const listUsers = async (req, res) => {
     const countParams = [];
 
     if (search) {
-      const searchTerm = `%${search}%`;
+      const searchTerm = `%${escapeLike(search)}%`;
       const idx1 = params.length + 1;
       const idx2 = params.length + 2;
-      const searchClause = ` AND (username ILIKE $${idx1} OR email ILIKE $${idx1} OR first_name ILIKE $${idx1} OR last_name ILIKE $${idx1} OR id::text = $${idx2})`;
+      const searchClause = ` AND (username ILIKE $${idx1} ESCAPE '\\' OR email ILIKE $${idx1} ESCAPE '\\' OR first_name ILIKE $${idx1} ESCAPE '\\' OR last_name ILIKE $${idx1} ESCAPE '\\' OR id::text = $${idx2})`;
       countQuery += searchClause;
       dataQuery += searchClause;
       params.push(searchTerm, search);

@@ -46,8 +46,8 @@ const rateLimitMiddleware = () => {
       const lang = ctx.session?.language || 'en';
 
       if (rejRes instanceof Error) {
-        logger.error('Rate limiter error:', rejRes);
-        return next();
+        logger.error('Rate limiter error (fail-closed, dropping update):', rejRes);
+        return; // fail-closed: do not process the update when Redis is unavailable
       }
 
       // Rate limit exceeded

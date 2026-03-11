@@ -76,6 +76,7 @@ export default function CmsPage() {
                   ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'a', 'blockquote', 'code', 'pre', 'hr', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img', 'span', 'div'],
                   ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'class'],
                   ALLOW_DATA_ATTR: false,
+                  ALLOWED_URI_REGEXP: /^(https?:\/\/|\/)/i,
                 }),
               }}
             />

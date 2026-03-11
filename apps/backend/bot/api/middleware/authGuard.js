@@ -48,8 +48,12 @@ const authGuard = async (req, res, next) => {
       });
     }
   } catch (banErr) {
-    // Fail open — never block a legitimate user on a DB hiccup
-    logger.error('authGuard — ban check error (fail open)', { error: banErr.message });
+    // Fail closed — infrastructure errors must not allow banned users through
+    logger.error('authGuard — ban check error (fail closed)', { error: banErr.message });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
+    });
   }
   // ─────────────────────────────────────────────────────────────────────────
 

@@ -216,7 +216,16 @@ const startApiServer = (modeLabel) => {
 
   // Attach Socket.IO for real-time chat/DM
   const io = new SocketIOServer(server, {
-    cors: { origin: process.env.WEBAPP_ORIGIN || ['https://app.pnptv.app', 'https://pnptv.app'], credentials: true },
+    cors: {
+      // H5: Filter out wildcard '*' entries — WEBAPP_ORIGIN must never accept all origins.
+      origin: (() => {
+        const raw = process.env.WEBAPP_ORIGIN;
+        if (!raw) return ['https://app.pnptv.app', 'https://pnptv.app'];
+        const allowed = raw.split(',').map(o => o.trim()).filter(o => o && o !== '*');
+        return allowed.length > 0 ? allowed : ['https://app.pnptv.app', 'https://pnptv.app'];
+      })(),
+      credentials: true,
+    },
     path: '/socket.io',
   });
   apiApp.set('io', io);

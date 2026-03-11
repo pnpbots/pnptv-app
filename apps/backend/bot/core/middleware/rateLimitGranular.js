@@ -176,13 +176,13 @@ const rateLimitByContext = (context = 'default', options = {}) => {
 
       // Handle actual errors (not rate limit rejections)
       if (rejRes instanceof Error) {
-        logger.error('Rate limiter error:', {
+        logger.error('Rate limiter error (fail-closed, dropping update):', {
           error: rejRes.message,
           context,
           userId,
         });
-        // Allow request to proceed on error (fail open)
-        return next();
+        // fail-closed: do not process the update when Redis is unavailable
+        return;
       }
 
       // Rate limit exceeded

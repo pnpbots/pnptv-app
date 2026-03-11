@@ -233,6 +233,13 @@ export function LoginPage() {
         return;
       }
 
+      const isValidDeepLink = (url: string) => url.startsWith('/') || url.startsWith('https://');
+      if (!isValidDeepLink(data.deepLink)) {
+        if (win) win.close();
+        setDeepLinkStatus("error");
+        return;
+      }
+
       if (win) {
         win.location.href = data.deepLink;
       } else {

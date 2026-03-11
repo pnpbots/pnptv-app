@@ -3,6 +3,16 @@ const TopicModerationService = require('../../services/topicModerationService');
 const ModerationModel = require('../../../models/moderationModel');
 const logger = require('../../../utils/logger');
 const { isAdmin, isGroupChat } = require('../../../utils/adminUtils');
+const PermissionService = require('../../../services/permissionService');
+
+/**
+ * Dual-layer admin check: user must be both a Telegram group admin AND a platform admin.
+ */
+async function isPlatformAdmin(ctx) {
+  const telegramAdmin = await isAdmin(ctx);
+  if (!telegramAdmin) return false;
+  return PermissionService.isAdmin(ctx.from?.id);
+}
 
 /**
  * Register moderation admin handlers
@@ -46,7 +56,7 @@ async function handleModerationToggle(ctx) {
       return ctx.reply('This command only works in groups.');
     }
 
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return ctx.reply('⛔ Only administrators can use this command.');
     }
 
@@ -124,7 +134,7 @@ async function handleSetLinks(ctx) {
       return ctx.reply('This command only works in groups.');
     }
 
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return ctx.reply('⛔ Only administrators can use this command.');
     }
 
@@ -176,7 +186,7 @@ async function handleModLogs(ctx) {
       return ctx.reply('This command only works in groups.');
     }
 
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return ctx.reply('⛔ Only administrators can use this command.');
     }
 
@@ -230,7 +240,7 @@ async function handleModStats(ctx) {
       return ctx.reply('This command only works in groups.');
     }
 
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return ctx.reply('⛔ Only administrators can use this command.');
     }
 
@@ -265,7 +275,7 @@ async function handleUserHistory(ctx) {
       return ctx.reply('This command only works in groups.');
     }
 
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return ctx.reply('⛔ Only administrators can use this command.');
     }
 
@@ -338,7 +348,7 @@ async function handleUsernameChanges(ctx) {
       return ctx.reply('This command only works in groups.');
     }
 
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return ctx.reply('⛔ Only administrators can use this command.');
     }
 
@@ -400,7 +410,7 @@ async function handleTopicModeration(ctx) {
       return ctx.reply('This command only works in groups.');
     }
 
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return ctx.reply('⛔ Only administrators can use this command.');
     }
 
@@ -448,7 +458,7 @@ async function handleSetTopicModeration(ctx) {
       return ctx.reply('This command only works in groups.');
     }
 
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return ctx.reply('⛔ Only administrators can use this command.');
     }
 

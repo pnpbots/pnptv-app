@@ -56,8 +56,8 @@ const globalBanCheck = () => async (ctx, next) => {
 
     return next();
   } catch (error) {
-    logger.error('globalBanCheck — error', { error: error.message });
-    return next(); // fail open
+    logger.error('globalBanCheck — error, dropping update (fail-closed)', { error: error.message });
+    return; // fail-closed: silently drop the update rather than bypass ban check
   }
 };
 

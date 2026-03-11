@@ -1682,6 +1682,13 @@ class PaymentService {
         // H2: Revoke entitlements granted by this plan when a payment is reversed.
         // Expire all user_entitlements that were sourced from this plan, and invalidate
         // the entitlement cache so the next access check reflects the revocation immediately.
+        //
+        // C-05 (confirmed intentional): The WHERE clause filters on source_plan_id = planId,
+        // NOT on all of the user's entitlements. This is correct for multi-plan users — a
+        // reversal of plan A should only revoke what plan A granted, leaving entitlements
+        // sourced from plan B (e.g. a separate active subscription) intact.
+        // source_plan_id is set to planId in both INSERT paths of grantEntitlementsForPlan,
+        // so this revocation is always accurate.
         if (userId && planIdOrBookingId) {
           try {
             await query(
@@ -2127,13 +2134,24 @@ class PaymentService {
               txHash: source?.txHash,
             });
 
-            // Grant entitlements based on plan_add_ons mapping
+            // Grant entitlements based on plan_add_ons mapping.
+            // C-01: Mirror the ePayco pattern — surface entitlement failures so the
+            // Daimo webhook handler returns { success: false } and Daimo can retry.
+            let daimoGrantResult;
             try {
-              await PaymentService.grantEntitlementsForPlan(userId, planId, 'daimo');
+              daimoGrantResult = await PaymentService.grantEntitlementsForPlan(userId, planId, 'daimo');
             } catch (entitlementErr) {
-              logger.warn('Failed to grant entitlements via Daimo (non-critical)', {
+              logger.error('grantEntitlementsForPlan threw unexpectedly — Daimo will retry', {
                 error: entitlementErr.message, userId, planId,
               });
+              throw entitlementErr;
+            }
+            const isDaimoPaidPlan = plan && (parseFloat(plan.price) > 0);
+            if (isDaimoPaidPlan && daimoGrantResult && daimoGrantResult.granted === 0) {
+              logger.error('grantEntitlementsForPlan returned 0 grants on paid Daimo plan — Daimo will retry', {
+                userId, planId, daimoGrantResult,
+              });
+              throw new Error('No entitlements were granted for paid Daimo plan');
             }
 
             // Creator subscription activation
@@ -3818,12 +3836,30 @@ class PaymentService {
    * Checks if payment was completed at ePayco and replays webhook if needed
    * @param {string} paymentId - Internal payment ID
    * @param {string} refPayco - ePayco reference
+   * @param {string|null} callerUserId - The authenticated user ID making this request (null for
+   *   background scheduler calls, which bypass the ownership check intentionally).
    * @returns {Promise<Object>} Recovery result
    */
-  static async recoverStuckPendingPayment(paymentId, refPayco) {
+  static async recoverStuckPendingPayment(paymentId, refPayco, callerUserId = null) {
     try {
       if (!paymentId || !refPayco) {
         return { success: false, error: 'Missing paymentId or refPayco' };
+      }
+
+      // C-03: Ownership assertion — when called from an authenticated HTTP request
+      // (callerUserId is set), verify the payment belongs to that user before
+      // attempting recovery. Background scheduler calls pass null and bypass this.
+      if (callerUserId !== null) {
+        const ownerRow = await PaymentModel.getById(paymentId);
+        const paymentOwner = ownerRow?.user_id || ownerRow?.userId;
+        if (!paymentOwner || String(paymentOwner) !== String(callerUserId)) {
+          logger.warn('recoverStuckPendingPayment: ownership mismatch — access denied', {
+            paymentId,
+            callerUserId,
+            paymentOwner,
+          });
+          return { success: false, error: 'Access denied: payment does not belong to this user', statusCode: 403 };
+        }
       }
 
       // Check current status at ePayco

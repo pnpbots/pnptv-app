@@ -704,8 +704,8 @@ class PaymentController {
           currentStatus: statusCheck.currentStatus,
         });
 
-        // Attempt recovery
-        await PaymentService.recoverStuckPendingPayment(paymentId, refPayco);
+        // Attempt recovery — pass callerUserId for C-03 ownership assertion.
+        await PaymentService.recoverStuckPendingPayment(paymentId, refPayco, req.session?.userId || null);
 
         return res.json({
           success: true,
@@ -1373,6 +1373,33 @@ class PaymentController {
             planId,
             expiry: expiryDate,
           });
+
+          // C-02: Grant entitlements after 3DS2 completion — was missing entirely.
+          // PaymentService is imported at the top of this file.
+          let threeDS2GrantResult;
+          try {
+            threeDS2GrantResult = await PaymentService.grantEntitlementsForPlan(userId, planId, 'epayco_3ds2');
+          } catch (entitlementErr) {
+            logger.error('grantEntitlementsForPlan threw during 3DS2 completion', {
+              error: entitlementErr.message, userId, planId, paymentId,
+            });
+            return res.status(500).json({
+              success: false,
+              error: 'Subscription activated but entitlement grant failed — please contact support',
+              code: 'ENTITLEMENT_GRANT_FAILED',
+            });
+          }
+          const is3DS2PaidPlan = plan && (parseFloat(plan.price) > 0);
+          if (is3DS2PaidPlan && threeDS2GrantResult && threeDS2GrantResult.granted === 0) {
+            logger.error('grantEntitlementsForPlan returned 0 grants after 3DS2 completion', {
+              userId, planId, paymentId, threeDS2GrantResult,
+            });
+            return res.status(500).json({
+              success: false,
+              error: 'Subscription activated but no entitlements were granted — please contact support',
+              code: 'ENTITLEMENT_GRANT_FAILED',
+            });
+          }
 
           logger.info('Subscription activated after 3DS 2.0 authentication', {
             userId,

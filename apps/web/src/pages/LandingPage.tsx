@@ -294,6 +294,8 @@ export function LandingPage() {
       const res = await fetch(`${API_BASE}/api/webapp/auth/telegram/token`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" } });
       const data = await res.json();
       if (!data.success || !data.token || !data.deepLink) { win?.close(); return; }
+      const isValidDeepLink = (url: string) => url.startsWith('/') || url.startsWith('https://');
+      if (!isValidDeepLink(data.deepLink)) { win?.close(); return; }
       if (win) win.location.href = data.deepLink; else window.location.href = data.deepLink;
       let attempts = 0;
       pollRef.current = setInterval(async () => {

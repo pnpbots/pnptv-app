@@ -440,6 +440,22 @@ class VisaCybersourceService {
           expiry: periodEnd,
         });
 
+        // C-04: Grant entitlements for the renewed plan period.
+        // Lazy require avoids any future circular dependency risk.
+        try {
+          const PaymentService = require('./paymentService');
+          await PaymentService.grantEntitlementsForPlan(subscription.user_id, subscription.plan_id, 'cybersource_recurring');
+        } catch (entitlementErr) {
+          logger.error('grantEntitlementsForPlan failed during Cybersource recurring renewal', {
+            userId: subscription.user_id,
+            planId: subscription.plan_id,
+            subscriptionId,
+            error: entitlementErr.message,
+          });
+          // Non-fatal for recurring: subscription period is already active. Log and continue.
+          // The next successful billing cycle will re-grant. Monitor closely.
+        }
+
         // Update user billing info
         await query(
           `UPDATE users SET
@@ -1222,16 +1238,30 @@ Thank you for staying with us! 🙏`;
         throw new Error('Invalid webhook signature');
       }
 
-      // C2: all event-specific handlers are stubs — return 503 until fully implemented
+      // C-04: Distinguish between events that must be acknowledged (return 200/success:true)
+      // and those that are genuinely unimplemented. Returning 503/success:false for
+      // payment.success, subscription.created, and subscription.updated causes Cybersource
+      // to mark the endpoint as broken and stop sending future events.
+      //
+      // TODO: Implement full processing for payment.success, subscription.created, and
+      // subscription.updated (entitlement grant, history record, user notification).
+      // For now, acknowledge them immediately to keep the Cybersource integration healthy.
       const eventType = webhookData.eventType;
-      const unimplementedEvents = [
+      const acknowledgeOnlyEvents = [
         'payment.success',
-        'payment.failed',
         'subscription.created',
         'subscription.updated',
       ];
+      const genuinelyUnimplementedEvents = [
+        'payment.failed',
+      ];
 
-      if (unimplementedEvents.includes(eventType)) {
+      if (acknowledgeOnlyEvents.includes(eventType)) {
+        logger.warn('Cybersource webhook event acknowledged but not yet fully processed', { eventType, eventId });
+        return { success: true, acknowledged: true, message: `Event type '${eventType}' received; full processing pending` };
+      }
+
+      if (genuinelyUnimplementedEvents.includes(eventType)) {
         logger.warn('Cybersource webhook event not yet implemented', { eventType });
         return {
           success: false,

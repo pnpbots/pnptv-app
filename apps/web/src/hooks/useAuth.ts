@@ -3,6 +3,7 @@ import { User } from "oidc-client-ts";
 import { getUser, login as oidcLogin, logout as oidcLogout, getAccessToken, userManager } from "@/lib/auth";
 import { isTelegramContext, getTelegramWebApp, waitForTelegramSdk } from "@/lib/telegram";
 import { telegramAuth, checkAuthStatus, apiLogout, type TelegramAuthResponse } from "@/lib/api";
+import { disconnectSocket } from "@/lib/socket";
 import React from "react";
 
 type AuthMode = "telegram" | "oidc" | null;
@@ -187,6 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const handleLogout = useCallback(async () => {
+    disconnectSocket();
     if (mode === "telegram") {
       await apiLogout();
     } else {

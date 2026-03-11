@@ -8,6 +8,29 @@ const { processChatMedia } = require('../services/chatMediaService');
 const NotificationEmitter = require('../services/notificationEmitter');
 const LiveStreamModel = require('../../models/liveStreamModel');
 
+// ── Lua script: atomic viewer-count decrement clamped to 0 ────────────────────
+// H4: Replaces the non-atomic decr + conditional set(0) pattern.
+// KEYS[1] = the viewer count key; returns the new count (never negative).
+const VIEWER_DECR_CLAMP_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if not current then return 0 end
+local val = tonumber(current)
+if not val or val <= 0 then
+  redis.call('SET', KEYS[1], 0)
+  return 0
+end
+return redis.call('DECR', KEYS[1])
+`;
+
+// Helper: atomically decrement viewer count for a stream, clamp to 0, refresh
+// TTL, and return the resulting count.
+async function atomicViewerDecrement(redis, streamId) {
+  const result = await redis.eval(VIEWER_DECR_CLAMP_SCRIPT, 1, `live:viewers:${streamId}`);
+  const count = Math.max(0, parseInt(result, 10) || 0);
+  await redis.expire(`live:viewers:${streamId}`, 3600);
+  return count;
+}
+
 // ── Session resolution ────────────────────────────────────────────────────────
 
 // Parse session cookie to authenticate Socket.IO connections
@@ -153,6 +176,11 @@ function initSocketIO(io) {
     // admin ban, password change) without the socket handler knowing.  Re-check
     // the Redis session every SESSION_REVALIDATION_INTERVAL_MS and disconnect
     // the socket if the session is gone or has been reassigned to a different user.
+    // N2: Track consecutive revalidation failures to disconnect after 3 failures
+    // (roughly 15 minutes) rather than failing open indefinitely on Redis outage.
+    let _sessionRevalidationFailures = 0;
+    const MAX_CONSECUTIVE_REVALIDATION_FAILURES = 3;
+
     const _sessionRevalidationTimer = setInterval(async () => {
       try {
         const freshUser = await revalidateSession(socket);
@@ -171,10 +199,24 @@ function initSocketIO(io) {
           logger.warn(`Socket revalidation: banned user ${user.id} disconnected`);
           socket.emit('auth:suspended', { message: 'Your account has been suspended.' });
           socket.disconnect(true);
+          return;
         }
+        // Reset failure counter on a successful revalidation round
+        _sessionRevalidationFailures = 0;
       } catch (err) {
-        logger.error('Periodic session revalidation error', { userId: user.id, error: err.message });
-        // Do NOT disconnect on transient Redis/DB errors — fail open for availability
+        _sessionRevalidationFailures += 1;
+        logger.error('Periodic session revalidation error', {
+          userId: user.id,
+          error: err.message,
+          consecutiveFailures: _sessionRevalidationFailures,
+        });
+        if (_sessionRevalidationFailures >= MAX_CONSECUTIVE_REVALIDATION_FAILURES) {
+          logger.warn(
+            `Socket revalidation: ${MAX_CONSECUTIVE_REVALIDATION_FAILURES} consecutive failures for user ${user.id} — disconnecting`,
+          );
+          socket.emit('auth:session_expired', { message: 'Session check unavailable. Please reconnect.' });
+          socket.disconnect(true);
+        }
       }
     }, SESSION_REVALIDATION_INTERVAL_MS);
 
@@ -195,6 +237,8 @@ function initSocketIO(io) {
     // ── Nearby Real-Time ────────────────────────────────────────────────────
 
     socket.on('nearby:join-grid', ({ lat, lng } = {}) => {
+      // N5: Rate-limit grid joins to 10 per 60 seconds per user
+      if (!rateLimit(`nearby:join-grid:${user.id}`, 10, 60000)) return;
       if (typeof lat !== 'number' || typeof lng !== 'number') return;
       if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
       const gridLat = Math.floor(lat * 10) / 10;
@@ -551,6 +595,27 @@ function initSocketIO(io) {
           return;
         }
 
+        // N3: Block check — reject messages between mutually blocked users.
+        // Fetch all other members of the group and check for any block relationship
+        // between the sender and any member; a simpler and cheaper check is to
+        // verify that the group owner or any admin has not blocked the sender.
+        // We use the same bidirectional query pattern as hangout:invite.
+        const { rows: hangoutBlockRows } = await query(
+          `SELECT 1 FROM blocked_users bu
+           JOIN hangout_group_members hgm
+             ON hgm.group_id = $2
+            AND (
+                  (bu.user_id = $1 AND bu.blocked_user_id = hgm.user_id)
+               OR (bu.user_id = hgm.user_id AND bu.blocked_user_id = $1)
+            )
+           LIMIT 1`,
+          [user.id, gid]
+        );
+        if (hangoutBlockRows.length > 0) {
+          socket.emit('hangout:error', { message: 'Cannot send message', code: 'BLOCKED' });
+          return;
+        }
+
         const room = `hangout:${gid}`;
         const firstName = user.firstName || user.first_name || null;
         const photoUrl = user.photoUrl || user.photo_url || null;
@@ -831,6 +896,29 @@ function initSocketIO(io) {
           return;
         }
 
+        // N1: Access control — if the DB-backed stream is not public, the viewer
+        // must hold the pnp-prime entitlement (creator-gated / subscribers-only stream).
+        // Restreamer slug streams and Directus performer streams without a live_streams
+        // row are treated as public (platform-level RTMP channels).
+        if (dbStream && dbStream.is_public === false) {
+          const userRole = (user.role || '').toLowerCase();
+          const isAdminUser = userRole === 'admin' || userRole === 'superadmin';
+          if (!isAdminUser && String(user.id) !== String(dbStream.host_id)) {
+            try {
+              const EntitlementAccessService = require('../services/entitlementAccessService');
+              const hasPrime = await EntitlementAccessService.hasEntitlement(String(user.id), 'pnp-prime');
+              if (!hasPrime) {
+                socket.emit('live:error', { message: 'Subscription required to view this stream', code: 'ACCESS_DENIED' });
+                return;
+              }
+            } catch (accessErr) {
+              logger.error('live:join access check failed', { streamId, userId: user.id, error: accessErr.message });
+              socket.emit('live:error', { message: 'Access check unavailable. Please try again.', code: 'ACCESS_CHECK_FAILED' });
+              return;
+            }
+          }
+        }
+
         socket.join(`live:${streamId}`);
         socket.data.liveRooms = socket.data.liveRooms || new Set();
         socket.data.liveRooms.add(streamId);
@@ -905,12 +993,9 @@ function initSocketIO(io) {
       if (socket.data.liveRooms) socket.data.liveRooms.delete(streamId);
 
       try {
+        // H4: Atomic decrement clamped to 0 via Lua script
         const redis = getRedis();
-        const afterDecr = await redis.decr(`live:viewers:${streamId}`);
-        if (afterDecr < 0) await redis.set(`live:viewers:${streamId}`, 0);
-        await redis.expire(`live:viewers:${streamId}`, 3600);
-        const countRaw = await redis.get(`live:viewers:${streamId}`);
-        const count = Math.max(0, parseInt(countRaw, 10) || 0);
+        const count = await atomicViewerDecrement(redis, streamId);
         io.to(`live:${streamId}`).emit('live:viewer_count', { streamId, count });
       } catch (err) {
         logger.error('live:leave error', { streamId, userId: user.id, error: err.message });
@@ -1235,14 +1320,11 @@ function initSocketIO(io) {
       }
 
       if (socket.data.liveRooms && socket.data.liveRooms.size > 0) {
+        // H4: Atomic decrement clamped to 0 via Lua script
         const redis = getRedis();
         for (const streamId of socket.data.liveRooms) {
           try {
-            const afterDecr = await redis.decr(`live:viewers:${streamId}`);
-            if (afterDecr < 0) await redis.set(`live:viewers:${streamId}`, 0);
-            await redis.expire(`live:viewers:${streamId}`, 3600);
-            const countRaw = await redis.get(`live:viewers:${streamId}`);
-            const count = Math.max(0, parseInt(countRaw, 10) || 0);
+            const count = await atomicViewerDecrement(redis, streamId);
             io.to(`live:${streamId}`).emit('live:viewer_count', { streamId, count });
           } catch (err) {
             logger.warn('live viewer count cleanup error on disconnect', { streamId, userId: user.id, error: err.message });

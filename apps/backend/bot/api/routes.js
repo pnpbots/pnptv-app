@@ -1317,10 +1317,10 @@ const { auditLog } = require('../../middleware/auditLogger');
 app.use('/api/admin/', auditLog);
 
 // Client error logging endpoint (used by ErrorBoundary)
-app.post('/api/log-error', limiter, (req, res) => {
+app.post('/api/log-error', limiter, requireSessionAuth, (req, res) => {
   const { error, stack, componentStack } = req.body || {};
   if (error) {
-    logger.error('Client error:', { error, stack: stack?.slice(0, 2000), componentStack: componentStack?.slice(0, 2000) });
+    logger.error('Client error:', { error: typeof error === 'string' ? error.slice(0, 500) : String(error).slice(0, 500), stack: stack?.slice(0, 2000), componentStack: componentStack?.slice(0, 2000) });
   }
   res.json({ ok: true });
 });
@@ -1559,7 +1559,7 @@ app.get('/api/join-group/:token', asyncHandler(invitationController.verifyGroupI
 app.get('/join-group/:token', asyncHandler(invitationController.redirectToGroup));
 
 // Stats endpoint
-app.get('/api/stats', asyncHandler(async (req, res) => {
+app.get('/api/stats', requireSessionAuth, asyncHandler(async (req, res) => {
   const UserService = require('../services/userService');
   const stats = await UserService.getStatistics();
   res.json(stats);
@@ -2297,10 +2297,10 @@ app.post('/api/apply/profile-photo', authenticateUser, uploadLimiter, uploadMode
 app.post('/api/apply/id-documents', authenticateUser, uploadLimiter, uploadModelIdDocuments, asyncHandler(applyController.uploadIdDocuments));
 
 // Web App User Location
-app.get('/api/webapp/profile/location', asyncHandler(userLocationController.getUserLocation));
-app.put('/api/webapp/profile/location', asyncHandler(userLocationController.updateUserLocation));
-app.delete('/api/webapp/profile/location', asyncHandler(userLocationController.deleteUserLocation));
-app.get('/api/webapp/users/nearby', asyncHandler(userLocationController.getNearbyUsers));
+app.get('/api/webapp/profile/location', requireSessionAuth, asyncHandler(userLocationController.getUserLocation));
+app.put('/api/webapp/profile/location', requireSessionAuth, asyncHandler(userLocationController.updateUserLocation));
+app.delete('/api/webapp/profile/location', requireSessionAuth, asyncHandler(userLocationController.deleteUserLocation));
+app.get('/api/webapp/users/nearby', requireSessionAuth, asyncHandler(userLocationController.getNearbyUsers));
 
 // Web App Block/Unblock Users
 app.post('/api/webapp/users/block', requireSessionAuth, asyncHandler(blockedUsersController.blockUser));
@@ -2342,7 +2342,7 @@ app.get('/api/webapp/notifications/preferences', requireSessionAuth, asyncHandle
 app.put('/api/webapp/notifications/preferences', requireSessionAuth, asyncHandler(notificationsController.updatePreferences));
 
 // Web App Mastodon Feed
-app.get('/api/webapp/mastodon/feed', asyncHandler(webAppController.getMastodonFeed));
+app.get('/api/webapp/mastodon/feed', requireSessionAuth, asyncHandler(webAppController.getMastodonFeed));
 
 // Web App Hangouts (session auth)
 const webappHangoutsController = require('./controllers/webappHangoutsController');
@@ -2654,7 +2654,7 @@ async function ensureEmailCredentials(userId, email, language) {
 }
 
 // Meru Lifetime Pass activation (webapp)
-app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
+app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user?.id) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
@@ -2885,7 +2885,7 @@ app.post('/api/webapp/activate/meru', asyncHandler(async (req, res) => {
   }
 }));
 
-app.post('/api/webapp/payments/create', asyncHandler(async (req, res) => {
+app.post('/api/webapp/payments/create', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user?.id) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
@@ -3519,7 +3519,7 @@ app.get('/api/webapp/admin/ampache/ping', adminGuard, asyncHandler(async (req, r
 // ==========================================
 // Ampache Media File Management
 // ==========================================
-const AMPACHE_MEDIA_DIR = '/var/www/pnptvbot-sandbox/public/media';
+const AMPACHE_MEDIA_DIR = process.env.AMPACHE_MEDIA_DIR || '/media';
 const AMPACHE_VALID_CATEGORIES = ['music', 'podcasts', 'videos'];
 
 // GET /api/webapp/admin/ampache/files — List files in all 3 categories (or filter by ?category=)
@@ -3596,7 +3596,7 @@ const ampacheUploadStorage = multer.diskStorage({
 });
 const ampacheUpload = multer({
   storage: ampacheUploadStorage,
-  limits: { fileSize: 500 * 1024 * 1024, files: 10 },
+  limits: { fileSize: 2 * 1024 * 1024 * 1024, files: 10 },
   fileFilter: (req, file, cb) => {
     const { category } = req.body;
     const audioMimes = ['audio/mpeg', 'audio/flac', 'audio/ogg', 'audio/wav', 'audio/aac', 'audio/mp4', 'audio/x-m4a'];
@@ -4002,16 +4002,16 @@ app.post('/api/webapp/admin/trials/revoke-unused', adminGuard, asyncHandler(asyn
 }));
 
 // DM threads & conversations
-app.get('/api/webapp/dm/threads', asyncHandler(dmController.getThreads));
-app.get('/api/webapp/dm/conversation/:partnerId', asyncHandler(dmController.getConversation));
-app.get('/api/webapp/dm/user/:partnerId', asyncHandler(dmController.getPartnerInfo));
+app.get('/api/webapp/dm/threads', requireSessionAuth, asyncHandler(dmController.getThreads));
+app.get('/api/webapp/dm/conversation/:partnerId', requireSessionAuth, asyncHandler(dmController.getConversation));
+app.get('/api/webapp/dm/user/:partnerId', requireSessionAuth, asyncHandler(dmController.getPartnerInfo));
 app.post('/api/webapp/dm/send/:recipientId', requireFreeTierDmLimit, asyncHandler(dmController.sendMessage));
 
 // Social feed, wall, posts
 // Public home-feed — no auth required, returns latest posts for the home page preview
 app.get('/api/webapp/social/home-feed', asyncHandler(socialController.getHomeFeed));
 // Authenticated feed — full paginated feed with liked_by_me per viewer
-app.get('/api/webapp/social/feed', asyncHandler(socialController.getFeed));
+app.get('/api/webapp/social/feed', requireSessionAuth, asyncHandler(socialController.getFeed));
 // Wall of Fame sub-feed — WoF-only posts
 app.get('/api/webapp/social/wof-feed', asyncHandler(socialController.getWofFeed));
 app.get('/api/webapp/social/wall/:userId', asyncHandler(socialController.getWall));
@@ -4577,7 +4577,7 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
   }
 }));
 
-app.get('/api/performers', asyncHandler(async (req, res) => {
+app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
   // Live status changes frequently — prevent browser from caching stale isLive values.
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   try {
@@ -4747,7 +4747,13 @@ app.get('/api/performers', asyncHandler(async (req, res) => {
       }
     }
 
-    res.json({ success: true, performers: mapped });
+    // Strip HLS stream URLs for unauthenticated users — prevents public access to stream links.
+    const isAuthenticated = !!req.user?.id;
+    const safePerformers = isAuthenticated
+      ? mapped
+      : mapped.map(p => { const { hlsUrl, ...rest } = p; return rest; });
+
+    res.json({ success: true, performers: safePerformers });
   } catch (error) {
     logger.error(`Performers all error: ${error.message}`);
     res.json({ success: true, performers: [] });
@@ -5881,7 +5887,7 @@ app.post('/api/atproto/repost', asyncHandler(atprotoController.repostBlueskyPost
 app.post('/api/atproto/follow', asyncHandler(atprotoController.followBlueskyUser));
 
 // POST /api/webapp/auth/atproto/unlink — unlink Bluesky account (clears DID from user + revokes)
-app.post('/api/webapp/auth/atproto/unlink', asyncHandler(atprotoController.unlinkAtproto));
+app.post('/api/webapp/auth/atproto/unlink', requireSessionAuth, asyncHandler(atprotoController.unlinkAtproto));
 
 // POST /api/webapp/social/posts/:postId/crosspost-bluesky — cross-post a PNPtv post to Bluesky
 app.post(

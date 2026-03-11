@@ -30,6 +30,11 @@ class RoleService {
         throw new Error('Usuario no encontrado');
       }
 
+      // Prevent self-promotion — an admin cannot assign roles to themselves
+      if (String(assignedBy) === String(userId)) {
+        throw new Error('No puedes asignarte roles a ti mismo');
+      }
+
       // Check actor rank vs target rank
       const actorQuery = 'SELECT rank FROM roles WHERE name = (SELECT primary_role FROM users WHERE id = $1)';
       const actorResult = await client.query(actorQuery, [assignedBy]);

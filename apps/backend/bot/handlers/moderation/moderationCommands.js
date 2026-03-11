@@ -3,6 +3,16 @@ const WarningService = require('../../../services/warningService');
 const logger = require('../../../utils/logger');
 const MODERATION_CONFIG = require('../../../config/moderationConfig');
 const { isAdmin, getUserFromContext, isGroupChat } = require('../../../utils/adminUtils');
+const PermissionService = require('../../../services/permissionService');
+
+/**
+ * Dual-layer admin check: user must be both a Telegram group admin AND a platform admin.
+ */
+async function isPlatformAdmin(ctx) {
+  const telegramAdmin = await isAdmin(ctx);
+  if (!telegramAdmin) return false;
+  return PermissionService.isAdmin(ctx.from?.id);
+}
 
 const GROUP_ID = process.env.GROUP_ID;
 const AUTO_DELETE_DELAY = MODERATION_CONFIG.MOD_MESSAGE_DELAY;
@@ -57,7 +67,7 @@ async function handleRules(ctx) {
 async function handleWarn(ctx) {
   try {
     // Check if user is admin
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return await sendAutoDeleteMessage(ctx, '⛔ Only admins can use this command.');
     }
 
@@ -141,7 +151,7 @@ async function handleWarn(ctx) {
 async function handleWarnings(ctx) {
   try {
     // Check if user is admin
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return await sendAutoDeleteMessage(ctx, '⛔ Only admins can use this command.');
     }
 
@@ -181,7 +191,7 @@ async function handleWarnings(ctx) {
 async function handleClearWarnings(ctx) {
   try {
     // Check if user is admin
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return await sendAutoDeleteMessage(ctx, '⛔ Only admins can use this command.');
     }
 
@@ -206,7 +216,7 @@ async function handleClearWarnings(ctx) {
 async function handleMute(ctx) {
   try {
     // Check if user is admin
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return await sendAutoDeleteMessage(ctx, '⛔ Only admins can use this command.');
     }
 
@@ -286,7 +296,7 @@ async function handleMute(ctx) {
 async function handleUnmute(ctx) {
   try {
     // Check if user is admin
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return await sendAutoDeleteMessage(ctx, '⛔ Only admins can use this command.');
     }
 
@@ -323,7 +333,7 @@ async function handleUnmute(ctx) {
 async function handleKick(ctx) {
   try {
     // Check if user is admin
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return await sendAutoDeleteMessage(ctx, '⛔ Only admins can use this command.');
     }
 
@@ -362,7 +372,7 @@ async function handleKick(ctx) {
 async function handleBan(ctx) {
   try {
     // Check if user is admin
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return await sendAutoDeleteMessage(ctx, '⛔ Only admins can use this command.');
     }
 
@@ -400,7 +410,7 @@ async function handleBan(ctx) {
 async function handleUnban(ctx) {
   try {
     // Check if user is admin
-    if (!(await isAdmin(ctx))) {
+    if (!(await isPlatformAdmin(ctx))) {
       return await sendAutoDeleteMessage(ctx, '⛔ Only admins can use this command.');
     }
 

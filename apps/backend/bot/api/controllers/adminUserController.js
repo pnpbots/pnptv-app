@@ -5,6 +5,9 @@ const PermissionService = require('../../services/permissionService');
 const supportRoutingService = require('../../services/supportRoutingService');
 const { resolveUserId } = require('../../utils/helpers');
 
+// Escape LIKE/ILIKE metacharacters so user input cannot widen search patterns
+const escapeLike = (str) => str.replace(/[%_\\]/g, '\\$&');
+
 class AdminUserController {
   /**
    * Get user details
@@ -252,11 +255,11 @@ class AdminUserController {
         return res.status(400).json({ success: false, error: 'Search query must be at least 2 characters' });
       }
 
-      const searchTerm = `%${searchQuery}%`;
+      const searchTerm = `%${escapeLike(searchQuery)}%`;
       const result = await query(
         `SELECT id, username, first_name, last_name, email, tier, subscription_status, created_at
          FROM users
-         WHERE username ILIKE $1 OR email ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1
+         WHERE username ILIKE $1 ESCAPE '\\' OR email ILIKE $1 ESCAPE '\\' OR first_name ILIKE $1 ESCAPE '\\' OR last_name ILIKE $1 ESCAPE '\\'
          LIMIT 20`,
         [searchTerm]
       );
