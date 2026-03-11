@@ -42,6 +42,26 @@ const strings = {
     logIn: "Log In",
     cancel: "Cancel",
 
+    // Registration form
+    register: "Register",
+    firstNamePlaceholder: "First Name",
+    lastNamePlaceholder: "Last Name (optional)",
+    emailPasswordFirstNameRequired: "Email, password, and first name are required",
+    registrationFailed: "Registration failed. Please try again.",
+    dontHaveAccount: "Don't have an account? Register here",
+    alreadyHaveAccount: "Already have an account? Log In",
+    registrationCompleteTitle: "Registration Complete!",
+    registrationCompleteMessage: "Your account has been created. You can now log in.",
+
+    // Email verification
+    verifyEmailTitle: "Verify Your Email",
+    verifyEmailInstructions: "A verification link has been sent to {email}. Please check your inbox (and spam folder) to complete your registration.",
+    resendEmail: "Resend verification email",
+    sendingEmail: "Sending...",
+    emailSent: "Email sent!",
+    resendFailed: "Failed to resend email. Please try again.",
+    backToLogin: "Back to Login",
+
     // Inline validation / errors
     emailAndPasswordRequired: "Please enter your email and password",
     loginFailed: "Login failed",

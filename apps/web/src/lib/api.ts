@@ -766,6 +766,35 @@ export function updateLanguage(lang: string): Promise<{ success: boolean }> {
   return updateProfile({ language: lang });
 }
 
+// Email Authentication
+export interface EmailRegisterPayload {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName?: string;
+}
+
+export interface EmailRegisterResponse {
+  authenticated: boolean;
+  requiresVerification?: boolean;
+  message?: string;
+  user?: {
+    id: string;
+    email: string;
+  };
+  error?: string;
+}
+
+export function emailRegister(
+  payload: EmailRegisterPayload
+): Promise<EmailRegisterResponse> {
+  return request("/api/webapp/auth/register", { method: "POST", body: payload });
+}
+
+export function resendVerificationEmail(email: string): Promise<{ success: boolean; message: string }> {
+  return request("/api/webapp/auth/resend-verification", { method: "POST", body: { email } });
+}
+
 export function deleteAccount(): Promise<{ success: boolean }> {
   return request("/api/webapp/account", { method: "DELETE" });
 }

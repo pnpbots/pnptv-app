@@ -378,7 +378,7 @@ export function LandingPage() {
               onClick={() => { setLoginOpen(v => !v); setLoginView("options"); }}
               className="w-full py-3.5 rounded-xl text-sm font-semibold text-pnp-textSecondary border border-pnp-border hover:border-white/30 hover:text-white flex items-center justify-center gap-2 transition-colors"
             >
-              Join your account
+              Members Access
               <svg className={`w-4 h-4 transition-transform duration-200 ${loginOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
               </svg>

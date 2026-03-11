@@ -404,7 +404,7 @@ export default function CanvaIntegration() {
           ) : (
             <>
               <a
-                href="https://www.canva.com/design/create/video"
+                href="https://www.canva.com/video-editor/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#7B2FBE] text-white hover:bg-[#6B21A8] transition-colors"

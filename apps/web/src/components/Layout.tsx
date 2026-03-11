@@ -10,7 +10,6 @@ import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
 import { getMessageThreads } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import { LanguageSelector } from "@/components/LanguageSelector";
 import { LandingPage } from "@/pages/LandingPage";
 import { SidebarPlayer, MobilePlayer } from "@/components/SidebarPlayer";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
@@ -250,7 +249,7 @@ export function Layout() {
                 {user?.displayName || t.nav.user}
               </span>
             </button>
-            <LanguageSelector position="sidebar" />
+
           </div>
         </div>
       </aside>
@@ -298,7 +297,7 @@ export function Layout() {
             )}
           </button>
           <NotificationBell />
-          <LanguageSelector position="topbar" />
+
           <button
             onClick={() => navigate("/profile")}
             className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
