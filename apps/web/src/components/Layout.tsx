@@ -5,15 +5,15 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTelegram } from "@/hooks/useTelegram";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { CristinaWidget } from "@/components/CristinaWidget";
-import { RadioWidget } from "@/components/RadioWidget";
+
 import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
 import { getMessageThreads } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { LanguageSelector } from "@/components/LanguageSelector";
 import { LandingPage } from "@/pages/LandingPage";
-import { SidebarPlayer } from "@/components/SidebarPlayer";
-
+import { SidebarPlayer, MobilePlayer } from "@/components/SidebarPlayer";
+import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 
 // ── HamburgerIcon / CloseIcon ─────────────────────────────────────────────────
 
@@ -38,6 +38,7 @@ function CloseIcon() {
 export function Layout() {
   const { isAuthenticated, isAdmin, user, isLoading } = useAuth();
   const { isTelegram } = useTelegram();
+  const { tracks: musicTracks } = useMusicPlayer();
   useViewportHeight();
   const navigate = useNavigate();
   const location = useLocation();
@@ -422,17 +423,15 @@ export function Layout() {
       )}
 
       {/* ── Main content ─────────────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto overscroll-contain lg:pl-60 lg:overflow-visible lg:pb-0 pb-16">
+      <main className={`flex-1 overflow-y-auto overscroll-contain lg:pl-60 lg:overflow-visible lg:pb-0 ${musicTracks.length > 0 ? "pb-28" : "pb-16"}`}>
         <Outlet />
       </main>
 
-      {/* Bottom nav */}
+      {/* Mobile music player + bottom nav */}
       <div className="flex-shrink-0 lg:hidden">
+        <MobilePlayer />
         <BottomNav />
       </div>
-
-      {/* PNP Radio floating widget */}
-      {isAuthenticated && <RadioWidget />}
 
       {/* Cristina AI Support Widget */}
       {isAuthenticated && <CristinaWidget />}
