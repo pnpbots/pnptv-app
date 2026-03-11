@@ -3661,6 +3661,19 @@ app.post('/api/webapp/admin/ampache/files/upload', adminGuard, ampacheUploadRate
   }
 
   logger.info(`Ampache upload: ${acceptedFiles.length} file(s) accepted, ${rejectedFiles.length} rejected for category ${category} by admin userId=${req.user?.id}`);
+
+  // Trigger Ampache catalog scan so new files appear in radio immediately
+  try {
+    const AmpacheService = require('../services/ampacheService');
+    const token = await AmpacheService.getAuthToken();
+    const http = require('http');
+    const scanUrl = `${process.env.AMPACHE_URL || 'http://ampache:80'}/server/json.server.php?action=catalog_action&auth=${encodeURIComponent(token)}&task=add_to_catalog&catalog=1`;
+    http.get(scanUrl, () => {}).on('error', () => {});
+    logger.info('Triggered Ampache catalog scan after upload');
+  } catch (scanErr) {
+    logger.warn('Could not trigger Ampache catalog scan:', scanErr.message);
+  }
+
   res.json({ success: true, uploaded: acceptedFiles, ...(rejectedFiles.length > 0 && { rejected: rejectedFiles }) });
 }));
 

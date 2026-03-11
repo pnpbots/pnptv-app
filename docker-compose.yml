@@ -438,6 +438,7 @@ services:
     volumes:
       - .:/app:ro
       - ./public/uploads:/app/public/uploads
+      - /var/www/pnptvbot-sandbox/public/media:/media
       - ./logs:/app/logs
       - pnptv-bot-nm:/app/node_modules
     command: >
