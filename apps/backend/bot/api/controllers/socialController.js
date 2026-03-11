@@ -830,6 +830,8 @@ const getPublicProfile = async (req, res) => {
         bio: profile.bio,
         photoUrl: profile.photo_file_id,
         pnptvId: profile.pnptv_id,
+        city: profile.city,
+        country: profile.country,
         memberSince: profile.created_at,
         postCount: result.postCount,
         creatorStatus: profile.creator_status,
@@ -1059,6 +1061,7 @@ const getPost = async (req, res) => {
               COALESCE(sp.content_tier, 'free') as content_tier,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
+              u.city as author_city, u.country as author_country,
               u.creator_status as author_creator_status, u.creator_type as author_creator_type,
               u.creator_verified as author_creator_verified, u.creator_price_usd as author_creator_price,
               ${viewerId

@@ -8,6 +8,7 @@ import {
 } from "@/lib/api";
 import { translateText } from "@/lib/feedI18n";
 import { SharePostModal } from "@/components/SharePostModal";
+import { NearbyBadge } from "@/components/NearbyBadge";
 
 // ── Helpers (duplicated here to keep the component self-contained) ────────────
 
@@ -49,6 +50,8 @@ export interface PostCardProps {
   onSubscribeCta?: () => void;
   contentDisclaimerAccepted?: boolean;
   onAcceptDisclaimer?: () => Promise<void>;
+  viewerCity?: string | null;
+  viewerCountry?: string | null;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -260,6 +263,15 @@ export default function PostCard({
             <span className="text-xs" style={{ color: "#8E8E93" }}>
               &middot; {timeAgo(post.created_at)}
             </span>
+            {post.author_city && post.author_country && (
+              <NearbyBadge
+                userCity={post.author_city}
+                userCountry={post.author_country}
+                viewerCity={post.viewer_city} // Assuming viewer_city is passed as a prop to PostCard
+                viewerCountry={post.viewer_country} // Assuming viewer_country is passed as a prop to PostCard
+                username={post.author_first_name || post.author_username || "User"}
+              />
+            )}
             {post.is_exclusive && isOwnProfile && (
               <span
                 className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"

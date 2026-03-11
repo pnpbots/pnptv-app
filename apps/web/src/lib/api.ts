@@ -626,6 +626,8 @@ export interface SocialPostItem {
   author_username: string;
   author_first_name: string;
   author_photo: string | null;
+  author_city?: string | null;
+  author_country?: string | null;
   liked_by_me: boolean;
   repost_content?: string;
   repost_created_at?: string;

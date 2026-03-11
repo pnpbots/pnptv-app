@@ -1468,6 +1468,8 @@ export default function Profile() {
                   onSubscribeCta={handleSubscribeCta}
                   contentDisclaimerAccepted={contentDisclaimer}
                   onAcceptDisclaimer={handleContentDisclaimerToggle}
+                  viewerCity={user?.city}
+                  viewerCountry={user?.country}
                 />
               ))}
 
@@ -1579,11 +1581,12 @@ export default function Profile() {
                     userLang={user?.language || "en"}
                     onLike={handleLike}
                     onDelete={handleDelete}
-                    onAuthorTap={handleAuthorTap}
-                    onSubscribeCta={handleSubscribeCta}
-                  />
-                ))}
-              </div>
+                                      onAuthorTap={handleAuthorTap}
+                                      onSubscribeCta={handleSubscribeCta}
+                                      viewerCity={user?.city}
+                                      viewerCountry={user?.country}
+                                    />
+                                    ))}              </div>
             );
           })()}
         </div>

@@ -19,20 +19,22 @@ import {
   getHangoutGroups,
   togglePostLike,
   updateProfile,
+  getUpcomingEvents,
+  rsvpEvent,
+  unrsvpEvent,
+  cancelEvent,
   type SocialPostItem,
   type FeaturedPerformer,
   type HangoutGroup,
 } from "@/lib/api";
 import { translateText } from "@/lib/feedI18n";
+import { 
+  HighlightCarousel, 
+  type HighlightItem, 
+  type AnnouncementItem 
+} from "@/components/events";
 
-interface Announcement {
-  id: number;
-  title: string;
-  body: string;
-  type: string;
-  is_pinned: boolean;
-  published_at: string;
-}
+interface Announcement extends AnnouncementItem {}
 
 
 function timeAgo(dateStr: string): string {
@@ -69,7 +71,7 @@ export default function Home() {
   const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [eventKey, setEventKey] = useState(0);
 
-  const { data: announcements } = useDirectus<Announcement>({
+  const { data: announcements, isLoading: annLoading } = useDirectus<Announcement>({
     collection: "announcements",
     params: {
       filter: { status: { _eq: "published" } },
@@ -78,8 +80,20 @@ export default function Home() {
     },
   });
 
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [evLoading, setEvLoading] = useState(true);
   const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
   const [userGroups, setUserGroups] = useState<HangoutGroup[]>([]);
+
+  const loadEvents = useCallback(() => {
+    setEvLoading(true);
+    getUpcomingEvents({ limit: 8 })
+      .then((res) => {
+        if (res.success) setEvents(res.events);
+      })
+      .catch(() => {})
+      .finally(() => setEvLoading(false));
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -97,6 +111,8 @@ export default function Home() {
       })
       .catch(() => {});
 
+    loadEvents();
+
     if (isAuthenticated) {
       getHangoutGroups()
         .then((res) => {
@@ -104,7 +120,47 @@ export default function Home() {
         })
         .catch(() => {});
     }
-  }, [authLoading, isAuthenticated]);
+  }, [authLoading, isAuthenticated, loadEvents]);
+
+  const handleRsvp = useCallback(async (eventId: string, shouldRsvp: boolean) => {
+    try {
+      const res = shouldRsvp ? await rsvpEvent(eventId) : await unrsvpEvent(eventId);
+      if (res.success) {
+        setEvents((prev) =>
+          prev.map((e) =>
+            e.id === eventId
+              ? { ...e, rsvpCount: res.rsvpCount, userRsvpd: res.userRsvpd }
+              : e
+          )
+        );
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  const handleCancel = useCallback(async (eventId: string) => {
+    if (!window.confirm("Cancel this event?")) return;
+    try {
+      await cancelEvent(eventId);
+      setEvents((prev) => prev.filter((e) => e.id !== eventId));
+    } catch { /* silent */ }
+  }, []);
+
+  // Combine and sort highlights: pinned announcements first, then by date (events & announcements)
+  const highlights: HighlightItem[] = [
+    ...announcements.map((a) => ({ kind: "announcement" as const, data: a })),
+    ...events.map((e) => ({ kind: "event" as const, data: e })),
+  ].sort((a, b) => {
+    // Pinned announcements always first
+    const aPinned = a.kind === "announcement" && a.data.is_pinned;
+    const bPinned = b.kind === "announcement" && b.data.is_pinned;
+    if (aPinned && !bPinned) return -1;
+    if (!aPinned && bPinned) return 1;
+
+    // Then sort by date: scheduledAt for events, published_at for announcements
+    const aDate = a.kind === "event" ? a.data.scheduledAt : a.data.published_at;
+    const bDate = b.kind === "event" ? b.data.scheduledAt : b.data.published_at;
+    return new Date(aDate).getTime() - new Date(bDate).getTime();
+  });
 
   const handleLike = useCallback(async (postId: number) => {
     try {
@@ -235,43 +291,16 @@ export default function Home() {
         </button>
       )}
 
-      {/* Announcements */}
-      {announcements.length > 0 && (
-        <div className="mb-4 space-y-2">
-          {announcements.map((ann) => (
-            <div
-              key={ann.id}
-              className="glass-card-sm p-3.5"
-              style={{ borderLeft: "3px solid rgba(212,0,122,0.4)" }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                {ann.is_pinned && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>
-                    PINNED
-                  </span>
-                )}
-                <span className="text-[10px] uppercase font-medium" style={{ color: "#555" }}>
-                  {ann.type}
-                </span>
-              </div>
-              <h3 className="text-sm font-semibold text-white">{ann.title}</h3>
-              <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
-                {ann.body}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Upcoming Events */}
-      <UpcomingEvents
-        key={eventKey}
-        limit={8}
-        title="Upcoming Events"
+      {/* Highlights: Combined Announcements + Events Carousel */}
+      <HighlightCarousel
+        items={highlights}
+        loading={annLoading || evLoading}
+        title="Featured"
         canCreate={isAuthenticated && (canCreateLive || isPrime || isMember)}
         onCreateClick={() => setShowCreateEvent(true)}
-        currentUserId={user?.dbId}
-        isAdmin={isAdmin}
+        onRsvp={handleRsvp}
+        onCancel={handleCancel}
+        canCancel={(eventId, creatorId) => isAdmin || creatorId === user?.dbId}
       />
 
       {/* Featured Performers */}

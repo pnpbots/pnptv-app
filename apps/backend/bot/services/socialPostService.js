@@ -62,6 +62,7 @@ class SocialPostService {
               COALESCE(sp.content_tier, 'free') as content_tier,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
+              u.city as author_city, u.country as author_country,
               u.creator_status as author_creator_status, u.creator_type as author_creator_type,
               u.creator_verified as author_creator_verified, u.creator_price_usd as author_creator_price,
               EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me,
@@ -203,6 +204,7 @@ class SocialPostService {
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_wof, sp.created_at,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
+              u.city as author_city, u.country as author_country,
               false as liked_by_me,
               rp.content as repost_content, rp.created_at as repost_created_at,
               ru.username as repost_author_username, ru.first_name as repost_author_first_name
@@ -249,6 +251,7 @@ class SocialPostService {
               COALESCE(sp.content_tier, 'free') as content_tier,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
+              u.city as author_city, u.country as author_country,
               EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me
        FROM social_posts sp
        JOIN users u ON sp.user_id = u.id
@@ -300,6 +303,7 @@ class SocialPostService {
                 COALESCE(sp.content_tier, 'free') as content_tier,
                 u.id as author_id, u.username as author_username,
                 u.first_name as author_first_name, u.photo_file_id as author_photo,
+                u.city as author_city, u.country as author_country,
                 EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me
          FROM social_posts sp
          JOIN users u ON sp.user_id = u.id
@@ -510,7 +514,7 @@ class SocialPostService {
       ),
       query(
         `SELECT id, username, first_name, last_name, bio, photo_file_id, pnptv_id,
-                created_at, privacy, date_of_birth,
+                created_at, privacy, date_of_birth, city, country,
                 creator_status, creator_type, creator_price_usd, creator_verified, creator_featured, creator_subscriber_count
          FROM users WHERE id = $1`,
         [userId]

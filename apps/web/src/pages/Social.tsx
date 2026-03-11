@@ -1073,6 +1073,8 @@ export default function Social() {
               onNavigate={navigate}
               contentDisclaimerAccepted={contentDisclaimer}
               onAcceptDisclaimer={handleAcceptDisclaimer}
+              viewerCity={user?.city}
+              viewerCountry={user?.country}
             />
           ))}
 
@@ -1141,6 +1143,8 @@ export default function Social() {
               onNavigate={navigate}
               contentDisclaimerAccepted={contentDisclaimer}
               onAcceptDisclaimer={handleAcceptDisclaimer}
+              viewerCity={user?.city}
+              viewerCountry={user?.country}
             />
           ))}
 
@@ -1212,6 +1216,8 @@ export default function Social() {
               onNavigate={navigate}
               contentDisclaimerAccepted={contentDisclaimer}
               onAcceptDisclaimer={handleAcceptDisclaimer}
+              viewerCity={user?.city}
+              viewerCountry={user?.country}
             />
           ))}
           {followingNextCursor && (
