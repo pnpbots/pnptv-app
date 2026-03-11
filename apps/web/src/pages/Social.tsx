@@ -29,6 +29,9 @@ import {
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { translateText } from "@/lib/feedI18n";
+import EmojiReactionBar, { type Reaction } from "@/components/EmojiReactionBar";
+
+const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
 function timeAgo(dateStr: string, nowLabel: string): string {
   if (!dateStr) return "";
@@ -92,7 +95,21 @@ function PostCard({
   const [wofToggling, setWofToggling] = useState(false);
   const [translatedContent, setTranslatedContent] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [reactions, setReactions] = useState<Reaction[]>((post as any).reactions || []);
   const isOwn = String(post.author_id) === currentUserId;
+
+  const handleToggleReaction = useCallback(async (emoji: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/webapp/social/posts/${post.id}/react`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emoji }),
+      });
+      const data = await res.json();
+      setReactions(data.reactions || []);
+    } catch { /* silent */ }
+  }, [post.id]);
   const canDelete = isOwn || isAdmin;
 
   const handleWofToggle = useCallback(async () => {
@@ -125,8 +142,15 @@ function PostCard({
   const toggleReplies = useCallback(() => {
     const next = !showReplies;
     setShowReplies(next);
-    if (next && replies.length === 0) loadReplies();
-  }, [showReplies, replies.length, loadReplies]);
+    if (next) {
+      if (replies.length === 0) loadReplies();
+      // Pre-fill reply with @authorUsername mention if not own post
+      if (!isOwn && (post.author_username || post.author_first_name)) {
+        const mention = `@${post.author_username || post.author_first_name} `;
+        setReplyText(prev => (prev.startsWith(mention) ? prev : mention));
+      }
+    }
+  }, [showReplies, replies.length, loadReplies, isOwn, post.author_username, post.author_first_name]);
 
   const handleSendReply = useCallback(async () => {
     if (!replyText.trim() || sendingReply) return;
@@ -432,18 +456,14 @@ function PostCard({
           )}
 
           {/* Actions bar */}
-          <div className="flex items-center gap-5 mt-3" style={{ color: "#8E8E93" }}>
-            {/* Like */}
-            <button
-              onClick={() => onLike(post.id)}
-              className="flex items-center gap-1.5 text-xs hover:text-pink-400 transition-colors"
-              style={post.liked_by_me ? { color: "#D4007A" } : undefined}
-            >
-              <svg className="w-4 h-4" fill={post.liked_by_me ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
-              </svg>
-              {post.likes_count > 0 && <span>{post.likes_count}</span>}
-            </button>
+          <div className="flex items-center gap-3 mt-3 flex-wrap" style={{ color: "#8E8E93" }}>
+            {/* Emoji Reactions — replaces the heart like */}
+            <EmojiReactionBar
+              reactions={reactions}
+              onToggle={handleToggleReaction}
+              currentUserId={currentUserId}
+              size="sm"
+            />
 
             {/* Comment */}
             <button

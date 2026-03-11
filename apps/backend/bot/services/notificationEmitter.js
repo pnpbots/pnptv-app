@@ -18,6 +18,10 @@ const TYPE_TO_PREF = {
   follow: 'follows',
   hangout_call: 'hangout_calls',
   hangout_creator_joined: 'hangout_calls',
+  reaction_post: 'reactions',
+  reaction_chat: 'reactions',
+  mention_post: 'mentions',
+  mention_chat: 'mentions',
 };
 
 // TTL constants (seconds)
@@ -32,7 +36,7 @@ const SKIP_BOT_TYPES = new Set(['dm', 'group_message']);
 
 // Notification types that originate from a specific user action toward another user.
 // These must be suppressed when a block relationship exists between actor and target.
-const USER_TO_USER_TYPES = new Set(['follow', 'like', 'reply', 'dm', 'hangout_call', 'hangout_creator_joined', 'group_join']);
+const USER_TO_USER_TYPES = new Set(['follow', 'like', 'reply', 'dm', 'hangout_call', 'hangout_creator_joined', 'group_join', 'reaction_post', 'reaction_chat', 'mention_post', 'mention_chat']);
 
 // Redis key for caching block check results (short TTL — blocks can be added/removed)
 const BLOCK_CHECK_TTL = 60; // 1 minute
@@ -119,7 +123,12 @@ function buildNotificationUrl(type, entityType, entityId) {
       return entityId ? `/profile/${entityId}` : '/';
     case 'like':
     case 'reply':
+    case 'reaction_post':
+    case 'mention_post':
       return entityId ? `/social/post/${entityId}` : '/social';
+    case 'reaction_chat':
+    case 'mention_chat':
+      return '/chat';
     case 'dm':
       return entityId ? `/dm/${entityId}` : '/dm';
     case 'hangout_call':
@@ -239,12 +248,17 @@ const NotificationEmitter = {
 
       // ── Socket.IO (in-app, real-time) ──
       if (_io) {
+        const rawPhoto = row.actor_photo_url;
+        const photoUrl = (typeof rawPhoto === 'string' &&
+          (rawPhoto.startsWith('/') || /^https?:\/\//i.test(rawPhoto)))
+          ? rawPhoto : null;
+
         const actor = row.actor_username || row.actor_first_name
           ? {
               id: row.actor_id,
               username: row.actor_username,
               firstName: row.actor_first_name,
-              photoUrl: row.actor_photo_url,
+              photoUrl,
             }
           : null;
 

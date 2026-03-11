@@ -46,7 +46,12 @@ import {
 } from "@/components/hangouts";
 import { connectSocket } from "@/lib/socket";
 import { translateText } from "@/lib/feedI18n";
+import EmojiReactionBar, { type Reaction } from "@/components/EmojiReactionBar";
 import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
+import { HangoutsPaywall } from "@/components/HangoutsPaywall";
+import { ApiError } from "@/lib/api";
+
+const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -97,6 +102,9 @@ interface MessageBubbleProps {
   userLang: string;
   onNavigate: (path: string) => void;
   onExpandImage: (src: string) => void;
+  currentUserId?: string;
+  reactions?: Reaction[];
+  onToggleReaction?: (messageId: number, emoji: string) => void;
 }
 
 const MessageBubble = memo(function MessageBubble({
@@ -105,6 +113,9 @@ const MessageBubble = memo(function MessageBubble({
   userLang,
   onNavigate,
   onExpandImage,
+  currentUserId,
+  reactions,
+  onToggleReaction,
 }: MessageBubbleProps) {
   const profilePath = isMe ? "/profile" : `/profile/${msg.user_id}`;
   const hasMedia = !!(msg.media_url && msg.media_type);
@@ -216,6 +227,17 @@ const MessageBubble = memo(function MessageBubble({
             />
           </div>
         )}
+
+        {/* Emoji reactions */}
+        {onToggleReaction && (
+          <EmojiReactionBar
+            reactions={reactions || []}
+            onToggle={(emoji) => onToggleReaction(msg.id, emoji)}
+            currentUserId={currentUserId}
+            size="sm"
+            className={`mt-1 ${isMe ? "justify-end" : ""}`}
+          />
+        )}
       </div>
     </div>
   );
@@ -292,6 +314,20 @@ export default function Chat() {
   const [view, setView] = useState<View>("list");
   const [activeGroup, setActiveGroup] = useState<HangoutGroup | null>(null);
   const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messageReactions, setMessageReactions] = useState<Record<number, Reaction[]>>({});
+
+  const handleToggleChatReaction = useCallback(async (messageId: number, emoji: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/webapp/chat/messages/${messageId}/react`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emoji }),
+      });
+      const data = await res.json();
+      setMessageReactions(prev => ({ ...prev, [messageId]: data.reactions || [] }));
+    } catch { /* silent */ }
+  }, []);
   const [msgInput, setMsgInput] = useState("");
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -331,6 +367,7 @@ export default function Chat() {
   const [callJwt, setCallJwt] = useState<string | null>(null);
   const [callId, setCallId] = useState<string | null>(null);
   const [callLoading, setCallLoading] = useState(false);
+  const [showPaywall, setShowPaywall] = useState(false);
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Create group error
@@ -664,8 +701,12 @@ export default function Chat() {
         setUploadError(t.chat.videoCallUrlInvalid);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to start video call";
-      setUploadError(msg);
+      if (err instanceof ApiError && err.code === "MEMBERSHIP_REQUIRED") {
+        setShowPaywall(true);
+      } else {
+        const msg = err instanceof Error ? err.message : "Failed to start video call";
+        setUploadError(msg);
+      }
     } finally {
       setCallLoading(false);
     }
@@ -712,8 +753,16 @@ export default function Chat() {
       dismissTimer = setTimeout(() => setInviteNotif(null), 8000);
     };
     socket.on("hangout:invite:received", onInvite);
+
+    // Real-time reaction updates from other users
+    const onReactionChat = ({ messageId, reactions }: { messageId: number; reactions: Reaction[] }) => {
+      setMessageReactions(prev => ({ ...prev, [messageId]: reactions }));
+    };
+    socket.on("reaction:chat", onReactionChat);
+
     return () => {
       socket.off("hangout:invite:received", onInvite);
+      socket.off("reaction:chat", onReactionChat);
       if (dismissTimer) clearTimeout(dismissTimer);
     };
   }, []);
@@ -769,6 +818,11 @@ export default function Chat() {
 
     return (
       <div className="relative flex flex-col h-full">
+        {/* Membership paywall — shown when a non-member tries to start/join a call */}
+        {showPaywall && (
+          <HangoutsPaywall onBack={() => setShowPaywall(false)} />
+        )}
+
         {/* Incoming call invite toast */}
         {inviteNotif && (
           <div
@@ -1091,6 +1145,9 @@ export default function Chat() {
                   userLang={user?.language || "en"}
                   onNavigate={handleNavigate}
                   onExpandImage={handleExpandImage}
+                  currentUserId={user?.dbId}
+                  reactions={messageReactions[msg.id]}
+                  onToggleReaction={handleToggleChatReaction}
                 />
               </React.Fragment>
             ))

@@ -2358,9 +2358,9 @@ const notificationLimiter = rateLimit({
 // Web App Notifications
 app.get('/api/webapp/notifications', requireSessionAuth, notificationLimiter, asyncHandler(notificationsController.getNotifications));
 app.get('/api/webapp/notifications/counts', requireSessionAuth, notificationLimiter, asyncHandler(notificationsController.getNotificationCounts));
-app.put('/api/webapp/notifications/mark-read', requireSessionAuth, asyncHandler(notificationsController.markAsRead));
-app.get('/api/webapp/notifications/preferences', requireSessionAuth, asyncHandler(notificationsController.getPreferences));
-app.put('/api/webapp/notifications/preferences', requireSessionAuth, asyncHandler(notificationsController.updatePreferences));
+app.put('/api/webapp/notifications/mark-read', requireSessionAuth, notificationLimiter, asyncHandler(notificationsController.markAsRead));
+app.get('/api/webapp/notifications/preferences', requireSessionAuth, notificationLimiter, asyncHandler(notificationsController.getPreferences));
+app.put('/api/webapp/notifications/preferences', requireSessionAuth, notificationLimiter, asyncHandler(notificationsController.updatePreferences));
 
 // Web App Mastodon Feed
 app.get('/api/webapp/mastodon/feed', requireSessionAuth, asyncHandler(webAppController.getMastodonFeed));
@@ -4248,6 +4248,36 @@ app.post('/api/admin/social/sync-content', adminGuard, asyncHandler(contentFeedS
 // Users search
 app.get('/api/webapp/users/search', asyncHandler(usersController.searchUsers));
 
+// ── @Mention autocomplete ────────────────────────────────────────────────────
+const mentionController = require('./controllers/mentionController');
+app.get('/api/webapp/users/mention-search', requireSessionAuth, asyncHandler(mentionController.mentionSearch));
+
+// ── Emoji Reactions ──────────────────────────────────────────────────────────
+const reactionController = require('./controllers/reactionController');
+// Post reactions
+app.post('/api/webapp/social/posts/:postId/react', requireSessionAuth, socialActionLimiter, asyncHandler(reactionController.reactToPost));
+app.get('/api/webapp/social/posts/:postId/reactions', asyncHandler(reactionController.getPostReactions));
+// Chat message reactions
+app.post('/api/webapp/chat/messages/:messageId/react', requireSessionAuth, asyncHandler(reactionController.reactToChatMessage));
+app.get('/api/webapp/chat/messages/:messageId/reactions', asyncHandler(reactionController.getChatReactions));
+// DM reactions
+app.post('/api/webapp/dm/messages/:messageId/react', requireSessionAuth, asyncHandler(reactionController.reactToDm));
+
+// ── Custom Media Packs (stickers / GIFs / custom emojis) ─────────────────────
+const mediaPackController = require('./controllers/mediaPackController');
+// Public / user routes
+app.get('/api/webapp/media-packs', asyncHandler(mediaPackController.listPacks));
+app.get('/api/webapp/media-packs/search', asyncHandler(mediaPackController.searchItems));
+app.get('/api/webapp/media-packs/favorites', requireSessionAuth, asyncHandler(mediaPackController.getUserFavorites));
+app.get('/api/webapp/media-packs/:slug/items', asyncHandler(mediaPackController.getPackItems));
+app.post('/api/webapp/media-packs/items/:id/use', requireSessionAuth, asyncHandler(mediaPackController.trackUsage));
+// Admin routes
+app.post('/api/webapp/admin/media-packs', adminGuard, asyncHandler(mediaPackController.adminCreatePack));
+app.patch('/api/webapp/admin/media-packs/:id/toggle', adminGuard, asyncHandler(mediaPackController.adminTogglePack));
+app.delete('/api/webapp/admin/media-packs/:id', adminGuard, asyncHandler(mediaPackController.adminDeletePack));
+app.post('/api/webapp/admin/media-packs/:packId/items', adminGuard, asyncHandler(mediaPackController.adminAddItem));
+app.delete('/api/webapp/admin/media-packs/items/:id', adminGuard, asyncHandler(mediaPackController.adminDeleteItem));
+
 // Account self-deletion
 const deleteAccountLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -5529,7 +5559,8 @@ app.post('/api/wallet/buy-wallet', asyncHandler(async (req, res) => {
 // GET /api/token-checkout/:purchaseId — return checkout page data (ePayco widget config or Daimo session)
 app.get('/api/token-checkout/:purchaseId', requireSessionAuth, asyncHandler(async (req, res) => {
   const { purchaseId } = req.params;
-  if (!purchaseId || !/^[0-9a-f-]{36}$/i.test(purchaseId)) {
+  // Strict UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+  if (!purchaseId || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(purchaseId)) {
     return res.status(400).json({ success: false, error: 'Invalid purchaseId' });
   }
 
@@ -5538,7 +5569,24 @@ app.get('/api/token-checkout/:purchaseId', requireSessionAuth, asyncHandler(asyn
     if (!data) {
       return res.status(404).json({ success: false, error: 'Token purchase not found or uses external checkout page' });
     }
-    res.json({ success: true, ...data });
+
+    // Ownership check: the requesting session must own this purchase.
+    // token_purchases.user_id is the integer PK from the users table.
+    // Session exposes both telegram_id (Telegram numeric ID string) and id (users PK integer).
+    const sessionUser = req.session.user;
+    const sessionUserId = sessionUser.id ?? null;
+    if (!sessionUserId || String(data.userId) !== String(sessionUserId)) {
+      logger.warn('Token checkout ownership mismatch', {
+        purchaseId,
+        purchaseOwner: data.userId,
+        requestingUser: sessionUserId,
+      });
+      return res.status(403).json({ success: false, error: 'Access denied' });
+    }
+
+    // Strip the internal userId field before sending to the client.
+    const { userId: _userId, ...clientData } = data;
+    res.json({ success: true, ...clientData });
   } catch (err) {
     logger.error(`Token checkout data error: ${err.message}`, { purchaseId });
     res.status(500).json({ success: false, error: 'Failed to load checkout data. Please try again.' });

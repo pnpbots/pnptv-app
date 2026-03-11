@@ -3,6 +3,7 @@
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { processChatMedia } = require('../../services/chatMediaService');
+const mentionService = require('../../services/mentionService');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -81,6 +82,10 @@ const sendMessage = async (req, res) => {
       [room, user.id, user.username || null, user.firstName || user.first_name || null, user.photoUrl || user.photo_url || null, text]
     );
     const msg = rows[0];
+    // Parse @mentions and notify tagged users (non-blocking)
+    setImmediate(() => {
+      mentionService.createChatMentions(msg.id, user.id, text, room).catch(() => {});
+    });
     const io = req.app.get('io');
     if (io) {
       io.to(`chat:${room}`).emit('chat:message', msg);

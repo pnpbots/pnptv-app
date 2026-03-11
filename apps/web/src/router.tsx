@@ -35,6 +35,7 @@ const CommunityResourcesPage = lazy(() => import("@/pages/CommunityResourcesPage
 const ShopPage = lazy(() => import("@/pages/ShopPage"));
 const DownloadPage = lazy(() => import("@/pages/DownloadPage"));
 const MainStage = lazy(() => import("@/pages/MainStage"));
+const DaHaus = lazy(() => import("@/pages/DaHaus"));
 const PostDetail = lazy(() => import("@/pages/PostDetail"));
 const Settings = lazy(() => import("@/pages/Settings"));
 
@@ -54,6 +55,7 @@ const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
 const AdminDemographics = lazy(() => import("@/pages/admin/AdminDemographics"));
 const Mono = lazy(() => import("@/pages/admin/Mono"));
 const Gamification = lazy(() => import("@/pages/admin/Gamification"));
+const MediaPacks = lazy(() => import("@/pages/admin/MediaPacks"));
 const StreamManagement = lazy(() => import("@/pages/admin/StreamManagement"));
 const SupportDashboard = lazy(() => import("@/pages/admin/SupportDashboard"));
 const AccessMatrix = lazy(() => import("@/pages/admin/AccessMatrix"));
@@ -135,6 +137,16 @@ export const router = createBrowserRouter([
           <ModuleLoader>
             <VerificationGate>
               <MainStage />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "da-haus",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <DaHaus />
             </VerificationGate>
           </ModuleLoader>
         ),
@@ -390,6 +402,14 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: "media-packs",
+        element: (
+          <ModuleLoader>
+            <MediaPacks />
+          </ModuleLoader>
+        ),
+      },
+      {
         path: "streams",
         element: (
           <ModuleLoader>
@@ -543,9 +563,7 @@ export const router = createBrowserRouter([
     path: "/checkout/:paymentId",
     element: (
       <ModuleLoader>
-        <VerificationGate>
-          <DaimoCheckout />
-        </VerificationGate>
+        <DaimoCheckout />
       </ModuleLoader>
     ),
   },

@@ -11,6 +11,7 @@ const axios = require('axios');
 
 const { query: dbQuery } = require('../../../config/postgres');
 const NotificationEmitter = require('../../services/notificationEmitter');
+const mentionService = require('../../services/mentionService');
 const { validateTierFresh } = require('../../services/accessService');
 const { resolveUserId } = require('../../utils/helpers');
 
@@ -224,6 +225,11 @@ const createPost = async (req, res) => {
       author_photo: authorPhoto,
       liked_by_me: false,
     };
+
+    // Parse @mentions and notify tagged users (non-blocking)
+    setImmediate(() => {
+      mentionService.createPostMentions(post.id, user.id, content.trim()).catch(() => {});
+    });
 
     const io = req.app.get('io');
     emitNewPost(io, fullPost, user.id);
