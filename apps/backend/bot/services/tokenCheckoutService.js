@@ -420,6 +420,7 @@ class TokenCheckoutService {
 
     const base = {
       purchaseId: purchase.purchase_uuid || String(purchase.id),
+      userId,
       provider,
       status: purchase.status,
       tokens,
@@ -566,9 +567,20 @@ class TokenCheckoutService {
       : idempotencyKey(provider, referenceId);
 
     const lockKey = `token:credit:${lookupKey}`;
-    const acquired = await cache.acquireLock(lockKey, 120).catch(() => false);
+    let acquired;
+    try {
+      acquired = await cache.acquireLock(lockKey, 120);
+    } catch (lockErr) {
+      // Redis is unavailable — log and continue without the lock.
+      // The DB `WHERE status = 'pending' RETURNING id` guard provides real idempotency.
+      logger.warn('creditTokensFromPayment: Redis lock unavailable, proceeding without lock', {
+        lockKey, provider, error: lockErr.message,
+      });
+      acquired = true; // treat as acquired so we do not false-positive on alreadyProcessed
+    }
     if (!acquired) {
-      logger.warn('creditTokensFromPayment duplicate blocked', { lookupKey, provider });
+      // acquireLock resolved to false — genuine duplicate in flight
+      logger.warn('creditTokensFromPayment duplicate blocked by Redis lock', { lookupKey, provider });
       return { success: false, alreadyProcessed: true };
     }
 

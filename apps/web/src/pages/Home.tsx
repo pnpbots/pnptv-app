@@ -308,25 +308,50 @@ export default function Home() {
         </div>
       )}
 
-      {/* Main Stage — 24/7 community video room */}
-      <div
-        className="glass-card-sm p-4 mb-5 cursor-pointer hover:border-white/15 transition-colors"
-        onClick={() => navigate("/main-stage")}
-        style={{ borderLeft: "3px solid rgba(94, 209, 196, 0.5)" }}
-      >
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg flex-shrink-0" style={{ background: "rgba(94, 209, 196, 0.15)" }}>
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#5ED1C4" }}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
+      {/* Video Rooms — Da Haus (free) + Main Stage (members+) */}
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        {/* Da Haus — free for all */}
+        <div
+          className="glass-card-sm p-4 cursor-pointer hover:border-white/15 transition-colors"
+          onClick={() => navigate("/da-haus")}
+          style={{ borderLeft: "3px solid rgba(162, 89, 255, 0.5)" }}
+        >
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(162, 89, 255, 0.15)" }}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#A259FF" }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(162,89,255,0.15)", color: "#A259FF" }}>FREE</span>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-white">Da Haus</h3>
+              <p className="text-[11px] text-white/40 mt-0.5 leading-relaxed">Open hangout for everyone</p>
+            </div>
           </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-semibold text-white">Main Stage</h3>
-            <p className="text-xs text-white/50">24/7 community video room — drop in anytime</p>
+        </div>
+
+        {/* Main Stage — members+ */}
+        <div
+          className="glass-card-sm p-4 cursor-pointer hover:border-white/15 transition-colors"
+          onClick={() => navigate("/main-stage")}
+          style={{ borderLeft: "3px solid rgba(94, 209, 196, 0.5)" }}
+        >
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(94, 209, 196, 0.15)" }}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#5ED1C4" }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>MEMBER+</span>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-white">Main Stage</h3>
+              <p className="text-[11px] text-white/40 mt-0.5 leading-relaxed">24/7 community video room</p>
+            </div>
           </div>
-          <svg className="w-4 h-4 text-white/30 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
         </div>
       </div>
 

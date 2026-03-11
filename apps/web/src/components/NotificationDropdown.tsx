@@ -21,7 +21,10 @@ function getDeepLink(notif: { entityType?: string; actorId?: string }): string {
     case "post":
       return "/social";
     case "message":
-      return notif.actorId ? `/dm/${notif.actorId}` : "/";
+      if (notif.actorId && /^\d+$/.test(String(notif.actorId))) {
+        return `/dm/${notif.actorId}`;
+      }
+      return "/";
     case "group":
       return "/chat";
     case "payment":

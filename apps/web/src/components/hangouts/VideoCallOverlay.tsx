@@ -3,6 +3,7 @@ import { JitsiMeetComponent } from "./JitsiMeetComponent";
 import { VideoCallSidePanel, MobileBottomBar } from "./VideoCallSidePanel";
 import { VideoCallModBot } from "./VideoCallModBot";
 import { PermissionGate } from "@/components/PermissionGate";
+import { useOrientation } from "@/hooks/useOrientation";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,8 @@ interface VideoCallOverlayProps {
   initialMode?: ViewMode;
   /** Admin/superadmin gets full toolbar */
   isAdmin?: boolean;
+  /** Group owner or call creator — also receives moderator toolbar */
+  isModerator?: boolean;
   /** Group ID for side panel chat */
   groupId?: number;
   /** User ID for side panel chat */
@@ -45,10 +48,12 @@ export function VideoCallOverlay({
   onClose,
   initialMode = "embedded",
   isAdmin = false,
+  isModerator = false,
   groupId,
   userId,
   socketChat,
 }: VideoCallOverlayProps) {
+  const isLandscape = useOrientation();
   const [viewMode, setViewMode] = useState<ViewMode>(initialMode);
   const [participantCount, setParticipantCount] = useState(0);
   const [permsGranted, setPermsGranted] = useState(false);
@@ -135,6 +140,8 @@ export function VideoCallOverlay({
           roomName={roomName}
           onCallEnd={onClose}
           isAdmin={isAdmin}
+          isModerator={isModerator}
+          disableChat={true}
           onApiReady={handleApiReady}
         />
       </div>
@@ -173,6 +180,8 @@ export function VideoCallOverlay({
             onParticipantJoined={handleParticipantJoined}
             onParticipantLeft={handleParticipantLeft}
             isAdmin={isAdmin}
+            isModerator={isModerator}
+            disableChat={true}
             onApiReady={handleApiReady}
             fullScreen
           />
@@ -228,6 +237,7 @@ export function VideoCallOverlay({
               groupId={groupId!}
               userId={userId!}
               isAdmin={isAdmin}
+              isLandscape={isLandscape}
               socketChat={socketChat}
             />
           </div>
@@ -324,6 +334,8 @@ export function VideoCallOverlay({
             onParticipantJoined={handleParticipantJoined}
             onParticipantLeft={handleParticipantLeft}
             isAdmin={isAdmin}
+            isModerator={isModerator}
+            disableChat={true}
             onApiReady={handleApiReady}
           />
         </div>
@@ -343,6 +355,8 @@ export function VideoCallOverlay({
             groupId={groupId!}
             userId={userId!}
             isAdmin={isAdmin}
+            isLandscape={isLandscape}
+            socketChat={socketChat}
           />
         </div>
       )}

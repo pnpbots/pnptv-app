@@ -408,6 +408,11 @@ class BroadcastService {
    * @returns {Promise<Array>} List of target users
    */
   async getTargetUsers(targetType, excludeUserIds = [], includeFilters = {}) {
+    const VALID_TARGET_TYPES = new Set(['all', 'premium', 'free', 'churned', 'payment_incomplete']);
+    if (!VALID_TARGET_TYPES.has(targetType)) {
+      throw new Error(`Invalid targetType: ${targetType}`);
+    }
+
     try {
       const filters = typeof includeFilters === 'string'
         ? (() => { try { return JSON.parse(includeFilters); } catch (e) { return {}; } })()
@@ -427,6 +432,8 @@ class BroadcastService {
           FROM users u
           INNER JOIN latest_payments lp ON lp.user_id = u.id
           WHERE lp.status IN ('pending', 'processing', 'failed', 'cancelled', 'expired')
+            AND u.deleted_at IS NULL
+            AND u.tier != 'banned'
         `;
 
         if (sinceDays) {
@@ -446,7 +453,7 @@ class BroadcastService {
         return result.rows;
       }
 
-      let query = 'SELECT id, language, tier, subscription_status FROM users WHERE 1=1';
+      let query = `SELECT id, language, tier, subscription_status FROM users WHERE deleted_at IS NULL AND tier != 'banned'`;
       const params = [];
 
       // Segment by tier (access level) and subscription_status (lifecycle)
@@ -907,7 +914,23 @@ class BroadcastService {
 
           const broadcast = broadcastResult.rows[0];
           const userId = recipient.user_id;
-          
+
+          // Skip delivery to banned or deleted users
+          const userCheckResult = await getPool().query(
+            `SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL AND tier != 'banned' LIMIT 1`,
+            [userId]
+          );
+          if (userCheckResult.rowCount === 0) {
+            await this._updateRecipientStatus(recipient.id, 'failed', {
+              error_code: 'USER_INELIGIBLE',
+              error_message: 'User is banned or deleted',
+              retry_count: recipient.retry_count + 1,
+            });
+            failed++;
+            processed++;
+            continue;
+          }
+
           // Try to send the broadcast again
           const sendOptions = {
             parse_mode: 'Markdown',

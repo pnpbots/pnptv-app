@@ -85,7 +85,7 @@ export default function DaimoCheckout() {
     // The Daimo SDK callback fires when the user confirms in their wallet, but
     // the on-chain transaction still needs to be indexed by the backend before
     // we can grant access.  Show a "confirming" spinner and poll the backend
-    // for up to 3 minutes before falling back to a success state.
+    // for up to 3 minutes before setting an error state.
     setState("confirming");
 
     // Send email to backend if provided (non-blocking, best-effort).
@@ -108,16 +108,16 @@ export default function DaimoCheckout() {
       } catch {
         // non-fatal — keep polling
       }
-      // Timeout after 60 attempts × 3 s = 3 minutes; fall back to success
-      // so the user is not left stuck on the confirming screen indefinitely.
+      // Timeout after 60 attempts × 3 s = 3 minutes; set error so the user
+      // is not left stuck on the confirming screen indefinitely.
       if (attempts >= 60) {
         clearInterval(confirmPollRef.current!);
         confirmPollRef.current = null;
-        await refreshUser();
-        setState("success");
+        setError(t.confirmationTimeout || "Your transaction was submitted but is taking longer than expected. You will receive a Telegram notification once confirmed.");
+        setState("error");
       }
     }, 3000);
-  }, [email, paymentId, refreshUser]);
+  }, [email, paymentId, refreshUser, t.confirmationTimeout]);
 
   // Clean up the confirmation poll if the component unmounts mid-flight.
   useEffect(() => {
@@ -142,6 +142,9 @@ export default function DaimoCheckout() {
         color: "#fff",
       }}
     >
+      {/* Single keyframes declaration — hoisted out of conditional branches */}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
       {/* Background orbs */}
       <div
         style={{
@@ -178,6 +181,7 @@ export default function DaimoCheckout() {
           border: "1px solid rgba(212,0,122,0.3)",
           borderRadius: 24,
           backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
           width: "100%",
           maxWidth: 520,
           padding: 32,
@@ -186,18 +190,28 @@ export default function DaimoCheckout() {
         }}
       >
         {/* Logo */}
-        <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <span
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <img
+            src="/Logo2-50.png"
+            alt="PNPtv!"
+            style={{ height: 48, width: "auto" }}
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+            }}
+          />
+          <div
             style={{
-              fontSize: 28,
+              fontSize: 24,
               fontWeight: 700,
+              marginTop: 4,
               background: "linear-gradient(135deg, #D4007A, #E69138)",
               WebkitBackgroundClip: "text",
               WebkitTextFillColor: "transparent",
+              backgroundClip: "text",
             }}
           >
-            {t.brandName}
-          </span>
+            PNPtv!
+          </div>
         </div>
 
         {state === "loading" && (
@@ -216,7 +230,6 @@ export default function DaimoCheckout() {
             <p style={{ color: "#8E8E93", fontSize: 14 }}>
               {t.loadingPaymentDetails}
             </p>
-            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
           </div>
         )}
 
@@ -248,7 +261,7 @@ export default function DaimoCheckout() {
                   WebkitTextFillColor: "transparent",
                 }}
               >
-                ${payment.amountUSD.toFixed(2)} USDC
+                ${Number(payment.amountUSD).toFixed(2)} USDC
               </div>
               <div style={{ fontSize: 11, color: "#8E8E93", marginTop: 6 }}>
                 {t.paymentRef} {payment.paymentRef}
@@ -365,14 +378,11 @@ export default function DaimoCheckout() {
               }}
             />
             <p style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
-              Confirming Payment…
+              {t.confirmingTitle}
             </p>
             <p style={{ fontSize: 13, color: "#8E8E93" }}>
-              Your transaction was submitted. We are waiting for on-chain
-              confirmation before crediting your account. This usually takes
-              a few seconds — please keep this page open.
+              {t.confirmingBody}
             </p>
-            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
           </div>
         )}
 

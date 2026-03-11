@@ -53,9 +53,21 @@ class DashTokenService {
    */
   static async creditTokens(userId, tokens, invoiceId, meta = {}) {
     const lockKey = `btcpay:credit:${invoiceId}`;
-    const acquired = await cache.acquireLock(lockKey, 120).catch(() => false);
-    if (!acquired) {
-      logger.warn('creditTokens duplicate blocked', { invoiceId });
+
+    // TC-C-03: distinguish a Redis failure (throw) from a genuine "already locked" (false).
+    // A Redis failure must NOT silently block crediting — the DB RETURNING guard below is the
+    // real idempotency fence. Only a clean false return means another process holds the lock.
+    let acquired = false;
+    try {
+      acquired = await cache.acquireLock(lockKey, 120);
+    } catch (lockErr) {
+      logger.warn('creditTokens: Redis lock unavailable, proceeding without lock', { invoiceId, err: lockErr.message });
+      acquired = null; // null = error path; skip the duplicate-check shortcut
+    }
+
+    if (acquired === false) {
+      // A clean false means the lock is held by another in-flight request — genuine duplicate.
+      logger.warn('creditTokens duplicate blocked by Redis lock', { invoiceId });
       return { newBalance: 0, alreadyProcessed: true };
     }
 
@@ -63,23 +75,22 @@ class DashTokenService {
     try {
       await client.query('BEGIN');
 
-      // Idempotency: check if this invoice was already credited
-      const existing = await client.query(
-        `SELECT id FROM token_purchases WHERE btcpay_invoice_id = $1 AND status = 'paid'`,
-        [invoiceId]
-      );
-      if (existing.rows.length > 0) {
-        await client.query('ROLLBACK');
-        return { newBalance: 0, alreadyProcessed: true };
-      }
-
-      // Mark purchase as paid
-      await client.query(
+      // Atomic idempotency: flip status 'pending' → 'paid' in one statement.
+      // If rowCount === 0 the row was already paid (or never existed) — bail out without
+      // crediting the wallet, eliminating the SELECT-then-UPDATE race condition.
+      const updateResult = await client.query(
         `UPDATE token_purchases
          SET status = 'paid', settled_at = NOW()
-         WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
+         WHERE btcpay_invoice_id = $1 AND status = 'pending'
+         RETURNING id`,
         [invoiceId]
       );
+
+      if (updateResult.rowCount === 0) {
+        await client.query('ROLLBACK');
+        logger.info('creditTokens: invoice already processed or not found', { invoiceId });
+        return { newBalance: 0, alreadyProcessed: true };
+      }
 
       // Credit wallet (atomic)
       const walletResult = await client.query(
@@ -105,7 +116,9 @@ class DashTokenService {
       throw error;
     } finally {
       client.release();
-      await cache.releaseLock(lockKey).catch(() => {});
+      if (acquired !== null) {
+        await cache.releaseLock(lockKey).catch(() => {});
+      }
     }
   }
 
@@ -186,9 +199,18 @@ class DashTokenService {
   static async creditTokensByPaymentId(paymentId, paymentMethod) {
     const idempotencyKey = `${paymentMethod}:${paymentId}`;
     const lockKey = `token:credit:${idempotencyKey}`;
-    const acquired = await cache.acquireLock(lockKey, 120).catch(() => false);
-    if (!acquired) {
-      logger.warn('creditTokensByPaymentId duplicate blocked', { idempotencyKey });
+
+    // TC-C-03: same pattern as creditTokens — Redis error must not silently drop tokens.
+    let acquired = false;
+    try {
+      acquired = await cache.acquireLock(lockKey, 120);
+    } catch (lockErr) {
+      logger.warn('creditTokensByPaymentId: Redis lock unavailable, proceeding without lock', { idempotencyKey, err: lockErr.message });
+      acquired = null; // null = error path; skip the duplicate-check shortcut
+    }
+
+    if (acquired === false) {
+      logger.warn('creditTokensByPaymentId duplicate blocked by Redis lock', { idempotencyKey });
       return { newBalance: 0, alreadyProcessed: true };
     }
 
@@ -196,34 +218,36 @@ class DashTokenService {
     try {
       await client.query('BEGIN');
 
-      // Look up the pending purchase record
-      const purchaseResult = await client.query(
-        `SELECT id, user_id, tokens_credited, usd_amount, status
-         FROM token_purchases
-         WHERE btcpay_invoice_id = $1`,
-        [idempotencyKey]
-      );
-
-      if (purchaseResult.rows.length === 0) {
-        await client.query('ROLLBACK');
-        logger.warn('creditTokensByPaymentId: purchase record not found', { idempotencyKey });
-        return { newBalance: 0, alreadyProcessed: false, notFound: true };
-      }
-
-      const purchase = purchaseResult.rows[0];
-
-      if (purchase.status === 'paid') {
-        await client.query('ROLLBACK');
-        return { newBalance: 0, alreadyProcessed: true, userId: purchase.user_id, tokens: purchase.tokens_credited };
-      }
-
-      // Mark purchase as paid
-      await client.query(
+      // Atomic idempotency: fetch the pending row and flip it to 'paid' in one statement.
+      // RETURNING gives us the user_id and tokens we need; rowCount === 0 means already paid
+      // or not found — both are safe to bail on without double-crediting.
+      const updateResult = await client.query(
         `UPDATE token_purchases
          SET status = 'paid', settled_at = NOW()
-         WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
+         WHERE btcpay_invoice_id = $1 AND status = 'pending'
+         RETURNING id, user_id, tokens_credited, usd_amount`,
         [idempotencyKey]
       );
+
+      if (updateResult.rowCount === 0) {
+        // Check whether the row exists at all to distinguish notFound from alreadyProcessed.
+        const existsResult = await client.query(
+          `SELECT user_id, tokens_credited FROM token_purchases WHERE btcpay_invoice_id = $1`,
+          [idempotencyKey]
+        );
+        await client.query('ROLLBACK');
+
+        if (existsResult.rows.length === 0) {
+          logger.warn('creditTokensByPaymentId: purchase record not found', { idempotencyKey });
+          return { newBalance: 0, alreadyProcessed: false, notFound: true };
+        }
+
+        // Row exists but was not 'pending' — already paid.
+        const existing = existsResult.rows[0];
+        return { newBalance: 0, alreadyProcessed: true, userId: existing.user_id, tokens: existing.tokens_credited };
+      }
+
+      const purchase = updateResult.rows[0];
 
       // Credit wallet (atomic)
       const walletResult = await client.query(
@@ -259,7 +283,9 @@ class DashTokenService {
       throw error;
     } finally {
       client.release();
-      await cache.releaseLock(lockKey).catch(() => {});
+      if (acquired !== null) {
+        await cache.releaseLock(lockKey).catch(() => {});
+      }
     }
   }
 

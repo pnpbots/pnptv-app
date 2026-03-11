@@ -155,7 +155,11 @@ class PushNotificationService {
 
     try {
       const result = await query(
-        'SELECT id, endpoint, auth, p256dh FROM push_subscriptions'
+        `SELECT ps.id, ps.endpoint, ps.auth, ps.p256dh
+           FROM push_subscriptions ps
+           JOIN users u ON u.id = ps.user_id
+          WHERE u.deleted_at IS NULL
+            AND u.tier != 'banned'`
       );
 
       if (result.rows.length === 0) return 0;

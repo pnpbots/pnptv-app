@@ -197,6 +197,7 @@ export default function MainStage() {
               roomName={roomInfo?.roomName}
               onCallEnd={handleLeave}
               isAdmin={isAdmin}
+              isModerator={isAdmin}
               disableChat
               onApiReady={handleApiReady}
             />
@@ -210,13 +211,14 @@ export default function MainStage() {
           </div>
         )}
 
-        {/* Mobile panels — only visible in landscape orientation */}
-        {userId && isLandscape && (
+        {/* Mobile in-call bar — paid users only, portrait=bottom, landscape=side */}
+        {userId && !isFree && (
           <div className="sm:hidden">
             <MobileBottomBar
               groupId={1}
               userId={userId}
               isAdmin={isAdmin}
+              isLandscape={isLandscape}
             />
           </div>
         )}

@@ -366,6 +366,7 @@ export default function Chat() {
   const [callUrl, setCallUrl] = useState<string | null>(null);
   const [callJwt, setCallJwt] = useState<string | null>(null);
   const [callId, setCallId] = useState<string | null>(null);
+  const [callIsModerator, setCallIsModerator] = useState(false);
   const [callLoading, setCallLoading] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -557,6 +558,7 @@ export default function Chat() {
     setCallUrl(null);
     setCallJwt(null);
     setCallId(null);
+    setCallIsModerator(false);
     setMessagesLoading(true);
     clearMedia();
     isNearBottom.current = true;
@@ -592,6 +594,7 @@ export default function Chat() {
     setCallUrl(null);
     setCallJwt(null);
     setCallId(null);
+    setCallIsModerator(false);
     setShowOnline(false);
     clearMedia();
     loadGroups();
@@ -694,6 +697,7 @@ export default function Chat() {
         setCallUrl(resolved.url);
         setCallJwt(resolved.jwt);
         setCallId(resolved.callId);
+        setCallIsModerator(data.call?.isModerator ?? false);
       } else if (data.jaas === null) {
         // JaaS not configured on the server
         setUploadError(t.chat.videoCallsUnavailable);
@@ -720,6 +724,7 @@ export default function Chat() {
     setCallUrl(null);
     setCallJwt(null);
     setCallId(null);
+    setCallIsModerator(false);
   }, [activeGroup, callId, callState.callId]);
 
   // Show notification when call ends due to creator leaving
@@ -729,6 +734,7 @@ export default function Chat() {
       setCallUrl(null);
       setCallJwt(null);
       setCallId(null);
+      setCallIsModerator(false);
     }
   }, [callState.endReason, t.chat]);
 
@@ -1002,6 +1008,7 @@ export default function Chat() {
               onClose={handleEndCall}
               initialMode="embedded"
               isAdmin={isAdmin}
+              isModerator={callIsModerator}
               groupId={activeGroup.id}
               userId={user?.id ? String(user.id) : undefined}
               socketChat={{ messages, sendMessage, emitTyping, typingUsers }}

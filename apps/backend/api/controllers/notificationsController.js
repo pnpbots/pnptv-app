@@ -172,7 +172,12 @@ async function getNotifications(req, res) {
               u.photo_file_id AS actor_photo_url
        FROM notifications n
        LEFT JOIN users u ON n.actor_id = u.id
-       WHERE n.target_user_id = $1 ${categoryFilter}
+       LEFT JOIN blocked_users bk
+         ON (bk.user_id = $1 AND bk.blocked_user_id = n.actor_id)
+         OR (bk.user_id = n.actor_id AND bk.blocked_user_id = $1)
+       WHERE n.target_user_id = $1
+         AND bk.id IS NULL
+         ${categoryFilter}
        ORDER BY n.created_at DESC
        LIMIT $2 OFFSET $3`,
       params
@@ -181,12 +186,19 @@ async function getNotifications(req, res) {
     const countParams = [userId];
     let countCategoryFilter = '';
     if (category) {
-      countCategoryFilter = 'AND category = $2';
+      countCategoryFilter = 'AND n.category = $2';
       countParams.push(category);
     }
 
     const { rows: countRows } = await query(
-      `SELECT COUNT(*)::int AS total FROM notifications WHERE target_user_id = $1 ${countCategoryFilter}`,
+      `SELECT COUNT(*)::int AS total
+       FROM notifications n
+       LEFT JOIN blocked_users bk
+         ON (bk.user_id = $1 AND bk.blocked_user_id = n.actor_id)
+         OR (bk.user_id = n.actor_id AND bk.blocked_user_id = $1)
+       WHERE n.target_user_id = $1
+         AND bk.id IS NULL
+         ${countCategoryFilter}`,
       countParams
     );
 

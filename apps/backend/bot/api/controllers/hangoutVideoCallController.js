@@ -256,7 +256,7 @@ const startCall = async (req, res) => {
   try {
     // Verify / auto-join membership (main + public groups auto-enroll callers)
     if (!(await ensureMembership(groupId, user.id))) {
-      return res.status(403).json({ error: 'Not a member of this group' });
+      return res.status(403).json({ error: 'Not a member of this group', code: 'MEMBERSHIP_REQUIRED' });
     }
 
     // Block check: group creator blocked caller OR caller blocked group creator
@@ -283,7 +283,14 @@ const startCall = async (req, res) => {
     if (existing.length > 0) {
       // Return the existing call instead of creating a duplicate
       const call = existing[0];
-      const isModerator = String(call.creator_id) === String(user.id);
+      let isModerator = String(call.creator_id) === String(user.id);
+      if (!isModerator) {
+        const { rows: ownerCheck } = await query(
+          `SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role='owner'`,
+          [groupId, user.id]
+        );
+        if (ownerCheck.length > 0) isModerator = true;
+      }
       const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
 
       // Auto-join the caller as participant
@@ -414,7 +421,14 @@ const startCall = async (req, res) => {
         );
         if (rows.length > 0) {
           const call = rows[0];
-          const isModerator = String(call.creator_id) === String(user.id);
+          let isModerator = String(call.creator_id) === String(user.id);
+          if (!isModerator) {
+            const { rows: ownerCheck } = await query(
+              `SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role='owner'`,
+              [groupId, user.id]
+            );
+            if (ownerCheck.length > 0) isModerator = true;
+          }
           const jaas = buildJaasPayload(call.room_name, user, isModerator, false);
           return res.json({
             success: true,
@@ -455,7 +469,7 @@ const getActiveCall = async (req, res) => {
   try {
     // Auto-join main/public groups so membership never blocks the call fetch
     if (!(await ensureMembership(groupId, user.id))) {
-      return res.status(403).json({ error: 'Not a member of this group' });
+      return res.status(403).json({ error: 'Not a member of this group', code: 'MEMBERSHIP_REQUIRED' });
     }
 
     // Block check: group creator blocked requester OR requester blocked group creator
@@ -536,7 +550,14 @@ const getActiveCall = async (req, res) => {
       [call.id]
     );
 
-    const isModerator = String(call.creator_id) === String(user.id);
+    let isModerator = String(call.creator_id) === String(user.id);
+    if (!isModerator) {
+      const { rows: ownerCheck } = await query(
+        `SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role='owner'`,
+        [groupId, user.id]
+      );
+      if (ownerCheck.length > 0) isModerator = true;
+    }
     const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
 
     return res.json({
@@ -588,7 +609,7 @@ const joinCall = async (req, res) => {
   try {
     // Auto-join main/public groups so membership never blocks joining a call
     if (!(await ensureMembership(groupId, user.id))) {
-      return res.status(403).json({ error: 'Not a member of this group' });
+      return res.status(403).json({ error: 'Not a member of this group', code: 'MEMBERSHIP_REQUIRED' });
     }
 
     // Block check: group creator blocked joiner OR joiner blocked group creator
@@ -640,7 +661,14 @@ const joinCall = async (req, res) => {
       [callId]
     );
 
-    const isModerator = String(call.creator_id) === String(user.id);
+    let isModerator = String(call.creator_id) === String(user.id);
+    if (!isModerator) {
+      const { rows: ownerCheck } = await query(
+        `SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role='owner'`,
+        [groupId, user.id]
+      );
+      if (ownerCheck.length > 0) isModerator = true;
+    }
     const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
 
     // Get authoritative participant count from DB

@@ -14,6 +14,18 @@ interface ApiOptions {
   headers?: Record<string, string>;
 }
 
+/** API error that preserves a machine-readable code from the backend response body. */
+export class ApiError extends Error {
+  public readonly code: string | undefined;
+  public readonly status: number;
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const { method = "GET", body, headers = {} } = options;
 
@@ -38,7 +50,8 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
           : typeof error.message === "string"
             ? error.message
             : friendlyHttpError(res.status, `API error ${res.status}`);
-    throw new Error(errorMessage);
+    const errorCode = typeof error.code === "string" ? error.code : undefined;
+    throw new ApiError(errorMessage, res.status, errorCode);
   }
 
   return res.json();

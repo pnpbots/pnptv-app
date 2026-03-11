@@ -9,7 +9,10 @@ function getDeepLink(toast: { type: string; entityType?: string; entityId?: stri
     case "post":
       return "/social";
     case "message":
-      return toast.actor?.id ? `/dm/${toast.actor.id}` : "/";
+      if (toast.actor?.id && /^\d+$/.test(String(toast.actor.id))) {
+        return `/dm/${toast.actor.id}`;
+      }
+      return "/";
     case "group":
       return "/chat";
     case "payment":

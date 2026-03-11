@@ -1197,6 +1197,7 @@ class PaymentService {
                 paymentId: paymentIdOrType,
                 refPayco: x_ref_payco,
               });
+              return { success: false, code: 'PURCHASE_NOT_FOUND', message: 'Token purchase record not found' };
             } else if (creditResult.success && !creditResult.alreadyProcessed) {
               logger.info('ePayco: tokens credited', {
                 userId: creditResult.userId,
@@ -1225,18 +1226,6 @@ class PaymentService {
               paymentId: paymentIdOrType,
               refPayco: x_ref_payco,
             });
-          }
-
-          // Mark the payment record as completed so polling returns 'completed'
-          if (paymentIdOrType) {
-            try {
-              await PaymentModel.updateStatus(paymentIdOrType, 'completed', {
-                completedAt: new Date(),
-                completedBy: 'epayco_webhook',
-              });
-            } catch (err) {
-              logger.error('Failed to mark token purchase payment as completed', { paymentId: paymentIdOrType, error: err.message });
-            }
           }
 
           return { success: true, type: 'token_purchase' };
@@ -1983,6 +1972,7 @@ class PaymentService {
                 paymentId,
                 daimoEventId: id,
               });
+              return { success: false, code: 'PURCHASE_NOT_FOUND', message: 'Token purchase record not found' };
             } else if (creditResult.success && !creditResult.alreadyProcessed) {
               logger.info('Daimo: tokens credited', {
                 userId: creditResult.userId,
@@ -2100,6 +2090,19 @@ class PaymentService {
           }
 
           {
+            // D-H05: Re-fetch payment immediately before writes to guard against
+            // duplicate webhook delivery racing past the earlier idempotency check.
+            // NOTE: The three writes below (updateSubscription, updateStatus,
+            // grantEntitlements) are NOT wrapped in a DB transaction because the
+            // model methods do not accept a client parameter. If a crash occurs
+            // between writes, the idempotency check above (payment.status ===
+            // 'completed') will prevent reprocessing on the next delivery.
+            const freshPayment = await PaymentModel.getById(paymentId);
+            if (freshPayment && (freshPayment.status === 'completed' || freshPayment.status === 'success')) {
+              logger.info('Daimo processDaimoWebhook: payment already completed (re-entry guard)', { paymentId, eventId: id });
+              return { success: true, alreadyProcessed: true };
+            }
+
             const durationDays = plan.duration_days || plan.duration || 30;
             const isLifetime = plan.isLifetime || plan.is_lifetime || (planId && planId.toString().toLowerCase().includes('lifetime'));
             const expiryDate = isLifetime ? null : (() => { const d = new Date(); d.setDate(d.getDate() + durationDays); return d; })();
@@ -2805,7 +2808,8 @@ class PaymentService {
       }
 
       const userId = payment.userId || payment.user_id;
-      const amountCOP = Math.round((payment.amount || parseFloat(plan.price)) * 4000);
+      const USD_TO_COP_RATE = Number(process.env.USD_TO_COP_RATE || 4350);
+      const amountCOP = Math.round((payment.amount || parseFloat(plan.price)) * USD_TO_COP_RATE);
       const paymentRef = `PAY-${paymentId.substring(0, 8).toUpperCase()}`;
       const normalizedBrowserInfo = this.buildChargeBrowserInfo({
         browserInfo,
@@ -3273,6 +3277,9 @@ class PaymentService {
           paymentId,
           chargeResultMessage: chargeResult?.message,
           rawDataKeys: Object.keys(rawData),
+          validationErrors: rawData?.errors || rawData?.error || null,
+          validationDescription: rawData?.description || null,
+          statusCode: chargeResult?.statusCode || null,
         });
 
         await PaymentModel.updateStatus(paymentId, 'failed', {

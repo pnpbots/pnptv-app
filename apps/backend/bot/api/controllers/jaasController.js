@@ -131,6 +131,34 @@ const generateModeratorToken = async (req, res) => {
     const isAdmin = user && (user.role === 'admin' || user.role === 'superadmin');
     const isCreator = user && user.creator_status === 'active';
     const hasChannel = user && user.live_channel;
+
+    // Exception: pnp-member who owns the hangout group (or created its call) gets a moderator token
+    const isHangoutRoomEarly = roomName.startsWith('hangout-');
+    if (!isAdmin && !isCreator && !hasChannel && isHangoutRoomEarly) {
+      const hasMembership = await EntitlementAccessService.hasEntitlement(userId, 'pnp-member');
+      if (hasMembership) {
+        const groupIdMatchEarly = roomName.match(/^hangout-(\d+)/);
+        if (groupIdMatchEarly) {
+          const hGroupIdEarly = parseInt(groupIdMatchEarly[1], 10);
+          const [ownerRowsEarly, callCreatorRowsEarly] = await Promise.all([
+            query(
+              'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role=$3',
+              [hGroupIdEarly, userId, 'owner']
+            ),
+            query(
+              'SELECT 1 FROM hangout_video_calls WHERE room_name=$1 AND creator_id=$2 LIMIT 1',
+              [roomName, userId]
+            ),
+          ]);
+          if (ownerRowsEarly.rows.length > 0 || callCreatorRowsEarly.rows.length > 0) {
+            const token = JaasService.generateModeratorToken(roomName, userId, displayName, email || '', '');
+            logger.info('JaaS moderator token granted to hangout owner/creator (pnp-member)', { userId, roomName });
+            return res.json({ success: true, token, domain: '8x8.vc', role: 'moderator' });
+          }
+        }
+      }
+    }
+
     if (!isAdmin && !isCreator && !hasChannel) {
       logger.warn('Unauthorized moderator token request', { userId });
       return res.status(403).json({

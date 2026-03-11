@@ -195,7 +195,15 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         setNotifications((prev) =>
           prev.map((n) => (idSet.has(String(n.id)) ? { ...n, isRead: true } : n))
         );
-        setUnreadCount((prev) => Math.max(0, prev - ids.length));
+        // Refetch the authoritative count from the server instead of
+        // decrementing client-side (avoids drift when notifications are
+        // marked read through other channels, e.g. bot or push).
+        try {
+          const countRes = await fetchCounts();
+          setUnreadCount(countRes.counts.total);
+        } catch {
+          // Non-fatal: leave the count as-is if the refetch fails
+        }
       }
     } catch {
       // ignore

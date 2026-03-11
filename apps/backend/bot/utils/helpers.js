@@ -330,14 +330,15 @@ async function resolveUserId(userId) {
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
   const isHyphenatedId = userId.includes('-');
 
-  if (isNumeric) return userId; // telegram IDs are used as-is
-  if (isHyphenatedId) return userId; // usernames do not allow hyphens, so treat these as canonical IDs
+  if (isNumeric) return userId; // numeric telegram IDs / legacy numeric user IDs used as-is
 
   const { query } = require('../../config/postgres');
   if (isUuid) {
+    // UUID could be either users.id (for UUID-keyed users) or pnptv_id — resolve both
     const r = await query('SELECT id FROM users WHERE id = $1 OR pnptv_id = $1 LIMIT 1', [userId]);
     return r.rows.length ? r.rows[0].id : null;
   }
+  if (isHyphenatedId) return userId; // non-UUID hyphenated strings are treated as canonical user IDs
   // username lookup
   const r = await query('SELECT id FROM users WHERE lower(username) = lower($1) LIMIT 1', [userId]);
   return r.rows.length ? r.rows[0].id : null;

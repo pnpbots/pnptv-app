@@ -1705,6 +1705,8 @@ export default function StreamerDashboard({
                 onCallEnd={handleEndJaasLive}
                 fullScreen={false}
                 isAdmin={true}
+                isModerator={true}
+                disableChat={true}
                 className="w-full h-full"
               />
             ) : (

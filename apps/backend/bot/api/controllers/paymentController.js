@@ -133,6 +133,14 @@ class PaymentController {
         });
       }
 
+      // Ownership check — requesting session must own this payment
+      const sessionUserId = String(req.session?.user?.id || req.session?.userId || '');
+      const paymentOwner = String(payment.userId || payment.user_id || '');
+      if (!sessionUserId || sessionUserId !== paymentOwner) {
+        logger.warn('getPaymentInfo ownership check failed', { paymentId, sessionUserId, paymentOwner });
+        return res.status(403).json({ success: false, error: 'Forbidden' });
+      }
+
       // Check if payment is still pending
       if (payment.status !== 'pending') {
         logger.warn('Payment already processed', { paymentId, status: payment.status });
@@ -171,7 +179,7 @@ class PaymentController {
           planId: 'token_purchase',
           provider,
           status: payment.status,
-          amountUSD: paymentAmountUsd,
+          amountUSD: Number(paymentAmountUsd),
           amountCOP: priceInCOP,
           currencyCode,
           isPromo: false,
@@ -221,7 +229,7 @@ class PaymentController {
           }
         } else if (provider === 'daimo') {
           const existingSessionId = payment.metadata?.daimo_payment_id || payment.daimo_payment_id;
-          const existingClientSecret = payment.metadata?.daimo_client_secret;
+          const existingClientSecret = payment.metadata?.daimo_client_secret || payment.daimo_client_secret;
           if (existingSessionId && existingClientSecret) {
             tokenPaymentData.daimoSessionId = existingSessionId;
             tokenPaymentData.daimoClientSecret = existingClientSecret;
@@ -303,7 +311,7 @@ class PaymentController {
         planId,
         provider,
         status: payment.status,
-        amountUSD: paymentAmount,
+        amountUSD: Number(paymentAmount),
         amountCOP: priceInCOP,
         currencyCode,
         isPromo,
@@ -318,7 +326,7 @@ class PaymentController {
             ? `Promo ${payment.metadata?.promoCode || ''} - ${plan.display_name || plan.name}`
             : `${plan.display_name || plan.name} Subscription`,
           icon: plan.icon || '💎',
-          duration: plan.duration || 30,
+          duration: plan.duration_days || plan.duration || 30,
           features: plan.features || [],
         },
       };
@@ -371,7 +379,7 @@ class PaymentController {
         // Return Daimo session data for the SDK modal on the frontend
         const existingSessionId = payment.metadata?.daimo_payment_id
           || payment.daimo_payment_id;
-        const existingClientSecret = payment.metadata?.daimo_client_secret;
+        const existingClientSecret = payment.metadata?.daimo_client_secret || payment.daimo_client_secret;
 
         if (existingSessionId && existingClientSecret) {
           // Session already created — reuse it

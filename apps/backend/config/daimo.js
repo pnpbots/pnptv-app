@@ -127,6 +127,14 @@ const createDaimoPayment = async ({
     const sessionId = session.sessionId || session.id;
     const clientSecret = session.clientSecret;
 
+    if (!sessionId) {
+      logger.error('[Daimo] Session created but sessionId absent from API response', {
+        paymentId,
+        responseKeys: Object.keys(data || {}),
+      });
+      return { success: false, error: 'Daimo session ID missing from API response' };
+    }
+
     logger.info('Daimo session created', {
       paymentId,
       daimoPaymentId: sessionId,

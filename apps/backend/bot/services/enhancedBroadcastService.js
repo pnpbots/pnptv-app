@@ -592,6 +592,7 @@ class EnhancedBroadcastService extends BroadcastService {
 
         if (buttonObj.type === 'url') {
           if (buttonText && buttonObj.target) {
+            if (!/^https?:\/\//i.test(buttonObj.target)) continue;
             buttonRows.push([Markup.button.url(buttonText, buttonObj.target)]);
           }
         } else if (buttonObj.type === 'callback') {

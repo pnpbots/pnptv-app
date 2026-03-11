@@ -752,6 +752,12 @@ async function sendBroadcastNow(ctx, bot) {
       return;
     }
 
+    const VALID_TARGET_TYPES = new Set(['all', 'premium', 'free', 'churned', 'payment_incomplete']);
+    if (!broadcastTarget || !VALID_TARGET_TYPES.has(broadcastTarget)) {
+      await ctx.reply('❌ Invalid broadcast target type.');
+      return;
+    }
+
     await ctx.editMessageText(
       '📤 *Enviando Broadcast...*\n\n'
       + 'Tu broadcast se está enviando a los usuarios seleccionados.\n'

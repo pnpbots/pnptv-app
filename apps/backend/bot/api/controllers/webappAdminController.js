@@ -713,6 +713,12 @@ const sendPushNotification = async (req, res) => {
     if (!body || !body.trim()) {
       return res.status(400).json({ error: 'body is required' });
     }
+    if (title.trim().length > 100) {
+      return res.status(400).json({ error: 'title must be ≤ 100 characters' });
+    }
+    if (body.trim().length > 500) {
+      return res.status(400).json({ error: 'body must be ≤ 500 characters' });
+    }
     if (url !== undefined && url !== null && url !== '') {
       const urlStr = String(url);
       if (!urlStr.startsWith('/') && !urlStr.startsWith('https://')) {
@@ -729,6 +735,9 @@ const sendPushNotification = async (req, res) => {
     }
     if (targetType === 'users' && (!Array.isArray(userIds) || userIds.length === 0)) {
       return res.status(400).json({ error: 'userIds must be a non-empty array when targetType is "users"' });
+    }
+    if (targetType === 'users' && Array.isArray(userIds) && userIds.length > 500) {
+      return res.status(400).json({ error: 'userIds must contain ≤ 500 entries' });
     }
 
     // Determine which channels to use — default to all three if not specified
@@ -761,7 +770,7 @@ const sendPushNotification = async (req, res) => {
       let usersResult;
       if (targetType === 'all') {
         usersResult = await query(
-          'SELECT id, email, telegram, first_name, username FROM users WHERE deleted_at IS NULL'
+          `SELECT id, email, telegram, first_name, username FROM users WHERE deleted_at IS NULL AND tier != 'banned'`
         );
       } else if (targetType === 'tier') {
         // Match users whose active subscription plan matches the requested tier label.
@@ -770,6 +779,7 @@ const sendPushNotification = async (req, res) => {
           `SELECT id, email, telegram, first_name, username
              FROM users
             WHERE deleted_at IS NULL
+              AND tier != 'banned'
               AND tier = $1`,
           [tier]
         );
@@ -781,7 +791,8 @@ const sendPushNotification = async (req, res) => {
             `SELECT id, email, telegram, first_name, username
                FROM users
               WHERE id = ANY($1::int[])
-                AND deleted_at IS NULL`,
+                AND deleted_at IS NULL
+                AND tier != 'banned'`,
             [numericIds]
           );
         } else {
@@ -843,23 +854,50 @@ const sendPushNotification = async (req, res) => {
       emailSent = emailResults.filter((r) => r.status === 'fulfilled').length;
     }
 
-    // ── Persist system notification record ────────────────────────────────────
+    // ── Persist in-app notification rows for all target users ─────────────────
+    // When bot/email channels are active, targetUsers is already resolved above.
+    // When only push is active we still need the user list for in-app delivery.
+    let inAppTargetUsers = targetUsers;
+    if (inAppTargetUsers.length === 0) {
+      let usersResult;
+      if (targetType === 'all') {
+        usersResult = await query(
+          `SELECT id FROM users WHERE deleted_at IS NULL AND tier != 'banned'`
+        );
+      } else if (targetType === 'tier') {
+        usersResult = await query(
+          `SELECT id FROM users WHERE deleted_at IS NULL AND tier != 'banned' AND tier = $1`,
+          [tier]
+        );
+      } else {
+        const numericIds = (userIds || []).map(Number).filter((n) => !isNaN(n) && n > 0);
+        if (numericIds.length > 0) {
+          usersResult = await query(
+            `SELECT id FROM users WHERE id = ANY($1::int[]) AND deleted_at IS NULL AND tier != 'banned'`,
+            [numericIds]
+          );
+        } else {
+          usersResult = { rows: [] };
+        }
+      }
+      inAppTargetUsers = usersResult.rows;
+    }
+
+    const NotificationEmitter = require('../../services/notificationEmitter');
     const notificationMessage = url ? `${body} — ${url}` : body;
-    await query(
-      `INSERT INTO notifications
-         (type, category, priority, actor_id, target_user_id, entity_type, entity_id, message, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       ON CONFLICT DO NOTHING`,
-      [
-        'system_push',
-        'announcements',
-        'high',
-        admin.id,
-        admin.id,
-        'admin_broadcast',
-        `push_${Date.now()}`,
-        notificationMessage,
-        JSON.stringify({
+    const broadcastEntityId = `push_${Date.now()}`;
+
+    if (inAppTargetUsers.length > 0) {
+      const recipientIds = inAppTargetUsers.map((u) => u.id);
+      await NotificationEmitter.emitToMany(recipientIds, {
+        type: 'system_push',
+        category: 'announcements',
+        priority: 'high',
+        actorId: admin.id,
+        entityType: 'broadcast',
+        entityId: broadcastEntityId,
+        message: notificationMessage,
+        metadata: {
           title,
           body,
           url,
@@ -869,9 +907,9 @@ const sendPushNotification = async (req, res) => {
           sentCount: sent,
           botDmSent,
           emailSent,
-        }),
-      ]
-    );
+        },
+      });
+    }
 
     logger.info('Admin sent broadcast notification', {
       adminId: admin.id,
@@ -959,7 +997,11 @@ const unsubscribePush = async (req, res) => {
  * Return the VAPID public key so the frontend can create a PushSubscription.
  */
 const getVapidKey = async (req, res) => {
-  return res.json({ success: true, publicKey: process.env.VAPID_PUBLIC_KEY || '' });
+  const key = process.env.VAPID_PUBLIC_KEY;
+  if (!key || !key.trim()) {
+    return res.status(503).json({ success: false, error: 'Push notifications not configured' });
+  }
+  return res.json({ success: true, publicKey: key });
 };
 
 /**
