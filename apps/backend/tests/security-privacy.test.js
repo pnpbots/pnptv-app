@@ -92,24 +92,23 @@ beforeEach(() => {
 describe('IDOR & PII Leakage', () => {
   describe('GET /api/webapp/social/profile/:userId', () => {
     it('should NOT expose email, telegram ID, or other private fields on a public profile', async () => {
+      // resolveUserId('user-bob-uuid'): contains hyphens → returned as-is, NO DB query.
       // Query sequence inside getPublicProfile:
-      // 1. resolveUserId
-      // 2. hasEntitlement(viewer, 'prime')        — validateTierFresh
-      // 3. hasEntitlement(viewer, 'pnp-member')   — validateTierFresh (when no prime)
-      // 4. getById(viewerId)  — isBlocked(viewer → target)
-      // 5. getById(userId)    — isBlocked(target → viewer)
-      // 6a. postsRes  \
-      // 6b. profileRes  } SocialPostService.getPublicProfile (Promise.all of 4 queries)
-      // 6c. postCountRes /
-      // 6d. performerRes/
+      // 1. hasEntitlement(viewer, 'prime')        — validateTierFresh
+      // 2. hasEntitlement(viewer, 'pnp-member')   — validateTierFresh (no prime found)
+      // 3. getById(viewerId)  — isBlocked(viewer → target)
+      // 4. getById(userId)    — isBlocked(target → viewer)
+      // 5a. postsRes  \
+      // 5b. profileRes  } SocialPostService.getPublicProfile (Promise.all of 4 queries)
+      // 5c. postCountRes /
+      // 5d. performerRes/
       mockQuery
-        .mockResolvedValueOnce({ rows: [{ id: BOB_ID }], rowCount: 1 })              // 1. resolveUserId
-        .mockResolvedValueOnce({ rows: [], rowCount: 0 })                             // 2. hasEntitlement prime
-        .mockResolvedValueOnce({ rows: [], rowCount: 0 })                             // 3. hasEntitlement pnp-member
-        .mockResolvedValueOnce({ rows: [{ id: MALLORY_ID, blocked: [] }], rowCount: 1 }) // 4. getById(viewer)
-        .mockResolvedValueOnce({ rows: [{ id: BOB_ID, blocked: [] }], rowCount: 1 })     // 5. getById(target)
-        .mockResolvedValueOnce({ rows: [], rowCount: 0 })                             // 6a. postsRes
-        .mockResolvedValueOnce({                                                      // 6b. profileRes
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 })                             // 1. hasEntitlement prime
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 })                             // 2. hasEntitlement pnp-member
+        .mockResolvedValueOnce({ rows: [{ id: MALLORY_ID, blocked: [] }], rowCount: 1 }) // 3. getById(viewer)
+        .mockResolvedValueOnce({ rows: [{ id: BOB_ID, blocked: [] }], rowCount: 1 })     // 4. getById(target)
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 })                             // 5a. postsRes
+        .mockResolvedValueOnce({                                                      // 5b. profileRes
           rows: [{
             id: BOB_ID,
             username: 'bob',
@@ -119,8 +118,8 @@ describe('IDOR & PII Leakage', () => {
           }],
           rowCount: 1,
         })
-        .mockResolvedValueOnce({ rows: [{ count: 0 }], rowCount: 1 })                // 6c. postCountRes
-        .mockResolvedValueOnce({ rows: [], rowCount: 0 });                            // 6d. performerRes
+        .mockResolvedValueOnce({ rows: [{ count: 0 }], rowCount: 1 })                // 5c. postCountRes
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 });                            // 5d. performerRes
 
       const app = buildApp(makeSession(MALLORY_ID), (app) => {
         app.get('/profile/:userId', socialController.getPublicProfile);
@@ -222,18 +221,17 @@ describe('Input Sanitization', () => {
 describe('Privacy & Business Logic', () => {
     describe('Blocking', () => {
         it("should prevent Mallory from viewing Bob's profile if Bob blocked Mallory", async () => {
+            // resolveUserId('user-bob-uuid'): contains hyphens → returned as-is, NO DB query.
             // Query sequence up to the block gate:
-            // 1. resolveUserId
-            // 2. hasEntitlement(viewer, 'prime')      — validateTierFresh
-            // 3. hasEntitlement(viewer, 'pnp-member') — validateTierFresh (no prime found)
-            // 4. getById(MALLORY_ID) — isBlocked(viewer → target): Mallory has NOT blocked Bob
-            // 5. getById(BOB_ID)    — isBlocked(target → viewer): Bob HAS blocked Mallory → 403
+            // 1. hasEntitlement(viewer, 'prime')      — validateTierFresh
+            // 2. hasEntitlement(viewer, 'pnp-member') — validateTierFresh (no prime found)
+            // 3. getById(MALLORY_ID) — isBlocked(viewer → target): Mallory has NOT blocked Bob
+            // 4. getById(BOB_ID)    — isBlocked(target → viewer): Bob HAS blocked Mallory → 403
             mockQuery
-                .mockResolvedValueOnce({ rows: [{ id: BOB_ID }], rowCount: 1 })                         // 1. resolveUserId
-                .mockResolvedValueOnce({ rows: [], rowCount: 0 })                                        // 2. hasEntitlement prime
-                .mockResolvedValueOnce({ rows: [], rowCount: 0 })                                        // 3. hasEntitlement pnp-member
-                .mockResolvedValueOnce({ rows: [{ id: MALLORY_ID, blocked: [] }], rowCount: 1 })         // 4. getById(viewer)
-                .mockResolvedValueOnce({ rows: [{ id: BOB_ID, blocked: [MALLORY_ID] }], rowCount: 1 }); // 5. getById(target) — Bob blocked Mallory
+                .mockResolvedValueOnce({ rows: [], rowCount: 0 })                                        // 1. hasEntitlement prime
+                .mockResolvedValueOnce({ rows: [], rowCount: 0 })                                        // 2. hasEntitlement pnp-member
+                .mockResolvedValueOnce({ rows: [{ id: MALLORY_ID, blocked: [] }], rowCount: 1 })         // 3. getById(viewer)
+                .mockResolvedValueOnce({ rows: [{ id: BOB_ID, blocked: [MALLORY_ID] }], rowCount: 1 }); // 4. getById(target) — Bob blocked Mallory
 
             const app = buildApp(makeSession(MALLORY_ID), (app) => {
                 app.get('/profile/:userId', socialController.getPublicProfile);

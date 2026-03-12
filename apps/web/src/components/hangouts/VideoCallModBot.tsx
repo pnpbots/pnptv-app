@@ -3,13 +3,13 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface VideoCallModBotProps {
-  /** Jitsi External API instance */
-  jitsiApi: any | null;
+  /** LiveKit Room object (from useRoomContext / onRoomConnected). May be null. */
+  room: any | null;
   /** Only show for admins */
   isAdmin: boolean;
 }
 
-interface JitsiParticipant {
+interface RoomParticipant {
   participantId: string;
   displayName: string;
 }
@@ -32,9 +32,9 @@ const ROTATION_INTERVALS = [
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function VideoCallModBot({ jitsiApi, isAdmin }: VideoCallModBotProps) {
+export function VideoCallModBot({ room, isAdmin }: VideoCallModBotProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [participants, setParticipants] = useState<JitsiParticipant[]>([]);
+  const [participants, setParticipants] = useState<RoomParticipant[]>([]);
   const [customMessage, setCustomMessage] = useState("");
   const [isRotating, setIsRotating] = useState(false);
   const [rotationInterval, setRotationInterval] = useState(30);
@@ -42,91 +42,122 @@ export function VideoCallModBot({ jitsiApi, isAdmin }: VideoCallModBotProps) {
   const [messageSent, setMessageSent] = useState<string | null>(null);
 
   const rotationTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const participantsRef = useRef<JitsiParticipant[]>([]);
+  const participantsRef = useRef<RoomParticipant[]>([]);
   const stageIdxRef = useRef(0);
 
   // Keep refs in sync
   useEffect(() => { participantsRef.current = participants; }, [participants]);
   useEffect(() => { stageIdxRef.current = currentStageIdx; }, [currentStageIdx]);
 
-  // Poll participants from Jitsi API
+  // Poll participants from LiveKit room
   useEffect(() => {
-    if (!jitsiApi || !isOpen) return;
+    if (!room || !isOpen) return;
 
     const fetchParticipants = () => {
       try {
-        const info = jitsiApi.getParticipantsInfo?.();
-        if (Array.isArray(info)) {
-          setParticipants(
-            info.map((p: any) => ({
-              participantId: p.participantId || p.id,
-              displayName: p.displayName || p.formattedDisplayName || "Unknown",
-            }))
-          );
+        // LiveKit Room exposes remoteParticipants as a Map<string, RemoteParticipant>
+        const remote: RoomParticipant[] = [];
+        if (room.remoteParticipants instanceof Map) {
+          room.remoteParticipants.forEach((p: any) => {
+            remote.push({
+              participantId: p.identity,
+              displayName: p.name || p.identity || "Unknown",
+            });
+          });
         }
+        // Include local participant
+        if (room.localParticipant) {
+          remote.unshift({
+            participantId: room.localParticipant.identity,
+            displayName: (room.localParticipant.name || room.localParticipant.identity || "You") + " (you)",
+          });
+        }
+        setParticipants(remote);
       } catch {
-        // API might not be ready
+        // Room not ready yet
       }
     };
 
     fetchParticipants();
     const interval = setInterval(fetchParticipants, 5000);
     return () => clearInterval(interval);
-  }, [jitsiApi, isOpen]);
+  }, [room, isOpen]);
 
-  // Send chat message via Jitsi API
+  // Send a data message to all participants via LiveKit data channel
   const sendChatMessage = useCallback(
     (text: string) => {
-      if (!jitsiApi || !text.trim()) return;
+      if (!text.trim()) return;
       try {
-        jitsiApi.executeCommand("sendChatMessage", text.trim());
+        // LiveKit data messages are sent as Uint8Array
+        if (room?.localParticipant?.publishData) {
+          const payload = JSON.stringify({ type: "mod_message", text: text.trim() });
+          room.localParticipant.publishData(
+            new TextEncoder().encode(payload),
+            { reliable: true }
+          );
+        }
         setMessageSent(text.trim());
         setTimeout(() => setMessageSent(null), 2000);
       } catch {
         // silent
       }
     },
-    [jitsiApi]
+    [room]
   );
 
-  // Pin participant to stage
+  // Pin a participant (stub — LiveKit pinning is client-side; moderator sends a data msg)
   const pinToStage = useCallback(
     (participantId: string) => {
-      if (!jitsiApi) return;
       try {
-        jitsiApi.executeCommand("setLargeVideoParticipant", participantId);
+        if (room?.localParticipant?.publishData) {
+          const payload = JSON.stringify({ type: "mod_pin", participantId });
+          room.localParticipant.publishData(
+            new TextEncoder().encode(payload),
+            { reliable: true }
+          );
+        }
       } catch {
         // silent
       }
     },
-    [jitsiApi]
+    [room]
   );
 
-  // Mute a participant
+  // Mute a participant (stub — LiveKit server-side muting requires server SDK call)
   const muteParticipant = useCallback(
     (participantId: string) => {
-      if (!jitsiApi) return;
       try {
-        jitsiApi.executeCommand("muteParticipant", participantId, "audio");
+        if (room?.localParticipant?.publishData) {
+          const payload = JSON.stringify({ type: "mod_mute", participantId });
+          room.localParticipant.publishData(
+            new TextEncoder().encode(payload),
+            { reliable: true }
+          );
+        }
       } catch {
         // silent
       }
     },
-    [jitsiApi]
+    [room]
   );
 
-  // Kick a participant (with confirmation)
+  // Kick a participant (stub — LiveKit server-side kick requires server SDK call)
   const kickParticipant = useCallback(
     (participantId: string, displayName: string) => {
-      if (!jitsiApi) return;
       if (!window.confirm(`Kick "${displayName}" from the call?`)) return;
       try {
-        jitsiApi.executeCommand("kickParticipant", participantId);
+        if (room?.localParticipant?.publishData) {
+          const payload = JSON.stringify({ type: "mod_kick", participantId });
+          room.localParticipant.publishData(
+            new TextEncoder().encode(payload),
+            { reliable: true }
+          );
+        }
       } catch {
         // silent
       }
     },
-    [jitsiApi]
+    [room]
   );
 
   // Stage rotation logic
@@ -153,7 +184,6 @@ export function VideoCallModBot({ jitsiApi, isAdmin }: VideoCallModBotProps) {
       }
     };
 
-    // Rotate immediately then on interval
     rotate();
     rotationTimer.current = setInterval(rotate, rotationInterval * 1000);
   }, [rotationInterval, pinToStage]);
@@ -360,7 +390,7 @@ export function VideoCallModBot({ jitsiApi, isAdmin }: VideoCallModBotProps) {
 
           {participants.length === 0 && (
             <p className="text-[10px] text-pnp-textSecondary italic">
-              {jitsiApi ? "No participants yet" : "Waiting for video call..."}
+              {room ? "No participants yet" : "Waiting for video call..."}
             </p>
           )}
 

@@ -575,6 +575,29 @@ services:
     networks:
       - pnptvapp_net
 
+  # ===========================================
+  # BLOCK L - LiveKit Server (Self-hosted WebRTC)
+  # Replaces JaaS for hangout video calls
+  # Internal: http://livekit-server:7880
+  # Public WSS: wss://lk.pnptv.app (via NPM proxy)
+  # ===========================================
+
+  livekit-server:
+    image: livekit/livekit-server:latest
+    container_name: livekit-server
+    restart: unless-stopped
+    networks:
+      - pnptvapp_net
+    ports:
+      - "7880:7880"
+      - "7443:7443"
+      - "50000-50200:50000-50200/udp"
+    volumes:
+      - ./config/livekit.yaml:/livekit.yaml
+    command: --config /livekit.yaml
+    depends_on:
+      - redis-pnptv
+
 volumes:
   pnptv-bot-nm:
   pnptv-bot-backend-nm:

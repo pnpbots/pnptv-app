@@ -1273,6 +1273,13 @@ export interface JaasCallInfo {
   appId?: string;
 }
 
+/** LiveKit connection info returned by the hangout call endpoints. */
+export interface LiveKitCallInfo {
+  token: string;
+  roomName: string;
+  wsUrl: string;
+}
+
 export interface ActiveCallInfo {
   id: string;
   groupId: number;
@@ -1295,6 +1302,8 @@ export interface StartCallResponse {
   success: boolean;
   isNew: boolean;
   call: ActiveCallInfo;
+  livekit: LiveKitCallInfo | null;
+  /** @deprecated Always null — kept for backward compatibility */
   jaas: JaasCallInfo | null;
 }
 
@@ -1309,11 +1318,27 @@ export function markGroupAsRead(groupId: number): Promise<{ success: boolean }> 
 export interface GetActiveCallResponse {
   success: boolean;
   call: ActiveCallInfo | null;
+  livekit: LiveKitCallInfo | null;
+  /** @deprecated Always null — kept for backward compatibility */
   jaas: JaasCallInfo | null;
 }
 
 export function getActiveGroupCall(groupId: number): Promise<GetActiveCallResponse> {
   return request(`/api/webapp/hangouts/groups/${groupId}/calls/active`);
+}
+
+/**
+ * Fetch a fresh LiveKit participant token for a given room.
+ * Used when the client needs to reconnect without going through the full call flow.
+ */
+export function getLiveKitToken(
+  roomName: string
+): Promise<{ success: boolean; token: string; wsUrl: string; roomName: string }> {
+  return request("/api/livekit/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ roomName }),
+  });
 }
 
 export function leaveGroupCall(

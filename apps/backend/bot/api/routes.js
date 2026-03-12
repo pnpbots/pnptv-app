@@ -6225,6 +6225,21 @@ app.post('/api/jaas/moderator-token', requireSessionAuth, jaasTokenLimiter, asyn
 app.post('/api/jaas/live-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.generateLiveToken));
 app.post('/api/jaas/refresh-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.refreshToken));
 
+// ── LiveKit Token Endpoints ─────────────────────────────────────────────────
+const livekitController = require('./controllers/livekitController');
+const livekitTokenLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+  handler: (req, res) => res.status(429).json({ error: 'Too many token requests. Please wait before generating another token.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipFailedRequests: false,
+});
+
+app.get('/api/livekit/status', asyncHandler(livekitController.getStatus));
+app.post('/api/livekit/token', requireSessionAuth, livekitTokenLimiter, asyncHandler(livekitController.getToken));
+
 // ==========================================
 // ATProto / Bluesky OAuth Routes (PUBLIC — no session required)
 // These must be mounted at app root so the client_id URL and redirect_uri

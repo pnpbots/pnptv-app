@@ -22,7 +22,7 @@ const { query, getClient } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const PushNotificationService = require('../../services/pushNotificationService');
 const NotificationEmitter = require('../../services/notificationEmitter');
-const jaasService = require('../../services/jaasService');
+const livekitService = require('../../services/livekitService');
 const BlockedUser = require('../../../models/blockedUser');
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -127,23 +127,22 @@ async function isBlockedFromGroup(groupId, userId) {
 
 /**
  * Generate a room name for a hangout call.
- * Persistent (is_main) groups get a stable name so Jitsi state survives restarts.
+ * Persistent (is_main) groups get a stable name so room state survives restarts.
  * Ephemeral groups get a unique per-call name.
  */
 function generateRoomName(groupId, isPersistent) {
-  if (isPersistent) {
-    return `hangout-${groupId}-main`;
-  }
-  const ts = Date.now();
-  const rand = Math.random().toString(36).substring(2, 8);
-  return `hangout-${groupId}-${ts}-${rand}`;
+  return livekitService.generateRoomName(groupId, isPersistent);
 }
 
 /**
- * Build a JaaS meeting payload with JWT token for a given user/call.
+ * Build a LiveKit meeting payload with JWT token for a given user/call.
+ * Returns null when LiveKit is not configured.
+ *
+ * NOTE: jaas: null is included in every response for backward-compatibility
+ * with any client code that still checks for the jaas field.
  */
-function buildJaasPayload(roomName, user, isModerator, isPersistent = false) {
-  if (!jaasService.isConfigured()) {
+async function buildLiveKitPayload(roomName, user, isModerator, isPersistent = false) {
+  if (!livekitService.isConfigured()) {
     return null;
   }
 
@@ -151,31 +150,24 @@ function buildJaasPayload(roomName, user, isModerator, isPersistent = false) {
     // In persistent (main/24-7) community rooms everyone gets moderator-level access.
     // In user-created subgroups, only the call creator gets moderator access.
     const useMod = isModerator || isPersistent;
-    const token = useMod
-      ? jaasService.generateModeratorToken(
-          roomName,
-          String(user.id),
-          user.firstName || user.username || 'User',
-          '',
-          user.photoUrl || ''
-        )
-      : jaasService.generateViewerToken(
-          roomName,
-          String(user.id),
-          user.firstName || user.username || 'User',
-          '',
-          user.photoUrl || ''
-        );
+    const displayName = user.firstName || user.username || 'User';
+    const photoUrl = user.photoUrl || '';
 
-    const meetingUrl = jaasService.generateMeetingUrl(roomName, token);
+    const token = await livekitService.generateToken(
+      roomName,
+      String(user.id),
+      displayName,
+      photoUrl,
+      useMod
+    );
 
     return {
       token,
-      meetingUrl,
-      domain: '8x8.vc',
+      roomName,
+      wsUrl: livekitService.LIVEKIT_WS_URL,
     };
   } catch (err) {
-    logger.warn('buildJaasPayload failed', { error: err.message });
+    logger.warn('buildLiveKitPayload failed', { error: err.message });
     return null;
   }
 }
@@ -291,7 +283,7 @@ const startCall = async (req, res) => {
         );
         if (ownerCheck.length > 0) isModerator = true;
       }
-      const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
+      const livekit = await buildLiveKitPayload(call.room_name, user, isModerator, call.is_persistent);
 
       // Auto-join the caller as participant
       await query(
@@ -313,7 +305,8 @@ const startCall = async (req, res) => {
           isPersistent: call.is_persistent,
           isModerator,
         },
-        jaas,
+        livekit,
+        jaas: null,
       });
     }
 
@@ -339,7 +332,7 @@ const startCall = async (req, res) => {
     // Touch activity timestamp
     await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
 
-    const jaas = buildJaasPayload(roomName, user, true, isPersistent);
+    const livekit = await buildLiveKitPayload(roomName, user, true, isPersistent);
 
     const callPayload = {
       id: newCall.id,
@@ -405,7 +398,8 @@ const startCall = async (req, res) => {
       success: true,
       isNew: true,
       call: callPayload,
-      jaas,
+      livekit,
+      jaas: null,
     });
   } catch (err) {
     // Handle race condition: the unique partial index prevents duplicates
@@ -429,7 +423,7 @@ const startCall = async (req, res) => {
             );
             if (ownerCheck.length > 0) isModerator = true;
           }
-          const jaas = buildJaasPayload(call.room_name, user, isModerator, false);
+          const livekit = await buildLiveKitPayload(call.room_name, user, isModerator, false);
           return res.json({
             success: true,
             isNew: false,
@@ -441,7 +435,8 @@ const startCall = async (req, res) => {
               createdAt: call.created_at,
               isModerator,
             },
-            jaas,
+            livekit,
+            jaas: null,
           });
         }
       } catch (innerErr) {
@@ -558,7 +553,7 @@ const getActiveCall = async (req, res) => {
       );
       if (ownerCheck.length > 0) isModerator = true;
     }
-    const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
+    const livekit = await buildLiveKitPayload(call.room_name, user, isModerator, call.is_persistent);
 
     return res.json({
       success: true,
@@ -581,7 +576,8 @@ const getActiveCall = async (req, res) => {
           joinedAt: p.joined_at,
         })),
       },
-      jaas,
+      livekit,
+      jaas: null,
     });
   } catch (err) {
     logger.error('getActiveCall error', err);
@@ -590,7 +586,7 @@ const getActiveCall = async (req, res) => {
 };
 
 // ── POST /api/webapp/hangouts/groups/:id/calls/:callId/join ─────────────────
-// Join an existing active call and receive a fresh JaaS JWT.
+// Join an existing active call and receive a fresh LiveKit token.
 
 const joinCall = async (req, res) => {
   const user = authGuard(req, res);
@@ -669,7 +665,7 @@ const joinCall = async (req, res) => {
       );
       if (ownerCheck.length > 0) isModerator = true;
     }
-    const jaas = buildJaasPayload(call.room_name, user, isModerator, call.is_persistent);
+    const livekit = await buildLiveKitPayload(call.room_name, user, isModerator, call.is_persistent);
 
     // Get authoritative participant count from DB
     const { rows: joinCountRows } = await query(
@@ -724,7 +720,8 @@ const joinCall = async (req, res) => {
         createdAt: call.created_at,
         isModerator,
       },
-      jaas,
+      livekit,
+      jaas: null,
     });
   } catch (err) {
     logger.error('joinCall error', err);
