@@ -32,6 +32,7 @@ import { careers, type CareersStrings } from "./careers";
 import { communityResources, type CommunityResourcesStrings } from "./communityResources";
 import { shop, type ShopStrings } from "./shop";
 import { notifications, type NotificationsStrings } from "./notifications";
+import { admin, type AdminStrings } from "./admin";
 
 export type Lang = "en" | "es" | "pt" | "zh" | "zhTW" | "fr" | "de" | "th" | "it" | "tr" | "ru" | "nl" | "vi" | "ja" | "id" | "ar";
 
@@ -72,6 +73,7 @@ export interface I18n {
   communityResources: Widen<CommunityResourcesStrings>;
   shop: Widen<ShopStrings>;
   notifications: Widen<NotificationsStrings>;
+  admin: Widen<AdminStrings>;
 }
 
 /** Safely index an i18n module, falling back to "en" for unsupported languages. */
@@ -110,6 +112,7 @@ function resolve(lang: Lang): I18n {
     communityResources: pick(communityResources, lang),
     shop: pick(shop, lang),
     notifications: pick(notifications, lang),
+    admin: pick(admin, lang),
   } as I18n;
 }
 

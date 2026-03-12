@@ -24,6 +24,7 @@ import {
   type XAutoCampaignPost,
   type XActiveAccount,
 } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 // ── Grok Manager Types ─────────────────────────────────────────────────────────
 interface GrokChatMessage {
@@ -66,22 +67,23 @@ function parseGrokAction(text: string): { cleanText: string; action: GrokAction 
   return { cleanText: text, action: null };
 }
 
-function GrokActionCard({ action, accounts, onApply }: {
+function GrokActionCard({ action, accounts, onApply, t }: {
   action: GrokAction;
   accounts: XActiveAccount[];
   onApply: (action: GrokAction) => void;
+  t: any;
 }) {
   const defaultAccount = accounts.find((a) => a.handle.toLowerCase() === action.accountHandle?.toLowerCase()) || accounts[0];
   const [selectedHandle, setSelectedHandle] = React.useState(defaultAccount?.handle || "");
 
   return (
     <div className="mt-2 p-3 rounded-lg bg-pnp-accent/10 border border-pnp-accent/30">
-      <p className="text-xs font-semibold text-pnp-accent mb-1">Campaign proposal</p>
-      <p className="text-xs text-pnp-textPrimary mb-0.5"><strong>Name:</strong> {action.name}</p>
+      <p className="text-xs font-semibold text-pnp-accent mb-1">{t.admin.xCampaigns.grok.proposal}</p>
+      <p className="text-xs text-pnp-textPrimary mb-0.5"><strong>{t.admin.xCampaigns.table.campaign}:</strong> {action.name}</p>
       <p className="text-xs text-pnp-textSecondary mb-0.5">{action.language} | every {action.intervalMinutes}min | UTC {action.activeHoursStart}–{action.activeHoursEnd}</p>
       <p className="text-xs text-pnp-textSecondary mb-0.5 line-clamp-2">{action.topic}</p>
       {action.attachVideos && (
-        <p className="text-xs text-purple-400 mb-2">&#9654; Attach random video from CMS</p>
+        <p className="text-xs text-purple-400 mb-2">&#9654; {t.admin.xCampaigns.form.attachVideos}</p>
       )}
       {accounts.length > 1 ? (
         <select
@@ -101,7 +103,7 @@ function GrokActionCard({ action, accounts, onApply }: {
         disabled={accounts.length === 0}
         className="cursor-pointer px-3 py-1.5 text-xs rounded-lg bg-pnp-accent text-white hover:bg-pnp-accent/80 active:scale-95 transition-all font-medium disabled:opacity-40"
       >
-        ✓ Apply — Create Campaign
+        {t.admin.xCampaigns.grok.apply}
       </button>
       {accounts.length === 0 && (
         <p className="text-xs text-red-400 mt-1">Connect an X account first.</p>
@@ -110,10 +112,11 @@ function GrokActionCard({ action, accounts, onApply }: {
   );
 }
 
-function RandomVideoActionCard({ action, mediaFolderId, onSaved }: {
+function RandomVideoActionCard({ action, mediaFolderId, onSaved, t }: {
   action: GrokAction;
   mediaFolderId: string | null;
   onSaved?: () => void;
+  t: any;
 }) {
   const [mediaUrl, setMediaUrl] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -151,7 +154,7 @@ function RandomVideoActionCard({ action, mediaFolderId, onSaved }: {
 
   return (
     <div className="mt-2 p-3 rounded-lg bg-purple-500/10 border border-purple-500/30">
-      <p className="text-xs font-semibold text-purple-400 mb-1">Random Video</p>
+      <p className="text-xs font-semibold text-purple-400 mb-1">{t.admin.xCampaigns.grok.randomVideo}</p>
       {action.reason && (
         <p className="text-xs text-pnp-textSecondary mb-2">{action.reason}</p>
       )}
@@ -171,7 +174,7 @@ function RandomVideoActionCard({ action, mediaFolderId, onSaved }: {
           disabled={loading}
           className="cursor-pointer px-3 py-1.5 text-xs rounded-lg bg-purple-500 text-white hover:bg-purple-500/80 active:scale-95 transition-all font-medium disabled:opacity-40"
         >
-          {loading ? "Fetching..." : "Preview Random Video"}
+          {loading ? t.admin.xCampaigns.grok.fetchingVideo : t.admin.xCampaigns.grok.previewVideo}
         </button>
       )}
       {action.campaignId && mediaFolderId && !saved && (
@@ -180,11 +183,11 @@ function RandomVideoActionCard({ action, mediaFolderId, onSaved }: {
           disabled={saving}
           className="cursor-pointer mt-2 px-3 py-1.5 text-xs rounded-lg bg-pnp-accent text-white hover:bg-pnp-accent/80 active:scale-95 transition-all font-medium disabled:opacity-40 block"
         >
-          {saving ? "Saving..." : "✓ Enable video on campaign"}
+          {saving ? t.admin.xCampaigns.grok.saving : t.admin.xCampaigns.grok.enableVideo}
         </button>
       )}
       {saved && (
-        <p className="text-xs text-green-400 mt-2">✓ Video enabled on campaign</p>
+        <p className="text-xs text-green-400 mt-2">{t.admin.xCampaigns.grok.videoEnabled}</p>
       )}
       {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
     </div>
@@ -713,9 +716,9 @@ export default function XAutoCampaigns() {
 
   return (
     <div>
-      <h1 className="text-xl font-bold text-pnp-textPrimary mb-1">X Auto Campaigns</h1>
+      <h1 className="text-xl font-bold text-pnp-textPrimary mb-1">{t.admin.xCampaigns.title}</h1>
       <p className="text-sm text-pnp-textSecondary mb-6">
-        Autonomous content generation with Grok AI, scheduled posting to X.
+        {t.admin.xCampaigns.subtitle}
       </p>
 
       {/* Feedback */}
@@ -728,11 +731,11 @@ export default function XAutoCampaigns() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <StatCard label="Active Campaigns" value={stats?.activeCampaigns ?? "\u2014"} variant={stats && stats.activeCampaigns > 0 ? "success" : "default"} />
-        <StatCard label="Total Generated" value={stats?.totalGenerated ?? "\u2014"} />
-        <StatCard label="Total Posted" value={stats?.totalPosted ?? "\u2014"} variant="success" />
+        <StatCard label={t.admin.xCampaigns.stats.active} value={stats?.activeCampaigns ?? "\u2014"} variant={stats && stats.activeCampaigns > 0 ? "success" : "default"} />
+        <StatCard label={t.admin.xCampaigns.stats.totalGenerated} value={stats?.totalGenerated ?? "\u2014"} />
+        <StatCard label={t.admin.xCampaigns.stats.totalPosted} value={stats?.totalPosted ?? "\u2014"} variant="success" />
         <StatCard
-          label="Failed"
+          label={t.admin.xCampaigns.stats.failed}
           value={stats?.totalFailed ?? "\u2014"}
           variant={stats && stats.totalFailed > 0 ? "danger" : "default"}
         />
@@ -745,7 +748,7 @@ export default function XAutoCampaigns() {
             onClick={() => { setShowForm((p) => !p); setEditingCampaign(null); setForm(defaultForm); }}
             className="px-4 py-2 rounded-lg text-sm font-medium bg-pnp-accent text-white hover:bg-pnp-accent/80 transition-colors"
           >
-            {showForm ? "Cancel" : "New Campaign"}
+            {showForm ? t.admin.xCampaigns.actions.cancel : t.admin.xCampaigns.actions.new}
           </button>
           <button
             onClick={() => {
@@ -756,7 +759,7 @@ export default function XAutoCampaigns() {
             }}
             className="px-4 py-2 rounded-lg text-sm font-medium bg-orange-500/20 border border-orange-500/40 text-orange-400 hover:bg-orange-500/30 transition-colors"
           >
-            🔥 Lifetime100 Template
+            🔥 {t.admin.xCampaigns.actions.lifetime100}
           </button>
           <button
             onClick={async () => {
@@ -764,7 +767,7 @@ export default function XAutoCampaigns() {
                 const res = await startXOAuth();
                 if (res.url) {
                   window.open(res.url, "_blank");
-                  setSuccess("X authorization opened — complete it in the new tab, then refresh this page");
+                  setSuccess(t.admin.xCampaigns.feedback.authOpened);
                 }
               } catch (err: unknown) {
                 setError(err instanceof Error ? err.message : "Failed to start X OAuth");
@@ -772,18 +775,18 @@ export default function XAutoCampaigns() {
             }}
             className="px-4 py-2 rounded-lg text-sm font-medium bg-pnp-surface border border-pnp-border text-pnp-textPrimary hover:border-pnp-accent/50 transition-colors"
           >
-            + Add X Account
+            + {t.admin.xCampaigns.actions.addAccount}
           </button>
         </div>
 
         {showForm && (
           <form onSubmit={handleCreate} className="mt-3 p-4 rounded-xl bg-pnp-surface border border-pnp-border space-y-3">
             {editingCampaign && (
-              <p className="text-xs font-semibold text-blue-400">Editing: {editingCampaign.name}</p>
+              <p className="text-xs font-semibold text-blue-400">{t.admin.xCampaigns.actions.edit}: {editingCampaign.name}</p>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-pnp-textSecondary block mb-1">Campaign Name</label>
+                <label className="text-xs text-pnp-textSecondary block mb-1">{t.admin.xCampaigns.form.name}</label>
                 <input
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
@@ -794,7 +797,7 @@ export default function XAutoCampaigns() {
               </div>
               {!editingCampaign && (
                 <div>
-                  <label className="text-xs text-pnp-textSecondary block mb-1">X Account</label>
+                  <label className="text-xs text-pnp-textSecondary block mb-1">{t.admin.xCampaigns.form.account}</label>
                   <select
                     value={form.accountId}
                     onChange={(e) => setForm((f) => ({ ...f, accountId: e.target.value }))}
@@ -813,19 +816,19 @@ export default function XAutoCampaigns() {
             </div>
 
             <div>
-              <label className="text-xs text-pnp-textSecondary block mb-1">Topic / Prompt</label>
+              <label className="text-xs text-pnp-textSecondary block mb-1">{t.admin.xCampaigns.form.topic}</label>
               <textarea
                 value={form.topic}
                 onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
                 className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none min-h-[80px]"
-                placeholder="e.g. Promote the $100 lifetime deal at pnptv.app/lifetime100. Highlight Lex & Santino, clouds, slams, live shows and forever access."
+                placeholder={t.admin.xCampaigns.form.topicPlaceholder}
                 required
               />
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
-                <label className="text-xs text-pnp-textSecondary block mb-1">Grok Mode</label>
+                <label className="text-xs text-pnp-textSecondary block mb-1">{t.admin.xCampaigns.form.grokMode}</label>
                 <select
                   value={form.grokMode}
                   onChange={(e) => setForm((f) => ({ ...f, grokMode: e.target.value }))}
@@ -837,7 +840,7 @@ export default function XAutoCampaigns() {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-pnp-textSecondary block mb-1">Language</label>
+                <label className="text-xs text-pnp-textSecondary block mb-1">{t.admin.xCampaigns.form.language}</label>
                 <select
                   value={form.language}
                   onChange={(e) => setForm((f) => ({ ...f, language: e.target.value }))}
@@ -849,7 +852,7 @@ export default function XAutoCampaigns() {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-pnp-textSecondary block mb-1">Interval (min)</label>
+                <label className="text-xs text-pnp-textSecondary block mb-1">{t.admin.xCampaigns.form.interval}</label>
                 <input
                   type="number"
                   value={form.intervalMinutes}
@@ -859,13 +862,13 @@ export default function XAutoCampaigns() {
                 />
               </div>
               <div>
-                <label className="text-xs text-pnp-textSecondary block mb-1">Max Posts</label>
+                <label className="text-xs text-pnp-textSecondary block mb-1">{t.admin.xCampaigns.form.maxPosts}</label>
                 <input
                   type="number"
                   value={form.maxPosts}
                   onChange={(e) => setForm((f) => ({ ...f, maxPosts: e.target.value }))}
                   className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
-                  placeholder="Unlimited"
+                  placeholder={t.admin.xCampaigns.form.maxPostsPlaceholder}
                   min={1}
                 />
               </div>
@@ -873,7 +876,7 @@ export default function XAutoCampaigns() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-pnp-textSecondary block mb-1">Active Hours Start (UTC)</label>
+                <label className="text-xs text-pnp-textSecondary block mb-1">{t.admin.xCampaigns.form.hoursStart}</label>
                 <input
                   type="number"
                   value={form.activeHoursStart}
@@ -884,7 +887,7 @@ export default function XAutoCampaigns() {
                 />
               </div>
               <div>
-                <label className="text-xs text-pnp-textSecondary block mb-1">Active Hours End (UTC)</label>
+                <label className="text-xs text-pnp-textSecondary block mb-1">{t.admin.xCampaigns.form.hoursEnd}</label>
                 <input
                   type="number"
                   value={form.activeHoursEnd}
@@ -897,12 +900,12 @@ export default function XAutoCampaigns() {
             </div>
 
             <div>
-              <label className="text-xs text-pnp-textSecondary block mb-1">Custom Prompt (optional)</label>
+              <label className="text-xs text-pnp-textSecondary block mb-1">{t.admin.xCampaigns.form.customPrompt}</label>
               <textarea
                 value={form.customPrompt}
                 onChange={(e) => setForm((f) => ({ ...f, customPrompt: e.target.value }))}
                 className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none min-h-[60px]"
-                placeholder="Additional instructions for Grok, e.g. force the lifetime100 format..."
+                placeholder={t.admin.xCampaigns.form.customPromptPlaceholder}
               />
               <div className="mt-2 p-2.5 rounded-lg bg-orange-500/10 border border-orange-500/20 text-xs text-orange-300/90">
                 <p className="font-semibold mb-1">🔥 Lifetime100 Required Format</p>
@@ -930,7 +933,7 @@ export default function XAutoCampaigns() {
                   }}
                   className="w-4 h-4 rounded border-pnp-border bg-pnp-background text-pnp-accent focus:ring-pnp-accent"
                 />
-                <span className="text-sm text-pnp-textPrimary">Attach random video from CMS</span>
+                <span className="text-sm text-pnp-textPrimary">{t.admin.xCampaigns.form.attachVideos}</span>
               </label>
               {form.attachVideos && mediaFolderCmsUrl && (
                 <a
@@ -939,7 +942,7 @@ export default function XAutoCampaigns() {
                   rel="noopener noreferrer"
                   className="text-xs text-pnp-accent hover:underline"
                 >
-                  Upload videos in CMS &rarr;
+                  {t.admin.xCampaigns.form.uploadInCms} &rarr;
                 </a>
               )}
             </div>
@@ -950,7 +953,7 @@ export default function XAutoCampaigns() {
                 disabled={formLoading}
                 className="px-4 py-2 rounded-lg text-sm font-medium bg-pnp-accent text-white hover:bg-pnp-accent/80 disabled:opacity-50 transition-colors"
               >
-                {formLoading ? (editingCampaign ? "Saving..." : "Creating...") : (editingCampaign ? "Save Changes" : "Create Campaign (Paused)")}
+                {formLoading ? (editingCampaign ? t.common.saving : t.common.loading) : (editingCampaign ? t.admin.xCampaigns.actions.saveChanges : t.admin.xCampaigns.actions.createPaused)}
               </button>
             </div>
           </form>
@@ -959,7 +962,7 @@ export default function XAutoCampaigns() {
 
       {/* Campaigns Table */}
       <div className="mb-6">
-        <h2 className="text-sm font-semibold text-pnp-textPrimary mb-3">Campaigns</h2>
+        <h2 className="text-sm font-semibold text-pnp-textPrimary mb-3">{t.admin.xCampaigns.table.campaigns}</h2>
 
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-none">
           {STATUS_TABS.map((tab) => (
@@ -972,7 +975,10 @@ export default function XAutoCampaigns() {
                   : "bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/50"
               }`}
             >
-              {tab.label}
+              {tab.label === "All" ? t.common.viewAll :
+               tab.label === "Active" ? t.admin.xCampaigns.stats.active :
+               tab.label === "Paused" ? t.admin.xCampaigns.actions.pause :
+               tab.label === "Completed" ? "Completed" : tab.label}
             </button>
           ))}
         </div>
@@ -981,7 +987,7 @@ export default function XAutoCampaigns() {
           columns={campaignColumns}
           data={campaigns}
           loading={loading}
-          emptyMessage="No campaigns found"
+          emptyMessage={t.common.noResults}
           getRowId={(row) => row.campaign_id}
           onRowClick={handleRowClick}
         />
@@ -998,13 +1004,13 @@ export default function XAutoCampaigns() {
         <div className="mb-6 p-4 rounded-xl bg-pnp-surface border border-pnp-border">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-pnp-textPrimary">
-              Post History: {selectedCampaign.name}
+              {t.admin.xCampaigns.history.title}: {selectedCampaign.name}
             </h2>
             <button
               onClick={() => setSelectedCampaign(null)}
               className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary"
             >
-              Close
+              {t.common.close}
             </button>
           </div>
 
@@ -1012,7 +1018,7 @@ export default function XAutoCampaigns() {
             columns={historyColumns}
             data={historyPosts}
             loading={historyLoading}
-            emptyMessage="No posts generated yet"
+            emptyMessage={t.admin.xCampaigns.history.empty}
             getRowId={(row) => row.post_id}
           />
 

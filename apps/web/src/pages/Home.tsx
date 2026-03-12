@@ -21,6 +21,7 @@ import {
   togglePostLike,
   updateProfile,
   getUpcomingEvents,
+  getMyRsvps,
   rsvpEvent,
   unrsvpEvent,
   cancelEvent,
@@ -85,6 +86,7 @@ export default function Home() {
 
   const [events, setEvents] = useState<EventItem[]>([]);
   const [evLoading, setEvLoading] = useState(true);
+  const [myRsvps, setMyRsvps] = useState<EventItem[]>([]);
   const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
   const [userGroups, setUserGroups] = useState<HangoutGroup[]>([]);
 
@@ -122,6 +124,12 @@ export default function Home() {
           if (res.success) setUserGroups(res.groups);
         })
         .catch(() => {});
+
+      getMyRsvps()
+        .then((res) => {
+          if (res.success) setMyRsvps(res.events);
+        })
+        .catch(() => {});
     }
   }, [authLoading, isAuthenticated, loadEvents]);
 
@@ -129,16 +137,29 @@ export default function Home() {
     try {
       const res = shouldRsvp ? await rsvpEvent(eventId) : await unrsvpEvent(eventId);
       if (res.success) {
-        setEvents((prev) =>
+        const applyUpdate = (prev: EventItem[]) =>
           prev.map((e) =>
             e.id === eventId
               ? { ...e, rsvpCount: res.rsvpCount, userRsvpd: res.userRsvpd }
               : e
-          )
-        );
+          );
+        setEvents(applyUpdate);
+        // If un-RSVPing, remove from myRsvps; if RSVPing, refresh list next load
+        if (!shouldRsvp) {
+          setMyRsvps((prev) => prev.filter((e) => e.id !== eventId));
+        } else {
+          // Add to myRsvps if not already there (optimistic)
+          setMyRsvps((prev) => {
+            if (prev.some((e) => e.id === eventId)) return applyUpdate(prev);
+            const found = events.find((e) => e.id === eventId);
+            return found
+              ? [{ ...found, rsvpCount: res.rsvpCount, userRsvpd: res.userRsvpd }, ...prev]
+              : prev;
+          });
+        }
       }
     } catch { /* silent */ }
-  }, []);
+  }, [events]);
 
   const handleCancel = useCallback(async (eventId: string) => {
     if (!window.confirm("Cancel this event?")) return;
@@ -306,6 +327,19 @@ export default function Home() {
         canCancel={(eventId, creatorId) => isAdmin || creatorId === user?.dbId}
         onViewDetails={(event) => setDetailEvent(event)}
       />
+
+      {/* Your Events — authenticated users with RSVPs */}
+      {isAuthenticated && myRsvps.length > 0 && (
+        <HighlightCarousel
+          items={myRsvps.map((e) => ({ kind: "event" as const, data: e }))}
+          loading={false}
+          title="Your Events"
+          onRsvp={handleRsvp}
+          onCancel={handleCancel}
+          canCancel={(eventId, creatorId) => isAdmin || creatorId === user?.dbId}
+          onViewDetails={(event) => setDetailEvent(event)}
+        />
+      )}
 
       {/* Featured Performers */}
       {performers.length > 0 && (

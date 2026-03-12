@@ -28,9 +28,18 @@ import {
   getUserLabel,
   getLabelColor,
   assertPaymentUrl,
+  blockUser,
+  unblockUser,
+  isUserBlocked,
+  getMyEvents,
+  rsvpEvent,
+  unrsvpEvent,
   type UserProfile,
   type SocialPostItem,
+  type EventItem,
 } from "@/lib/api";
+import { EventCard } from "@/components/events/EventCard";
+import { EventDetailModal } from "@/components/events/EventDetailModal";
 import PostCard from "@/components/profile/PostCard";
 import EditProfileModal from "@/components/profile/EditProfileModal";
 import FollowListModal from "@/components/profile/FollowListModal";
@@ -97,6 +106,15 @@ export default function Profile() {
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [showFollowModal, setShowFollowModal] = useState<"followers" | "following" | null>(null);
+
+  // Block state (only relevant when viewing another user's profile)
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [blockLoading, setBlockLoading] = useState(false);
+
+  // My Events state (own profile only)
+  const [myEvents, setMyEvents] = useState<EventItem[]>([]);
+  const [myEventsLoading, setMyEventsLoading] = useState(false);
+  const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
 
   // Creator subscription state
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -169,6 +187,8 @@ export default function Profile() {
     setFollowersCount(0);
     setFollowingCount(0);
     setIsSubscribed(false);
+    setIsBlocked(false);
+    setMyEvents([]);
     setError(null);
     setLoading(true);
   }, [targetUserId]);
@@ -196,6 +216,12 @@ export default function Profile() {
             setFollowersCount(s.followerCount);
             setFollowingCount(s.followingCount);
           }).catch(() => {});
+          // Load own events
+          setMyEventsLoading(true);
+          getMyEvents()
+            .then((r) => { if (r.success) setMyEvents(r.events); })
+            .catch(() => {})
+            .finally(() => setMyEventsLoading(false));
         } else {
           setPosts((prev) => [...prev, ...postsRes.posts]);
         }
@@ -218,6 +244,12 @@ export default function Profile() {
           if (isAuthenticated && res.profile.creatorStatus === "active") {
             getCreatorSubscriptionStatus(targetUserId)
               .then((subRes) => { if (subRes.success) setIsSubscribed(subRes.subscribed); })
+              .catch(() => {});
+          }
+          // Check block status
+          if (isAuthenticated) {
+            isUserBlocked(targetUserId)
+              .then((r) => { if (r.success) setIsBlocked(r.isBlocked); })
               .catch(() => {});
           }
         } else {
@@ -368,6 +400,26 @@ export default function Profile() {
       setTimeout(() => setFollowError(null), 3000);
     }
     setFollowLoading(false);
+  };
+
+  const handleBlock = async () => {
+    if (blockLoading || !profile) return;
+    setBlockLoading(true);
+    try {
+      const targetId = profile.id || paramUserId!;
+      if (isBlocked) {
+        await unblockUser(targetId);
+        setIsBlocked(false);
+      } else {
+        if (!window.confirm(`Block ${profile.firstName || profile.username || "this user"}? They won't be able to see your posts or send you messages.`)) {
+          setBlockLoading(false);
+          return;
+        }
+        await blockUser(targetId);
+        setIsBlocked(true);
+      }
+    } catch { /* silent */ }
+    setBlockLoading(false);
   };
 
   const handleSubscribe = () => {
@@ -555,6 +607,48 @@ export default function Profile() {
         <p className="text-white font-medium mb-1">{p.profileNotFound}</p>
         <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>{error || p.userDoesntExist}</p>
         <Button onClick={() => navigate("/")}>{p.goHome}</Button>
+      </div>
+    );
+  }
+
+  // Blocked user state — show minimal profile with unblock option
+  if (!isOwnProfile && isBlocked) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-6">
+        {paramUserId && (
+          <button
+            onClick={() => navigate(-1)}
+            className="flex items-center gap-2 text-sm mb-4 hover:text-white transition-colors"
+            style={{ color: "#8E8E93" }}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            </svg>
+            Back
+          </button>
+        )}
+        <div className="glass-card-sm p-8 text-center">
+          <div
+            className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
+            style={{ background: "rgba(255,59,48,0.12)", border: "1px solid rgba(255,59,48,0.25)" }}
+          >
+            <svg className="w-8 h-8" style={{ color: "#FF453A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+          </div>
+          <p className="text-white font-semibold mb-1">User Blocked</p>
+          <p className="text-sm mb-6" style={{ color: "#8E8E93" }}>
+            You have blocked {profile.firstName || profile.username || "this user"}. Their content is hidden.
+          </p>
+          <button
+            onClick={handleBlock}
+            disabled={blockLoading}
+            className="px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition-colors"
+            style={{ background: "rgba(255,59,48,0.15)", color: "#FF453A", border: "1px solid rgba(255,59,48,0.3)" }}
+          >
+            {blockLoading ? "..." : "Unblock User"}
+          </button>
+        </div>
       </div>
     );
   }
@@ -1081,67 +1175,85 @@ export default function Profile() {
               </div>
             </>
           ) : (
-            <div className="flex gap-2">
-              {isAuthenticated && (
-                <button
-                  onClick={handleFollow}
-                  disabled={followLoading}
-                  className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
-                  style={isFollowing
-                    ? { background: "rgba(255,255,255,0.08)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)" }
-                    : { background: accentGradient, color: "#fff" }
-                  }
-                >
-                  {followLoading ? "..." : isFollowing ? p.following_verb : p.follow}
-                </button>
-              )}
-              {followError && (
-                <p className="text-xs text-center w-full" style={{ color: "#FF453A" }}>{followError}</p>
-              )}
-              <button
-                onClick={() => navigate(`/dm/${profile.id || paramUserId}`)}
-                className="flex-1 py-2 rounded-lg text-white text-sm font-semibold border border-white/20 hover:border-white/40 transition-colors"
-              >
-                {p.message}
-              </button>
-              {profile.creatorStatus === "active" && isAuthenticated && (() => {
-                const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
-                return (
+            <>
+              <div className="flex gap-2">
+                {isAuthenticated && (
                   <button
-                    onClick={handleSubscribe}
-                    disabled={subscribeLoading}
+                    onClick={handleFollow}
+                    disabled={followLoading}
                     className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
-                    style={isSubscribed
-                      ? { background: `rgba(${tc.rgb},0.12)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.35)` }
-                      : { background: tc.gradient, color: "#fff" }
+                    style={isFollowing
+                      ? { background: "rgba(255,255,255,0.08)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)" }
+                      : { background: accentGradient, color: "#fff" }
                     }
                   >
-                    {subscribeLoading ? "..." : isSubscribed ? `${tc.emoji} ${p.subscribed}` : `${tc.emoji} ${p.subscribe} $${profile.creatorPriceUsd || tc.price}/mo`}
+                    {followLoading ? "..." : isFollowing ? p.following_verb : p.follow}
                   </button>
-                );
-              })()}
-              {/* Share profile — icon-only button */}
-              <button
-                onClick={handleShareProfile}
-                className="flex items-center justify-center w-10 h-10 rounded-lg flex-shrink-0 transition-all"
-                style={shareProfileCopied
-                  ? { background: "rgba(52,199,89,0.1)", color: "#34C759", border: "1px solid rgba(52,199,89,0.3)" }
-                  : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.12)" }
-                }
-                title="Share profile"
-                aria-label="Share this profile"
-              >
-                {shareProfileCopied ? (
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 00-2.25 2.25v9a2.25 2.25 0 002.25 2.25h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25H15m0-3l-3-3m0 0l-3 3m3-3V15" />
-                  </svg>
                 )}
-              </button>
-            </div>
+                {followError && (
+                  <p className="text-xs text-center w-full" style={{ color: "#FF453A" }}>{followError}</p>
+                )}
+                <button
+                  onClick={() => navigate(`/dm/${profile.id || paramUserId}`)}
+                  className="flex-1 py-2 rounded-lg text-white text-sm font-semibold border border-white/20 hover:border-white/40 transition-colors"
+                >
+                  {p.message}
+                </button>
+                {profile.creatorStatus === "active" && isAuthenticated && (() => {
+                  const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
+                  return (
+                    <button
+                      onClick={handleSubscribe}
+                      disabled={subscribeLoading}
+                      className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                      style={isSubscribed
+                        ? { background: `rgba(${tc.rgb},0.12)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.35)` }
+                        : { background: tc.gradient, color: "#fff" }
+                      }
+                    >
+                      {subscribeLoading ? "..." : isSubscribed ? `${tc.emoji} ${p.subscribed}` : `${tc.emoji} ${p.subscribe} $${profile.creatorPriceUsd || tc.price}/mo`}
+                    </button>
+                  );
+                })()}
+                {/* Share profile — icon-only button */}
+                <button
+                  onClick={handleShareProfile}
+                  className="flex items-center justify-center w-10 h-10 rounded-lg flex-shrink-0 transition-all"
+                  style={shareProfileCopied
+                    ? { background: "rgba(52,199,89,0.1)", color: "#34C759", border: "1px solid rgba(52,199,89,0.3)" }
+                    : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.12)" }
+                  }
+                  title="Share profile"
+                  aria-label="Share this profile"
+                >
+                  {shareProfileCopied ? (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 00-2.25 2.25v9a2.25 2.25 0 002.25 2.25h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25H15m0-3l-3-3m0 0l-3 3m3-3V15" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+              {/* Block / Unblock — authenticated, other profiles only */}
+              {isAuthenticated && (
+                <div className="flex justify-end mt-1">
+                  <button
+                    onClick={handleBlock}
+                    disabled={blockLoading}
+                    className="text-xs px-3 py-1 rounded-full disabled:opacity-50 transition-colors"
+                    style={isBlocked
+                      ? { background: "rgba(255,59,48,0.12)", color: "#FF453A", border: "1px solid rgba(255,59,48,0.3)" }
+                      : { background: "rgba(255,255,255,0.05)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
+                    }
+                  >
+                    {blockLoading ? "..." : isBlocked ? "Unblock" : "Block"}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
         {subscribeError && (
@@ -1590,6 +1702,76 @@ export default function Profile() {
             );
           })()}
         </div>
+      )}
+
+      {/* ── My Events (own profile only) ── */}
+      {isOwnProfile && (
+        <div className="mt-4">
+          <h2 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3">My Events</h2>
+          {myEventsLoading ? (
+            <div className="glass-card-sm p-4 animate-pulse">
+              <div className="h-4 bg-white/10 rounded w-40 mb-2" />
+              <div className="h-3 bg-white/10 rounded w-24" />
+            </div>
+          ) : myEvents.length === 0 ? (
+            <div className="glass-card-sm p-6 text-center">
+              <p className="text-sm" style={{ color: "#8E8E93" }}>No events yet. Create one from the Home page.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {myEvents.map((event) => (
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  onRsvp={async (eventId, shouldRsvp) => {
+                    try {
+                      const res = shouldRsvp ? await rsvpEvent(eventId) : await unrsvpEvent(eventId);
+                      if (res.success) {
+                        setMyEvents((prev) =>
+                          prev.map((e) =>
+                            e.id === eventId
+                              ? { ...e, rsvpCount: res.rsvpCount, userRsvpd: res.userRsvpd }
+                              : e
+                          )
+                        );
+                      }
+                    } catch { /* silent */ }
+                  }}
+                  onViewDetails={(event) => setDetailEvent(event)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Event Detail Modal ── */}
+      {detailEvent && (
+        <EventDetailModal
+          event={detailEvent}
+          onClose={() => setDetailEvent(null)}
+          onRsvp={async (eventId, shouldRsvp) => {
+            try {
+              const res = shouldRsvp ? await rsvpEvent(eventId) : await unrsvpEvent(eventId);
+              if (res.success) {
+                setMyEvents((prev) =>
+                  prev.map((e) =>
+                    e.id === eventId
+                      ? { ...e, rsvpCount: res.rsvpCount, userRsvpd: res.userRsvpd }
+                      : e
+                  )
+                );
+                setDetailEvent((prev) =>
+                  prev ? { ...prev, rsvpCount: res.rsvpCount, userRsvpd: res.userRsvpd } : null
+                );
+              }
+            } catch { /* silent */ }
+          }}
+          onUpdated={(updated) => {
+            setMyEvents((prev) => prev.map((e) => e.id === updated.id ? updated : e));
+            setDetailEvent(updated);
+          }}
+        />
       )}
 
       {/* ── Edit Profile Modal ── */}

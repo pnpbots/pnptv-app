@@ -51,5 +51,16 @@ module.exports = {
     wait_ready: true, // Wait for process.send('ready') signal
     listen_timeout: 10000,
     ignore_watch: ['node_modules', 'logs'],
+  }, {
+    name: 'pnp-x-agent',
+    script: './venv/bin/python',
+    args: 'main.py',
+    cwd: '/opt/pnptvapp/pnp_x_agent',
+    interpreter: 'none',
+    autorestart: true,
+    watch: false,
+    env: {
+      PYTHONUNBUFFERED: '1',
+    }
   }],
 };

@@ -11,7 +11,10 @@ import {
   updateProfile,
   updateLanguage,
   deleteAccount,
+  getBlockedUsers,
+  unblockUser,
   type ReferralStats,
+  type BlockedUser,
 } from "@/lib/api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -126,6 +129,11 @@ export default function Settings() {
   const [referralStats, setReferralStats] = useState<ReferralStats | null>(null);
   const [referralCopied, setReferralCopied] = useState(false);
 
+  // ── Blocked users state ───────────────────────────────────────────────────
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
+  const [blockedLoading, setBlockedLoading] = useState(true);
+  const [unblockingId, setUnblockingId] = useState<string | null>(null);
+
   // ── Load data ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -134,12 +142,14 @@ export default function Settings() {
 
     async function load() {
       setProfileLoading(true);
+      setBlockedLoading(true);
       try {
-        const [profileRes, referralRes, notifRes] = await Promise.all([
+        const [profileRes, referralRes, notifRes, blockedRes] = await Promise.all([
           getProfile(),
           getMyReferral().catch(() => null),
           fetch(`${import.meta.env.VITE_API_URL || "https://pnptv.app"}/api/webapp/notifications/preferences`, { credentials: "include" })
             .then(r => r.ok ? r.json() : null).catch(() => null),
+          getBlockedUsers().catch(() => null),
         ]);
 
         if (cancelled) return;
@@ -157,10 +167,17 @@ export default function Settings() {
           setNotifPrefs(notifRes.preferences);
         }
         setNotifLoading(false);
+        if (blockedRes?.success) {
+          setBlockedUsers(blockedRes.blockedUsers);
+        }
+        setBlockedLoading(false);
       } catch {
         // Silent — individual sections degrade gracefully
       } finally {
-        if (!cancelled) setProfileLoading(false);
+        if (!cancelled) {
+          setProfileLoading(false);
+          setBlockedLoading(false);
+        }
       }
     }
 
@@ -273,6 +290,16 @@ export default function Settings() {
       setNotifPrefs(prev);
     }
   }, [notifPrefs]);
+
+  const handleUnblock = useCallback(async (userId: string) => {
+    if (unblockingId) return;
+    setUnblockingId(userId);
+    try {
+      await unblockUser(userId);
+      setBlockedUsers((prev) => prev.filter((u) => u.id !== userId));
+    } catch { /* silent */ }
+    setUnblockingId(null);
+  }, [unblockingId]);
 
   const handleCopyReferral = useCallback(() => {
     if (!referralStats?.link) return;
@@ -597,6 +624,62 @@ export default function Settings() {
           <p className="text-xs" style={{ color: "#8E8E93" }}>
             {p.referralLoadError}
           </p>
+        )}
+      </Section>
+
+      {/* ── Blocked Users ─────────────────────────────────────────────────── */}
+      <Section title="Blocked Users">
+        {blockedLoading ? (
+          <div className="space-y-3">
+            <div className="h-12 rounded-lg animate-pulse" style={{ background: "rgba(255,255,255,0.05)" }} />
+            <div className="h-12 rounded-lg animate-pulse" style={{ background: "rgba(255,255,255,0.05)" }} />
+          </div>
+        ) : blockedUsers.length === 0 ? (
+          <div className="text-center py-4">
+            <svg className="w-8 h-8 mx-auto mb-2" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+            <p className="text-sm" style={{ color: "#8E8E93" }}>No blocked users</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {blockedUsers.map((u) => {
+              const photo = u.photoUrl && (u.photoUrl.startsWith("/") || u.photoUrl.startsWith("http")) ? u.photoUrl : null;
+              const initial = (u.firstName || u.username || "?")[0].toUpperCase();
+              return (
+                <div
+                  key={u.id}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                >
+                  {photo ? (
+                    <img src={photo} alt={u.firstName} className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+                  ) : (
+                    <div
+                      className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                    >
+                      {initial}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white truncate">{u.firstName || u.username}</p>
+                    {u.username && (
+                      <p className="text-xs truncate" style={{ color: "#8E8E93" }}>@{u.username}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleUnblock(u.id)}
+                    disabled={unblockingId === u.id}
+                    className="text-xs px-3 py-1.5 rounded-lg flex-shrink-0 disabled:opacity-50 transition-colors"
+                    style={{ background: "rgba(255,59,48,0.12)", color: "#FF453A", border: "1px solid rgba(255,59,48,0.25)" }}
+                  >
+                    {unblockingId === u.id ? "..." : "Unblock"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         )}
       </Section>
 
