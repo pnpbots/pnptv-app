@@ -467,9 +467,9 @@ class SocialPostService {
        LEFT JOIN users viewer ON viewer.id = $1::text
        WHERE sp.reply_to_id = $2 AND sp.is_deleted = false
          -- Filter: viewer has not blocked the reply author
-         AND NOT (viewer.blocked @> ARRAY[u.id::text])
+         AND NOT COALESCE(viewer.blocked @> ARRAY[u.id::text], false)
          -- Filter: reply author has not blocked the viewer
-         AND NOT (u.blocked @> ARRAY[$1::text])
+         AND NOT COALESCE(u.blocked @> ARRAY[$1::text], false)
          ${cursorId ? 'AND sp.id > $3' : ''}
        ORDER BY sp.id ASC LIMIT 20`,
       params
