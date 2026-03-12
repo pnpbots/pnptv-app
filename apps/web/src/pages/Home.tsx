@@ -110,11 +110,6 @@ export default function Home() {
       .catch(() => {})
       .finally(() => setIsLoading(false));
 
-    getFeaturedPerformers()
-      .then((res) => {
-        if (res.success) setPerformers(res.performers);
-      })
-      .catch(() => {});
 
     loadEvents();
 
