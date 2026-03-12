@@ -441,6 +441,9 @@ services:
       - /var/www/pnptvbot-sandbox/public/media:/media
       - ./logs:/app/logs
       - pnptv-bot-nm:/app/node_modules
+      - pnptv-bot-backend-nm:/app/apps/backend/node_modules
+      - pnptv-bot-uikit-nm:/app/packages/ui-kit/node_modules
+      - pnptv-bot-web-nm:/app/apps/web/node_modules
     command: >
       sh -c "apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null 2>&1;
              npm install --omit=dev --package-lock=false;
@@ -574,3 +577,6 @@ services:
 
 volumes:
   pnptv-bot-nm:
+  pnptv-bot-backend-nm:
+  pnptv-bot-uikit-nm:
+  pnptv-bot-web-nm:
