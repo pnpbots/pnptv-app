@@ -65,7 +65,7 @@ const strings = {
     posting: "Posting...",
     photoOrVideo: "Photo or Video",
     uploadVideo: "Upload Video",
-    fileTooLarge: "File too large (max 50MB)",
+    fileTooLarge: "File too large (max 512 MB)",
 
     // ── Post card ─────────────────────────────────────────────────────────────
     anonymous: "Anonymous",
@@ -393,7 +393,7 @@ const strings = {
     posting: "Publicando...",
     photoOrVideo: "Foto o video",
     uploadVideo: "Subir video",
-    fileTooLarge: "Archivo demasiado grande (máx. 50MB)",
+    fileTooLarge: "Archivo demasiado grande (máx. 512 MB)",
 
     // ── Post card ─────────────────────────────────────────────────────────────
     anonymous: "Anónimo",
