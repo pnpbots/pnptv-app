@@ -731,6 +731,11 @@ export default function StreamerDashboard({
   const [jaasUrl, setJaasUrl] = useState<string | null>(null);
   const [jaasLoading, setJaasLoading] = useState(false);
   const [jaasError, setJaasError] = useState<string | null>(null);
+  // Set once JaaS reports back that the RTMP broadcast is live
+  const [jaasBroadcastActive, setJaasBroadcastActive] = useState(false);
+  const [jaasHlsUrl, setJaasHlsUrl] = useState<string | null>(null);
+  // Store conferenceId so stop can reference it even if the API object is gone
+  const jaasConferenceIdRef = useRef<string | null>(null);
 
   // ── Stream Profile + Grok Auto-Chat state ─────────────────────────────────
   const [streamProfile, setStreamProfile] = useState({
@@ -933,16 +938,56 @@ export default function StreamerDashboard({
       dispatch({ type: "SET_VIEWER_COUNT", payload: data.count });
     };
 
+    // ── JaaS broadcast events ──────────────────────────────────────────────
+    const onJaasStarted = (data: { conferenceId: string; channelRef: string; hlsUrl: string }) => {
+      setJaasBroadcastActive(true);
+      setJaasHlsUrl(data.hlsUrl ?? null);
+      // Start the shared duration + stats timers so the header shows LIVE state
+      const now = Date.now();
+      dispatch({ type: "SET_LIVE", payload: true });
+      dispatch({ type: "SET_CONNECTING", payload: false });
+      dispatch({ type: "SET_STREAM_START", payload: now });
+      setDurationSec(0);
+      bytesWindowRef.current = [];
+      bytesSentTotalRef.current = 0;
+      frameCountRef.current = 0;
+
+      const startTime = now;
+      durationTimerRef.current = setInterval(() => {
+        setDurationSec(Math.floor((Date.now() - startTime) / 1000));
+      }, 1000);
+
+      pingTimerRef.current = setInterval(() => {
+        const pingStart = Date.now();
+        socket.emit("ping", () => {
+          dispatch({ type: "UPDATE_STATS", payload: { latency: Date.now() - pingStart } });
+        });
+      }, 5000);
+    };
+
+    const onJaasStopped = (_data?: { conferenceId?: string }) => {
+      setJaasBroadcastActive(false);
+      setJaasHlsUrl(null);
+      jaasConferenceIdRef.current = null;
+      dispatch({ type: "RESET_STREAM" });
+      clearAllTimers();
+      setDurationSec(0);
+    };
+
     socket.on("stream:started", onStarted);
     socket.on("stream:stopped", onStopped);
     socket.on("stream:error", onStreamError);
     socket.on("live:viewer_count", onViewerCount);
+    socket.on("stream:jaas-started", onJaasStarted);
+    socket.on("stream:jaas-stopped", onJaasStopped);
 
     return () => {
       socket.off("stream:started", onStarted);
       socket.off("stream:stopped", onStopped);
       socket.off("stream:error", onStreamError);
       socket.off("live:viewer_count", onViewerCount);
+      socket.off("stream:jaas-started", onJaasStarted);
+      socket.off("stream:jaas-stopped", onJaasStopped);
     };
   }, [socket]);
 
@@ -1197,13 +1242,18 @@ export default function StreamerDashboard({
     state.orientation === "landscape" || window.matchMedia("(min-width: 1024px)").matches;
 
   // ── Go Live button handler (with confirmation for stop) ───────────────────
+  // When JaaS broadcast is active, the top-bar Stop Stream button also ends
+  // the JaaS meeting and the Restreamer push.
   const handleGoLiveClick = useCallback(() => {
-    if (state.isLive) {
+    if (jaasUrl && (jaasBroadcastActive || state.isLive)) {
+      // JaaS mode — end the JaaS broadcast directly (no separate confirmation dialog)
+      handleEndJaasLive();
+    } else if (state.isLive) {
       setShowStopConfirm(true);
     } else if (!state.isConnecting) {
       handleGoLive();
     }
-  }, [state.isLive, state.isConnecting, handleGoLive]);
+  }, [jaasUrl, jaasBroadcastActive, state.isLive, state.isConnecting, handleGoLive, handleEndJaasLive]);
 
   // ── JaaS Go Live ──────────────────────────────────────────────────────────
   const handleStartJaasLive = useCallback(async () => {
@@ -1224,9 +1274,50 @@ export default function StreamerDashboard({
   }, []);
 
   const handleEndJaasLive = useCallback(() => {
+    // Tell the backend to stop the JaaS → Restreamer RTMP push
+    if (jaasConferenceIdRef.current && socket) {
+      socket.emit("stream:stop-jaas", { conferenceId: jaasConferenceIdRef.current });
+    }
     setJaasUrl(null);
     setJaasError(null);
-  }, []);
+    setJaasBroadcastActive(false);
+    setJaasHlsUrl(null);
+    jaasConferenceIdRef.current = null;
+    dispatch({ type: "RESET_STREAM" });
+    clearAllTimers();
+    setDurationSec(0);
+  }, [socket]);
+
+  // ── JaaS API ready: wire the broadcast start ──────────────────────────────
+  // Called by JitsiMeetComponent once the Jitsi External API object is ready.
+  // We extract the conference room path and emit stream:start-jaas so the
+  // backend can call the JaaS Livestream API to push video to Restreamer.
+  const handleJaasApiReady = useCallback((api: any) => {
+    if (!socket) return;
+    if (socket.data?.jaasBroadcastActive) return; // already broadcasting
+
+    try {
+      // api.getRoomName() returns the full JaaS room path, e.g.
+      // "vpaas-magic-cookie-xxxxxxxx/pnptv-frank" — this is the conferenceId
+      // the JaaS Livestream API expects.
+      const conferenceId: string = api.getRoomName?.() ?? "";
+      if (!conferenceId) {
+        setJaasError("Could not determine conference ID from JaaS API.");
+        return;
+      }
+
+      jaasConferenceIdRef.current = conferenceId;
+
+      dispatch({ type: "SET_CONNECTING", payload: true });
+      socket.emit("stream:start-jaas", {
+        conferenceId,
+        roomName: conferenceId,
+      });
+    } catch (err) {
+      setJaasError(err instanceof Error ? err.message : "Failed to start JaaS broadcast.");
+      dispatch({ type: "SET_CONNECTING", payload: false });
+    }
+  }, [socket]);
 
   // ── Stream Profile: load on mount ─────────────────────────────────────────
   useEffect(() => {
@@ -1700,15 +1791,64 @@ export default function StreamerDashboard({
           >
             {jaasUrl ? (
               /* ── JaaS live embed (replaces camera preview when live via JaaS) ── */
-              <JitsiMeetComponent
-                meetingUrl={jaasUrl}
-                onCallEnd={handleEndJaasLive}
-                fullScreen={false}
-                isAdmin={true}
-                isModerator={true}
-                disableChat={true}
-                className="w-full h-full"
-              />
+              <div className="relative w-full h-full">
+                <JitsiMeetComponent
+                  meetingUrl={jaasUrl}
+                  onCallEnd={handleEndJaasLive}
+                  onApiReady={handleJaasApiReady}
+                  fullScreen={false}
+                  isAdmin={true}
+                  isModerator={true}
+                  disableChat={true}
+                  className="w-full h-full"
+                />
+
+                {/* ── JaaS broadcast status overlay ── */}
+                {jaasBroadcastActive && jaasHlsUrl && (
+                  <div
+                    className="absolute bottom-0 left-0 right-0 z-10 px-3 py-2 flex items-center justify-between gap-2"
+                    style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-2 h-2 flex-shrink-0 rounded-full bg-red-500 animate-pulse" aria-hidden="true" />
+                      <span className="text-[10px] font-bold text-white uppercase tracking-wider flex-shrink-0">
+                        Broadcasting to Restreamer
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                      <span className="text-[9px] text-white/50 flex-shrink-0">HLS:</span>
+                      <a
+                        href={jaasHlsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[9px] text-pnp-accent hover:underline truncate max-w-[180px] sm:max-w-xs"
+                        title={jaasHlsUrl}
+                      >
+                        {jaasHlsUrl}
+                      </a>
+                    </div>
+                    <button
+                      onClick={handleEndJaasLive}
+                      className="flex-shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold text-white transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                      style={{ background: "rgba(239,68,68,0.85)" }}
+                      aria-label="End JaaS broadcast"
+                    >
+                      End Stream
+                    </button>
+                  </div>
+                )}
+
+                {/* Connecting overlay — shown while waiting for stream:jaas-started */}
+                {state.isConnecting && !jaasBroadcastActive && (
+                  <div
+                    className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3"
+                    style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+                  >
+                    <div className="w-8 h-8 rounded-full border-2 border-white/30 border-t-white animate-spin" aria-hidden="true" />
+                    <p className="text-xs text-white font-medium">Connecting to Restreamer…</p>
+                  </div>
+                )}
+              </div>
             ) : (
               <>
                 {/* ── Camera preview (default, shown when not live via JaaS) ── */}

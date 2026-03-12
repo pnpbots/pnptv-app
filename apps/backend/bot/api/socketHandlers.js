@@ -8,6 +8,7 @@ const { processChatMedia } = require('../services/chatMediaService');
 const NotificationEmitter = require('../services/notificationEmitter');
 const LiveStreamModel = require('../../models/liveStreamModel');
 const BlockedUser = require('../../models/blockedUser');
+const jaasBroadcastService = require('../services/jaasBroadcastService');
 
 // ── Lua script: atomic viewer-count decrement clamped to 0 ────────────────────
 // H4: Replaces the non-atomic decr + conditional set(0) pattern.
@@ -1458,8 +1459,84 @@ function initSocketIO(io) {
       }
     });
 
+    // ── JaaS → Restreamer broadcast bridge ───────────────────────────────────
+    //
+    // When a creator uses JaaS (in-browser video call) as their stream source,
+    // the Jitsi External API cannot push to RTMP by itself.  These handlers
+    // call the JaaS Livestream API on the creator's behalf so JaaS pushes the
+    // meeting's composite video to the user's Restreamer RTMP channel.
+    //
+    // Frontend flow:
+    //   1. Creator calls GET /api/jaas/live-token → gets meetingUrl with JWT.
+    //   2. JitsiMeetComponent loads; onApiReady fires → frontend has conferenceId.
+    //   3. Frontend emits 'stream:start-jaas' with { conferenceId, roomName }.
+    //   4. Backend calls jaasBroadcastService.startBroadcast → JaaS API → RTMP.
+    //   5. Backend emits 'stream:jaas-started' with { hlsUrl, conferenceId }.
+    //   6. Creator ends meeting → frontend emits 'stream:stop-jaas'.
+    //   7. Backend calls jaasBroadcastService.stopBroadcast → JaaS API.
+    //   8. Backend emits 'stream:jaas-stopped'.
+
+    socket.on('stream:start-jaas', async ({ conferenceId, roomName } = {}) => {
+      if (!conferenceId || typeof conferenceId !== 'string' || conferenceId.length > 512) {
+        socket.emit('stream:error', { message: 'Invalid or missing conferenceId for JaaS broadcast.' });
+        return;
+      }
+
+      // Prevent starting a second JaaS broadcast while one is already running
+      if (socket.data.jaasBroadcastActive) {
+        socket.emit('stream:error', { message: 'JaaS broadcast already active. Stop the current broadcast first.' });
+        return;
+      }
+
+      try {
+        const { channelRef, hlsUrl, conferenceId: activeConferenceId } =
+          await jaasBroadcastService.startBroadcast(user.id, conferenceId, roomName || conferenceId);
+
+        socket.data.jaasBroadcastActive  = true;
+        socket.data.jaasConferenceId     = conferenceId;
+
+        logger.info(`JaaS broadcast started: user ${user.id} → channel '${channelRef}'`);
+        socket.emit('stream:jaas-started', {
+          conferenceId: activeConferenceId,
+          channelRef,
+          hlsUrl,
+        });
+      } catch (err) {
+        logger.error('stream:start-jaas error', { userId: user.id, conferenceId, error: err.message });
+        socket.emit('stream:error', {
+          message: err.message || 'Failed to start JaaS broadcast. Please try again.',
+        });
+      }
+    });
+
+    socket.on('stream:stop-jaas', async ({ conferenceId: payloadConferenceId } = {}) => {
+      // Use the conferenceId from the payload, or fall back to what we stored on start
+      const conferenceId = payloadConferenceId || socket.data.jaasConferenceId || null;
+
+      try {
+        await jaasBroadcastService.stopBroadcast(user.id, conferenceId);
+        logger.info(`JaaS broadcast stopped: user ${user.id}, conferenceId '${conferenceId}'`);
+      } catch (err) {
+        logger.warn('stream:stop-jaas error (non-fatal)', { userId: user.id, conferenceId, error: err.message });
+      } finally {
+        socket.data.jaasBroadcastActive = false;
+        socket.data.jaasConferenceId    = null;
+        socket.emit('stream:jaas-stopped', { conferenceId });
+      }
+    });
+
     socket.on('disconnect', async () => {
       logger.info(`Socket disconnected: user ${user.id}`);
+
+      // Clean up any running JaaS broadcast
+      if (socket.data.jaasBroadcastActive && socket.data.jaasConferenceId) {
+        const conferenceId = socket.data.jaasConferenceId;
+        jaasBroadcastService.stopBroadcast(user.id, conferenceId).catch((err) => {
+          logger.warn('JaaS broadcast cleanup on disconnect failed', { userId: user.id, conferenceId, error: err.message });
+        });
+        socket.data.jaasBroadcastActive = false;
+        socket.data.jaasConferenceId    = null;
+      }
 
       // Clean up any running FFmpeg browser-stream process
       if (socket.data.ffmpegProcess) {
