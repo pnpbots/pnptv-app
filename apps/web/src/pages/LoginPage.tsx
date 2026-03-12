@@ -529,287 +529,22 @@ export function LoginPage() {
           </button>
         </div>
 
-        {/* ── TERTIARY: Email login (collapsible) ─────────────────────────── */}
+        {/* ── TERTIARY: Email login/register/verification (collapsible) ─────────────────────────── */}
         <div className="flex items-center gap-3 mt-6 mb-4">
-          <div
-            className="flex-1 h-px"
-            style={{ background: "rgba(255, 255, 255, 0.08)" }}
-          />
-          <span className="text-xs" style={{ color: "#8E8E93" }}>
-            {t.orDivider}
-          </span>
-          <div
-            className="flex-1 h-px"
-            style={{ background: "rgba(255, 255, 255, 0.08)" }}
-          />
+          <div className="flex-1 h-px" style={{ background: "rgba(255, 255, 255, 0.08)" }} />
+          <span className="text-xs" style={{ color: "#8E8E93" }}>{t.orDivider}</span>
+          <div className="flex-1 h-px" style={{ background: "rgba(255, 255, 255, 0.08)" }} />
         </div>
 
-        {!showEmailForm ? (
-          <button
-            onClick={() => {
-              setShowEmailForm(true);
-              setShowRegisterForm(false); // Ensure we switch to login view
-              setTimeout(() => emailInputRef.current?.focus(), 100);
-            }}
-            className="w-full py-3.5 px-6 rounded-xl font-semibold text-base flex items-center justify-center gap-3 transition-all duration-200 hover:bg-white/10"
-            style={{
-              background: "rgba(255, 255, 255, 0.05)",
-              border: "1px solid rgba(255, 255, 255, 0.15)",
-              color: "#FFFFFF",
-            }}
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <rect x="2" y="4" width="20" height="16" rx="2" />
-              <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
-            </svg>
-            {t.loginWithEmail}
-          </button>
-        )
-
-        {/* Email Login/Register Form */}
-        {showEmailForm && !emailVerificationNeeded && !registrationSuccess ? (
-          <div
-            className="rounded-xl p-4 space-y-3 animate-fade-in-up"
-            style={{
-              background: "rgba(212, 0, 122, 0.06)",
-              border: "1px solid rgba(212, 0, 122, 0.2)",
-            }}
-          >
-            {!showRegisterForm ? (
-              <>
-                {/* Login Form */}
-                <input
-                  ref={emailInputRef}
-                  type="email"
-                  value={emailVal}
-                  onChange={(e) => {
-                    setEmailVal(e.target.value);
-                    setEmailLoginError(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleEmailLogin();
-                  }}
-                  placeholder={t.emailPlaceholder}
-                  disabled={emailLogging}
-                  className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
-                  style={{
-                    borderColor: emailLoginError
-                      ? "#FF453A"
-                      : "rgba(255,255,255,0.15)",
-                  }}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-                <input
-                  type="password"
-                  value={passwordVal}
-                  onChange={(e) => {
-                    setPasswordVal(e.target.value);
-                    setEmailLoginError(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleEmailLogin();
-                  }}
-                  placeholder={t.passwordPlaceholder}
-                  disabled={emailLogging}
-                  className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
-                  style={{
-                    borderColor: emailLoginError
-                      ? "#FF453A"
-                      : "rgba(255,255,255,0.15)",
-                  }}
-                />
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded accent-[#D4007A]"
-                  />
-                  <span className="text-xs" style={{ color: "#8E8E93" }}>
-                    {t.rememberMe}
-                  </span>
-                </label>
-                {emailLoginError && (
-                  <p className="text-xs text-red-400">{emailLoginError}</p>
-                )}
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleEmailLogin}
-                    disabled={emailLogging || !emailVal.trim() || !passwordVal}
-                    className="flex-1 py-2.5 rounded-lg text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                    style={{
-                      background: "linear-gradient(135deg, #D4007A, #E69138)",
-                    }}
-                  >
-                    {emailLogging ? <Spinner className="w-4 h-4" /> : t.logIn}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowEmailForm(false);
-                      setEmailVal("");
-                      setPasswordVal("");
-                      setEmailLoginError(null);
-                    }}
-                    className="px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-white/5 transition-colors"
-                    style={{ color: "#8E8E93" }}
-                  >
-                    {t.cancel}
-                  </button>
-                </div>
-                <div className="text-center mt-3">
-                  <button
-                    onClick={() => setShowRegisterForm(true)}
-                    className="text-xs underline text-pnp-textSecondary hover:text-white transition-colors"
-                  >
-                    {t.dontHaveAccount}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                {/* Registration Form */}
-                <input
-                  ref={registerFirstNameRef}
-                  type="text"
-                  value={registerFirstName}
-                  onChange={(e) => setRegisterFirstName(e.target.value)}
-                  placeholder={t.firstNamePlaceholder}
-                  disabled={registerLogging}
-                  className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
-                  style={{
-                    borderColor: registerError
-                      ? "#FF453A"
-                      : "rgba(255,255,255,0.15)",
-                  }}
-                />
-                <input
-                  type="text"
-                  value={registerLastName}
-                  onChange={(e) => setRegisterLastName(e.target.value)}
-                  placeholder={t.lastNamePlaceholder}
-                  disabled={registerLogging}
-                  className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
-                  style={{
-                    borderColor: registerError
-                      ? "#FF453A"
-                      : "rgba(255,255,255,0.15)",
-                  }}
-                />
-                <input
-                  type="email"
-                  value={registerEmail}
-                  onChange={(e) => setRegisterEmail(e.target.value)}
-                  placeholder={t.emailPlaceholder}
-                  disabled={registerLogging}
-                  className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
-                  style={{
-                    borderColor: registerError
-                      ? "#FF453A"
-                      : "rgba(255,255,255,0.15)",
-                  }}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-                <input
-                  type="password"
-                  value={registerPassword}
-                  onChange={(e) => setRegisterPassword(e.target.value)}
-                  placeholder={t.passwordPlaceholder}
-                  disabled={registerLogging}
-                  className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
-                  style={{
-                    borderColor: registerError
-                      ? "#FF453A"
-                      : "rgba(255,255,255,0.15)",
-                  }}
-                />
-                {registerError && (
-                  <p className="text-xs text-red-400">{registerError}</p>
-                )}
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleEmailRegister}
-                    disabled={
-                      registerLogging ||
-                      !registerEmail.trim() ||
-                      !registerPassword ||
-                      !registerFirstName.trim()
-                    }
-                    className="flex-1 py-2.5 rounded-lg text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                    style={{
-                      background: "linear-gradient(135deg, #D4007A, #E69138)",
-                    }}
-                  >
-                    {registerLogging ? <Spinner className="w-4 h-4" /> : t.register}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowRegisterForm(false);
-                      setRegisterFirstName("");
-                      setRegisterLastName("");
-                      setRegisterEmail("");
-                      setRegisterPassword("");
-                      setRegisterError(null);
-                    }}
-                    className="px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-white/5 transition-colors"
-                    style={{ color: "#8E8E93" }}
-                  >
-                    {t.cancel}
-                  </button>
-                </div>
-                <div className="text-center mt-3">
-                  <button
-                    onClick={() => setShowRegisterForm(false)}
-                    className="text-xs underline text-pnp-textSecondary hover:text-white transition-colors"
-                  >
-                    {t.alreadyHaveAccount}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        ) : emailVerificationNeeded ? (
+        {emailVerificationNeeded ? (
           <div
             className="rounded-xl p-4 space-y-3 animate-fade-in-up text-center"
-            style={{
-              background: "rgba(212, 0, 122, 0.06)",
-              border: "1px solid rgba(212, 0, 122, 0.2)",
-            }}
+            style={{ background: "rgba(212, 0, 122, 0.06)", border: "1px solid rgba(212, 0, 122, 0.2)" }}
           >
-            <svg
-              className="w-12 h-12 text-pnp-accent mx-auto"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M3 8.689l12.603 7.562a.96.96 0 001.077-.074L21 8.689m-16.5 6.311V21.75A2.25 2.25 0 007.5 24h9a2.25 2.25 0 002.25-2.25V15.001M18.75 8.25a.75.75 0 00-1.5 0v3.75a.75.75 0 001.5 0V8.25z"
-              />
-            </svg>
-            <h3 className="text-base font-bold text-white">
-              {t.verifyEmailTitle}
-            </h3>
+            <svg className="w-12 h-12 text-pnp-accent mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8.689l12.603 7.562a.96.96 0 001.077-.074L21 8.689m-16.5 6.311V21.75A2.25 2.25 0 007.5 24h9a2.25 2.25 0 002.25-2.25V15.001M18.75 8.25a.75.75 0 00-1.5 0v3.75a.75.75 0 001.5 0V8.25z" /></svg>
+            <h3 className="text-base font-bold text-white">{t.verifyEmailTitle}</h3>
             <p className="text-sm text-pnp-textSecondary">
-              {t.verifyEmailInstructions.replace(
-                "{email}",
-                unverifiedEmail || "your email",
-              )}
+              {t.verifyEmailInstructions.replace("{email}", unverifiedEmail || "your email")}
             </p>
             {resendEmailStatus === "error" && (
               <p className="text-xs text-red-400">{registerError}</p>
@@ -819,11 +554,7 @@ export function LoginPage() {
               disabled={resendEmailStatus === "sending"}
               className="text-xs underline text-pnp-textSecondary hover:text-white transition-colors mt-2 disabled:opacity-50"
             >
-              {resendEmailStatus === "sending"
-                ? t.sendingEmail
-                : resendEmailStatus === "sent"
-                  ? t.emailSent
-                  : t.resendEmail}
+              {resendEmailStatus === "sending" ? t.sendingEmail : resendEmailStatus === "sent" ? t.emailSent : t.resendEmail}
             </button>
             <div className="flex gap-2 mt-4">
               <button
@@ -841,33 +572,14 @@ export function LoginPage() {
               </button>
             </div>
           </div>
-        ) : (
+        ) : registrationSuccess ? (
           <div
             className="rounded-xl p-4 space-y-3 animate-fade-in-up text-center"
-            style={{
-              background: "rgba(52,199,89,0.08)",
-              border: "1px solid rgba(52,199,89,0.2)",
-            }}
+            style={{ background: "rgba(52,199,89,0.08)", border: "1px solid rgba(52,199,89,0.2)" }}
           >
-            <svg
-              className="w-12 h-12 text-green-400 mx-auto"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M9 12.75L11.25 15 15 9.75M21 12c0 1.01-1.253 1.01-1.253 1.01H12c-.75-1.25-1.5-2.5-1.5-2.5"
-              />
-            </svg>
-            <h3 className="text-base font-bold text-white">
-              {t.registrationCompleteTitle}
-            </h3>
-            <p className="text-sm text-pnp-textSecondary">
-              {t.registrationCompleteMessage}
-            </p>
+            <svg className="w-12 h-12 text-green-400 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.01-1.253 1.01-1.253 1.01H12c-.75-1.25-1.5-2.5-1.5-2.5" /></svg>
+            <h3 className="text-base font-bold text-white">{t.registrationCompleteTitle}</h3>
+            <p className="text-sm text-pnp-textSecondary">{t.registrationCompleteMessage}</p>
             <div className="flex gap-2 mt-4">
               <button
                 onClick={() => {
@@ -884,6 +596,244 @@ export function LoginPage() {
               </button>
             </div>
           </div>
+        ) : (
+          <>
+            {!showEmailForm ? (
+              <button
+                onClick={() => {
+                  setShowEmailForm(true);
+                  setShowRegisterForm(false); // Ensure we switch to login view
+                  setTimeout(() => emailInputRef.current?.focus(), 100);
+                }}
+                className="w-full py-3.5 px-6 rounded-xl font-semibold text-base flex items-center justify-center gap-3 transition-all duration-200 hover:bg-white/10"
+                style={{
+                  background: "rgba(255, 255, 255, 0.05)",
+                  border: "1px solid rgba(255, 255, 255, 0.15)",
+                  color: "#FFFFFF",
+                }}
+              >
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="2" y="4" width="20" height="16" rx="2" />
+                  <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                </svg>
+                {t.loginWithEmail}
+              </button>
+            ) : (
+              <div
+                className="rounded-xl p-4 space-y-3 animate-fade-in-up"
+                style={{
+                  background: "rgba(212, 0, 122, 0.06)",
+                  border: "1px solid rgba(212, 0, 122, 0.2)",
+                }}
+              >
+                {!showRegisterForm ? (
+                  <>
+                    {/* Login Form */}
+                    <input
+                      ref={emailInputRef}
+                      type="email"
+                      value={emailVal}
+                      onChange={(e) => {
+                        setEmailVal(e.target.value);
+                        setEmailLoginError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleEmailLogin();
+                      }}
+                      placeholder={t.emailPlaceholder}
+                      disabled={emailLogging}
+                      className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
+                      style={{
+                        borderColor: emailLoginError
+                          ? "#FF453A"
+                          : "rgba(255,255,255,0.15)",
+                      }}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                    <input
+                      type="password"
+                      value={passwordVal}
+                      onChange={(e) => {
+                        setPasswordVal(e.target.value);
+                        setEmailLoginError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleEmailLogin();
+                      }}
+                      placeholder={t.passwordPlaceholder}
+                      disabled={emailLogging}
+                      className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
+                      style={{
+                        borderColor: emailLoginError
+                          ? "#FF453A"
+                          : "rgba(255,255,255,0.15)",
+                      }}
+                    />
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        className="w-3.5 h-3.5 rounded accent-[#D4007A]"
+                      />
+                      <span className="text-xs" style={{ color: "#8E8E93" }}>
+                        {t.rememberMe}
+                      </span>
+                    </label>
+                    {emailLoginError && (
+                      <p className="text-xs text-red-400">{emailLoginError}</p>
+                    )}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleEmailLogin}
+                        disabled={emailLogging || !emailVal.trim() || !passwordVal}
+                        className="flex-1 py-2.5 rounded-lg text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                        style={{
+                          background: "linear-gradient(135deg, #D4007A, #E69138)",
+                        }}
+                      >
+                        {emailLogging ? <Spinner className="w-4 h-4" /> : t.logIn}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowEmailForm(false);
+                          setEmailVal("");
+                          setPasswordVal("");
+                          setEmailLoginError(null);
+                        }}
+                        className="px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-white/5 transition-colors"
+                        style={{ color: "#8E8E93" }}
+                      >
+                        {t.cancel}
+                      </button>
+                    </div>
+                    <div className="text-center mt-3">
+                      <button
+                        onClick={() => setShowRegisterForm(true)}
+                        className="text-xs underline text-pnp-textSecondary hover:text-white transition-colors"
+                      >
+                        {t.dontHaveAccount}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Registration Form */}
+                    <input
+                      ref={registerFirstNameRef}
+                      type="text"
+                      value={registerFirstName}
+                      onChange={(e) => setRegisterFirstName(e.target.value)}
+                      placeholder={t.firstNamePlaceholder}
+                      disabled={registerLogging}
+                      className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
+                      style={{
+                        borderColor: registerError
+                          ? "#FF453A"
+                          : "rgba(255,255,255,0.15)",
+                      }}
+                    />
+                    <input
+                      type="text"
+                      value={registerLastName}
+                      onChange={(e) => setRegisterLastName(e.target.value)}
+                      placeholder={t.lastNamePlaceholder}
+                      disabled={registerLogging}
+                      className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
+                      style={{
+                        borderColor: registerError
+                          ? "#FF453A"
+                          : "rgba(255,255,255,0.15)",
+                      }}
+                    />
+                    <input
+                      type="email"
+                      value={registerEmail}
+                      onChange={(e) => setRegisterEmail(e.target.value)}
+                      placeholder={t.emailPlaceholder}
+                      disabled={registerLogging}
+                      className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
+                      style={{
+                        borderColor: registerError
+                          ? "#FF453A"
+                          : "rgba(255,255,255,0.15)",
+                      }}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                    <input
+                      type="password"
+                      value={registerPassword}
+                      onChange={(e) => setRegisterPassword(e.target.value)}
+                      placeholder={t.passwordPlaceholder}
+                      disabled={registerLogging}
+                      className="w-full px-3 py-2.5 rounded-lg border text-sm bg-transparent text-white outline-none transition-colors placeholder-[#8E8E93]"
+                      style={{
+                        borderColor: registerError
+                          ? "#FF453A"
+                          : "rgba(255,255,255,0.15)",
+                      }}
+                    />
+                    {registerError && (
+                      <p className="text-xs text-red-400">{registerError}</p>
+                    )}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleEmailRegister}
+                        disabled={
+                          registerLogging ||
+                          !registerEmail.trim() ||
+                          !registerPassword ||
+                          !registerFirstName.trim()
+                        }
+                        className="flex-1 py-2.5 rounded-lg text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                        style={{
+                          background: "linear-gradient(135deg, #D4007A, #E69138)",
+                        }}
+                      >
+                        {registerLogging ? <Spinner className="w-4 h-4" /> : t.register}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowRegisterForm(false);
+                          setRegisterFirstName("");
+                          setRegisterLastName("");
+                          setRegisterEmail("");
+                          setRegisterPassword("");
+                          setRegisterError(null);
+                        }}
+                        className="px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-white/5 transition-colors"
+                        style={{ color: "#8E8E93" }}
+                      >
+                        {t.cancel}
+                      </button>
+                    </div>
+                    <div className="text-center mt-3">
+                      <button
+                        onClick={() => setShowRegisterForm(false)}
+                        className="text-xs underline text-pnp-textSecondary hover:text-white transition-colors"
+                      >
+                        {t.alreadyHaveAccount}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </>
         )}
 
         {/* ── Deep-link fallback (low-prominence) ─────────────────────────── */}

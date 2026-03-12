@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { getXLoginUrl, telegramWidgetAuth, type TelegramWidgetUser } from "@/lib/api";
+import { getXLoginUrl, telegramWidgetAuth, TelegramWidgetUser } from "@/lib/api"; // Removed 'type' keyword
 import { useAuth } from "@/hooks/useAuth";
+import { LanguageSelector } from "@/components/LanguageSelector"; // Import LanguageSelector
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
@@ -343,12 +344,7 @@ export function LandingPage() {
 
       {/* ── HEADER ──────────────────────────────────────────────────────────── */}
       <header className="glass-nav border-b border-pnp-border flex items-center justify-end px-4 h-14 flex-shrink-0">
-        <button
-          onClick={() => { setLoginOpen(v => !v); setLoginView("options"); }}
-          className="text-sm font-medium text-pnp-textSecondary hover:text-white transition-colors"
-        >
-          Log in
-        </button>
+        <LanguageSelector />
       </header>
 
       {/* ── HERO ────────────────────────────────────────────────────────────── */}
@@ -395,7 +391,7 @@ export function LandingPage() {
                   <>
                     <button onClick={() => setLoginView("telegram")} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white border border-pnp-border hover:border-white/30 hover:bg-pnp-surface transition-colors">
                       <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor" style={{ color: "#29B6F6" }}>
-                        <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248-1.97 9.289c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.062 13.85l-2.946-.924c-.64-.203-.654-.64.136-.953l11.5-4.431c.534-.194 1.001.13.81.706z" />
+                        <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248l-1.97 9.289c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.062 13.85l-2.946-.924c-.64-.203-.654-.64.136-.953l11.5-4.431c.534-.194 1.001.13.81.706z" />
                       </svg>
                       Continue with Telegram
                     </button>
