@@ -242,6 +242,38 @@ const getRandomVideo = async (req, res) => {
   }
 };
 
+const previewCampaign = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const campaign = await XAutoCampaignService.getCampaign(id);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    const options = await XAutoCampaignService.generatePreviewOptions(campaign);
+    return res.json({ success: true, options });
+  } catch (error) {
+    logger.error('Error previewing campaign:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+const duplicateCampaign = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const campaignId = await XAutoCampaignService.duplicateCampaign(
+      id,
+      req.session?.user?.id,
+      req.session?.user?.username
+    );
+    logger.info('X auto campaign duplicated', {
+      original: id, new: campaignId, adminId: req.session?.user?.id,
+    });
+    return res.json({ success: true, campaignId });
+  } catch (error) {
+    logger.error('Error duplicating campaign:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   getStats,
   listCampaigns,
@@ -254,4 +286,6 @@ module.exports = {
   triggerGenerate,
   getMediaFolder,
   getRandomVideo,
+  previewCampaign,
+  duplicateCampaign,
 };

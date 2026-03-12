@@ -3011,6 +3011,8 @@ app.post('/api/webapp/admin/x-campaigns/:id/resume', adminGuard, asyncHandler(xA
 app.delete('/api/webapp/admin/x-campaigns/:id', adminGuard, asyncHandler(xAutoCampaignAdminController.deleteCampaign));
 app.get('/api/webapp/admin/x-campaigns/:id/history', adminGuard, asyncHandler(xAutoCampaignAdminController.getCampaignHistory));
 app.post('/api/webapp/admin/x-campaigns/:id/generate', adminGuard, asyncHandler(xAutoCampaignAdminController.triggerGenerate));
+app.post('/api/webapp/admin/x-campaigns/:id/preview', adminGuard, asyncHandler(xAutoCampaignAdminController.previewCampaign));
+app.post('/api/webapp/admin/x-campaigns/:id/duplicate', adminGuard, asyncHandler(xAutoCampaignAdminController.duplicateCampaign));
 
 // Creator Subscription management
 // NOTE: static-path routes (/summary, /payouts/process-all) MUST be registered
@@ -3056,63 +3058,71 @@ app.post('/api/webapp/admin/grok/manager-chat', adminGuard, asyncHandler(async (
   } catch { /* ignore */ }
 
   // Build live context block from DB
+  // Static parts (demographics, accounts, language dist) are cached 10 min to reduce DB load
   let contextBlock = '';
   try {
-    // Campaigns
-    const { rows: campaigns } = await pool.query(`
-      SELECT c.campaign_id, c.name, c.language, c.status, c.interval_minutes,
-             c.active_hours_start, c.active_hours_end, c.total_generated,
-             c.total_posted, c.total_failed, a.handle
-      FROM x_auto_campaigns c
-      JOIN x_accounts a ON c.account_id = a.account_id
-      ORDER BY c.created_at DESC LIMIT 20`);
+    const STATIC_CACHE_KEY = 'pnpapp:xcampaign:grok_static_ctx';
+    const STATIC_CTX_TTL = 600; // 10 minutes
 
-    // Recent post performance (last 7 days)
-    const { rows: postStats } = await pool.query(`
-      SELECT DATE(created_at) as day,
-             COUNT(*) FILTER (WHERE status = 'sent') as sent,
-             COUNT(*) FILTER (WHERE status = 'failed') as failed,
-             COUNT(*) FILTER (WHERE status = 'scheduled') as scheduled
-      FROM x_post_jobs
-      WHERE created_at > NOW() - INTERVAL '7 days'
-      GROUP BY DATE(created_at)
-      ORDER BY day DESC LIMIT 7`);
+    // Dynamic parts — always fresh
+    const [campaignsResult, postStatsResult, recentFailedResult] = await Promise.all([
+      pool.query(`
+        SELECT c.campaign_id, c.name, c.language, c.status, c.interval_minutes,
+               c.active_hours_start, c.active_hours_end, c.total_generated,
+               c.total_posted, c.total_failed, a.handle
+        FROM x_auto_campaigns c
+        JOIN x_accounts a ON c.account_id = a.account_id
+        ORDER BY c.created_at DESC LIMIT 20`),
+      pool.query(`
+        SELECT DATE(created_at) as day,
+               COUNT(*) FILTER (WHERE status = 'sent') as sent,
+               COUNT(*) FILTER (WHERE status = 'failed') as failed,
+               COUNT(*) FILTER (WHERE status = 'scheduled') as scheduled
+        FROM x_post_jobs
+        WHERE created_at > NOW() - INTERVAL '7 days'
+        GROUP BY DATE(created_at)
+        ORDER BY day DESC LIMIT 7`),
+      pool.query(`
+        SELECT j.error_message, c.name as campaign_name
+        FROM x_post_jobs j
+        JOIN x_auto_campaigns c ON j.campaign_id = c.campaign_id
+        WHERE j.status = 'failed' AND j.created_at > NOW() - INTERVAL '7 days'
+        ORDER BY j.created_at DESC LIMIT 5`),
+    ]);
+    const campaigns = campaignsResult.rows;
+    const postStats = postStatsResult.rows;
+    const recentFailed = recentFailedResult.rows;
 
-    // User demographics
-    const { rows: demog } = await pool.query(`
-      SELECT
-        COUNT(*) as total_users,
-        COUNT(*) FILTER (WHERE tier = 'PRIME') as prime_users,
-        COUNT(*) FILTER (WHERE tier = 'member') as member_users,
-        COUNT(*) FILTER (WHERE tier = 'free' OR tier IS NULL) as free_users,
-        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') as new_last_30d,
-        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') as new_last_7d
-      FROM users WHERE is_active = true`);
+    // Static parts — try cache first
+    let staticCtx = null;
+    try { staticCtx = await cache.get(STATIC_CACHE_KEY); } catch { /* ignore */ }
 
-    // Language distribution
-    const { rows: langs } = await pool.query(`
-      SELECT COALESCE(language, 'unknown') as lang, COUNT(*) as cnt
-      FROM users WHERE is_active = true
-      GROUP BY language ORDER BY cnt DESC LIMIT 8`);
+    if (!staticCtx) {
+      const [demogResult, langsResult, accountsResult] = await Promise.all([
+        pool.query(`
+          SELECT
+            COUNT(*) as total_users,
+            COUNT(*) FILTER (WHERE tier = 'PRIME') as prime_users,
+            COUNT(*) FILTER (WHERE tier = 'member') as member_users,
+            COUNT(*) FILTER (WHERE tier = 'free' OR tier IS NULL) as free_users,
+            COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') as new_last_30d,
+            COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') as new_last_7d
+          FROM users WHERE is_active = true`),
+        pool.query(`
+          SELECT COALESCE(language, 'unknown') as lang, COUNT(*) as cnt
+          FROM users WHERE is_active = true
+          GROUP BY language ORDER BY cnt DESC LIMIT 8`),
+        pool.query(`
+          SELECT handle, display_name, is_active FROM x_accounts ORDER BY updated_at DESC`),
+      ]);
+      const d = demogResult.rows[0] || {};
+      const langs = langsResult.rows;
+      const accounts = accountsResult.rows;
+      const convRate = d.total_users > 0
+        ? ((Number(d.prime_users) + Number(d.member_users)) / Number(d.total_users) * 100).toFixed(1)
+        : '0';
 
-    // Accounts
-    const { rows: accounts } = await pool.query(`
-      SELECT handle, display_name, is_active FROM x_accounts ORDER BY updated_at DESC`);
-
-    // Recent failed posts (for analysis)
-    const { rows: recentFailed } = await pool.query(`
-      SELECT j.error_message, c.name as campaign_name
-      FROM x_post_jobs j
-      JOIN x_auto_campaigns c ON j.campaign_id = c.campaign_id
-      WHERE j.status = 'failed' AND j.created_at > NOW() - INTERVAL '7 days'
-      ORDER BY j.created_at DESC LIMIT 5`);
-
-    const d = demog[0] || {};
-    const convRate = d.total_users > 0
-      ? ((Number(d.prime_users) + Number(d.member_users)) / Number(d.total_users) * 100).toFixed(1)
-      : '0';
-
-    contextBlock = `=== PLATFORM DEMOGRAPHICS ===
+      staticCtx = `=== PLATFORM DEMOGRAPHICS ===
 Total active users: ${d.total_users || 0}
 PRIME members: ${d.prime_users || 0} | Regular members: ${d.member_users || 0} | Free: ${d.free_users || 0}
 Paid conversion rate: ${convRate}%
@@ -3122,7 +3132,11 @@ Language distribution:
 ${langs.map(l => `  ${l.lang}: ${l.cnt} users`).join('\n') || '  No data'}
 
 === X ACCOUNTS ===
-${accounts.map(a => `  @${a.handle} (${a.display_name || 'no display name'}) — ${a.is_active ? 'ACTIVE' : 'INACTIVE'}`).join('\n') || '  No accounts'}
+${accounts.map(a => `  @${a.handle} (${a.display_name || 'no display name'}) — ${a.is_active ? 'ACTIVE' : 'INACTIVE'}`).join('\n') || '  No accounts'}`;
+      try { await cache.set(STATIC_CACHE_KEY, staticCtx, STATIC_CTX_TTL); } catch { /* ignore */ }
+    }
+
+    contextBlock = `${staticCtx}
 
 === CAMPAIGNS (${campaigns.length} total) ===
 ${campaigns.map(c => `  [${c.status.toUpperCase()}] "${c.name}" → @${c.handle} | ${c.language} | every ${c.interval_minutes}min | UTC ${c.active_hours_start}-${c.active_hours_end} | generated: ${c.total_generated} | posted: ${c.total_posted} | failed: ${c.total_failed}`).join('\n') || '  No campaigns'}
@@ -4247,6 +4261,7 @@ app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, social
 app.post('/api/webapp/social/posts/bulk-videos', requireSessionAuth, bulkVideoLimiter, uploadPerformerVideos, asyncHandler(socialController.bulkCreateVideos));
 app.post('/api/webapp/social/posts/:postId/like', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.toggleLike));
 app.delete('/api/webapp/social/posts/:postId', requireSessionAuth, asyncHandler(socialController.deletePost));
+app.patch('/api/webapp/social/posts/:postId', requireSessionAuth, asyncHandler(socialController.editPost));
 app.get('/api/webapp/social/posts/:postId', asyncHandler(socialController.getPost));
 app.get('/api/webapp/social/posts/:postId/replies', requireSessionAuth, asyncHandler(socialController.getReplies));
 app.post('/api/webapp/social/posts/:postId/mastodon', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.postToMastodon));
@@ -6195,6 +6210,7 @@ app.get('/api/jaas/status', requireSessionAuth, asyncHandler(jaasController.getS
 app.post('/api/jaas/token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.generateToken));
 app.post('/api/jaas/moderator-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.generateModeratorToken));
 app.post('/api/jaas/live-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.generateLiveToken));
+app.post('/api/jaas/refresh-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.refreshToken));
 
 // ==========================================
 // ATProto / Bluesky OAuth Routes (PUBLIC — no session required)

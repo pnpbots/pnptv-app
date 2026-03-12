@@ -4,6 +4,9 @@ const db = require('../../utils/db');
 const logger = require('../../utils/logger');
 const GrokService = require('./grokService');
 const XPostService = require('./xPostService');
+const { cache } = require('../../config/redis');
+
+const VIDEO_CACHE_TTL = 300; // 5 minutes
 
 const DIRECTUS_URL = process.env.DIRECTUS_URL || 'http://directus:8055';
 const DIRECTUS_PUBLIC_URL = process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app';
@@ -295,10 +298,11 @@ class XAutoCampaignService {
       [campaign.campaign_id, postId]
     );
 
-    // Update campaign counters
+    // Update campaign counters (reset consecutive_failures on success)
     const updateResult = await db.query(
       `UPDATE x_auto_campaigns
        SET total_generated = total_generated + 1,
+           consecutive_failures = 0,
            last_generated_at = NOW(),
            updated_at = NOW()
        WHERE campaign_id = $1
@@ -326,15 +330,31 @@ class XAutoCampaignService {
   }
 
   /**
-   * Record a generation failure — increment counter, advance next_run_at.
+   * Record a generation failure — increment counter.
+   * Auto-pauses campaign if consecutive_failures reaches 5.
    */
   static async recordFailure(campaignId) {
-    await db.query(
+    const result = await db.query(
       `UPDATE x_auto_campaigns
-       SET total_failed = total_failed + 1, updated_at = NOW()
-       WHERE campaign_id = $1`,
+       SET total_failed = total_failed + 1,
+           consecutive_failures = consecutive_failures + 1,
+           updated_at = NOW()
+       WHERE campaign_id = $1
+       RETURNING consecutive_failures, name`,
       [campaignId]
     );
+    const row = result.rows[0];
+    if (row && row.consecutive_failures >= 5) {
+      await db.query(
+        `UPDATE x_auto_campaigns
+         SET status = 'paused', next_run_at = NULL, updated_at = NOW()
+         WHERE campaign_id = $1 AND status = 'active'`,
+        [campaignId]
+      );
+      logger.warn('Auto-paused campaign due to 5 consecutive failures', {
+        campaignId, name: row.name,
+      });
+    }
   }
 
   /**
@@ -364,6 +384,61 @@ class XAutoCampaignService {
       posts: postsResult.rows,
       total: parseInt(countResult.rows[0].total) || 0,
     };
+  }
+
+  /**
+   * Generate preview post options via Grok without queuing anything.
+   * Returns up to 3 option strings (xPost mode) or 1 string (other modes).
+   */
+  static async generatePreviewOptions(campaign) {
+    const prompt = campaign.custom_prompt
+      ? `${campaign.topic}\n\nAdditional instructions: ${campaign.custom_prompt}`
+      : campaign.topic;
+
+    const langMap = { es: 'Spanish', en: 'English', bilingual: 'Spanish' };
+    const grokLanguage = langMap[campaign.language] || 'Spanish';
+
+    const grokResponse = await GrokService.chat({
+      mode: campaign.grok_mode,
+      language: grokLanguage,
+      prompt,
+    });
+
+    if (campaign.grok_mode === 'xPost') {
+      const optionRegex = /(?:OPCI[OÓ]N|OPTION)\s+[ABC][\s:.\-—]*([\s\S]*?)(?=(?:OPCI[OÓ]N|OPTION)\s+[ABC]|$)/gi;
+      const options = [];
+      let match;
+      while ((match = optionRegex.exec(grokResponse)) !== null) {
+        const cleaned = this._stripOptionLabel(match[1].trim());
+        if (cleaned) options.push(cleaned);
+      }
+      if (options.length > 0) return options.slice(0, 3);
+    }
+    return [this._stripOptionLabel(grokResponse.trim())];
+  }
+
+  /**
+   * Duplicate an existing campaign (creates paused copy).
+   */
+  static async duplicateCampaign(campaignId, createdBy, createdByUsername) {
+    const original = await this.getCampaign(campaignId);
+    if (!original) throw new Error('Campaign not found');
+
+    return this.createCampaign({
+      name: `${original.name} (copy)`,
+      accountId: original.account_id,
+      topic: original.topic,
+      grokMode: original.grok_mode,
+      language: original.language,
+      customPrompt: original.custom_prompt,
+      intervalMinutes: original.interval_minutes,
+      activeHoursStart: original.active_hours_start,
+      activeHoursEnd: original.active_hours_end,
+      maxPosts: original.max_posts,
+      mediaFolderId: original.media_folder_id,
+      createdBy,
+      createdByUsername,
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -421,15 +496,30 @@ class XAutoCampaignService {
   static async _getRandomMediaUrl(folderId, campaignId = null) {
     if (!DIRECTUS_TOKEN) return null;
 
-    const res = await fetch(
-      `${DIRECTUS_URL}/files?filter[folder][_eq]=${folderId}&filter[type][_starts_with]=video&fields[]=id&limit=200`,
-      { headers: { Authorization: `Bearer ${DIRECTUS_TOKEN}` } }
-    );
-    const data = await res.json();
+    // Try Redis cache first to avoid Directus API call on every generation
+    let allIds = null;
+    const videoCacheKey = `pnpapp:xcampaign:videos:${folderId}`;
+    try {
+      const cached = await cache.get(videoCacheKey);
+      if (cached) allIds = cached;
+    } catch { /* fall through to Directus */ }
 
-    if (!data.data || data.data.length === 0) return null;
+    if (!allIds) {
+      const res = await fetch(
+        `${DIRECTUS_URL}/files?filter[folder][_eq]=${folderId}&filter[type][_starts_with]=video&fields[]=id&limit=200`,
+        { headers: { Authorization: `Bearer ${DIRECTUS_TOKEN}` } }
+      );
+      const data = await res.json();
 
-    const allIds = data.data.map((f) => f.id);
+      if (!data.data || data.data.length === 0) return null;
+
+      allIds = data.data.map((f) => f.id);
+      try {
+        await cache.set(videoCacheKey, allIds, VIDEO_CACHE_TTL);
+      } catch { /* cache failure is non-fatal */ }
+    }
+
+    if (!allIds || allIds.length === 0) return null;
 
     // Get recently used media IDs for this campaign to avoid repeats
     let usedIds = new Set();

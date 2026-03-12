@@ -228,6 +228,13 @@ export default function Stream() {
   const chatEndRef = React.useRef<HTMLDivElement>(null);
   const chatContainerRef = React.useRef<HTMLDivElement>(null);
   const [hasNewMessages, setHasNewMessages] = useState(false);
+  const videoContainerRef = React.useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Chat collapsed by default on mobile (improvement #6)
+  const [isChatCollapsed, setIsChatCollapsed] = useState(
+    () => window.innerWidth < 768
+  );
 
   const isNearBottom = () => {
     const el = chatContainerRef.current;
@@ -248,6 +255,23 @@ export default function Stream() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     setHasNewMessages(false);
   };
+
+  const handleFullscreen = useCallback(() => {
+    const el = videoContainerRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+    } else {
+      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+    }
+  }, []);
+
+  // Sync isFullscreen state with external fullscreenchange events
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
 
   const formatTimeAgo = (dateStr: string) => {
     const diff = Date.now() - new Date(dateStr).getTime();
@@ -298,8 +322,25 @@ export default function Stream() {
       </button>
 
       {/* Video Player */}
-      <div className="relative -mx-4 sm:-mx-6">
+      <div ref={videoContainerRef} className="relative -mx-4 sm:-mx-6">
         <LivePlayer src={stream.hlsUrl} title={stream.name} overlay={overlay} />
+
+        {/* Mobile fullscreen toggle button (improvement #6) */}
+        <button
+          onClick={handleFullscreen}
+          className="sm:hidden absolute bottom-14 right-3 z-20 w-9 h-9 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 transition-colors active:scale-95"
+          aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+        >
+          {isFullscreen ? (
+            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5M15 15l5.25 5.25M9 15H4.5M9 15v4.5M9 15l-5.25 5.25" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+            </svg>
+          )}
+        </button>
         {/* Overlay */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-4 pb-3 pt-10">
           <div className="flex items-center gap-2 flex-wrap">
@@ -333,7 +374,7 @@ export default function Stream() {
               key={amount}
               onClick={() => handleTip(amount)}
               disabled={tipping}
-              className="px-3 py-1.5 rounded-lg font-semibold text-xs transition-all text-white active:scale-95 disabled:opacity-50 btn-gradient whitespace-nowrap"
+              className="min-h-[44px] px-3 py-1.5 rounded-lg font-semibold text-xs transition-all text-white active:scale-95 disabled:opacity-50 btn-gradient whitespace-nowrap"
             >
               {tipPaymentTab === "tokens" ? `${amount}T` : `$${amount}`}
             </button>
@@ -365,7 +406,7 @@ export default function Stream() {
         </div>
       )}
 
-      {/* Live Chat */}
+      {/* Live Chat — collapsible on mobile (improvement #6) */}
       <Card>
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
@@ -375,68 +416,90 @@ export default function Stream() {
               {chatConnected ? t.live.chatConnected : t.live.chatConnecting}
             </span>
           </div>
-          {socketError && <span className="text-[10px] text-pnp-error">{socketError}</span>}
-        </div>
-
-        <div className="relative">
-        {hasNewMessages && (
-          <button
-            onClick={scrollToBottom}
-            className="absolute -top-2 left-1/2 -translate-x-1/2 z-10 px-3 py-1 rounded-full bg-pnp-accent text-white text-[10px] font-semibold shadow-lg"
-          >
-            New messages
-          </button>
-        )}
-        <div ref={chatContainerRef} className="h-48 overflow-y-auto space-y-1 mb-2 pr-1" style={{ scrollbarWidth: "thin" }}>
-          {chatMessages.length === 0 ? (
-            <p className="text-[10px] text-pnp-textSecondary text-center py-4">
-              {chatConnected ? t.live.beFirstToChat : t.live.connectingToChat}
-            </p>
-          ) : (
-            chatMessages.map((msg) => (
-              <div key={msg.id} className="text-xs">
-                <span className="font-medium text-gradient">@{msg.username}</span>
-                <span className="text-pnp-textSecondary mx-1">·</span>
-                <span className="text-pnp-textPrimary">{msg.content}</span>
-              </div>
-            ))
-          )}
-          <div ref={chatEndRef} />
-        </div>
-        </div>
-
-        {isAuthenticated ? (
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="Type a message..."
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && chatInput.trim()) {
-                  sendMessage(chatInput.trim());
-                  setChatInput("");
-                }
-              }}
-              maxLength={500}
-              className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
-            />
+          <div className="flex items-center gap-2">
+            {socketError && <span className="text-[10px] text-pnp-error">{socketError}</span>}
+            {/* Collapse toggle — always visible on mobile, available on desktop too */}
             <button
-              onClick={() => {
-                if (chatInput.trim()) {
-                  sendMessage(chatInput.trim());
-                  setChatInput("");
-                }
-              }}
-              className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium"
+              onClick={() => setIsChatCollapsed((v) => !v)}
+              className="p-1 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              aria-label={isChatCollapsed ? "Expand chat" : "Collapse chat"}
             >
-              Send
+              <svg
+                className={`w-4 h-4 transition-transform duration-200 ${isChatCollapsed ? "rotate-180" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
             </button>
           </div>
-        ) : (
-          <button onClick={login} className="text-xs text-pnp-accent hover:underline">
-            {t.live.logInToChat}
-          </button>
+        </div>
+
+        {!isChatCollapsed && (
+          <>
+            <div className="relative">
+              {hasNewMessages && (
+                <button
+                  onClick={scrollToBottom}
+                  className="absolute -top-2 left-1/2 -translate-x-1/2 z-10 px-3 py-1 rounded-full bg-pnp-accent text-white text-[10px] font-semibold shadow-lg"
+                >
+                  New messages
+                </button>
+              )}
+              <div ref={chatContainerRef} className="h-48 overflow-y-auto space-y-1 mb-2 pr-1" style={{ scrollbarWidth: "thin" }}>
+                {chatMessages.length === 0 ? (
+                  <p className="text-[10px] text-pnp-textSecondary text-center py-4">
+                    {chatConnected ? t.live.beFirstToChat : t.live.connectingToChat}
+                  </p>
+                ) : (
+                  chatMessages.map((msg) => (
+                    <div key={msg.id} className="text-xs">
+                      <span className="font-medium text-gradient">@{msg.username}</span>
+                      <span className="text-pnp-textSecondary mx-1">·</span>
+                      <span className="text-pnp-textPrimary">{msg.content}</span>
+                    </div>
+                  ))
+                )}
+                <div ref={chatEndRef} />
+              </div>
+            </div>
+
+            {isAuthenticated ? (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Type a message..."
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && chatInput.trim()) {
+                      sendMessage(chatInput.trim());
+                      setChatInput("");
+                    }
+                  }}
+                  maxLength={500}
+                  className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+                />
+                <button
+                  onClick={() => {
+                    if (chatInput.trim()) {
+                      sendMessage(chatInput.trim());
+                      setChatInput("");
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium"
+                >
+                  Send
+                </button>
+              </div>
+            ) : (
+              <button onClick={login} className="text-xs text-pnp-accent hover:underline">
+                {t.live.logInToChat}
+              </button>
+            )}
+          </>
         )}
       </Card>
     </div>

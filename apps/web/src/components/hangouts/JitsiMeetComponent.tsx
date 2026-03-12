@@ -141,6 +141,11 @@ export function JitsiMeetComponent({
         return;
       }
 
+      // Detect mobile (improvement #4)
+      const isMobile =
+        /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
+        window.innerWidth < 768;
+
       const apiOptions: Record<string, any> = {
         roomName: resolvedRoom,
         parentNode: containerRef.current,
@@ -162,30 +167,34 @@ export function JitsiMeetComponent({
           filmstrip: {
             disableResizable: true,
           },
+          // Mobile-specific bandwidth/performance config (improvement #4)
+          ...(isMobile ? {
+            enableLayerSuspension: true,
+            channelLastN: 4,
+            adaptiveLastN: true,
+            p2p: { enabled: true },
+          } : {}),
           ...(isAdmin || isModerator
-            ? (disableChat ? {
-                toolbarButtons: [
-                  'camera', 'microphone', 'desktop', 'participants-pane',
-                  'closedcaptions', 'noisesuppression', 'fullscreen',
-                  'settings', 'videoquality', 'tileview', 'select-background',
-                  'mute-everyone', 'security',
-                ],
-              } : {
-                toolbarButtons: [
-                  'camera', 'microphone', 'desktop', 'participants-pane',
-                  'closedcaptions', 'noisesuppression', 'fullscreen',
-                  'settings', 'videoquality', 'tileview', 'select-background',
-                  'mute-everyone', 'security',
-                ],
-              })
+            ? {
+                toolbarButtons: isMobile
+                  ? ['camera', 'microphone', 'desktop', 'tileview', 'fullscreen', 'settings', 'videoquality']
+                  : [
+                      'camera', 'microphone', 'desktop', 'participants-pane',
+                      'closedcaptions', 'noisesuppression', 'fullscreen',
+                      'settings', 'videoquality', 'tileview', 'select-background',
+                      'mute-everyone', 'security',
+                    ],
+              }
             : {
-                toolbarButtons: [
-                  'participants-pane',
-                  'closedcaptions',
-                  'noisesuppression',
-                  'fullscreen',
-                  'settings',
-                ],
+                toolbarButtons: isMobile
+                  ? ['camera', 'microphone', 'tileview', 'fullscreen']
+                  : [
+                      'participants-pane',
+                      'closedcaptions',
+                      'noisesuppression',
+                      'fullscreen',
+                      'settings',
+                    ],
                 startWithAudioMuted: true,
               }),
         },

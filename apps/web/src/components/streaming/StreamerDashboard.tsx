@@ -13,6 +13,7 @@ import {
   getStreamerSettings,
   updateStreamerSettings,
   getJaasLiveToken,
+  refreshJaasToken,
   getStreamProfile,
   saveStreamProfile,
   startStreamAutoMessages,
@@ -121,6 +122,43 @@ const RotateCwIcon = (p: React.SVGProps<SVGSVGElement>) => (
 );
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+type NetworkQuality = "wifi" | "4g" | "3g" | "2g" | "unknown";
+
+/** Map navigator.connection.effectiveType + downlink → quality preset id */
+function getAdaptivePresetId(conn: any): string {
+  if (!conn) return "720p";
+  const et: string = conn.effectiveType || "4g";
+  const downlink: number = typeof conn.downlink === "number" ? conn.downlink : 10;
+  if (et === "4g" && downlink >= 4) return "720p";
+  if (et === "4g") return "480p";
+  return "360p";
+}
+
+function getNetworkQuality(conn: any): NetworkQuality {
+  if (!conn) return "unknown";
+  const et: string = conn.effectiveType || "";
+  if (et === "4g") return "4g";
+  if (et === "3g") return "3g";
+  if (et === "2g") return "2g";
+  // type may be "wifi" on some browsers
+  if ((conn.type || "") === "wifi") return "wifi";
+  return "unknown";
+}
+
+function networkQualityColor(q: NetworkQuality): string {
+  if (q === "wifi" || q === "4g") return "#5ED1C4";
+  if (q === "3g") return "#FFD60A";
+  return "#FF453A";
+}
+
+function networkQualityLabel(q: NetworkQuality): string {
+  if (q === "wifi") return "WiFi";
+  if (q === "4g") return "4G";
+  if (q === "3g") return "3G";
+  if (q === "2g") return "2G";
+  return "Net";
+}
 
 type ActiveTab = "scenes" | "audio" | "filters" | "settings";
 type Orientation = "portrait" | "landscape";
@@ -737,6 +775,23 @@ export default function StreamerDashboard({
   // Store conferenceId so stop can reference it even if the API object is gone
   const jaasConferenceIdRef = useRef<string | null>(null);
 
+  // ── JWT auto-refresh ref (improvement #1) ──────────────────────────────────
+  const jaasApiRef = useRef<any>(null);
+  const jaasRefreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Wake lock ref (improvement #3) ────────────────────────────────────────
+  const wakeLockRef = useRef<any>(null);
+
+  // ── Network quality state (improvement #2) ────────────────────────────────
+  const [networkQuality, setNetworkQuality] = useState<NetworkQuality>(() =>
+    getNetworkQuality((navigator as any).connection)
+  );
+  const [streamTitle, setStreamTitle] = useState("");
+
+  // ── Mobile detection ──────────────────────────────────────────────────────
+  const isMobileDevice =
+    window.innerWidth < 768 || "ontouchstart" in window;
+
   // ── Stream Profile + Grok Auto-Chat state ─────────────────────────────────
   const [streamProfile, setStreamProfile] = useState({
     boundaries: "",
@@ -820,6 +875,55 @@ export default function StreamerDashboard({
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
+
+  // ── Network quality monitor (improvement #2) ──────────────────────────────
+  useEffect(() => {
+    const conn = (navigator as any).connection;
+    if (!conn) return;
+
+    const handleChange = () => {
+      const q = getNetworkQuality(conn);
+      setNetworkQuality(q);
+      // Apply adaptive preset only when not yet live
+      if (!state.isLive && !state.isConnecting) {
+        const presetId = getAdaptivePresetId(conn);
+        const preset = QUALITY_PRESETS.find((p) => p.id === presetId) || QUALITY_PRESETS[0];
+        dispatch({ type: "SET_PRESET", payload: preset });
+      }
+    };
+
+    conn.addEventListener("change", handleChange);
+    return () => conn.removeEventListener("change", handleChange);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.isLive, state.isConnecting]);
+
+  // ── Wake lock helpers (improvement #3) ────────────────────────────────────
+  const acquireWakeLock = useCallback(async () => {
+    if (!("wakeLock" in navigator)) return;
+    try {
+      wakeLockRef.current = await (navigator as any).wakeLock.request("screen");
+    } catch {
+      // Silent fail — not all browsers/devices support it
+    }
+  }, []);
+
+  const releaseWakeLock = useCallback(() => {
+    if (wakeLockRef.current) {
+      try { wakeLockRef.current.release(); } catch { /* ignore */ }
+      wakeLockRef.current = null;
+    }
+  }, []);
+
+  // Re-acquire on tab visibility change (spec requirement after tab switch)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && state.isLive) {
+        acquireWakeLock();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [state.isLive, acquireWakeLock]);
 
   // ── Device enumeration ────────────────────────────────────────────────────
   const enumerateCameras = useCallback(async () => {
@@ -1022,12 +1126,57 @@ export default function StreamerDashboard({
     ref.current = null;
   }
 
+  // ── JWT auto-refresh (improvement #1) — refresh every 3.5h while JaaS live ─
+  useEffect(() => {
+    if (!jaasBroadcastActive) {
+      // Stop existing refresh timer when broadcast ends
+      if (jaasRefreshTimerRef.current) {
+        clearInterval(jaasRefreshTimerRef.current);
+        jaasRefreshTimerRef.current = null;
+      }
+      return;
+    }
+
+    const MS_3_5H = 3.5 * 60 * 60 * 1000;
+    jaasRefreshTimerRef.current = setInterval(async () => {
+      try {
+        const result = await refreshJaasToken();
+        if (result.success && result.token && jaasApiRef.current) {
+          jaasApiRef.current.executeCommand("overwriteConfig", { jwt: result.token });
+        }
+      } catch {
+        // Non-fatal — stream continues with existing token
+      }
+    }, MS_3_5H);
+
+    return () => {
+      if (jaasRefreshTimerRef.current) {
+        clearInterval(jaasRefreshTimerRef.current);
+        jaasRefreshTimerRef.current = null;
+      }
+    };
+  }, [jaasBroadcastActive]);
+
+  // ── Wake lock: acquire when live, release when stream ends (improvement #3) ─
+  useEffect(() => {
+    if (state.isLive) {
+      acquireWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+  }, [state.isLive, acquireWakeLock, releaseWakeLock]);
+
   // ── Unmount cleanup ───────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
       clearAllTimers();
       stopRecorder(recorderRef);
       stopRecorder(localRecorderRef);
+      if (jaasRefreshTimerRef.current) {
+        clearInterval(jaasRefreshTimerRef.current);
+        jaasRefreshTimerRef.current = null;
+      }
+      releaseWakeLock();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
@@ -1036,6 +1185,7 @@ export default function StreamerDashboard({
       filteredStreamRef.current = null;
       mixedAudioNodeRef.current = null;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Go Live ───────────────────────────────────────────────────────────────
@@ -1269,6 +1419,7 @@ export default function StreamerDashboard({
     setJaasBroadcastActive(false);
     setJaasHlsUrl(null);
     jaasConferenceIdRef.current = null;
+    jaasApiRef.current = null;
     dispatch({ type: "RESET_STREAM" });
     clearAllTimers();
     setDurationSec(0);
@@ -1293,6 +1444,9 @@ export default function StreamerDashboard({
   // We extract the conference room path and emit stream:start-jaas so the
   // backend can call the JaaS Livestream API to push video to Restreamer.
   const handleJaasApiReady = useCallback((api: any) => {
+    // Store the api reference for JWT refresh (improvement #1)
+    jaasApiRef.current = api;
+
     if (!socket) return;
     if (socket.data?.jaasBroadcastActive) return; // already broadcasting
 
@@ -1870,45 +2024,116 @@ export default function StreamerDashboard({
                   </div>
                 )}
 
-                {/* ── Go Live with JaaS CTA (shown when not live) ── */}
+                {/* ── Go Live CTA (shown when not live) ── */}
                 {!state.isLive && !state.isConnecting && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60">
-                    {jaasError && (
-                      <p className="text-xs text-red-400 bg-red-900/40 px-3 py-1.5 rounded-lg max-w-xs text-center">
-                        {jaasError}
-                      </p>
-                    )}
-                    <button
-                      onClick={handleStartJaasLive}
-                      disabled={jaasLoading}
-                      className="
-                        flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-bold text-white
-                        transition-all duration-150 hover:opacity-90 active:scale-[0.97]
-                        disabled:opacity-50 disabled:cursor-not-allowed
-                        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent
-                      "
-                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-                      aria-label="Go Live with JaaS"
+                  isMobileDevice ? (
+                    /* ── Mobile simplified Go Live splash (improvement #5) ── */
+                    <div
+                      className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6"
+                      style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(4px)" }}
                     >
-                      {jaasLoading ? (
-                        <>
-                          <span
-                            className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin"
-                            aria-hidden="true"
-                          />
-                          Connecting…
-                        </>
-                      ) : (
-                        <>
-                          <Radio className="w-4 h-4" aria-hidden="true" />
-                          Go Live with JaaS
-                        </>
+                      {/* Pulsing broadcast icon */}
+                      <div className="relative flex items-center justify-center">
+                        <span
+                          className="absolute w-16 h-16 rounded-full animate-ping opacity-30"
+                          style={{ background: "#D4007A" }}
+                          aria-hidden="true"
+                        />
+                        <span className="relative text-3xl" aria-hidden="true">📡</span>
+                      </div>
+
+                      <p className="text-base font-bold text-white text-center">
+                        Ready to Go Live?
+                      </p>
+
+                      {/* Stream title input */}
+                      <input
+                        type="text"
+                        value={streamTitle}
+                        onChange={(e) => setStreamTitle(e.target.value)}
+                        placeholder="Stream title (optional)"
+                        maxLength={80}
+                        className="w-full max-w-xs rounded-xl bg-white/10 border border-white/20 px-4 py-2.5 text-sm text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-pnp-accent text-center"
+                      />
+
+                      {/* Network quality pill */}
+                      <NetworkQualityPill quality={networkQuality} />
+
+                      {jaasError && (
+                        <p className="text-xs text-red-400 bg-red-900/40 px-3 py-1.5 rounded-lg max-w-xs text-center">
+                          {jaasError}
+                        </p>
                       )}
-                    </button>
-                    <p className="text-[10px] text-white/50 text-center max-w-[200px]">
-                      JaaS Pro — use the in-call "Start Livestream" button to broadcast
-                    </p>
-                  </div>
+
+                      {/* Big Go Live button */}
+                      <button
+                        onClick={handleStartJaasLive}
+                        disabled={jaasLoading}
+                        className="
+                          flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white w-full max-w-xs justify-center
+                          transition-all duration-150 active:scale-[0.97]
+                          disabled:opacity-50 disabled:cursor-not-allowed
+                          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent
+                        "
+                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                        aria-label="Go Live Now"
+                      >
+                        {jaasLoading ? (
+                          <>
+                            <span
+                              className="w-5 h-5 rounded-full border-2 border-white/30 border-t-white animate-spin"
+                              aria-hidden="true"
+                            />
+                            Connecting…
+                          </>
+                        ) : (
+                          <>
+                            <span aria-hidden="true">🔴</span>
+                            Go Live Now
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    /* ── Desktop Go Live CTA ── */
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60">
+                      {jaasError && (
+                        <p className="text-xs text-red-400 bg-red-900/40 px-3 py-1.5 rounded-lg max-w-xs text-center">
+                          {jaasError}
+                        </p>
+                      )}
+                      <button
+                        onClick={handleStartJaasLive}
+                        disabled={jaasLoading}
+                        className="
+                          flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-bold text-white
+                          transition-all duration-150 hover:opacity-90 active:scale-[0.97]
+                          disabled:opacity-50 disabled:cursor-not-allowed
+                          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent
+                        "
+                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                        aria-label="Go Live with JaaS"
+                      >
+                        {jaasLoading ? (
+                          <>
+                            <span
+                              className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin"
+                              aria-hidden="true"
+                            />
+                            Connecting…
+                          </>
+                        ) : (
+                          <>
+                            <Radio className="w-4 h-4" aria-hidden="true" />
+                            Go Live with JaaS
+                          </>
+                        )}
+                      </button>
+                      <p className="text-[10px] text-white/50 text-center max-w-[200px]">
+                        JaaS Pro — use the in-call "Start Livestream" button to broadcast
+                      </p>
+                    </div>
+                  )
                 )}
 
                 {/* Status badge — top-left (only when not in JaaS mode) */}
@@ -1983,13 +2208,15 @@ export default function StreamerDashboard({
           {/* ── Mobile stats bar ──────────────────────────────────────────── */}
           {!isDesktopLayout && (
             <div
-              className="flex items-center justify-between gap-3 px-3 py-2 border-b border-pnp-border flex-shrink-0"
+              className="flex items-center justify-between gap-2 px-3 py-2 border-b border-pnp-border flex-shrink-0"
               style={{ background: "rgba(18,18,18,0.9)" }}
             >
               <MiniStat label="Bitrate" value={state.isLive ? `${state.stats.bitrate}k` : "—"} />
               <MiniStat label="FPS" value={state.isLive ? String(state.stats.fps) : "—"} />
               <MiniStat label="Viewers" value={state.isLive ? String(state.viewerCount) : "—"} />
               <MiniStat label="Time" value={state.isLive ? formatDuration(durationSec) : "—"} monospace />
+              {/* Network quality pill (improvement #2) */}
+              <NetworkQualityPill quality={networkQuality} />
               <span
                 className="w-2 h-2 rounded-full flex-shrink-0"
                 style={{ background: hColor }}
@@ -2251,5 +2478,19 @@ function MiniStat({
         {value}
       </span>
     </div>
+  );
+}
+
+function NetworkQualityPill({ quality }: { quality: NetworkQuality }) {
+  const color = networkQualityColor(quality);
+  const label = networkQualityLabel(quality);
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+      style={{ background: `${color}22`, color, border: `1px solid ${color}55` }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+      {label}
+    </span>
   );
 }

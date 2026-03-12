@@ -327,9 +327,69 @@ const getStatus = async (req, res) => {
   }
 };
 
+/**
+ * Refresh JaaS live streaming token for an active broadcast session
+ * POST /api/jaas/refresh-token
+ * Returns a fresh 4h JWT without restarting the conference.
+ */
+const refreshToken = async (req, res) => {
+  try {
+    const sessionUser = req.session?.user || req.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const userId = String(sessionUser.id);
+
+    if (!JaasService.isConfigured()) {
+      return res.status(503).json({ success: false, error: 'Video service temporarily unavailable' });
+    }
+
+    const user = await UserService.getById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+    const isCreator = user.creator_status === 'active';
+    const hasChannel = !!user.live_channel;
+    if (!isAdmin && !isCreator && !hasChannel) {
+      return res.status(403).json({ success: false, error: 'Not authorized to livestream' });
+    }
+
+    const roomName = user.live_channel || `pnptv-live-${userId}`;
+    const displayName = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || 'Streamer';
+    const avatarUrl = user.photo_file_id
+      ? (user.photo_file_id.startsWith('/') ? user.photo_file_id : '/' + user.photo_file_id)
+      : '';
+
+    const token = JaasService.generateToken({
+      roomName,
+      userId,
+      userName: displayName,
+      userEmail: user.email || '',
+      userAvatar: avatarUrl,
+      isModerator: true,
+      enableLivestreaming: true,
+      enableRecording: false,
+      enableTranscription: false,
+      expiresIn: '4h'
+    });
+
+    const meetingUrl = JaasService.generateMeetingUrl(roomName, token);
+
+    logger.info('JaaS live token refreshed', { userId, roomName });
+
+    res.json({ success: true, token, meetingUrl });
+  } catch (error) {
+    logger.error('Error refreshing live token:', error);
+    res.status(500).json({ success: false, error: 'Failed to refresh live streaming token' });
+  }
+};
+
 module.exports = {
   generateToken,
   generateModeratorToken,
   generateLiveToken,
+  refreshToken,
   getStatus
 };

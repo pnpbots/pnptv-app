@@ -1020,6 +1020,14 @@ export function deleteSocialPost(postId: number): Promise<{ success: boolean }> 
   return request(`/api/webapp/social/posts/${postId}`, { method: "DELETE" });
 }
 
+export function editSocialPost(postId: number, content: string): Promise<{ success: boolean; content: string }> {
+  return request(`/api/webapp/social/posts/${postId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+}
+
 export function requestWofDeletion(postId: number): Promise<{ success: boolean }> {
   return request(`/api/webapp/social/posts/${postId}/request-deletion`, { method: "POST" });
 }
@@ -2707,6 +2715,14 @@ export function getRandomCampaignVideo(campaignId?: string): Promise<{ success: 
   return request(`/api/webapp/admin/x-campaigns/random-video${qs}`);
 }
 
+export function previewAdminXCampaign(id: string): Promise<{ success: boolean; options: string[] }> {
+  return request(`/api/webapp/admin/x-campaigns/${id}/preview`, { method: "POST" });
+}
+
+export function duplicateAdminXCampaign(id: string): Promise<{ success: boolean; campaignId: string }> {
+  return request(`/api/webapp/admin/x-campaigns/${id}/duplicate`, { method: "POST" });
+}
+
 export function startXOAuth(adminId?: number, adminUsername?: string): Promise<{ success: boolean; url: string }> {
   const params = new URLSearchParams();
   if (adminId) params.set("admin_id", String(adminId));
@@ -3583,6 +3599,15 @@ export function getJaasLiveToken(): Promise<{
   error?: string;
 }> {
   return request("/api/jaas/live-token", { method: "POST" });
+}
+
+export function refreshJaasToken(): Promise<{
+  success: boolean;
+  token: string;
+  meetingUrl: string;
+  error?: string;
+}> {
+  return request("/api/jaas/refresh-token", { method: "POST" });
 }
 
 // Live Rules Acknowledgment Gate

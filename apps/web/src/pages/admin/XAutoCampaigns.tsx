@@ -19,12 +19,65 @@ import {
   startXOAuth,
   chatWithGrokManager,
   resetGrokManagerChat,
+  previewAdminXCampaign,
+  duplicateAdminXCampaign,
   type XAutoCampaignStats,
   type XAutoCampaign,
   type XAutoCampaignPost,
   type XActiveAccount,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+
+// ── Countdown Timer ────────────────────────────────────────────────────────────
+function CountdownTimer({ targetDate }: { targetDate: string | null | undefined }) {
+  const [label, setLabel] = React.useState("");
+
+  React.useEffect(() => {
+    if (!targetDate) { setLabel("—"); return; }
+    const update = () => {
+      const diff = new Date(targetDate).getTime() - Date.now();
+      if (diff <= 0) { setLabel("now"); return; }
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      if (h > 0) setLabel(`in ${h}h ${m}m`);
+      else if (m > 0) setLabel(`in ${m}m ${s}s`);
+      else setLabel(`in ${s}s`);
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [targetDate]);
+
+  return <span className="text-xs tabular-nums font-medium">{label}</span>;
+}
+
+// ── Expandable Post Text ───────────────────────────────────────────────────────
+function ExpandablePostText({ text }: { text: string }) {
+  const [expanded, setExpanded] = React.useState(false);
+  if (!text) return <span className="text-pnp-textSecondary text-xs">—</span>;
+  return (
+    <div className="max-w-[300px]">
+      {expanded ? (
+        <div>
+          <p className="text-xs text-pnp-textPrimary whitespace-pre-wrap break-words">{text}</p>
+          <button onClick={() => setExpanded(false)} className="text-xs text-pnp-accent hover:underline mt-1">
+            Show less
+          </button>
+        </div>
+      ) : (
+        <div>
+          <p className="text-xs text-pnp-textSecondary truncate">{text}</p>
+          {text.length > 60 && (
+            <button onClick={() => setExpanded(true)} className="text-xs text-pnp-accent hover:underline">
+              Show more
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Grok Manager Types ─────────────────────────────────────────────────────────
 interface GrokChatMessage {
@@ -309,6 +362,11 @@ export default function XAutoCampaigns() {
   const [mediaFolderId, setMediaFolderId] = useState<string | null>(null);
   const [mediaFolderCmsUrl, setMediaFolderCmsUrl] = useState<string | null>(null);
 
+  // Preview modal state
+  const [previewTarget, setPreviewTarget] = useState<XAutoCampaign | null>(null);
+  const [previewOptions, setPreviewOptions] = useState<string[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -507,6 +565,32 @@ export default function XAutoCampaigns() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const handleClone = async (campaign: XAutoCampaign) => {
+    try {
+      await duplicateAdminXCampaign(campaign.campaign_id);
+      setSuccess(`"${campaign.name}" cloned`);
+      loadStats();
+      loadCampaigns(page, statusFilter);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to clone campaign");
+    }
+  };
+
+  const handlePreview = async (campaign: XAutoCampaign) => {
+    setPreviewTarget(campaign);
+    setPreviewOptions([]);
+    setPreviewLoading(true);
+    try {
+      const res = await previewAdminXCampaign(campaign.campaign_id);
+      setPreviewOptions(res.options);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to generate preview");
+      setPreviewTarget(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   // Grok Manager handlers
   useEffect(() => {
     if (grokOpen && grokMessages.length === 0) {
@@ -639,7 +723,12 @@ export default function XAutoCampaigns() {
       key: "next_run_at",
       header: "Next Run",
       render: (row: XAutoCampaign) =>
-        row.status === "active" ? formatDate(row.next_run_at) : <span className="text-pnp-textSecondary">\u2014</span>,
+        row.status === "active" ? (
+          <div>
+            <CountdownTimer targetDate={row.next_run_at} />
+            <p className="text-xs text-pnp-textSecondary mt-0.5">{formatDate(row.next_run_at)}</p>
+          </div>
+        ) : <span className="text-pnp-textSecondary">\u2014</span>,
     },
     {
       key: "actions",
@@ -663,6 +752,18 @@ export default function XAutoCampaigns() {
             className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
           >
             Edit
+          </button>
+          <button
+            onClick={() => handleClone(row)}
+            className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
+          >
+            Clone
+          </button>
+          <button
+            onClick={() => handlePreview(row)}
+            className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
+          >
+            Preview
           </button>
           <button
             onClick={() =>
@@ -689,9 +790,7 @@ export default function XAutoCampaigns() {
     {
       key: "text",
       header: "Post Text",
-      render: (row: XAutoCampaignPost) => (
-        <p className="text-xs max-w-[300px] truncate" title={row.text}>{row.text}</p>
-      ),
+      render: (row: XAutoCampaignPost) => <ExpandablePostText text={row.text} />,
     },
     {
       key: "status",
@@ -731,7 +830,7 @@ export default function XAutoCampaigns() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 2xl:grid-cols-5 gap-3 mb-6">
         <StatCard label={t.admin.xCampaigns.stats.active} value={stats?.activeCampaigns ?? "\u2014"} variant={stats && stats.activeCampaigns > 0 ? "success" : "default"} />
         <StatCard label={t.admin.xCampaigns.stats.totalGenerated} value={stats?.totalGenerated ?? "\u2014"} />
         <StatCard label={t.admin.xCampaigns.stats.totalPosted} value={stats?.totalPosted ?? "\u2014"} variant="success" />
@@ -739,6 +838,19 @@ export default function XAutoCampaigns() {
           label={t.admin.xCampaigns.stats.failed}
           value={stats?.totalFailed ?? "\u2014"}
           variant={stats && stats.totalFailed > 0 ? "danger" : "default"}
+        />
+        <StatCard
+          label="Success Rate"
+          value={stats && stats.totalGenerated > 0
+            ? `${Math.round((stats.totalPosted / stats.totalGenerated) * 100)}%`
+            : "\u2014"}
+          variant={
+            stats && stats.totalGenerated > 0
+              ? stats.totalPosted / stats.totalGenerated >= 0.8 ? "success"
+                : stats.totalPosted / stats.totalGenerated >= 0.5 ? "warning"
+                : "danger"
+              : "default"
+          }
         />
       </div>
 
@@ -1168,6 +1280,56 @@ export default function XAutoCampaigns() {
           </div>
         )}
       </div>
+
+      {/* Preview Modal */}
+      {previewTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+          <div className="bg-pnp-surface border border-pnp-border rounded-xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-pnp-border">
+              <div>
+                <h3 className="text-sm font-semibold text-pnp-textPrimary">Post Preview</h3>
+                <p className="text-xs text-pnp-textSecondary">{previewTarget.name}</p>
+              </div>
+              <button
+                onClick={() => setPreviewTarget(null)}
+                className="text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors text-xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              {previewLoading ? (
+                <div className="flex items-center gap-2 text-pnp-textSecondary text-sm">
+                  <div className="w-4 h-4 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+                  Generating with Grok...
+                </div>
+              ) : previewOptions.length > 0 ? (
+                <div className="space-y-3">
+                  {previewOptions.map((option, i) => (
+                    <div key={i} className="p-3 rounded-lg bg-pnp-background border border-pnp-border">
+                      <p className="text-xs font-semibold text-pnp-accent mb-1">
+                        {previewOptions.length > 1 ? `Option ${String.fromCharCode(65 + i)}` : "Generated Post"}
+                      </p>
+                      <p className="text-sm text-pnp-textPrimary whitespace-pre-wrap">{option}</p>
+                      <p className="text-xs text-pnp-textSecondary mt-1">{option.length} chars</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-pnp-textSecondary">No options generated.</p>
+              )}
+            </div>
+            <div className="p-4 border-t border-pnp-border flex justify-end">
+              <button
+                onClick={() => setPreviewTarget(null)}
+                className="px-4 py-2 rounded-lg text-sm bg-pnp-background border border-pnp-border text-pnp-textPrimary hover:border-pnp-accent/50 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
