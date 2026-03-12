@@ -16,6 +16,7 @@ class EventModel {
       id: row.id,
       creatorId: row.creator_id,
       creatorName: row.creator_name || null,
+      creatorUsername: row.creator_username || null,
       creatorPhoto: row.creator_photo || null,
       type: row.type,
       title: row.title,
@@ -56,6 +57,7 @@ class EventModel {
     const result = await query(
       `SELECT e.*,
               u.first_name || COALESCE(' ' || u.last_name, '') AS creator_name,
+              u.username AS creator_username,
               u.photo_file_id AS creator_photo,
               CASE WHEN r.user_id IS NOT NULL THEN TRUE ELSE FALSE END AS user_rsvpd
        FROM ${TABLE} e
@@ -86,6 +88,7 @@ class EventModel {
     const result = await query(
       `SELECT e.*,
               u.first_name || COALESCE(' ' || u.last_name, '') AS creator_name,
+              u.username AS creator_username,
               u.photo_file_id AS creator_photo,
               CASE WHEN r.user_id IS NOT NULL THEN TRUE ELSE FALSE END AS user_rsvpd
        FROM ${TABLE} e
@@ -105,6 +108,7 @@ class EventModel {
     const result = await query(
       `SELECT e.*,
               u.first_name || COALESCE(' ' || u.last_name, '') AS creator_name,
+              u.username AS creator_username,
               u.photo_file_id AS creator_photo,
               CASE WHEN r.user_id IS NOT NULL THEN TRUE ELSE FALSE END AS user_rsvpd
        FROM ${TABLE} e
@@ -124,6 +128,7 @@ class EventModel {
     const result = await query(
       `SELECT e.*,
               u.first_name || COALESCE(' ' || u.last_name, '') AS creator_name,
+              u.username AS creator_username,
               u.photo_file_id AS creator_photo
        FROM ${TABLE} e
        LEFT JOIN users u ON u.id = e.creator_id
@@ -135,7 +140,7 @@ class EventModel {
     return result.rows.map((r) => this._map(r));
   }
 
-  static async update(id, creatorId, { title, description, coverImage, scheduledAt, durationMinutes, maxAttendees, tags, status }) {
+  static async update(id, creatorId, { title, description, coverImage, scheduledAt, durationMinutes, maxAttendees, hangoutGroupId, tags, status }) {
     const fields = [];
     const params = [id, String(creatorId)];
 
@@ -151,6 +156,7 @@ class EventModel {
     set('scheduled_at', scheduledAt);
     set('duration_minutes', durationMinutes);
     set('max_attendees', maxAttendees);
+    set('hangout_group_id', hangoutGroupId);
     set('tags', tags);
     set('status', status);
 
@@ -215,6 +221,7 @@ class EventModel {
     const result = await query(
       `SELECT e.*, r.created_at AS rsvp_at,
               u.first_name || COALESCE(' ' || u.last_name, '') AS creator_name,
+              u.username AS creator_username,
               u.photo_file_id AS creator_photo,
               TRUE AS user_rsvpd
        FROM ${RSVP_TABLE} r

@@ -9,6 +9,7 @@ interface EventCardProps {
   onRsvp?: (eventId: string, rsvpd: boolean) => void;
   onCancel?: (eventId: string) => void;
   canCancel?: boolean;
+  onViewDetails?: (event: EventItem) => void;
 }
 
 function formatEventDate(iso: string): { date: string; time: string } {
@@ -40,7 +41,7 @@ function isValidUrl(url: string | undefined | null): url is string {
 
 const isLiveType = (e: EventItem) => e.type === "live_stream";
 
-export function EventCard({ event, compact = false, onRsvp, onCancel, canCancel }: EventCardProps) {
+export function EventCard({ event, compact = false, onRsvp, onCancel, canCancel, onViewDetails }: EventCardProps) {
   const isLive = isLiveType(event);
   const isHappeningNow = event.status === "live";
   const isFull = event.maxAttendees != null && event.rsvpCount >= event.maxAttendees;
@@ -55,7 +56,8 @@ export function EventCard({ event, compact = false, onRsvp, onCancel, canCancel 
     return (
       <div
         className="flex items-start gap-3 rounded-xl p-3"
-        style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.05)" }}
+        style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.05)", cursor: onViewDetails ? "pointer" : undefined }}
+        onClick={() => onViewDetails?.(event)}
       >
         {isValidUrl(event.coverImage) ? (
           <img
@@ -99,6 +101,7 @@ export function EventCard({ event, compact = false, onRsvp, onCancel, canCancel 
     <div
       className="glass-card-sm flex-shrink-0 overflow-hidden cursor-pointer hover:border-white/15 transition-colors"
       style={{ width: 240, border: event.isFeatured ? "1px solid rgba(255,180,84,0.35)" : undefined }}
+      onClick={() => onViewDetails?.(event)}
     >
       {/* Cover / header */}
       <div className="relative" style={{ height: 110 }}>

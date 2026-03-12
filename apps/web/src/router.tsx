@@ -12,6 +12,7 @@ const Media = lazy(() => import("@/pages/Media"));
 const Live = lazy(() => import("@/pages/Live"));
 const Stream = lazy(() => import("@/pages/Stream"));
 const Nearby = lazy(() => import("@/pages/Nearby"));
+const Channels = lazy(() => import("@/pages/Channels"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const Social = lazy(() => import("@/pages/Social"));
 const Profile = lazy(() => import("@/pages/Profile"));
@@ -113,6 +114,16 @@ export const router = createBrowserRouter([
           <ModuleLoader>
             <VerificationGate>
               <Nearby />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "channels",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <Channels />
             </VerificationGate>
           </ModuleLoader>
         ),

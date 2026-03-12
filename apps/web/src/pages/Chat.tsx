@@ -48,6 +48,7 @@ import { connectSocket } from "@/lib/socket";
 import { translateText } from "@/lib/feedI18n";
 import EmojiReactionBar, { type Reaction } from "@/components/EmojiReactionBar";
 import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
+import { NearbyWidget } from "@/components/NearbyWidget";
 import { HangoutsPaywall } from "@/components/HangoutsPaywall";
 import { ApiError } from "@/lib/api";
 
@@ -122,6 +123,8 @@ const MessageBubble = memo(function MessageBubble({
   const hasText = !!(msg.content && msg.content.trim());
   const [translatedContent, setTranslatedContent] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
+  const showAvatarFallback = !isValidPhotoUrl(msg.photo_url) || avatarError;
 
   const handleTranslate = useCallback(async () => {
     if (isTranslating) return;
@@ -138,31 +141,25 @@ const MessageBubble = memo(function MessageBubble({
       {/* Avatar */}
       <button
         onClick={() => onNavigate(profilePath)}
-        className="flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent rounded-full"
+        className="w-11 h-11 flex items-center justify-center rounded-full flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
         aria-label={`View ${msg.first_name || msg.username || "user"}'s profile`}
       >
-        {isValidPhotoUrl(msg.photo_url) ? (
+        {!showAvatarFallback && (
           <img
-            src={msg.photo_url}
-            className="w-8 h-8 rounded-full object-cover"
+            src={msg.photo_url!}
             alt=""
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = "none";
-              const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement;
-              if (fallback) fallback.style.display = "flex";
-            }}
+            className="w-8 h-8 rounded-full object-cover"
+            onError={() => setAvatarError(true)}
           />
-        ) : null}
-        <div
-          className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
-          style={{
-            background: isMe ? "rgba(230, 145, 56, 0.2)" : "rgba(212, 0, 122, 0.2)",
-            color: isMe ? "#E69138" : "#D4007A",
-            display: isValidPhotoUrl(msg.photo_url) ? "none" : undefined,
-          }}
-        >
-          {(msg.first_name || msg.username || "?")[0].toUpperCase()}
-        </div>
+        )}
+        {showAvatarFallback && (
+          <div
+            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+          >
+            {(msg.first_name || msg.username || "?")[0].toUpperCase()}
+          </div>
+        )}
       </button>
 
       {/* Bubble */}
@@ -280,6 +277,73 @@ function DateSeparator({ date }: { date: string }) {
   );
 }
 
+// ─── Call Invite Toast ──────────────────────────────────────────────────────
+
+function CallInviteToast({
+  notif,
+  groups,
+  onOpen,
+  onDismiss,
+  navigate,
+  t,
+}: {
+  notif: { groupId: number; groupName: string; fromName: string; fromPhotoUrl: string | null } | null;
+  groups: HangoutGroup[];
+  onOpen: (group: HangoutGroup) => Promise<void>;
+  onDismiss: () => void;
+  navigate: (path: string) => void;
+  t: any;
+}) {
+  if (!notif) return null;
+  const group = groups.find(g => g.id === notif.groupId);
+  const validPhoto = notif.fromPhotoUrl && (notif.fromPhotoUrl.startsWith("/") || notif.fromPhotoUrl.startsWith("http"));
+  return (
+    <div className="absolute top-3 left-3 right-3 z-50 animate-fade-in-up" style={{ animationDuration: "0.2s" }}>
+      <div className="glass-card-sm p-3 flex items-center gap-3" style={{ borderColor: "rgba(94,209,196,0.3)" }}>
+        {validPhoto ? (
+          <img src={notif.fromPhotoUrl!} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+        ) : (
+          <div
+            className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+          >
+            {(notif.fromName || "?")[0].toUpperCase()}
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-white truncate">{t.chat.callInviteTitle(notif.fromName)}</p>
+          <p className="text-[10px] text-pnp-textSecondary truncate">{t.chat.callInviteBody(notif.groupName)}</p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => {
+              if (group) {
+                onOpen(group).catch(() => {});
+              } else {
+                // User isn't a member — navigate to hangouts so they can find the group
+                navigate("/chat");
+              }
+              onDismiss();
+            }}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white active:scale-95 transition-all hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-1 focus-visible:ring-offset-pnp-background"
+            style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
+          >
+            {t.chat.joinCall}
+          </button>
+          <button
+            onClick={onDismiss}
+            className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all"
+            style={{ color: "#8E8E93" }}
+            aria-label="Dismiss"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export default function Chat() {
@@ -377,6 +441,21 @@ export default function Chat() {
   // Online members panel
   const [showOnline, setShowOnline] = useState(false);
 
+  // In-app confirmation modal (replaces window.confirm)
+  const [confirmAction, setConfirmAction] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => Promise<void>;
+    isDanger?: boolean;
+  } | null>(null);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+
+  // Group overflow menu
+  const [showGroupMenu, setShowGroupMenu] = useState(false);
+
+  // Dedicated error states for non-upload errors
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
+
   // Incoming invite notification (global — received even from other groups)
   const [inviteNotif, setInviteNotif] = useState<{
     groupId: number;
@@ -426,11 +505,12 @@ export default function Chat() {
 
   const loadDiscover = useCallback(async () => {
     setDiscoverLoading(true);
+    setDiscoverError(null);
     try {
       const data = await discoverHangoutGroups();
       setDiscoverList(data.groups || []);
     } catch {
-      // silent fail
+      setDiscoverError("Failed to load groups. Tap to retry.");
     } finally {
       setDiscoverLoading(false);
     }
@@ -447,7 +527,7 @@ export default function Chat() {
         loadDiscover();
       }
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Failed to join group");
+      setDiscoverError(err instanceof Error ? err.message : "Failed to join group");
     }
   };
 
@@ -468,7 +548,7 @@ export default function Chat() {
       loadJoinRequests(groupId);
       if (action === "accept") loadGroups();
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : `Failed to ${action} request`);
+      setError(err instanceof Error ? err.message : `Failed to ${action} request`);
     }
   };
 
@@ -511,12 +591,19 @@ export default function Chat() {
     }
   }, [hasMore, isLoadingMore, loadOlderMessages]);
 
-  // Cleanup loading timer on unmount
+  // Start (and cancel) the messagesLoading fallback timer whenever the active group changes.
+  // Using a useEffect here ensures the previous timer is always cancelled before a new one
+  // starts, preventing stale timers from clearing the loading state for the wrong group.
   useEffect(() => {
+    if (!activeGroup) return;
+    loadingTimerRef.current = setTimeout(() => setMessagesLoading(false), 8000);
     return () => {
-      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
+      if (loadingTimerRef.current) {
+        clearTimeout(loadingTimerRef.current);
+        loadingTimerRef.current = null;
+      }
     };
-  }, []);
+  }, [activeGroup?.id]);
 
   // Preserve scroll position after loading older messages
   useEffect(() => {
@@ -560,15 +647,14 @@ export default function Chat() {
     setCallId(null);
     setCallIsModerator(false);
     setMessagesLoading(true);
+    setMsgInput("");
+    setMessageReactions({});
+    setUploadError(null);
     clearMedia();
     isNearBottom.current = true;
 
     // Mark as read
     markGroupAsRead(group.id).catch(() => {});
-
-    // Give socket a moment to deliver history, then clear loading
-    if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-    loadingTimerRef.current = setTimeout(() => setMessagesLoading(false), 1000);
 
     // If there's already an active call, fetch the URL so the banner/overlay appears.
     // We only auto-open the overlay when the user explicitly clicks Join (not on entering
@@ -596,6 +682,8 @@ export default function Chat() {
     setCallId(null);
     setCallIsModerator(false);
     setShowOnline(false);
+    setMsgInput("");
+    setUploadError(null);
     clearMedia();
     loadGroups();
   };
@@ -775,25 +863,33 @@ export default function Chat() {
 
   // ─── Group management ──────────────────────────────────────────────
 
-  const handleLeaveGroup = async (gid: number) => {
-    if (!window.confirm(t.chat.leaveGroupConfirm)) return;
-    try {
-      await leaveHangoutGroup(gid);
-      closeChat();
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Failed to leave group");
-    }
-  };
+  const handleLeaveGroup = useCallback((gid: number) => {
+    const group = groups.find(g => g.id === gid);
+    setConfirmAction({
+      title: t.chat.leaveGroup,
+      message: `Leave "${group?.name ?? "this group"}"? You can rejoin later if it's public.`,
+      isDanger: true,
+      onConfirm: async () => {
+        await leaveHangoutGroup(gid);
+        if (activeGroup?.id === gid) closeChat();
+        loadGroups();
+      },
+    });
+  }, [groups, activeGroup, t, loadGroups]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleDeleteGroup = async (gid: number) => {
-    if (!window.confirm(t.chat.deleteGroupConfirm)) return;
-    try {
-      await deleteHangoutGroup(gid);
-      closeChat();
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Failed to delete group");
-    }
-  };
+  const handleDeleteGroup = useCallback((gid: number) => {
+    const group = groups.find(g => g.id === gid);
+    setConfirmAction({
+      title: "Delete Group",
+      message: `Permanently delete "${group?.name ?? "this group"}"? This cannot be undone.`,
+      isDanger: true,
+      onConfirm: async () => {
+        await deleteHangoutGroup(gid);
+        if (activeGroup?.id === gid) closeChat();
+        loadGroups();
+      },
+    });
+  }, [groups, activeGroup, loadGroups]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Memoized callbacks ────────────────────────────────────────────
 
@@ -830,64 +926,7 @@ export default function Chat() {
         )}
 
         {/* Incoming call invite toast */}
-        {inviteNotif && (
-          <div
-            className="fixed top-4 left-1/2 z-50 w-full max-w-sm -translate-x-1/2 px-4 animate-fade-in-up"
-            style={{ pointerEvents: "none" }}
-          >
-            <div
-              className="rounded-2xl p-4 flex items-center gap-3 shadow-2xl"
-              style={{
-                background: "#1C1C1E",
-                border: "1px solid rgba(94,209,196,0.3)",
-                pointerEvents: "auto",
-              }}
-            >
-              {/* Avatar */}
-              {inviteNotif.fromPhotoUrl ? (
-                <img src={inviteNotif.fromPhotoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
-              ) : (
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                  style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)", color: "#fff" }}
-                >
-                  {(inviteNotif.fromName || "?")[0].toUpperCase()}
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-white truncate">
-                  {t.chat.callInviteTitle(inviteNotif.fromName)}
-                </p>
-                <p className="text-xs truncate" style={{ color: "#8E8E93" }}>
-                  {t.chat.callInviteBody(inviteNotif.groupName)}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <button
-                  onClick={() => {
-                    const g = groups.find((gr) => gr.id === inviteNotif.groupId);
-                    if (g) openChat(g);
-                    setInviteNotif(null);
-                  }}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                  style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
-                >
-                  {t.chat.joinCall}
-                </button>
-                <button
-                  onClick={() => setInviteNotif(null)}
-                  className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
-                  style={{ color: "#8E8E93" }}
-                  aria-label={t.chat.dismissInvite}
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <CallInviteToast notif={inviteNotif} groups={groups} onOpen={openChat} onDismiss={() => setInviteNotif(null)} navigate={navigate} t={t} />
 
         {/* Lightbox */}
         {lightboxSrc && (
@@ -958,21 +997,54 @@ export default function Chat() {
             />
           )}
 
-          {/* Leave/delete button (hidden for main + Wall of Fame groups) */}
-          {!activeGroup.isMain && !activeGroup.isWallOfFame && (
+          {/* Three-dot overflow menu */}
+          <div className="relative">
             <button
-              onClick={() => {
-                if (activeGroup.creatorId === user?.dbId) {
-                  handleDeleteGroup(activeGroup.id);
-                } else {
-                  handleLeaveGroup(activeGroup.id);
-                }
-              }}
-              className="text-xs px-2 py-1.5 rounded text-pnp-error hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              onClick={() => setShowGroupMenu(v => !v)}
+              className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              style={{ color: "#8E8E93" }}
+              aria-label="Group options"
+              aria-expanded={showGroupMenu}
             >
-              {activeGroup.creatorId === user?.dbId ? t.chat.deleteGroup : t.chat.leaveGroup}
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" />
+              </svg>
             </button>
-          )}
+            {showGroupMenu && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowGroupMenu(false)} />
+                <div className="absolute right-0 top-10 z-40 rounded-xl overflow-hidden shadow-xl min-w-[160px]" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  <button
+                    onClick={() => { setShowGroupMenu(false); setShowOnline(true); }}
+                    className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
+                  >
+                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    Members
+                  </button>
+                  {!activeGroup.isMain && (
+                    <button
+                      onClick={() => { setShowGroupMenu(false); handleLeaveGroup(activeGroup.id); }}
+                      className="w-full px-4 py-3 text-sm text-left hover:bg-white/10 transition-colors flex items-center gap-3"
+                      style={{ color: "#FF6B6B" }}
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                      Leave Group
+                    </button>
+                  )}
+                  {isAdmin && (
+                    <button
+                      onClick={() => { setShowGroupMenu(false); handleDeleteGroup(activeGroup.id); }}
+                      className="w-full px-4 py-3 text-sm text-left hover:bg-white/10 transition-colors flex items-center gap-3"
+                      style={{ color: "#FF6B6B" }}
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      Delete Group
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Active call banner (not for main group — uses Main Stage) */}
@@ -1027,6 +1099,10 @@ export default function Chat() {
               className="rounded-t-2xl w-full max-h-[60vh] flex flex-col"
               style={{ background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}
             >
+              {/* Drag handle */}
+              <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
+                <div className="w-10 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.2)" }} />
+              </div>
               {/* Panel header */}
               <div className="flex items-center justify-between px-5 pt-4 pb-3 flex-shrink-0">
                 <div>
@@ -1072,6 +1148,14 @@ export default function Chat() {
                           <div className="flex items-center gap-1 mt-0.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
                             <span className="text-xs" style={{ color: "#8E8E93" }}>{t.chat.online}</span>
+                            <NearbyWidget
+                              context="post"
+                              authorCity={(member as any).city}
+                              authorCountry={(member as any).country}
+                              userCity={user?.city}
+                              userCountry={user?.country}
+                              isCreator={false}
+                            />
                           </div>
                         </div>
                         {/* Invite button — only if call is active and not self */}
@@ -1091,6 +1175,20 @@ export default function Chat() {
                     );
                   })
                 )}
+              </div>
+              {/* View on Map button */}
+              <div className="px-4 pb-4 flex-shrink-0">
+                <button
+                  onClick={() => { setShowOnline(false); navigate("/nearby"); }}
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all active:scale-95"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  View on Map
+                </button>
               </div>
             </div>
           </div>
@@ -1243,6 +1341,44 @@ export default function Chat() {
             </button>
           </div>
         </div>
+
+        {/* In-app confirmation modal */}
+        {confirmAction && (
+          <div
+            className="fixed inset-0 z-[70] flex items-end justify-center"
+            style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+            onClick={(e) => { if (e.target === e.currentTarget && !confirmLoading) setConfirmAction(null); }}
+          >
+            <div className="w-full max-w-lg rounded-t-2xl p-6 space-y-4" style={{ background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+              {/* Drag handle */}
+              <div className="flex justify-center -mt-2 mb-2"><div className="w-10 h-1 rounded-full bg-white/20" /></div>
+              <h3 className="text-base font-bold text-white">{confirmAction.title}</h3>
+              <p className="text-sm text-pnp-textSecondary">{confirmAction.message}</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => !confirmLoading && setConfirmAction(null)}
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold text-pnp-textSecondary border border-pnp-border hover:bg-white/5 active:scale-98 transition-all"
+                  disabled={confirmLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    setConfirmLoading(true);
+                    try { await confirmAction.onConfirm(); setConfirmAction(null); }
+                    catch { /* silent */ }
+                    finally { setConfirmLoading(false); }
+                  }}
+                  disabled={confirmLoading}
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold text-white active:scale-98 transition-all disabled:opacity-50"
+                  style={{ background: confirmAction.isDanger ? "#C0392B" : "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  {confirmLoading ? "..." : confirmAction.title}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1258,64 +1394,7 @@ export default function Chat() {
       {showTutorial && <TutorialOverlay section="hangouts" onDismiss={dismissTutorial} />}
 
       {/* Incoming call invite toast */}
-      {inviteNotif && (
-        <div
-          className="fixed top-4 left-1/2 z-50 w-full max-w-sm -translate-x-1/2 px-4 animate-fade-in-up"
-          style={{ pointerEvents: "none" }}
-        >
-          <div
-            className="rounded-2xl p-4 flex items-center gap-3 shadow-2xl"
-            style={{
-              background: "#1C1C1E",
-              border: "1px solid rgba(94,209,196,0.3)",
-              pointerEvents: "auto",
-            }}
-          >
-            {/* Avatar */}
-            {inviteNotif.fromPhotoUrl ? (
-              <img src={inviteNotif.fromPhotoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
-            ) : (
-              <div
-                className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)", color: "#fff" }}
-              >
-                {(inviteNotif.fromName || "?")[0].toUpperCase()}
-              </div>
-            )}
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-white truncate">
-                {t.chat.callInviteTitle(inviteNotif.fromName)}
-              </p>
-              <p className="text-xs truncate" style={{ color: "#8E8E93" }}>
-                {t.chat.callInviteBody(inviteNotif.groupName)}
-              </p>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <button
-                onClick={() => {
-                  const g = groups.find((gr) => gr.id === inviteNotif.groupId);
-                  if (g) openChat(g);
-                  setInviteNotif(null);
-                }}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
-              >
-                {t.chat.joinCall}
-              </button>
-              <button
-                onClick={() => setInviteNotif(null)}
-                className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
-                style={{ color: "#8E8E93" }}
-                aria-label={t.chat.dismissInvite}
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <CallInviteToast notif={inviteNotif} groups={groups} onOpen={openChat} onDismiss={() => setInviteNotif(null)} navigate={navigate} t={t} />
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -1339,7 +1418,10 @@ export default function Chat() {
         <div className="glass-card-sm p-4 mb-4 animate-fade-in-up">
           <h3 className="text-sm font-semibold text-pnp-textPrimary mb-1">{t.chat.createSubgroupTitle}</h3>
           <p className="text-xs text-pnp-textSecondary mb-3">{t.chat.createSubgroupHint}</p>
-          <label className="sr-only" htmlFor="new-group-name">{t.chat.groupNameLabel}</label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs text-pnp-textSecondary" htmlFor="new-group-name">{t.chat.groupNameLabel}</label>
+            <span className={`text-[10px] ${newName.length > 90 ? "text-red-400" : "text-pnp-textSecondary"}`}>{newName.length}/100</span>
+          </div>
           <input
             id="new-group-name"
             value={newName}
@@ -1348,7 +1430,10 @@ export default function Chat() {
             className="w-full bg-white/5 rounded-lg px-3 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 mb-2 transition-colors"
             maxLength={100}
           />
-          <label className="sr-only" htmlFor="new-group-desc">{t.chat.groupDescriptionLabel}</label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs text-pnp-textSecondary" htmlFor="new-group-desc">{t.chat.groupDescriptionLabel}</label>
+            <span className={`text-[10px] ${newDesc.length > 450 ? "text-red-400" : "text-pnp-textSecondary"}`}>{newDesc.length}/500</span>
+          </div>
           <textarea
             id="new-group-desc"
             value={newDesc}
@@ -1428,7 +1513,7 @@ export default function Chat() {
       {/* Loading skeletons */}
       {isLoading ? (
         <div className="space-y-3" aria-label="Loading groups" aria-busy="true">
-          {Array.from({ length: 3 }).map((_, i) => (
+          {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="glass-card-sm p-4 animate-pulse">
               <div className="flex gap-3">
                 <div className="w-12 h-12 rounded-full bg-pnp-surface flex-shrink-0" />
@@ -1450,19 +1535,29 @@ export default function Chat() {
           <p className="text-sm text-pnp-textSecondary">
             {t.chat.noGroupsLoginHint}
           </p>
+          {isPrime && (
+            <button
+              onClick={() => setShowCreate(true)}
+              className="mt-4 px-6 py-2.5 rounded-xl text-sm font-semibold text-white active:scale-95 transition-transform"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              Create a Group
+            </button>
+          )}
         </div>
       ) : (
         /* Group list */
         <div className="space-y-2">
           {/* Free-tier upgrade prompt */}
           {isFree && (
-            <div className="glass-card-sm p-4 mb-2 text-center border border-purple-500/30 bg-purple-900/20">
-              <p className="text-sm text-purple-200 mb-2">
+            <div className="glass-card-sm p-4 mb-2 text-center border border-pnp-accent/30">
+              <p className="text-sm text-pnp-textSecondary mb-2">
                 {t.chat.freeTierJoinPrompt}
               </p>
               <button
                 onClick={() => navigate("/subscribe")}
-                className="px-4 py-2 rounded-full text-sm font-semibold bg-gradient-to-r from-purple-500 to-pink-500 text-white active:scale-95 transition-transform"
+                className="px-4 py-2 rounded-full text-sm font-semibold text-white active:scale-95 transition-transform"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
               >
                 {t.chat.freeTierJoinButton}
               </button>
@@ -1472,7 +1567,7 @@ export default function Chat() {
             <button
               key={group.id}
               onClick={() => openChat(group)}
-              className="w-full glass-card-sm p-4 text-left hover:border-white/20 active:scale-[0.99] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              className="w-full glass-card-sm p-4 text-left hover:border-white/20 active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             >
               <div className="flex gap-3 items-center">
                 {/* Group avatar */}
@@ -1487,7 +1582,7 @@ export default function Chat() {
                     color: group.isMain || group.isWallOfFame ? "#fff" : "#D4007A",
                   }}
                 >
-                  {group.isMain ? "P" : group.isWallOfFame ? "\u{1F3C6}" : group.name[0]?.toUpperCase()}
+                  {group.isMain ? "P" : group.isWallOfFame ? "\u{1F3C6}" : (group.name?.[0] || "?").toUpperCase()}
                 </div>
 
                 <div className="flex-1 min-w-0">
@@ -1559,6 +1654,8 @@ export default function Chat() {
             if (next && discoverList.length === 0) loadDiscover();
           }}
           className="flex items-center gap-2 mb-3 group"
+          aria-expanded={showDiscover}
+          aria-controls="discover-groups-list"
         >
           <h2 className="text-sm font-semibold text-pnp-textSecondary group-hover:text-pnp-textPrimary transition-colors">
             {t.chat.discoverGroups}
@@ -1572,13 +1669,29 @@ export default function Chat() {
         </button>
 
         {showDiscover && (
-          <div className="space-y-2 animate-fade-in-up">
+          <div id="discover-groups-list" className="space-y-2 animate-fade-in-up">
             {discoverLoading ? (
-              <div className="glass-card-sm p-4 animate-pulse">
-                <div className="h-4 bg-pnp-surface rounded w-40" />
+              <div className="space-y-2">
+                {[0, 1, 2].map(i => (
+                  <div key={i} className="glass-card-sm p-4 animate-pulse">
+                    <div className="flex gap-3 items-center">
+                      <div className="w-10 h-10 rounded-full flex-shrink-0" style={{ background: "#2C2C2E" }} />
+                      <div className="flex-1 space-y-2">
+                        <div className="h-4 rounded w-32" style={{ background: "#2C2C2E" }} />
+                        <div className="h-3 rounded w-24" style={{ background: "#2C2C2E" }} />
+                      </div>
+                      <div className="h-8 w-16 rounded-lg flex-shrink-0" style={{ background: "#2C2C2E" }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : discoverError ? (
+              <div className="text-center py-4">
+                <p className="text-sm text-pnp-textSecondary mb-2">{discoverError}</p>
+                <button onClick={() => { setDiscoverError(null); loadDiscover(); }} className="text-sm text-pnp-accent hover:underline">Retry</button>
               </div>
             ) : discoverList.length === 0 ? (
-              <p className="text-xs text-pnp-textSecondary px-1">{t.chat.noGroupsToDiscover}</p>
+              <p className="text-sm text-pnp-textSecondary text-center py-4">No public groups to join yet.</p>
             ) : (
               discoverList.map((group) => (
                 <div key={group.id} className="glass-card-sm p-4">
@@ -1587,7 +1700,7 @@ export default function Chat() {
                       className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
                       style={{ background: "rgba(212, 0, 122, 0.2)", color: "#D4007A" }}
                     >
-                      {group.name[0]?.toUpperCase()}
+                      {(group.name?.[0] || "?").toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -1605,7 +1718,7 @@ export default function Chat() {
                     {isFree ? (
                       <button
                         onClick={() => navigate("/subscribe")}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 border border-purple-500/50 text-purple-300 hover:bg-purple-500/10 active:scale-95 transition-all"
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 border border-pnp-accent/50 text-pnp-accent hover:bg-pnp-accent/10 active:scale-95 transition-all"
                       >
                         {t.chat.freeTierDiscoverButton}
                       </button>
@@ -1718,6 +1831,43 @@ export default function Chat() {
           >
             {t.chat.upgradeToPrime}
           </button>
+        </div>
+      )}
+
+      {/* In-app confirmation modal */}
+      {confirmAction && (
+        <div
+          className="fixed inset-0 z-[70] flex items-end justify-center"
+          style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget && !confirmLoading) setConfirmAction(null); }}
+        >
+          <div className="w-full max-w-lg rounded-t-2xl p-6 space-y-4" style={{ background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+            <div className="flex justify-center -mt-2 mb-2"><div className="w-10 h-1 rounded-full bg-white/20" /></div>
+            <h3 className="text-base font-bold text-white">{confirmAction.title}</h3>
+            <p className="text-sm text-pnp-textSecondary">{confirmAction.message}</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => !confirmLoading && setConfirmAction(null)}
+                className="flex-1 py-3 rounded-xl text-sm font-semibold text-pnp-textSecondary border border-pnp-border hover:bg-white/5 active:scale-98 transition-all"
+                disabled={confirmLoading}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setConfirmLoading(true);
+                  try { await confirmAction.onConfirm(); setConfirmAction(null); }
+                  catch { /* silent */ }
+                  finally { setConfirmLoading(false); }
+                }}
+                disabled={confirmLoading}
+                className="flex-1 py-3 rounded-xl text-sm font-semibold text-white active:scale-98 transition-all disabled:opacity-50"
+                style={{ background: confirmAction.isDanger ? "#C0392B" : "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                {confirmLoading ? "..." : confirmAction.title}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

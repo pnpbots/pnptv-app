@@ -71,6 +71,8 @@ export default function PostCard({
   onSubscribeCta,
   contentDisclaimerAccepted,
   onAcceptDisclaimer,
+  viewerCity,
+  viewerCountry,
 }: PostCardProps) {
   const t = useI18n();
   const p = t.profile;
@@ -267,8 +269,8 @@ export default function PostCard({
               <NearbyBadge
                 userCity={post.author_city}
                 userCountry={post.author_country}
-                viewerCity={post.viewer_city} // Assuming viewer_city is passed as a prop to PostCard
-                viewerCountry={post.viewer_country} // Assuming viewer_country is passed as a prop to PostCard
+                viewerCity={viewerCity}
+                viewerCountry={viewerCountry}
                 username={post.author_first_name || post.author_username || "User"}
               />
             )}

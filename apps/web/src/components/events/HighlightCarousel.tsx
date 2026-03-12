@@ -10,6 +10,7 @@ interface HighlightCarouselProps {
   onRsvp?: (eventId: string, rsvpd: boolean) => void;
   onCancel?: (eventId: string) => void;
   canCancel?: (eventId: string, creatorId?: string) => boolean;
+  onViewDetails?: (event: import("./EventCard").EventItem) => void;
   className?: string;
 }
 
@@ -22,6 +23,7 @@ export function HighlightCarousel({
   onRsvp,
   onCancel,
   canCancel,
+  onViewDetails,
   className = "",
 }: HighlightCarouselProps) {
   if (loading) {
@@ -87,6 +89,7 @@ export function HighlightCarousel({
               onRsvp={onRsvp}
               onCancel={onCancel}
               canCancel={item.kind === "event" ? (canCancel ? canCancel(item.data.id, item.data.creatorId) : false) : false}
+              onViewDetails={onViewDetails}
             />
           ))}
         </div>

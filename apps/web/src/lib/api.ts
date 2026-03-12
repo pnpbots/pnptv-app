@@ -80,6 +80,8 @@ export interface TelegramAuthResponse {
     creator_type?: string | null;
     contentDisclaimer?: boolean;
     last_login_method?: string | null;
+    city?: string | null;
+    country?: string | null;
   };
   requiresTerms?: boolean;
   error?: string;
@@ -983,6 +985,33 @@ export function bulkUploadVideos(
 
 export function togglePostLike(postId: number): Promise<{ liked: boolean; likes_count?: number }> {
   return request(`/api/webapp/social/posts/${postId}/like`, { method: "POST" });
+}
+
+// ── Content (video) reactions ─────────────────────────────────────────────────
+
+export type ContentReaction = {
+  emoji: string;
+  count: number;
+  users: Array<{ id: string; username: string }>;
+  reactedByMe?: boolean;
+};
+
+export function getContentReactions(contentId: number): Promise<{
+  success: boolean;
+  reactions: ContentReaction[];
+}> {
+  return request(`/api/webapp/content/${contentId}/reactions`);
+}
+
+export function toggleContentReaction(contentId: number, emoji: string): Promise<{
+  success: boolean;
+  added: boolean;
+  reactions: ContentReaction[];
+}> {
+  return request(`/api/webapp/content/${contentId}/react`, {
+    method: "POST",
+    body: { emoji },
+  });
 }
 
 export function deleteSocialPost(postId: number): Promise<{ success: boolean }> {
@@ -3984,7 +4013,9 @@ export interface EventItem {
   userRsvpd: boolean;
   creatorId: string;
   creatorName?: string;
+  creatorUsername?: string | null;
   creatorPhoto?: string;
+  hangoutGroupId?: number | null;
   tags?: string[];
 }
 
@@ -4032,6 +4063,7 @@ export function updateEvent(
     scheduledAt: string;
     durationMinutes: number;
     maxAttendees: number;
+    hangoutGroupId: number | null;
     tags: string[];
     status: string;
   }>

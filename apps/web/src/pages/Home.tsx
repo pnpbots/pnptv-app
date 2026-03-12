@@ -9,6 +9,7 @@ import { useDirectus } from "@/hooks/useDirectus";
 import { useI18n } from "@/lib/i18n";
 import { PostComposer } from "@/components/PostComposer";
 import { SharePostModal } from "@/components/SharePostModal";
+import { NearbyWidget } from "@/components/NearbyWidget";
 import { UpcomingEvents } from "@/components/events/UpcomingEvents";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
 import type { EventItem } from "@/components/events/EventCard";
@@ -28,10 +29,11 @@ import {
   type HangoutGroup,
 } from "@/lib/api";
 import { translateText } from "@/lib/feedI18n";
-import { 
-  HighlightCarousel, 
-  type HighlightItem, 
-  type AnnouncementItem 
+import {
+  HighlightCarousel,
+  EventDetailModal,
+  type HighlightItem,
+  type AnnouncementItem
 } from "@/components/events";
 
 interface Announcement extends AnnouncementItem {}
@@ -70,6 +72,7 @@ export default function Home() {
   const [shareModalPostId, setShareModalPostId] = useState<number | null>(null);
   const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [eventKey, setEventKey] = useState(0);
+  const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
 
   const { data: announcements, isLoading: annLoading } = useDirectus<Announcement>({
     collection: "announcements",
@@ -301,6 +304,7 @@ export default function Home() {
         onRsvp={handleRsvp}
         onCancel={handleCancel}
         canCancel={(eventId, creatorId) => isAdmin || creatorId === user?.dbId}
+        onViewDetails={(event) => setDetailEvent(event)}
       />
 
       {/* Featured Performers */}
@@ -469,6 +473,15 @@ export default function Home() {
                       <span className="text-xs" style={{ color: "#8E8E93" }}>
                         &middot; {timeAgo(post.created_at)}
                       </span>
+                      <NearbyWidget
+                        context="post"
+                        authorCity={post.author_city}
+                        authorCountry={post.author_country}
+                        userCity={user?.city}
+                        userCountry={user?.country}
+                        isCreator={!!post.author_creator_status && post.author_creator_status === "approved"}
+                        authorName={post.author_first_name || post.author_username}
+                      />
                     </div>
                     <p className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed">
                       {translatedPosts[post.id] ?? post.content}
@@ -638,6 +651,18 @@ export default function Home() {
           onCreated={(_event: EventItem) => {
             setShowCreateEvent(false);
             setEventKey((k) => k + 1);
+          }}
+        />
+      )}
+
+      {detailEvent && (
+        <EventDetailModal
+          event={detailEvent}
+          onClose={() => setDetailEvent(null)}
+          onRsvp={handleRsvp}
+          onUpdated={(updated) => {
+            setEvents((prev) => prev.map((e) => e.id === updated.id ? updated : e));
+            setDetailEvent(updated);
           }}
         />
       )}

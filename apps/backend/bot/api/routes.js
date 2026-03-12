@@ -4262,6 +4262,9 @@ app.post('/api/webapp/chat/messages/:messageId/react', requireSessionAuth, async
 app.get('/api/webapp/chat/messages/:messageId/reactions', asyncHandler(reactionController.getChatReactions));
 // DM reactions
 app.post('/api/webapp/dm/messages/:messageId/react', requireSessionAuth, asyncHandler(reactionController.reactToDm));
+// Content reactions (PRIME videos / audio — contentId is a Directus integer ID)
+app.get('/api/webapp/content/:contentId/reactions', softAuth, asyncHandler(reactionController.getContentReactions));
+app.post('/api/webapp/content/:contentId/react', requireSessionAuth, socialActionLimiter, asyncHandler(reactionController.reactToContent));
 
 // ── Custom Media Packs (stickers / GIFs / custom emojis) ─────────────────────
 const mediaPackController = require('./controllers/mediaPackController');
@@ -4909,14 +4912,18 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
     const photoMap = await fetchPerformerPhotos(directusPerformers);
     const mapped = directusPerformers.map(p => mapDirectusPerformer(p, photoMap));
 
-    // Track which DB user IDs are already covered by Directus performers
+    // Track which DB user IDs and slugs are already covered by Directus performers
     const coveredUserIds = new Set(
       directusPerformers.filter(p => p.pnptv_id).map(p => String(p.pnptv_id))
+    );
+    const coveredSlugs = new Set(
+      directusPerformers.filter(p => p.slug).map(p => String(p.slug).toLowerCase())
     );
 
     // Add active creators from DB that aren't already in Directus
     for (const c of dbCreators) {
       if (coveredUserIds.has(String(c.id))) continue;
+      if (c.username && coveredSlugs.has(String(c.username).toLowerCase())) continue;
       const photo = c.photo_file_id
         ? (c.photo_file_id.startsWith('/') ? c.photo_file_id : `/${c.photo_file_id}`)
         : null;

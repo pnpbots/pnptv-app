@@ -31,6 +31,10 @@ export function useHangoutSocket(
   userId: string | undefined
 ) {
   const [messages, setMessages] = useState<GroupMessage[]>([]);
+  // Internal map tracks typing state by userId to prevent collisions when two
+  // users share the same first name.  The exported typingUsers is derived from
+  // the map's values so the external interface stays as string[].
+  const typingMap = useRef<Map<string, string>>(new Map());
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [callState, setCallState] = useState<CallState>(EMPTY_CALL);
   const [isConnected, setIsConnected] = useState(false);
@@ -62,6 +66,7 @@ export function useHangoutSocket(
   useEffect(() => {
     if (!groupId) {
       setMessages([]);
+      typingMap.current.clear();
       setTypingUsers([]);
       setCallState(EMPTY_CALL);
       setHasMore(true);
@@ -71,6 +76,7 @@ export function useHangoutSocket(
 
     // Reset state before attaching to new group (prevents stale messages flash)
     setMessages([]);
+    typingMap.current.clear();
     setTypingUsers([]);
     setCallState(EMPTY_CALL);
     setHasMore(true);
@@ -105,17 +111,23 @@ export function useHangoutSocket(
 
     const onTyping = (data: { userId: string; firstName: string }) => {
       if (data.userId === userId) return; // Ignore own typing
-      const name = data.firstName;
+      // Cap firstName to 50 chars to prevent oversized display strings from
+      // untrusted socket data.
+      const safeName = (data.firstName || "Someone").slice(0, 50);
 
-      setTypingUsers((prev) => (prev.includes(name) ? prev : [...prev, name]));
+      // Deduplicate by userId (not by name) so two users with the same first
+      // name are both tracked correctly.
+      typingMap.current.set(data.userId, safeName);
+      setTypingUsers(Array.from(typingMap.current.values()));
 
-      // Clear after 3s
+      // Clear after 3s of no further typing events from this user
       const existing = typingTimers.current.get(data.userId);
       if (existing) clearTimeout(existing);
       typingTimers.current.set(
         data.userId,
         setTimeout(() => {
-          setTypingUsers((prev) => prev.filter((n) => n !== name));
+          typingMap.current.delete(data.userId);
+          setTypingUsers(Array.from(typingMap.current.values()));
           typingTimers.current.delete(data.userId);
         }, 3000)
       );
@@ -220,9 +232,10 @@ export function useHangoutSocket(
       socket.off("hangout:call:joined", onCallJoined);
       socket.off("hangout:call:participant:left", onParticipantLeft);
 
-      // Clear typing timers
+      // Clear typing timers and map
       typingTimers.current.forEach((t) => clearTimeout(t));
       typingTimers.current.clear();
+      typingMap.current.clear();
       setTypingUsers([]);
       setOnlineMembers([]);
     };

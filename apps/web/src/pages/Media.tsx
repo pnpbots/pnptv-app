@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { Card, Skeleton, Badge } from "@pnptv/ui-kit";
@@ -6,9 +6,12 @@ import { useDirectus } from "@/hooks/useDirectus";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useTier } from "@/hooks/useTier";
+import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
 import { type Content, type Performer, getAssetUrl } from "@/lib/directus";
 import { AnimatedVideoThumbnail } from "@/components/AnimatedVideoThumbnail";
+import EmojiReactionBar from "@/components/EmojiReactionBar";
+import { type ContentReaction, getContentReactions, toggleContentReaction } from "@/lib/api";
 
 function formatDuration(seconds: number | null): string {
   if (!seconds) return "";
@@ -36,6 +39,7 @@ const PlayIcon = () => (
 
 export default function Media() {
   const { isPrime, isMember } = useTier();
+  const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const { media: t } = useI18n();
 
@@ -55,6 +59,8 @@ export default function Media() {
 
   const [activeVideo, setActiveVideo] = useState<Content | null>(null);
   const [activeSeries, setActiveSeries] = useState<string>("all");
+  const [videoReactions, setVideoReactions] = useState<ContentReaction[]>([]);
+  const [reactionsLoading, setReactionsLoading] = useState(false);
   const { showTutorial, dismissTutorial } = useTutorial("prime");
 
   // Fixed categories
@@ -74,6 +80,29 @@ export default function Media() {
     if (!isPrime) { navigate("/subscribe"); return; }
     setActiveVideo((prev) => (prev?.id === video.id ? null : video));
   };
+
+  // Load reactions whenever the active video changes
+  useEffect(() => {
+    if (!activeVideo?.id) {
+      setVideoReactions([]);
+      return;
+    }
+    setReactionsLoading(true);
+    getContentReactions(activeVideo.id)
+      .then((res) => { if (res.success) setVideoReactions(res.reactions); })
+      .catch(() => {})
+      .finally(() => setReactionsLoading(false));
+  }, [activeVideo?.id]);
+
+  const handleVideoReaction = useCallback(async (emoji: string) => {
+    if (!activeVideo?.id || !isAuthenticated) return;
+    try {
+      const res = await toggleContentReaction(activeVideo.id, emoji);
+      if (res.success) setVideoReactions(res.reactions);
+    } catch {
+      // silent — optimistic updates are not needed here; stale reactions are harmless
+    }
+  }, [activeVideo?.id, isAuthenticated]);
 
   return (
     <div className="page-container">
@@ -229,6 +258,20 @@ export default function Media() {
                 {activeVideo.description}
               </p>
             )}
+
+            {/* Reactions */}
+            <div className="mt-3 pt-3 border-t border-pnp-border">
+              {reactionsLoading ? (
+                <div className="h-7 w-32 rounded-full bg-pnp-surface animate-pulse" />
+              ) : (
+                <EmojiReactionBar
+                  reactions={videoReactions}
+                  onToggle={handleVideoReaction}
+                  currentUserId={user?.dbId}
+                  size="sm"
+                />
+              )}
+            </div>
           </div>
         </div>
       )}

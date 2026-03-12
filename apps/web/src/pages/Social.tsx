@@ -30,6 +30,7 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { translateText } from "@/lib/feedI18n";
 import EmojiReactionBar, { type Reaction } from "@/components/EmojiReactionBar";
+import { NearbyBadge } from "@/components/NearbyBadge";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
@@ -66,6 +67,8 @@ function PostCard({
   onNavigate,
   contentDisclaimerAccepted,
   onAcceptDisclaimer,
+  viewerCity,
+  viewerCountry,
 }: {
   post: SocialPostItem;
   currentUserId: string;
@@ -77,6 +80,8 @@ function PostCard({
   onNavigate: (path: string) => void;
   contentDisclaimerAccepted?: boolean;
   onAcceptDisclaimer?: () => Promise<void>;
+  viewerCity?: string | null;
+  viewerCountry?: string | null;
 }) {
   const { feed: t } = useI18n();
   const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
@@ -243,6 +248,17 @@ function PostCard({
               <span className="text-xs" style={{ color: "#8E8E93" }}>@{post.author_username}</span>
             )}
             <span className="text-xs" style={{ color: "#8E8E93" }}>&middot; {timeAgo(post.created_at, t.translating)}</span>
+
+            {/* Nearby badge */}
+            {post.author_city && post.author_country && (
+              <NearbyBadge
+                userCity={post.author_city}
+                userCountry={post.author_country}
+                viewerCity={viewerCity}
+                viewerCountry={viewerCountry}
+                username={post.author_first_name || post.author_username || "User"}
+              />
+            )}
 
             {/* Featured / Promoted badge */}
             {post.is_promoted && (

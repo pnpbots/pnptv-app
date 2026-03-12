@@ -62,8 +62,8 @@ export default function EmojiReactionBar({
                 ${textSize} font-medium
                 ${
                   reacted
-                    ? 'bg-violet-900/40 border-violet-500 text-violet-300'
-                    : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:border-zinc-500'
+                    ? 'bg-pnp-accent/20 border-pnp-accent text-pnp-accent'
+                    : 'bg-pnp-surface border-pnp-border text-pnp-textSecondary hover:bg-white/10 hover:border-pnp-border'
                 }
               `}
             >
@@ -73,7 +73,7 @@ export default function EmojiReactionBar({
             {/* Tooltip */}
             {tooltipNames && (
               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50 pointer-events-none hidden group-hover:block">
-                <div className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300 whitespace-nowrap shadow-lg max-w-[180px] truncate">
+                <div className="bg-pnp-background border border-pnp-border rounded px-2 py-1 text-xs text-pnp-textSecondary whitespace-nowrap shadow-lg max-w-[180px] truncate">
                   {tooltipNames}
                 </div>
               </div>
@@ -89,20 +89,20 @@ export default function EmojiReactionBar({
             onClick={() => setPickerOpen(v => !v)}
             aria-label="Add reaction"
             className={`
-              flex items-center justify-center w-7 ${pillH} rounded-full border border-zinc-700
-              bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-all ${textSize}
+              flex items-center justify-center w-7 ${pillH} rounded-full border border-pnp-border
+              bg-pnp-surface text-pnp-textSecondary hover:bg-white/10 transition-all ${textSize}
             `}
           >
             +
           </button>
 
           {pickerOpen && (
-            <div className="absolute bottom-full left-0 mb-1.5 z-50 bg-zinc-900 border border-zinc-700 rounded-xl p-2 shadow-xl flex gap-1.5">
+            <div className="absolute bottom-full left-0 mb-1.5 z-50 bg-pnp-background border border-pnp-border rounded-xl p-2 shadow-xl flex gap-1.5">
               {DEFAULT_EMOJIS.map(emoji => (
                 <button
                   key={emoji}
                   onClick={() => { onToggle(emoji); setPickerOpen(false); }}
-                  className="text-lg hover:scale-125 transition-transform p-1 rounded hover:bg-zinc-700"
+                  className="text-lg hover:scale-125 transition-transform p-1 rounded hover:bg-white/10"
                   aria-label={`React with ${emoji}`}
                 >
                   {emoji}

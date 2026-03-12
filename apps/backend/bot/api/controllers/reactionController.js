@@ -106,4 +106,40 @@ async function reactToDm(req, res) {
   }
 }
 
-module.exports = { reactToPost, getPostReactions, reactToChatMessage, getChatReactions, reactToDm };
+// GET /api/webapp/content/:contentId/reactions
+async function getContentReactions(req, res) {
+  const contentId = parseInt(req.params.contentId, 10);
+  if (!Number.isFinite(contentId) || contentId <= 0) return res.status(400).json({ error: 'Invalid content ID' });
+
+  const userId = req.session?.user?.id || null;
+
+  try {
+    const reactions = await reactionService.getContentReactions(contentId, userId);
+    return res.json({ reactions });
+  } catch (err) {
+    logger.error('[reactionController] getContentReactions:', err.message);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+}
+
+// POST /api/webapp/content/:contentId/react  body: { emoji }
+async function reactToContent(req, res) {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+
+  const contentId = parseInt(req.params.contentId, 10);
+  if (!Number.isFinite(contentId) || contentId <= 0) return res.status(400).json({ error: 'Invalid content ID' });
+
+  const { emoji } = req.body;
+  if (!emoji) return res.status(400).json({ error: 'emoji required' });
+
+  try {
+    const result = await reactionService.toggleContentReaction(user.id, contentId, emoji);
+    return res.json(result);
+  } catch (err) {
+    logger.error('[reactionController] reactToContent:', err.message);
+    return res.status(400).json({ error: err.message });
+  }
+}
+
+module.exports = { reactToPost, getPostReactions, reactToChatMessage, getChatReactions, reactToDm, getContentReactions, reactToContent };

@@ -21,16 +21,18 @@ interface HighlightCardProps {
   onRsvp?: (eventId: string, rsvpd: boolean) => void;
   onCancel?: (eventId: string) => void;
   canCancel?: boolean;
+  onViewDetails?: (event: EventItem) => void;
 }
 
-export function HighlightCard({ item, onRsvp, onCancel, canCancel }: HighlightCardProps) {
+export function HighlightCard({ item, onRsvp, onCancel, canCancel, onViewDetails }: HighlightCardProps) {
   if (item.kind === "event") {
     return (
-      <EventCard 
-        event={item.data} 
-        onRsvp={onRsvp} 
-        onCancel={onCancel} 
-        canCancel={canCancel} 
+      <EventCard
+        event={item.data}
+        onRsvp={onRsvp}
+        onCancel={onCancel}
+        canCancel={canCancel}
+        onViewDetails={onViewDetails}
       />
     );
   }

@@ -96,7 +96,7 @@ const eventsController = {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     const { id } = req.params;
-    const { title, description, coverImage, scheduledAt, durationMinutes, maxAttendees, tags, status } = req.body;
+    const { title, description, coverImage, scheduledAt, durationMinutes, maxAttendees, hangoutGroupId, tags, status } = req.body;
 
     if (scheduledAt && new Date(scheduledAt) < new Date()) {
       return res.status(400).json({ error: 'Scheduled date must be in the future' });
@@ -109,6 +109,7 @@ const eventsController = {
       scheduledAt,
       durationMinutes: durationMinutes ? parseInt(durationMinutes, 10) : undefined,
       maxAttendees: maxAttendees ? parseInt(maxAttendees, 10) : undefined,
+      hangoutGroupId: hangoutGroupId !== undefined ? (hangoutGroupId ? parseInt(hangoutGroupId, 10) : null) : undefined,
       tags,
       status,
     });

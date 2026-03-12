@@ -239,9 +239,17 @@ export function Layout() {
               onClick={() => navigate("/profile")}
               className="flex items-center gap-3 flex-1 min-w-0 px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors"
             >
+              {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
+                <img
+                  src={user.photoUrl}
+                  alt={user.displayName || "Profile"}
+                  className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }}
+                />
+              ) : null}
               <div
                 className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: (user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http"))) ? "none" : undefined }}
               >
                 {(user?.displayName || t.nav.user)[0].toUpperCase()}
               </div>
@@ -300,11 +308,15 @@ export function Layout() {
 
           <button
             onClick={() => navigate("/profile")}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+            className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center text-sm font-bold flex-shrink-0"
+            style={!(user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http"))) ? { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" } : undefined}
             aria-label="Profile"
           >
-            {(user?.displayName || t.nav.user)[0].toUpperCase()}
+            {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
+              <img src={user.photoUrl} alt={user.displayName || "Profile"} className="w-full h-full object-cover" onError={(e) => { const btn = e.currentTarget.parentElement!; btn.style.background = "linear-gradient(135deg, #D4007A, #E69138)"; btn.style.color = "#fff"; e.currentTarget.replaceWith(document.createTextNode((user?.displayName || "U")[0].toUpperCase())); }} />
+            ) : (
+              (user?.displayName || t.nav.user)[0].toUpperCase()
+            )}
           </button>
         </div>
       </header>
@@ -403,9 +415,17 @@ export function Layout() {
                 }}
                 className="flex items-center gap-3 w-full px-2 py-2 rounded-lg hover:bg-white/5 transition-colors"
               >
+                {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
+                  <img
+                    src={user.photoUrl}
+                    alt={user.displayName || "Profile"}
+                    className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }}
+                  />
+                ) : null}
                 <div
                   className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: (user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http"))) ? "none" : undefined }}
                 >
                   {(user?.displayName || t.nav.user)[0].toUpperCase()}
                 </div>

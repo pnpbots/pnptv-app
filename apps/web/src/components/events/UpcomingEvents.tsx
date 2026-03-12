@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { EventCard, type EventItem } from "./EventCard";
+import { EventDetailModal } from "./EventDetailModal";
 import { getUpcomingEvents, rsvpEvent, unrsvpEvent, cancelEvent } from "@/lib/api";
 
 interface UpcomingEventsProps {
@@ -28,6 +29,7 @@ export function UpcomingEvents({
 }: UpcomingEventsProps) {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
 
   const loadEvents = useCallback(() => {
     getUpcomingEvents({ type, limit, hangoutGroupId })
@@ -131,9 +133,21 @@ export function UpcomingEvents({
               onRsvp={handleRsvp}
               canCancel={isAdmin || event.creatorId === currentUserId}
               onCancel={handleCancel}
+              onViewDetails={(e) => setDetailEvent(e)}
             />
           ))}
         </div>
+      )}
+      {detailEvent && (
+        <EventDetailModal
+          event={detailEvent}
+          onClose={() => setDetailEvent(null)}
+          onRsvp={handleRsvp}
+          onUpdated={(updated) => {
+            setEvents((prev) => prev.map((e) => e.id === updated.id ? updated : e));
+            setDetailEvent(updated);
+          }}
+        />
       )}
     </div>
   );

@@ -234,6 +234,61 @@ async function getDmReactions(messageId) {
   return _groupReactions(rows);
 }
 
+// ── Content reactions (PRIME videos / audio — Directus content IDs) ──
+
+async function toggleContentReaction(userId, contentId, emoji) {
+  validateEmoji(emoji);
+
+  const existing = await query(
+    'SELECT id, emoji FROM content_reactions WHERE content_id=$1 AND user_id=$2',
+    [contentId, userId]
+  );
+
+  let added;
+  if (existing.rows.length > 0 && existing.rows[0].emoji === emoji) {
+    // Same emoji tapped again — toggle off
+    await query('DELETE FROM content_reactions WHERE content_id=$1 AND user_id=$2', [contentId, userId]);
+    added = false;
+  } else {
+    // New or different emoji — upsert to the new one
+    await query(
+      `INSERT INTO content_reactions (content_id, user_id, emoji) VALUES ($1,$2,$3)
+       ON CONFLICT (content_id, user_id) DO UPDATE SET emoji = EXCLUDED.emoji, created_at = NOW()`,
+      [contentId, userId, emoji]
+    );
+    added = true;
+  }
+
+  const reactions = await getContentReactions(contentId, userId);
+  return { added, reactions };
+}
+
+async function getContentReactions(contentId, userId = null) {
+  const { rows } = await query(
+    `SELECT cr.emoji, COUNT(*) AS count,
+       COALESCE(
+         json_agg(
+           json_build_object('id', u.id, 'username', u.username)
+           ORDER BY cr.created_at
+         ) FILTER (WHERE u.id IS NOT NULL),
+         '[]'
+       ) AS users,
+       BOOL_OR(cr.user_id = $2) AS reacted_by_me
+     FROM content_reactions cr
+     JOIN users u ON u.id = cr.user_id
+     WHERE cr.content_id = $1
+     GROUP BY cr.emoji
+     ORDER BY count DESC`,
+    [contentId, userId || '']
+  );
+  return rows.map(r => ({
+    emoji: r.emoji,
+    count: Number(r.count),
+    users: r.users || [],
+    reactedByMe: r.reacted_by_me || false,
+  }));
+}
+
 module.exports = {
   DEFAULT_EMOJIS,
   togglePostReaction,
@@ -242,4 +297,6 @@ module.exports = {
   getChatReactions,
   toggleDmReaction,
   getDmReactions,
+  toggleContentReaction,
+  getContentReactions,
 };

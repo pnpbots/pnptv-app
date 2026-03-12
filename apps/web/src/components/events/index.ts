@@ -6,3 +6,4 @@ export { HangoutEventReminder } from "./HangoutEventReminder";
 export { HighlightCard } from "./HighlightCard";
 export type { HighlightItem, AnnouncementItem } from "./HighlightCard";
 export { HighlightCarousel } from "./HighlightCarousel";
+export { EventDetailModal } from "./EventDetailModal";
