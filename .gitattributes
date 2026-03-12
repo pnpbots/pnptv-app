@@ -1,0 +1,2 @@
+infrastructure/data/ampache/mariadb/ibdata1 filter=lfs diff=lfs merge=lfs -text
+infrastructure/data/ampache/mariadb/ib_logfile0 filter=lfs diff=lfs merge=lfs -text
