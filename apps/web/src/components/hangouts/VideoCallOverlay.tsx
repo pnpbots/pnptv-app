@@ -37,6 +37,8 @@ interface VideoCallOverlayProps {
   userId?: string;
   /** Pre-wired socket data from parent — avoids duplicate useHangoutSocket */
   socketChat?: SocketChatData;
+  /** Whether this overlay is inside the Main Stage (Radio PNP always plays) */
+  isMainStage?: boolean;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -52,6 +54,7 @@ export function VideoCallOverlay({
   groupId,
   userId,
   socketChat,
+  isMainStage = false,
 }: VideoCallOverlayProps) {
   const isLandscape = useOrientation();
   const [viewMode, setViewMode] = useState<ViewMode>(initialMode);
@@ -167,6 +170,8 @@ export function VideoCallOverlay({
               collapsed={sidePanelCollapsed}
               onToggleCollapse={() => setSidePanelCollapsed((p) => !p)}
               socketChat={socketChat}
+              isModerator={isModerator}
+              isMainStage={isMainStage}
             />
           </div>
         )}
@@ -239,6 +244,8 @@ export function VideoCallOverlay({
               isAdmin={isAdmin}
               isLandscape={isLandscape}
               socketChat={socketChat}
+              isModerator={isModerator}
+              isMainStage={isMainStage}
             />
           </div>
         )}
@@ -326,6 +333,8 @@ export function VideoCallOverlay({
               collapsed={sidePanelCollapsed}
               onToggleCollapse={() => setSidePanelCollapsed((p) => !p)}
               socketChat={socketChat}
+              isModerator={isModerator}
+              isMainStage={isMainStage}
             />
           </div>
         )}
@@ -362,6 +371,8 @@ export function VideoCallOverlay({
             isAdmin={isAdmin}
             isLandscape={isLandscape}
             socketChat={socketChat}
+            isModerator={isModerator}
+            isMainStage={isMainStage}
           />
         </div>
       )}

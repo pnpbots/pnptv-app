@@ -11,3 +11,4 @@ export { JitsiMeetComponent } from "./JitsiMeetComponent";
 export { VideoCallOverlay } from "./VideoCallOverlay";
 export { VideoCallSidePanel, MobileBottomBar } from "./VideoCallSidePanel";
 export { VideoCallModBot } from "./VideoCallModBot";
+export { HangoutMusicBar } from "./HangoutMusicBar";

@@ -157,8 +157,8 @@ export function JitsiMeetComponent({
           lobbyModeEnabled: false,
           requireDisplayName: false,
           enableInsecureRoomNameWarning: false,
-          startInTileView: false,
-          maxFullResolutionParticipants: 4,
+          startInTileView: true,
+          maxFullResolutionParticipants: 9,
           filmstrip: {
             disableResizable: true,
           },

@@ -128,6 +128,10 @@ const MSG_RETURNING_COLS = `
 // Track online users: userId → { name, photoUrl, hangoutGroupIds: Set<number> }
 const onlineUsersMap = new Map();
 
+// ── In-memory music state per hangout group ───────────────────────────────────
+// Map<groupId, { trackId, trackUrl, trackTitle, trackArtist, trackArt, isPlaying, position, startedAt }>
+const hangoutMusicState = new Map();
+
 function emitGroupPresence(io, gid) {
   const online = [];
   for (const [uid, p] of onlineUsersMap) {
@@ -558,6 +562,15 @@ function initSocketIO(io) {
           });
         }
 
+        // Send current music state to joining user
+        const musicState = hangoutMusicState.get(gid);
+        if (musicState) {
+          const effectivePosition = musicState.isPlaying && musicState.startedAt
+            ? musicState.position + (Date.now() - musicState.startedAt) / 1000
+            : musicState.position;
+          socket.emit('hangout:music:state', { ...musicState, position: effectivePosition });
+        }
+
         // Update presence map and emit presence to the joining socket and room
         onlineUsersMap.get(user.id)?.hangoutGroupIds.add(gid);
 
@@ -752,6 +765,112 @@ function initSocketIO(io) {
       } catch (err) {
         logger.error('hangout:invite error', err);
       }
+    });
+
+    // ── Hangout Music Sync ───────────────────────────────────────────────────
+
+    async function isHangoutMod(userId, gid) {
+      if (user.role === 'admin' || user.role === 'superadmin') return true;
+      const { rows: ownerRows } = await query(
+        "SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role='owner'",
+        [gid, userId]
+      );
+      if (ownerRows.length > 0) return true;
+      const { rows: callRows } = await query(
+        "SELECT 1 FROM hangout_video_calls WHERE group_id=$1 AND status='active' AND creator_id=$2",
+        [gid, userId]
+      );
+      return callRows.length > 0;
+    }
+
+    socket.on('hangout:music:play', async ({ groupId, trackId, trackUrl, trackTitle, trackArtist, trackArt } = {}) => {
+      if (!groupId || !trackId || !trackUrl) return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+      if (!rateLimit(`music:${user.id}:${gid}`, 10, 60000)) return;
+      try {
+        const isMod = await isHangoutMod(user.id, gid);
+        if (!isMod) { socket.emit('hangout:error', { message: 'Not a moderator', code: 'NOT_MOD' }); return; }
+        const state = {
+          trackId: String(trackId),
+          trackUrl: String(trackUrl).slice(0, 500),
+          trackTitle: String(trackTitle || '').slice(0, 200),
+          trackArtist: String(trackArtist || '').slice(0, 200),
+          trackArt: trackArt ? String(trackArt).slice(0, 500) : null,
+          isPlaying: true,
+          position: 0,
+          startedAt: Date.now(),
+        };
+        hangoutMusicState.set(gid, state);
+        io.to(`hangout:${gid}`).emit('hangout:music:play', state);
+      } catch (err) { logger.error('hangout:music:play error', err); }
+    });
+
+    socket.on('hangout:music:pause', async ({ groupId, position } = {}) => {
+      if (!groupId) return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+      try {
+        const isMod = await isHangoutMod(user.id, gid);
+        if (!isMod) return;
+        const existing = hangoutMusicState.get(gid);
+        if (!existing) return;
+        const pausePos = typeof position === 'number'
+          ? position
+          : (existing.isPlaying && existing.startedAt
+              ? existing.position + (Date.now() - existing.startedAt) / 1000
+              : existing.position);
+        const updated = { ...existing, isPlaying: false, position: pausePos, startedAt: null };
+        hangoutMusicState.set(gid, updated);
+        io.to(`hangout:${gid}`).emit('hangout:music:pause', { position: pausePos });
+      } catch (err) { logger.error('hangout:music:pause error', err); }
+    });
+
+    socket.on('hangout:music:resume', async ({ groupId, position } = {}) => {
+      if (!groupId) return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+      try {
+        const isMod = await isHangoutMod(user.id, gid);
+        if (!isMod) return;
+        const existing = hangoutMusicState.get(gid);
+        if (!existing) return;
+        const resumePos = typeof position === 'number' ? position : existing.position;
+        const updated = { ...existing, isPlaying: true, position: resumePos, startedAt: Date.now() };
+        hangoutMusicState.set(gid, updated);
+        io.to(`hangout:${gid}`).emit('hangout:music:resume', {
+          position: resumePos,
+          startedAt: updated.startedAt,
+          trackId: updated.trackId,
+        });
+      } catch (err) { logger.error('hangout:music:resume error', err); }
+    });
+
+    socket.on('hangout:music:seek', async ({ groupId, position } = {}) => {
+      if (!groupId || typeof position !== 'number') return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid) || !Number.isFinite(position)) return;
+      try {
+        const isMod = await isHangoutMod(user.id, gid);
+        if (!isMod) return;
+        const existing = hangoutMusicState.get(gid);
+        if (!existing) return;
+        const updated = { ...existing, position, startedAt: existing.isPlaying ? Date.now() : null };
+        hangoutMusicState.set(gid, updated);
+        io.to(`hangout:${gid}`).emit('hangout:music:seek', { position, startedAt: updated.startedAt });
+      } catch (err) { logger.error('hangout:music:seek error', err); }
+    });
+
+    socket.on('hangout:music:stop', async ({ groupId } = {}) => {
+      if (!groupId) return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+      try {
+        const isMod = await isHangoutMod(user.id, gid);
+        if (!isMod) return;
+        hangoutMusicState.delete(gid);
+        io.to(`hangout:${gid}`).emit('hangout:music:stop', {});
+      } catch (err) { logger.error('hangout:music:stop error', err); }
     });
 
     // ── Direct Messages ──────────────────────────────────────────────────────

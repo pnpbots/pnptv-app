@@ -50,20 +50,20 @@ interface GrokAction {
 }
 
 function parseGrokAction(text: string): { cleanText: string; action: GrokAction | null } {
-  const jsonMatch = text.match(/```json\s*([\s\S]*?)```/i) || text.match(/(\{[\s\S]*?"action"\s*:\s*"(?:create_campaign|add_random_video)"[\s\S]*?\})/);
+  // Try finding JSON in code blocks or as a bare object
+  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i) || text.match(/(\{[\s\S]*?"action"\s*:\s*"(?:create_campaign|add_random_video)"[\s\S]*?\})/);
   if (!jsonMatch) return { cleanText: text, action: null };
   try {
     const raw = jsonMatch[1] || jsonMatch[0];
-    const action = JSON.parse(raw) as GrokAction;
-    if (action.action === "create_campaign" && action.name && action.topic) {
+    const action = JSON.parse(raw.trim()) as GrokAction;
+    
+    if (action.action === "create_campaign" || action.action === "add_random_video") {
       const cleanText = text.replace(jsonMatch[0], "").trim();
       return { cleanText, action };
     }
-    if (action.action === "add_random_video") {
-      const cleanText = text.replace(jsonMatch[0], "").trim();
-      return { cleanText, action };
-    }
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.warn("Failed to parse Grok action JSON", e);
+  }
   return { cleanText: text, action: null };
 }
 

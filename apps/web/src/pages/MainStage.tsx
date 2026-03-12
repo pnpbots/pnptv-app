@@ -153,6 +153,8 @@ export default function MainStage() {
               userId={userId}
               collapsed={sidePanelCollapsed}
               onToggleCollapse={() => setSidePanelCollapsed((p) => !p)}
+              isModerator={isAdmin}
+              isMainStage={true}
             />
           </div>
         )}
@@ -210,6 +212,8 @@ export default function MainStage() {
               userId={userId}
               isAdmin={isAdmin}
               isLandscape={isLandscape}
+              isModerator={isAdmin}
+              isMainStage={true}
             />
           </div>
         )}
