@@ -2642,6 +2642,7 @@ export interface XAutoCampaign {
   max_posts?: number;
   created_by_username?: string;
   media_folder_id?: string;
+  persona_type?: "santino" | "lex" | "generic";
   created_at: string;
   updated_at: string;
 }
@@ -2688,6 +2689,7 @@ export function createAdminXCampaign(data: {
   activeHoursEnd?: number;
   maxPosts?: number;
   mediaFolderId?: string;
+  personaType?: "santino" | "lex" | "generic";
 }): Promise<{ success: boolean; campaignId: string }> {
   return request("/api/webapp/admin/x-campaigns", { method: "POST", body: data });
 }
@@ -2745,6 +2747,10 @@ export function startXOAuth(adminId?: number, adminUsername?: string): Promise<{
   if (adminUsername) params.set("admin_username", adminUsername);
   const qs = params.toString();
   return request(`/api/admin/x/oauth/start${qs ? `?${qs}` : ""}`);
+}
+
+export function startXOAuth1(): Promise<{ success: boolean; url: string }> {
+  return request("/api/admin/x/oauth/1a/start");
 }
 
 // ============================================================================

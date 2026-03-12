@@ -17,6 +17,7 @@ import {
   getRandomCampaignVideo,
   updateAdminXCampaign,
   startXOAuth,
+  startXOAuth1,
   chatWithGrokManager,
   resetGrokManagerChat,
   previewAdminXCampaign,
@@ -300,6 +301,18 @@ const GROK_MODES = [
   { value: "sharePost", label: "Share Post" },
 ];
 
+const PERSONA_TYPES = [
+  { value: "generic", label: "Generic PnP Brand" },
+  { value: "santino", label: "🔥 SXNTINX (Dominant)" },
+  { value: "lex", label: "🐷 Lex (Submissive)" },
+];
+
+const PERSONA_BADGE: Record<string, string> = {
+  santino: "🔥",
+  lex: "🐷",
+  generic: "",
+};
+
 const LANGUAGES = [
   { value: "es", label: "Spanish" },
   { value: "en", label: "English" },
@@ -335,6 +348,7 @@ const defaultForm = {
   activeHoursEnd: 23,
   maxPosts: "",
   attachVideos: false,
+  personaType: "generic" as "santino" | "lex" | "generic",
 };
 
 export default function XAutoCampaigns() {
@@ -428,6 +442,21 @@ export default function XAutoCampaigns() {
     loadCampaigns(1);
   }, [loadStats, loadCampaigns]);
 
+  // Handle OAuth1 callback URL params (oauth1=success|error)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const oauth1Status = params.get("oauth1");
+    if (oauth1Status === "success") {
+      setSuccess("X account connected via OAuth 1.0a (permanent tokens)!");
+      loadStats();
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (oauth1Status === "error") {
+      const msg = params.get("msg");
+      setError(`OAuth 1.0a connection failed: ${msg || "unknown error"}`);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Auto-poll every 15s while active campaigns exist
   useEffect(() => {
     const hasActive = stats?.activeCampaigns && stats.activeCampaigns > 0;
@@ -475,6 +504,7 @@ export default function XAutoCampaigns() {
           activeHoursEnd: form.activeHoursEnd,
           maxPosts: form.maxPosts ? parseInt(form.maxPosts) : null,
           mediaFolderId: form.attachVideos && mediaFolderId ? mediaFolderId : null,
+          personaType: form.personaType,
         });
         setSuccess(`Campaign "${form.name}" updated`);
       } else {
@@ -490,6 +520,7 @@ export default function XAutoCampaigns() {
           activeHoursEnd: form.activeHoursEnd,
           maxPosts: form.maxPosts ? parseInt(form.maxPosts) : undefined,
           mediaFolderId: form.attachVideos && mediaFolderId ? mediaFolderId : undefined,
+          personaType: form.personaType,
         });
         setSuccess("Campaign created (paused)");
       }
@@ -560,6 +591,7 @@ export default function XAutoCampaigns() {
       activeHoursEnd: campaign.active_hours_end,
       maxPosts: campaign.max_posts ? String(campaign.max_posts) : "",
       attachVideos: !!campaign.media_folder_id,
+      personaType: (campaign.persona_type || "generic") as "santino" | "lex" | "generic",
     });
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -676,6 +708,11 @@ export default function XAutoCampaigns() {
         <div className="max-w-[180px]">
           <p className="text-sm font-medium truncate">
             {row.media_folder_id && <span title="Video attached" className="text-pnp-accent mr-1">&#9654;</span>}
+            {PERSONA_BADGE[row.persona_type || "generic"] && (
+              <span title={`Persona: ${row.persona_type}`} className="mr-1">
+                {PERSONA_BADGE[row.persona_type || "generic"]}
+              </span>
+            )}
             {row.name}
           </p>
           <p className="text-xs text-pnp-textSecondary">@{row.handle || "unknown"}</p>
@@ -890,6 +927,22 @@ export default function XAutoCampaigns() {
           >
             + {t.admin.xCampaigns.actions.addAccount}
           </button>
+          <button
+            onClick={async () => {
+              try {
+                const res = await startXOAuth1();
+                if (res.url) {
+                  window.location.href = res.url;
+                }
+              } catch (err: unknown) {
+                setError(err instanceof Error ? err.message : "Failed to start X OAuth 1.0a");
+              }
+            }}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-green-500/20 border border-green-500/40 text-green-400 hover:bg-green-500/30 transition-colors"
+            title="OAuth 1.0a — permanent tokens, no expiry"
+          >
+            + Connect X (1.0a)
+          </button>
         </div>
 
         {showForm && (
@@ -961,6 +1014,18 @@ export default function XAutoCampaigns() {
                 >
                   {LANGUAGES.map((l) => (
                     <option key={l.value} value={l.value}>{l.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-pnp-textSecondary block mb-1">Persona</label>
+                <select
+                  value={form.personaType}
+                  onChange={(e) => setForm((f) => ({ ...f, personaType: e.target.value as "santino" | "lex" | "generic" }))}
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary focus:border-pnp-accent focus:outline-none"
+                >
+                  {PERSONA_TYPES.map((p) => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
                   ))}
                 </select>
               </div>

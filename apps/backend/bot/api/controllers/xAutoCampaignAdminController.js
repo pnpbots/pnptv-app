@@ -54,7 +54,7 @@ const createCampaign = async (req, res) => {
     let {
       name, accountId, topic, grokMode, language, customPrompt,
       intervalMinutes, activeHoursStart, activeHoursEnd, maxPosts,
-      mediaFolderId,
+      mediaFolderId, personaType,
     } = req.body;
 
     if (!name || !accountId || !topic) {
@@ -63,6 +63,11 @@ const createCampaign = async (req, res) => {
 
     if (grokMode && !VALID_GROK_MODES.has(grokMode)) {
       return res.status(400).json({ error: 'Invalid grokMode' });
+    }
+
+    const VALID_PERSONA_TYPES = new Set(['santino', 'lex', 'generic']);
+    if (personaType && !VALID_PERSONA_TYPES.has(personaType)) {
+      return res.status(400).json({ error: 'Invalid personaType. Must be: santino, lex, or generic' });
     }
 
     if (intervalMinutes !== undefined) {
@@ -83,6 +88,7 @@ const createCampaign = async (req, res) => {
       createdBy: req.session?.user?.id,
       createdByUsername: req.session?.user?.username,
       mediaFolderId: mediaFolderId || null,
+      personaType: personaType || 'generic',
     });
 
     logger.info('X auto campaign created', {

@@ -394,7 +394,49 @@ const handleCallback = async (req, res) => {
   }
 };
 
+const startOAuth1 = async (req, res) => {
+  try {
+    const XOAuth1Service = require('../../services/xOAuth1Service');
+    const { oauth_token } = await XOAuth1Service.getRequestToken();
+    const authorizeUrl = `https://api.twitter.com/oauth/authorize?oauth_token=${oauth_token}`;
+    return res.json({ success: true, url: authorizeUrl });
+  } catch (err) {
+    logger.error('OAuth 1.0a start failed:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const callbackOAuth1 = async (req, res) => {
+  try {
+    const XOAuth1Service = require('../../services/xOAuth1Service');
+    const { oauth_token, oauth_verifier } = req.query;
+
+    if (!oauth_token || !oauth_verifier) {
+      return res.status(400).json({ success: false, error: 'Missing oauth_token or oauth_verifier' });
+    }
+
+    const result = await XOAuth1Service.getAccessToken(oauth_token, oauth_verifier);
+    await XOAuth1Service.saveAccount({
+      oauthToken: result.accessToken,
+      oauthTokenSecret: result.accessTokenSecret,
+      xUserId: result.xUserId,
+      handle: result.handle,
+      displayName: result.displayName,
+      createdBy: req.session?.user?.id || null,
+    });
+
+    const webBase = (process.env.WEB_APP_URL || 'https://app.pnptv.app').replace(/\/+$/, '');
+    return res.redirect(`${webBase}/admin/x-campaigns?oauth1=success`);
+  } catch (err) {
+    logger.error('OAuth 1.0a callback failed:', err);
+    const webBase = (process.env.WEB_APP_URL || 'https://app.pnptv.app').replace(/\/+$/, '');
+    return res.redirect(`${webBase}/admin/x-campaigns?oauth1=error&msg=${encodeURIComponent(err.message)}`);
+  }
+};
+
 module.exports = {
   startOAuth,
   handleCallback,
+  startOAuth1,
+  callbackOAuth1,
 };

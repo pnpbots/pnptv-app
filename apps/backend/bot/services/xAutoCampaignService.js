@@ -19,7 +19,7 @@ const ITEMS_PER_PAGE = 20;
 const ALLOWED_UPDATE_COLUMNS = new Set([
   'name', 'topic', 'grok_mode', 'language', 'custom_prompt',
   'interval_minutes', 'active_hours_start', 'active_hours_end', 'max_posts',
-  'media_folder_id',
+  'media_folder_id', 'persona_type',
 ]);
 
 class XAutoCampaignService {
@@ -30,18 +30,18 @@ class XAutoCampaignService {
     name, accountId, topic, grokMode = 'xPost', language = 'es',
     customPrompt = null, intervalMinutes = 240, activeHoursStart = 8,
     activeHoursEnd = 23, maxPosts = null, createdBy, createdByUsername,
-    mediaFolderId = null,
+    mediaFolderId = null, personaType = 'generic',
   }) {
     const result = await db.query(
       `INSERT INTO x_auto_campaigns
         (name, account_id, topic, grok_mode, language, custom_prompt,
          interval_minutes, active_hours_start, active_hours_end, max_posts,
-         created_by, created_by_username, media_folder_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         created_by, created_by_username, media_folder_id, persona_type)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING campaign_id`,
       [name, accountId, topic, grokMode, language, customPrompt,
        intervalMinutes, activeHoursStart, activeHoursEnd, maxPosts,
-       createdBy, createdByUsername, mediaFolderId]
+       createdBy, createdByUsername, mediaFolderId, personaType]
     );
     return result.rows[0].campaign_id;
   }
@@ -237,12 +237,19 @@ class XAutoCampaignService {
     const langMap = { es: 'Spanish', en: 'English', bilingual: 'Spanish' };
     const grokLanguage = langMap[campaign.language] || 'Spanish';
 
-    // Generate text via Grok
+    // Generate text via Grok (with persona routing)
     const grokResponse = await GrokService.chat({
       mode: campaign.grok_mode,
       language: grokLanguage,
       prompt,
+      personaType: campaign.persona_type || 'generic',
     });
+
+    // A/B test mode: in xPost mode, queue ALL 3 options at staggered intervals
+    // and record them in x_ab_tests for performance tracking.
+    if (campaign.grok_mode === 'xPost' && campaign.ab_test_mode) {
+      return this._generateAndQueueABTest(campaign, grokResponse, mediaUrl);
+    }
 
     // For xPost mode, Grok returns 3 options (A/B/C) — pick one randomly
     // For all other modes, still strip any label artifacts Grok may have included
@@ -327,6 +334,85 @@ class XAutoCampaignService {
     });
 
     return postId;
+  }
+
+  /**
+   * A/B test mode: queue all 3 xPost options at staggered intervals.
+   * Options B and C are scheduled at interval/3 and 2*interval/3 minutes out.
+   * Records a single x_ab_tests row linking all 3 variants.
+   * Returns the post_id of variant A (the first one).
+   */
+  static async _generateAndQueueABTest(campaign, grokResponse, mediaUrl) {
+    const optionRegex = /(?:OPCI[OÓ]N|OPTION)\s+[ABC][\s:.\-—]*([\s\S]*?)(?=(?:OPCI[OÓ]N|OPTION)\s+[ABC]|$)/gi;
+    const options = [];
+    let match;
+    while ((match = optionRegex.exec(grokResponse)) !== null) {
+      const cleaned = this._stripOptionLabel(match[1].trim());
+      if (cleaned) options.push(cleaned);
+    }
+
+    // Fallback: no options parsed — use single random extraction
+    if (options.length === 0) {
+      return this.generateAndQueue(Object.assign({}, campaign, { ab_test_mode: false }));
+    }
+
+    const intervalMs = (campaign.interval_minutes || 240) * 60 * 1000;
+    const stagger = Math.floor(intervalMs / 3);
+    const requiredLinks = ['pnptv.app'];
+    const X_TEXT_BUDGET = 280 - 24;
+    const now = new Date();
+
+    const postIds = [];
+    for (let i = 0; i < Math.min(options.length, 3); i++) {
+      let postText = options[i];
+      if (postText.length > X_TEXT_BUDGET) postText = this._smartTruncate(postText, X_TEXT_BUDGET);
+      const { text: normalizedText } = XPostService.ensureRequiredLinks(postText, requiredLinks);
+      const scheduledAt = new Date(now.getTime() + i * stagger);
+
+      const postId = await XPostService.createPostJob({
+        accountId: campaign.account_id,
+        adminId: campaign.created_by,
+        adminUsername: campaign.created_by_username || 'auto-campaign',
+        text: normalizedText,
+        mediaUrl,
+        scheduledAt,
+        status: 'scheduled',
+      });
+      await db.query('UPDATE x_post_jobs SET campaign_id = $1 WHERE post_id = $2', [campaign.campaign_id, postId]);
+      postIds.push(postId);
+    }
+
+    // Record A/B test
+    const [varA, varB, varC] = postIds;
+    await db.query(
+      `INSERT INTO x_ab_tests (campaign_id, variant_a, variant_b, variant_c)
+       VALUES ($1, $2, $3, $4)`,
+      [campaign.campaign_id, varA || null, varB || null, varC || null]
+    ).catch((err) => logger.warn('Failed to insert x_ab_tests record', { error: err.message }));
+
+    // Update campaign counters
+    const updateResult = await db.query(
+      `UPDATE x_auto_campaigns
+       SET total_generated = total_generated + $1,
+           consecutive_failures = 0,
+           last_generated_at = NOW(),
+           updated_at = NOW()
+       WHERE campaign_id = $2
+       RETURNING total_generated, max_posts`,
+      [postIds.length, campaign.campaign_id]
+    );
+    const updated = updateResult.rows[0];
+    if (updated?.max_posts && updated.total_generated >= updated.max_posts) {
+      await db.query(
+        `UPDATE x_auto_campaigns SET status = 'completed', updated_at = NOW() WHERE campaign_id = $1`,
+        [campaign.campaign_id]
+      );
+    }
+
+    logger.info('Auto campaign A/B test queued', {
+      campaignId: campaign.campaign_id, variants: postIds.length,
+    });
+    return postIds[0];
   }
 
   /**
@@ -436,6 +522,7 @@ class XAutoCampaignService {
       activeHoursEnd: original.active_hours_end,
       maxPosts: original.max_posts,
       mediaFolderId: original.media_folder_id,
+      personaType: original.persona_type || 'generic',
       createdBy,
       createdByUsername,
     });

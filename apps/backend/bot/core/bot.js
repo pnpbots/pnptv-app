@@ -814,6 +814,15 @@ const startBot = async () => {
       logger.warn(`X token refresh scheduler initialization failed: ${error.message}`);
     }
 
+    // Initialize Bogota daily X campaign analysis scheduler (10:00 AM America/Bogota)
+    try {
+      const { startBogotaAnalysisScheduler } = require('./schedulers/xBogotaAnalysisScheduler');
+      startBogotaAnalysisScheduler();
+      logger.info('✓ Bogota daily X analysis scheduler initialized');
+    } catch (error) {
+      logger.warn(`Bogota analysis scheduler initialization failed: ${error.message}`);
+    }
+
     // Initialize proactive reminder service
     try {
       const ProactiveReminderService = require('../services/proactiveReminderService');

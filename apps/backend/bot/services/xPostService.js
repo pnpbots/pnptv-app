@@ -185,7 +185,8 @@ class XPostService {
 
   static async getAccount(accountId) {
     const query = `
-      SELECT account_id, handle, display_name, encrypted_access_token, encrypted_refresh_token, token_expires_at, is_active
+      SELECT account_id, handle, display_name, encrypted_access_token, encrypted_refresh_token,
+             token_expires_at, is_active, oauth_version, encrypted_access_token_secret
       FROM x_accounts
       WHERE account_id = $1
     `;
@@ -355,6 +356,11 @@ class XPostService {
   }
 
   static async postToX(account, text, mediaUrl = null) {
+    // Route OAuth 1.0a accounts through dedicated signing path
+    if (account.oauth_version === '1.0a') {
+      return this.postToXWithOAuth1(account, text, mediaUrl);
+    }
+
     const accessToken = await this.getValidAccessToken(account);
 
     if (!accessToken) {
@@ -421,6 +427,109 @@ class XPostService {
     });
 
     return response.data;
+  }
+
+  /**
+   * Post to X using OAuth 1.0a HMAC-SHA1 signed requests (permanent tokens, no expiry).
+   */
+  static async postToXWithOAuth1(account, text, mediaUrl = null) {
+    const XOAuth1Service = require('./xOAuth1Service');
+    const consumerKey = process.env.TWITTER_CONSUMER_KEY;
+    const consumerSecret = process.env.TWITTER_CONSUMER_SECRET;
+
+    if (!consumerKey || !consumerSecret) {
+      throw new Error('TWITTER_CONSUMER_KEY / TWITTER_CONSUMER_SECRET not configured for OAuth 1.0a posting');
+    }
+
+    // Decrypt permanent access token
+    let decryptedToken;
+    try {
+      decryptedToken = PaymentSecurityService.decryptSensitiveData(account.encrypted_access_token);
+    } catch (err) {
+      throw new Error(`OAuth 1.0a: failed to decrypt access token for @${account.handle}: ${err.message}`);
+    }
+    const accessToken = decryptedToken?.accessToken || decryptedToken?.token;
+    if (!accessToken) throw new Error(`OAuth 1.0a: no access token found for @${account.handle}`);
+
+    // Decrypt permanent token secret
+    let decryptedSecret;
+    try {
+      decryptedSecret = PaymentSecurityService.decryptSensitiveData(account.encrypted_access_token_secret);
+    } catch (err) {
+      throw new Error(`OAuth 1.0a: failed to decrypt token secret for @${account.handle}: ${err.message}`);
+    }
+    const tokenSecret = decryptedSecret?.accessToken || decryptedSecret?.token;
+    if (!tokenSecret) throw new Error(`OAuth 1.0a: no token secret found for @${account.handle}`);
+
+    const credentials = { consumerKey, consumerSecret, accessToken, tokenSecret };
+
+    // Upload media via v1.1 (native OAuth1 endpoint) if needed
+    const payload = { text };
+    if (mediaUrl) {
+      logger.info('Uploading media for X post (OAuth1)', { accountId: account.account_id, handle: account.handle });
+      try {
+        const mediaId = await this.uploadMediaToXV1WithOAuth1({ credentials, mediaUrl });
+        if (mediaId) payload.media = { media_ids: [String(mediaId)] };
+      } catch (err) {
+        logger.warn('OAuth1 media upload failed, posting without media', { error: err.message });
+      }
+    }
+
+    // POST tweet via v2 API with OAuth1 header
+    const tweetUrl = `${X_API_BASE}/tweets`;
+    const authHeader = XOAuth1Service.buildAuthHeader('POST', tweetUrl, {}, credentials);
+
+    let response;
+    try {
+      response = await axios.post(tweetUrl, payload, {
+        headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+        timeout: 15000,
+      });
+    } catch (error) {
+      if (error?.response?.status === 403) {
+        throw new Error(`403 Forbidden al publicar tweet OAuth1 con @${account.handle}. Verifica los permisos de la app.`);
+      }
+      throw error;
+    }
+
+    logger.info('X post published (OAuth1)', {
+      accountId: account.account_id,
+      handle: account.handle,
+      tweetId: response.data?.data?.id,
+    });
+    return response.data;
+  }
+
+  /**
+   * Upload media using OAuth 1.0a signed requests (v1.1 upload endpoint).
+   */
+  static async uploadMediaToXV1WithOAuth1({ credentials, mediaUrl }) {
+    const XOAuth1Service = require('./xOAuth1Service');
+    const { filePath, mimeType, size } = await this.downloadMediaToFile(mediaUrl);
+
+    try {
+      this.validateMediaSize(mimeType, size);
+
+      const uploadUrl = X_MEDIA_UPLOAD_V1_URL;
+      const form = new FormData();
+      form.append('media', fs.createReadStream(filePath), {
+        filename: path.basename(filePath),
+        contentType: mimeType,
+      });
+
+      const authHeader = XOAuth1Service.buildAuthHeader('POST', uploadUrl, {}, credentials);
+      const uploadRes = await axios.post(uploadUrl, form, {
+        headers: { ...form.getHeaders(), Authorization: authHeader },
+        timeout: 60000,
+      });
+
+      const mediaId = uploadRes.data?.media_id_string || String(uploadRes.data?.media_id || '');
+      if (!mediaId) throw new Error('No media_id returned from v1.1 upload');
+      logger.info('OAuth1 media uploaded', { mediaId });
+      return mediaId;
+    } finally {
+      try { await fs.promises.unlink(filePath); } catch (_) {} // eslint-disable-line no-empty
+    }
   }
 
   static async resolveMediaUrl(mediaUrlOrFileId) {
