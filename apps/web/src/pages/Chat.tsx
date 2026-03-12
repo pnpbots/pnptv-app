@@ -1250,7 +1250,7 @@ export default function Chat() {
                   userLang={user?.language || "en"}
                   onNavigate={handleNavigate}
                   onExpandImage={handleExpandImage}
-                  currentUserId={user?.dbId}
+                  currentUserId={user?.dbId != null ? String(user.dbId) : user?.id ? String(user.id) : undefined}
                   reactions={messageReactions[msg.id]}
                   onToggleReaction={handleToggleChatReaction}
                 />

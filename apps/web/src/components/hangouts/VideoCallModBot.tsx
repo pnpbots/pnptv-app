@@ -166,6 +166,29 @@ export function VideoCallModBot({ jitsiApi, isAdmin }: VideoCallModBotProps) {
     }
   }, []);
 
+  // Pick a random participant (avoiding the current stage index when possible)
+  const shuffleStage = useCallback(() => {
+    const pList = participantsRef.current;
+    if (pList.length === 0) return;
+
+    let randomIdx: number;
+    if (pList.length === 1) {
+      randomIdx = 0;
+    } else {
+      do {
+        randomIdx = Math.floor(Math.random() * pList.length);
+      } while (randomIdx === stageIdxRef.current);
+    }
+
+    setCurrentStageIdx(randomIdx);
+    stageIdxRef.current = randomIdx;
+
+    const pid = pList[randomIdx]?.participantId;
+    if (pid) {
+      pinToStage(pid);
+    }
+  }, [pinToStage]);
+
   // Restart rotation with new interval when it changes while active
   useEffect(() => {
     if (isRotating && participants.length > 0) {
@@ -314,6 +337,18 @@ export function VideoCallModBot({ jitsiApi, isAdmin }: VideoCallModBotProps) {
             }`}
           >
             {isRotating ? `Rotating (every ${rotationInterval}s)` : "Start Rotation"}
+          </button>
+
+          {/* Shuffle Stage button */}
+          <button
+            onClick={shuffleStage}
+            disabled={participants.length === 0}
+            className="w-full mt-1.5 py-2 rounded-lg text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-30 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 border border-indigo-500/30 flex items-center justify-center gap-1.5"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+            </svg>
+            Shuffle
           </button>
         </div>
 

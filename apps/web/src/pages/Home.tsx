@@ -16,7 +16,7 @@ import type { EventItem } from "@/components/events/EventCard";
 import {
   getHomeFeedPosts,
   getSocialFeedPosts,
-  getFeaturedPerformers,
+
   getHangoutGroups,
   togglePostLike,
   updateProfile,
@@ -26,7 +26,7 @@ import {
   unrsvpEvent,
   cancelEvent,
   type SocialPostItem,
-  type FeaturedPerformer,
+
   type HangoutGroup,
 } from "@/lib/api";
 import { translateText } from "@/lib/feedI18n";
@@ -87,7 +87,7 @@ export default function Home() {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [evLoading, setEvLoading] = useState(true);
   const [myRsvps, setMyRsvps] = useState<EventItem[]>([]);
-  const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
+
   const [userGroups, setUserGroups] = useState<HangoutGroup[]>([]);
 
   const loadEvents = useCallback(() => {
@@ -244,12 +244,64 @@ export default function Home() {
 
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6">
+    <div className="max-w-5xl mx-auto px-4 py-6">
       <Helmet>
         <title>Home — PNPtv!</title>
         <meta name="description" content="Your PNPtv feed. Browse announcements, featured performers, and community posts." />
       </Helmet>
       {showTutorial && <TutorialOverlay section="home" onDismiss={dismissTutorial} />}
+
+      <div className="lg:flex lg:gap-6 lg:items-start">
+
+      {/* ── Right sidebar (widgets) — comes first in HTML so it appears above feed on mobile ── */}
+      <aside className="w-full lg:w-80 flex-shrink-0 space-y-4 order-first lg:order-last lg:sticky lg:top-4">
+
+      {/* Video Rooms — Da Haus (free) + Main Stage (members+) */}
+      <div className="grid grid-cols-2 gap-3">
+        {/* Da Haus — free for all */}
+        <div
+          className="glass-card-sm p-4 cursor-pointer hover:border-white/15 transition-colors"
+          onClick={() => navigate("/da-haus")}
+          style={{ borderLeft: "3px solid rgba(162, 89, 255, 0.5)" }}
+        >
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(162, 89, 255, 0.15)" }}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#A259FF" }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(162,89,255,0.15)", color: "#A259FF" }}>FREE</span>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-white">Da Haus</h3>
+              <p className="text-[11px] text-white/40 mt-0.5 leading-relaxed">Open hangout for everyone</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Stage — members+ */}
+        <div
+          className="glass-card-sm p-4 cursor-pointer hover:border-white/15 transition-colors"
+          onClick={() => navigate("/main-stage")}
+          style={{ borderLeft: "3px solid rgba(94, 209, 196, 0.5)" }}
+        >
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(94, 209, 196, 0.15)" }}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#5ED1C4" }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>MEMBER+</span>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-white">Main Stage</h3>
+              <p className="text-[11px] text-white/40 mt-0.5 leading-relaxed">24/7 community video room</p>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Hero — greeting + tier badge */}
       <div className="glass-card-sm p-5 mb-4 animate-fade-in-up">
@@ -341,86 +393,11 @@ export default function Home() {
         />
       )}
 
-      {/* Featured Performers */}
-      {performers.length > 0 && (
-        <div className="mb-5">
-          <h2 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3">{t.featured}</h2>
-          <div className="flex gap-2.5 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide">
-            {performers.map((p) => {
-              const profilePath = p.userId ? `/profile/${p.userId}` : "#";
-              return (
-                <div
-                  key={p.id}
-                  className="glass-card-sm p-3 flex-shrink-0 w-24 text-center cursor-pointer hover:border-white/15 transition-colors"
-                  onClick={() => p.userId && navigate(profilePath)}
-                >
-                  <img
-                    src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
-                    alt={p.displayName}
-                    className="w-12 h-12 rounded-full mx-auto mb-1.5 object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = "/default-performer.svg";
-                    }}
-                  />
-                  <p className="text-[11px] font-medium text-white truncate">{p.displayName}</p>
-                  {p.isAvailable && (
-                    <p className="text-[10px] truncate" style={{ color: "#5ED1C4" }}>
-                      Available
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
-      {/* Video Rooms — Da Haus (free) + Main Stage (members+) */}
-      <div className="grid grid-cols-2 gap-3 mb-5">
-        {/* Da Haus — free for all */}
-        <div
-          className="glass-card-sm p-4 cursor-pointer hover:border-white/15 transition-colors"
-          onClick={() => navigate("/da-haus")}
-          style={{ borderLeft: "3px solid rgba(162, 89, 255, 0.5)" }}
-        >
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(162, 89, 255, 0.15)" }}>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#A259FF" }}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(162,89,255,0.15)", color: "#A259FF" }}>FREE</span>
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-white">Da Haus</h3>
-              <p className="text-[11px] text-white/40 mt-0.5 leading-relaxed">Open hangout for everyone</p>
-            </div>
-          </div>
-        </div>
+      </aside>{/* end sidebar */}
 
-        {/* Main Stage — members+ */}
-        <div
-          className="glass-card-sm p-4 cursor-pointer hover:border-white/15 transition-colors"
-          onClick={() => navigate("/main-stage")}
-          style={{ borderLeft: "3px solid rgba(94, 209, 196, 0.5)" }}
-        >
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(94, 209, 196, 0.15)" }}>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#5ED1C4" }}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-              </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>MEMBER+</span>
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-white">Main Stage</h3>
-              <p className="text-[11px] text-white/40 mt-0.5 leading-relaxed">24/7 community video room</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* ── Main feed column ── */}
+      <main className="flex-1 min-w-0 order-last lg:order-first">
 
       {/* Create post — compact composer, expands on focus */}
       {isAuthenticated && (
@@ -620,6 +597,9 @@ export default function Home() {
           </button>
         </div>
       )}
+
+      </main>{/* end main feed */}
+      </div>{/* end two-column layout */}
 
       {/* Content Disclaimer Modal */}
       {showDisclaimerModal && (

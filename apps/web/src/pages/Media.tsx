@@ -89,7 +89,7 @@ export default function Media() {
     }
     setReactionsLoading(true);
     getContentReactions(activeVideo.id)
-      .then((res) => { if (res.success) setVideoReactions(res.reactions); })
+      .then((res) => { if (res.reactions) setVideoReactions(res.reactions); })
       .catch(() => {})
       .finally(() => setReactionsLoading(false));
   }, [activeVideo?.id]);
