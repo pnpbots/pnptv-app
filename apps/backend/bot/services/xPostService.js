@@ -186,7 +186,7 @@ class XPostService {
   static async getAccount(accountId) {
     const query = `
       SELECT account_id, handle, display_name, encrypted_access_token, encrypted_refresh_token,
-             token_expires_at, is_active, oauth_version, encrypted_access_token_secret
+             token_expires_at, is_active, oauth_version, encrypted_access_token_secret, consumer_key_ref
       FROM x_accounts
       WHERE account_id = $1
     `;
@@ -434,11 +434,15 @@ class XPostService {
    */
   static async postToXWithOAuth1(account, text, mediaUrl = null) {
     const XOAuth1Service = require('./xOAuth1Service');
-    const consumerKey = process.env.TWITTER_CONSUMER_KEY;
-    const consumerSecret = process.env.TWITTER_CONSUMER_SECRET;
+
+    // Look up the consumer key/secret for this account's X app.
+    // consumer_key_ref ('santino'|'lex'|'generic') maps to env var prefix.
+    const ref = (account.consumer_key_ref || 'generic').toUpperCase();
+    const consumerKey = process.env[`${ref}_CONSUMER_KEY`] || process.env.TWITTER_CONSUMER_KEY;
+    const consumerSecret = process.env[`${ref}_CONSUMER_SECRET`] || process.env.TWITTER_CONSUMER_SECRET;
 
     if (!consumerKey || !consumerSecret) {
-      throw new Error('TWITTER_CONSUMER_KEY / TWITTER_CONSUMER_SECRET not configured for OAuth 1.0a posting');
+      throw new Error(`OAuth 1.0a consumer key/secret not configured for ref="${ref}". Set ${ref}_CONSUMER_KEY and ${ref}_CONSUMER_SECRET.`);
     }
 
     // Decrypt permanent access token

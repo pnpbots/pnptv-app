@@ -270,7 +270,7 @@ async function getAccessToken(oauthToken, oauthVerifier) {
 // Persist OAuth 1.0a account to x_accounts table
 // ---------------------------------------------------------------------------
 
-async function saveAccount({ oauthToken, oauthTokenSecret, xUserId, handle, displayName, createdBy }) {
+async function saveAccount({ oauthToken, oauthTokenSecret, xUserId, handle, displayName, createdBy, consumerKeyRef = 'generic' }) {
   if (!handle) {
     throw new Error('X handle is required to save OAuth 1.0a account');
   }
@@ -294,14 +294,16 @@ async function saveAccount({ oauthToken, oauthTokenSecret, xUserId, handle, disp
       encrypted_access_token_secret,
       is_active,
       oauth_version,
+      consumer_key_ref,
       created_by
     )
-    VALUES ($1, $2, $3, $4, $5, TRUE, '1.0a', $6)
+    VALUES ($1, $2, $3, $4, $5, TRUE, '1.0a', $6, $7)
     ON CONFLICT (handle) DO UPDATE SET
       encrypted_access_token = EXCLUDED.encrypted_access_token,
       encrypted_access_token_secret = EXCLUDED.encrypted_access_token_secret,
       is_active = TRUE,
       oauth_version = '1.0a',
+      consumer_key_ref = EXCLUDED.consumer_key_ref,
       display_name = EXCLUDED.display_name,
       x_user_id = COALESCE(EXCLUDED.x_user_id, x_accounts.x_user_id),
       updated_at = NOW()
@@ -314,6 +316,7 @@ async function saveAccount({ oauthToken, oauthTokenSecret, xUserId, handle, disp
     displayName || handle,
     encryptedToken,
     encryptedSecret,
+    consumerKeyRef,
     createdBy || null,
   ]);
 
