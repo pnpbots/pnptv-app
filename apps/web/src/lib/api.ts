@@ -2747,6 +2747,11 @@ export interface AdminUser {
   created_at: string;
   last_payment_date?: string;
   phone_number?: string;
+  // Creator / Live Performer fields
+  creator_status?: string;
+  creator_type?: string;
+  creator_price_usd?: number;
+  live_channel?: string;
 }
 
 export interface PlanAddOnEntry {
@@ -4150,4 +4155,44 @@ export function listCourtesyInvites(): Promise<{ success: boolean; invites: Cour
 
 export function deactivateCourtesyInvite(id: number): Promise<{ success: boolean }> {
   return request(`/api/courtesy-invites/${id}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Admin: Creator / Live Performer management
+// ---------------------------------------------------------------------------
+
+export interface AdminChannel {
+  id: string;
+  reference: string;
+  rtmpName: string | null;
+  hlsUrl: string | null;
+  isLive: boolean;
+  assignedUser: { id: string; username: string; displayName: string } | null;
+}
+
+export function getAdminLiveChannels(): Promise<{ success: boolean; channels: AdminChannel[] }> {
+  return request("/api/webapp/admin/live/channels");
+}
+
+export function makeAdminUserCreator(
+  userId: string,
+  payload: {
+    channelRef?: string;
+    creatorType?: string;
+    priceUsd?: number;
+    grantMonetization?: boolean;
+  }
+): Promise<{ success: boolean; user: Partial<AdminUser> }> {
+  return request(`/api/webapp/admin/users/${userId}/make-creator`, {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export function revokeAdminUserCreator(
+  userId: string
+): Promise<{ success: boolean; user: Partial<AdminUser> }> {
+  return request(`/api/webapp/admin/users/${userId}/make-creator`, {
+    method: "DELETE",
+  });
 }

@@ -3358,6 +3358,9 @@ app.get('/api/webapp/admin/users/:userId/entitlements', adminGuard, asyncHandler
 app.post('/api/webapp/admin/users/:userId/entitlements', adminGuard, asyncHandler(webappAdminController.grantUserEntitlement));
 app.delete('/api/webapp/admin/users/:userId/entitlements/:addOnId', adminGuard, asyncHandler(webappAdminController.revokeUserEntitlement));
 app.put('/api/webapp/admin/users/:userId/entitlements/:addOnId/extend', adminGuard, asyncHandler(webappAdminController.extendUserEntitlement));
+// Creator / Live Performer promotion
+app.post('/api/webapp/admin/users/:userId/make-creator', adminGuard, asyncHandler(webappAdminController.makeCreator));
+app.delete('/api/webapp/admin/users/:userId/make-creator', adminGuard, asyncHandler(webappAdminController.revokeCreator));
 // User-facing entitlements
 app.get('/api/webapp/my-entitlements', requireSessionAuth, asyncHandler(webappAdminController.getMyEntitlements));
 

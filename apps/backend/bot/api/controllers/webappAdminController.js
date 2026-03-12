@@ -187,7 +187,9 @@ const getUser = async (req, res) => {
     const result = await query(
       `SELECT id, username, email, first_name, last_name, bio, role, tier,
               subscription_status, plan_id AS subscription_plan, plan_expiry, created_at,
-              last_payment_date FROM users WHERE id = $1`,
+              last_payment_date,
+              creator_status, creator_type, creator_price_usd, live_channel
+         FROM users WHERE id = $1`,
       [userId]
     );
 
@@ -1403,6 +1405,222 @@ const getMyEntitlements = async (req, res) => {
   }
 };
 
+// ==========================================
+// Creator / Live Performer Promotion
+// ==========================================
+
+const VALID_CREATOR_TYPES = ['performer', 'streamer', 'creator', 'dj', 'host'];
+
+/**
+ * POST /api/webapp/admin/users/:userId/make-creator
+ * Cherry-pick promote a user to creator/model role and optionally assign a live channel.
+ *
+ * Body: { channelRef?: string, creatorType?: string, priceUsd?: number, grantMonetization?: boolean }
+ */
+const makeCreator = async (req, res) => {
+  const admin = req.user;
+
+  try {
+    const { userId } = req.params;
+    const {
+      channelRef,
+      creatorType,
+      priceUsd,
+      grantMonetization = true,
+    } = req.body;
+
+    // Validate optional inputs
+    if (channelRef !== undefined && typeof channelRef !== 'string') {
+      return res.status(400).json({ success: false, error: 'channelRef must be a string' });
+    }
+    if (channelRef && !/^[a-zA-Z0-9\-_]+$/.test(channelRef)) {
+      return res.status(400).json({ success: false, error: 'channelRef contains invalid characters' });
+    }
+    if (creatorType !== undefined && !VALID_CREATOR_TYPES.includes(creatorType)) {
+      return res.status(400).json({
+        success: false,
+        error: `creatorType must be one of: ${VALID_CREATOR_TYPES.join(', ')}`,
+      });
+    }
+    if (priceUsd !== undefined) {
+      const price = parseFloat(priceUsd);
+      if (isNaN(price) || price < 0 || price > 9999.99) {
+        return res.status(400).json({ success: false, error: 'priceUsd must be a number between 0 and 9999.99' });
+      }
+    }
+
+    // Verify the target user exists
+    const userCheck = await query('SELECT id, username FROM users WHERE id = $1', [userId]);
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    // If a channelRef is being assigned, check it is not already taken by another user
+    if (channelRef) {
+      const channelCheck = await query(
+        'SELECT id, username FROM users WHERE live_channel = $1 AND id != $2',
+        [channelRef, userId]
+      );
+      if (channelCheck.rows.length > 0) {
+        const taken = channelCheck.rows[0];
+        return res.status(409).json({
+          success: false,
+          error: `Channel '${channelRef}' is already assigned to user @${taken.username || taken.id}`,
+        });
+      }
+    }
+
+    // Build the UPDATE statement dynamically so we only touch provided fields
+    const setClauses = [
+      'role = $2',
+      'creator_status = $3',
+      'creator_enabled_at = NOW()',
+      'role_assigned_at = NOW()',
+      'primary_role = $4',
+      'updated_at = NOW()',
+    ];
+    const values = [userId, 'model', 'active', 'model'];
+    let paramIdx = 5;
+
+    if (creatorType !== undefined) {
+      setClauses.push(`creator_type = $${paramIdx++}`);
+      values.push(creatorType);
+    }
+    if (priceUsd !== undefined) {
+      setClauses.push(`creator_price_usd = $${paramIdx++}`);
+      values.push(parseFloat(priceUsd));
+    }
+    if (channelRef !== undefined) {
+      setClauses.push(`live_channel = $${paramIdx++}`);
+      values.push(channelRef);
+    }
+
+    const updateResult = await query(
+      `UPDATE users
+         SET ${setClauses.join(', ')}
+       WHERE id = $1
+       RETURNING id, username, role, creator_status, creator_type, creator_price_usd, live_channel`,
+      values
+    );
+
+    const updatedUser = updateResult.rows[0];
+
+    // Optionally grant the creator-subscription lifetime entitlement
+    if (grantMonetization) {
+      await EntitlementModel.grantEntitlement(
+        String(userId),
+        'creator-subscription',
+        {
+          isLifetime: true,
+          durationDays: 0,
+          source: 'admin',
+          actorId: String(admin?.id ?? 'admin'),
+          reason: 'creator promotion cherry-pick by admin',
+        }
+      );
+    }
+
+    // Audit log for the role promotion itself
+    await EntitlementModel._auditLog({
+      userId: String(userId),
+      action: 'grant',
+      actorId: String(admin?.id ?? 'admin'),
+      actorType: 'admin',
+      reason: 'cherry-pick creator promotion by admin',
+      newValues: { role: 'model', creator_status: 'active', channelRef: channelRef || null },
+    }).catch((auditErr) => {
+      // Non-fatal — log but do not abort the request
+      logger.warn('makeCreator: audit log write failed (non-fatal)', { error: auditErr.message });
+    });
+
+    // Invalidate Redis user cache
+    await cache.del(`user:${userId}`);
+
+    logger.info('Admin promoted user to creator', {
+      adminId: admin?.id,
+      userId,
+      channelRef,
+      creatorType,
+      grantMonetization,
+    });
+
+    return res.json({ success: true, user: updatedUser });
+  } catch (error) {
+    logger.error('makeCreator error:', error);
+    const status = error.status || 500;
+    return res.status(status).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * DELETE /api/webapp/admin/users/:userId/make-creator
+ * Revoke creator/model status from a user — reset to plain 'user' role.
+ */
+const revokeCreator = async (req, res) => {
+  const admin = req.user;
+
+  try {
+    const { userId } = req.params;
+
+    const userCheck = await query('SELECT id, username FROM users WHERE id = $1', [userId]);
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const updateResult = await query(
+      `UPDATE users
+         SET role = 'user',
+             creator_status = 'none',
+             creator_enabled_at = NULL,
+             live_channel = NULL,
+             creator_type = NULL,
+             primary_role = NULL,
+             role_assigned_at = NOW(),
+             updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, username, role, creator_status, creator_type, creator_price_usd, live_channel`,
+      [userId]
+    );
+
+    const updatedUser = updateResult.rows[0];
+
+    // Revoke the creator-subscription entitlement (if any)
+    await query(
+      `DELETE FROM user_entitlements WHERE user_id = $1 AND add_on_id = 'creator-subscription'`,
+      [userId]
+    ).catch((delErr) => {
+      logger.warn('revokeCreator: failed to delete creator-subscription entitlement (non-fatal)', {
+        error: delErr.message,
+        userId,
+      });
+    });
+
+    // Audit log
+    await EntitlementModel._auditLog({
+      userId: String(userId),
+      action: 'revoke',
+      actorId: String(admin?.id ?? 'admin'),
+      actorType: 'admin',
+      reason: 'creator status revoked by admin',
+      oldValues: { role: 'model' },
+      newValues: { role: 'user', creator_status: 'none' },
+    }).catch((auditErr) => {
+      logger.warn('revokeCreator: audit log write failed (non-fatal)', { error: auditErr.message });
+    });
+
+    // Invalidate Redis user cache
+    await cache.del(`user:${userId}`);
+
+    logger.info('Admin revoked creator status', { adminId: admin?.id, userId });
+
+    return res.json({ success: true, user: updatedUser });
+  } catch (error) {
+    logger.error('revokeCreator error:', error);
+    const status = error.status || 500;
+    return res.status(status).json({ success: false, error: error.message });
+  }
+};
+
 module.exports = {
   getStats,
   getDemographics,
@@ -1436,4 +1654,7 @@ module.exports = {
   revokeUserEntitlement,
   extendUserEntitlement,
   getMyEntitlements,
+  // Creator / Live Performer promotion
+  makeCreator,
+  revokeCreator,
 };
