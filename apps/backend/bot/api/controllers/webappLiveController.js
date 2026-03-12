@@ -160,7 +160,7 @@ const listStreams = async (req, res) => {
 // ---------------------------------------------------------------------------
 const getRtmpKey = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  if (!['creator', 'admin', 'superadmin'].includes(user.role)) {
+  if (!['model', 'creator', 'admin', 'superadmin'].includes(user.role)) {
     return res.status(403).json({
       success: false,
       error: 'Creator or admin access required to retrieve a stream key',
