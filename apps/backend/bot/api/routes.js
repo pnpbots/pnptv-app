@@ -882,6 +882,17 @@ const avatarUpload = multer({
   }
 });
 
+// Event cover upload - 5 MB max, images only
+const eventCoverUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const isImage = /^image\/(jpeg|jpg|png|webp|gif)$/i.test(file.mimetype || '');
+    if (isImage) return cb(null, true);
+    cb(new Error('Only image files are allowed'));
+  }
+});
+
 // ── Tiered upload limits: 512 MB for regular users, 3 GB for active creators ──
 const UPLOAD_LIMIT_REGULAR = 512 * 1024 * 1024;   // 512 MB
 const UPLOAD_LIMIT_CREATOR = 3 * 1024 * 1024 * 1024; // 3 GB
@@ -2265,6 +2276,7 @@ app.post('/api/webapp/auth/reset-password', authLimiter, asyncHandler(webAppCont
 app.get('/api/webapp/profile', requireSessionAuth, asyncHandler(webAppController.getProfile));
 app.put('/api/webapp/profile', requireSessionAuth, asyncHandler(webAppController.updateProfile));
 app.post('/api/webapp/profile/avatar', requireSessionAuth, uploadLimiter, avatarUpload.single('avatar'), asyncHandler(webAppController.uploadAvatar));
+app.post('/api/webapp/upload/event-cover', requireSessionAuth, uploadLimiter, eventCoverUpload.single('media'), asyncHandler(webAppController.uploadEventCover));
 
 // Web App Privacy Settings
 app.patch('/api/webapp/privacy', asyncHandler(async (req, res) => {

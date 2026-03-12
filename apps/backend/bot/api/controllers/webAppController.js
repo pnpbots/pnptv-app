@@ -1948,4 +1948,39 @@ module.exports = {
   resetPassword,
   getMastodonFeed,
   uploadAvatar,
+  uploadEventCover,
 };
+
+// placed after exports object — hoisted by module eval order is fine
+async function uploadEventCover(req, res) {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+  if (!req.file) return res.status(400).json({ error: 'No file provided' });
+
+  try {
+    const { buffer } = req.file;
+    const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+    const detected = await FileType.fromBuffer(buffer);
+    if (!detected?.mime || !ALLOWED.has(detected.mime)) {
+      return res.status(400).json({ error: 'Only image files are allowed' });
+    }
+
+    const filename = `event-${user.id}-${Date.now()}.webp`;
+    const uploadDir = path.join(__dirname, '../../../../../public/uploads/events');
+    const filePath = path.join(uploadDir, filename);
+    const url = `/uploads/events/${filename}`;
+
+    await fs.mkdir(uploadDir, { recursive: true });
+    await sharp(buffer)
+      .rotate()
+      .withMetadata(false)
+      .resize(1200, 630, { fit: 'cover', position: 'center' })
+      .webp({ quality: 80 })
+      .toFile(filePath);
+
+    return res.json({ success: true, url });
+  } catch (err) {
+    logger.error('uploadEventCover error', { userId: user.id, err: err.message });
+    return res.status(500).json({ error: 'Upload failed' });
+  }
+}
