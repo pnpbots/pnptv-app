@@ -1063,6 +1063,22 @@ export function createReply(
   });
 }
 
+// Mention autocomplete search
+export interface MentionUser {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  creator_status: string | null;
+}
+
+export function searchMentions(
+  q: string
+): Promise<{ success: boolean; users: MentionUser[] }> {
+  return request(
+    `/api/webapp/social/mentions/search?q=${encodeURIComponent(q)}`
+  );
+}
+
 // Aliases used by Home.tsx internal feed
 export type InternalPost = SocialPostItem;
 

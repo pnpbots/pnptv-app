@@ -1192,4 +1192,19 @@ const getPublicPost = async (req, res) => {
   }
 };
 
-module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, editPost, getReplies, postToMastodon, createPostWithMedia, createPostWithMultiMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof, getPost, getPublicPost };
+// ── Mention autocomplete search ───────────────────────────────────────────────
+
+const searchMentions = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const q = (req.query.q || '').trim();
+  if (!q || q.length < 1) return res.json({ success: true, users: [] });
+  try {
+    const users = await mentionService.searchUsersForMention(q, 8);
+    return res.json({ success: true, users });
+  } catch (err) {
+    logger.error('searchMentions error', err);
+    return res.status(500).json({ error: 'Failed to search users' });
+  }
+};
+
+module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, editPost, getReplies, postToMastodon, createPostWithMedia, createPostWithMultiMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof, getPost, getPublicPost, searchMentions };

@@ -4264,6 +4264,7 @@ app.delete('/api/webapp/social/posts/:postId', requireSessionAuth, asyncHandler(
 app.patch('/api/webapp/social/posts/:postId', requireSessionAuth, asyncHandler(socialController.editPost));
 app.get('/api/webapp/social/posts/:postId', asyncHandler(socialController.getPost));
 app.get('/api/webapp/social/posts/:postId/replies', requireSessionAuth, asyncHandler(socialController.getReplies));
+app.get('/api/webapp/social/mentions/search', requireSessionAuth, asyncHandler(socialController.searchMentions));
 app.post('/api/webapp/social/posts/:postId/mastodon', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.postToMastodon));
 app.post('/api/webapp/social/posts/:postId/request-deletion', requireSessionAuth, asyncHandler(socialController.requestWofDeletion));
 app.get('/api/webapp/social/wof/leaderboard', asyncHandler(socialController.getWofLeaderboard));

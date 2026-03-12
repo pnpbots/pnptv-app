@@ -36,11 +36,18 @@ const strings = {
     translate: "Translate",
     showOriginal: "Show original",
     translating: "...",
-    // Comments
+    // Comments / Replies
     writeComment: "Write a comment...",
     send: "Send",
     loadingComments: "Loading comments...",
     noCommentsYet: "No comments yet",
+    reply: "Reply",
+    replies: "Replies",
+    replyingTo: "Replying to",
+    writeReply: "Write a reply...",
+    loadingReplies: "Loading replies...",
+    noRepliesYet: "No replies yet. Be the first!",
+    searchingUsers: "Searching...",
     // WoF removal
     remove: "Remove",
     removing: "Removing...",
@@ -92,6 +99,13 @@ const strings = {
     send: "Enviar",
     loadingComments: "Cargando comentarios...",
     noCommentsYet: "Aún no hay comentarios",
+    reply: "Responder",
+    replies: "Respuestas",
+    replyingTo: "Respondiendo a",
+    writeReply: "Escribe una respuesta...",
+    loadingReplies: "Cargando respuestas...",
+    noRepliesYet: "Sin respuestas aún. ¡Sé el primero!",
+    searchingUsers: "Buscando...",
     remove: "Eliminar",
     removing: "Eliminando...",
     // X cross-post

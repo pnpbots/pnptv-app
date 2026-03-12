@@ -1,178 +1,299 @@
-import React, { useState, useRef, useCallback } from 'react';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'https://pnptv.app';
-
-interface MentionUser {
-  id: string;
-  username: string;
-  avatar_url?: string;
-  creator_status?: string;
-}
+import React, {
+  useRef,
+  useState,
+  useCallback,
+  useEffect,
+  KeyboardEvent,
+} from "react";
+import { searchMentions, type MentionUser } from "@/lib/api";
 
 interface MentionInputProps {
   value: string;
   onChange: (val: string) => void;
   placeholder?: string;
-  className?: string;
-  rows?: number;
-  onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-  disabled?: boolean;
   maxLength?: number;
+  className?: string;
+  /** Called when Enter is pressed without Shift (if no dropdown is open). */
+  onSubmit?: () => void;
+  rows?: number;
+  autoFocus?: boolean;
+  disabled?: boolean;
+}
+
+interface ActiveMention {
+  query: string;
+  /** Index in the full string where `@` starts. */
+  start: number;
+}
+
+function getActiveMention(
+  text: string,
+  cursorPos: number
+): ActiveMention | null {
+  const before = text.slice(0, cursorPos);
+  const match = before.match(/@([a-zA-Z0-9_]*)$/);
+  if (!match) return null;
+  return { query: match[1], start: cursorPos - match[0].length };
 }
 
 /**
- * Textarea that detects `@username` at cursor and shows an autocomplete dropdown.
- * On selection, replaces the `@partial` text with `@username `.
+ * Drop-in textarea with @mention autocomplete.
+ *
+ * When the user types `@` followed by non-space characters, a floating dropdown
+ * appears above the input showing matching users fetched from the social API.
+ * Selecting a user replaces the partial @token with `@username `.
+ *
+ * Exports both a named export (`MentionInput`) and a default export for
+ * backward compatibility with any existing default import sites.
  */
-export default function MentionInput({
+export function MentionInput({
   value,
   onChange,
   placeholder,
-  className = '',
-  rows = 3,
-  onKeyDown,
-  disabled,
-  maxLength,
+  maxLength = 500,
+  className,
+  onSubmit,
+  rows = 2,
+  autoFocus = false,
+  disabled = false,
 }: MentionInputProps) {
-  const [suggestions, setSuggestions] = useState<MentionUser[]>([]);
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [activeIdx, setActiveIdx] = useState(0);
-  const [mentionQuery, setMentionQuery] = useState('');
-  const [mentionStart, setMentionStart] = useState(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const detectMention = useCallback((text: string, cursorPos: number): string | null => {
-    const before = text.slice(0, cursorPos);
-    const match = before.match(/@([a-zA-Z0-9_]*)$/);
-    if (match) {
-      setMentionQuery(match[1]);
-      setMentionStart(before.lastIndexOf('@'));
-      return match[1];
-    }
-    setShowDropdown(false);
-    setMentionStart(-1);
-    return null;
+  const [cursorPos, setCursorPos] = useState(0);
+  const [dropdown, setDropdown] = useState<MentionUser[]>([]);
+  const [dropdownLoading, setDropdownLoading] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [activeMention, setActiveMention] = useState<ActiveMention | null>(
+    null
+  );
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node) &&
+        textareaRef.current &&
+        !textareaRef.current.contains(e.target as Node)
+      ) {
+        setDropdown([]);
+        setActiveMention(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const fetchSuggestions = useCallback((q: string) => {
-    if (q.length < 1) { setSuggestions([]); setShowDropdown(false); return; }
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(async () => {
-      try {
-        const res = await fetch(
-          `${API_BASE}/api/webapp/users/mention-search?q=${encodeURIComponent(q)}`,
-          { credentials: 'include' }
-        );
-        if (!res.ok) throw new Error('search failed');
-        const data = await res.json();
-        const users = data.users || [];
-        setSuggestions(users);
-        setShowDropdown(users.length > 0);
-        setActiveIdx(0);
-      } catch {
-        setSuggestions([]);
-        setShowDropdown(false);
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const newVal = e.target.value.slice(0, maxLength);
+      const pos = e.target.selectionStart ?? newVal.length;
+      onChange(newVal);
+      setCursorPos(pos);
+
+      const mention = getActiveMention(newVal, pos);
+
+      if (!mention) {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        setDropdown([]);
+        setActiveMention(null);
+        setDropdownLoading(false);
+        return;
       }
-    }, 300);
+
+      setActiveMention(mention);
+      setSelectedIndex(0);
+
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+
+      if (mention.query.length === 0) {
+        // Just typed @, don't search yet
+        setDropdown([]);
+        setDropdownLoading(false);
+        return;
+      }
+
+      setDropdownLoading(true);
+      debounceRef.current = setTimeout(async () => {
+        try {
+          const res = await searchMentions(mention.query);
+          setDropdown(res.users || []);
+        } catch {
+          setDropdown([]);
+        } finally {
+          setDropdownLoading(false);
+        }
+      }, 200);
+    },
+    [onChange, maxLength]
+  );
+
+  const insertMention = useCallback(
+    (user: MentionUser) => {
+      const mention = activeMention;
+      if (!mention) return;
+      // Use current real cursor pos from the textarea, not stale state
+      const pos = textareaRef.current?.selectionStart ?? cursorPos;
+      const before = value.slice(0, mention.start);
+      const after = value.slice(pos);
+      const newText = `${before}@${user.username} ${after}`.slice(
+        0,
+        maxLength
+      );
+      onChange(newText);
+      setDropdown([]);
+      setActiveMention(null);
+      setDropdownLoading(false);
+
+      const newCursor = mention.start + user.username.length + 2; // @ + username + space
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.setSelectionRange(newCursor, newCursor);
+          setCursorPos(newCursor);
+        }
+      });
+    },
+    [activeMention, cursorPos, value, onChange, maxLength]
+  );
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (dropdown.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSelectedIndex((i) => Math.min(i + 1, dropdown.length - 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSelectedIndex((i) => Math.max(i - 1, 0));
+          return;
+        }
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          insertMention(dropdown[selectedIndex]);
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setDropdown([]);
+          setActiveMention(null);
+          return;
+        }
+      }
+
+      if (e.key === "Enter" && !e.shiftKey && onSubmit) {
+        e.preventDefault();
+        onSubmit();
+      }
+    },
+    [dropdown, selectedIndex, insertMention, onSubmit]
+  );
+
+  const handleSelect = useCallback(() => {
+    const pos = textareaRef.current?.selectionStart ?? 0;
+    setCursorPos(pos);
   }, []);
 
-  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newVal = e.target.value;
-    onChange(newVal);
-    const cursor = e.target.selectionStart ?? newVal.length;
-    const q = detectMention(newVal, cursor);
-    if (q !== null) fetchSuggestions(q);
-  };
-
-  const selectUser = (user: MentionUser) => {
-    if (mentionStart === -1) return;
-    const before = value.slice(0, mentionStart);
-    const after = value.slice(mentionStart + mentionQuery.length + 1);
-    const newVal = `${before}@${user.username} ${after}`;
-    onChange(newVal);
-    setShowDropdown(false);
-    setSuggestions([]);
-    setMentionStart(-1);
-    setTimeout(() => {
-      const ta = textareaRef.current;
-      if (ta) {
-        const pos = before.length + user.username.length + 2;
-        ta.focus();
-        ta.setSelectionRange(pos, pos);
-      }
-    }, 0);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (showDropdown && suggestions.length > 0) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setActiveIdx(i => Math.min(i + 1, suggestions.length - 1));
-        return;
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setActiveIdx(i => Math.max(i - 1, 0));
-        return;
-      }
-      if (e.key === 'Enter' && suggestions[activeIdx]) {
-        e.preventDefault();
-        selectUser(suggestions[activeIdx]);
-        return;
-      }
-      if (e.key === 'Escape') {
-        setShowDropdown(false);
-        return;
-      }
-    }
-    onKeyDown?.(e);
-  };
+  const showDropdown = dropdown.length > 0 || dropdownLoading;
 
   return (
-    <div className="relative w-full">
+    <div className="relative flex-1 min-w-0">
+      {/* Mention dropdown — floats above the textarea */}
+      {showDropdown && (
+        <div
+          ref={dropdownRef}
+          className="absolute bottom-full left-0 right-0 mb-1 rounded-xl overflow-hidden shadow-xl z-50"
+          style={{
+            background: "#1C1C1E",
+            border: "1px solid rgba(255,255,255,0.12)",
+            maxHeight: "220px",
+            overflowY: "auto",
+          }}
+        >
+          {dropdownLoading && dropdown.length === 0 ? (
+            <div className="px-3 py-2 text-xs" style={{ color: "#8E8E93" }}>
+              Searching...
+            </div>
+          ) : (
+            dropdown.map((user, idx) => (
+              <button
+                key={user.id}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  insertMention(user);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors"
+                style={{
+                  background:
+                    idx === selectedIndex
+                      ? "rgba(94,209,196,0.12)"
+                      : "transparent",
+                }}
+                onMouseEnter={() => setSelectedIndex(idx)}
+              >
+                {user.avatar_url ? (
+                  <img
+                    src={user.avatar_url}
+                    alt={user.username}
+                    className="w-7 h-7 rounded-full object-cover flex-shrink-0"
+                  />
+                ) : (
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                    style={{
+                      background: "linear-gradient(135deg, #D4007A, #E69138)",
+                      color: "#fff",
+                    }}
+                  >
+                    {(user.username || "?")[0].toUpperCase()}
+                  </div>
+                )}
+                <div className="flex flex-col min-w-0">
+                  <span
+                    className="text-xs font-semibold truncate"
+                    style={{ color: "#5ED1C4" }}
+                  >
+                    @{user.username}
+                  </span>
+                  {user.creator_status === "approved" && (
+                    <span
+                      className="text-[10px] leading-none"
+                      style={{ color: "#8E8E93" }}
+                    >
+                      Creator
+                    </span>
+                  )}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
       <textarea
         ref={textareaRef}
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
+        onSelect={handleSelect}
         placeholder={placeholder}
-        className={className}
         rows={rows}
         disabled={disabled}
+        // eslint-disable-next-line jsx-a11y/no-autofocus
+        autoFocus={autoFocus}
         maxLength={maxLength}
+        className={
+          className ??
+          "w-full bg-white/5 text-white text-xs rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 placeholder:text-white/30 resize-none"
+        }
       />
-
-      {showDropdown && suggestions.length > 0 && (
-        <div className="absolute z-50 left-0 bottom-full mb-1 w-64 bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl overflow-hidden">
-          {suggestions.map((user, idx) => (
-            <button
-              key={user.id}
-              type="button"
-              onMouseDown={e => { e.preventDefault(); selectUser(user); }}
-              className={`
-                w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors
-                ${idx === activeIdx ? 'bg-zinc-700' : 'hover:bg-zinc-800'}
-              `}
-            >
-              <img
-                src={user.avatar_url || '/placeholder-avatar.png'}
-                alt={user.username}
-                className="w-7 h-7 rounded-full object-cover flex-shrink-0 bg-zinc-700"
-                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-              />
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-sm text-zinc-100 font-medium truncate">@{user.username}</span>
-                {user.creator_status === 'approved' && (
-                  <span className="text-xs bg-violet-900/50 text-violet-300 px-1.5 py-0.5 rounded-full flex-shrink-0">
-                    Creator
-                  </span>
-                )}
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
+
+export default MentionInput;
