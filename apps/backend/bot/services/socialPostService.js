@@ -464,7 +464,7 @@ class SocialPostService {
        FROM social_posts sp
        JOIN users u ON sp.user_id = u.id
        -- Exclude replies where the viewer has blocked the reply author
-       LEFT JOIN users viewer ON viewer.id = $1::bigint
+       LEFT JOIN users viewer ON viewer.id = $1::text
        WHERE sp.reply_to_id = $2 AND sp.is_deleted = false
          -- Filter: viewer has not blocked the reply author
          AND NOT (viewer.blocked @> ARRAY[u.id::text])
