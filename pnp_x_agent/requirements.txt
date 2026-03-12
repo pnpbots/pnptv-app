@@ -1,0 +1,6 @@
+tweepy>=4.14.0
+xai-sdk
+apscheduler
+python-dotenv
+pytz
+psycopg2-binary

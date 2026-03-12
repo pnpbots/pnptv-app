@@ -30,6 +30,8 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { translateText } from "@/lib/feedI18n";
 import { NearbyBadge } from "@/components/NearbyBadge";
+import { MentionText } from "@/components/MentionText";
+import { MentionInput } from "@/components/MentionInput";
 
 
 function timeAgo(dateStr: string, nowLabel: string): string {
@@ -378,9 +380,10 @@ function PostCard({
                 </div>
               )}
 
-              <p className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed">
-                {translatedContent ?? post.content}
-              </p>
+              <MentionText
+                text={translatedContent ?? post.content}
+                className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed block"
+              />
               {translatedContent && (
                 <button
                   onClick={() => setTranslatedContent(null)}
@@ -562,7 +565,7 @@ function PostCard({
                           <span className="text-xs font-semibold text-white truncate">{reply.author_first_name || reply.author_username}</span>
                           <span className="text-xs" style={{ color: "#8E8E93" }}>{timeAgo(reply.created_at, t.translating)}</span>
                         </div>
-                        <p className="text-xs text-white/80 mt-0.5 whitespace-pre-wrap">{reply.content}</p>
+                        <MentionText text={reply.content} className="text-xs text-white/80 mt-0.5 whitespace-pre-wrap block" />
                       </div>
                     </div>
                   ))}
@@ -571,24 +574,40 @@ function PostCard({
 
               {/* Reply composer */}
               {currentUserId && (
-                <div className="flex gap-2 items-end">
-                  <input
-                    value={replyText}
-                    onChange={(e) => setReplyText(e.target.value.slice(0, 500))}
-                    placeholder={t.writeComment}
-                    className="flex-1 bg-white/5 text-white text-xs rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 placeholder:text-white/30"
-                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSendReply()}
-                    disabled={sendingReply}
-                  />
-                  <button
-                    onClick={handleSendReply}
-                    disabled={!replyText.trim() || sendingReply}
-                    className="text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-30 transition-colors"
-                    style={{ color: "#D4007A" }}
-                  >
-                    {sendingReply ? "..." : t.send}
-                  </button>
-                </div>
+                <>
+                  {/* "Replying to @username" context banner */}
+                  {post.author_username && (
+                    <div className="flex items-center gap-1.5 mb-2 text-xs">
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                      </svg>
+                      <span style={{ color: "#8E8E93" }}>
+                        {t.replyingTo}{" "}
+                        <span className="font-medium" style={{ color: "#5ED1C4" }}>@{post.author_username}</span>
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex gap-2 items-end">
+                    <MentionInput
+                      value={replyText}
+                      onChange={setReplyText}
+                      placeholder={t.writeReply}
+                      maxLength={500}
+                      rows={2}
+                      disabled={sendingReply}
+                      onSubmit={handleSendReply}
+                      className="flex-1 bg-white/5 text-white text-xs rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 placeholder:text-white/30 resize-none"
+                    />
+                    <button
+                      onClick={handleSendReply}
+                      disabled={!replyText.trim() || sendingReply}
+                      className="text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-30 transition-colors flex-shrink-0"
+                      style={{ color: "#D4007A" }}
+                    >
+                      {sendingReply ? "..." : t.reply}
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           )}
