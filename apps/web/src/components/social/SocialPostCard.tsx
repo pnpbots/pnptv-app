@@ -184,7 +184,8 @@ export default function SocialPostCard({
 
   return (
     <div
-      className="glass-card-sm p-4"
+      className="glass-card-sm p-4 cursor-pointer"
+      onClick={toggleReplies}
       id={`post-${post.id}`}
       style={
         post.is_promoted
@@ -198,7 +199,7 @@ export default function SocialPostCard({
       <div className="flex gap-3">
         {/* Avatar — promoted posts show PNPtv logo, others show user photo */}
         <button
-          onClick={() => (post.is_promoted ? undefined : onNavigate(authorPath))}
+          onClick={(e) => { e.stopPropagation(); if (!post.is_promoted) onNavigate(authorPath); }}
           className="flex-shrink-0"
         >
           {post.is_promoted ? (
@@ -238,7 +239,7 @@ export default function SocialPostCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={() => onNavigate(authorPath)}
+              onClick={(e) => { e.stopPropagation(); onNavigate(authorPath); }}
               className="font-semibold text-white text-sm truncate hover:underline"
             >
               {post.author_first_name || post.author_username || "Anonymous"}
@@ -320,7 +321,7 @@ export default function SocialPostCard({
             {/* Admin: WoF flag toggle */}
             {isAdmin && (
               <button
-                onClick={handleWofToggle}
+                onClick={(e) => { e.stopPropagation(); handleWofToggle(); }}
                 disabled={wofToggling}
                 className="text-xs transition-colors disabled:opacity-40"
                 style={{ color: isWof ? "#FFB454" : "#8E8E93" }}
@@ -346,7 +347,7 @@ export default function SocialPostCard({
             {/* Delete (own posts or admin) */}
             {canDelete && (
               <button
-                onClick={handleDelete}
+                onClick={(e) => { e.stopPropagation(); handleDelete(); }}
                 disabled={deleting}
                 className="ml-auto text-xs hover:text-red-400 transition-colors"
                 style={{ color: "#8E8E93" }}
@@ -398,6 +399,7 @@ export default function SocialPostCard({
           ) : post.is_exclusive && post.exclusive_status === "locked" ? (
             <div
               className="mt-2 rounded-lg p-6 text-center"
+              onClick={(e) => e.stopPropagation()}
               style={{
                 background: "rgba(255,255,255,0.03)",
                 border: "1px solid rgba(255,255,255,0.08)",
@@ -474,7 +476,7 @@ export default function SocialPostCard({
               />
               {translatedContent && (
                 <button
-                  onClick={() => setTranslatedContent(null)}
+                  onClick={(e) => { e.stopPropagation(); setTranslatedContent(null); }}
                   className="text-xs mt-0.5"
                   style={{ color: "#8E8E93" }}
                 >
@@ -485,7 +487,7 @@ export default function SocialPostCard({
               {/* Promoted CTA button */}
               {post.is_promoted && post.promoted_link && (
                 <button
-                  onClick={() => {
+                  onClick={(e) => { e.stopPropagation();
                     const link = post.promoted_link!;
                     if (link.startsWith("/")) {
                       onNavigate(link);
@@ -566,6 +568,7 @@ export default function SocialPostCard({
           <div
             className="flex items-center gap-3 mt-3 flex-wrap"
             style={{ color: "#8E8E93" }}
+            onClick={(e) => e.stopPropagation()}
           >
             {/* Heart like */}
             <button
@@ -702,7 +705,7 @@ export default function SocialPostCard({
 
           {/* Replies section */}
           {showReplies && (
-            <div className="mt-3 pt-3 border-t border-white/10">
+            <div className="mt-3 pt-3 border-t border-white/10" onClick={(e) => e.stopPropagation()}>
               {loadingReplies ? (
                 <p className="text-xs" style={{ color: "#8E8E93" }}>
                   {t.loadingComments}
@@ -837,7 +840,7 @@ export default function SocialPostCard({
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center p-4"
           style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
-          onClick={() => setShowDisclaimerModal(false)}
+          onClick={(e) => { e.stopPropagation(); setShowDisclaimerModal(false); }}
         >
           <div
             className="w-full max-w-sm rounded-2xl p-5 space-y-4"

@@ -301,6 +301,7 @@ export default function SocialFeedTabs({
           ) : (
             <>
               <PostComposer
+                compact
                 onPostCreated={(newPost) => {
                   setPosts((prev) => [newPost, ...prev]);
                 }}

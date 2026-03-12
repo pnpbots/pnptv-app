@@ -179,23 +179,41 @@ class EmailService {
      * @returns {Promise<Object>} Send result
      */
     async sendWelcomeEmail(data) {
-        const {
-            email,
-            userName = 'New User',
-            attachments = [],
-            userLanguage = 'en'
-        } = data;
+        // Accept both old-style {email, userName, userLanguage} and
+        // new-style {to, customerName, language} param names so all callers work.
+        const resolvedEmail    = data.to || data.email;
+        const resolvedName     = data.customerName || data.userName || 'New User';
+        const resolvedLang     = data.language || data.userLanguage || 'en';
+        const resolvedPlanName = data.planName || null;
+        const resolvedExpiry   = data.expiryDate || null;
+        const resolvedUuid     = data.userUuid || null;
+
+        // onboardingGuidePdf (Buffer) → attachment; fall back to old-style attachments array
+        let attachments = data.attachments || [];
+        if (data.onboardingGuidePdf) {
+            attachments = [
+                ...attachments,
+                {
+                    filename: resolvedLang === 'es' ? 'guia-bienvenida-pnptv.pdf' : 'pnptv-welcome-guide.pdf',
+                    content: data.onboardingGuidePdf,
+                    contentType: 'application/pdf',
+                },
+            ];
+        }
 
         const html = this.getWelcomeEmailTemplate({
-            userName,
-            language: userLanguage
+            userName: resolvedName,
+            language: resolvedLang,
+            planName: resolvedPlanName,
+            expiryDate: resolvedExpiry,
+            userUuid: resolvedUuid,
         });
 
         return await this.send({
-            to: email,
-            subject: userLanguage === 'es' ? '🎉 ¡Bienvenido a PNP TV Bot!' : '🎉 Welcome to PNP TV Bot!',
+            to: resolvedEmail,
+            subject: resolvedLang === 'es' ? '🎉 ¡Bienvenido a PNPtv!' : '🎉 Welcome to PNPtv!',
             html,
-            attachments: attachments
+            attachments,
         });
     }
 
@@ -520,7 +538,7 @@ class EmailService {
      * @returns {string} HTML template
      */
     getWelcomeEmailTemplate(data) {
-        const { userName, language = 'en' } = data;
+        const { userName, language = 'en', planName = null, expiryDate = null, userUuid = null } = data;
         const isSpanish = language === 'es';
 
         const welcomeTitle = isSpanish ? '¡Bienvenido a PNP TV Bot!' : 'Welcome to PNP TV Bot!';
@@ -741,16 +759,42 @@ class EmailService {
                                 ${botFeatures.map(feature => `<li>${feature}</li>`).join('')}
                             </ul>
                             
+                            ${planName ? `
+                            <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;border-radius:10px;overflow:hidden;border:1px solid rgba(0,229,255,0.25);">
+                                <tr>
+                                    <td colspan="2" style="background:linear-gradient(90deg,rgba(0,229,255,0.12),rgba(255,0,204,0.08));padding:10px 16px;border-bottom:1px solid rgba(0,229,255,0.15);">
+                                        <span style="color:#00e5ff;font-weight:bold;font-size:14px;">🎫 ${isSpanish ? 'Tu Plan' : 'Your Plan'}</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:10px 16px;color:#aaa;font-size:13px;width:40%;">${isSpanish ? 'Plan' : 'Plan'}</td>
+                                    <td style="padding:10px 16px;color:#fff;font-size:13px;font-weight:bold;">${this.escapeHtml(planName)}</td>
+                                </tr>
+                                <tr style="background:rgba(255,255,255,0.03);">
+                                    <td style="padding:10px 16px;color:#aaa;font-size:13px;">${isSpanish ? 'Membresía' : 'Membership'}</td>
+                                    <td style="padding:10px 16px;color:#00e5ff;font-size:13px;font-weight:bold;">${isSpanish ? '✅ De por vida' : '✅ Lifetime'}</td>
+                                </tr>
+                                ${expiryDate ? `<tr>
+                                    <td style="padding:10px 16px;color:#aaa;font-size:13px;">${isSpanish ? 'PRIME expira' : 'PRIME expires'}</td>
+                                    <td style="padding:10px 16px;color:#ff00cc;font-size:13px;font-weight:bold;">${new Date(expiryDate).toLocaleDateString(isSpanish ? 'es-CO' : 'en-US', { year:'numeric', month:'long', day:'numeric' })}</td>
+                                </tr>` : ''}
+                                ${userUuid ? `<tr style="background:rgba(255,255,255,0.03);">
+                                    <td style="padding:10px 16px;color:#aaa;font-size:13px;">${isSpanish ? 'Tu UUID' : 'Your UUID'}</td>
+                                    <td style="padding:10px 16px;color:#777;font-size:11px;font-family:monospace;">${this.escapeHtml(userUuid)}</td>
+                                </tr>` : ''}
+                            </table>
+                            ` : ''}
+
                             <div class="attachment-note">
-                                ${isSpanish 
-                                    ? '📎 ¡Hemos incluido algunos documentos útiles como archivos adjuntos para ayudarte a comenzar!' 
+                                ${isSpanish
+                                    ? '📎 ¡Hemos incluido algunos documentos útiles como archivos adjuntos para ayudarte a comenzar!'
                                     : '📎 We\'ve included some helpful documents as attachments to help you get started!'}
                             </div>
-                            
+
                             <p>${getStarted}</p>
-                            
+
                             <div style="text-align: center; margin-top: 20px;">
-                                <a href="https://pnptv.app/landing.html" class="button-primary">${buttonText}</a>
+                                <a href="https://app.pnptv.app" class="button-primary">${isSpanish ? 'Abrir PNPtv!' : 'Open PNPtv!'}</a>
                             </div>
                             
                             <p style="text-align: center; margin-top: 30px;">${excitedMessage}</p>

@@ -43,12 +43,15 @@ jest.mock('../config/redis', () => {
     _store: store,
     _reset: () => store.clear(),
   };
-  return { getRedis: () => redis };
+  return {
+    getRedis: () => redis,
+    cache: redis, // Also export it as 'cache' for controllers that destructure it
+  };
 });
 
 // ── Mock pg ───────────────────────────────────────────────────────────────────
 
-const mockQuery = jest.fn();
+const mockQuery = jest.fn().mockResolvedValue({ rows: [], rowCount: 0 });
 jest.mock('../config/postgres', () => ({ query: mockQuery }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -140,6 +143,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   mockQuery.mockReset();
+  mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
   const { getRedis } = require('../config/redis');
   getRedis()._reset();
 });

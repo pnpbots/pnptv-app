@@ -34,7 +34,7 @@ function redirectToCanonicalApp(res) {
 }
 
 function redirectToCanonicalAuthError(res) {
-  return res.redirect(canonicalWebUrl('/?error=auth_failed'));
+  return res.redirect('https://app.pnptv.app/?error=auth_failed');
 }
 
 function generatePnptvId() {

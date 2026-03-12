@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { getXLoginUrl, telegramWidgetAuth, emailRegister, resendVerificationEmail, type TelegramWidgetUser, type EmailRegisterPayload, type EmailRegisterResponse } from "@/lib/api";
 import { getI18n, getLang } from "@/lib/i18n";
 import { useAuth } from "@/hooks/useAuth";
@@ -156,6 +157,16 @@ export function LoginPage() {
   type DeepLinkStatus = "idle" | "waiting" | "error";
   const [deepLinkStatus, setDeepLinkStatus] = useState<DeepLinkStatus>("idle");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── X OAuth error from redirect (e.g. ?error=auth_failed)
+  const [searchParams] = useSearchParams();
+  const [xAuthError, setXAuthError] = useState<string | null>(
+    searchParams.get("error") === "auth_failed"
+      ? lang === "es"
+        ? "No se pudo completar el inicio de sesión con X. Por favor intenta de nuevo."
+        : "X login failed. Please try again."
+      : null
+  );
 
   // ── X state
   const [xRedirecting, setXRedirecting] = useState(false);
@@ -417,6 +428,17 @@ export function LoginPage() {
             {t.tagline}
           </p>
         </div>
+
+        {/* X auth error banner */}
+        {xAuthError && (
+          <div className="mb-4 rounded-xl p-3 text-center"
+            style={{ background: "rgba(255,69,58,0.08)", border: "1px solid rgba(255,69,58,0.2)" }}>
+            <p className="text-sm text-red-400">{xAuthError}</p>
+            <button className="mt-1 text-xs underline" style={{ color: "#8E8E93" }} onClick={() => setXAuthError(null)}>
+              {lang === "es" ? "Cerrar" : "Dismiss"}
+            </button>
+          </div>
+        )}
 
         {/* Welcome back banner + last login method hint */}
         {(lastUsername || (lastMethod && methodLabel(lastMethod))) && (

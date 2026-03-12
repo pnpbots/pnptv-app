@@ -110,6 +110,7 @@ const EntitlementAccessService = require('../services/entitlementAccessService')
  */
 const requireSessionAuth = (req, res, next) => {
   if (!req.session?.user?.id) return res.status(401).json({ error: 'Not authenticated' });
+  req.user = req.session.user;
   next();
 };
 
@@ -147,7 +148,6 @@ const requireFreeTierDmLimit = async (req, res, next) => {
   }
   // Member/Prime bypass via live entitlement check (not stale session.tier)
   try {
-    const EntitlementAccessService = require('./services/entitlementAccessService');
     if (await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member')) {
       return next();
     }
@@ -2727,6 +2727,11 @@ app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (re
       logger.warn('ensureEmailCredentials failed (non-critical)', { userId, error: credErr.message });
     }
 
+    // Guard: prevent a user from consuming a second code if already on lifetime100
+    if (user.plan_id === 'lifetime100') {
+      return res.status(409).json({ success: false, error: 'Your account already has the Lifetime100 plan activated.' });
+    }
+
     // 1. Check code exists and is available
     const meruLinkService = require('../../services/meruLinkService');
     const availableLinks = await meruLinkService.getAvailableLinks();
@@ -2742,6 +2747,14 @@ app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (re
 
     if (!verification.isPaid) {
       return res.status(402).json({ success: false, error: 'Payment not yet completed on Meru. Please complete payment first.' });
+    }
+
+    // 2b. Atomically claim the code BEFORE granting membership — this is the real race gate.
+    // invalidateLinkAfterActivation uses WHERE status = 'active', so only one concurrent
+    // request can win. If 0 rows updated, someone else already claimed it.
+    const claimResult = await meruLinkService.invalidateLinkAfterActivation(meruCode, userId, username);
+    if (!claimResult.success) {
+      return res.status(409).json({ success: false, error: 'Code not found or already used' });
     }
 
     // 3. Activate membership — set lifetime100 (member tier) + 2 months PRIME bonus
@@ -2767,7 +2780,6 @@ app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (re
     // 3b. Grant entitlements (pnp-member lifetime + prime 60 days) — sole source of truth for access
     try {
       const EntitlementModel = require('../../models/entitlementModel');
-      const EntitlementAccessService = require('./services/entitlementAccessService');
       // Lifetime pnp-member
       await EntitlementModel.grantEntitlement(userId, 'pnp-member', {
         isLifetime: true, source: 'meru', actorId: 'system', reason: 'Meru lifetime100 activation',
@@ -2782,12 +2794,7 @@ app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (re
       // Continue — users.tier is set, so legacy paths still work; entitlements will be synced by daily cleanup
     }
 
-    // 4. Invalidate the Meru link + mark activation code used (non-critical)
-    try {
-      await meruLinkService.invalidateLinkAfterActivation(meruCode, userId, username);
-    } catch (e) {
-      logger.warn('Failed to invalidate Meru link (non-critical)', { code: meruCode, error: e.message });
-    }
+    // 4. Mark activation code used in activation_codes table (non-critical; Meru link already claimed above)
     try {
       const { markCodeUsed } = require('../handlers/payments/activation');
       await markCodeUsed(meruCode, userId, username);
@@ -2893,6 +2900,7 @@ app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (re
             expiryDate: primeExpiry,
             language,
             onboardingGuidePdf: guidePdf,
+            userUuid: user.id || userId,
           });
           logger.info('Meru welcome email sent', { to: customerEmail, code: meruCode });
         } catch (emailError) {
@@ -5800,7 +5808,6 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
 
         // Invalidate entitlement cache
         try {
-          const EntitlementAccessService = require('../services/entitlementAccessService');
           await EntitlementAccessService.invalidateCache(invalidUserId);
         } catch (cacheErr) {
           logger.warn('BTCPay InvoiceMarkedInvalid: cache invalidation failed', { error: cacheErr.message });
