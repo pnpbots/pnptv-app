@@ -6242,6 +6242,38 @@ const livekitTokenLimiter = rateLimit({
 app.get('/api/livekit/status', asyncHandler(livekitController.getStatus));
 app.post('/api/livekit/token', requireSessionAuth, livekitTokenLimiter, asyncHandler(livekitController.getToken));
 
+// ── Book a Call ──────────────────────────────────────────────────────────────
+const callPackageController = require('./controllers/callPackageController');
+
+// Public: list active call packages for a creator (used on profile pages)
+app.get('/api/webapp/creators/:creatorId/call-packages',
+  asyncHandler(callPackageController.listPackages));
+
+// Admin: create a call package for a creator
+app.post('/api/webapp/admin/creators/:creatorId/call-packages',
+  requireSessionAuth, adminGuard,
+  asyncHandler(callPackageController.createPackage));
+
+// Admin: deactivate a call package
+app.delete('/api/webapp/admin/creators/:creatorId/call-packages/:packageId',
+  requireSessionAuth, adminGuard,
+  asyncHandler(callPackageController.deactivatePackage));
+
+// Member: get booking options (immediate if creator online, else next 5 slots)
+app.get('/api/webapp/book-call/:creatorId/options',
+  requireSessionAuth,
+  asyncHandler(callPackageController.getBookingOptions));
+
+// Member: book a call using a call credit
+app.post('/api/webapp/book-call',
+  requireSessionAuth,
+  asyncHandler(callPackageController.bookCall));
+
+// Member: get own call credits (optionally filtered by creatorId)
+app.get('/api/webapp/my-call-credits',
+  requireSessionAuth,
+  asyncHandler(callPackageController.myCallCredits));
+
 // ==========================================
 // ATProto / Bluesky OAuth Routes (PUBLIC — no session required)
 // These must be mounted at app root so the client_id URL and redirect_uri

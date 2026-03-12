@@ -4268,3 +4268,83 @@ export function revokeAdminUserCreator(
     method: "DELETE",
   });
 }
+
+// ─── Book a Call ─────────────────────────────────────────────────────────────
+
+export interface CallPackage {
+  id: number;
+  creator_id: string;
+  duration_minutes: 30 | 60;
+  quantity: number;
+  price_usd: string;
+  sku: string;
+  title: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface CallCredit {
+  id: number;
+  member_id: string;
+  creator_id: string;
+  package_id: number;
+  quantity_total: number;
+  quantity_used: number;
+  quantity_scheduled: number;
+  status: "unused" | "partial" | "completed" | "expired" | "refunded";
+  expires_at: string | null;
+  created_at: string;
+  duration_minutes: 30 | 60;
+  package_title: string | null;
+  creator_username?: string;
+  creator_photo?: string | null;
+}
+
+export interface BookingSlot {
+  startUtc: string;
+  endUtc: string;
+  durationMinutes: number;
+  available: boolean;
+}
+
+export interface BookingOptionsResponse {
+  success: boolean;
+  type: "immediate" | "slots";
+  startAt?: string;
+  slots?: BookingSlot[];
+  durationMinutes: number;
+}
+
+export function getCreatorCallPackages(
+  creatorId: string
+): Promise<{ success: boolean; packages: CallPackage[] }> {
+  return request(`/api/webapp/creators/${creatorId}/call-packages`);
+}
+
+export function getBookingOptions(
+  creatorId: string,
+  durationMinutes: 30 | 60 = 30
+): Promise<BookingOptionsResponse> {
+  return request(
+    `/api/webapp/book-call/${creatorId}/options?duration=${durationMinutes}`
+  );
+}
+
+export function bookCall(data: {
+  creatorId: string;
+  startAt: string;
+  creditId: number;
+  durationMinutes: 30 | 60;
+}): Promise<{ success: boolean; booking: Record<string, unknown> }> {
+  return request("/api/webapp/book-call", {
+    method: "POST",
+    body: data,
+  });
+}
+
+export function getMyCallCredits(
+  creatorId?: string
+): Promise<{ success: boolean; credits: CallCredit[] }> {
+  const qs = creatorId ? `?creatorId=${encodeURIComponent(creatorId)}` : "";
+  return request(`/api/webapp/my-call-credits${qs}`);
+}
