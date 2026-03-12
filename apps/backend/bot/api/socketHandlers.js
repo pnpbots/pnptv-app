@@ -1459,23 +1459,9 @@ function initSocketIO(io) {
       }
     });
 
-    // ── JaaS → Restreamer broadcast bridge ───────────────────────────────────
+    // ── JaaS → Restreamer broadcast bridge (DISABLED) ───────────────────────
     //
-    // When a creator uses JaaS (in-browser video call) as their stream source,
-    // the Jitsi External API cannot push to RTMP by itself.  These handlers
-    // call the JaaS Livestream API on the creator's behalf so JaaS pushes the
-    // meeting's composite video to the user's Restreamer RTMP channel.
-    //
-    // Frontend flow:
-    //   1. Creator calls GET /api/jaas/live-token → gets meetingUrl with JWT.
-    //   2. JitsiMeetComponent loads; onApiReady fires → frontend has conferenceId.
-    //   3. Frontend emits 'stream:start-jaas' with { conferenceId, roomName }.
-    //   4. Backend calls jaasBroadcastService.startBroadcast → JaaS API → RTMP.
-    //   5. Backend emits 'stream:jaas-started' with { hlsUrl, conferenceId }.
-    //   6. Creator ends meeting → frontend emits 'stream:stop-jaas'.
-    //   7. Backend calls jaasBroadcastService.stopBroadcast → JaaS API.
-    //   8. Backend emits 'stream:jaas-stopped'.
-
+    /*
     socket.on('stream:start-jaas', async ({ conferenceId, roomName } = {}) => {
       if (!conferenceId || typeof conferenceId !== 'string' || conferenceId.length > 512) {
         socket.emit('stream:error', { message: 'Invalid or missing conferenceId for JaaS broadcast.' });
@@ -1524,11 +1510,13 @@ function initSocketIO(io) {
         socket.emit('stream:jaas-stopped', { conferenceId });
       }
     });
+    */
 
     socket.on('disconnect', async () => {
       logger.info(`Socket disconnected: user ${user.id}`);
 
-      // Clean up any running JaaS broadcast
+      // Clean up any running JaaS broadcast (DISABLED)
+      /*
       if (socket.data.jaasBroadcastActive && socket.data.jaasConferenceId) {
         const conferenceId = socket.data.jaasConferenceId;
         jaasBroadcastService.stopBroadcast(user.id, conferenceId).catch((err) => {
@@ -1537,6 +1525,7 @@ function initSocketIO(io) {
         socket.data.jaasBroadcastActive = false;
         socket.data.jaasConferenceId    = null;
       }
+      */
 
       // Clean up any running FFmpeg browser-stream process
       if (socket.data.ffmpegProcess) {

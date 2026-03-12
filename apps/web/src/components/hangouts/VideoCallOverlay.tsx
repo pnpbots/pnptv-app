@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import { JitsiMeetComponent } from "./JitsiMeetComponent";
+import { LiveKitMeetComponent } from "./LiveKitMeetComponent";
 import { VideoCallSidePanel, MobileBottomBar } from "./VideoCallSidePanel";
 import { VideoCallModBot } from "./VideoCallModBot";
 import { PermissionGate } from "@/components/PermissionGate";
@@ -17,8 +17,10 @@ interface SocketChatData {
 }
 
 interface VideoCallOverlayProps {
-  /** The full Jitsi meeting URL (with JWT token) */
-  meetingUrl: string;
+  /** LiveKit participant JWT */
+  token: string;
+  /** LiveKit WebSocket URL (wss://lk.pnptv.app) */
+  wsUrl: string;
   /** Room name for display/accessibility */
   roomName?: string;
   /** Group name for display in the header */
@@ -44,7 +46,8 @@ interface VideoCallOverlayProps {
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function VideoCallOverlay({
-  meetingUrl,
+  token,
+  wsUrl,
   roomName,
   groupName,
   onClose,
@@ -61,7 +64,8 @@ export function VideoCallOverlay({
   const [participantCount, setParticipantCount] = useState(0);
   const [permsGranted, setPermsGranted] = useState(false);
   const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
-  const [jitsiApi, setJitsiApi] = useState<any>(null);
+  // LiveKit Room object — provided by LiveKitMeetComponent via onRoomConnected
+  const [livekitRoom, setLivekitRoom] = useState<any>(null);
 
   // Prevent body scroll in fullscreen mode
   useEffect(() => {
@@ -77,10 +81,8 @@ export function VideoCallOverlay({
   // Escape key to exit fullscreen
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (viewMode === "fullscreen") {
-          setViewMode("embedded");
-        }
+      if (e.key === "Escape" && viewMode === "fullscreen") {
+        setViewMode("embedded");
       }
     };
     document.addEventListener("keydown", handler);
@@ -95,8 +97,8 @@ export function VideoCallOverlay({
     setParticipantCount(count);
   }, []);
 
-  const handleApiReady = useCallback((api: any) => {
-    setJitsiApi(api);
+  const handleRoomConnected = useCallback((room: any) => {
+    setLivekitRoom(room);
   }, []);
 
   const hasSidePanel = !!(groupId && userId);
@@ -138,14 +140,15 @@ export function VideoCallOverlay({
           </div>
         </div>
 
-        <JitsiMeetComponent
-          meetingUrl={meetingUrl}
+        <LiveKitMeetComponent
+          token={token}
+          wsUrl={wsUrl}
           roomName={roomName}
           onCallEnd={onClose}
           isAdmin={isAdmin}
           isModerator={isModerator}
           disableChat={true}
-          onApiReady={handleApiReady}
+          onRoomConnected={handleRoomConnected}
         />
       </div>
     );
@@ -178,8 +181,9 @@ export function VideoCallOverlay({
 
         {/* Video area */}
         <div className="flex-1 flex flex-col min-w-0 relative">
-          <JitsiMeetComponent
-            meetingUrl={meetingUrl}
+          <LiveKitMeetComponent
+            token={token}
+            wsUrl={wsUrl}
             roomName={roomName}
             onCallEnd={onClose}
             onParticipantJoined={handleParticipantJoined}
@@ -187,19 +191,19 @@ export function VideoCallOverlay({
             isAdmin={isAdmin}
             isModerator={isModerator}
             disableChat={true}
-            onApiReady={handleApiReady}
+            onRoomConnected={handleRoomConnected}
             fullScreen
           />
 
-          {/* Bottom control bar */}
-          <div className="absolute bottom-0 inset-x-0 z-20 flex items-center justify-center gap-4 p-4 bg-gradient-to-t from-black/80 to-transparent">
+          {/* View-mode controls overlay (above LiveKit's own control bar) */}
+          <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
             {/* Minimize to PiP */}
             <button
               onClick={() => setViewMode("pip")}
-              className="w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-black/40 hover:bg-black/60 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
               aria-label="Minimize to picture-in-picture"
             >
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
               </svg>
             </button>
@@ -207,22 +211,11 @@ export function VideoCallOverlay({
             {/* Exit fullscreen */}
             <button
               onClick={() => setViewMode("embedded")}
-              className="w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-black/40 hover:bg-black/60 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
               aria-label="Exit fullscreen"
             >
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
-              </svg>
-            </button>
-
-            {/* End call */}
-            <button
-              onClick={onClose}
-              className="w-14 h-14 flex items-center justify-center rounded-full bg-pnp-error hover:bg-pnp-error/80 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-error"
-              aria-label="End video call"
-            >
-              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 3.75v4.5m0-4.5h-4.5m4.5 0l-6 6m3 12c-8.284 0-15-6.716-15-15V4.5A2.25 2.25 0 016.75 2.25h1.372c.516 0 .966.351 1.091.852l1.106 4.423c.11.44-.054.902-.417 1.173l-1.293.97a1.062 1.062 0 00-.38 1.21 12.035 12.035 0 007.143 7.143c.441.162.928-.004 1.21-.38l.97-1.293a1.125 1.125 0 011.173-.417l4.423 1.106c.5.125.852.575.852 1.091V19.5a2.25 2.25 0 01-2.25 2.25h-2.25z" />
               </svg>
             </button>
           </div>
@@ -231,7 +224,7 @@ export function VideoCallOverlay({
         {/* Mod Bot (right, admin only) */}
         {isAdmin && (
           <div className="hidden sm:flex flex-shrink-0 p-2">
-            <VideoCallModBot jitsiApi={jitsiApi} isAdmin={isAdmin} />
+            <VideoCallModBot room={livekitRoom} isAdmin={isAdmin} />
           </div>
         )}
 
@@ -339,10 +332,11 @@ export function VideoCallOverlay({
           </div>
         )}
 
-        {/* Jitsi embed */}
+        {/* LiveKit video */}
         <div className="flex-1 min-w-0">
-          <JitsiMeetComponent
-            meetingUrl={meetingUrl}
+          <LiveKitMeetComponent
+            token={token}
+            wsUrl={wsUrl}
             roomName={roomName}
             onCallEnd={onClose}
             onParticipantJoined={handleParticipantJoined}
@@ -350,14 +344,14 @@ export function VideoCallOverlay({
             isAdmin={isAdmin}
             isModerator={isModerator}
             disableChat={true}
-            onApiReady={handleApiReady}
+            onRoomConnected={handleRoomConnected}
           />
         </div>
 
         {/* Mod Bot (desktop, admin only) */}
         {isAdmin && (
           <div className="hidden lg:flex flex-shrink-0 p-2 border-l border-white/5">
-            <VideoCallModBot jitsiApi={jitsiApi} isAdmin={isAdmin} />
+            <VideoCallModBot room={livekitRoom} isAdmin={isAdmin} />
           </div>
         )}
       </div>

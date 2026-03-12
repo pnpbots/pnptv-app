@@ -1,0 +1,16 @@
+port: 7880
+bind_addresses:
+  - ""
+rtc:
+  tcp_port: 7443
+  port_range_start: 50000
+  port_range_end: 50200
+  use_external_ip: true
+redis:
+  address: redis-pnptv:6379
+  db: 1
+keys:
+  pnptv: _CwBLNh2mVaJPy9yu3MgrIzSajvS6_-_tratIvCx9SQ
+logging:
+  json: false
+  level: warn

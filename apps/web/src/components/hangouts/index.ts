@@ -8,6 +8,7 @@ export { MediaLightbox } from "./MediaLightbox";
 export { VideoCallButton } from "./VideoCallButton";
 export { VideoCallBanner } from "./VideoCallBanner";
 export { JitsiMeetComponent } from "./JitsiMeetComponent";
+export { LiveKitMeetComponent } from "./LiveKitMeetComponent";
 export { VideoCallOverlay } from "./VideoCallOverlay";
 export { VideoCallSidePanel, MobileBottomBar } from "./VideoCallSidePanel";
 export { VideoCallModBot } from "./VideoCallModBot";

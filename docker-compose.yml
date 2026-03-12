@@ -465,6 +465,10 @@ services:
       RESTREAMER_PUBLIC_URL: https://live.pnptv.app
       RESTREAMER_USER: admin
       RESTREAMER_PASSWORD: ${RESTREAMER_PASSWORD}
+      LIVEKIT_URL: http://livekit-server:7880
+      LIVEKIT_WS_URL: wss://lk.pnptv.app
+      LIVEKIT_API_KEY: pnptv
+      LIVEKIT_API_SECRET: _CwBLNh2mVaJPy9yu3MgrIzSajvS6_-_tratIvCx9SQ
     networks:
       - pnptvapp_net
     depends_on:

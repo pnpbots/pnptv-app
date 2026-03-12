@@ -6208,7 +6208,8 @@ app.post('/api/community-room/moderation/mute', verifyAdminJWT, asyncHandler(com
 app.post('/api/community-room/moderation/remove', verifyAdminJWT, asyncHandler(communityRoomController.removeUser));
 app.post('/api/community-room/moderation/clear-chat', verifyAdminJWT, asyncHandler(communityRoomController.clearChat));
 
-// ── JaaS Token Endpoints ────────────────────────────────────────────────────
+// ── JaaS Token Endpoints (DISABLED) ─────────────────────────────────────────
+/*
 const jaasTokenLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
@@ -6224,6 +6225,7 @@ app.post('/api/jaas/token', requireSessionAuth, jaasTokenLimiter, asyncHandler(j
 app.post('/api/jaas/moderator-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.generateModeratorToken));
 app.post('/api/jaas/live-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.generateLiveToken));
 app.post('/api/jaas/refresh-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.refreshToken));
+*/
 
 // ── LiveKit Token Endpoints ─────────────────────────────────────────────────
 const livekitController = require('./controllers/livekitController');
