@@ -49,11 +49,18 @@ class UserLocation {
   /**
    * Get nearby users using bounding box + Haversine (no PostGIS needed)
    */
-  static async getNearbyUsers(latitude, longitude, radiusKm = 5, limit = 50) {
+  static async getNearbyUsers(latitude, longitude, radiusKm = 5, limit = 50, excludeUserIds = []) {
     const lat = parseFloat(latitude);
     const lon = parseFloat(longitude);
     const latDelta = radiusKm / 111;
     const lngDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
+    // Include online users AND offline users seen within the last 72 hours
+    // so the map is never empty just because no one is active right now
+    const excludeClause = excludeUserIds.length
+      ? `AND ul.user_id != ALL($8::text[])`
+      : '';
+    const params = [lat, lon, lat - latDelta, lat + latDelta, lon - lngDelta, lon + lngDelta, limit];
+    if (excludeUserIds.length) params.push(excludeUserIds);
     const result = await query(
       `SELECT
          ul.user_id,
@@ -61,6 +68,7 @@ class UserLocation {
          ul.longitude,
          ul.accuracy,
          ul.is_online,
+         ul.last_seen,
          u.first_name,
          u.username,
          u.photo_file_id,
@@ -71,12 +79,13 @@ class UserLocation {
          )) AS distance_km
        FROM user_locations ul
        JOIN users u ON ul.user_id = u.id
-       WHERE ul.is_online = true
+       WHERE ul.last_seen > NOW() - INTERVAL '72 hours'
          AND ul.latitude BETWEEN $3 AND $4
          AND ul.longitude BETWEEN $5 AND $6
-       ORDER BY distance_km ASC
+         ${excludeClause}
+       ORDER BY ul.is_online DESC, distance_km ASC
        LIMIT $7`,
-      [lat, lon, lat - latDelta, lat + latDelta, lon - lngDelta, lon + lngDelta, limit]
+      params
     );
     return result.rows;
   }

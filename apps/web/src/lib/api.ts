@@ -270,6 +270,8 @@ export interface NearbyUser {
   accuracy_estimate: string;
   status: string;
   is_followed?: boolean;
+  last_seen?: string | null;
+  last_update?: string | null;
 }
 
 export interface NearbySearchResponse {

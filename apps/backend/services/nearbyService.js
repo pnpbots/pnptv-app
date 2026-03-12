@@ -179,25 +179,20 @@ class NearbyService {
       const blockedUsers = await this.getBlockedUsers(userId);
       const blockedUserIds = blockedUsers.map(b => b.blocked_user_id);
 
-      // Query nearby users from Redis
-      const nearbyUsers = await redisGeoService.getNearbyUsers(
-        latitude,
-        longitude,
-        radiusKm,
-        {
-          limit,
-          excludeUsers: [userId, ...blockedUserIds]
-        }
+      const excludeSet = new Set([String(userId), ...blockedUserIds.map(String)]);
+
+      // ── Step 1: online users from Redis (fast, exact positions) ──────────
+      const redisUsers = await redisGeoService.getNearbyUsers(
+        latitude, longitude, radiusKm,
+        { limit, excludeUsers: [userId, ...blockedUserIds] }
       );
 
-      // Apply privacy filtering
-      const privacyFiltered = nearbyUsers.map(user => {
-        const { latitude: obfLat, longitude: obfLon } = this.obfuscateCoordinates(
-          user.latitude,
-          user.longitude,
-          user.accuracy
-        );
+      const onlineIds = new Set(redisUsers.map(u => String(u.user_id)));
 
+      const privacyFiltered = redisUsers.map(user => {
+        const { latitude: obfLat, longitude: obfLon } = this.obfuscateCoordinates(
+          user.latitude, user.longitude, user.accuracy
+        );
         return {
           user_id: user.user_id,
           latitude: obfLat,
@@ -206,13 +201,47 @@ class NearbyService {
           distance_km: includeDistance ? user.distance_km : undefined,
           distance_m: includeDistance ? user.distance_m : undefined,
           status: 'online',
-          last_update: user.last_update
+          last_update: user.last_update,
+          last_seen: null,
         };
       });
 
-      // Enrich with username / first_name from PostgreSQL
-      if (privacyFiltered.length > 0) {
-        const userIds = privacyFiltered.map(u => u.user_id);
+      // ── Step 2: recently-offline users from PostgreSQL (last 72 h) ───────
+      // This ensures the map is never empty just because no one has the app open
+      try {
+        const excludeIds = [...excludeSet, ...onlineIds];
+        const offlineRows = await UserLocation.getNearbyUsers(
+          latitude, longitude, radiusKm, limit, excludeIds
+        );
+        for (const row of offlineRows) {
+          if (excludeSet.has(String(row.user_id)) || onlineIds.has(String(row.user_id))) continue;
+          const { latitude: obfLat, longitude: obfLon } = this.obfuscateCoordinates(
+            parseFloat(row.latitude), parseFloat(row.longitude), row.accuracy || 100
+          );
+          privacyFiltered.push({
+            user_id: row.user_id,
+            latitude: obfLat,
+            longitude: obfLon,
+            accuracy_estimate: this.getAccuracyEstimate(row.accuracy || 100),
+            distance_km: includeDistance ? parseFloat(row.distance_km) : undefined,
+            distance_m: includeDistance ? parseFloat(row.distance_km) * 1000 : undefined,
+            status: row.is_online ? 'online' : 'offline',
+            last_update: row.last_seen ? new Date(row.last_seen).toISOString() : null,
+            last_seen: row.last_seen ? new Date(row.last_seen).toISOString() : null,
+            username: row.username || null,
+            name: row.first_name || null,
+            photo_url: (row.photo_file_id && (row.photo_file_id.startsWith('/') || row.photo_file_id.startsWith('http')))
+              ? row.photo_file_id : null,
+          });
+        }
+      } catch (offlineErr) {
+        logger.warn(`Failed to load offline nearby users: ${offlineErr.message}`);
+      }
+
+      // ── Step 3: Enrich online users with profile data from PostgreSQL ────
+      const onlineFiltered = privacyFiltered.filter(u => u.status === 'online' && !u.username);
+      if (onlineFiltered.length > 0) {
+        const userIds = onlineFiltered.map(u => u.user_id);
         try {
           const profileResult = await query(
             `SELECT id, username, first_name, photo_file_id FROM users WHERE id = ANY($1)`,
@@ -220,7 +249,7 @@ class NearbyService {
           );
           const profileMap = {};
           profileResult.rows.forEach(r => { profileMap[r.id] = r; });
-          privacyFiltered.forEach(u => {
+          onlineFiltered.forEach(u => {
             const p = profileMap[u.user_id];
             if (p) {
               u.username = p.username || null;

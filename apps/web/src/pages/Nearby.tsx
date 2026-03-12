@@ -218,9 +218,21 @@ interface UserDetailSheetProps {
   onNavigate: (path: string) => void;
 }
 
+function formatLastSeen(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 2) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 function UserDetailSheet({ user, onClose, onNavigate }: UserDetailSheetProps) {
   const t = useI18n();
   const displayName = user.name || user.username || `User #${user.user_id}`;
+  const isOffline = user.status === "offline";
 
   function formatUserDist(u: NearbyUser): string {
     if (u.distance_m !== undefined && u.distance_m < 1000) {
@@ -262,12 +274,21 @@ function UserDetailSheet({ user, onClose, onNavigate }: UserDetailSheetProps) {
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm text-pnp-textPrimary truncate">{displayName}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="font-semibold text-sm text-pnp-textPrimary truncate">{displayName}</p>
+                {isOffline ? (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/10 text-white/40 font-medium flex-shrink-0">offline</span>
+                ) : (
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
+                )}
+              </div>
               {user.username && (
                 <p className="text-xs text-pnp-textSecondary">@{user.username}</p>
               )}
-              <p className="text-xs mt-0.5" style={{ color: "#FFB454" }}>
-                {formatUserDist(user)}
+              <p className="text-xs mt-0.5" style={{ color: isOffline ? "#555" : "#FFB454" }}>
+                {isOffline && user.last_seen
+                  ? `Last seen ${formatLastSeen(user.last_seen)} · ${formatUserDist(user)}`
+                  : formatUserDist(user)}
               </p>
             </div>
           </div>
@@ -1015,10 +1036,12 @@ export default function Nearby() {
               icon={locationStatus === "online" ? myIconRef.current : myIconOfflineRef.current}
             />
 
-            {/* Nearby users — avatar markers */}
+            {/* Nearby users — avatar markers (online=bright, offline=dimmed) */}
             {showUsers && nearbyUsers.map((u) => {
               const displayName = u.name || u.username || "?";
-              const icon = createUserAvatarIcon(u.photo_url, displayName);
+              const icon = u.status === "offline"
+                ? createUserAvatarIcon(null, displayName)   // no photo = initials only, dimmer
+                : createUserAvatarIcon(u.photo_url, displayName);
               return (
                 <Marker
                   key={u.user_id}
@@ -1220,13 +1243,17 @@ export default function Nearby() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <p className="text-xs font-semibold text-pnp-textPrimary truncate">{displayName}</p>
+                      {u.status !== "offline" && <span className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />}
                       {u.is_followed && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 font-medium">Siguiendo</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 font-medium">Following</span>
                       )}
                     </div>
-                    {u.username && <p className="text-[11px] text-pnp-textSecondary">@{u.username}</p>}
+                    {u.status === "offline" && u.last_seen
+                      ? <p className="text-[11px] text-white/30">Last seen {formatLastSeen(u.last_seen)}</p>
+                      : u.username && <p className="text-[11px] text-pnp-textSecondary">@{u.username}</p>
+                    }
                   </div>
-                  {dist && <span className="text-[11px] text-amber-400 font-medium flex-shrink-0">{dist}</span>}
+                  {dist && <span className="text-[11px] flex-shrink-0" style={{ color: u.status === "offline" ? "#555" : "#FFB454" }}>{dist}</span>}
                 </div>
               );
             })}
