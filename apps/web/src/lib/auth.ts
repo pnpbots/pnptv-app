@@ -11,7 +11,7 @@ const userManager = new UserManager({
   post_logout_redirect_uri: APP_URL,
   response_type: "code",
   scope: "openid profile email",
-  userStore: new WebStorageStateStore({ store: sessionStorage }),
+  userStore: new WebStorageStateStore({ store: localStorage }),
   automaticSilentRenew: true,
   silent_redirect_uri: `${APP_URL}/auth/silent-renew`,
 });

@@ -23,9 +23,9 @@ export function VerificationGate({ children }: VerificationGateProps) {
     return <div className="flex items-center justify-center min-h-screen"><div className="animate-spin w-8 h-8 border-2 border-white/20 border-t-white rounded-full" /></div>;
   }
 
-  // Not authenticated: redirect to login — never expose gated content
+  // Not authenticated: redirect to home (shows LandingPage) — never expose gated content
   if (!isAuthenticated || !user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/" replace />;
   }
 
   // Both verified: show content
