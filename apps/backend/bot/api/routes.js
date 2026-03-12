@@ -650,8 +650,13 @@ app.get('/', (req, res) => {
   return res.sendFile(path.join(__dirname, '../../../public/login.html'));
 });
 
-// /login → redirect to /
-app.get('/login', (req, res) => res.redirect(301, '/'));
+// /login → same behaviour as /
+app.get('/login', (req, res) => {
+  if (req.session?.user) {
+    return res.redirect(302, 'https://app.pnptv.app');
+  }
+  return res.sendFile(path.join(__dirname, '../../../public/login.html'));
+});
 
 // PNPtv Haus page
 app.get('/community-room', (req, res) => {
