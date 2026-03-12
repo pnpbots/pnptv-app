@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { useTutorial } from "@/hooks/useTutorial";
@@ -9,16 +9,16 @@ import { useDirectus } from "@/hooks/useDirectus";
 import { useI18n } from "@/lib/i18n";
 import { PostComposer } from "@/components/PostComposer";
 import { SharePostModal } from "@/components/SharePostModal";
-import { NearbyWidget } from "@/components/NearbyWidget";
 import { UpcomingEvents } from "@/components/events/UpcomingEvents";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
 import type { EventItem } from "@/components/events/EventCard";
 import {
   getHomeFeedPosts,
   getSocialFeedPosts,
-
   getHangoutGroups,
   togglePostLike,
+  deleteSocialPost,
+  editSocialPost,
   updateProfile,
   getUpcomingEvents,
   getMyRsvps,
@@ -26,7 +26,6 @@ import {
   unrsvpEvent,
   cancelEvent,
   type SocialPostItem,
-
   type HangoutGroup,
 } from "@/lib/api";
 import { translateText } from "@/lib/feedI18n";
@@ -57,14 +56,301 @@ function isValidPhotoUrl(photo: string | null | undefined): photo is string {
   return !!photo && (photo.startsWith("/") || photo.startsWith("http"));
 }
 
+const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
+
+// ── Per-post card with reactions, translate, edit, delete ─────────────────────
+function PostCard({
+  post,
+  currentUserId,
+  isAdmin,
+  userLang,
+  contentDisclaimerAccepted,
+  onDelete,
+  onUpdated,
+  onShare,
+  onNavigate,
+}: {
+  post: SocialPostItem;
+  currentUserId?: string;
+  isAdmin: boolean;
+  userLang?: string;
+  contentDisclaimerAccepted: boolean;
+  onDelete: (id: number) => void;
+  onUpdated: (id: number, content: string) => void;
+  onShare: (id: number) => void;
+  onNavigate: (path: string) => void;
+}) {
+  const { feed: t } = useI18n();
+  const [translatedContent, setTranslatedContent] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(post.content || "");
+  const [saving, setSaving] = useState(false);
+  const [currentContent, setCurrentContent] = useState(post.content || "");
+  const [likedByMe, setLikedByMe] = useState(post.liked_by_me);
+  const [likesCount, setLikesCount] = useState(post.likes_count || 0);
+  const [showMenu, setShowMenu] = useState(false);
+
+  const isOwn = !!currentUserId && String(post.author_id) === currentUserId;
+  const authorPath = isOwn ? "/profile" : `/profile/${post.author_id}`;
+
+  const handleLike = async () => {
+    try {
+      const res = await togglePostLike(post.id);
+      setLikedByMe(res.liked);
+      setLikesCount(res.likes_count ?? (likesCount + (res.liked ? 1 : -1)));
+    } catch { /* silent */ }
+  };
+
+  const handleTranslate = async () => {
+    if (isTranslating) return;
+    if (translatedContent) { setTranslatedContent(null); return; }
+    if (!currentContent) return;
+    setIsTranslating(true);
+    const result = await translateText(currentContent, userLang || "en");
+    if (result) setTranslatedContent(result);
+    setIsTranslating(false);
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm("Delete this post?")) return;
+    try {
+      await deleteSocialPost(post.id);
+      onDelete(post.id);
+    } catch { /* silent */ }
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editText.trim() || saving) return;
+    setSaving(true);
+    try {
+      const res = await editSocialPost(post.id, editText.trim());
+      if (res.success) {
+        setCurrentContent(res.content);
+        setTranslatedContent(null);
+        onUpdated(post.id, res.content);
+        setIsEditing(false);
+      }
+    } catch { /* silent */ }
+    setSaving(false);
+  };
+
+  return (
+    <div className="glass-card-sm p-4">
+      <div className="flex gap-3">
+        {/* Avatar */}
+        <button onClick={() => onNavigate(authorPath)} className="flex-shrink-0">
+          {isValidPhotoUrl(post.author_photo) ? (
+            <img
+              src={post.author_photo}
+              alt={`${post.author_first_name || post.author_username || "User"}'s avatar`}
+              className="w-10 h-10 rounded-full object-cover"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            />
+          ) : (
+            <div
+              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+            >
+              {(post.author_first_name || post.author_username || "?")[0].toUpperCase()}
+            </div>
+          )}
+        </button>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          {/* Header row */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <button
+                onClick={() => onNavigate(authorPath)}
+                className="font-semibold text-white text-sm truncate hover:underline"
+              >
+                {post.author_first_name || post.author_username || "Anonymous"}
+              </button>
+              {post.author_username && (
+                <span className="text-xs hidden sm:inline" style={{ color: "#8E8E93" }}>
+                  @{post.author_username}
+                </span>
+              )}
+              <span className="text-xs" style={{ color: "#8E8E93" }}>
+                &middot; {timeAgo(post.created_at)}
+              </span>
+            </div>
+
+            {/* Owner/admin menu */}
+            {(isOwn || isAdmin) && (
+              <div className="relative flex-shrink-0">
+                <button
+                  onClick={() => setShowMenu((v) => !v)}
+                  className="p-1 rounded hover:bg-white/10 transition-colors"
+                  style={{ color: "#8E8E93" }}
+                  aria-label="Post options"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm0 7a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm0 7a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
+                  </svg>
+                </button>
+                {showMenu && (
+                  <div
+                    className="absolute right-0 top-7 z-50 rounded-xl shadow-xl py-1 min-w-[120px]"
+                    style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}
+                  >
+                    {isOwn && (
+                      <button
+                        onClick={() => { setIsEditing(true); setEditText(currentContent); setShowMenu(false); }}
+                        className="w-full text-left px-4 py-2 text-sm text-white hover:bg-white/10 transition-colors"
+                      >
+                        Edit
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setShowMenu(false); handleDelete(); }}
+                      className="w-full text-left px-4 py-2 text-sm hover:bg-white/10 transition-colors"
+                      style={{ color: "#F87171" }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Body */}
+          {isEditing ? (
+            <div className="mt-2 space-y-2">
+              <textarea
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                rows={3}
+                className="w-full rounded-lg px-3 py-2 text-sm text-white bg-white/5 border border-white/15 focus:border-white/30 outline-none resize-none"
+                maxLength={2000}
+                autoFocus
+              />
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setIsEditing(false)}
+                  className="px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={saving || !editText.trim()}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-40 transition-all"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed">
+                {translatedContent ?? currentContent}
+              </p>
+              {translatedContent && (
+                <button
+                  onClick={() => setTranslatedContent(null)}
+                  className="text-xs mt-0.5"
+                  style={{ color: "#8E8E93" }}
+                >
+                  {t.showOriginal}
+                </button>
+              )}
+            </>
+          )}
+
+          {/* Media */}
+          {post.media_url && !isEditing && (
+            <div className="mt-2">
+              {post.media_type === "video" ? (
+                <video
+                  src={post.media_url}
+                  controls
+                  playsInline
+                  muted
+                  className="w-full max-h-72 rounded-lg object-cover"
+                  preload="metadata"
+                  onError={(e) => { (e.target as HTMLVideoElement).parentElement!.style.display = "none"; }}
+                />
+              ) : (
+                <img
+                  src={post.media_url}
+                  alt="Post image"
+                  className="w-full max-h-72 rounded-lg object-cover"
+                  loading="lazy"
+                  onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = "none"; }}
+                />
+              )}
+            </div>
+          )}
+
+          {/* Actions */}
+          {!isEditing && (
+            <div className="mt-3">
+              <div className="flex items-center gap-4" style={{ color: "#8E8E93" }}>
+                {/* Like */}
+                <button
+                  onClick={handleLike}
+                  className="flex items-center gap-1.5 text-xs transition-colors hover:text-pink-400"
+                  style={{ color: likedByMe ? "#D4007A" : "#8E8E93" }}
+                >
+                  <svg className="w-4 h-4" fill={likedByMe ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={likedByMe ? 0 : 1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
+                  </svg>
+                  {likesCount > 0 && <span>{likesCount}</span>}
+                </button>
+
+                {/* Share */}
+                <button
+                  onClick={() => {
+                    if (contentDisclaimerAccepted) onShare(post.id);
+                    else onShare(post.id); // disclaimer handled upstream
+                  }}
+                  className="flex items-center gap-1.5 text-xs hover:text-green-400 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
+                  </svg>
+                </button>
+
+                {/* Translate */}
+                {currentContent && (
+                  <button
+                    onClick={handleTranslate}
+                    disabled={isTranslating}
+                    className="flex items-center gap-1 text-xs transition-colors hover:text-teal-400 disabled:opacity-40"
+                    style={translatedContent ? { color: "#5ED1C4" } : { color: "#8E8E93" }}
+                    title={translatedContent ? t.showOriginal : t.translate}
+                  >
+                    {isTranslating ? (
+                      <span className="text-[10px]">{t.translating}</span>
+                    ) : (
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 01-3.827-5.802" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { feed: t } = useI18n();
   const [posts, setPosts] = useState<SocialPostItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [translatedPosts, setTranslatedPosts] = useState<Record<number, string>>({});
-  const [translatingId, setTranslatingId] = useState<number | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [contentDisclaimer, setContentDisclaimer] = useState(user?.contentDisclaimer || false);
   const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
   const [disclaimerAccepting, setDisclaimerAccepting] = useState(false);
@@ -102,10 +388,13 @@ export default function Home() {
 
   useEffect(() => {
     if (authLoading) return;
-    const loader = isAuthenticated ? getSocialFeedPosts(undefined, 10) : getHomeFeedPosts(10);
+    const loader = isAuthenticated ? getSocialFeedPosts(undefined, 20) : getHomeFeedPosts(20);
     loader
       .then((res) => {
-        if (res.success) setPosts(res.posts);
+        if (res.success) {
+          setPosts(res.posts);
+          setNextCursor((res as any).nextCursor ?? null);
+        }
       })
       .catch(() => {})
       .finally(() => setIsLoading(false));
@@ -181,23 +470,6 @@ export default function Home() {
     return new Date(aDate).getTime() - new Date(bDate).getTime();
   });
 
-  const handleLike = useCallback(async (postId: number) => {
-    try {
-      const res = await togglePostLike(postId);
-      setPosts((prev) =>
-        prev.map((p) =>
-          p.id === postId
-            ? {
-                ...p,
-                liked_by_me: res.liked,
-                likes_count: res.likes_count ?? (p.likes_count + (res.liked ? 1 : -1)),
-              }
-            : p
-        )
-      );
-    } catch { /* silent */ }
-  }, []);
-
   const handleShare = useCallback((postId: number) => {
     if (contentDisclaimer) {
       setShareModalPostId(postId);
@@ -223,14 +495,26 @@ export default function Home() {
     setDisclaimerAccepting(false);
   }, [pendingSharePostId]);
 
-  const handleTranslate = useCallback(async (postId: number, content: string) => {
-    if (translatingId === postId) return;
-    if (translatedPosts[postId]) { setTranslatedPosts((prev) => { const next = { ...prev }; delete next[postId]; return next; }); return; }
-    setTranslatingId(postId);
-    const result = await translateText(content, user?.language || "en");
-    if (result) setTranslatedPosts((prev) => ({ ...prev, [postId]: result }));
-    setTranslatingId(null);
-  }, [translatingId, translatedPosts, user?.language]);
+  const handleLoadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore || !isAuthenticated) return;
+    setLoadingMore(true);
+    try {
+      const res = await getSocialFeedPosts(nextCursor, 20);
+      if (res.success) {
+        setPosts((prev) => [...prev, ...res.posts]);
+        setNextCursor(res.nextCursor ?? null);
+      }
+    } catch { /* silent */ }
+    setLoadingMore(false);
+  }, [nextCursor, loadingMore, isAuthenticated]);
+
+  const handlePostDeleted = useCallback((postId: number) => {
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+  }, []);
+
+  const handlePostUpdated = useCallback((postId: number, content: string) => {
+    setPosts((prev) => prev.map((p) => p.id === postId ? { ...p, content } : p));
+  }, []);
 
   const username = user?.username || user?.displayName || "user";
   const { tier, isPrime, isMember, isAdmin } = useTier();
@@ -246,153 +530,123 @@ export default function Home() {
       </Helmet>
       {showTutorial && <TutorialOverlay section="home" onDismiss={dismissTutorial} />}
 
+      {/* ── ZONE 1: Full-width top strip — always visible, minimal height ── */}
+
+      {/* Slim hero bar */}
+      <div className="flex items-center justify-between px-4 py-2.5 glass-card-sm mb-3 animate-fade-in-up">
+        <h1 className="text-sm font-bold text-white">
+          High <span role="img" aria-label="wind">🌬️</span>{" "}
+          <span className="text-gradient">@{username}</span>
+        </h1>
+        <span
+          className="text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex-shrink-0"
+          style={
+            isPrime
+              ? { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }
+              : { background: "rgba(255,255,255,0.06)", color: "#555" }
+          }
+        >
+          {tier}
+        </span>
+      </div>
+
+      {/* Compact room access buttons */}
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <button
+          onClick={() => navigate("/da-haus")}
+          className="flex items-center gap-2.5 px-3 py-2.5 glass-card-sm hover:border-white/20 active:scale-[0.98] transition-all text-left"
+          style={{ borderLeft: "3px solid rgba(162,89,255,0.5)" }}
+        >
+          <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(162,89,255,0.15)" }}>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#A259FF" }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold text-white leading-none">Da Haus</p>
+            <p className="text-[9px] mt-0.5" style={{ color: "#A259FF" }}>Free for all</p>
+          </div>
+        </button>
+        <button
+          onClick={() => navigate("/main-stage")}
+          className="flex items-center gap-2.5 px-3 py-2.5 glass-card-sm hover:border-white/20 active:scale-[0.98] transition-all text-left"
+          style={{ borderLeft: "3px solid rgba(94,209,196,0.5)" }}
+        >
+          <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(94,209,196,0.15)" }}>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#5ED1C4" }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold text-white leading-none">Main Stage</p>
+            <p className="text-[9px] mt-0.5" style={{ color: "#5ED1C4" }}>Member+</p>
+          </div>
+        </button>
+      </div>
+
+      {/* ── ZONE 2: Mobile-only event pills — replaces full carousel on small screens ── */}
+      {(highlights.length > 0 || annLoading || evLoading) && (
+        <div className="lg:hidden mb-4 -mx-4 px-4 overflow-x-auto scrollbar-hide">
+          <div className="flex gap-2 pb-1">
+            {annLoading || evLoading ? (
+              <>
+                {[80, 110, 90].map((w, i) => (
+                  <div key={i} className="flex-shrink-0 h-7 rounded-full bg-white/5 animate-pulse" style={{ width: w }} />
+                ))}
+              </>
+            ) : (
+              highlights.slice(0, 10).map((item, i) => {
+                const label = item.kind === "event"
+                  ? (item.data as EventItem).title
+                  : String((item.data as AnnouncementItem).title || (item.data as AnnouncementItem).body || "").slice(0, 35);
+                const isEvent = item.kind === "event";
+                return (
+                  <button
+                    key={i}
+                    onClick={() => isEvent && setDetailEvent(item.data as EventItem)}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-medium text-white/70 whitespace-nowrap border border-white/10 bg-white/5 hover:border-white/20 active:scale-95 transition-all"
+                  >
+                    <span>{isEvent ? "📅" : "📢"}</span>
+                    <span className="max-w-[140px] truncate">{label}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── ZONE 3: Two-column layout ── */}
       <div className="lg:flex lg:gap-6 lg:items-start">
 
-      {/* ── Right sidebar (widgets) — comes first in HTML so it appears above feed on mobile ── */}
-      <aside className="w-full lg:w-80 flex-shrink-0 space-y-4 order-first lg:order-last lg:sticky lg:top-4">
+      {/* ── Main feed — left on desktop, only column on mobile ── */}
+      <main className="flex-1 min-w-0">
 
-      {/* Video Rooms — Da Haus (free) + Main Stage (members+) */}
-      <div className="grid grid-cols-2 gap-3">
-        {/* Da Haus — free for all */}
-        <div
-          className="glass-card-sm p-4 cursor-pointer hover:border-white/15 transition-colors"
-          onClick={() => navigate("/da-haus")}
-          style={{ borderLeft: "3px solid rgba(162, 89, 255, 0.5)" }}
-        >
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(162, 89, 255, 0.15)" }}>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#A259FF" }}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(162,89,255,0.15)", color: "#A259FF" }}>FREE</span>
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-white">Da Haus</h3>
-              <p className="text-[11px] text-white/40 mt-0.5 leading-relaxed">Open hangout for everyone</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Main Stage — members+ */}
-        <div
-          className="glass-card-sm p-4 cursor-pointer hover:border-white/15 transition-colors"
-          onClick={() => navigate("/main-stage")}
-          style={{ borderLeft: "3px solid rgba(94, 209, 196, 0.5)" }}
-        >
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(94, 209, 196, 0.15)" }}>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#5ED1C4" }}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-              </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>MEMBER+</span>
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-white">Main Stage</h3>
-              <p className="text-[11px] text-white/40 mt-0.5 leading-relaxed">24/7 community video room</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Hero — greeting + tier badge */}
-      <div className="glass-card-sm p-5 mb-4 animate-fade-in-up">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <h1 className="text-lg font-bold text-white">
-              High <span role="img" aria-label="wind">🌬️</span>{" "}
-              <span className="text-gradient">@{username}</span>
-            </h1>
-            <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>
-              PNP Content. Live Video Rooms. Raw Podcasts.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <span
-              className="text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider"
-              style={
-                isPrime
-                  ? { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }
-                  : { background: "rgba(255,255,255,0.06)", color: "#555" }
-              }
-            >
-              {tier}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* PRIME upgrade CTA — neon yellow, standalone */}
+      {/* PRIME CTA — mobile only, compact single line */}
       {!isPrime && (
         <button
           onClick={() => navigate("/subscribe")}
-          className="w-full mb-4 group"
+          className="lg:hidden w-full mb-4 group"
         >
           <div
-            className="rounded-2xl p-4 flex items-center gap-3 transition-all"
+            className="rounded-xl px-4 py-2.5 flex items-center gap-3 transition-all"
             style={{
               background: "rgba(229,255,0,0.06)",
               border: "1px solid rgba(229,255,0,0.15)",
-              boxShadow: "0 0 20px rgba(229,255,0,0.04)",
             }}
           >
-            <div
-              className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-              style={{ background: "rgba(229,255,0,0.12)" }}
-            >
-              <svg className="w-4 h-4" style={{ color: "#E5FF00" }} fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-              </svg>
-            </div>
-            <div className="flex-1 text-left">
-              <p className="font-semibold text-sm" style={{ color: "#E5FF00" }}>
-                {isMember ? "Upgrade to PRIME" : "Unlock PRIME"}
-              </p>
-              <p className="text-[11px] mt-0.5" style={{ color: "rgba(229,255,0,0.4)" }}>
-                DMs, video calls, exclusive content & more
-              </p>
-            </div>
-            <svg className="w-4 h-4 flex-shrink-0 group-hover:translate-x-0.5 transition-transform" style={{ color: "rgba(229,255,0,0.3)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#E5FF00" }} fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+            </svg>
+            <p className="font-semibold text-xs flex-1 text-left" style={{ color: "#E5FF00" }}>
+              {isMember ? "Upgrade to PRIME" : "Unlock PRIME"} — DMs, video calls & more
+            </p>
+            <svg className="w-3.5 h-3.5 flex-shrink-0 group-hover:translate-x-0.5 transition-transform" style={{ color: "rgba(229,255,0,0.4)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
             </svg>
           </div>
         </button>
       )}
-
-      {/* Highlights: Combined Announcements + Events Carousel */}
-      <HighlightCarousel
-        items={highlights}
-        loading={annLoading || evLoading}
-        title="Featured"
-        canCreate={isAuthenticated && (canCreateLive || isPrime || isMember)}
-        onCreateClick={() => setShowCreateEvent(true)}
-        onRsvp={handleRsvp}
-        onCancel={handleCancel}
-        canCancel={(eventId, creatorId) => isAdmin || creatorId === user?.dbId}
-        onViewDetails={(event) => setDetailEvent(event)}
-      />
-
-      {/* Your Events — authenticated users with RSVPs */}
-      {isAuthenticated && myRsvps.length > 0 && (
-        <HighlightCarousel
-          items={myRsvps.map((e) => ({ kind: "event" as const, data: e }))}
-          loading={false}
-          title="Your Events"
-          onRsvp={handleRsvp}
-          onCancel={handleCancel}
-          canCancel={(eventId, creatorId) => isAdmin || creatorId === user?.dbId}
-          onViewDetails={(event) => setDetailEvent(event)}
-        />
-      )}
-
-
-      </aside>{/* end sidebar */}
-
-      {/* ── Main feed column ── */}
-      <main className="flex-1 min-w-0 order-last lg:order-first">
 
       {/* Create post — compact composer, expands on focus */}
       {isAuthenticated && (
@@ -404,12 +658,6 @@ export default function Home() {
       )}
 
       {/* Social Feed */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-white">{t.socialFeed}</h2>
-        <Link to="/social" className="text-xs font-medium text-gradient">
-          {t.viewAll}
-        </Link>
-      </div>
 
       {isLoading ? (
         <div className="space-y-3">
@@ -449,151 +697,101 @@ export default function Home() {
         </div>
       ) : (
         <div className="space-y-3">
-          {posts.map((post) => {
-            const authorPath = post.author_id === user?.dbId ? "/profile" : `/profile/${post.author_id}`;
-            return (
-              <div key={post.id} className="glass-card-sm p-4">
-                <div className="flex gap-3">
-                  {/* Avatar */}
-                  <button onClick={() => navigate(authorPath)} className="flex-shrink-0">
-                    {isValidPhotoUrl(post.author_photo) ? (
-                      <img src={post.author_photo} alt={`${post.author_first_name || post.author_username || "User"}'s avatar`} className="w-10 h-10 rounded-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty("display"); }} />
-                    ) : null}
-                    <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
-                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: isValidPhotoUrl(post.author_photo) ? "none" : undefined }}
-                    >
-                      {(post.author_first_name || post.author_username || "?")[0].toUpperCase()}
-                    </div>
-                  </button>
-
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        onClick={() => navigate(authorPath)}
-                        className="font-semibold text-white text-sm truncate hover:underline"
-                      >
-                        {post.author_first_name || post.author_username || "Anonymous"}
-                      </button>
-                      <span className="text-xs" style={{ color: "#8E8E93" }}>
-                        &middot; {timeAgo(post.created_at)}
-                      </span>
-                      <NearbyWidget
-                        context="post"
-                        authorCity={post.author_city}
-                        authorCountry={post.author_country}
-                        userCity={user?.city}
-                        userCountry={user?.country}
-                        isCreator={!!post.author_creator_status && post.author_creator_status === "approved"}
-                        authorName={post.author_first_name || post.author_username}
-                      />
-                    </div>
-                    <p className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed">
-                      {translatedPosts[post.id] ?? post.content}
-                    </p>
-                    {translatedPosts[post.id] && (
-                      <button
-                        onClick={() => setTranslatedPosts((prev) => { const next = { ...prev }; delete next[post.id]; return next; })}
-                        className="text-xs mt-0.5"
-                        style={{ color: "#8E8E93" }}
-                      >
-                        {t.showOriginal}
-                      </button>
-                    )}
-                    {/* Media */}
-                    {post.media_url && (
-                      <div className="mt-2">
-                        {post.media_type === "video" ? (
-                          <video
-                            src={post.media_url}
-                            controls
-                            playsInline
-                            muted
-                            className="w-full max-h-48 rounded-lg object-cover"
-                            preload="metadata"
-                            onError={(e) => { (e.target as HTMLVideoElement).parentElement!.style.display = "none"; }}
-                          />
-                        ) : (
-                          <img
-                            src={post.media_url}
-                            alt="Post image"
-                            className="w-full max-h-48 rounded-lg object-cover"
-                            loading="lazy"
-                            onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = "none"; }}
-                          />
-                        )}
-                      </div>
-                    )}
-                    {/* Actions */}
-                    <div className="flex items-center gap-5 mt-3 -ml-1">
-                      {/* Like */}
-                      <button
-                        onClick={() => handleLike(post.id)}
-                        className="flex items-center gap-1.5 text-xs transition-colors"
-                        style={{ color: post.liked_by_me ? "#D4007A" : "#8E8E93" }}
-                      >
-                        <svg className="w-4 h-4" fill={post.liked_by_me ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={post.liked_by_me ? 0 : 1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
-                        </svg>
-                        {(post.likes_count || 0) > 0 && <span>{post.likes_count}</span>}
-                      </button>
-                      {/* Comment — link to Social */}
-                      <button
-                        onClick={() => navigate("/social")}
-                        className="flex items-center gap-1.5 text-xs"
-                        style={{ color: "#8E8E93" }}
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.273 5.48.432.447.74 1.04.586 1.641a4.483 4.483 0 01-.923 1.785A5.969 5.969 0 006 21c1.282 0 2.47-.402 3.445-1.087.81.22 1.668.337 2.555.337z" />
-                        </svg>
-                        {(post.replies_count || 0) > 0 && <span>{post.replies_count}</span>}
-                      </button>
-                      {/* Share — requires content disclaimer */}
-                      <button
-                        onClick={() => handleShare(post.id)}
-                        className="flex items-center gap-1.5 text-xs hover:text-green-400 transition-colors"
-                        style={{ color: "#8E8E93" }}
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
-                        </svg>
-                      </button>
-                      {/* Translate */}
-                      {post.content && (
-                        <button
-                          onClick={() => handleTranslate(post.id, post.content)}
-                          disabled={translatingId === post.id}
-                          className="flex items-center gap-1 text-xs transition-colors hover:text-teal-400 disabled:opacity-40"
-                          style={translatedPosts[post.id] ? { color: "#5ED1C4" } : { color: "#8E8E93" }}
-                          title={translatedPosts[post.id] ? t.showOriginal : t.translate}
-                        >
-                          {translatingId === post.id ? (
-                            <span className="text-[10px]">{t.translating}</span>
-                          ) : (
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 01-3.827-5.802" />
-                            </svg>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {/* View all link */}
-          <button
-            onClick={() => navigate("/social")}
-            className="w-full py-3 text-center text-sm font-medium text-gradient"
-          >
-            {t.viewAllPosts}
-          </button>
+          {posts.map((post) => (
+            <PostCard
+              key={post.id}
+              post={post}
+              currentUserId={user?.dbId ? String(user.dbId) : undefined}
+              isAdmin={isAdmin}
+              userLang={user?.language}
+              contentDisclaimerAccepted={contentDisclaimer}
+              onDelete={handlePostDeleted}
+              onUpdated={handlePostUpdated}
+              onShare={handleShare}
+              onNavigate={navigate}
+            />
+          ))}
+          {/* Load more */}
+          {nextCursor && (
+            <button
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+              className="w-full py-3 text-center text-sm font-medium text-white/50 hover:text-white/80 transition-colors disabled:opacity-40"
+            >
+              {loadingMore ? "Loading..." : "Load more"}
+            </button>
+          )}
         </div>
       )}
 
       </main>{/* end main feed */}
+
+      {/* ── Desktop-only sidebar ── */}
+      <aside className="hidden lg:block w-80 flex-shrink-0 lg:sticky lg:top-4 space-y-4">
+
+        {/* PRIME CTA — desktop */}
+        {!isPrime && (
+          <button
+            onClick={() => navigate("/subscribe")}
+            className="w-full group text-left"
+          >
+            <div
+              className="rounded-2xl px-4 py-4 flex items-start gap-3 transition-all"
+              style={{
+                background: "rgba(229,255,0,0.06)",
+                border: "1px solid rgba(229,255,0,0.2)",
+              }}
+            >
+              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: "rgba(229,255,0,0.1)" }}>
+                <svg className="w-4 h-4" style={{ color: "#E5FF00" }} fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-bold text-sm leading-tight" style={{ color: "#E5FF00" }}>
+                  {isMember ? "Upgrade to PRIME" : "Unlock PRIME"}
+                </p>
+                <p className="text-xs mt-1 leading-relaxed" style={{ color: "rgba(229,255,0,0.55)" }}>
+                  DMs, video calls, private hangouts & more
+                </p>
+              </div>
+              <svg className="w-4 h-4 flex-shrink-0 mt-2 group-hover:translate-x-0.5 transition-transform" style={{ color: "rgba(229,255,0,0.4)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </button>
+        )}
+
+        {/* Featured events & announcements carousel */}
+        {(highlights.length > 0 || annLoading || evLoading) && (
+          <HighlightCarousel
+            items={highlights}
+            loading={annLoading || evLoading}
+            onViewDetails={setDetailEvent}
+            onRsvp={handleRsvp}
+            onCancel={handleCancel}
+            canCancel={(eventId, creatorId) => isAdmin || creatorId === (user?.dbId ? String(user.dbId) : undefined)}
+            canCreate={canCreateLive}
+            onCreateClick={isAuthenticated ? () => setShowCreateEvent(true) : undefined}
+          />
+        )}
+
+        {/* Your Events (upcoming hangout events) */}
+        {isAuthenticated && (
+          <UpcomingEvents
+            key={eventKey}
+            type="hangout_event"
+            limit={3}
+            title="Your Events"
+            currentUserId={user?.dbId ? String(user.dbId) : undefined}
+            isAdmin={isAdmin}
+            canCreate={canCreateLive}
+            onCreateClick={() => setShowCreateEvent(true)}
+          />
+        )}
+
+      </aside>{/* end desktop sidebar */}
+
       </div>{/* end two-column layout */}
 
       {/* Content Disclaimer Modal */}

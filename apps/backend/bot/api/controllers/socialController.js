@@ -291,6 +291,31 @@ const deletePost = async (req, res) => {
   }
 };
 
+// ── Edit post ─────────────────────────────────────────────────────────────────
+
+const editPost = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const postId = parsePostId(req, res); if (!postId) return;
+  const { content } = req.body;
+  if (!content || typeof content !== 'string' || !content.trim()) {
+    return res.status(400).json({ error: 'Content is required' });
+  }
+  const trimmed = content.trim().slice(0, 2000);
+  try {
+    const result = await dbQuery(
+      `UPDATE social_posts SET content = $1, updated_at = NOW()
+       WHERE id = $2 AND user_id = $3 AND is_deleted = false
+       RETURNING id, content`,
+      [trimmed, postId, user.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Post not found or not yours' });
+    return res.json({ success: true, content: result.rows[0].content });
+  } catch (err) {
+    logger.error('editPost error', err);
+    return res.status(500).json({ error: 'Failed to edit post' });
+  }
+};
+
 // ── Replies ───────────────────────────────────────────────────────────────────
 
 const getReplies = async (req, res) => {
@@ -1167,4 +1192,4 @@ const getPublicPost = async (req, res) => {
   }
 };
 
-module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, getReplies, postToMastodon, createPostWithMedia, createPostWithMultiMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof, getPost, getPublicPost };
+module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, editPost, getReplies, postToMastodon, createPostWithMedia, createPostWithMultiMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof, getPost, getPublicPost };

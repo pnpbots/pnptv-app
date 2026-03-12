@@ -10,7 +10,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
 import { type Content, type Performer, getAssetUrl } from "@/lib/directus";
 import { AnimatedVideoThumbnail } from "@/components/AnimatedVideoThumbnail";
-import EmojiReactionBar from "@/components/EmojiReactionBar";
 import { type ContentReaction, getContentReactions, toggleContentReaction } from "@/lib/api";
 
 function formatDuration(seconds: number | null): string {
@@ -259,19 +258,30 @@ export default function Media() {
               </p>
             )}
 
-            {/* Reactions */}
-            <div className="mt-3 pt-3 border-t border-pnp-border">
-              {reactionsLoading ? (
-                <div className="h-7 w-32 rounded-full bg-pnp-surface animate-pulse" />
-              ) : (
-                <EmojiReactionBar
-                  reactions={videoReactions}
-                  onToggle={handleVideoReaction}
-                  currentUserId={user?.dbId}
-                  size="sm"
-                />
-              )}
-            </div>
+            {/* Heart like */}
+            {isAuthenticated && (
+              <div className="mt-3 pt-3 border-t border-pnp-border">
+                {reactionsLoading ? (
+                  <div className="h-7 w-10 rounded-full bg-pnp-surface animate-pulse" />
+                ) : (() => {
+                  const heart = videoReactions.find((r) => r.emoji === "❤️");
+                  const liked = heart?.reactedByMe ?? false;
+                  const count = heart?.count ?? 0;
+                  return (
+                    <button
+                      onClick={() => handleVideoReaction("❤️")}
+                      className="flex items-center gap-1.5 text-sm transition-colors hover:text-pink-400"
+                      style={{ color: liked ? "#D4007A" : "#8E8E93" }}
+                    >
+                      <svg className="w-5 h-5" fill={liked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={liked ? 0 : 1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
+                      </svg>
+                      {count > 0 && <span>{count}</span>}
+                    </button>
+                  );
+                })()}
+              </div>
+            )}
           </div>
         </div>
       )}

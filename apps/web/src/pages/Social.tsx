@@ -29,10 +29,8 @@ import {
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { translateText } from "@/lib/feedI18n";
-import EmojiReactionBar, { type Reaction } from "@/components/EmojiReactionBar";
 import { NearbyBadge } from "@/components/NearbyBadge";
 
-const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
 function timeAgo(dateStr: string, nowLabel: string): string {
   if (!dateStr) return "";
@@ -100,21 +98,7 @@ function PostCard({
   const [wofToggling, setWofToggling] = useState(false);
   const [translatedContent, setTranslatedContent] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
-  const [reactions, setReactions] = useState<Reaction[]>((post as any).reactions || []);
   const isOwn = String(post.author_id) === currentUserId;
-
-  const handleToggleReaction = useCallback(async (emoji: string) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/webapp/social/posts/${post.id}/react`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emoji }),
-      });
-      const data = await res.json();
-      setReactions(data.reactions || []);
-    } catch { /* silent */ }
-  }, [post.id]);
   const canDelete = isOwn || isAdmin;
 
   const handleWofToggle = useCallback(async () => {
@@ -473,13 +457,17 @@ function PostCard({
 
           {/* Actions bar */}
           <div className="flex items-center gap-3 mt-3 flex-wrap" style={{ color: "#8E8E93" }}>
-            {/* Emoji Reactions — replaces the heart like */}
-            <EmojiReactionBar
-              reactions={reactions}
-              onToggle={handleToggleReaction}
-              currentUserId={currentUserId}
-              size="sm"
-            />
+            {/* Heart like */}
+            <button
+              onClick={() => onLike(post.id)}
+              className="flex items-center gap-1.5 text-xs transition-colors hover:text-pink-400"
+              style={{ color: post.liked_by_me ? "#D4007A" : "#8E8E93" }}
+            >
+              <svg className="w-4 h-4" fill={post.liked_by_me ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={post.liked_by_me ? 0 : 1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
+              </svg>
+              {(post.likes_count || 0) > 0 && <span>{post.likes_count}</span>}
+            </button>
 
             {/* Comment */}
             <button
