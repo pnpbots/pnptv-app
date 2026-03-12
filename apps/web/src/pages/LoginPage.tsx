@@ -350,7 +350,7 @@ export function LoginPage() {
         lastName: registerLastName.trim() || undefined,
       };
       const result = await emailRegister(payload);
-      if (result.success) {
+      if (result.authenticated || result.requiresVerification) {
         setRegistrationSuccess(true);
         if (result.requiresVerification) {
           setEmailVerificationNeeded(true);

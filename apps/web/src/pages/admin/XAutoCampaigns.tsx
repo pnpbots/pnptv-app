@@ -285,6 +285,7 @@ const defaultForm = {
 };
 
 export default function XAutoCampaigns() {
+  const t = useI18n();
   const [stats, setStats] = useState<XAutoCampaignStats | null>(null);
   const [accounts, setAccounts] = useState<XActiveAccount[]>([]);
 
@@ -1090,6 +1091,7 @@ export default function XAutoCampaigns() {
                         action={msg.action}
                         accounts={accounts}
                         onApply={applyGrokCampaign}
+                        t={t}
                       />
                     )}
                     {/* Action card — Grok proposed adding a random video */}
@@ -1098,6 +1100,7 @@ export default function XAutoCampaigns() {
                         action={msg.action}
                         mediaFolderId={mediaFolderId}
                         onSaved={() => { loadStats(); loadCampaigns(page, statusFilter); }}
+                        t={t}
                       />
                     )}
                   </div>

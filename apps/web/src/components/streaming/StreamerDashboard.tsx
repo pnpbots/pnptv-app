@@ -1241,20 +1241,6 @@ export default function StreamerDashboard({
   const isDesktopLayout =
     state.orientation === "landscape" || window.matchMedia("(min-width: 1024px)").matches;
 
-  // ── Go Live button handler (with confirmation for stop) ───────────────────
-  // When JaaS broadcast is active, the top-bar Stop Stream button also ends
-  // the JaaS meeting and the Restreamer push.
-  const handleGoLiveClick = useCallback(() => {
-    if (jaasUrl && (jaasBroadcastActive || state.isLive)) {
-      // JaaS mode — end the JaaS broadcast directly (no separate confirmation dialog)
-      handleEndJaasLive();
-    } else if (state.isLive) {
-      setShowStopConfirm(true);
-    } else if (!state.isConnecting) {
-      handleGoLive();
-    }
-  }, [jaasUrl, jaasBroadcastActive, state.isLive, state.isConnecting, handleGoLive, handleEndJaasLive]);
-
   // ── JaaS Go Live ──────────────────────────────────────────────────────────
   const handleStartJaasLive = useCallback(async () => {
     setJaasLoading(true);
@@ -1287,6 +1273,20 @@ export default function StreamerDashboard({
     clearAllTimers();
     setDurationSec(0);
   }, [socket]);
+
+  // ── Go Live button handler (with confirmation for stop) ───────────────────
+  // When JaaS broadcast is active, the top-bar Stop Stream button also ends
+  // the JaaS meeting and the Restreamer push.
+  const handleGoLiveClick = useCallback(() => {
+    if (jaasUrl && (jaasBroadcastActive || state.isLive)) {
+      // JaaS mode — end the JaaS broadcast directly (no separate confirmation dialog)
+      handleEndJaasLive();
+    } else if (state.isLive) {
+      setShowStopConfirm(true);
+    } else if (!state.isConnecting) {
+      handleGoLive();
+    }
+  }, [jaasUrl, jaasBroadcastActive, state.isLive, state.isConnecting, handleGoLive, handleEndJaasLive]);
 
   // ── JaaS API ready: wire the broadcast start ──────────────────────────────
   // Called by JitsiMeetComponent once the Jitsi External API object is ready.
