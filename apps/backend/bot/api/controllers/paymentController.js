@@ -627,7 +627,8 @@ class PaymentController {
           });
         }
 
-        const daimoCheck = await DaimoConfig.checkDaimoPaymentStatus(daimoPaymentId);
+        const clientSecret = payment.metadata?.daimoClientSecret || null;
+        const daimoCheck = await DaimoConfig.checkDaimoPaymentStatus(daimoPaymentId, clientSecret);
 
         if (!daimoCheck.success) {
           return res.json({
@@ -643,14 +644,21 @@ class PaymentController {
             daimoPaymentId,
           });
 
-          // Trigger recovery inline
+          // Trigger recovery inline — inject fallback metadata from DB row
+          // in case the Daimo API response lacks paymentId/userId in metadata
+          const recoveryMetadata = {
+            ...daimoCheck.metadata,
+            paymentId: daimoCheck.metadata?.paymentId || paymentId,
+            userId: daimoCheck.metadata?.userId || String(payment.userId || payment.user_id || ''),
+            planId: daimoCheck.metadata?.planId || payment.planId || payment.plan_id,
+          };
           const webhookData = {
             payment: {
               id: daimoCheck.id,
               status: daimoCheck.status,
               source: daimoCheck.source,
               destination: daimoCheck.destination,
-              metadata: daimoCheck.metadata,
+              metadata: recoveryMetadata,
             },
             _recovery: true,
           };

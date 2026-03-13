@@ -23,7 +23,15 @@ interface PaymentInfo {
   };
 }
 
-type CheckoutState = "loading" | "ready" | "confirming" | "success" | "error";
+type CheckoutState = "loading" | "ready" | "started" | "confirming" | "success" | "error";
+
+// Detect mobile platform for Daimo wallet deeplink optimisation.
+function detectPlatform(): "ios" | "android" | "other" {
+  if (typeof navigator === "undefined") return "other";
+  if (/iPhone|iPad|iPod/.test(navigator.userAgent)) return "ios";
+  if (/Android/.test(navigator.userAgent)) return "android";
+  return "other";
+}
 
 export default function DaimoCheckout() {
   const { paymentId } = useParams<{ paymentId: string }>();
@@ -39,6 +47,9 @@ export default function DaimoCheckout() {
   // and to prevent it appearing in React DevTools state panels.
   const clientSecretRef = useRef<string>("");
   const confirmPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Stable platform value — computed once, never causes re-renders.
+  const platformRef = useRef<"ios" | "android" | "other">(detectPlatform());
 
   useEffect(() => {
     if (!paymentId) {
@@ -81,6 +92,14 @@ export default function DaimoCheckout() {
       });
   }, [paymentId, t.errorNoPaymentId, t.errorPaymentNotFound, t.errorNotCrypto, t.errorSessionNotReady, t.errorCouldNotLoad]);
 
+  // Called by DaimoModal as soon as the first on-chain fulfillment is detected
+  // (before full confirmation). Show a lightweight "payment initiated" state
+  // so the user knows something is happening immediately.
+  const handlePaymentStarted = useCallback(() => {
+    // Only advance from "ready" — if we're already confirming or done, ignore.
+    setState((prev) => (prev === "ready" ? "started" : prev));
+  }, []);
+
   const handlePaymentCompleted = useCallback(() => {
     // The Daimo SDK callback fires when the user confirms in their wallet, but
     // the on-chain transaction still needs to be indexed by the backend before
@@ -98,7 +117,11 @@ export default function DaimoCheckout() {
       attempts++;
       try {
         const status = await getPaymentStatus(paymentId!);
-        if (status?.status === "completed" || status?.status === "paid") {
+        if (
+          status?.status === "completed" ||
+          status?.status === "paid" ||
+          status?.status === "success"
+        ) {
           clearInterval(confirmPollRef.current!);
           confirmPollRef.current = null;
           await refreshUser();
@@ -351,17 +374,49 @@ export default function DaimoCheckout() {
 
             {/* Daimo Modal — embedded mode renders inline.
                 clientSecret is read from a ref (never stored in React state)
-                to keep it out of DevTools and snapshot serialisation. */}
+                to keep it out of DevTools and snapshot serialisation.
+                platform optimises wallet deeplinks on iOS/Android.
+                returnUrl brings the user back after completing payment in
+                an external wallet app. */}
             <DaimoSDKProvider>
               <DaimoModal
                 sessionId={payment.daimoSessionId!}
                 clientSecret={clientSecretRef.current}
                 defaultOpen
                 embedded
+                platform={platformRef.current}
+                returnUrl={`${window.location.origin}/payment-status/${paymentId}`}
+                returnLabel="Return to PNPtv"
+                onPaymentStarted={handlePaymentStarted}
                 onPaymentCompleted={handlePaymentCompleted}
               />
             </DaimoSDKProvider>
           </>
+        )}
+
+        {/* Payment initiated — wallet has received the request, waiting for
+            on-chain confirmation. Shown between onPaymentStarted firing and
+            onPaymentCompleted (which transitions to "confirming"). */}
+        {state === "started" && (
+          <div style={{ textAlign: "center", padding: 40 }}>
+            <div
+              style={{
+                width: 40,
+                height: 40,
+                border: "3px solid rgba(230,145,56,0.3)",
+                borderTopColor: "#E69138",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite",
+                margin: "0 auto 16px",
+              }}
+            />
+            <p style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+              Payment Initiated
+            </p>
+            <p style={{ fontSize: 13, color: "#8E8E93" }}>
+              Your wallet has received the request. Waiting for on-chain confirmation...
+            </p>
+          </div>
         )}
 
         {state === "confirming" && (

@@ -440,6 +440,8 @@ class CreatorPayoutService {
         paymentUrl: checkoutUrl,
         provider: 'daimo',
         daimo_payment_id: daimoResult.daimoPaymentId,
+        daimoSessionId: daimoResult.daimoPaymentId,
+        daimoClientSecret: daimoResult.clientSecret || null,
         daimo_client_secret: daimoResult.clientSecret,
       });
     } catch (err) {

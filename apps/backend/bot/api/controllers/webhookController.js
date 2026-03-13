@@ -110,24 +110,23 @@ const validateEpaycoPayload = (payload) => {
  * @returns {Object} { valid: boolean, error?: string, isTestEvent?: boolean }
  */
 const validateDaimoPayload = (payload) => {
-  // Handle test events from Daimo's /api/webhook/test endpoint
-  // Test events have structure: { type, isTestEvent, paymentId, chainId, txHash, payment }
+  // Handle test events
   if (payload && payload.isTestEvent === true) {
-    logger.info('Daimo test event received', { type: payload.type, paymentId: payload.paymentId });
+    logger.info('Daimo test event received', { type: payload.type });
     return { valid: true, isTestEvent: true };
   }
 
-  // Normalize: Daimo Pay v2 nests data under `payment` object
-  const data = (payload?.payment && typeof payload.payment === 'object')
-    ? payload.payment
-    : payload;
+  // Normalize using the unified normalizer (handles v3, v2, and legacy)
+  const normalized = DaimoConfig.normalizeDaimoPayload(payload);
 
-  // Require basic fields before deeper validation
-  const hasTransactionId = Boolean(data?.transaction_id || data?.id);
-  const hasStatus = Boolean(data?.status);
-  const hasMetadata = Boolean(data?.metadata && typeof data.metadata === 'object');
-  if (!hasTransactionId || !hasStatus || !hasMetadata) {
+  // Require eventId and status
+  if (!normalized.eventId || !normalized.status) {
     return { valid: false, error: 'Missing required fields' };
+  }
+
+  // Require metadata with userId or paymentId
+  if (!normalized.metadata?.userId && !normalized.metadata?.paymentId) {
+    return { valid: false, error: 'Invalid metadata structure' };
   }
 
   // Support simplified test-friendly shape (transaction_id, status, metadata)
@@ -142,36 +141,32 @@ const validateDaimoPayload = (payload) => {
     return { valid: true };
   }
 
-  // Validate using normalized data
+  // Validate using DaimoConfig.validateWebhookPayload for deeper checks
   try {
-    const result = DaimoConfig.validateWebhookPayload(
-      // Pass the nested payment object so validateWebhookPayload sees flat fields
-      (payload?.payment && typeof payload.payment === 'object') ? payload.payment : payload
-    );
+    // For v3 format, pass the session object; for others, pass as-is
+    const dataToValidate = normalized.format === 'v3'
+      ? payload.data.session
+      : (payload?.payment && typeof payload.payment === 'object') ? payload.payment : payload;
+
+    const result = DaimoConfig.validateWebhookPayload(dataToValidate);
     if (result && typeof result === 'object') {
-      if (result.error && result.error.toLowerCase().includes('missing required fields')) {
-        return { valid: false, error: 'Missing required fields' };
-      }
-      const errorMsg = result.error ? result.error.toLowerCase() : '';
-      const metadataErrors = ['metadata', 'source', 'destination'];
-      const isMetadataError = metadataErrors.some((term) => errorMsg.includes(term));
-      if (result.error && isMetadataError) {
-        return { valid: false, error: 'Invalid metadata structure' };
+      if (result.error) {
+        const errorMsg = result.error.toLowerCase();
+        if (errorMsg.includes('missing required fields')) {
+          return { valid: false, error: 'Missing required fields' };
+        }
+        const metadataErrors = ['metadata', 'source', 'destination'];
+        if (metadataErrors.some((term) => errorMsg.includes(term))) {
+          return { valid: false, error: 'Invalid metadata structure' };
+        }
       }
       return result;
     }
     return { valid: false, error: 'Invalid metadata structure' };
   } catch (err) {
-    if (err && err.message && err.message.toLowerCase().includes('missing required fields')) {
+    const errMsg = (err?.message || '').toLowerCase();
+    if (errMsg.includes('missing required fields')) {
       return { valid: false, error: 'Missing required fields' };
-    }
-    if (err && err.message) {
-      const errMsg = err.message.toLowerCase();
-      const metadataErrors = ['metadata', 'source', 'destination'];
-      const isMetadataError = metadataErrors.some((term) => errMsg.includes(term));
-      if (isMetadataError) {
-        return { valid: false, error: 'Invalid metadata structure' };
-      }
     }
     return { valid: false, error: 'Invalid metadata structure' };
   }
@@ -386,21 +381,44 @@ const handleDaimoWebhook = async (req, res) => {
 
   try {
     // Step 1: Verify auth BEFORE any Redis lock or payload processing
+    // Support both new HMAC-SHA256 (Daimo-Signature header) and legacy Bearer token
+    const daimoSignatureHeader = req.headers['daimo-signature'];
     const authHeader = req.headers['authorization'] || req.headers['x-daimo-signature'];
     let isValidSignature = false;
 
-    if (DaimoService.webhookSecret) {
+    const hmacSecret = process.env.DAIMO_WEBHOOK_HMAC_SECRET;
+    const legacySecret = DaimoService.webhookSecret;
+
+    if (hmacSecret) {
+      // New HMAC-SHA256 path (preferred)
+      if (!daimoSignatureHeader) {
+        logger.error('Daimo webhook rejected: Daimo-Signature header missing (HMAC mode)');
+        return res.status(401).json({ success: false, error: 'Daimo-Signature header required' });
+      }
+      const rawBody = req.rawBody;
+      if (!rawBody) {
+        logger.error('Daimo webhook rejected: rawBody not available — ensure express.json verify callback is configured');
+        return res.status(500).json({ success: false, error: 'Internal configuration error' });
+      }
+      isValidSignature = DaimoService.verifyWebhookSignature(daimoSignatureHeader, rawBody);
+      if (!isValidSignature) {
+        logger.error('Invalid Daimo webhook HMAC signature — rejecting');
+        return res.status(401).json({ success: false, error: 'Invalid signature' });
+      }
+    } else if (legacySecret) {
+      // Legacy Bearer token path — deprecated
+      logger.warn('Daimo webhook: DAIMO_WEBHOOK_HMAC_SECRET not set — using legacy Bearer verification. Migrate to HMAC.');
       if (!authHeader) {
-        logger.error('Daimo webhook rejected: secret configured but no auth header');
+        logger.error('Daimo webhook rejected: legacy secret configured but no Authorization header');
         return res.status(401).json({ success: false, error: 'Authorization header required' });
       }
-      isValidSignature = DaimoService.verifyWebhookSignature(req.body, authHeader);
+      isValidSignature = DaimoService.verifyWebhookSignature(authHeader, null);
       if (!isValidSignature) {
         logger.error('Invalid Daimo webhook authorization — rejecting');
         return res.status(401).json({ success: false, error: 'Invalid signature' });
       }
     } else if (process.env.NODE_ENV === 'production') {
-      logger.error('Daimo webhook rejected: DAIMO_WEBHOOK_SECRET not configured in production');
+      logger.error('Daimo webhook rejected: no webhook secret configured in production');
       return res.status(500).json({ success: false, error: 'Webhook secret not configured' });
     } else {
       logger.warn('Daimo webhook accepted without secret configured (non-production)');
@@ -408,17 +426,20 @@ const handleDaimoWebhook = async (req, res) => {
     }
 
     // Step 2: Normalize payload after auth passes
-    // New format: { type, paymentId, chainId, txHash, payment: { id, status, source, destination, metadata } }
-    // Legacy format: { id, status, source, metadata }
-    let id, status, source, metadata;
-    if (req.body.payment && typeof req.body.payment === 'object') {
-      id = req.body.payment.id || req.body.paymentId;
-      status = req.body.payment.status || req.body.type;
-      source = req.body.payment.source;
-      metadata = req.body.payment.metadata;
-    } else {
-      ({ id, status, source, metadata } = req.body);
+    // Guard against empty/malformed bodies (e.g. missing Content-Type header)
+    if (!req.body || typeof req.body !== 'object') {
+      logger.warn('Daimo webhook rejected: empty or non-JSON body');
+      return res.status(400).json({ success: false, error: 'Invalid request body' });
     }
+
+    // Supports v3 envelope { id, type, data: { session } }, v2 { payment: {} }, and legacy flat
+    const normalized = DaimoConfig.normalizeDaimoPayload(req.body);
+    logger.info('Daimo webhook format detected', { format: normalized.format, eventType: normalized.eventType });
+
+    const id = normalized.eventId;
+    const status = normalized.status;
+    const source = normalized.source;
+    const metadata = normalized.metadata;
 
     // Reject payloads with undefined id/status to prevent poisoned lock keys
     if (!id || !status) {
@@ -525,7 +546,7 @@ const handleDaimoWebhook = async (req, res) => {
       });
 
       // Extract metadata from request body (metadata variable is scoped to try block)
-      const errMeta = req.body?.payment?.metadata || req.body?.metadata;
+      const errMeta = req.body?.data?.session?.metadata || req.body?.payment?.metadata || req.body?.metadata;
       PaymentSecurityService.logPaymentError({
         paymentId: errMeta?.paymentId,
         userId: errMeta?.userId,

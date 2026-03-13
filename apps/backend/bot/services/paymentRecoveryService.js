@@ -172,9 +172,11 @@ class PaymentRecoveryService {
 
       try {
         // Query pending Daimo payments with a daimo_payment_id (10min–24hr old)
+        // Include metadata to retrieve daimoClientSecret for new status check API
         const stuckPayments = await query(`
           SELECT id, reference, daimo_payment_id,
-                 user_id, plan_id, created_at
+                 user_id, plan_id, created_at,
+                 COALESCE(metadata->>'daimoClientSecret', metadata->>'daimo_client_secret') as client_secret
           FROM payments
           WHERE status = 'pending'
             AND provider = 'daimo'
@@ -202,7 +204,7 @@ class PaymentRecoveryService {
               createdAt: payment.created_at,
             });
 
-            const statusCheck = await checkDaimoPaymentStatus(daimoPaymentId);
+            const statusCheck = await checkDaimoPaymentStatus(daimoPaymentId, payment.client_secret);
 
             if (!statusCheck.success) {
               results.errors++;

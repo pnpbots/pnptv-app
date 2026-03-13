@@ -105,14 +105,18 @@ async function createCallCheckout(memberId, packageId, provider, email) {
       if (daimoResult.success && daimoResult.daimoPaymentId) {
         await query(
           `UPDATE payments
-           SET metadata = metadata || $2::jsonb,
+           SET daimo_payment_id = $2,
+               metadata = metadata || $3::jsonb,
                updated_at = NOW()
            WHERE id = $1`,
           [
             payment.id,
+            daimoResult.daimoPaymentId,
             JSON.stringify({
               payment_url: checkoutUrl,
               daimo_payment_id: daimoResult.daimoPaymentId,
+              daimoSessionId: daimoResult.daimoPaymentId,
+              daimoClientSecret: daimoResult.clientSecret || null,
               daimo_client_secret: daimoResult.clientSecret || null,
             }),
           ]

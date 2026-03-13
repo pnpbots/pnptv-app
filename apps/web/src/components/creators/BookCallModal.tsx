@@ -5,7 +5,11 @@
  *  1. SELECT_PACKAGE  — choose 30 or 60 min package + quantity
  *  2. SELECT_SLOT     — choose an available time slot (offline creators only)
  *  3. CHECKOUT        — enter email + payment provider, submit
- *  4. SUCCESS         — confirmation screen
+ *  4. SUCCESS         — confirmation screen (epayco / token payments only)
+ *
+ * For Daimo (USDC) payments the modal closes and the user is navigated to
+ * the DaimoCheckout page in the same tab so the embedded Daimo modal can
+ * render at full height without popup-blocker interference.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -15,6 +19,7 @@ import {
   getCreatorCallPackages,
   getBookingOptions,
   createCallCheckout,
+  assertPaymentUrl,
   type CallPackage,
   type BookingSlot,
 } from "@/lib/api";
@@ -251,6 +256,17 @@ export function BookCallModal({
         quantity,
         selectedSlot: selectedSlot?.startUtc ?? null,
       });
+
+      if (provider === "daimo" && res.checkoutUrl) {
+        // Navigate in-tab to the Daimo checkout page.  Store the bookingId so
+        // the user can still see their booking after the payment flow completes
+        // (the DaimoCheckout success screen links back to /booking/:id).
+        onClose();
+        navigate(new URL(assertPaymentUrl(res.checkoutUrl)).pathname);
+        return;
+      }
+
+      // ePayco and any future non-Daimo providers — stay in modal and show SUCCESS.
       setBookingId(res.bookingId);
       setConfirmedStartAt(res.startAt ?? null);
       setStep("SUCCESS");
@@ -260,7 +276,7 @@ export function BookCallModal({
     } finally {
       setCheckoutLoading(false);
     }
-  }, [activePackage, provider, email, quantity, selectedSlot]);
+  }, [activePackage, provider, email, quantity, selectedSlot, onClose, navigate]);
 
   if (!open) return null;
 
@@ -617,6 +633,11 @@ export function BookCallModal({
             );
           })}
         </div>
+        {provider === "daimo" && (
+          <p className="text-[11px] mt-2" style={{ color: "#8E8E93" }}>
+            You will be taken to a secure USDC checkout page. Return here after completing payment.
+          </p>
+        )}
       </div>
 
       {/* Email input */}
@@ -670,6 +691,8 @@ export function BookCallModal({
             <Spinner size={18} />
             <span>Processing...</span>
           </>
+        ) : provider === "daimo" ? (
+          "Pay with Crypto (USDC)"
         ) : (
           "Proceed to Checkout"
         )}

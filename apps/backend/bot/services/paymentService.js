@@ -509,6 +509,8 @@ class PaymentService {
               paymentUrl,
               provider,
               daimo_payment_id: daimoResult.daimoPaymentId,
+              daimoSessionId: daimoResult.daimoPaymentId,
+              daimoClientSecret: daimoResult.clientSecret || null,
               daimo_client_secret: daimoResult.clientSecret,
             });
           } else {
@@ -1836,29 +1838,22 @@ class PaymentService {
    */
   static async processDaimoWebhook(webhookData) {
     try {
-      // Normalize payload: Daimo Pay v2 nests data under `payment` object
-      // New format: { type, paymentId, payment: { id, status, source, destination, metadata } }
-      // Legacy format: { id, status, source, metadata }
-      let normalizedData;
-      if (webhookData.payment && typeof webhookData.payment === 'object') {
-        normalizedData = {
-          id: webhookData.payment.id || webhookData.paymentId,
-          status: webhookData.payment.status || webhookData.type,
-          source: webhookData.payment.source,
-          destination: webhookData.payment.destination,
-          metadata: webhookData.payment.metadata,
-        };
-      } else {
-        normalizedData = webhookData;
+      // Short-circuit test events before any processing
+      if (webhookData.isTestEvent === true) {
+        logger.info('Daimo test event received in processDaimoWebhook — skipping', { type: webhookData.type });
+        return { success: true, testEvent: true };
       }
 
-      // Extract webhook data
-      const {
-        id,
-        status,
-        source,
-        metadata,
-      } = normalizedData;
+      // Normalize payload: supports v3 envelope, v2 nested, and legacy flat formats
+      const DaimoConfig = require('../../config/daimo');
+      const normalized = DaimoConfig.normalizeDaimoPayload(webhookData);
+      logger.info('Daimo webhook payload normalized', { format: normalized.format, eventType: normalized.eventType });
+
+      // Extract webhook data from normalized shape
+      const id = normalized.eventId;
+      const status = normalized.status;
+      const source = normalized.source;
+      const metadata = normalized.metadata;
 
       const userId = metadata?.userId;
       const planId = metadata?.planId;

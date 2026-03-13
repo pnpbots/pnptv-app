@@ -16,6 +16,7 @@ class DaimoService {
     this.treasuryAddress = process.env.DAIMO_TREASURY_ADDRESS;
     this.refundAddress = process.env.DAIMO_REFUND_ADDRESS;
     this.webhookSecret = process.env.DAIMO_WEBHOOK_SECRET;
+    this.webhookHmacSecret = process.env.DAIMO_WEBHOOK_HMAC_SECRET;
     this.apiKey = process.env.DAIMO_API_KEY;
 
     // API base URL
@@ -40,59 +41,57 @@ class DaimoService {
 
 
   /**
-   * Verify webhook authorization from Daimo
-   * Daimo uses Authorization: Basic <token> or Bearer <token> header for webhook verification
-   * @param {Object} payload - Webhook payload (unused but kept for API compatibility)
-   * @param {string} authHeader - Authorization header value (can be from x-daimo-signature or Authorization)
+   * Verify webhook signature from Daimo.
+   * Supports two modes:
+   * 1. HMAC-SHA256 via Daimo-Signature header (new API — preferred)
+   * 2. Bearer token via Authorization header (legacy — deprecated)
+   *
+   * @param {string} signatureOrAuthHeader - Daimo-Signature header (HMAC) or Authorization header (legacy)
+   * @param {Buffer|string|null} rawBody - Raw request body (required for HMAC, unused for legacy)
    * @returns {boolean} True if authorization is valid
    */
-  verifyWebhookSignature(payload, authHeader) {
+  verifyWebhookSignature(signatureOrAuthHeader, rawBody) {
+    const DaimoConfig = require('../../config/daimo');
+
     try {
-      if (!this.webhookSecret) {
-        logger.warn('Daimo webhook secret not configured — cannot verify');
-        return false;
+      // Path 1: HMAC-SHA256 (new API) — uses Daimo-Signature header
+      // Read fresh from env to avoid stale singleton after hot-reload
+      const hmacSecret = process.env.DAIMO_WEBHOOK_HMAC_SECRET || this.webhookHmacSecret;
+      if (hmacSecret && signatureOrAuthHeader && signatureOrAuthHeader.includes('t=')) {
+        const result = DaimoConfig.verifyWebhookSignature(signatureOrAuthHeader, rawBody, hmacSecret);
+        if (!result.valid) {
+          logger.error('Daimo HMAC webhook verification failed', { reason: result.reason });
+        }
+        return result.valid;
       }
 
-      if (!authHeader) {
-        logger.warn('Missing Daimo webhook authorization header');
-        return false;
-      }
+      // Path 2: Legacy Bearer token — deprecated
+      if (this.webhookSecret && signatureOrAuthHeader) {
+        logger.warn('Using deprecated Bearer token Daimo webhook verification — migrate to HMAC-SHA256');
 
-      // Daimo sends Authorization: Basic <token> (legacy) or Bearer <token> (new API)
-      // Extract token regardless of prefix
-      let receivedToken = authHeader;
-      if (authHeader.startsWith('Basic ')) {
-        receivedToken = authHeader.substring(6);
-      } else if (authHeader.startsWith('Bearer ')) {
-        receivedToken = authHeader.substring(7);
-      }
-
-      // Normalize 0x prefix — Daimo may send with or without it
-      const normalize = (t) => t.startsWith('0x') ? t.slice(2) : t;
-      const normalizedReceived = normalize(receivedToken);
-      const normalizedExpected = normalize(this.webhookSecret);
-
-      try {
-        const receivedBuf = Buffer.from(normalizedReceived, 'utf8');
-        const expectedBuf = Buffer.from(normalizedExpected, 'utf8');
-        const isValid = crypto.timingSafeEqual(receivedBuf, expectedBuf);
-
-        if (!isValid) {
-          logger.error('Invalid Daimo webhook authorization token', {
-            receivedLength: normalizedReceived.length,
-            expectedLength: normalizedExpected.length,
-          });
+        let receivedToken = signatureOrAuthHeader;
+        if (signatureOrAuthHeader.startsWith('Basic ')) {
+          receivedToken = signatureOrAuthHeader.substring(6);
+        } else if (signatureOrAuthHeader.startsWith('Bearer ')) {
+          receivedToken = signatureOrAuthHeader.substring(7);
         }
 
-        return isValid;
-      } catch (bufferError) {
-        // If buffer lengths don't match, timingSafeEqual throws
-        logger.error('Daimo webhook token length mismatch', {
-          receivedLength: normalizedReceived.length,
-          expectedLength: normalizedExpected.length,
-        });
-        return false;
+        const normalize = (t) => t.startsWith('0x') ? t.slice(2) : t;
+        const normalizedReceived = normalize(receivedToken);
+        const normalizedExpected = normalize(this.webhookSecret);
+
+        try {
+          const receivedBuf = Buffer.from(normalizedReceived, 'utf8');
+          const expectedBuf = Buffer.from(normalizedExpected, 'utf8');
+          return crypto.timingSafeEqual(receivedBuf, expectedBuf);
+        } catch {
+          logger.error('Daimo webhook token length mismatch');
+          return false;
+        }
       }
+
+      logger.warn('Daimo webhook secret not configured — cannot verify');
+      return false;
     } catch (error) {
       logger.error('Error verifying Daimo webhook authorization:', error);
       return false;
@@ -100,68 +99,47 @@ class DaimoService {
   }
 
   /**
-   * Parse and validate Daimo webhook event
+   * Parse and validate Daimo webhook event.
+   * Supports v3 envelope, v2 nested, and legacy flat formats via normalizeDaimoPayload.
    * @param {Object} event - Webhook event data
    * @returns {Object} Parsed event data
    */
   parseWebhookEvent(event) {
     try {
-      // Normalize: Daimo Pay v2 nests data under `payment` object
-      let normalizedEvent;
-      if (event.payment && typeof event.payment === 'object') {
-        normalizedEvent = {
-          id: event.payment.id || event.paymentId,
-          status: event.payment.status || event.type,
-          source: event.payment.source,
-          destination: event.payment.destination,
-          metadata: event.payment.metadata,
-        };
-      } else {
-        normalizedEvent = event;
-      }
+      const DaimoConfig = require('../../config/daimo');
+      const normalized = DaimoConfig.normalizeDaimoPayload(event);
 
-      const {
-        id,
-        status,
-        source,
-        destination,
-        metadata,
-      } = normalizedEvent;
-
-      // Validate required fields
-      if (!id || !status) {
+      if (!normalized.eventId || !normalized.status) {
         throw new Error('Invalid webhook event: missing id or status');
       }
 
-      // Parse source (payment details)
       const paymentDetails = {
-        eventId: id,
-        status,
-        payerAddress: source?.payerAddress,
-        txHash: source?.txHash,
-        chainId: source?.chainId,
-        amountUnits: source?.amountUnits,
-        tokenSymbol: source?.tokenSymbol,
+        eventId: normalized.eventId,
+        status: normalized.status,
+        payerAddress: normalized.source?.payerAddress,
+        txHash: normalized.source?.txHash,
+        chainId: normalized.source?.chainId,
+        amountUnits: normalized.source?.amountUnits,
+        tokenSymbol: normalized.source?.tokenSymbol,
       };
 
-      // Parse destination
       const destinationDetails = {
-        toAddress: destination?.toAddress,
-        toChain: destination?.toChain,
-        toToken: destination?.toToken,
+        toAddress: normalized.destination?.address || normalized.destination?.toAddress,
+        toChain: normalized.destination?.chainId || normalized.destination?.toChain,
+        toToken: normalized.destination?.tokenAddress || normalized.destination?.toToken,
       };
 
-      // Parse metadata (our custom data)
       const customMetadata = {
-        userId: metadata?.userId,
-        chatId: metadata?.chatId,
-        planId: metadata?.planId,
-        paymentId: metadata?.paymentId,
+        userId: normalized.metadata?.userId,
+        chatId: normalized.metadata?.chatId,
+        planId: normalized.metadata?.planId,
+        paymentId: normalized.metadata?.paymentId,
       };
 
       logger.info('Daimo webhook event parsed', {
-        eventId: id,
-        status,
+        eventId: normalized.eventId,
+        format: normalized.format,
+        status: normalized.status,
         paymentId: customMetadata.paymentId,
       });
 

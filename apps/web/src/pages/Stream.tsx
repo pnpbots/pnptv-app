@@ -16,6 +16,7 @@ import {
   getStreamOverlayPublic,
   getLiveRulesStatus,
   acknowledgeLiveRules,
+  assertPaymentUrl,
   type LiveStream,
   type RecentTip,
   type StreamOverlay,
@@ -211,11 +212,39 @@ export default function Stream() {
 
   const handleTip = async (amount: number) => {
     if (!isAuthenticated) { login(); return; }
+
+    if (tipPaymentTab === "daimo") {
+      // For Daimo/USDC tips, create a payment server-side and navigate to the
+      // dedicated checkout page in the same tab.  This avoids popup blockers
+      // and gives the user the full Daimo embedded modal UX.
+      setTipping(true);
+      setTipError(null);
+      setTipSuccess(null);
+      try {
+        const result = await sendTip(streamId || "", amount, undefined, "daimo");
+        if (result.paymentUrl) {
+          // paymentUrl is the DaimoCheckout route — navigate in-tab.
+          navigate(new URL(assertPaymentUrl(result.paymentUrl)).pathname);
+        } else {
+          // Backend returned success but no URL — treat as immediate success
+          // (e.g. the tip was credited via a pre-funded balance).
+          setTipSuccess(t.live.tipSuccess);
+          setTimeout(() => setTipSuccess(null), 3000);
+        }
+      } catch (err) {
+        setTipError(err instanceof Error ? err.message : t.live.tipFailed);
+      } finally {
+        setTipping(false);
+      }
+      return;
+    }
+
+    // Token tip — fire directly.
     setTipping(true);
     setTipError(null);
     setTipSuccess(null);
     try {
-      await sendTip(streamId || "", amount, undefined, tipPaymentTab);
+      await sendTip(streamId || "", amount, undefined, "tokens");
       setTipSuccess(t.live.tipSuccess);
       setTimeout(() => setTipSuccess(null), 3000);
     } catch (err) {

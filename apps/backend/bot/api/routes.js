@@ -4833,9 +4833,13 @@ async function fetchPerformerPhotos(performers) {
 }
 
 app.get('/api/performers/featured', asyncHandler(async (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   try {
-    // Fetch featured from Directus + active creators from DB
-    const [directusResult, dbResult] = await Promise.allSettled([
+    const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
+    const restreamerPublicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
+
+    // Fetch featured from Directus + active creators from DB + live streams from Restreamer
+    const [directusResult, dbResult, streamsResult] = await Promise.allSettled([
       axios.get(`${DIRECTUS_INTERNAL_URL}/items/performers`, {
         params: {
           'filter[status][_eq]': 'published',
@@ -4848,12 +4852,35 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
       }),
       getPool().query(
         `SELECT id, username, first_name, last_name, photo_file_id, bio,
-                creator_type, creator_status, creator_price_usd
+                creator_type, creator_status, creator_price_usd, live_channel
          FROM users
          WHERE creator_status = 'active'
          ORDER BY creator_subscriber_count DESC NULLS LAST
          LIMIT 20`
       ),
+      (async () => {
+        if (process.env.RESTREAMER_USER === undefined || process.env.RESTREAMER_PASSWORD === undefined) return [];
+        try {
+          let token = null;
+          try {
+            const loginResp = await axios.post(`${restreamerUrl}/api/login`, {
+              username: process.env.RESTREAMER_USER,
+              password: process.env.RESTREAMER_PASSWORD,
+            }, { timeout: 5000 });
+            token = loginResp.data?.access_token ?? null;
+          } catch (loginErr) {
+            logger.warn(`featured: Restreamer login failed (non-fatal): ${loginErr.message}`);
+          }
+          const headers = token ? { Authorization: `Bearer ${token}` } : {};
+          const procResp = await axios.get(`${restreamerUrl}/api/v3/process`, { headers, timeout: 8000 });
+          return (procResp.data || []).filter(p =>
+            p.id?.startsWith('restreamer-ui:ingest:') && p.state?.exec === 'running'
+          );
+        } catch (e) {
+          logger.warn(`featured: Restreamer fetch failed (non-fatal): ${e.message}`);
+          return [];
+        }
+      })(),
     ]);
 
     const directusPerformers = directusResult.status === 'fulfilled'
@@ -4862,6 +4889,16 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
     const dbCreators = dbResult.status === 'fulfilled'
       ? (dbResult.value.rows || [])
       : [];
+    const liveProcesses = streamsResult.status === 'fulfilled'
+      ? (streamsResult.value || [])
+      : [];
+
+    // Build set of currently-live Restreamer channel references
+    const liveRefs = new Set(
+      liveProcesses
+        .map(p => (typeof p.reference === 'string' && p.reference) ? p.reference : null)
+        .filter(Boolean)
+    );
 
     const photoMap = await fetchPerformerPhotos(directusPerformers);
     const mapped = directusPerformers.map(p => mapDirectusPerformer(p, photoMap));
@@ -4889,6 +4926,43 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
         averageRating: 0,
       });
     }
+
+    // Inject live status: match users by live_channel against running Restreamer processes
+    if (liveRefs.size > 0) {
+      try {
+        const placeholders = [...liveRefs].map((_, i) => `$${i + 1}`).join(',');
+        const { rows: channelUsers } = await getPool().query(
+          `SELECT id, live_channel FROM users WHERE live_channel IN (${placeholders})`,
+          [...liveRefs]
+        );
+        for (const u of channelUsers) {
+          const safeRef = typeof u.live_channel === 'string'
+            ? u.live_channel.replace(/[^a-zA-Z0-9\-_.]/g, '')
+            : null;
+          const hlsUrl = safeRef && !safeRef.includes('..')
+            ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8`
+            : null;
+          const uid = String(u.id);
+          for (const entry of mapped) {
+            if (entry.userId && String(entry.userId) === uid) {
+              entry.isLive = true;
+              entry.hlsUrl = hlsUrl;
+            }
+          }
+        }
+      } catch (liveErr) {
+        logger.warn(`featured: live injection failed (non-fatal): ${liveErr.message}`);
+      }
+    }
+
+    // Sort: live performers first, then featured, then rest
+    mapped.sort((a, b) => {
+      if (a.isLive && !b.isLive) return -1;
+      if (!a.isLive && b.isLive) return 1;
+      if (a.isFeatured && !b.isFeatured) return -1;
+      if (!a.isFeatured && b.isFeatured) return 1;
+      return 0;
+    });
 
     res.json({ success: true, performers: mapped });
   } catch (error) {
@@ -5353,19 +5427,55 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
       return res.status(500).json({ success: false, error: 'Failed to create tip' });
     }
 
-    // Try to create Daimo payment
+    // Create a real payments row for the Daimo tip so we get a UUID paymentId
+    // that works with /checkout/:paymentId and PaymentModel.getById
+    const webAppUrl = process.env.WEB_APP_URL || 'https://app.pnptv.app';
     let paymentUrl = null;
+    let tipPaymentId = null;
     try {
       const { createDaimoPayment } = require('../../config/daimo');
+
+      // Create payment record first
+      const paymentRow = await getPool().query(
+        `INSERT INTO payments (user_id, plan_id, amount, currency, provider, payment_method, status, metadata)
+         VALUES ($1, $2, $3, 'USD', 'daimo', 'daimo', 'pending', $4::jsonb)
+         RETURNING id`,
+        [
+          userId,
+          `tip-${tip.id}`,
+          numAmount,
+          JSON.stringify({ tipId: tip.id, performerId: String(resolvedPerformerId) }),
+        ]
+      );
+      tipPaymentId = paymentRow.rows[0].id;
+
       const daimoResult = await createDaimoPayment({
         amount: numAmount,
         userId,
         planId: `tip-${tip.id}`,
-        paymentId: `TIP-${tip.id}`,
+        paymentId: tipPaymentId,
         description: `Tip for ${performerName}`,
       });
       if (daimoResult.success && daimoResult.daimoPaymentId) {
-        paymentUrl = `https://pay.daimo.com/checkout?session=${daimoResult.daimoPaymentId}`;
+        // Use internal checkout page (matches /checkout/:paymentId route)
+        paymentUrl = `${webAppUrl}/checkout/${tipPaymentId}`;
+
+        // Store Daimo session data on the payment record
+        await getPool().query(
+          `UPDATE payments
+           SET daimo_payment_id = $2,
+               metadata = metadata || $3::jsonb
+           WHERE id = $1`,
+          [
+            tipPaymentId,
+            daimoResult.daimoPaymentId,
+            JSON.stringify({
+              daimoSessionId: daimoResult.daimoPaymentId,
+              daimoClientSecret: daimoResult.clientSecret || null,
+              daimo_client_secret: daimoResult.clientSecret || null,
+            }),
+          ]
+        );
       }
     } catch (daimoErr) {
       logger.warn(`Daimo payment creation failed for tip, falling back: ${daimoErr.message}`);
@@ -5374,6 +5484,7 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
     res.json({
       success: true,
       tipId: tip.id,
+      paymentId: tipPaymentId,
       paymentUrl,
       amount: numAmount,
       paymentMethod: 'daimo',

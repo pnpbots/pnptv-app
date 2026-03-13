@@ -471,9 +471,15 @@ export default function Profile() {
       const creatorId = profile.id || paramUserId!;
       const result = await initiateCreatorSubscriptionPayment(creatorId, subscribeProvider, trimmed);
       if (result.success && result.paymentUrl) {
-        window.open(assertPaymentUrl(result.paymentUrl), "_blank", "noopener,noreferrer");
-        setSubscribePaymentId(result.paymentId);
-        setSubscribeAwaitingPayment(true);
+        if (subscribeProvider === "daimo") {
+          // Navigate in-tab to the Daimo checkout page — avoids popup blockers
+          // and provides the full embedded wallet UX.
+          navigate(new URL(assertPaymentUrl(result.paymentUrl)).pathname);
+        } else {
+          window.open(assertPaymentUrl(result.paymentUrl), "_blank", "noopener,noreferrer");
+          setSubscribePaymentId(result.paymentId);
+          setSubscribeAwaitingPayment(true);
+        }
       } else {
         setSubscribeError(result.error || p.failedToCreatePayment);
       }
