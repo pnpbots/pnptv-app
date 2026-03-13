@@ -53,6 +53,28 @@ export interface Content {
   date_created: string;
 }
 
+export interface PrimeVideo {
+  id: number;
+  status: "published" | "draft";
+  title: string;
+  description: string | null;
+  video_file: string | null;
+  thumbnail: string | null;
+  cover_url: string | null;
+  duration: number | null;
+  artist: string | null;
+  category: string | null;
+  type: string;
+  language: string | null;
+  is_explicit: boolean;
+  is_featured: boolean;
+  tags: string[] | null;
+  plays: number;
+  likes: number;
+  date_created: string;
+  date_updated: string | null;
+}
+
 export interface Announcement {
   id: number;
   status: "published" | "draft";

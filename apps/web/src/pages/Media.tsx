@@ -8,7 +8,7 @@ import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useTier } from "@/hooks/useTier";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
-import { type Content, type Performer, getAssetUrl } from "@/lib/directus";
+import { type PrimeVideo, getAssetUrl, DIRECTUS_URL } from "@/lib/directus";
 import { AnimatedVideoThumbnail } from "@/components/AnimatedVideoThumbnail";
 import { type ContentReaction, getContentReactions, toggleContentReaction } from "@/lib/api";
 
@@ -19,9 +19,10 @@ function formatDuration(seconds: number | null): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function performerName(performer: Content["performer"]): string {
-  if (!performer || typeof performer === "number") return "";
-  return (performer as Performer).name || "";
+/** Build a playable video URL from a Directus file UUID */
+function videoUrl(fileId: string | null): string | null {
+  if (!fileId) return null;
+  return `${DIRECTUS_URL}/assets/${fileId}`;
 }
 
 const CROWN = (
@@ -42,40 +43,46 @@ export default function Media() {
   const navigate = useNavigate();
   const { media: t } = useI18n();
 
-  const { data: videos, isLoading, error } = useDirectus<Content>({
-    collection: "content",
+  const { data: videos, isLoading, error } = useDirectus<PrimeVideo>({
+    collection: "prime_videos",
     params: {
       filter: {
         status: { _eq: "published" },
         type: { _eq: "video" },
-        is_premium: { _eq: true },
       },
-      fields: ["*", "performer.name", "performer.photo"],
-      sort: ["series", "episode_number", "-date_created"],
+      fields: ["*"],
+      sort: ["category", "-is_featured", "-date_created"],
       limit: 100,
     },
   });
 
-  const [activeVideo, setActiveVideo] = useState<Content | null>(null);
+  const [activeVideo, setActiveVideo] = useState<PrimeVideo | null>(null);
   const [activeSeries, setActiveSeries] = useState<string>("all");
   const [videoReactions, setVideoReactions] = useState<ContentReaction[]>([]);
   const [reactionsLoading, setReactionsLoading] = useState(false);
   const { showTutorial, dismissTutorial } = useTutorial("prime");
 
-  // Fixed categories
-  const CATEGORIES = [
-    { key: "Clouding", label: t.categoryClouding },
-    { key: "Slamming", label: t.categorySlamming },
-    { key: "Live Show", label: t.categoryLiveShow },
-  ];
+  // Dynamic categories derived from the actual data
+  const CATEGORIES = useMemo(() => {
+    const cats = new Set(videos.map((v) => v.category).filter(Boolean));
+    const labelMap: Record<string, string> = {
+      clouding: t.categoryClouding,
+      slamming: t.categorySlamming,
+      live_show: t.categoryLiveShow,
+    };
+    return Array.from(cats).map((key) => ({
+      key: key!,
+      label: labelMap[key!.toLowerCase()] || key!.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+    }));
+  }, [videos, t]);
 
-  // Filter videos by selected category (matches series field)
+  // Filter videos by selected category
   const filteredVideos = useMemo(() => {
     if (activeSeries === "all") return videos;
-    return videos.filter((v) => v.series === activeSeries);
+    return videos.filter((v) => v.category === activeSeries);
   }, [videos, activeSeries]);
 
-  const handleVideoClick = (video: Content) => {
+  const handleVideoClick = (video: PrimeVideo) => {
     if (!isPrime) { navigate("/subscribe"); return; }
     setActiveVideo((prev) => (prev?.id === video.id ? null : video));
   };
@@ -218,7 +225,7 @@ export default function Media() {
         <div className="mb-5 rounded-2xl overflow-hidden bg-black border border-pnp-accent/30 shadow-lg">
           <video
             key={activeVideo.id}
-            src={activeVideo.media_url || ""}
+            src={videoUrl(activeVideo.video_file) || ""}
             controls
             autoPlay
             playsInline
@@ -230,15 +237,14 @@ export default function Media() {
                 <p className="font-semibold text-pnp-textPrimary truncate">
                   {activeVideo.title}
                 </p>
-                {activeVideo.series && (
+                {activeVideo.category && (
                   <p className="text-xs text-pnp-accent mt-0.5">
-                    {activeVideo.series}
-                    {activeVideo.episode_number ? ` · ${t.episodePrefix} ${activeVideo.episode_number}` : ""}
+                    {activeVideo.category.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
                   </p>
                 )}
-                {performerName(activeVideo.performer) && (
+                {activeVideo.artist && (
                   <p className="text-sm text-pnp-textSecondary mt-0.5 truncate">
-                    {performerName(activeVideo.performer)}
+                    {activeVideo.artist}
                   </p>
                 )}
               </div>
@@ -353,6 +359,7 @@ export default function Media() {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {filteredVideos.map((video) => {
             const thumb = getAssetUrl(video.thumbnail);
+            const vidSrc = videoUrl(video.video_file);
             const isActive = activeVideo?.id === video.id;
 
             return (
@@ -368,7 +375,7 @@ export default function Media() {
                 {/* Thumbnail — cycles through random video frames */}
                 <div className="relative aspect-video bg-pnp-bg group">
                   <AnimatedVideoThumbnail
-                    videoUrl={isPrime ? (video.media_url || null) : null}
+                    videoUrl={isPrime ? vidSrc : null}
                     posterUrl={thumb}
                     alt={video.title}
                   />
@@ -400,16 +407,16 @@ export default function Media() {
                   )}
 
                   {/* Duration badge */}
-                  {video.duration_seconds && (
+                  {video.duration && (
                     <span className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded font-mono">
-                      {formatDuration(video.duration_seconds)}
+                      {formatDuration(video.duration)}
                     </span>
                   )}
 
-                  {/* Episode number */}
-                  {video.episode_number && (
-                    <span className="absolute top-1 left-1 bg-pnp-accent/90 text-white text-[10px] px-1.5 py-0.5 rounded font-semibold">
-                      {t.episodePrefix} {video.episode_number}
+                  {/* Featured badge */}
+                  {video.is_featured && (
+                    <span className="absolute top-1 left-1 bg-pnp-accent/90 text-white text-[10px] px-1.5 py-0.5 rounded font-semibold flex items-center gap-0.5">
+                      {CROWN} Featured
                     </span>
                   )}
                 </div>
@@ -419,14 +426,14 @@ export default function Media() {
                   <p className="text-xs font-medium text-pnp-textPrimary truncate leading-snug">
                     {video.title}
                   </p>
-                  {video.series && activeSeries === "all" && (
+                  {video.category && activeSeries === "all" && (
                     <p className="text-[10px] text-pnp-accent truncate mt-0.5">
-                      {CATEGORIES.find(c => c.key === video.series)?.label || video.series}
+                      {CATEGORIES.find(c => c.key === video.category)?.label || video.category}
                     </p>
                   )}
-                  {performerName(video.performer) && (
+                  {video.artist && (
                     <p className="text-[10px] text-pnp-textSecondary truncate mt-0.5">
-                      {performerName(video.performer)}
+                      {video.artist}
                     </p>
                   )}
                 </div>
