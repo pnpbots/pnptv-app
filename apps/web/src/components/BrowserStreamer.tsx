@@ -875,7 +875,17 @@ export default function BrowserStreamer() {
 
     // Don't start the recorder here — it will be started by onStarted() after
     // the backend confirms FFmpeg is ready (stream:started acknowledgment).
+    // Safety timeout: if stream:started never arrives within 10s, start anyway.
+    const safetyTimer = setTimeout(() => {
+      if (recorderRef.current?.state === "inactive" && !recorderStartedByAck) {
+        recorderStartedByAck = true;
+        recorderRef.current.start(1000);
+      }
+    }, 10000);
     recorderRef.current = recorder;
+
+    // Store the safety timer so stopMediaRecorder can clear it
+    (recorder as any)._safetyTimer = safetyTimer;
   }, [t, loadChannel, recordChunkSize, selectedPreset, isScreenSharing]);
 
   // ── Stop Streaming ────────────────────────────────────────────────────────
@@ -915,8 +925,12 @@ export default function BrowserStreamer() {
 
   // ── Cleanup helpers ───────────────────────────────────────────────────────
   function stopMediaRecorder() {
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      recorderRef.current.stop();
+    if (recorderRef.current) {
+      // Clear safety timer if it hasn't fired yet
+      clearTimeout((recorderRef.current as any)._safetyTimer);
+      if (recorderRef.current.state !== "inactive") {
+        recorderRef.current.stop();
+      }
     }
     recorderRef.current = null;
   }

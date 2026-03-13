@@ -77,52 +77,55 @@ export default function Stream() {
   // when the backend injects isLive + hlsUrl directly on the performer object).
   const loadStream = useCallback(() => {
     if (!streamId) return Promise.resolve();
-    return getLiveStreams()
-      .then(async (data) => {
-        const found = (data.streams || []).find((s) => s.id === streamId);
-        if (found) {
-          setStream(found);
+    return Promise.all([getLiveStreams(), getAllPerformers()])
+      .then(([data, perfData]) => {
+        const streams = data.streams || [];
+        const performers = perfData.performers || [];
+
+        // 1. Direct match by Restreamer process ID (e.g. "restreamer-ui:ingest:pnptv-santino")
+        const directMatch = streams.find((s) => s.id === streamId);
+        if (directMatch) {
+          setStream(directMatch);
           setError(null);
           setStreamError(false);
           return;
         }
-        // Not found in the Restreamer stream list — try resolving via the performers
-        // endpoint, which injects live users with their own isLive/hlsUrl fields.
-        try {
-          const perfData = await getAllPerformers();
-          const performer = (perfData.performers || []).find(
-            (p) => p.id === streamId || (p.userId && String(p.userId) === streamId)
-          );
-          if (performer && performer.isLive) {
-            // Use performer hlsUrl if available; fall back to constructing it
-            // from the streams list or the known public URL pattern.
-            const hlsUrl =
-              performer.hlsUrl ||
-              (stream ? stream.hlsUrl : null) ||
-              null;
-            if (hlsUrl) {
-              const syntheticStream: LiveStream = {
-                id: performer.id,
-                name: performer.displayName,
-                description: performer.bio || "",
-                hlsUrl,
-                isLive: true,
-              };
-              setStream(syntheticStream);
-              setError(null);
-              setStreamError(false);
-            } else {
-              setError(t.live.streamNotFound);
-              setStreamError(true);
-            }
-          } else {
-            setError(t.live.streamNotFound);
-            setStreamError(true);
-          }
-        } catch {
-          setError(t.live.streamNotFound);
-          setStreamError(true);
+
+        // 2. Match by performer ID (e.g. "db-8599671840" or "live-8599671840")
+        //    or userId (e.g. "8599671840") — resolve via performers endpoint
+        const performer = performers.find(
+          (p: any) =>
+            p.id === streamId ||
+            (p.userId && String(p.userId) === streamId) ||
+            (p.slug && p.slug === streamId)
+        );
+        if (performer && performer.isLive && performer.hlsUrl) {
+          setStream({
+            id: performer.id,
+            name: performer.displayName,
+            description: performer.bio || "",
+            hlsUrl: performer.hlsUrl,
+            isLive: true,
+          });
+          setError(null);
+          setStreamError(false);
+          return;
         }
+
+        // 3. Fuzzy match: streamId might be a channel ref like "pnptv-santino"
+        //    embedded in the Restreamer process ID
+        const fuzzyMatch = streams.find(
+          (s) => s.id.endsWith(`:${streamId}`) || s.id.includes(streamId)
+        );
+        if (fuzzyMatch) {
+          setStream(fuzzyMatch);
+          setError(null);
+          setStreamError(false);
+          return;
+        }
+
+        setError(t.live.streamNotFound);
+        setStreamError(true);
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : "Failed to load stream");

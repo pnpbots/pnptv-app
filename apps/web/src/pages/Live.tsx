@@ -396,12 +396,15 @@ export default function Live() {
             // or userId against the separately-fetched liveStreams list.
             const stream = findLiveStream(p);
             const isLive = p.isLive === true || !!stream;
-            // Prefer the direct hlsUrl from the performer object; fall back to
-            // the matched stream's id for the /live/:streamId route.
-            const watchUrl = p.hlsUrl
-              ? `/live/${encodeURIComponent(p.id)}`
-              : stream
+            // Navigate using the matched stream's Restreamer process ID when available
+            // (the Stream page can directly resolve it). Fall back to performer userId
+            // which the Stream page resolves via the /api/performers endpoint.
+            const watchUrl = stream
               ? `/live/${encodeURIComponent(stream.id)}`
+              : p.hlsUrl && p.userId
+              ? `/live/${encodeURIComponent(String(p.userId))}`
+              : p.hlsUrl
+              ? `/live/${encodeURIComponent(p.id)}`
               : null;
             return (
               <div

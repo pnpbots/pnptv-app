@@ -2775,8 +2775,9 @@ export function startXOAuth(adminId?: number, adminUsername?: string): Promise<{
   return request(`/api/admin/x/oauth/start${qs ? `?${qs}` : ""}`);
 }
 
-export function startXOAuth1(): Promise<{ success: boolean; url: string }> {
-  return request("/api/admin/x/oauth/1a/start");
+export function startXOAuth1(app?: string): Promise<{ success: boolean; url: string }> {
+  const qs = app ? `?app=${encodeURIComponent(app)}` : "";
+  return request(`/api/admin/x/oauth/1a/start${qs}`);
 }
 
 // ============================================================================

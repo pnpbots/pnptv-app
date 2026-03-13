@@ -1406,6 +1406,7 @@ function initSocketIO(io) {
           '-maxrate', `${maxrateK}k`,
           '-bufsize', `${bufsizeK}k`,
           '-r', String(safeFps),
+          '-g', String(safeFps * 2),  // Keyframe every 2 seconds for HLS segment alignment
           '-c:a', 'aac',
           '-b:a', `${audioBitrateK}k`,
           '-ar', '44100',
