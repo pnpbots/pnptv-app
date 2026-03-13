@@ -590,6 +590,12 @@ function initSocketIO(io) {
         socket.emit('hangout:presence', { groupId: gid, online: onlineNow });
         // Also notify others in the room that this user came online
         emitGroupPresence(io, gid);
+
+        // Clear unread message counter now that user is viewing this hangout
+        try {
+          const redis = getRedis();
+          await redis.del(`hangout:unread:${gid}:${user.id}`);
+        } catch (_) { /* non-fatal */ }
       } catch (err) {
         logger.error('hangout:join error', err);
       }
@@ -683,6 +689,71 @@ function initSocketIO(io) {
         await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [gid]);
 
         io.to(room).emit('chat:message', rows[0]);
+
+        // ── Push notifications to offline hangout members ──
+        // Fire-and-forget: don't block the message flow
+        (async () => {
+          try {
+            // Get group name + all member IDs
+            const [groupResult, membersResult] = await Promise.all([
+              query('SELECT name FROM hangout_groups WHERE id = $1', [gid]),
+              query('SELECT user_id FROM hangout_group_members WHERE group_id = $1 AND user_id != $2', [gid, user.id]),
+            ]);
+            const groupName = groupResult.rows[0]?.name || 'Hangout';
+            const memberIds = membersResult.rows.map(r => r.user_id);
+            if (memberIds.length === 0) return;
+
+            // Find which members are currently in the socket room (online & viewing)
+            const roomSockets = await io.in(room).fetchSockets();
+            const onlineUserIds = new Set(roomSockets.map(s => String(s.data?.user?.id)).filter(Boolean));
+
+            // Only notify members NOT currently in the room
+            const offlineIds = memberIds.filter(id => !onlineUserIds.has(String(id)));
+            if (offlineIds.length === 0) return;
+
+            // Batch: use Redis counter to aggregate message count per user per group.
+            // Each notification replaces the previous one (same tag) with updated count.
+            const redis = getRedis();
+            const senderName = user.username || firstName || 'Someone';
+            const preview = content.trim().length > 80 ? content.trim().slice(0, 77) + '...' : content.trim();
+
+            await Promise.allSettled(offlineIds.map(async (targetId) => {
+              const countKey = `hangout:unread:${gid}:${targetId}`;
+              const unread = await redis.incr(countKey);
+              // Expire counter after 24h (resets if user doesn't open the hangout)
+              if (unread === 1) await redis.expire(countKey, 86400);
+
+              const msgText = unread === 1
+                ? `${senderName}: ${preview}`
+                : `${unread} new messages — ${senderName}: ${preview}`;
+
+              await NotificationEmitter.emit({
+                type: 'group_message',
+                category: 'hangouts',
+                priority: 'normal',
+                actorId: user.id,
+                targetUserId: targetId,
+                entityType: 'hangout',
+                entityId: String(gid),
+                message: msgText,
+                metadata: {
+                  groupId: gid,
+                  groupName,
+                  senderId: user.id,
+                  senderName,
+                  unreadCount: unread,
+                  url: `/hangouts/${gid}`,
+                  // Push notification fields
+                  pushTitle: groupName,
+                  pushBody: msgText,
+                  pushTag: `hangout-${gid}`,  // replaces previous notification for same group
+                },
+              });
+            }));
+          } catch (notifErr) {
+            logger.warn('hangout:message push notification error', { error: notifErr.message, groupId: gid });
+          }
+        })();
       } catch (err) {
         logger.error('hangout:message error', err);
         socket.emit('hangout:error', { message: 'Failed to send message' });

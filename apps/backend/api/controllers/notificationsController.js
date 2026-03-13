@@ -32,7 +32,7 @@ const DEFAULT_PREFS = {
   follows:        { inApp: true,  bot: true,  email: true,  push: true  },
   replies:        { inApp: true,  bot: true,  email: true,  push: true  },
   dms:            { inApp: true,  bot: false, email: false, push: true  },
-  group_messages: { inApp: true,  bot: false, email: false, push: false },
+  group_messages: { inApp: true,  bot: false, email: false, push: true  },
   group_joins:    { inApp: true,  bot: false, email: false, push: false },
   wof:            { inApp: true,  bot: true,  email: true,  push: true  },
   payments:       { inApp: true,  bot: true,  email: true,  push: true  },

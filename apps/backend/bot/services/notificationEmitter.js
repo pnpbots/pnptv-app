@@ -298,11 +298,12 @@ const NotificationEmitter = {
         const canPush = await NotificationThrottleService.canSendPush(targetUserId);
         if (canPush) {
           const PushNotificationService = require('./pushNotificationService');
+          const meta = (typeof row.metadata === 'object' && row.metadata) || {};
           await PushNotificationService.sendToUser(targetUserId, {
-            title: 'PNPtv!',
-            body: row.message,
-            url: buildNotificationUrl(type, entityType, entityId),
-            tag: `${type}-${entityId || 'general'}`,
+            title: meta.pushTitle || 'PNPtv!',
+            body: meta.pushBody || row.message,
+            url: meta.url || buildNotificationUrl(type, entityType, entityId),
+            tag: meta.pushTag || `${type}-${entityId || 'general'}`,
           });
         }
       } catch (err) {
