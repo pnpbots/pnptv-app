@@ -3,9 +3,11 @@ import {
   getCreatorAvailabilitySchedule,
   saveCreatorAvailabilitySchedule,
   setCreatorOnlineStatus,
+  type WeeklyAvailabilitySchedule,
 } from "@/lib/api";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const DAY_KEYS: Array<keyof WeeklyAvailabilitySchedule> = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const TIMEZONES = [
   "UTC",
   "America/New_York",
@@ -21,13 +23,14 @@ interface SlotRow {
   endTime: string;
 }
 
+const defaultSlots = (): SlotRow[] =>
+  DAYS.map(() => ({ enabled: false, startTime: "09:00", endTime: "17:00" }));
+
 export function CreatorAvailabilitySettings() {
   const [online, setOnline] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [timezone, setTimezone] = useState("UTC");
-  const [schedule, setSchedule] = useState<SlotRow[]>(
-    DAYS.map(() => ({ enabled: false, startTime: "09:00", endTime: "17:00" }))
-  );
+  const [schedule, setSchedule] = useState<SlotRow[]>(defaultSlots());
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -37,18 +40,20 @@ export function CreatorAvailabilitySettings() {
   useEffect(() => {
     getCreatorAvailabilitySchedule()
       .then((res) => {
-        if (res.schedule?.length) {
-          const updated = [...schedule];
-          for (const slot of res.schedule) {
-            if (slot.day_of_week >= 0 && slot.day_of_week <= 6) {
-              updated[slot.day_of_week] = {
-                enabled: true,
-                startTime: slot.start_time,
-                endTime: slot.end_time,
+        setOnline(res.isOnline ?? false);
+        if (res.schedule) {
+          const updated = defaultSlots();
+          DAY_KEYS.forEach((key, idx) => {
+            const slot = res.schedule![key];
+            if (slot) {
+              updated[idx] = {
+                enabled: slot.enabled,
+                startTime: slot.startTime,
+                endTime: slot.endTime,
               };
               if (slot.timezone) setTimezone(slot.timezone);
             }
-          }
+          });
           setSchedule(updated);
         }
       })
@@ -60,7 +65,7 @@ export function CreatorAvailabilitySettings() {
     setToggling(true);
     try {
       const res = await setCreatorOnlineStatus(!online);
-      setOnline(res.online);
+      setOnline(res.isOnline);
     } catch {
       setError("Failed to update status");
     } finally {
@@ -81,14 +86,16 @@ export function CreatorAvailabilitySettings() {
     setSaving(true);
     setError(null);
     try {
-      const slots = schedule
-        .map((row, i) =>
-          row.enabled
-            ? { day_of_week: i, start_time: row.startTime, end_time: row.endTime, timezone }
-            : null
-        )
-        .filter(Boolean);
-      await saveCreatorAvailabilitySchedule(slots as any);
+      const weeklySchedule = DAY_KEYS.reduce<WeeklyAvailabilitySchedule>((acc, key, idx) => {
+        acc[key] = {
+          enabled: schedule[idx].enabled,
+          startTime: schedule[idx].startTime,
+          endTime: schedule[idx].endTime,
+          timezone,
+        };
+        return acc;
+      }, {} as WeeklyAvailabilitySchedule);
+      await saveCreatorAvailabilitySchedule(weeklySchedule);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch {

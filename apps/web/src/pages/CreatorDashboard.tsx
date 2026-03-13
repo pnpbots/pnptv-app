@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
+import { CreatorAvailabilitySettings } from "@/components/creators";
 import {
   getCreatorEligibility,
   getCreatorDashboard,
@@ -84,7 +85,7 @@ export default function CreatorDashboard() {
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
   const [withdrawSuccess, setWithdrawSuccess] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "earnings" | "payouts" | "settings" | "content" | "golive">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "earnings" | "payouts" | "settings" | "content" | "golive" | "availability">("overview");
 
   // Settings tab — payout method
   const [payoutMethod, setPayoutMethod] = useState<"crypto" | "meru">("crypto");
@@ -567,7 +568,7 @@ export default function CreatorDashboard() {
         <>
           {/* Tab navigation */}
           <div className="flex overflow-x-auto border-b border-white/10 mb-4 scrollbar-hide">
-            {(["overview", "earnings", "payouts", "content", "golive", "settings"] as const).map((tab) => (
+            {(["overview", "earnings", "payouts", "content", "golive", "availability", "settings"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -581,6 +582,7 @@ export default function CreatorDashboard() {
                   : tab === "payouts" ? t.tabPayouts
                   : tab === "content" ? t.tabContent
                   : tab === "golive" ? t.tabGoLive
+                  : tab === "availability" ? "Availability"
                   : t.tabSettings
                 }
               </button>
@@ -1210,6 +1212,11 @@ export default function CreatorDashboard() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Availability Tab */}
+          {activeTab === "availability" && (
+            <CreatorAvailabilitySettings />
           )}
 
           {/* Settings Tab */}

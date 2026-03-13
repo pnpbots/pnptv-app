@@ -4401,7 +4401,7 @@ export interface CallBooking {
 export function getCallBooking(
   bookingId: string | number
 ): Promise<{ success: boolean; booking: CallBooking }> {
-  return request(`/api/webapp/book-call/bookings/${bookingId}`);
+  return request(`/api/webapp/bookings/${bookingId}`);
 }
 
 export interface CallSurveyPayload {
@@ -4413,7 +4413,7 @@ export function submitCallSurvey(
   bookingId: number,
   data: CallSurveyPayload
 ): Promise<{ success: boolean }> {
-  return request(`/api/webapp/book-call/bookings/${bookingId}/survey`, {
+  return request(`/api/webapp/bookings/${bookingId}/survey`, {
     method: "POST",
     body: data,
   });
@@ -4437,13 +4437,13 @@ export interface CreatorAvailabilityResponse {
 }
 
 export function getCreatorAvailabilitySchedule(): Promise<CreatorAvailabilityResponse> {
-  return request("/api/webapp/creator/availability");
+  return request("/api/webapp/creator/availability/schedule");
 }
 
 export function saveCreatorAvailabilitySchedule(
   schedule: WeeklyAvailabilitySchedule
 ): Promise<{ success: boolean }> {
-  return request("/api/webapp/creator/availability", {
+  return request("/api/webapp/creator/availability/schedule", {
     method: "PUT",
     body: { schedule },
   });
@@ -4453,7 +4453,7 @@ export function setCreatorOnlineStatus(
   online: boolean
 ): Promise<{ success: boolean; isOnline: boolean }> {
   return request("/api/webapp/creator/online-status", {
-    method: "POST",
+    method: "PUT",
     body: { online },
   });
 }

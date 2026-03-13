@@ -4,6 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { getAllPerformers, type FeaturedPerformer } from "@/lib/api";
 import { NearbyWidget } from "@/components/NearbyWidget";
+import { BookCallModal } from "@/components/creators/BookCallModal";
+import type { CreatorCardCreator } from "@/components/creators/CreatorCard";
 
 // ============================================================================
 // Filter chip types
@@ -103,9 +105,10 @@ interface CreatorCardProps {
   userCity?: string | null;
   userCountry?: string | null;
   onViewChannel: (performer: FeaturedPerformer) => void;
+  onBookCall: (performer: FeaturedPerformer) => void;
 }
 
-function CreatorCard({ performer, userCity, userCountry, onViewChannel }: CreatorCardProps) {
+function CreatorCard({ performer, userCity, userCountry, onViewChannel, onBookCall }: CreatorCardProps) {
   return (
     <div
       className="rounded-2xl overflow-hidden flex flex-col transition-all hover:scale-[1.01]"
@@ -214,6 +217,21 @@ function CreatorCard({ performer, userCity, userCountry, onViewChannel }: Creato
           </svg>
           View Channel
         </button>
+        {performer.basePrice > 0 && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onBookCall(performer);
+            }}
+            className="w-full py-2 rounded-xl text-xs font-semibold text-white flex items-center justify-center gap-1.5 transition-all active:scale-95"
+            style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.3)", color: "#D4007A" }}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+            </svg>
+            {performer.isAvailable ? "Call Now" : "Book a Call"}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -260,6 +278,7 @@ export default function Channels() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
+  const [bookCallCreator, setBookCallCreator] = useState<CreatorCardCreator | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -313,6 +332,17 @@ export default function Channels() {
     } else if (performer.userId) {
       navigate(`/profile/${performer.userId}`);
     }
+  }
+
+  function handleBookCall(performer: FeaturedPerformer) {
+    setBookCallCreator({
+      id: performer.userId || performer.id,
+      username: performer.displayName,
+      photo_url: performer.photoUrl,
+      creator_type: "full_time",
+      creator_price_usd: performer.basePrice,
+      bio: performer.bio,
+    });
   }
 
   return (
@@ -432,12 +462,22 @@ export default function Channels() {
                   userCity={user?.city}
                   userCountry={user?.country}
                   onViewChannel={handleViewChannel}
+                  onBookCall={handleBookCall}
                 />
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {bookCallCreator && (
+        <BookCallModal
+          creator={bookCallCreator}
+          isOnline={performers.find((p) => (p.userId || p.id) === bookCallCreator.id)?.isAvailable ?? false}
+          open={!!bookCallCreator}
+          onClose={() => setBookCallCreator(null)}
+        />
+      )}
     </>
   );
 }

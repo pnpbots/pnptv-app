@@ -289,6 +289,12 @@ async function saveAvailabilitySchedule(req, res) {
     }
     const creatorId = String(sessionUser.id);
 
+    // Only creators (role: 'model'), admins, and superadmins may manage availability
+    const userRole = sessionUser.role || '';
+    if (!['model', 'admin', 'superadmin'].includes(userRole)) {
+      return res.status(403).json({ success: false, error: 'Only creators can manage availability' });
+    }
+
     const { schedule } = req.body;
     if (!Array.isArray(schedule)) {
       return res.status(400).json({ success: false, error: 'schedule must be an array' });

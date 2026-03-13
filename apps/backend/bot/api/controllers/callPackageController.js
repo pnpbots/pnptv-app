@@ -107,6 +107,10 @@ async function bookCall(req, res) {
       return res.status(400).json({ error: 'creatorId, startAt, and creditId are required' });
     }
 
+    if (memberId === String(creatorId)) {
+      return res.status(400).json({ success: false, error: 'You cannot book a call with yourself' });
+    }
+
     const parsedDuration = Number(durationMinutes) || 30;
     if (![30, 60].includes(parsedDuration)) {
       return res.status(400).json({ error: 'durationMinutes must be 30 or 60' });

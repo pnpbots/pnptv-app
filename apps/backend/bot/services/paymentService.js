@@ -1233,6 +1233,32 @@ class PaymentService {
           return { success: true, type: 'token_purchase' };
         }
 
+        // Handle call package purchase — credit call credits instead of activating a subscription
+        if (payment?.metadata?.type === 'call_package' && paymentIdOrType) {
+          try {
+            const callCheckoutService = require('./callCheckoutService');
+            await callCheckoutService.onCallPaymentSuccess(paymentIdOrType);
+
+            await PaymentModel.updateStatus(paymentIdOrType, 'completed', {
+              transaction_id: x_transaction_id,
+              reference_code: x_ref_payco,
+            });
+
+            logger.info('ePayco: call package credits granted', {
+              paymentId: paymentIdOrType,
+              userId,
+              refPayco: x_ref_payco,
+            });
+          } catch (callErr) {
+            logger.error('ePayco call package credit failed', {
+              error: callErr.message,
+              paymentId: paymentIdOrType,
+              refPayco: x_ref_payco,
+            });
+          }
+          return { success: true, type: 'call_package' };
+        }
+
         // Activate user subscription
         if (userId && planIdOrBookingId) {
           const plan = await PlanModel.getById(planIdOrBookingId);
@@ -2023,6 +2049,41 @@ class PaymentService {
           }
         }
         return { success: true, type: 'tip' };
+      }
+
+      // Handle call package payment — credit call credits instead of activating a subscription.
+      // Call package SKUs follow the pattern CALL-{slug}-{duration}M-Q{quantity}.
+      // planId is set to pkg.sku during Daimo payment creation (plan_id column is null).
+      if (planId && planId.startsWith('CALL-')) {
+        if (status === 'payment_completed' || status === 'succeeded') {
+          try {
+            const callCheckoutService = require('./callCheckoutService');
+            await callCheckoutService.onCallPaymentSuccess(paymentId);
+
+            await PaymentModel.updateStatus(paymentId, 'completed', {
+              transaction_id: source?.txHash || id,
+              daimo_event_id: id,
+            });
+
+            logger.info('Daimo: call package credits granted', {
+              paymentId,
+              userId,
+              txHash: source?.txHash,
+              planId,
+            });
+
+            return { success: true, type: 'call_package' };
+          } catch (callErr) {
+            logger.error('Daimo call package credit failed', {
+              error: callErr.message,
+              paymentId,
+              userId,
+              planId,
+            });
+            return { success: false, error: callErr.message };
+          }
+        }
+        return { success: true, type: 'call_package' };
       }
 
       if (!planId) {

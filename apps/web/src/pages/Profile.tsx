@@ -48,6 +48,8 @@ import FollowListModal from "@/components/profile/FollowListModal";
 import CreatorEnrollmentWizard, { TIER_CONFIG, type TierId } from "@/components/profile/CreatorEnrollmentWizard";
 import MonetizeContentCard from "@/components/profile/MonetizeContentCard";
 import IdentityConnections from "@/components/profile/IdentityConnections";
+import { BookCallModal } from "@/components/creators/BookCallModal";
+import type { CreatorCardCreator } from "@/components/creators/CreatorCard";
 
 function resolvePhotoUrl(url: string | null | undefined): string | null {
   if (!url) return null;
@@ -118,6 +120,9 @@ export default function Profile() {
   const [myEventsLoading, setMyEventsLoading] = useState(false);
   const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
   const [showCreateEvent, setShowCreateEvent] = useState(false);
+
+  // Book a Call modal state
+  const [showBookCall, setShowBookCall] = useState(false);
 
   // Creator subscription state
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -1246,6 +1251,20 @@ export default function Profile() {
                   )}
                 </button>
               </div>
+              {isPerformer && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowBookCall(true)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-95"
+                    style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.3)", color: "#D4007A" }}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                    </svg>
+                    Book a Call
+                  </button>
+                </div>
+              )}
               {/* Block / Unblock — authenticated, other profiles only */}
               {isAuthenticated && (
                 <div className="flex justify-end mt-1">
@@ -1845,6 +1864,23 @@ export default function Profile() {
             if (userId === String(user?.id)) navigate("/profile");
             else navigate(`/profile/${userId}`);
           }}
+        />
+      )}
+
+      {/* ── Book a Call Modal ── */}
+      {showBookCall && profile && isPerformer && (
+        <BookCallModal
+          creator={{
+            id: profile.id,
+            username: profile.username || profile.firstName || "Creator",
+            photo_url: profile.photoUrl || null,
+            creator_type: "full_time",
+            creator_price_usd: profile.performerData?.basePrice ?? 0,
+            bio: profile.bio || null,
+          } as CreatorCardCreator}
+          isOnline={profile.performerData?.isAvailable ?? false}
+          open={showBookCall}
+          onClose={() => setShowBookCall(false)}
         />
       )}
     </div>

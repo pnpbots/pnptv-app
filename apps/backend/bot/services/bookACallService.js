@@ -8,7 +8,7 @@
 const { getRedis } = require('../../config/redis');
 const PrivateCallBookingService = require('./privateCallBookingService');
 const callPackageService = require('./callPackageService');
-const { query } = require('../../config/postgres');
+const { query, getPool } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 
 const ONLINE_KEY = (userId) => `user:${userId}:active`;
@@ -74,38 +74,55 @@ async function getBookingOptions(creatorId, durationMinutes = 30) {
  * @param {number} durationMinutes
  */
 async function bookCall(memberId, creatorId, startAt, creditId, durationMinutes) {
-  // Validate credit belongs to member + creator and is still available
-  const creditResult = await query(
-    `SELECT * FROM call_credits
-     WHERE id = $1 AND member_id = $2 AND creator_id = $3
-       AND status IN ('unused','partial')
-       AND (expires_at IS NULL OR expires_at > NOW())`,
-    [creditId, memberId, creatorId]
-  );
-  if (!creditResult.rows[0]) {
-    throw Object.assign(new Error('No valid call credit found'), { code: 'NO_CREDIT' });
-  }
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  // Delegate booking creation to the existing service
-  const result = await PrivateCallBookingService.createBooking({
-    userId: memberId,
-    performerId: creatorId,
-    callType: 'private',
-    durationMinutes,
-    startTimeUtc: startAt,
-  });
+    // Validate credit belongs to member + creator and is still available — inside transaction
+    // so no concurrent booking can consume it between this check and the reservation.
+    const creditResult = await client.query(
+      `SELECT * FROM call_credits
+       WHERE id = $1 AND member_id = $2 AND creator_id = $3
+         AND status IN ('unused','partial')
+         AND (expires_at IS NULL OR expires_at > NOW())
+       FOR UPDATE`,
+      [creditId, memberId, creatorId]
+    );
+    if (!creditResult.rows[0]) {
+      throw Object.assign(new Error('No valid call credit found'), { code: 'NO_CREDIT' });
+    }
 
-  if (!result.success) {
-    const err = new Error(result.error || 'Booking creation failed');
-    err.code = result.error || 'BOOKING_FAILED';
+    // Reserve the credit slot first — prevents double-booking if another request races
+    await callPackageService.reserveCredit(creditId, client);
+
+    // Create the booking record
+    const result = await PrivateCallBookingService.createBooking({
+      userId: memberId,
+      performerId: creatorId,
+      callType: 'private',
+      durationMinutes,
+      startTimeUtc: startAt,
+    });
+
+    if (!result.success) {
+      const err = new Error(result.error || 'Booking creation failed');
+      err.code = result.error || 'BOOKING_FAILED';
+      throw err;
+    }
+
+    // Consume the reserved credit slot
+    await callPackageService.consumeCredit(creditId, client);
+
+    await client.query('COMMIT');
+    logger.info('call booked', { memberId, creatorId, creditId, startAt, durationMinutes });
+    return result.booking;
+  } catch (err) {
+    await client.query('ROLLBACK');
     throw err;
+  } finally {
+    client.release();
   }
-
-  // Consume the credit after the booking is successfully created
-  await callPackageService.consumeCredit(creditId);
-
-  logger.info('call booked', { memberId, creatorId, creditId, startAt, durationMinutes });
-  return result.booking;
 }
 
 module.exports = { isCreatorOnline, getBookingOptions, bookCall };
