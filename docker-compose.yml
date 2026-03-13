@@ -466,7 +466,7 @@ services:
       RESTREAMER_USER: admin
       RESTREAMER_PASSWORD: ${RESTREAMER_PASSWORD}
       LIVEKIT_URL: http://livekit-server:7880
-      LIVEKIT_WS_URL: wss://lk.pnptv.app
+      LIVEKIT_WS_URL: wss://pnptv.app/livekit-ws
       LIVEKIT_API_KEY: pnptv
       LIVEKIT_API_SECRET: _CwBLNh2mVaJPy9yu3MgrIzSajvS6_-_tratIvCx9SQ
     networks:
@@ -583,7 +583,7 @@ services:
   # BLOCK L - LiveKit Server (Self-hosted WebRTC)
   # Replaces JaaS for hangout video calls
   # Internal: http://livekit-server:7880
-  # Public WSS: wss://lk.pnptv.app (via NPM proxy)
+  # Public WSS: wss://pnptv.app/livekit-ws (via NPM proxy)
   # ===========================================
 
   livekit-server:

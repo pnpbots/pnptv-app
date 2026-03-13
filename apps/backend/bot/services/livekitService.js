@@ -17,7 +17,7 @@ const { AccessToken, RoomServiceClient, VideoGrant } = require('livekit-server-s
 const logger = require('../../utils/logger');
 
 const LIVEKIT_URL = process.env.LIVEKIT_URL || 'http://livekit-server:7880';
-const LIVEKIT_WS_URL = process.env.LIVEKIT_WS_URL || 'wss://lk.pnptv.app';
+const LIVEKIT_WS_URL = process.env.LIVEKIT_WS_URL || 'wss://pnptv.app/livekit-ws';
 const API_KEY = process.env.LIVEKIT_API_KEY || 'pnptv';
 const API_SECRET = process.env.LIVEKIT_API_SECRET || '_CwBLNh2mVaJPy9yu3MgrIzSajvS6_-_tratIvCx9SQ';
 
