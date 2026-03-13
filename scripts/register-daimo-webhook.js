@@ -88,7 +88,7 @@ function printWebhookTable(webhooks) {
     console.log(`  Events:      ${events}`);
     console.log(`  Description: ${wh.description || '(none)'}`);
     console.log(`  Created:     ${wh.createdAt ?? '(unknown)'}`);
-    console.log(`  Secret:      ${wh.secret ?? '(redacted)'}`);
+    console.log(`  Secret:      ${wh.secret ? '(configured — redacted)' : '(not returned)'}`);
     console.log('  ' + '-'.repeat(60));
   }
   console.log('');

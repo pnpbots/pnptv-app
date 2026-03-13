@@ -1905,6 +1905,16 @@ class PaymentService {
         // This is a booking payment
         if (status === 'payment_completed' || status === 'succeeded') {
           await BookingAvailabilityIntegration.completeBooking(bookingId, null, userId);
+
+          // Mark payment as completed
+          if (paymentId) {
+            await PaymentModel.updateStatus(paymentId, 'completed', {
+              transaction_id: source?.txHash || id,
+              daimo_event_id: id,
+              booking_id: bookingId,
+            });
+          }
+
           logger.info('Booking completed via Daimo webhook', { bookingId, userId });
 
           // Send booking confirmation DM to the user
@@ -2048,6 +2058,15 @@ class PaymentService {
             logger.error('Daimo tip confirmation failed', { tipId, error: tipErr.message });
           }
         }
+        // Mark tip payment as completed
+        if (paymentId) {
+          await PaymentModel.updateStatus(paymentId, 'completed', {
+            transaction_id: source?.txHash || id,
+            daimo_event_id: id,
+            tipId,
+          });
+        }
+
         return { success: true, type: 'tip' };
       }
 
@@ -2249,7 +2268,7 @@ class PaymentService {
                 paymentReference: source?.txHash || id,
                 providerTransactionId: source?.txHash,
                 providerPaymentId: id,
-                webhookData: normalizedData,
+                webhookData: normalized,
                 status: 'completed',
                 ipAddress: null,
                 metadata: {

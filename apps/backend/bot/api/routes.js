@@ -5443,9 +5443,9 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
          RETURNING id`,
         [
           userId,
-          `tip-${tip.id}`,
+          null,
           numAmount,
-          JSON.stringify({ tipId: tip.id, performerId: String(resolvedPerformerId) }),
+          JSON.stringify({ tipId: tip.id, performerId: String(resolvedPerformerId), planId: `tip-${tip.id}` }),
         ]
       );
       tipPaymentId = paymentRow.rows[0].id;
@@ -6400,6 +6400,20 @@ app.post('/api/webapp/book-call',
 app.get('/api/webapp/my-call-credits',
   requireSessionAuth,
   asyncHandler(callPackageController.myCallCredits));
+
+// Creator: manage own call packages (role-gated inside controller)
+app.get('/api/webapp/creator/call-packages',
+  requireSessionAuth,
+  asyncHandler(callPackageController.listMyPackages));
+app.post('/api/webapp/creator/call-packages',
+  requireSessionAuth,
+  asyncHandler(callPackageController.createMyPackage));
+app.put('/api/webapp/creator/call-packages/:packageId',
+  requireSessionAuth,
+  asyncHandler(callPackageController.updateMyPackage));
+app.delete('/api/webapp/creator/call-packages/:packageId',
+  requireSessionAuth,
+  asyncHandler(callPackageController.deactivateMyPackage));
 
 // ── Book a Call: Checkout, Booking Management & Creator Availability ─────────
 const callBookingController = require('./controllers/callBookingController');

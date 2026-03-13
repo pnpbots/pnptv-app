@@ -627,7 +627,7 @@ class PaymentController {
           });
         }
 
-        const clientSecret = payment.metadata?.daimoClientSecret || null;
+        const clientSecret = payment.metadata?.daimoClientSecret || payment.metadata?.daimo_client_secret || null;
         const daimoCheck = await DaimoConfig.checkDaimoPaymentStatus(daimoPaymentId, clientSecret);
 
         if (!daimoCheck.success) {
@@ -662,7 +662,15 @@ class PaymentController {
             },
             _recovery: true,
           };
-          await PaymentService.processDaimoWebhook(webhookData);
+          const recoveryResult = await PaymentService.processDaimoWebhook(webhookData);
+
+          if (recoveryResult?.success) {
+            return res.json({
+              success: true,
+              status: 'completed',
+              message: 'Payment completed — your subscription is now active.',
+            });
+          }
 
           return res.json({
             success: true,

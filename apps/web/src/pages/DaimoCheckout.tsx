@@ -385,7 +385,7 @@ export default function DaimoCheckout() {
                 defaultOpen
                 embedded
                 platform={platformRef.current}
-                returnUrl={`${window.location.origin}/payment-status/${paymentId}`}
+                returnUrl={`${window.location.origin}/checkout/${paymentId}`}
                 returnLabel="Return to PNPtv"
                 onPaymentStarted={handlePaymentStarted}
                 onPaymentCompleted={handlePaymentCompleted}
