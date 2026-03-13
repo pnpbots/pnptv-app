@@ -24,8 +24,10 @@ import {
 } from "@/lib/api";
 
 function extractChannelRef(streamId: string): string | null {
+  // streamId is now the channel ref directly (e.g. "pnptv-santino")
+  // or could be a legacy full process ID (e.g. "restreamer-ui:ingest:pnptv-santino")
   const match = streamId.match(/restreamer-ui:ingest:([\w-]+)/);
-  return match ? match[1] : null;
+  return match ? match[1] : streamId;
 }
 
 export default function Stream() {

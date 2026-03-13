@@ -135,7 +135,7 @@ const listStreams = async (req, res) => {
           return null;
         }
         return {
-          id: p.id,
+          id: refId,
           name: p.metadata?.['restreamer-ui']?.meta?.name || 'Live Stream',
           description: p.metadata?.['restreamer-ui']?.meta?.description || '',
           hlsUrl: `${publicUrl}/memfs/${refId}.m3u8`,

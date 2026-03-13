@@ -396,15 +396,12 @@ export default function Live() {
             // or userId against the separately-fetched liveStreams list.
             const stream = findLiveStream(p);
             const isLive = p.isLive === true || !!stream;
-            // Navigate using the matched stream's Restreamer process ID when available
-            // (the Stream page can directly resolve it). Fall back to performer userId
-            // which the Stream page resolves via the /api/performers endpoint.
+            // Navigate using the stream's channel ref (e.g. "pnptv-santino") — simple,
+            // URL-safe, and directly resolvable by the Stream page.
             const watchUrl = stream
-              ? `/live/${encodeURIComponent(stream.id)}`
+              ? `/live/${stream.id}`
               : p.hlsUrl && p.userId
-              ? `/live/${encodeURIComponent(String(p.userId))}`
-              : p.hlsUrl
-              ? `/live/${encodeURIComponent(p.id)}`
+              ? `/live/${String(p.userId)}`
               : null;
             return (
               <div
@@ -498,7 +495,7 @@ export default function Live() {
                     <span className="text-[10px] text-pnp-textSecondary mt-0.5 line-clamp-1">{s.description}</span>
                   ) : null}
                   <button
-                    onClick={() => navigate(`/live/${encodeURIComponent(s.id)}`)}
+                    onClick={() => navigate(`/live/${s.id}`)}
                     className="mt-2 w-full py-1.5 rounded-lg font-semibold text-xs active:scale-95 transition-all text-white bg-red-500 hover:bg-red-600"
                   >
                     {t.live.watchLive}
