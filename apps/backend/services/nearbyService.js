@@ -266,10 +266,10 @@ class NearbyService {
       // Followers-first ordering: show followed users at the top
       try {
         const followRes = await query(
-          'SELECT followed_id FROM follows WHERE follower_id=$1',
+          'SELECT following_id FROM user_follows WHERE follower_id=$1',
           [userId]
         );
-        const followedIds = new Set(followRes.rows.map(r => String(r.followed_id)));
+        const followedIds = new Set(followRes.rows.map(r => String(r.following_id)));
         privacyFiltered.forEach(u => {
           u.is_followed = followedIds.has(String(u.user_id));
         });

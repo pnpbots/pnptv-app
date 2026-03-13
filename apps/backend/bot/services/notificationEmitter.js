@@ -206,8 +206,8 @@ const NotificationEmitter = {
       // ON CONFLICT must reference the correct one based on whether actor_id is set.
       const hasActor = actorId != null;
       const conflictClause = hasActor
-        ? 'ON CONFLICT ON CONSTRAINT uq_notif_dedup_with_actor'
-        : 'ON CONFLICT ON CONSTRAINT uq_notif_dedup_system';
+        ? 'ON CONFLICT (type, actor_id, target_user_id, entity_type, entity_id) WHERE actor_id IS NOT NULL'
+        : 'ON CONFLICT (type, target_user_id, entity_type, entity_id) WHERE actor_id IS NULL';
 
       const { rows: resultRows } = await query(
         `WITH upserted AS (
