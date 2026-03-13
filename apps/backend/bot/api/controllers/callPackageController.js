@@ -76,23 +76,48 @@ async function deactivatePackage(req, res) {
 
 /**
  * GET /api/webapp/book-call/:creatorId/options
- * Returns booking options (immediate or next 5 slots) for the authenticated member.
+ * Returns booking options (next 5 slots, paginated) for the authenticated member.
  * Query: ?duration=30|60  (default 30)
+ *        ?offset=0        (default 0 — zero-based slot offset for pagination)
  */
 async function getBookingOptions(req, res) {
   try {
     const { creatorId } = req.params;
     const durationMinutes = Number(req.query.duration) || 30;
+    const offset = Math.max(0, Number(req.query.offset) || 0);
 
     if (![30, 60].includes(durationMinutes)) {
       return res.status(400).json({ error: 'duration must be 30 or 60' });
     }
 
+    // Check if the creator is currently live (Socket.IO presence key written by notificationThrottleService)
+    const { getRedis } = require('../../../config/redis');
+    const redis = getRedis();
+    const onlineRaw = await redis.get(`user:${creatorId}:active`);
+    const isLive = onlineRaw !== null && onlineRaw !== '0';
+    const liveMessage = isLive
+      ? 'This model is currently in a live show. You can still book a future call!'
+      : null;
+
+    // Fetch enough slots to cover the requested page plus one extra to determine hasMore.
+    // We request offset + 10 slots from the availability engine so we avoid re-fetching
+    // for the first several pages without over-fetching on large offsets.
     const fromDate = moment.utc().toDate();
     const toDate = moment.utc().add(14, 'days').toDate();
     const slots = await CallBookingService.getAvailableSlots(creatorId, fromDate, toDate, durationMinutes);
-    
-    res.json({ success: true, slots: slots.slice(0, 5), type: 'slots' });
+
+    const PAGE_SIZE = 5;
+    const pageSlots = slots.slice(offset, offset + PAGE_SIZE);
+    const hasMore = slots.length > offset + PAGE_SIZE;
+
+    res.json({
+      success: true,
+      slots: pageSlots,
+      hasMore,
+      isLive,
+      liveMessage,
+      type: 'slots',
+    });
   } catch (err) {
     logger.error('getBookingOptions error', { error: err.message });
     res.status(500).json({ success: false, error: 'Failed to retrieve booking options' });

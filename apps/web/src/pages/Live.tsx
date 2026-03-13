@@ -12,6 +12,7 @@ import { useI18n } from "@/lib/i18n";
 import { UpcomingEvents } from "@/components/events/UpcomingEvents";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
 import type { EventItem } from "@/components/events/EventCard";
+import { CallPackageCards } from "@/components/creators/CallPackageCards";
 
 const StreamerDashboard = lazy(() => import("@/components/streaming/StreamerDashboard"));
 const WebRTCStreamer = lazy(() => import("@/components/WebRTCStreamer"));
@@ -375,7 +376,7 @@ export default function Live() {
           <h1 className="text-lg font-bold text-pnp-textPrimary">{t.live.liveTitle}</h1>
           <p className="text-xs text-pnp-textSecondary mt-0.5">{t.live.liveSubtitle}</p>
         </div>
-        {isAuthenticated && (user?.role === "model" || user?.role === "admin" || user?.role === "superadmin") && (
+        {canCreateLive && (
           <button
             onClick={() => setShowBrowserStreamer(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-gradient transition-all"
@@ -527,6 +528,14 @@ export default function Live() {
           </div>
         );
       })()}
+
+      {/* ── Book a Private Session ── */}
+      {isAuthenticated && (
+        <CallPackageCards
+          performers={performers}
+          className="mb-4"
+        />
+      )}
 
       {/* ── Wallet ── */}
       {isAuthenticated && (

@@ -2249,16 +2249,22 @@ export function getCreatorWallet(): Promise<{
   success: boolean;
   address: string | null;
   verified: boolean;
-  payoutMethod: "crypto" | "meru";
+  payoutMethod: "crypto" | "meru" | "fiat";
   meruAccount: string | null;
+  payoutChainId: number;
+  fiatPayoutMethod: string | null;
+  fiatPayoutAccount: string | null;
 }> {
   return request("/api/webapp/creator/wallet");
 }
 
 export function saveCreatorWallet(payload: {
-  payoutMethod: "crypto" | "meru";
+  payoutMethod: "crypto" | "meru" | "fiat";
   address?: string;
   meruAccount?: string;
+  chainId?: number;
+  fiatProvider?: string;
+  fiatAccount?: string;
 }): Promise<{
   success: boolean;
   payoutMethod?: string;
@@ -4366,6 +4372,9 @@ export interface BookingOptionsResponse {
   startAt?: string;
   slots?: BookingSlot[];
   durationMinutes: number;
+  hasMore?: boolean;
+  isLive?: boolean;
+  liveMessage?: string | null;
 }
 
 export function getCreatorCallPackages(
@@ -4376,11 +4385,13 @@ export function getCreatorCallPackages(
 
 export function getBookingOptions(
   creatorId: string,
-  durationMinutes: 30 | 60 = 30
+  durationMinutes?: number,
+  offset?: number
 ): Promise<BookingOptionsResponse> {
-  return request(
-    `/api/webapp/book-call/${creatorId}/options?duration=${durationMinutes}`
-  );
+  const params = new URLSearchParams();
+  if (durationMinutes) params.set("duration", String(durationMinutes));
+  if (offset) params.set("offset", String(offset));
+  return request(`/api/webapp/book-call/${creatorId}/options?${params}`);
 }
 
 export function bookCall(data: {

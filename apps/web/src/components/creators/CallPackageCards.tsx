@@ -1,0 +1,302 @@
+/**
+ * CallPackageCards — promotional cards for the two fixed call packages.
+ *
+ * Displayed below the performer grid on the Live page.  Clicking "Book Now"
+ * on a card opens BookCallModal with the duration pre-selected, skipping the
+ * SELECT_PACKAGE step entirely.  If a specific performer is not yet chosen
+ * the modal opens to SELECT_MODEL first.
+ */
+
+import React, { useState } from "react";
+import clsx from "clsx";
+import { BookCallModal } from "./BookCallModal";
+import type { FeaturedPerformer } from "@/lib/api";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface CallPackageCardsProps {
+  /** Full list of available performers to let the user pick from. */
+  performers: FeaturedPerformer[];
+  /** Optional: pre-select a specific performer (e.g. from a performer card). */
+  preselectedPerformer?: FeaturedPerformer | null;
+  className?: string;
+}
+
+interface PackageConfig {
+  duration: 30 | 60;
+  price: number;
+  name: string;
+  tagline: string;
+  bullets: string[];
+  badge: string | null;
+  /** Tailwind gradient classes for the card background strip */
+  gradientStyle: React.CSSProperties;
+  /** Price accent color */
+  priceColor: string;
+}
+
+// ─── Package definitions ─────────────────────────────────────────────────────
+
+const PACKAGES: PackageConfig[] = [
+  {
+    duration: 30,
+    price: 60,
+    name: "Quick Connection",
+    tagline: "A quick, intimate one-on-one session",
+    bullets: [
+      "Private video call",
+      "Undivided attention",
+      "Perfect for a quick thrill",
+    ],
+    badge: "Most Popular",
+    gradientStyle: {
+      background: "linear-gradient(145deg, rgba(212,0,122,0.22) 0%, rgba(230,145,56,0.14) 100%)",
+      border: "1px solid rgba(212,0,122,0.30)",
+    },
+    priceColor: "#D4007A",
+  },
+  {
+    duration: 60,
+    price: 100,
+    name: "Full Experience",
+    tagline: "The full private experience, unrushed",
+    bullets: [
+      "Extended private session",
+      "Deep personal connection",
+      "The ultimate experience",
+    ],
+    badge: null,
+    gradientStyle: {
+      background: "linear-gradient(145deg, rgba(139,92,246,0.22) 0%, rgba(59,130,246,0.14) 100%)",
+      border: "1px solid rgba(139,92,246,0.30)",
+    },
+    priceColor: "#A78BFA",
+  },
+];
+
+// ─── CheckIcon ────────────────────────────────────────────────────────────────
+
+function CheckIcon({ color }: { color: string }) {
+  return (
+    <svg
+      className="w-3.5 h-3.5 flex-shrink-0 mt-0.5"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="8" r="7" fill={color} fillOpacity={0.18} />
+      <path
+        d="M5 8l2 2 4-4"
+        stroke={color}
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// ─── Single card ──────────────────────────────────────────────────────────────
+
+interface PackageCardProps {
+  pkg: PackageConfig;
+  onBookNow: () => void;
+}
+
+function PackageCard({ pkg, onBookNow }: PackageCardProps) {
+  return (
+    <div
+      className={clsx(
+        "relative flex flex-col rounded-2xl p-5 overflow-hidden",
+        "transition-transform duration-150 active:scale-[0.99]"
+      )}
+      style={pkg.gradientStyle}
+    >
+      {/* Badge */}
+      {pkg.badge && (
+        <span
+          className="absolute top-3.5 right-3.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase whitespace-nowrap"
+          style={{
+            background: "linear-gradient(90deg, #D4007A, #E69138)",
+            color: "#fff",
+          }}
+        >
+          {pkg.badge}
+        </span>
+      )}
+
+      {/* Duration pill */}
+      <span
+        className="self-start px-2.5 py-0.5 rounded-full text-[11px] font-semibold mb-3"
+        style={{
+          background: "rgba(255,255,255,0.09)",
+          color: "rgba(235,235,245,0.70)",
+        }}
+      >
+        {pkg.duration} minutes
+      </span>
+
+      {/* Price */}
+      <p
+        className="text-4xl font-extrabold leading-none mb-1"
+        style={{ color: pkg.priceColor }}
+      >
+        ${pkg.price}
+        <span
+          className="text-base font-medium ml-1"
+          style={{ color: "rgba(235,235,245,0.45)" }}
+        >
+          USD
+        </span>
+      </p>
+
+      {/* Name + tagline */}
+      <p className="text-sm font-bold mt-2" style={{ color: "#EBEBF5" }}>
+        {pkg.name}
+      </p>
+      <p className="text-xs mt-0.5 mb-4" style={{ color: "rgba(235,235,245,0.55)" }}>
+        {pkg.tagline}
+      </p>
+
+      {/* Bullets */}
+      <ul className="space-y-1.5 mb-5">
+        {pkg.bullets.map((bullet) => (
+          <li key={bullet} className="flex items-start gap-2">
+            <CheckIcon color={pkg.priceColor} />
+            <span className="text-xs" style={{ color: "rgba(235,235,245,0.75)" }}>
+              {bullet}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      {/* CTA */}
+      <button
+        type="button"
+        onClick={onBookNow}
+        aria-label={`Book ${pkg.name} — ${pkg.duration} minutes for $${pkg.price}`}
+        className={clsx(
+          "w-full min-h-[48px] rounded-xl text-sm font-bold text-white",
+          "transition-all duration-150 active:scale-[0.97]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent",
+          "hover:brightness-110"
+        )}
+        style={{
+          background:
+            pkg.duration === 30
+              ? "linear-gradient(90deg, #D4007A, #E69138)"
+              : "linear-gradient(90deg, #7C3AED, #3B82F6)",
+        }}
+      >
+        Book Now
+      </button>
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+export function CallPackageCards({
+  performers,
+  preselectedPerformer = null,
+  className,
+}: CallPackageCardsProps) {
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedDuration, setSelectedDuration] = useState<30 | 60>(30);
+  const [selectedPerformer, setSelectedPerformer] = useState<FeaturedPerformer | null>(null);
+
+  const handleBookNow = (duration: 30 | 60) => {
+    setSelectedDuration(duration);
+    // Use the preselected performer if provided, otherwise null = SELECT_MODEL step
+    setSelectedPerformer(preselectedPerformer ?? null);
+    setModalOpen(true);
+  };
+
+  const handleClose = () => {
+    setModalOpen(false);
+    setSelectedPerformer(null);
+  };
+
+  // Convert FeaturedPerformer to CreatorCardCreator shape for the modal
+  const creatorForModal = selectedPerformer
+    ? {
+        id: selectedPerformer.userId ?? selectedPerformer.id,
+        username: selectedPerformer.displayName,
+        photo_url: selectedPerformer.photoUrl,
+        creator_type: "full_time" as const,
+        creator_price_usd: selectedPerformer.basePrice ?? 60,
+        bio: selectedPerformer.bio,
+      }
+    : null;
+
+  return (
+    <div className={clsx("", className)}>
+      {/* Section header */}
+      <div className="flex items-center gap-2 mb-3">
+        <svg
+          className="w-4 h-4 flex-shrink-0"
+          style={{ color: "#D4007A" }}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
+          />
+        </svg>
+        <h2
+          className="text-xs font-semibold uppercase tracking-wider"
+          style={{ color: "#8E8E93" }}
+        >
+          Book a Private Session
+        </h2>
+      </div>
+
+      {/* Cards grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {PACKAGES.map((pkg) => (
+          <PackageCard
+            key={pkg.duration}
+            pkg={pkg}
+            onBookNow={() => handleBookNow(pkg.duration)}
+          />
+        ))}
+      </div>
+
+      {/* Modal — only render when a performer has been selected */}
+      {modalOpen && creatorForModal && (
+        <BookCallModal
+          creator={creatorForModal}
+          isOnline={selectedPerformer?.isLive === true}
+          open={modalOpen}
+          onClose={handleClose}
+          initialDuration={selectedDuration}
+          skipPackageStep
+        />
+      )}
+
+      {/* Modal — SELECT_MODEL step when no performer preselected */}
+      {modalOpen && !creatorForModal && (
+        <BookCallModal
+          creator={{
+            id: "",
+            username: "",
+            photo_url: null,
+            creator_type: "full_time",
+            creator_price_usd: selectedDuration === 30 ? 60 : 100,
+          }}
+          isOnline={false}
+          open={modalOpen}
+          onClose={handleClose}
+          initialDuration={selectedDuration}
+          skipPackageStep
+          performers={performers}
+        />
+      )}
+    </div>
+  );
+}
