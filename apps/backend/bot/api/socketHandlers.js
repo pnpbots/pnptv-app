@@ -125,9 +125,16 @@ const MSG_RETURNING_COLS = `
   media_width, media_height, media_metadata, created_at
 `;
 
+// ── Stream ID validation regex (module-scope so it is compiled once) ─────────
+// SOCK-L1: moved out of the per-connection handler closure.
+const STREAM_ID_RE = /^[a-zA-Z0-9_:\-\.]{1,200}$/;
+
 // ── Global online presence ────────────────────────────────────────────────────
 
-// Track online users: userId → { name, photoUrl, hangoutGroupIds: Set<number> }
+// Track online users: userId → { name, photoUrl, hangoutGroupIds: Set<number>, socketIds: Set<string> }
+// SOCK-H3: socketIds tracks every active socket for this user so that closing
+// one tab (one socket) does not evict the user from the presence map while
+// other tabs remain connected.
 const onlineUsersMap = new Map();
 
 // ── In-memory music state per hangout group ───────────────────────────────────
@@ -234,12 +241,21 @@ function initSocketIO(io) {
     // Join personal room for DMs and targeted notifications
     socket.join(`user:${user.id}`);
 
-    // Register user in the global presence map
-    onlineUsersMap.set(user.id, {
-      name: user.firstName || user.first_name || user.username || 'User',
-      photoUrl: user.photoUrl || user.photo_url || null,
-      hangoutGroupIds: new Set(),
-    });
+    // Register user in the global presence map.
+    // SOCK-H3: If the user already has an entry (another open tab / socket),
+    // we add this socket to the existing set rather than overwriting, so that
+    // disconnecting one tab does not remove the user from presence while other
+    // connections are still alive.
+    if (onlineUsersMap.has(user.id)) {
+      onlineUsersMap.get(user.id).socketIds.add(socket.id);
+    } else {
+      onlineUsersMap.set(user.id, {
+        name: user.firstName || user.first_name || user.username || 'User',
+        photoUrl: user.photoUrl || user.photo_url || null,
+        hangoutGroupIds: new Set(),
+        socketIds: new Set([socket.id]),
+      });
+    }
 
     // ── Nearby Real-Time ────────────────────────────────────────────────────
 
@@ -1046,8 +1062,6 @@ function initSocketIO(io) {
 
     // ── Live Stream Chat ──────────────────────────────────────────────────────
 
-    const STREAM_ID_RE = /^[a-zA-Z0-9_:\-\.]{1,200}$/;
-
     socket.on('live:join', async ({ streamId } = {}) => {
       if (!streamId || !STREAM_ID_RE.test(String(streamId))) {
         socket.emit('live:error', { message: 'Invalid stream ID' });
@@ -1131,8 +1145,17 @@ function initSocketIO(io) {
         socket.data.liveRooms.add(streamId);
 
         const redis = getRedis();
-        await redis.incr(`live:viewers:${streamId}`);
-        await redis.expire(`live:viewers:${streamId}`, 3600);
+
+        // SOCK-H1: Deduplicate viewer-count increments per user per stream.
+        // A user opening multiple tabs or reconnecting rapidly must only count
+        // once in the viewer total.  SET NX with a 1-hour TTL acts as the gate;
+        // if the key already exists the increment (and broadcast) are skipped.
+        const joinKey = `live:joined:${streamId}:${user.id}`;
+        const firstJoin = await redis.set(joinKey, '1', 'EX', 3600, 'NX');
+        if (firstJoin === 'OK') {
+          await redis.incr(`live:viewers:${streamId}`);
+          await redis.expire(`live:viewers:${streamId}`, 3600);
+        }
         const countRaw = await redis.get(`live:viewers:${streamId}`);
         const count = parseInt(countRaw, 10) || 0;
 
@@ -1181,7 +1204,9 @@ function initSocketIO(io) {
           }
 
           if (overlayRows.length > 0) {
-            socket.emit('overlay:config', overlayRows[0]);
+            // SOCK-L2: Strip server-only audit field before sending to clients.
+            const { updated_by: _ub, ...overlayPayload } = overlayRows[0];
+            socket.emit('overlay:config', overlayPayload);
           }
         } catch (overlayErr) {
           // Non-fatal — viewer just won't see the overlay on join
@@ -1196,13 +1221,24 @@ function initSocketIO(io) {
     socket.on('live:leave', async ({ streamId } = {}) => {
       if (!streamId || !STREAM_ID_RE.test(String(streamId))) return;
 
+      // SOCK-H5: Rate-limit leave events (max 10 per minute per user) to prevent
+      // flooding that could artificially thrash the viewer-count counter.
+      if (!rateLimit(`live:leave:${user.id}`, 10, 60000)) return;
+
+      // SOCK-H5: Only process leave if the user actually joined this stream room.
+      // This prevents a client from decrementing the viewer count for a stream
+      // it never joined (e.g., spoofed leave packets).
+      if (!socket.data.liveRooms?.has(streamId)) return;
+
       socket.leave(`live:${streamId}`);
       if (socket.data.liveRooms) socket.data.liveRooms.delete(streamId);
 
       try {
-        // H4: Atomic decrement clamped to 0 via Lua script
+        // H4: Atomic decrement clamped to 0 via Lua script.
+        // Also clear the deduplication key so a rejoin is counted fresh.
         const redis = getRedis();
         const count = await atomicViewerDecrement(redis, streamId);
+        await redis.del(`live:joined:${streamId}:${user.id}`);
         io.to(`live:${streamId}`).emit('live:viewer_count', { streamId, count });
       } catch (err) {
         logger.error('live:leave error', { streamId, userId: user.id, error: err.message });
@@ -1343,15 +1379,24 @@ function initSocketIO(io) {
           ? channelRef.slice('pnptv-'.length)
           : channelRef;
 
-        const rtmpTarget = `rtmp://restreamer:1935/live/${streamKey}`;
+        const rtmpToken = process.env.RESTREAMER_RTMP_TOKEN;
+        const rtmpTarget = rtmpToken
+          ? `rtmp://restreamer:1935/live/${streamKey}?token=${rtmpToken}`
+          : `rtmp://restreamer:1935/live/${streamKey}`;
 
         // Spawn FFmpeg: read webm/opus from stdin, transcode to H.264+AAC, push to RTMP.
         // -re is omitted so FFmpeg consumes input as fast as it arrives from the socket.
         // -fflags nobuffer + -flags low_delay minimise latency through the pipeline.
+        // -f webm is required so FFmpeg knows the container format on stdin (without it,
+        // format probing on a pipe is unreliable and causes VP8 keyframe decode errors).
+        // -analyzeduration/-probesize are set low for fast startup on live piped input.
         const ffmpeg = spawn('ffmpeg', [
           '-loglevel', 'warning',
-          '-fflags', 'nobuffer',
+          '-fflags', '+nobuffer+discardcorrupt',
           '-flags', 'low_delay',
+          '-f', 'webm',
+          '-analyzeduration', '500000',
+          '-probesize', '500000',
           '-i', 'pipe:0',
           '-c:v', 'libx264',
           '-preset', 'veryfast',
@@ -1406,7 +1451,9 @@ function initSocketIO(io) {
         socket.data.streamDataChunks = 0;
         socket.data.streamDataBytes = 0;
         logger.info(`Browser stream started: user ${user.id} → channel '${channelRef}' → ${rtmpTarget}`);
-        socket.emit('stream:started', { channelRef, rtmpTarget });
+        // SOCK-H4: Do not send rtmpTarget to the client — it exposes the internal
+        // RTMP server address and stream key which are server-side concerns only.
+        socket.emit('stream:started', { channelRef });
       } catch (err) {
         logger.error('stream:start error', { userId: user.id, channelRef, err });
         socket.emit('stream:error', { message: 'Failed to start stream. Please try again.' });
@@ -1592,11 +1639,14 @@ function initSocketIO(io) {
       }
 
       if (socket.data.liveRooms && socket.data.liveRooms.size > 0) {
-        // H4: Atomic decrement clamped to 0 via Lua script
+        // H4: Atomic decrement clamped to 0 via Lua script.
+        // SOCK-H1: Also delete the deduplication join key so that if the same
+        // user reconnects (e.g., page refresh) their next join is counted fresh.
         const redis = getRedis();
         for (const streamId of socket.data.liveRooms) {
           try {
             const count = await atomicViewerDecrement(redis, streamId);
+            await redis.del(`live:joined:${streamId}:${user.id}`);
             io.to(`live:${streamId}`).emit('live:viewer_count', { streamId, count });
           } catch (err) {
             logger.warn('live viewer count cleanup error on disconnect', { streamId, userId: user.id, error: err.message });
@@ -1604,15 +1654,21 @@ function initSocketIO(io) {
         }
       }
 
+      // SOCK-H3: Remove this socket from the user's presence entry.  Only purge
+      // the user entirely (and broadcast absence) when the last socket closes.
       const presenceEntry = onlineUsersMap.get(user.id);
       if (presenceEntry) {
-        for (const gid of presenceEntry.hangoutGroupIds) {
-          presenceEntry.hangoutGroupIds.delete(gid);
-          // Emit after a tiny delay so the socket fully disconnects first
-          setImmediate(() => emitGroupPresence(io, gid));
+        presenceEntry.socketIds.delete(socket.id);
+        if (presenceEntry.socketIds.size === 0) {
+          // Last tab/connection closed — remove from presence and notify groups
+          for (const gid of presenceEntry.hangoutGroupIds) {
+            presenceEntry.hangoutGroupIds.delete(gid);
+            // Emit after a tiny delay so the socket fully disconnects first
+            setImmediate(() => emitGroupPresence(io, gid));
+          }
+          onlineUsersMap.delete(user.id);
         }
       }
-      onlineUsersMap.delete(user.id);
     });
   });
 }

@@ -10,14 +10,14 @@
  * record IS the booking record for the new Book-a-Call flow.
  */
 
-const { query } = require('../../../config/postgres');
+const { query, getPool } = require('../../../config/postgres');
 const { getRedis } = require('../../../config/redis');
 const callCheckoutService = require('../../services/callCheckoutService');
 const callPackageService = require('../../services/callPackageService');
 const livekitService = require('../../services/livekitService');
 const logger = require('../../../utils/logger');
 
-// Redis key for creator online presence (matches bookACallService.js)
+// Redis key for creator online presence
 const ONLINE_KEY = (userId) => `user:${userId}:active`;
 // TTL for the online presence key (30 minutes — heartbeat is expected from frontend)
 const ONLINE_TTL_SECONDS = 30 * 60;
@@ -92,7 +92,7 @@ async function getBooking(req, res) {
       return res.status(400).json({ success: false, error: 'Invalid bookingId' });
     }
 
-    // Load credit — accessible by the member OR the creator
+    // BC-C-01/DB-C2: Load credit with LEFT JOIN to bookings for start_at/end_at
     const creditResult = await query(
       `SELECT cc.*,
               cp.duration_minutes, cp.title AS package_title,
@@ -101,11 +101,15 @@ async function getBooking(req, res) {
               u_creator.photo_url AS creator_photo,
               u_member.username AS member_username,
               u_member.display_name AS member_display_name,
-              u_member.photo_url AS member_photo
+              u_member.photo_url AS member_photo,
+              b.start_time_utc AS start_at,
+              b.end_time_utc AS end_at,
+              b.status AS booking_status
        FROM call_credits cc
        JOIN call_packages cp ON cp.id = cc.package_id
        JOIN users u_creator ON u_creator.id = cc.creator_id
        JOIN users u_member  ON u_member.id  = cc.member_id
+       LEFT JOIN bookings b ON b.credit_id = cc.id AND b.status IN ('confirmed', 'held', 'awaiting_payment')
        WHERE cc.id = $1
          AND (cc.member_id = $2 OR cc.creator_id = $2)`,
       [creditId, userId]
@@ -146,7 +150,9 @@ async function getBooking(req, res) {
       credit_id: credit.id,
       duration_minutes: credit.duration_minutes,
       package_title: credit.package_title,
-      status: credit.status,
+      status: credit.booking_status || credit.status,
+      start_at: credit.start_at || null,
+      end_at: credit.end_at || null,
       livekit_room: roomName,
       created_at: credit.created_at,
       creator_username: credit.creator_username,
@@ -296,7 +302,14 @@ async function saveAvailabilitySchedule(req, res) {
       return res.status(403).json({ success: false, error: 'Only creators can manage availability' });
     }
 
-    const { schedule } = req.body;
+    let { schedule } = req.body;
+
+    // BC-C-02: Normalize WeeklyAvailabilitySchedule object → array
+    // Frontend may send { "0": {...}, "1": {...} } instead of [...]
+    if (schedule && typeof schedule === 'object' && !Array.isArray(schedule)) {
+      schedule = Object.values(schedule);
+    }
+
     if (!Array.isArray(schedule)) {
       return res.status(400).json({ success: false, error: 'schedule must be an array' });
     }
@@ -334,27 +347,40 @@ async function saveAvailabilitySchedule(req, res) {
       }
     }
 
-    // Full replace strategy — deactivate all existing, insert new rows
-    await query(
-      'UPDATE creator_availability_schedules SET is_active = false WHERE creator_id = $1',
-      [creatorId]
-    );
+    // HIGH-02: Full replace strategy wrapped in a transaction
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    for (const slot of schedule) {
-      const breakMins = Number.isInteger(Number(slot.breakMinutes)) ? Number(slot.breakMinutes) : 10;
-      await query(
-        `INSERT INTO creator_availability_schedules
-           (creator_id, day_of_week, start_time, end_time, timezone, break_minutes, is_active)
-         VALUES ($1, $2, $3::time, $4::time, $5, $6, true)
-         ON CONFLICT (creator_id, day_of_week, start_time)
-         DO UPDATE SET
-           end_time = EXCLUDED.end_time,
-           timezone = EXCLUDED.timezone,
-           break_minutes = EXCLUDED.break_minutes,
-           is_active = true,
-           updated_at = NOW()`,
-        [creatorId, Number(slot.dayOfWeek), slot.startTime, slot.endTime, slot.timezone, breakMins]
+      await client.query(
+        'UPDATE creator_availability_schedules SET is_active = false WHERE creator_id = $1',
+        [creatorId]
       );
+
+      for (const slot of schedule) {
+        const breakMins = Number.isInteger(Number(slot.breakMinutes)) ? Number(slot.breakMinutes) : 10;
+        await client.query(
+          `INSERT INTO creator_availability_schedules
+             (creator_id, day_of_week, start_time, end_time, timezone, break_minutes, is_active)
+           VALUES ($1, $2, $3::time, $4::time, $5, $6, true)
+           ON CONFLICT (creator_id, day_of_week, start_time)
+           DO UPDATE SET
+             end_time = EXCLUDED.end_time,
+             timezone = EXCLUDED.timezone,
+             break_minutes = EXCLUDED.break_minutes,
+             is_active = true,
+             updated_at = NOW()`,
+          [creatorId, Number(slot.dayOfWeek), slot.startTime, slot.endTime, slot.timezone, breakMins]
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
     }
 
     logger.info('[callBookingController] availability schedule saved', {
@@ -499,10 +525,10 @@ async function getCallEarnings(req, res) {
       WHERE cc.creator_id = $1
     `, [creatorId]);
 
-    // Revenue — join credits with packages to get price per purchase
+    // MED-05: Revenue — per-call revenue: price / quantity * quantity_used
     const revenueResult = await query(`
       SELECT
-        COALESCE(SUM(cp.price_usd), 0) AS total_revenue,
+        COALESCE(SUM(cp.price_usd / NULLIF(cp.quantity, 0) * cc.quantity_used), 0) AS total_revenue,
         COUNT(DISTINCT cc.id)           AS total_purchases
       FROM call_credits cc
       JOIN call_packages cp ON cp.id = cc.package_id

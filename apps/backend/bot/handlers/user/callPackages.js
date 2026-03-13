@@ -206,7 +206,7 @@ function registerCallPackageHandlers(bot) {
         parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '📞 Book Call Now', callback_data: 'book_private_call' }],
+            [{ text: '📞 Book Call on Web', url: 'https://pnptv.app/book-call' }],
             [{ text: '📦 Buy More', callback_data: 'back_to_packages' }],
           ],
         },

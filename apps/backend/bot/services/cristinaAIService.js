@@ -4,7 +4,7 @@ const { AbortController, fetch } = global;
 function getCristinaConfig() {
   return {
     apiKey: process.env.GROK_API_KEY || process.env.MISTRAL_API_KEY,
-    model: process.env.CRISTINA_GROK_MODEL || process.env.GROK_MODEL || 'grok-2-latest',
+    model: process.env.CRISTINA_GROK_MODEL || process.env.GROK_MODEL || 'grok-3-mini',
     baseUrl: process.env.GROK_BASE_URL || 'https://api.x.ai/v1',
     timeoutMs: Number(process.env.GROK_TIMEOUT_MS || 45000),
     maxTokens: Number(process.env.CRISTINA_MAX_TOKENS || 500),

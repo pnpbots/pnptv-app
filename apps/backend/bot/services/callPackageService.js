@@ -29,14 +29,31 @@ async function createPackage(creatorId, { durationMinutes, quantity, priceUsd, t
     sku = `${sku}-${Date.now().toString(36).toUpperCase()}`;
   }
 
-  const result = await query(
-    `INSERT INTO call_packages (creator_id, duration_minutes, quantity, price_usd, sku, title)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     RETURNING *`,
-    [creatorId, durationMinutes, quantity, priceUsd, sku, title || null]
-  );
-  logger.info('call_package created', { id: result.rows[0].id, sku });
-  return result.rows[0];
+  // MED-02: Handle 23505 unique violation by retrying with timestamp suffix
+  try {
+    const result = await query(
+      `INSERT INTO call_packages (creator_id, duration_minutes, quantity, price_usd, sku, title)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [creatorId, durationMinutes, quantity, priceUsd, sku, title || null]
+    );
+    logger.info('call_package created', { id: result.rows[0].id, sku });
+    return result.rows[0];
+  } catch (err) {
+    if (err.code === '23505') {
+      // Unique violation — retry with timestamp suffix
+      sku = `${sku}-${Date.now().toString(36).toUpperCase()}`;
+      const result = await query(
+        `INSERT INTO call_packages (creator_id, duration_minutes, quantity, price_usd, sku, title)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *`,
+        [creatorId, durationMinutes, quantity, priceUsd, sku, title || null]
+      );
+      logger.info('call_package created (retry after 23505)', { id: result.rows[0].id, sku });
+      return result.rows[0];
+    }
+    throw err;
+  }
 }
 
 /** List active packages for a creator. */

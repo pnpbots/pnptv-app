@@ -36,6 +36,7 @@ const userManagementRoutes = require('./routes/userManagementRoutes');
 const nearbyRoutes = require('./routes/nearby.routes');
 const NearbyController = require('./controllers/nearbyController');
 const { verifyAdminJWT } = require('./middleware/jwtAuth');
+const roleGuard = require('./middleware/roleGuard');
 
 // Middleware
 const { asyncHandler } = require('./middleware/errorHandler');
@@ -1214,7 +1215,7 @@ const socialActionLimiter = rateLimit({
 const tipLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
-  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  keyGenerator: (req) => `user:${req.session?.user?.id || req.ip}`,
   handler: (req, res) => res.status(429).json({ success: false, error: 'Too many tips. Please slow down.' }),
   standardHeaders: true,
   legacyHeaders: false,
@@ -2410,7 +2411,7 @@ app.put('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSe
 
 // Stream Bridge: browser → RTMP via WebSocket+FFmpeg
 const streamBridgeController = require('./controllers/streamBridgeController');
-app.get('/api/webapp/live/my-channel', requireSessionAuth, asyncHandler(streamBridgeController.getMyChannel));
+app.get('/api/webapp/live/my-channel', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamBridgeController.getMyChannel));
 
 // Stream Auto-Chat (Grok-generated messages that post to live chat at intervals)
 const streamAutoController = require('./controllers/streamAutoController');
@@ -2422,10 +2423,30 @@ const grokStreamChatLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// Rate limiter for authenticated /api/proxy/live/performers — 30 req/min per user
+const livePerformersLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => `user:${req.session?.user?.id || req.ip}`,
+  message: { success: false, error: 'Too many requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// IP-based rate limiter for the public overlay endpoint — 60 req/min per IP
+const overlayPublicLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyGenerator: (req) => req.ip,
+  message: { success: false, error: 'Too many requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 app.get('/api/webapp/live/stream-profile', requireSessionAuth, asyncHandler(streamAutoController.getStreamProfile));
 app.post('/api/webapp/live/stream-profile', requireSessionAuth, grokStreamChatLimiter, asyncHandler(streamAutoController.saveStreamProfile));
-app.post('/api/webapp/live/stream-auto-start', requireSessionAuth, asyncHandler(streamAutoController.startAutoMessages));
-app.post('/api/webapp/live/stream-auto-stop', requireSessionAuth, asyncHandler(streamAutoController.stopAutoMessages));
+app.post('/api/webapp/live/stream-auto-start', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamAutoController.startAutoMessages));
+app.post('/api/webapp/live/stream-auto-stop', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamAutoController.stopAutoMessages));
 
 // Stream Overlay Management (admin CRUD + public viewer endpoint)
 // Socket.IO access uses socketSingleton.get() directly inside the controller —
@@ -2435,7 +2456,7 @@ app.get('/api/webapp/admin/stream-overlays', adminGuard, asyncHandler(streamOver
 app.get('/api/webapp/admin/stream-overlays/:channelRef', adminGuard, asyncHandler(streamOverlayController.getOverlay));
 app.put('/api/webapp/admin/stream-overlays/:channelRef', adminGuard, asyncHandler(streamOverlayController.updateOverlay));
 // Public overlay endpoint — no auth, short cache, used by the frontend LivePlayer
-app.get('/api/proxy/live/overlay/:channelRef', asyncHandler(streamOverlayController.getPublicOverlay));
+app.get('/api/proxy/live/overlay/:channelRef', overlayPublicLimiter, asyncHandler(streamOverlayController.getPublicOverlay));
 
 // Overlay Asset Library (CMS-managed logos & banners)
 const overlayLibraryController = require('./controllers/overlayLibraryController');
@@ -3239,20 +3260,21 @@ app.get('/api/webapp/admin/support/stats', adminGuard, asyncHandler(async (req, 
 
   res.json({
     success: true,
-    data: {
-      ...stats,
-      avg_first_response_hours: frt.avg_hours,
-      avg_csat: csat.avg_csat,
-      total_ratings: csat.total_ratings,
-      awaiting_first_response: waiting.count,
-      new_today: today.count,
+    stats: {
+      openTickets: parseInt(stats.open_topics) || 0,
+      awaitingFirstResponse: waiting.count || 0,
+      avgResponseTimeHours: parseFloat(frt.avg_hours) || 0,
+      csatScore: parseFloat(csat.avg_csat) || 0,
+      totalRatings: csat.total_ratings || 0,
+      slaBreaches: parseInt(stats.sla_breaches) || 0,
+      newToday: today.count || 0,
     }
   });
 }));
 
 app.get('/api/webapp/admin/support/tickets', adminGuard, asyncHandler(async (req, res) => {
   const pool = getPool();
-  const { status, priority, category, search, limit: lim, offset: off } = req.query;
+  const { status, priority, category, search, limit: lim, page: pg } = req.query;
 
   let where = [];
   let params = [];
@@ -3262,14 +3284,16 @@ app.get('/api/webapp/admin/support/tickets', adminGuard, asyncHandler(async (req
   if (priority) { where.push(`st.priority = $${idx++}`); params.push(priority); }
   if (category) { where.push(`st.category = $${idx++}`); params.push(category); }
   if (search) {
-    where.push(`(st.user_id ILIKE $${idx} OR st.thread_name ILIKE $${idx} OR u.username ILIKE $${idx} OR u.first_name ILIKE $${idx})`);
-    params.push(`%${search}%`);
+    const escaped = search.replace(/[%_]/g, '\\$&');
+    where.push(`(st.user_id::text ILIKE $${idx} OR st.thread_name ILIKE $${idx} OR u.username ILIKE $${idx} OR u.first_name ILIKE $${idx})`);
+    params.push(`%${escaped}%`);
     idx++;
   }
 
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const limit = Math.min(parseInt(lim) || 50, 100);
-  const offset = parseInt(off) || 0;
+  const limit = Math.min(parseInt(lim) || 25, 100);
+  const page = Math.max(parseInt(pg) || 1, 1);
+  const offset = (page - 1) * limit;
 
   const { rows } = await pool.query(`
     SELECT st.*, u.username, u.first_name, u.last_name, u.tier, u.plan_id, u.language AS user_language,
@@ -3290,13 +3314,38 @@ app.get('/api/webapp/admin/support/tickets', adminGuard, asyncHandler(async (req
     params
   );
 
-  res.json({ success: true, data: rows, total, limit, offset });
+  // Map snake_case DB fields to camelCase for frontend
+  const tickets = rows.map(r => ({
+    userId: r.user_id,
+    username: r.username || null,
+    firstName: r.first_name || null,
+    tier: r.tier || 'free',
+    plan: r.plan_id || null,
+    language: r.user_language || null,
+    status: r.status,
+    priority: r.priority,
+    category: r.category,
+    lastMessage: r.last_message || null,
+    lastMessageAt: r.last_message_at,
+    unreadCount: r.unread_count || 0,
+    createdAt: r.created_at,
+    threadName: r.thread_name || null,
+  }));
+
+  res.json({ success: true, tickets, hasMore: offset + rows.length < total, total });
 }));
 
 app.get('/api/webapp/admin/support/tickets/:userId/messages', adminGuard, asyncHandler(async (req, res) => {
   const SupportTicketMessageModel = require('../../models/supportTicketMessageModel');
-  const messages = await SupportTicketMessageModel.getByUserId(req.params.userId);
-  res.json({ success: true, data: messages });
+  const raw = await SupportTicketMessageModel.getByUserId(req.params.userId);
+  const messages = (raw || []).map(m => ({
+    id: m.id,
+    content: m.content,
+    senderRole: m.sender_type === 'agent' ? 'agent' : m.sender_type === 'admin' ? 'admin' : 'user',
+    senderName: m.sender_name || null,
+    createdAt: m.created_at,
+  }));
+  res.json({ success: true, messages });
 }));
 
 app.post('/api/webapp/admin/support/tickets/:userId/reply', adminGuard, asyncHandler(async (req, res) => {
@@ -3347,7 +3396,16 @@ app.post('/api/webapp/admin/support/tickets/:userId/reply', adminGuard, asyncHan
     }
   } catch (e) { /* user may have blocked bot */ }
 
-  res.json({ success: true, data: saved });
+  res.json({
+    success: true,
+    message: {
+      id: saved.id,
+      content: saved.content,
+      senderRole: 'agent',
+      senderName: adminName,
+      createdAt: saved.created_at || new Date().toISOString(),
+    }
+  });
 }));
 
 app.patch('/api/webapp/admin/support/tickets/:userId', adminGuard, asyncHandler(async (req, res) => {
@@ -3377,7 +3435,15 @@ app.patch('/api/webapp/admin/support/tickets/:userId', adminGuard, asyncHandler(
     return res.status(400).json({ success: false, error: 'No valid fields to update' });
   }
 
-  res.json({ success: true, data: updated });
+  res.json({
+    success: true,
+    ticket: {
+      userId: updated.user_id,
+      status: updated.status,
+      priority: updated.priority,
+      category: updated.category,
+    }
+  });
 }));
 
 // Plan Builder — create, list, update, deactivate plans with auto-derived metadata
@@ -5205,7 +5271,7 @@ app.delete('/api/webapp/events/:id/rsvp', requireSessionAuth, asyncHandler(event
 app.put('/api/webapp/admin/events/:id/feature', requireSessionAuth, adminGuard, asyncHandler(eventsController.featureEvent));
 
 // GET /api/proxy/live/performers — List performers from Directus for tip picker
-app.get('/api/proxy/live/performers', asyncHandler(async (req, res) => {
+app.get('/api/proxy/live/performers', requireSessionAuth, livePerformersLimiter, asyncHandler(async (req, res) => {
   try {
     const resp = await axios.get(`${DIRECTUS_INTERNAL_URL}/items/performers`, {
       params: {
@@ -5411,11 +5477,8 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
           if (resolvedPerformerId !== String(performerId)) {
             io.to(`live:${String(performerId)}`).emit('live:tip', tipPayload);
           }
-          // Notify sender of new balance
-          const socketId = req.session?.socketId;
-          if (socketId) {
-            io.to(socketId).emit('wallet:updated', { balance: debit.newBalance });
-          }
+          // Notify sender of new balance via their user room
+          io.to(`user:${user.id}`).emit('wallet:updated', { balance: debit.newBalance });
         }
       } catch (emitErr) {
         logger.warn(`Token tip socket emit failed: ${emitErr.message}`);
@@ -6403,14 +6466,32 @@ app.delete('/api/webapp/admin/creators/:creatorId/call-packages/:packageId',
   requireSessionAuth, adminGuard,
   asyncHandler(callPackageController.deactivatePackage));
 
+// CRIT-04: Rate limit booking options endpoint (30 requests/min)
+const bookCallOptionsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many requests, please slow down' },
+});
+
+// BC-C-04: Rate limit booking endpoint (1 request per 5 seconds)
+const bookCallLimiter = rateLimit({
+  windowMs: 5 * 1000,
+  max: 1,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Please wait before booking again' },
+});
+
 // Member: get booking options (immediate if creator online, else next 5 slots)
 app.get('/api/webapp/book-call/:creatorId/options',
-  requireSessionAuth,
+  requireSessionAuth, bookCallOptionsLimiter,
   asyncHandler(callPackageController.getBookingOptions));
 
 // Member: book a call using a call credit
 app.post('/api/webapp/book-call',
-  requireSessionAuth,
+  requireSessionAuth, bookCallLimiter,
   asyncHandler(callPackageController.bookCall));
 
 // Member: get own call credits (optionally filtered by creatorId)
@@ -6418,9 +6499,9 @@ app.get('/api/webapp/my-call-credits',
   requireSessionAuth,
   asyncHandler(callPackageController.myCallCredits));
 
-// Creator: manage own call packages (role-gated inside controller)
+// HIGH-01: Creator: manage own call packages (role-gated via middleware + controller)
 app.get('/api/webapp/creator/call-packages',
-  requireSessionAuth,
+  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
   asyncHandler(callPackageController.listMyPackages));
 app.post('/api/webapp/creator/call-packages',
   requireSessionAuth,
@@ -6452,6 +6533,11 @@ app.get('/api/webapp/creator/availability/schedule',
   asyncHandler(callBookingController.getAvailabilitySchedule));
 
 app.post('/api/webapp/creator/availability/schedule',
+  requireSessionAuth,
+  asyncHandler(callBookingController.saveAvailabilitySchedule));
+
+// BC-C-02: PUT alias for frontend compatibility
+app.put('/api/webapp/creator/availability/schedule',
   requireSessionAuth,
   asyncHandler(callBookingController.saveAvailabilitySchedule));
 

@@ -15,7 +15,7 @@ const MAX_TOOL_ROUNDS = 5; // max DB query rounds per message
 function getGrokCfg() {
   return {
     apiKey: process.env.GROK_API_KEY,
-    model: process.env.GROK_MODEL || 'grok-2-latest',
+    model: process.env.GROK_MODEL || 'grok-3-mini',
     baseUrl: process.env.GROK_BASE_URL || 'https://api.x.ai/v1',
     timeoutMs: Number(process.env.GROK_TIMEOUT_MS || 60000),
   };

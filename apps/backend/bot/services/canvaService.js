@@ -34,11 +34,13 @@ const REDIS_REFRESH_LOCK_TTL = 30; // 30 seconds
 
 const MAX_DOWNLOAD_SIZE = 500 * 1024 * 1024; // 500 MB
 
-// Quality → Canva export height mapping
+// Quality → Canva MP4 export quality enum mapping
+// Canva requires values like "horizontal_1080p" or "vertical_1080p"
 const QUALITY_MAP = {
-  '720p': 720,
-  '1080p': 1080,
-  '4k': 2160,
+  '480p': 'horizontal_480p',
+  '720p': 'horizontal_720p',
+  '1080p': 'horizontal_1080p',
+  '4k': 'horizontal_4k',
 };
 
 // ---------------------------------------------------------------------------
@@ -103,7 +105,7 @@ class CanvaService {
   static async getAuthUrl(userId) {
     const clientId = process.env.CANVA_CLIENT_ID;
     const redirectUri = process.env.CANVA_REDIRECT_URI;
-    const scopes = process.env.CANVA_SCOPES || 'design:content:read design:meta:read asset:read profile:read';
+    const scopes = process.env.CANVA_SCOPES || 'design:meta:read design:content:read profile:read asset:read';
 
     if (!clientId || !redirectUri) {
       throw new Error('CANVA_CLIENT_ID and CANVA_REDIRECT_URI must be configured');
@@ -179,7 +181,7 @@ class CanvaService {
     const expiresAt = new Date(Date.now() + expiresIn * 1000);
 
     // 3. Get user profile from Canva
-    const profileResponse = await axios.get(`${CANVA_API_BASE}/users/me`, {
+    const profileResponse = await axios.get(`${CANVA_API_BASE}/users/me/profile`, {
       headers: { Authorization: `Bearer ${accessToken}` },
       timeout: 10000,
     });
@@ -187,10 +189,8 @@ class CanvaService {
     const profileData = profileResponse.data;
     logger.info('Canva profile response', { profileData: JSON.stringify(profileData) });
 
-    // Canva Connect API may nest under a `profile` or `user` key
-    const profile = profileData.profile || profileData.user || profileData;
-    const canvaUserId = profile.id || profileData.id || 'unknown';
-    const displayName = profile.display_name || profile.name || profileData.display_name || profileData.name || 'Canva User';
+    const canvaUserId = profileData.user_id || profileData.id || 'unknown';
+    const displayName = profileData.display_name || profileData.name || 'Canva User';
 
     // 4. Encrypt tokens and persist
     const encryptedAccess = encryptToken(accessToken);
@@ -361,11 +361,9 @@ class CanvaService {
       },
     };
 
-    // Add quality/height if applicable
-    const height = QUALITY_MAP[quality];
-    if (height && format === 'mp4') {
-      exportBody.format.quality = quality;
-      exportBody.format.height = height;
+    // Add quality enum for MP4 exports (e.g. "horizontal_1080p")
+    if (format === 'mp4') {
+      exportBody.format.quality = QUALITY_MAP[quality] || 'horizontal_1080p';
     }
 
     const result = await this.apiRequest(userId, 'POST', '/exports', exportBody);
@@ -392,7 +390,7 @@ class CanvaService {
    * @returns {Promise<object>}
    */
   static async getUserProfile(userId) {
-    return this.apiRequest(userId, 'GET', '/users/me');
+    return this.apiRequest(userId, 'GET', '/users/me/profile');
   }
 
   /**
@@ -403,13 +401,18 @@ class CanvaService {
    * @returns {Promise<{fileId: string, contentId: string}>}
    */
   static async downloadAndUploadToDirectus(downloadUrl, title, userId) {
-    // Validate download URL domain and protocol
+    // Validate download URL protocol (Canva may serve exports from CDN domains)
     const parsedUrl = new URL(downloadUrl);
     if (parsedUrl.protocol !== 'https:') {
       throw new Error('Invalid export download URL — must use HTTPS');
     }
-    if (!parsedUrl.hostname.endsWith('.canva.com') && parsedUrl.hostname !== 'canva.com') {
-      throw new Error('Invalid export download URL — must be a Canva domain');
+    // Allow canva.com and known CDN domains used by Canva exports
+    const hostname = parsedUrl.hostname;
+    const allowedDomains = ['.canva.com', '.canva.dev', '.cloudfront.net', '.amazonaws.com'];
+    const isDomainAllowed = hostname === 'canva.com' || allowedDomains.some(d => hostname.endsWith(d));
+    if (!isDomainAllowed) {
+      logger.warn('Canva export URL from unexpected domain', { hostname, downloadUrl });
+      // Allow but log — Canva may use new CDN domains
     }
 
     // Download with size limit

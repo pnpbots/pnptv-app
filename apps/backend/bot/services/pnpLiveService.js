@@ -206,10 +206,11 @@ class PNPLiveService {
         throw new Error('Model not found');
       }
 
-      // Acquire a per-model-per-day Redis lock to prevent two concurrent requests
-      // from both passing the overlap check and double-booking the same slot.
-      const slotDate = bookingTimeUtc.toISOString().slice(0, 10); // YYYY-MM-DD
-      bookingLockKey = `booking:lock:${modelId}:${slotDate}`;
+      // SVC-M1: Acquire a per-slot Redis lock to prevent two concurrent requests
+      // from both passing the overlap check and double-booking the exact same slot.
+      // Lock key is at slot granularity: modelId + ISO start time (minute precision).
+      const slotStartIso = bookingTimeUtc.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
+      bookingLockKey = `booking:lock:slot:${modelId}:${slotStartIso}`;
       const lockAcquired = await cache.acquireLock(bookingLockKey, 10); // 10-second TTL
       if (!lockAcquired) {
         return {
@@ -517,14 +518,26 @@ class PNPLiveService {
    * @param {number} bookingId - Booking ID
    * @param {string} reason - Cancellation reason
    * @param {boolean} isAdmin - Whether cancellation is by admin
+   * @param {string|null} actorId - ID of the user or model performing the cancellation (null = system/admin)
    * @returns {Promise<Object>} Cancelled booking
    */
-  static async cancelBooking(bookingId, reason = '', isAdmin = false) {
+  static async cancelBooking(bookingId, reason = '', isAdmin = false, actorId = null) {
+    let client;
     try {
       // Get current booking
       const booking = await this.getBookingById(bookingId);
       if (!booking) {
         throw new Error('Booking not found');
+      }
+
+      // SVC-C2: Ownership check — actor must be the booking user, the model, or an admin
+      if (actorId !== null && !isAdmin) {
+        const actorIdStr = String(actorId);
+        const isBookingUser = String(booking.user_id) === actorIdStr;
+        const isBookingModel = String(booking.model_id) === actorIdStr;
+        if (!isBookingUser && !isBookingModel) {
+          throw new Error('Not authorized to cancel this booking');
+        }
       }
 
       if (booking.status === 'cancelled') {
@@ -536,34 +549,62 @@ class PNPLiveService {
       }
 
       // Check if booking is within refund window (15 minutes before start)
+      // canRefund = true when there is at least 15 min remaining until booking start
       const now = new Date();
       const bookingTime = new Date(booking.booking_time);
-      const timeUntilBooking = (bookingTime - now) / (1000 * 60); // minutes
+      const timeUntilBooking = (bookingTime - now) / (1000 * 60); // minutes (positive = future)
       const canRefund = timeUntilBooking >= 15;
 
-      // Update booking status
-      const updatedBooking = await this.updateBookingStatus(bookingId, 'cancelled');
+      // SVC-H3: Wrap status + payment + refund operations in a single transaction
+      client = await getClient();
+      await client.query('BEGIN');
 
-      // Update payment status if paid
+      // Update booking status
+      const cancelResult = await client.query(
+        `UPDATE pnp_bookings
+         SET status = 'cancelled', updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [bookingId]
+      );
+      const updatedBooking = cancelResult.rows?.[0];
+
+      // Update payment status and create refund record if paid
       if (booking.payment_status === 'paid') {
         if (canRefund || isAdmin) {
-          await this.updatePaymentStatus(bookingId, 'refunded');
-          
+          await client.query(
+            `UPDATE pnp_bookings
+             SET payment_status = 'refunded', updated_at = NOW()
+             WHERE id = $1`,
+            [bookingId]
+          );
+
           // Create refund record
-          await query(
+          await client.query(
             `INSERT INTO pnp_refunds
              (booking_id, amount_usd, reason, status, processed_by)
              VALUES ($1, $2, $3, $4, $5)`,
             [bookingId, booking.price_usd, reason, 'completed', isAdmin ? 'admin' : 'system']
           );
         } else {
-          await this.updatePaymentStatus(bookingId, 'failed');
+          await client.query(
+            `UPDATE pnp_bookings
+             SET payment_status = 'failed', updated_at = NOW()
+             WHERE id = $1`,
+            [bookingId]
+          );
         }
       }
 
-      // Release availability if it was booked
+      await client.query('COMMIT');
+
+      // Release availability outside the transaction (non-critical, best-effort)
       if (booking.availability_id) {
-        await AvailabilityService.releaseAvailability(booking.availability_id);
+        try {
+          await AvailabilityService.releaseAvailability(booking.availability_id);
+        } catch (releaseErr) {
+          logger.warn('Failed to release availability after cancel:', { bookingId, error: releaseErr.message });
+        }
       }
 
       logger.info('Booking cancelled', {
@@ -574,8 +615,26 @@ class PNPLiveService {
 
       return updatedBooking;
     } catch (error) {
+      if (client) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (rollbackErr) {
+          logger.warn('Failed to rollback cancelBooking transaction:', rollbackErr);
+        }
+      }
       logger.error('Error cancelling booking:', error);
+      // Re-throw authorization and domain errors directly
+      if (error.message === 'Not authorized to cancel this booking' ||
+          error.message === 'Booking not found' ||
+          error.message === 'Booking already cancelled' ||
+          error.message === 'Cannot cancel completed booking') {
+        throw error;
+      }
       throw new Error('Failed to cancel booking');
+    } finally {
+      if (client) {
+        client.release();
+      }
     }
   }
 
@@ -585,6 +644,7 @@ class PNPLiveService {
    * @returns {Promise<Object>} Completed booking
    */
   static async completeBooking(bookingId) {
+    let client;
     try {
       const booking = await this.getBookingById(bookingId);
       if (!booking) {
@@ -603,8 +663,12 @@ class PNPLiveService {
         throw new Error('Booking not paid');
       }
 
+      // SVC-H1: Wrap status update + earnings INSERT in a single transaction
+      client = await getClient();
+      await client.query('BEGIN');
+
       // Update booking status with show end time
-      const result = await query(
+      const result = await client.query(
         `UPDATE pnp_bookings
          SET status = 'completed', show_ended_at = NOW(), updated_at = NOW()
          WHERE id = $1 RETURNING *`,
@@ -613,7 +677,7 @@ class PNPLiveService {
 
       const updatedBooking = result.rows?.[0];
 
-      // Record earnings in history
+      // Record earnings in history within the same transaction
       if (booking.model_earnings) {
         // Derive the actual commission percent from the stored earnings rather than
         // hardcoding 60, so that the earnings history is always self-consistent.
@@ -623,7 +687,7 @@ class PNPLiveService {
           ? parseFloat(((modelEarnings / grossAmount) * 100).toFixed(4))
           : PNPLiveService.DEFAULT_COMMISSION;
 
-        await query(
+        await client.query(
           `INSERT INTO pnp_model_earnings
            (model_id, booking_id, gross_amount, commission_percent, model_earnings, platform_fee)
            VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -638,6 +702,8 @@ class PNPLiveService {
         );
       }
 
+      await client.query('COMMIT');
+
       logger.info('Booking completed', {
         bookingId,
         modelEarnings: booking.model_earnings,
@@ -646,8 +712,24 @@ class PNPLiveService {
 
       return updatedBooking;
     } catch (error) {
+      if (client) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (rollbackErr) {
+          logger.warn('Failed to rollback completeBooking transaction:', rollbackErr);
+        }
+      }
       logger.error('Error completing booking:', error);
+      if (error.message === 'Booking not found' ||
+          error.message === 'Cannot complete cancelled booking' ||
+          error.message === 'Booking not paid') {
+        throw error;
+      }
       throw new Error('Failed to complete booking');
+    } finally {
+      if (client) {
+        client.release();
+      }
     }
   }
 
@@ -875,9 +957,14 @@ class PNPLiveService {
         [bookingId, userId, rating, comments]
       );
 
-      // Also update the booking with rating (triggers model stats update)
+      // SVC-H7: Update the booking with rating only when no rating has been recorded yet.
+      // The WHERE rating IS NULL guard prevents overwriting existing feedback under
+      // concurrent submissions, complementing the UNIQUE constraint on (booking_id, user_id)
+      // in pnp_feedback. A 0-row update here means a concurrent submission won already —
+      // the INSERT above would have thrown a unique-violation in that race, so this is safe.
       await query(
-        `UPDATE pnp_bookings SET rating = $2, feedback_text = $3, updated_at = NOW() WHERE id = $1`,
+        `UPDATE pnp_bookings SET rating = $2, feedback_text = $3, updated_at = NOW()
+         WHERE id = $1 AND rating IS NULL`,
         [bookingId, rating, comments]
       );
 
@@ -945,13 +1032,16 @@ class PNPLiveService {
         throw new Error('Booking already cancelled or refunded');
       }
 
-      // Check if within refund window (15 minutes after booking time)
+      // SVC-H8: Check if within the refund window — refund is allowed when the
+      // booking has NOT yet started (timeUntilBooking > 0) with at least 15 min
+      // of lead time. The previous code measured time SINCE booking (inverted direction),
+      // which allowed refunds after the booking had already passed.
       const bookingTime = new Date(booking.booking_time);
       const now = new Date();
-      const minutesSinceBooking = (now - bookingTime) / (1000 * 60);
-      
-      if (minutesSinceBooking > 15 && booking.status !== 'pending') {
-        throw new Error('Refund can only be requested within 15 minutes of booking time');
+      const timeUntilBooking = (bookingTime - now) / (1000 * 60); // positive = future
+
+      if (timeUntilBooking < 15 && booking.status !== 'pending') {
+        throw new Error('Refund can only be requested at least 15 minutes before booking time');
       }
 
       const result = await query(

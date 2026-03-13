@@ -146,7 +146,7 @@ export default function Live() {
   // Booking
   const [showBooking, setShowBooking] = useState(false);
   const [bookingLoaded, setBookingLoaded] = useState(false);
-  const [bookingError, setBookingError] = useState(false);
+  const [bookingError, setBookingError] = useState<string | null>(null);
 
   // Go Live
   const [showBrowserStreamer, setShowBrowserStreamer] = useState(false);
@@ -154,6 +154,7 @@ export default function Live() {
   // Socket (null stream — connected only for wallet push events)
   const {
     walletBalance: socketBalance,
+    socketBalanceReceived,
   } = useLiveSocket(null);
 
   // Load performers + streams
@@ -184,16 +185,22 @@ export default function Live() {
     if (!isAuthenticated) return;
     getWalletBalance()
       .then((data) => {
-        setTokenBalance(data.balance);
+        // FE-M1: only apply the HTTP-fetched balance if the socket has not yet
+        // delivered an authoritative value — prevents a stale HTTP response
+        // from overwriting a more recent socket-pushed balance.
+        if (!socketBalanceReceived) {
+          setTokenBalance(data.balance);
+        }
         setDpnsHandle(data.dpnsHandle);
       })
       .catch(() => {});
     getTokenPackages()
       .then((data) => setTokenPackages(data.packages || []))
       .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
-  // Sync socket-pushed balance updates
+  // Sync socket-pushed balance updates — socket value always wins (FE-M1)
   useEffect(() => {
     if (socketBalance !== null) setTokenBalance(socketBalance);
   }, [socketBalance]);
@@ -203,9 +210,9 @@ export default function Live() {
   // pending timer, so setBookingError is never called on a successful load.
   useEffect(() => {
     if (!showBooking || bookingLoaded) return;
-    const timer = setTimeout(() => setBookingError(true), 15000);
+    const timer = setTimeout(() => setBookingError(t.live.failedToLoadStreams ?? "The booking calendar failed to load. Please try again."), 15000);
     return () => clearTimeout(timer);
-  }, [showBooking, bookingLoaded]);
+  }, [showBooking, bookingLoaded, t.live]);
 
   const handleBuyTokens = async (pkg: TokenPackage) => {
     setBuyingPackage(pkg.id);
@@ -285,27 +292,19 @@ export default function Live() {
     handleLoadWalletHistory();
   };
 
-  // Match a performer to their live stream by hlsUrl (injected by backend),
-  // userId, display name, or slug. The backend sets isLive + hlsUrl on the
-  // performer object when their assigned Restreamer channel is running.
+  // Match a performer to their live stream by hlsUrl (injected by backend) or
+  // exact userId. Fuzzy name/slug matching is intentionally excluded — it
+  // caused false positives when multiple performers had similar display names.
   const findLiveStream = (p: FeaturedPerformer): LiveStream | undefined => {
     // Fast path: backend already injected hlsUrl — find the matching stream
     if (p.hlsUrl) {
       const match = liveStreams.find((s) => s.hlsUrl === p.hlsUrl);
       if (match) return match;
     }
-    const name = p.displayName.toLowerCase().split(/[^a-z]/)[0];
-    const slug = p.slug?.toLowerCase();
+    // Fall back to exact userId match only
     const userId = p.userId ? String(p.userId) : null;
-    return liveStreams.find((s) => {
-      const sName = s.name.toLowerCase();
-      const sId = s.id.toLowerCase();
-      return (
-        (userId && (sId.includes(userId) || sName.includes(userId))) ||
-        (name && name.length >= 3 && (sName.includes(name) || sId.includes(name))) ||
-        (slug && slug.length >= 3 && (sName.includes(slug) || sId.includes(slug)))
-      );
-    });
+    if (!userId) return undefined;
+    return liveStreams.find((s) => s.id === userId);
   };
 
   // Free-tier gate — show upsell instead of live content
@@ -592,25 +591,45 @@ export default function Live() {
                 {t.live.openFullCalendar}
               </Button>
             </div>
-            <div className="embed-frame overflow-hidden" style={{ minHeight: "500px" }}>
-              <Cal
-                calLink="pnptv/private-session"
-                config={{ theme: "dark" }}
-                calOrigin={CALCOM_URL}
-                embedJsUrl={`${CALCOM_URL}/embed/embed.js`}
-                style={{ width: "100%", height: "100%", minHeight: "500px" }}
-              />
-            </div>
-            <Card className="mt-3">
-              <div className="flex items-start gap-3">
-                <svg className="w-4 h-4 text-pnp-accent flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            {bookingError ? (
+              <div className="flex flex-col items-center gap-3 p-6 rounded-xl border border-pnp-error/20 bg-pnp-error/10">
+                <svg className="w-8 h-8 text-pnp-error flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
-                <p className="text-xs text-pnp-textSecondary">
-                  {t.live.sessionTimezoneNote}
-                </p>
+                <p className="text-sm text-pnp-error text-center">{bookingError}</p>
+                <button
+                  onClick={() => {
+                    setBookingError(null);
+                    setBookingLoaded(false);
+                  }}
+                  className="px-4 py-2 rounded-lg btn-gradient text-white text-xs font-semibold"
+                >
+                  {t.live.retryLoading}
+                </button>
               </div>
-            </Card>
+            ) : (
+              <div className="embed-frame overflow-hidden" style={{ minHeight: "500px" }}>
+                <Cal
+                  calLink="pnptv/private-session"
+                  config={{ theme: "dark" }}
+                  calOrigin={CALCOM_URL}
+                  embedJsUrl={`${CALCOM_URL}/embed/embed.js`}
+                  style={{ width: "100%", height: "100%", minHeight: "500px" }}
+                />
+              </div>
+            )}
+            {!bookingError && (
+              <Card className="mt-3">
+                <div className="flex items-start gap-3">
+                  <svg className="w-4 h-4 text-pnp-accent flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-xs text-pnp-textSecondary">
+                    {t.live.sessionTimezoneNote}
+                  </p>
+                </div>
+              </Card>
+            )}
           </div>
         )}
       </div>

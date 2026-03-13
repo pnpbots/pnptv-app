@@ -960,6 +960,16 @@ class XPostService {
     }
 
     const accessToken = decrypted?.accessToken || decrypted?.token;
+
+    // OAuth 1.0a tokens are permanent — skip expiry check and refresh entirely
+    if (account.oauth_version === '1.0a') {
+      if (!accessToken) {
+        throw new Error(`Token de acceso OAuth 1.0a inválido para @${account.handle}`);
+      }
+      return accessToken;
+    }
+
+    // OAuth 2.0: check expiry and refresh if needed
     const expiresAt = decrypted?.expiresAt ? new Date(decrypted.expiresAt) : account.token_expires_at;
 
     if (expiresAt && expiresAt.getTime() - Date.now() <= X_TOKEN_EXPIRY_BUFFER_MS) {

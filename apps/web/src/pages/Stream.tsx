@@ -596,7 +596,9 @@ export default function Stream() {
                     {chatConnected ? t.live.beFirstToChat : t.live.connectingToChat}
                   </p>
                 ) : (
-                  chatMessages.map((msg) => (
+                  // FE-M4: render at most the latest 50 messages to avoid
+                  // long DOM lists degrading scroll performance on mobile.
+                  chatMessages.slice(-50).map((msg) => (
                     <div key={msg.id} className="text-xs">
                       <span className="font-medium text-gradient">@{msg.username}</span>
                       <span className="text-pnp-textSecondary mx-1">·</span>

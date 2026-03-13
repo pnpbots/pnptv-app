@@ -2,7 +2,53 @@ const PNPLiveNotificationService = require('../bot/services/pnpLiveNotificationS
 const PNPLiveService = require('../bot/services/pnpLiveService');
 const PNPLiveAvailabilityService = require('../bot/services/pnpLiveAvailabilityService');
 const { query } = require('../config/postgres');
+const { cache } = require('../config/redis');
 const logger = require('../utils/logger');
+
+// Inactivity threshold before a model is automatically set offline (minutes).
+// A model whose `updated_at` (last row-level change) is older than this value
+// and who is still marked is_available = TRUE will be offlined by Job 3.
+const AUTO_OFFLINE_THRESHOLD_MINUTES = 5;
+
+// Timeout limits (ms) — jobs exceeding these durations are aborted and the
+// distributed lock is released so the next interval can run cleanly.
+const JOB_TIMEOUT_MS = {
+  notifications: 60_000,    // 1 minute
+  autoComplete: 60_000,     // 1 minute
+  statusUpdate: 60_000,     // 1 minute
+  feedbackRequests: 60_000, // 1 minute
+  autoOffline: 60_000,      // 1 minute
+  releaseHolds: 60_000,     // 1 minute
+};
+
+// Redis distributed-lock keys and their TTLs (seconds).
+// TTL is set to 2× the job interval so a crashed worker cannot permanently
+// hold a lock past the next scheduled run.
+const LOCK_KEYS = {
+  notifications:    { key: 'pnplive:worker:notifications:lock',    ttl: 120 },
+  autoComplete:     { key: 'pnplive:worker:autoComplete:lock',      ttl: 600 },
+  statusUpdate:     { key: 'pnplive:worker:statusUpdate:lock',      ttl: 240 },
+  feedbackRequests: { key: 'pnplive:worker:feedbackRequests:lock',  ttl: 600 },
+  autoOffline:      { key: 'pnplive:worker:autoOffline:lock',       ttl: 600 },
+  releaseHolds:     { key: 'pnplive:worker:releaseHolds:lock',      ttl: 120 },
+};
+
+/**
+ * Wrap a promise with a hard timeout.  If the promise does not settle within
+ * `ms` milliseconds a rejection with an Error('Job timeout') is returned so
+ * the caller can release the distributed lock.
+ *
+ * @param {Promise<any>} promise - The async work to race.
+ * @param {number} ms - Timeout in milliseconds.
+ * @returns {Promise<any>}
+ */
+const withTimeout = (promise, ms) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Job timeout after ${ms}ms`)), ms)
+    ),
+  ]);
 
 /**
  * PNP Television Live Worker
@@ -11,6 +57,11 @@ const logger = require('../utils/logger');
  * - Auto-complete shows after duration (every 5 minutes)
  * - Update model online status (every 2 minutes)
  * - Send feedback requests after shows (every 5 minutes)
+ * - Auto-offline inactive models (every 5 minutes)
+ * - Release expired slot holds (every minute)
+ *
+ * All jobs use Redis distributed locks so that a multi-instance deployment
+ * never runs the same job concurrently across processes.
  */
 class PNPLiveWorker {
   constructor(bot) {
@@ -18,40 +69,35 @@ class PNPLiveWorker {
     this.intervals = [];
     this.isRunning = false;
 
-    // Job locks to prevent overlapping executions
-    this.jobLocks = {
-      notifications: false,
-      autoComplete: false,
-      statusUpdate: false,
-      feedbackRequests: false,
-      autoOffline: false,
-      releaseHolds: false
-    };
-
     // Initialize notification service with bot
     PNPLiveNotificationService.init(bot);
   }
 
   /**
-   * Acquire a lock for a job
-   * @param {string} jobName - Name of the job
-   * @returns {boolean} True if lock acquired, false if already locked
+   * Try to acquire a Redis distributed lock for a named job.
+   *
+   * @param {string} jobName - Key into LOCK_KEYS (e.g. 'notifications')
+   * @returns {Promise<boolean>} True when lock was acquired; false when
+   *   another process/instance is already running this job.
    */
-  acquireLock(jobName) {
-    if (this.jobLocks[jobName]) {
-      logger.debug(`PNP Live worker: ${jobName} job already running, skipping`);
-      return false;
+  async acquireRedisLock(jobName) {
+    const { key, ttl } = LOCK_KEYS[jobName];
+    const acquired = await cache.acquireLock(key, ttl);
+    if (!acquired) {
+      logger.debug(`PNP Live worker: ${jobName} lock held by another instance, skipping`);
     }
-    this.jobLocks[jobName] = true;
-    return true;
+    return acquired;
   }
 
   /**
-   * Release a lock for a job
-   * @param {string} jobName - Name of the job
+   * Release a previously acquired Redis distributed lock.
+   *
+   * @param {string} jobName - Key into LOCK_KEYS
+   * @returns {Promise<void>}
    */
-  releaseLock(jobName) {
-    this.jobLocks[jobName] = false;
+  async releaseRedisLock(jobName) {
+    const { key } = LOCK_KEYS[jobName];
+    await cache.releaseLock(key);
   }
 
   /**
@@ -66,98 +112,117 @@ class PNPLiveWorker {
     logger.info('Starting PNP Live worker...');
     this.isRunning = true;
 
-    // Job 1: Send booking notifications (every minute) - with lock
+    // Job 1: Send booking notifications (every minute)
     this.intervals.push(
       setInterval(async () => {
-        if (!this.acquireLock('notifications')) return;
+        if (!(await this.acquireRedisLock('notifications'))) return;
         try {
-          await PNPLiveNotificationService.processPendingNotifications();
+          await withTimeout(
+            PNPLiveNotificationService.processPendingNotifications(),
+            JOB_TIMEOUT_MS.notifications
+          );
         } catch (error) {
           logger.error('PNP Live worker: error processing notifications', { error: error.message });
         } finally {
-          this.releaseLock('notifications');
+          await this.releaseRedisLock('notifications');
         }
       }, 60 * 1000) // 1 minute
     );
 
-    // Job 2: Auto-complete shows after duration (every 5 minutes) - with lock
+    // Job 2: Auto-complete shows after duration (every 5 minutes)
     this.intervals.push(
       setInterval(async () => {
-        if (!this.acquireLock('autoComplete')) return;
+        if (!(await this.acquireRedisLock('autoComplete'))) return;
         try {
-          const completed = await this.autoCompleteShows();
+          const completed = await withTimeout(
+            this.autoCompleteShows(),
+            JOB_TIMEOUT_MS.autoComplete
+          );
           if (completed > 0) {
             logger.info('PNP Live worker: auto-completed shows', { count: completed });
           }
         } catch (error) {
           logger.error('PNP Live worker: error auto-completing shows', { error: error.message });
         } finally {
-          this.releaseLock('autoComplete');
+          await this.releaseRedisLock('autoComplete');
         }
       }, 5 * 60 * 1000) // 5 minutes
     );
 
-    // Job 3: Update model online status (every 2 minutes) - with lock
+    // Job 3: Update model online status (every 2 minutes)
+    // Only offlines models that have been inactive beyond AUTO_OFFLINE_THRESHOLD_MINUTES.
     this.intervals.push(
       setInterval(async () => {
-        if (!this.acquireLock('statusUpdate')) return;
+        if (!(await this.acquireRedisLock('statusUpdate'))) return;
         try {
-          await this.updateModelOnlineStatus();
+          await withTimeout(
+            this.updateModelOnlineStatus(),
+            JOB_TIMEOUT_MS.statusUpdate
+          );
         } catch (error) {
           logger.error('PNP Live worker: error updating model status', { error: error.message });
         } finally {
-          this.releaseLock('statusUpdate');
+          await this.releaseRedisLock('statusUpdate');
         }
       }, 2 * 60 * 1000) // 2 minutes
     );
 
-    // Job 4: Send feedback requests (every 5 minutes) - with lock
+    // Job 4: Send feedback requests (every 5 minutes)
     this.intervals.push(
       setInterval(async () => {
-        if (!this.acquireLock('feedbackRequests')) return;
+        if (!(await this.acquireRedisLock('feedbackRequests'))) return;
         try {
-          const sent = await this.sendFeedbackRequests();
+          const sent = await withTimeout(
+            this.sendFeedbackRequests(),
+            JOB_TIMEOUT_MS.feedbackRequests
+          );
           if (sent > 0) {
             logger.info('PNP Live worker: sent feedback requests', { count: sent });
           }
         } catch (error) {
           logger.error('PNP Live worker: error sending feedback requests', { error: error.message });
         } finally {
-          this.releaseLock('feedbackRequests');
+          await this.releaseRedisLock('feedbackRequests');
         }
       }, 5 * 60 * 1000) // 5 minutes
     );
 
-    // Job 5: Auto-offline inactive models (every 5 minutes) - with lock
+    // Job 5: Auto-offline inactive models (every 5 minutes)
     this.intervals.push(
       setInterval(async () => {
-        if (!this.acquireLock('autoOffline')) return;
+        if (!(await this.acquireRedisLock('autoOffline'))) return;
         try {
-          const offlined = await PNPLiveAvailabilityService.autoOfflineInactiveModels();
+          const offlined = await withTimeout(
+            PNPLiveAvailabilityService.autoOfflineInactiveModels(),
+            JOB_TIMEOUT_MS.autoOffline
+          );
           if (offlined > 0) {
             logger.info('PNP Live worker: auto-offlined inactive models', { count: offlined });
           }
         } catch (error) {
           logger.error('PNP Live worker: error auto-offlining models', { error: error.message });
         } finally {
-          this.releaseLock('autoOffline');
+          await this.releaseRedisLock('autoOffline');
         }
       }, 5 * 60 * 1000) // 5 minutes
     );
 
-    // Job 6: Release expired slot holds (every minute) - with lock
+    // Job 6: Release expired slot holds (every minute)
     this.intervals.push(
       setInterval(async () => {
-        if (!this.acquireLock('releaseHolds')) return;
+        if (!(await this.acquireRedisLock('releaseHolds'))) return;
         try {
-          const released = await PNPLiveAvailabilityService.releaseExpiredHolds();
+          const released = await withTimeout(
+            PNPLiveAvailabilityService.releaseExpiredHolds(),
+            JOB_TIMEOUT_MS.releaseHolds
+          );
           if (released > 0) {
             logger.info('PNP Live worker: released expired slot holds', { count: released });
           }
         } catch (error) {
           logger.error('PNP Live worker: error releasing expired holds', { error: error.message });
         } finally {
-          this.releaseLock('releaseHolds');
+          await this.releaseRedisLock('releaseHolds');
         }
       }, 60 * 1000) // 1 minute
     );
@@ -217,32 +282,54 @@ class PNPLiveWorker {
   }
 
   /**
-   * Update model online status based on recent activity
-   * Models are marked offline if no activity in 30 minutes
+   * Update model online status based on recent activity.
+   *
+   * Only performers that are currently marked available AND whose last row
+   * update (`updated_at`) is older than AUTO_OFFLINE_THRESHOLD_MINUTES are
+   * set offline.  This prevents a blanket reset that would override a model
+   * who just toggled themselves online moments before this job ran.
+   *
+   * After the inactivity sweep, any model with a confirmed, paid booking
+   * starting within the next 15 minutes is re-marked available so they
+   * appear online to incoming viewers.
    */
   async updateModelOnlineStatus() {
     try {
-      const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+      const inactivityCutoff = new Date(Date.now() - AUTO_OFFLINE_THRESHOLD_MINUTES * 60 * 1000);
 
-      // Mark models as offline if no recent activity
-      await query(
+      // Only offline models that have been inactive beyond the threshold.
+      // updated_at is maintained by the trigger_performers_updated_at trigger,
+      // so it reflects the last time the row was touched (including manual
+      // online/offline toggles from the model's own session).
+      const offlineResult = await query(
         `UPDATE performers
-         SET is_available = FALSE
-         WHERE is_available = TRUE`,
-        []
+         SET is_available = FALSE, updated_at = NOW()
+         WHERE is_available = TRUE
+           AND updated_at < $1
+         RETURNING id`,
+        [inactivityCutoff]
       );
 
-      // Models with upcoming bookings in next 15 minutes should be marked online
+      const offlinedCount = offlineResult.rows?.length ?? 0;
+      if (offlinedCount > 0) {
+        logger.info('PNP Live worker: set inactive models offline', {
+          count: offlinedCount,
+          thresholdMinutes: AUTO_OFFLINE_THRESHOLD_MINUTES,
+        });
+      }
+
+      // Models with upcoming bookings in the next 15 minutes should appear online
+      // regardless of the inactivity window — the booking itself signals intent.
       const fifteenMinutesFromNow = new Date(Date.now() + 15 * 60 * 1000);
       await query(
         `UPDATE performers m
-         SET is_available = TRUE
+         SET is_available = TRUE, updated_at = NOW()
          FROM pnp_bookings b
          WHERE m.id = b.model_id
-         AND b.status = 'confirmed'
-         AND b.payment_status = 'paid'
-         AND b.booking_time BETWEEN NOW() AND $1
-         AND m.is_available = FALSE`,
+           AND b.status = 'confirmed'
+           AND b.payment_status = 'paid'
+           AND b.booking_time BETWEEN NOW() AND $1
+           AND m.is_available = FALSE`,
         [fifteenMinutesFromNow]
       );
     } catch (error) {

@@ -851,23 +851,32 @@ No time slots are available for this date. Please choose another date.`;
         return;
       }
 
-      // Create time slot buttons
+      // Store generated slots in session (they are virtual — no DB id)
+      ctx.session.pnpLive = ctx.session.pnpLive || {};
+      ctx.session.pnpLive.availableSlots = slots.map(s => ({
+        available_from: s.available_from instanceof Date ? s.available_from.toISOString() : s.available_from,
+        available_to: s.available_to instanceof Date ? s.available_to.toISOString() : s.available_to,
+      }));
+      await ctx.saveSession();
+
+      // Create time slot buttons using slot index as key
       const buttons = [];
-      for (const slot of slots) {
+      for (let idx = 0; idx < slots.length; idx++) {
+        const slot = slots[idx];
         const startTime = new Date(slot.available_from).toLocaleTimeString(lang === 'es' ? 'es-ES' : 'en-US', {
           hour: '2-digit',
           minute: '2-digit',
           hour12: false
         });
-        
+
         const endTime = new Date(slot.available_to).toLocaleTimeString(lang === 'es' ? 'es-ES' : 'en-US', {
           hour: '2-digit',
           minute: '2-digit',
           hour12: false
         });
-        
+
         buttons.push([
-          Markup.button.callback(`${startTime} - ${endTime}`, `pnp_select_slot_${slot.id}`)
+          Markup.button.callback(`${startTime} - ${endTime}`, `pnp_select_slot_${idx}`)
         ]);
       }
 
@@ -918,13 +927,41 @@ Choose a time slot for your Private Show:`;
     try {
       await ctx.answerCbQuery();
       const lang = getLanguage(ctx);
-      const slotId = parseInt(ctx.match[1]);
+      const slotIndex = parseInt(ctx.match[1]);
       const userId = ctx.from.id.toString();
 
-      // Try to hold the slot (10 minute hold for payment)
-      const holdResult = await PNPLiveAvailabilityService.holdSlot(slotId, userId, 10);
+      // Resolve the virtual slot from session cache
+      const pnpLiveSession = ctx.session.pnpLive || {};
+      const availableSlots = pnpLiveSession.availableSlots || [];
+      const slotEntry = availableSlots[slotIndex];
 
-      if (!holdResult.success) {
+      if (!slotEntry) {
+        const errorMessage = lang === 'es'
+          ? '❌ Horario inválido. Por favor, elige de nuevo.'
+          : '❌ Invalid time slot. Please choose again.';
+        await ctx.answerCbQuery(errorMessage, { show_alert: true });
+        return;
+      }
+
+      const modelId = pnpLiveSession.selectedModel;
+      if (!modelId) {
+        const errorMessage = lang === 'es'
+          ? '❌ Sesión expirada. Por favor, comienza de nuevo.'
+          : '❌ Session expired. Please start over.';
+        await ctx.answerCbQuery(errorMessage, { show_alert: true });
+        return;
+      }
+
+      const slotStart = new Date(slotEntry.available_from);
+      const slotEnd = new Date(slotEntry.available_to);
+
+      // Try to hold the slot (10 minute hold for payment)
+      // holdSlot throws if the slot is already taken
+      let holdRecord;
+      try {
+        holdRecord = await PNPLiveAvailabilityService.holdSlot(modelId, slotStart, slotEnd, userId);
+      } catch (holdError) {
+        logger.warn('Slot hold failed', { modelId, slotStart, userId, error: holdError.message });
         const errorMessage = lang === 'es'
           ? '❌ Este horario ya no está disponible. Por favor, elige otro.'
           : '❌ This time slot is no longer available. Please choose another.';
@@ -932,10 +969,12 @@ Choose a time slot for your Private Show:`;
         return;
       }
 
-      // Store selected slot and hold expiry in session
-      ctx.session.pnpLive = ctx.session.pnpLive || {};
-      ctx.session.pnpLive.selectedSlot = slotId;
-      ctx.session.pnpLive.holdExpiresAt = holdResult.holdExpiresAt;
+      // Store selected slot details and hold expiry in session
+      ctx.session.pnpLive.selectedSlotStart = slotStart.toISOString();
+      ctx.session.pnpLive.selectedSlotEnd = slotEnd.toISOString();
+      ctx.session.pnpLive.holdExpiresAt = holdRecord?.hold_expires_at
+        ? new Date(holdRecord.hold_expires_at).toISOString()
+        : new Date(Date.now() + 10 * 60 * 1000).toISOString();
       await ctx.saveSession();
 
       // Show payment selection with hold timer info
@@ -949,19 +988,19 @@ Choose a time slot for your Private Show:`;
   // Show payment selection
   async function showPaymentSelection(ctx, lang) {
     try {
-      const { selectedModel, selectedDuration, selectedDate, selectedSlot } = ctx.session.pnpLive || {};
-      
+      const { selectedModel, selectedDuration, selectedDate, selectedSlotStart } = ctx.session.pnpLive || {};
+
       // Validate booking details with user-friendly feedback
-      if (!selectedModel || !selectedDuration || !selectedDate || !selectedSlot) {
+      if (!selectedModel || !selectedDuration || !selectedDate || !selectedSlotStart) {
         logger.warn('Incomplete booking details in session', {
           userId: ctx.from?.id,
           session: ctx.session.pnpLive
         });
-        
-        const missingMessage = lang === 'es' 
+
+        const missingMessage = lang === 'es'
           ? '❌ Por favor completa todos los pasos de reserva primero.'
           : '❌ Please complete all booking steps first.';
-        
+
         try {
           await ctx.answerCbQuery(missingMessage);
         } catch (cbError) {
@@ -969,7 +1008,6 @@ Choose a time slot for your Private Show:`;
             error: cbError.message,
             userId: ctx.from?.id
           });
-          // Try to send as a regular message if callback fails
           try {
             await ctx.reply(missingMessage);
           } catch (replyError) {
@@ -983,19 +1021,17 @@ Choose a time slot for your Private Show:`;
       }
 
       const model = await ModelService.getModelById(selectedModel);
-      const slot = await AvailabilityService.getAvailabilityById(selectedSlot);
-      
-      if (!model || !slot) {
-        logger.warn('Model or slot not found', {
+
+      if (!model) {
+        logger.warn('Model not found for payment selection', {
           selectedModel,
-          selectedSlot,
           userId: ctx.from?.id
         });
-        
+
         const notFoundMessage = lang === 'es'
-          ? '❌ Modelo o horario no disponible. Por favor selecciona nuevamente.'
-          : '❌ Model or time slot not available. Please select again.';
-        
+          ? '❌ Modelo no disponible. Por favor selecciona nuevamente.'
+          : '❌ Model not available. Please select again.';
+
         await ctx.answerCbQuery(notFoundMessage);
         return;
       }
@@ -1005,7 +1041,7 @@ Choose a time slot for your Private Show:`;
         ? `${selectedDuration} minutos`
         : `${selectedDuration} minutes`;
 
-      const startTime = new Date(slot.available_from).toLocaleTimeString(lang === 'es' ? 'es-ES' : 'en-US', {
+      const startTime = new Date(selectedSlotStart).toLocaleTimeString(lang === 'es' ? 'es-ES' : 'en-US', {
         hour: '2-digit',
         minute: '2-digit',
         hour12: false
@@ -1074,39 +1110,25 @@ Select your payment method:`;
       const lang = getLanguage(ctx);
 
       // Create booking
-      const { selectedModel, selectedDuration, selectedDate, selectedSlot } = ctx.session.pnpLive || {};
+      const { selectedModel, selectedDuration, selectedDate, selectedSlotStart } = ctx.session.pnpLive || {};
       const userId = ctx.from.id.toString();
 
       // Validate booking details with user-friendly feedback
-      if (!selectedModel || !selectedDuration || !selectedSlot) {
+      if (!selectedModel || !selectedDuration || !selectedSlotStart) {
         logger.warn('Incomplete booking details for payment', {
           userId,
           session: ctx.session.pnpLive
         });
-        
+
         const missingMessage = lang === 'es'
           ? '❌ Por favor completa todos los pasos de reserva primero.'
           : '❌ Please complete all booking steps first.';
-        
+
         await safeEditMessage(ctx, missingMessage);
         return;
       }
 
-      // Get slot details
-      const slot = await AvailabilityService.getAvailabilityById(selectedSlot);
-      if (!slot) {
-        logger.warn('Slot not found for booking', {
-          selectedSlot,
-          userId
-        });
-        
-        const notFoundMessage = lang === 'es'
-          ? '❌ Horario seleccionado no disponible. Por favor elige otro.'
-          : '❌ Selected time slot not available. Please choose another.';
-        
-        await safeEditMessage(ctx, notFoundMessage);
-        return;
-      }
+      const slotStart = new Date(selectedSlotStart);
 
       const model = await ModelService.getModelById(selectedModel);
       const price = PNPLiveService.calculatePrice(selectedDuration);
@@ -1116,13 +1138,13 @@ Select your payment method:`;
         userId,
         selectedModel,
         selectedDuration,
-        slot.available_from,
+        slotStart,
         'credit_card'
       );
 
-      // Set payment expiry (10 minutes from now)
-      const paymentExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
-      await PNPLiveAvailabilityService.confirmSlotBooking(selectedSlot, booking.id, paymentExpiresAt);
+      // Convert hold to confirmed booking record
+      // confirmSlotBooking(modelId, slotStart, userId, bookingId)
+      await PNPLiveAvailabilityService.confirmSlotBooking(selectedModel, slotStart, userId, booking.id);
 
       // Store booking ID in session for webhook callback
       ctx.session.pnpLive.bookingId = booking.id;
@@ -1180,39 +1202,25 @@ Select your payment method:`;
       const lang = getLanguage(ctx);
 
       // Create booking
-      const { selectedModel, selectedDuration, selectedDate, selectedSlot } = ctx.session.pnpLive || {};
+      const { selectedModel, selectedDuration, selectedDate, selectedSlotStart } = ctx.session.pnpLive || {};
       const userId = ctx.from.id.toString();
 
       // Validate booking details with user-friendly feedback
-      if (!selectedModel || !selectedDuration || !selectedSlot) {
+      if (!selectedModel || !selectedDuration || !selectedSlotStart) {
         logger.warn('Incomplete booking details for crypto payment', {
           userId,
           session: ctx.session.pnpLive
         });
-        
+
         const missingMessage = lang === 'es'
           ? '❌ Por favor completa todos los pasos de reserva primero.'
           : '❌ Please complete all booking steps first.';
-        
+
         await safeEditMessage(ctx, missingMessage);
         return;
       }
 
-      // Get slot details
-      const slot = await AvailabilityService.getAvailabilityById(selectedSlot);
-      if (!slot) {
-        logger.warn('Slot not found for crypto booking', {
-          selectedSlot,
-          userId
-        });
-        
-        const notFoundMessage = lang === 'es'
-          ? '❌ Horario seleccionado no disponible. Por favor elige otro.'
-          : '❌ Selected time slot not available. Please choose another.';
-        
-        await safeEditMessage(ctx, notFoundMessage);
-        return;
-      }
+      const slotStart = new Date(selectedSlotStart);
 
       const model = await ModelService.getModelById(selectedModel);
       const price = PNPLiveService.calculatePrice(selectedDuration);
@@ -1222,13 +1230,13 @@ Select your payment method:`;
         userId,
         selectedModel,
         selectedDuration,
-        slot.available_from,
+        slotStart,
         'crypto'
       );
 
-      // Set payment expiry (10 minutes from now)
-      const paymentExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
-      await PNPLiveAvailabilityService.confirmSlotBooking(selectedSlot, booking.id, paymentExpiresAt);
+      // Convert hold to confirmed booking record
+      // confirmSlotBooking(modelId, slotStart, userId, bookingId)
+      await PNPLiveAvailabilityService.confirmSlotBooking(selectedModel, slotStart, userId, booking.id);
 
       // Store booking ID in session for webhook callback
       ctx.session.pnpLive.bookingId = booking.id;

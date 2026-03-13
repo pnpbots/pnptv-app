@@ -122,8 +122,20 @@ export default function CanvaIntegration() {
     }
   }, []);
 
-  // Initial load
+  // Initial load + read URL params from OAuth callback
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const canvaError = params.get("canva_error");
+    const canvaConnectedParam = params.get("canva_connected");
+    if (canvaError) {
+      setError(`Canva OAuth failed: ${canvaError}`);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    if (canvaConnectedParam) {
+      setSuccess("Canva account connected successfully!");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
     loadStats();
     loadUsers();
     loadJobs(1);

@@ -1,4 +1,4 @@
-const CallModel = require('../../models/callModel');
+const BookingModel = require('../../models/bookingModel');
 const logger = require('../../utils/logger');
 
 /**
@@ -71,7 +71,7 @@ class CallReminderService {
 
       // Mark reminder as sent
       const reminderField = `reminder${reminderType}Sent`;
-      await CallModel.updateStatus(call.id, call.status, {
+      await BookingModel.updateStatus(call.id, call.status, {
         [reminderField]: true,
         [`${reminderField}At`]: new Date(),
       });
@@ -117,7 +117,7 @@ class CallReminderService {
       const results = { sent: 0, failed: 0 };
 
       // Get all confirmed and pending calls
-      const upcomingCalls = await CallModel.getUpcoming();
+      const upcomingCalls = await BookingModel.getUpcoming();
 
       for (const call of upcomingCalls) {
         try {
@@ -159,7 +159,7 @@ class CallReminderService {
           // Auto-complete calls that are past their end time (duration + 15 min buffer)
           const callEndTime = new Date(scheduledDate.getTime() + ((call.duration || 45) + 15) * 60 * 1000);
           if (now > callEndTime && call.status === 'confirmed') {
-            await CallModel.updateStatus(call.id, 'completed', {
+            await BookingModel.updateStatus(call.id, 'completed', {
               completedAt: new Date(),
               autoCompleted: true,
             });

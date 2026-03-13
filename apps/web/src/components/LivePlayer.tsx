@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from "react";
 import Hls from "hls.js";
 import { Badge, Skeleton } from "@pnptv/ui-kit";
 import { StreamOverlayLayer, type StreamOverlayConfig } from "@/components/StreamOverlayLayer";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import { useI18n } from "@/lib/i18n";
 
 interface LivePlayerProps {
@@ -16,9 +17,15 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<"loading" | "live" | "offline" | "error" | "retrying">("loading");
   const hlsRef = useRef<Hls | null>(null);
+  // FE-H3: track retry setTimeout so it can be cleared on unmount
+  const retryTimerRef = useRef<number | undefined>(undefined);
   const t = useI18n();
 
   const initHls = (video: HTMLVideoElement, source: string) => {
+    // FE-H3: clear any pending retry timer before reinitialising
+    clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = undefined;
+
     hlsRef.current?.destroy();
     hlsRef.current = null;
 
@@ -52,7 +59,8 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
             console.warn("[LivePlayer] Fatal network error, attempting recovery…");
             setStatus("retrying");
             hls.startLoad();
-            setTimeout(() => {
+            // FE-H3: track the timer so it can be cleared on unmount
+            retryTimerRef.current = window.setTimeout(() => {
               if (hls.media && hls.media.readyState === 0) {
                 setStatus("offline");
               }
@@ -63,15 +71,24 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Safari native HLS
+      // FE-H4: Safari native HLS — use { once: true } so listeners self-remove
+      // and store references so the cleanup function can also remove them.
       video.src = source;
       const onMetadata = () => {
         setStatus("live");
         video.play().catch(() => {});
       };
       const onError = () => setStatus("error");
-      video.addEventListener("loadedmetadata", onMetadata);
-      video.addEventListener("error", onError);
+      // { once: true } ensures each fires at most once; cleanup below handles
+      // the case where unmount occurs before either event fires.
+      video.addEventListener("loadedmetadata", onMetadata, { once: true });
+      video.addEventListener("error", onError, { once: true });
+      // Store references on the video element so the useEffect cleanup can
+      // remove them if the component unmounts before the events fire.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (video as any)._pnpOnMetadata = onMetadata;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (video as any)._pnpOnError = onError;
     } else {
       setStatus("error");
     }
@@ -89,8 +106,30 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
     initHls(video, src);
 
     return () => {
+      // FE-H3: cancel any pending retry timer
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = undefined;
+
       hlsRef.current?.destroy();
       hlsRef.current = null;
+
+      // FE-H4: remove Safari native HLS listeners if they haven't fired yet
+      if (video) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const onMeta = (video as any)._pnpOnMetadata;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const onErr = (video as any)._pnpOnError;
+        if (onMeta) {
+          video.removeEventListener("loadedmetadata", onMeta);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          delete (video as any)._pnpOnMetadata;
+        }
+        if (onErr) {
+          video.removeEventListener("error", onErr);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          delete (video as any)._pnpOnError;
+        }
+      }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
@@ -166,9 +205,13 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
           <p className="text-white font-medium">{title}</p>
         </div>
       )}
-      {/* Stream overlay: logos and banners configured by admins */}
+      {/* Stream overlay: logos and banners configured by admins.
+           FE-M6: wrapped in ErrorBoundary so a broken overlay config never
+           crashes the entire player. fallback=null renders nothing on error. */}
       {overlay?.is_active !== false && (
-        <StreamOverlayLayer overlay={overlay ?? null} />
+        <ErrorBoundary fallback={null}>
+          <StreamOverlayLayer overlay={overlay ?? null} />
+        </ErrorBoundary>
       )}
     </div>
   );

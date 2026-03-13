@@ -1,7 +1,7 @@
 'use strict';
 
-const { query } = require('../../../config/postgres');
-const logger = require('../../../utils/logger');
+const { query } = require('../../config/postgres');
+const logger = require('../../utils/logger');
 const NotificationEmitter = require('./notificationEmitter');
 const { resolveUserId } = require('../utils/helpers');
 

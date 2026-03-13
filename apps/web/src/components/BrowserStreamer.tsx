@@ -288,6 +288,23 @@ export default function BrowserStreamer() {
   const startTimeRef = useRef<number>(0);
   // Track bytes sent for quality estimation
   const bytesSentRef = useRef<number[]>([]);
+  // FE-H2: chunk queue for backpressure — drop oldest when buffer is full
+  const MAX_QUEUED_CHUNKS = 5;
+  const chunkQueueRef = useRef<Blob[]>([]);
+  // FE-C4: store socket handler references so cleanup can pass them to .off()
+  const socketHandlersRef = useRef<{
+    onStarted: (() => void) | null;
+    onStopped: (() => void) | null;
+    onStreamError: ((data: { message?: string }) => void) | null;
+    onViewerCount: ((data: { count: number }) => void) | null;
+    onDisconnect: (() => void) | null;
+  }>({
+    onStarted: null,
+    onStopped: null,
+    onStreamError: null,
+    onViewerCount: null,
+    onDisconnect: null,
+  });
 
   // ── Browser support check ────────────────────────────────────────────────
   useEffect(() => {
@@ -726,7 +743,11 @@ export default function BrowserStreamer() {
     const socket = connectSocket();
     socketRef.current = socket;
 
-    // 3. Register socket event listeners
+    // 3. Register socket event listeners — store in ref so handleStop and
+    //    unmount cleanup can call .off() with the specific handler reference (FE-C4)
+    // Flag to track if MediaRecorder has been started by the onStarted handler
+    let recorderStartedByAck = false;
+
     const onStarted = () => {
       setStatus("live");
       startTimeRef.current = Date.now();
@@ -735,6 +756,14 @@ export default function BrowserStreamer() {
       durationTimerRef.current = setInterval(() => {
         setDurationSec(Math.floor((Date.now() - startTimeRef.current) / 1000));
       }, 1000);
+
+      // Start MediaRecorder only AFTER FFmpeg is ready on the backend.
+      // Previously, the recorder started immediately after socket.emit("stream:start"),
+      // creating a race condition where chunks arrived before FFmpeg was spawned.
+      if (recorderRef.current && recorderRef.current.state === "inactive" && !recorderStartedByAck) {
+        recorderStartedByAck = true;
+        recorderRef.current.start(1000); // 1-second chunks
+      }
     };
 
     const onStopped = () => {
@@ -754,10 +783,24 @@ export default function BrowserStreamer() {
       setViewerCount(data.count);
     };
 
+    // SOCK-H2: show error state and stop recording when the socket disconnects
+    // mid-stream so the user is not left staring at a frozen UI.
+    const onDisconnect = () => {
+      setStreamError(t.streamError ?? "Connection lost. Please try going live again.");
+      setStatus("error");
+      clearDurationTimer();
+      if (recorderRef.current?.state === "recording") {
+        recorderRef.current.stop();
+      }
+    };
+
+    socketHandlersRef.current = { onStarted, onStopped, onStreamError, onViewerCount, onDisconnect };
+
     socket.on("stream:started", onStarted);
     socket.on("stream:stopped", onStopped);
     socket.on("stream:error", onStreamError);
     socket.on("live:viewer_count", onViewerCount);
+    socket.on("disconnect", onDisconnect);
 
     // 4. Emit stream:start with quality params
     socket.emit("stream:start", {
@@ -777,10 +820,13 @@ export default function BrowserStreamer() {
     if (!recordStream) {
       setStreamError(t.cameraPermissionDenied);
       setStatus("error");
+      // FE-C4: pass specific handler references to .off()
       socket.off("stream:started", onStarted);
       socket.off("stream:stopped", onStopped);
       socket.off("stream:error", onStreamError);
       socket.off("live:viewer_count", onViewerCount);
+      socket.off("disconnect", onDisconnect);
+      socketHandlersRef.current = { onStarted: null, onStopped: null, onStreamError: null, onViewerCount: null, onDisconnect: null };
       return;
     }
 
@@ -795,16 +841,28 @@ export default function BrowserStreamer() {
     } catch {
       setStreamError(t.browserNotSupported);
       setStatus("error");
+      // FE-C4: pass specific handler references to .off()
       socket.off("stream:started", onStarted);
       socket.off("stream:stopped", onStopped);
       socket.off("stream:error", onStreamError);
       socket.off("live:viewer_count", onViewerCount);
+      socket.off("disconnect", onDisconnect);
+      socketHandlersRef.current = { onStarted: null, onStopped: null, onStreamError: null, onViewerCount: null, onDisconnect: null };
       return;
     }
 
+    // FE-H2: backpressure guard — drop oldest chunk if the queue is full
+    // so a slow network never causes unbounded memory growth.
+    chunkQueueRef.current = [];
     recorder.ondataavailable = (e: BlobEvent) => {
       if (e.data && e.data.size > 0 && socket.connected) {
-        e.data.arrayBuffer().then((ab) => socket.emit("stream:data", ab));
+        if (chunkQueueRef.current.length >= MAX_QUEUED_CHUNKS) {
+          // Drop the oldest chunk to make room
+          chunkQueueRef.current.shift();
+        }
+        chunkQueueRef.current.push(e.data);
+        const chunk = chunkQueueRef.current.shift()!;
+        chunk.arrayBuffer().then((ab) => socket.emit("stream:data", ab));
         recordChunkSize(e.data.size);
       }
     };
@@ -815,7 +873,8 @@ export default function BrowserStreamer() {
       clearDurationTimer();
     };
 
-    recorder.start(1000); // 1-second chunks
+    // Don't start the recorder here — it will be started by onStarted() after
+    // the backend confirms FFmpeg is ready (stream:started acknowledgment).
     recorderRef.current = recorder;
   }, [t, loadChannel, recordChunkSize, selectedPreset, isScreenSharing]);
 
@@ -823,16 +882,22 @@ export default function BrowserStreamer() {
   const handleStop = useCallback(() => {
     setStatus("stopping");
     stopMediaRecorder();
+    chunkQueueRef.current = [];
 
     if (socketRef.current?.connected) {
       socketRef.current.emit("stream:stop");
     }
 
+    // FE-C4: remove only the specific handlers registered during this stream
+    // session — avoids accidentally removing global Socket.IO listeners.
     if (socketRef.current) {
-      socketRef.current.off("stream:started");
-      socketRef.current.off("stream:stopped");
-      socketRef.current.off("stream:error");
-      socketRef.current.off("live:viewer_count");
+      const h = socketHandlersRef.current;
+      if (h.onStarted) socketRef.current.off("stream:started", h.onStarted);
+      if (h.onStopped) socketRef.current.off("stream:stopped", h.onStopped);
+      if (h.onStreamError) socketRef.current.off("stream:error", h.onStreamError);
+      if (h.onViewerCount) socketRef.current.off("live:viewer_count", h.onViewerCount);
+      if (h.onDisconnect) socketRef.current.off("disconnect", h.onDisconnect);
+      socketHandlersRef.current = { onStarted: null, onStopped: null, onStreamError: null, onViewerCount: null, onDisconnect: null };
     }
 
     clearDurationTimer();
@@ -869,6 +934,7 @@ export default function BrowserStreamer() {
       stopMediaRecorder();
       clearDurationTimer();
       stopCanvasComposite();
+      chunkQueueRef.current = [];
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
@@ -877,11 +943,15 @@ export default function BrowserStreamer() {
         screenStreamRef.current.getTracks().forEach((track) => track.stop());
         screenStreamRef.current = null;
       }
+      // FE-C4: remove only the specific handlers stored in the ref
       if (socketRef.current) {
-        socketRef.current.off("stream:started");
-        socketRef.current.off("stream:stopped");
-        socketRef.current.off("stream:error");
-        socketRef.current.off("live:viewer_count");
+        const h = socketHandlersRef.current;
+        if (h.onStarted) socketRef.current.off("stream:started", h.onStarted);
+        if (h.onStopped) socketRef.current.off("stream:stopped", h.onStopped);
+        if (h.onStreamError) socketRef.current.off("stream:error", h.onStreamError);
+        if (h.onViewerCount) socketRef.current.off("live:viewer_count", h.onViewerCount);
+        if (h.onDisconnect) socketRef.current.off("disconnect", h.onDisconnect);
+        socketHandlersRef.current = { onStarted: null, onStopped: null, onStreamError: null, onViewerCount: null, onDisconnect: null };
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

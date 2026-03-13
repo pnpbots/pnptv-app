@@ -626,36 +626,33 @@ class PNPLiveAvailabilityService {
 
   /**
    * Manually add availability slot (admin)
+   * SVC-H5: Uses INSERT ... ON CONFLICT DO NOTHING RETURNING * so that a concurrent
+   * duplicate insert on (model_id, available_from) is silently ignored rather than
+   * raising an exception, relying on the DB-level unique constraint for enforcement.
    * @param {number} modelId - Model ID
    * @param {Date} from - Start time
    * @param {Date} to - End time
-   * @returns {Promise<Object>} Created slot
+   * @returns {Promise<Object|null>} Created slot, or null if the slot already exists
    */
   static async addManualSlot(modelId, from, to) {
     try {
-      // Check for conflicts
-      const conflicts = await query(
-        `SELECT 1 FROM pnp_availability
-         WHERE model_id = $1
-         AND available_from < $3
-         AND available_to > $2`,
-        [modelId, from, to]
-      );
-
-      if (conflicts.rows?.length > 0) {
-        throw new Error('Slot conflicts with existing availability');
-      }
-
       const result = await query(
         `INSERT INTO pnp_availability
          (model_id, available_from, available_to, slot_type)
          VALUES ($1, $2, $3, 'manual')
+         ON CONFLICT (model_id, available_from) DO NOTHING
          RETURNING *`,
         [modelId, from, to]
       );
 
+      if (!result.rows || result.rows.length === 0) {
+        // Slot already exists for this model + start time — idempotent no-op
+        logger.info('Manual slot already exists (idempotent)', { modelId, from });
+        return null;
+      }
+
       logger.info('Manual slot added', { modelId, from, to });
-      return result.rows?.[0];
+      return result.rows[0];
     } catch (error) {
       logger.error('Error adding manual slot:', error);
       throw error;

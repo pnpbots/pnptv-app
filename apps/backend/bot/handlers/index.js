@@ -7,7 +7,7 @@ module.exports = {
   // User handlers
   user: {
     registerUserHandlers: require('./user'),
-    registerPrivateCalls: require('./user/privateCallsBooking'),
+    registerPrivateCalls: () => {}, // Stub: privateCallsBooking deleted — booking flow unified in CallBookingService
     registerPrivateCallsPronto: require('./user/privateCallsPronto'),
     registerPaymentHandlers: require('./payments'),
     registerMediaHandlers: require('./media'),

@@ -233,6 +233,11 @@ class StreamingService {
                 throw new Error('Stream not found');
             }
 
+            // SVC-C3: Ownership check — only the stream's host may end the stream
+            if (String(stream.hostId) !== String(hostId)) {
+                throw new Error('Not authorized to end this stream');
+            }
+
             await LiveStreamModel.endStream(streamId, hostId);
 
             logger.info('Stream ended', { streamId, hostId });
@@ -333,6 +338,11 @@ class StreamingService {
             const stream = await LiveStreamModel.getById(streamId);
             if (!stream) {
                 throw new Error('Stream not found');
+            }
+
+            // SVC-C3: Ownership check — only the stream's host may start the stream
+            if (String(stream.hostId) !== String(hostId)) {
+                throw new Error('Not authorized to start this stream');
             }
 
             await LiveStreamModel.startStream(streamId, hostId);

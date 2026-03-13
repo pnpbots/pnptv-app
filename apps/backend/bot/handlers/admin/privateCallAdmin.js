@@ -1,7 +1,6 @@
 const { Markup } = require('telegraf');
-const PrivateCallService = require('../../services/privateCallService');
 const PerformerModel = require('../../../models/performerModel');
-const CallModel = require('../../../models/callModel');
+const BookingModel = require('../../../models/bookingModel');
 const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
 const PermissionService = require('../../services/permissionService');
@@ -58,30 +57,28 @@ const registerPrivateCallAdminHandlers = (bot) => {
         return;
       }
       
-      // Get statistics
-      const stats = await PrivateCallService.getStatistics();
+      // Get statistics from BookingModel
+      const stats = await BookingModel.getStatistics();
       
       const dashboardText = lang === 'es'
         ? `📊 *Panel de Control - Llamadas Privadas*
 
 📞 *Estadísticas Generales:*
 • Total de llamadas: ${stats.total}
-• Pendientes: ${stats.pending}
 • Confirmadas: ${stats.confirmed}
 • Completadas: ${stats.completed}
 • Canceladas: ${stats.cancelled}
-• Ingresos: $${stats.revenue.toFixed(2)} USD
+• Ingresos: $${(stats.totalRevenueCents / 100).toFixed(2)} USD
 
 🎭 *Acciones Rápidas:*`
         : `📊 *Admin Dashboard - Private Calls*
 
 📞 *General Statistics:*
 • Total Calls: ${stats.total}
-• Pending: ${stats.pending}
 • Confirmed: ${stats.confirmed}
 • Completed: ${stats.completed}
 • Cancelled: ${stats.cancelled}
-• Revenue: $${stats.revenue.toFixed(2)} USD
+• Revenue: $${(stats.totalRevenueCents / 100).toFixed(2)} USD
 
 🎭 *Quick Actions:*`;
       
@@ -113,7 +110,7 @@ const registerPrivateCallAdminHandlers = (bot) => {
       }
       
       // Get all calls (limited to 20 for display)
-      const allCalls = await CallModel.getAll();
+      const allCalls = await BookingModel.getAll();
       const recentCalls = allCalls.slice(0, 20);
       
       let callsText = lang === 'es'
@@ -240,7 +237,7 @@ const registerPrivateCallAdminHandlers = (bot) => {
       
       // Get performer details
       const performer = await PerformerModel.getById(performerId);
-      const stats = await PrivateCallService.getPerformerStatistics(performerId);
+      const stats = await BookingModel.getStatistics({ performerId });
       
       if (!performer) {
         await ctx.answerCbQuery(
@@ -255,8 +252,8 @@ const registerPrivateCallAdminHandlers = (bot) => {
 
 👤 *Nombre:* ${performer.display_name}
 💰 *Precio base:* $${performer.base_price}/hr
-⭐ *Calificación:* ${stats.averageRating} (${stats.ratingCount} reseñas)
-📅 *Llamadas totales:* ${stats.totalCalls}
+⭐ *Llamadas completadas:* ${stats.completed}
+📅 *Llamadas totales:* ${stats.total}
 🕒 *Duración máx:* ${performer.max_call_duration} min
 🟢 *Disponible:* ${performer.is_available ? 'Sí' : 'No'}
 📋 *Estado:* ${performer.status}
@@ -269,8 +266,8 @@ ${performer.bio || 'Sin bio'}
 
 👤 *Name:* ${performer.display_name}
 💰 *Base Price:* $${performer.base_price}/hr
-⭐ *Rating:* ${stats.averageRating} (${stats.ratingCount} reviews)
-📅 *Total Calls:* ${stats.totalCalls}
+⭐ *Completed:* ${stats.completed}
+📅 *Total Calls:* ${stats.total}
 🕒 *Max Duration:* ${performer.max_call_duration} min
 🟢 *Available:* ${performer.is_available ? 'Yes' : 'No'}
 📋 *Status:* ${performer.status}
@@ -366,7 +363,7 @@ ${performer.bio || 'No bio'}
       }
       
       // Get performer calls
-      const calls = await CallModel.getByPerformer(performerId);
+      const calls = await BookingModel.getByPerformer(performerId);
       const performer = await PerformerModel.getById(performerId);
       
       let callsText = lang === 'es'
@@ -422,23 +419,11 @@ ${performer.bio || 'No bio'}
       }
       
       // Get detailed statistics
-      const stats = await PrivateCallService.getStatistics();
+      const stats = await BookingModel.getStatistics();
       const performers = await PerformerModel.getAll({ status: 'active' });
       
-      // Calculate average rating
-      let totalRating = 0;
-      let totalRatingCount = 0;
-      
-      for (const performer of performers) {
-        const performerStats = await PrivateCallService.getPerformerStatistics(performer.id);
-        totalRating += performerStats.averageRating * performerStats.ratingCount;
-        totalRatingCount += performerStats.ratingCount;
-      }
-      
-      const averageRating = totalRatingCount > 0 
-        ? (totalRating / totalRatingCount).toFixed(2)
-        : '0.00';
-      
+      const revenue = (stats.totalRevenueCents / 100);
+
       const detailedStatsText = lang === 'es'
         ? `📊 *Estadísticas Detalladas - Llamadas Privadas*
 
@@ -446,16 +431,14 @@ ${performer.bio || 'No bio'}
 • Total de llamadas: ${stats.total}
 • Tasa de completado: ${stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}%
 • Tasa de cancelación: ${stats.total > 0 ? Math.round((stats.cancelled / stats.total) * 100) : 0}%
-• Ingresos totales: $${stats.revenue.toFixed(2)} USD
-• Calificación promedio: ⭐ ${averageRating}
+• Ingresos totales: $${revenue.toFixed(2)} USD
 
 🎭 *Desempeño de Performers:*
 • Performers activos: ${performers.length}
-• Llamadas por performer: ${stats.total > 0 ? Math.round(stats.total / performers.length) : 0}
-• Ingresos por performer: $${stats.revenue > 0 ? (stats.revenue / performers.length).toFixed(2) : '0.00'} USD
+• Llamadas por performer: ${performers.length > 0 && stats.total > 0 ? Math.round(stats.total / performers.length) : 0}
+• Ingresos por performer: $${performers.length > 0 && revenue > 0 ? (revenue / performers.length).toFixed(2) : '0.00'} USD
 
 📅 *Tendencias:*
-• Llamadas pendientes: ${stats.pending}
 • Llamadas confirmadas: ${stats.confirmed}
 • Llamadas completadas: ${stats.completed}`
         : `📊 *Detailed Statistics - Private Calls*
@@ -464,16 +447,14 @@ ${performer.bio || 'No bio'}
 • Total Calls: ${stats.total}
 • Completion Rate: ${stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}%
 • Cancellation Rate: ${stats.total > 0 ? Math.round((stats.cancelled / stats.total) * 100) : 0}%
-• Total Revenue: $${stats.revenue.toFixed(2)} USD
-• Average Rating: ⭐ ${averageRating}
+• Total Revenue: $${revenue.toFixed(2)} USD
 
 🎭 *Performer Performance:*
 • Active Performers: ${performers.length}
-• Calls per Performer: ${stats.total > 0 ? Math.round(stats.total / performers.length) : 0}
-• Revenue per Performer: $${stats.revenue > 0 ? (stats.revenue / performers.length).toFixed(2) : '0.00'} USD
+• Calls per Performer: ${performers.length > 0 && stats.total > 0 ? Math.round(stats.total / performers.length) : 0}
+• Revenue per Performer: $${performers.length > 0 && revenue > 0 ? (revenue / performers.length).toFixed(2) : '0.00'} USD
 
 📅 *Trends:*
-• Pending Calls: ${stats.pending}
 • Confirmed Calls: ${stats.confirmed}
 • Completed Calls: ${stats.completed}`;
       

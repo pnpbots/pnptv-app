@@ -146,29 +146,27 @@ class PNPLivePromoService {
         throw new Error('Promo code no longer valid or has reached maximum uses');
       }
 
-      // Check if user already used this promo (within transaction)
-      const usageCheck = await client.query(
-        `SELECT 1 FROM pnp_live_promo_usage WHERE promo_id = $1 AND user_id = $2`,
-        [promoId, userId]
-      );
-
-      if (usageCheck.rows.length > 0) {
-        await client.query('ROLLBACK');
-        throw new Error('You have already used this promo code');
-      }
-
-      // Record usage
+      // SVC-C6: Use INSERT ... ON CONFLICT DO NOTHING RETURNING * to atomically prevent
+      // double-use of a promo by the same user. The UNIQUE constraint on (promo_id, user_id)
+      // guarantees exactly-once enforcement even under concurrent requests.
       const result = await client.query(
         `INSERT INTO pnp_live_promo_usage
          (promo_id, booking_id, user_id, discount_amount, used_at)
          VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (promo_id, user_id) DO NOTHING
          RETURNING *`,
         [promoId, bookingId, userId, discountAmount]
       );
 
+      // If no row was returned the user already used this promo (conflict was silenced)
+      if (!result.rows || result.rows.length === 0) {
+        await client.query('ROLLBACK');
+        throw new Error('You have already used this promo code');
+      }
+
       await client.query('COMMIT');
 
-      return result.rows && result.rows[0] ? result.rows[0] : null;
+      return result.rows[0];
     } catch (error) {
       await client.query('ROLLBACK');
       logger.error('Error applying promo code:', error);

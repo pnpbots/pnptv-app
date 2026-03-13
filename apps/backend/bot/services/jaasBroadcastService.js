@@ -163,9 +163,12 @@ async function startBroadcast(userId, conferenceId, roomName) {
   const endpoint = `${JAAS_API_BASE}/${appId}/v1/conferences/${encodedConferenceId}/livestream`;
 
   try {
+    const rtmpToken = process.env.RESTREAMER_RTMP_TOKEN;
+    const fullStreamUrl = rtmpToken ? `${streamUrl}?token=${rtmpToken}` : streamUrl;
+
     await axios.post(
       endpoint,
-      { streamUrl, streamKey: streamName },
+      { streamUrl: fullStreamUrl, streamKey: streamName },
       {
         headers: {
           Authorization: `Bearer ${apiToken}`,

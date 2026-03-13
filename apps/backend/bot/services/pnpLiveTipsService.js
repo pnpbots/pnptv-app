@@ -3,7 +3,7 @@
  * Handles tip management for PNP Television Live system
  */
 
-const { query } = require('../../config/postgres');
+const { query, getClient } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 
 class PNPLiveTipsService {
@@ -17,9 +17,17 @@ class PNPLiveTipsService {
    * @param {number} bookingId - Booking ID (optional)
    * @param {number} amount - Tip amount in USD
    * @param {string} message - Optional message
+   * @param {string|null} performerId - Performer ID (optional)
    * @returns {Promise<Object>} Created tip
    */
   static async createTip(userId, modelId, bookingId, amount, message = '', performerId = null) {
+    // SVC-M2: Validate amount — must be a positive integer within reasonable bounds
+    if (!Number.isInteger(amount) || amount <= 0 || amount > 100000) {
+      const err = new Error('Tip amount must be a positive integer and cannot exceed 100,000');
+      err.name = 'ValidationError';
+      throw err;
+    }
+
     try {
       const result = await query(
         `INSERT INTO pnp_tips
@@ -31,8 +39,96 @@ class PNPLiveTipsService {
 
       return result.rows && result.rows[0] ? result.rows[0] : null;
     } catch (error) {
+      if (error.name === 'ValidationError') throw error;
       logger.error('Error creating tip:', error);
       throw new Error('Failed to create tip');
+    }
+  }
+
+  /**
+   * SVC-C4: Process a token-funded tip atomically.
+   * Debits the user wallet, inserts the tip record, and marks it paid — all in one transaction.
+   * If any step fails the entire operation rolls back (no tokens lost, no ghost tip created).
+   *
+   * @param {string} userId - User ID
+   * @param {number} amount - Tip amount (positive integer, max 100,000)
+   * @param {string} message - Optional tip message
+   * @param {string} performerId - Performer ID
+   * @param {string|null} idempotencyKey - Optional caller-supplied dedup key
+   * @returns {Promise<{tip: Object, newBalance: number}>}
+   */
+  static async processTipWithTokens(userId, amount, message = '', performerId, idempotencyKey = null) {
+    // Validate amount before touching DB
+    if (!Number.isInteger(amount) || amount <= 0 || amount > 100000) {
+      const err = new Error('Tip amount must be a positive integer and cannot exceed 100,000');
+      err.name = 'ValidationError';
+      throw err;
+    }
+
+    let client;
+    try {
+      client = await getClient();
+      await client.query('BEGIN');
+
+      // Debit tokens atomically — fails immediately if balance is insufficient
+      const debitResult = await client.query(
+        `UPDATE user_token_wallets
+         SET balance_tokens = balance_tokens - $2,
+             updated_at = NOW()
+         WHERE user_id = $1 AND balance_tokens >= $2
+         RETURNING balance_tokens`,
+        [userId, amount]
+      );
+
+      if (debitResult.rows.length === 0) {
+        const err = new Error('Insufficient token balance');
+        err.name = 'InsufficientFundsError';
+        throw err;
+      }
+
+      const newBalance = debitResult.rows[0].balance_tokens;
+
+      // Insert tip record as already paid
+      const tipResult = await client.query(
+        `INSERT INTO pnp_tips
+         (user_id, model_id, performer_id, booking_id, amount, message, payment_status, transaction_id, created_at, completed_at)
+         VALUES ($1, NULL, $2, NULL, $3, $4, 'completed', $5, NOW(), NOW())
+         RETURNING *`,
+        [userId, String(performerId), amount, (message || '').slice(0, 200), `TOKEN-${userId}-${Date.now()}`]
+      );
+
+      const tip = tipResult.rows[0];
+
+      await client.query('COMMIT');
+
+      // Invalidate wallet cache outside the transaction (best-effort)
+      try {
+        const { cache } = require('../../config/redis');
+        await cache.del(`wallet:${userId}`);
+      } catch (cacheErr) {
+        logger.warn('Failed to invalidate wallet cache after token tip:', { userId, error: cacheErr.message });
+      }
+
+      logger.info('Token tip processed atomically', { userId, performerId, amount, tipId: tip.id });
+
+      return { tip, newBalance };
+    } catch (error) {
+      if (client) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (rollbackErr) {
+          logger.warn('Failed to rollback processTipWithTokens transaction:', rollbackErr);
+        }
+      }
+      if (error.name === 'ValidationError' || error.name === 'InsufficientFundsError') {
+        throw error;
+      }
+      logger.error('Error processing token tip:', error);
+      throw new Error('Failed to process token tip');
+    } finally {
+      if (client) {
+        client.release();
+      }
     }
   }
 

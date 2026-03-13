@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getCallBooking } from "@/lib/api";
 import { LiveKitMeetComponent } from "@/components/hangouts";
@@ -10,6 +10,7 @@ export default function BookingConfirmation() {
   const [booking, setBooking] = useState<any>(null);
   const [livekit, setLivekit] = useState<{ token: string; wsUrl: string; roomName: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inCall, setInCall] = useState(false);
   const [showSurvey, setShowSurvey] = useState(false);
@@ -19,10 +20,29 @@ export default function BookingConfirmation() {
     getCallBooking(Number(bookingId))
       .then((res) => {
         setBooking(res.booking);
-        if ((res as any).livekit) setLivekit((res as any).livekit);
+        // Don't store livekit token at load time — fetch fresh on join
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load booking"))
       .finally(() => setLoading(false));
+  }, [bookingId]);
+
+  // BC-H-03: Fetch fresh LiveKit token on "Join Call" click, not at page load
+  const handleJoinCall = useCallback(async () => {
+    if (!bookingId) return;
+    setJoining(true);
+    try {
+      const res = await getCallBooking(Number(bookingId));
+      if ((res as any).livekit) {
+        setLivekit((res as any).livekit);
+        setInCall(true);
+      } else {
+        setError("Unable to generate call token. Please try again.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to join call");
+    } finally {
+      setJoining(false);
+    }
   }, [bookingId]);
 
   const startTime = booking?.start_at ? new Date(booking.start_at) : null;
@@ -146,12 +166,12 @@ export default function BookingConfirmation() {
 
         {/* Join call button */}
         <button
-          onClick={() => setInCall(true)}
-          disabled={!canJoin || !livekit}
+          onClick={handleJoinCall}
+          disabled={!canJoin || joining}
           className="w-full py-3.5 rounded-xl font-semibold text-white text-sm transition-opacity disabled:opacity-40"
           style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
         >
-          {canJoin ? "Join Call" : timeUntilStart}
+          {joining ? "Connecting..." : canJoin ? "Join Call" : timeUntilStart}
         </button>
 
         {/* Tutorial / Rules */}

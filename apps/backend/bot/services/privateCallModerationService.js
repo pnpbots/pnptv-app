@@ -1,4 +1,4 @@
-const CallModel = require('../../models/callModel');
+const BookingModel = require('../../models/bookingModel');
 const CallModerationLogModel = require('../../models/callModerationLogModel');
 const UserModel = require('../../models/userModel');
 const PerformerModel = require('../../models/performerModel');
@@ -20,7 +20,7 @@ class PrivateCallModerationService {
    */
   static async monitorActiveCalls(bot) {
     try {
-      const activeCalls = await CallModel.getByStatus('active');
+      const activeCalls = await BookingModel.getByStatus('active');
       let monitoredCount = 0;
       
       for (const call of activeCalls) {
@@ -77,14 +77,14 @@ class PrivateCallModerationService {
    */
   static async endCallDueToTimeout(bot, callId) {
     try {
-      const call = await CallModel.getById(callId);
+      const call = await BookingModel.getById(callId);
       
       if (!call || call.status !== 'active') {
         return false;
       }
       
       // End the call
-      await CallModel.updateStatus(callId, 'completed', {
+      await BookingModel.updateStatus(callId, 'completed', {
         ended_at: new Date(),
         completed_at: new Date(),
       });
@@ -131,7 +131,7 @@ class PrivateCallModerationService {
   static async checkForNoShows(bot) {
     try {
       const now = new Date();
-      const scheduledCalls = await CallModel.getByStatus('confirmed');
+      const scheduledCalls = await BookingModel.getByStatus('confirmed');
       let noShowsDetected = 0;
       
       for (const call of scheduledCalls) {
@@ -167,14 +167,14 @@ class PrivateCallModerationService {
    */
   static async handleNoShow(bot, callId, userType) {
     try {
-      const call = await CallModel.getById(callId);
+      const call = await BookingModel.getById(callId);
       
       if (!call || call.status !== 'confirmed') {
         return false;
       }
       
       // Mark as no-show
-      await CallModel.updateStatus(callId, 'completed', {
+      await BookingModel.updateStatus(callId, 'completed', {
         no_show: true,
         ended_at: new Date(),
         completed_at: new Date(),
@@ -262,7 +262,7 @@ class PrivateCallModerationService {
   static async checkPerformerNoShowPattern(performerId) {
     try {
       // Get recent calls for this performer
-      const recentCalls = await CallModel.getByPerformer(performerId);
+      const recentCalls = await BookingModel.getByPerformer(performerId);
       const noShowCalls = recentCalls.filter(call => call.no_show && call.status === 'completed');
       
       // If performer has 3 or more no-shows in the last 30 days, flag them
@@ -319,14 +319,14 @@ class PrivateCallModerationService {
    */
   static async reportIncident(callId, reporterId, incidentType, details) {
     try {
-      const call = await CallModel.getById(callId);
+      const call = await BookingModel.getById(callId);
       
       if (!call || call.status !== 'active') {
         throw new Error('Call not found or not active');
       }
       
       // End the call immediately
-      await CallModel.updateStatus(callId, 'completed', {
+      await BookingModel.updateStatus(callId, 'completed', {
         incident_reported: true,
         incident_details: details,
         ended_at: new Date(),
@@ -537,7 +537,7 @@ class PrivateCallModerationService {
       }
       
       // Check for recent no-shows
-      const recentCalls = await CallModel.getByPerformer(performerId);
+      const recentCalls = await BookingModel.getByPerformer(performerId);
       const recentNoShows = recentCalls.filter(call => 
         call.no_show && 
         call.status === 'completed'

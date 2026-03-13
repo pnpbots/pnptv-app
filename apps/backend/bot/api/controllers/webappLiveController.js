@@ -2,12 +2,6 @@ const logger = require('../../../utils/logger');
 const { getPool } = require('../../../config/postgres');
 const axios = require('axios');
 
-const authGuard = (req, res) => {
-  const user = req.session?.user;
-  if (!user) { res.status(401).json({ error: 'Not authenticated' }); return null; }
-  return user;
-};
-
 /**
  * Module-level cache for the Restreamer auth token.
  * Tokens typically last 1 hour; we cache for 55 minutes to avoid expiry mid-request.
@@ -123,7 +117,7 @@ function sanitizeRefId(refId) {
 // Proxies to Restreamer API and returns active HLS streams.
 // ---------------------------------------------------------------------------
 const listStreams = async (req, res) => {
-  const user = authGuard(req, res); if (!user) return;
+  const user = req.session.user;
 
   const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
   const publicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
@@ -173,7 +167,7 @@ const listStreams = async (req, res) => {
 // by an admin before they can stream. If no channel is assigned, 404 is returned.
 // ---------------------------------------------------------------------------
 const getRtmpKey = async (req, res) => {
-  const user = authGuard(req, res); if (!user) return;
+  const user = req.session.user;
   if (!['model', 'creator', 'admin', 'superadmin'].includes(user.role)) {
     return res.status(403).json({
       success: false,
@@ -294,9 +288,7 @@ const assignChannel = async (req, res) => {
       }
       const exists = processes.some(p => p.reference === channelRef);
       if (!exists) {
-        return res.status(404).json({
-          error: `Channel '${channelRef}' does not exist in Restreamer. Available channels: ${processes.map(p => p.reference).join(', ')}`,
-        });
+        return res.status(404).json({ error: 'Channel not found' });
       }
     }
 

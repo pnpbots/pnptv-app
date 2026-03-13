@@ -563,8 +563,7 @@ export function getStreamerSettings(): Promise<{ success: boolean; settings: Str
 export function updateStreamerSettings(settings: Partial<StreamerSettings>): Promise<{ success: boolean; settings: StreamerSettings }> {
   return request("/api/webapp/live/settings", {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(settings),
+    body: settings,
   });
 }
 

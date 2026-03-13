@@ -15,8 +15,7 @@ const { getPool } = require('../../../config/postgres');
  * hostname so the backend FFmpeg process can reach Restreamer directly.
  */
 const getMyChannel = async (req, res) => {
-  const user = req.session?.user;
-  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+  const user = req.session.user;
 
   try {
     const { rows } = await getPool().query(
@@ -37,12 +36,17 @@ const getMyChannel = async (req, res) => {
       ? channelRef.slice('pnptv-'.length)
       : channelRef;
 
+    const rtmpToken = process.env.RESTREAMER_RTMP_TOKEN;
+    const rtmpUrl = rtmpToken
+      ? `rtmp://restreamer:1935/live/${streamKey}?token=${rtmpToken}`
+      : `rtmp://restreamer:1935/live/${streamKey}`;
+
     return res.json({
       success: true,
       channel: {
         ref: channelRef,
         streamKey,
-        rtmpUrl: `rtmp://restreamer:1935/live/${streamKey}`,
+        rtmpUrl,
       },
     });
   } catch (err) {

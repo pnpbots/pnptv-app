@@ -914,10 +914,9 @@ export default function XAutoCampaigns() {
           <button
             onClick={async () => {
               try {
-                const res = await startXOAuth();
+                const res = await startXOAuth1();
                 if (res.url) {
-                  window.open(res.url, "_blank");
-                  setSuccess(t.admin.xCampaigns.feedback.authOpened);
+                  window.location.href = res.url;
                 }
               } catch (err: unknown) {
                 setError(err instanceof Error ? err.message : "Failed to start X OAuth");
@@ -926,22 +925,6 @@ export default function XAutoCampaigns() {
             className="px-4 py-2 rounded-lg text-sm font-medium bg-pnp-surface border border-pnp-border text-pnp-textPrimary hover:border-pnp-accent/50 transition-colors"
           >
             + {t.admin.xCampaigns.actions.addAccount}
-          </button>
-          <button
-            onClick={async () => {
-              try {
-                const res = await startXOAuth1();
-                if (res.url) {
-                  window.location.href = res.url;
-                }
-              } catch (err: unknown) {
-                setError(err instanceof Error ? err.message : "Failed to start X OAuth 1.0a");
-              }
-            }}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-green-500/20 border border-green-500/40 text-green-400 hover:bg-green-500/30 transition-colors"
-            title="OAuth 1.0a — permanent tokens, no expiry"
-          >
-            + Connect X (1.0a)
           </button>
         </div>
 

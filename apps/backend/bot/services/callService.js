@@ -1,5 +1,5 @@
 const axios = require('axios');
-const CallModel = require('../../models/callModel');
+const BookingModel = require('../../models/bookingModel');
 const PaymentModel = require('../../models/paymentModel');
 const UserModel = require('../../models/userModel');
 const logger = require('../../utils/logger');
@@ -74,7 +74,7 @@ class CallService {
       }
 
       // Create call booking
-      const call = await CallModel.create({
+      const call = await BookingModel.create({
         userId: bookingData.userId.toString(),
         userName: bookingData.userName,
         userUsername: bookingData.userUsername,
@@ -93,7 +93,7 @@ class CallService {
       });
 
       // Update call with meeting URL
-      await CallModel.updateStatus(call.id, 'confirmed', {
+      await BookingModel.updateStatus(call.id, 'confirmed', {
         meetingUrl,
       });
 
@@ -121,7 +121,7 @@ class CallService {
    */
   static async setAvailability(availabilityData) {
     try {
-      const availability = await CallModel.setAvailability(availabilityData);
+      const availability = await BookingModel.setAvailability(availabilityData);
 
       logger.info('Availability set', {
         adminId: availabilityData.adminId,
@@ -141,7 +141,7 @@ class CallService {
    */
   static async getAvailability() {
     try {
-      return await CallModel.getAvailability();
+      return await BookingModel.getAvailability();
     } catch (error) {
       logger.error('Error getting availability:', error);
       return { available: false, message: 'Error checking availability' };
@@ -240,7 +240,7 @@ class CallService {
       });
 
       // Mark reminder as sent
-      await CallModel.updateStatus(call.id, call.status, {
+      await BookingModel.updateStatus(call.id, call.status, {
         reminderSent: true,
         reminderSentAt: new Date(),
       });
@@ -264,7 +264,7 @@ class CallService {
    */
   static async getUpcomingCalls() {
     try {
-      return await CallModel.getUpcoming();
+      return await BookingModel.getUpcoming();
     } catch (error) {
       logger.error('Error getting upcoming calls:', error);
       return [];
@@ -279,7 +279,7 @@ class CallService {
    */
   static async cancelCall(callId, reason = 'User cancellation') {
     try {
-      await CallModel.updateStatus(callId, 'cancelled', {
+      await BookingModel.updateStatus(callId, 'cancelled', {
         cancelledAt: new Date(),
         cancellationReason: reason,
       });
@@ -299,7 +299,7 @@ class CallService {
    */
   static async completeCall(callId) {
     try {
-      await CallModel.updateStatus(callId, 'completed', {
+      await BookingModel.updateStatus(callId, 'completed', {
         completedAt: new Date(),
       });
 
@@ -317,7 +317,7 @@ class CallService {
    */
   static async getStatistics() {
     try {
-      return await CallModel.getStatistics();
+      return await BookingModel.getStatistics();
     } catch (error) {
       logger.error('Error getting call statistics:', error);
       return {

@@ -11,7 +11,7 @@
  */
 
 const { v4: uuidv4 } = require('uuid');
-const { query } = require('../../config/postgres');
+const { query, getPool } = require('../../config/postgres');
 const PaymentModel = require('../../models/paymentModel');
 const callPackageService = require('./callPackageService');
 const logger = require('../../utils/logger');
@@ -198,15 +198,50 @@ async function onCallPaymentSuccess(paymentId) {
     return;
   }
 
-  // 3. Grant call credits
-  const credit = await callPackageService.grantCallCredits(payment.user_id, packageId, paymentId);
+  // HIGH-05: Grant call credits + update payment status in single transaction
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  logger.info('[callCheckoutService] call credits granted after payment', {
-    paymentId,
-    userId: payment.user_id,
-    packageId,
-    creditId: credit.id,
-  });
+    // Grant call credits within transaction
+    const pkgResult = await client.query('SELECT * FROM call_packages WHERE id = $1', [packageId]);
+    if (!pkgResult.rows[0]) throw new Error(`Package ${packageId} not found`);
+    const { creator_id, quantity } = pkgResult.rows[0];
+
+    const creditResult = await client.query(
+      `INSERT INTO call_credits
+         (member_id, creator_id, package_id, quantity_total, payment_id)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [payment.user_id, creator_id, packageId, quantity, paymentId]
+    );
+    const credit = creditResult.rows[0];
+
+    // Update payment status to completed
+    await client.query(
+      `UPDATE payments SET status = 'success', updated_at = NOW() WHERE id = $1 AND status = 'pending'`,
+      [paymentId]
+    );
+
+    await client.query('COMMIT');
+
+    logger.info('[callCheckoutService] call credits granted after payment', {
+      paymentId,
+      userId: payment.user_id,
+      packageId,
+      creditId: credit.id,
+    });
+  } catch (txErr) {
+    await client.query('ROLLBACK');
+    logger.error('[callCheckoutService] onCallPaymentSuccess transaction failed', {
+      paymentId,
+      error: txErr.message,
+    });
+    throw txErr;
+  } finally {
+    client.release();
+  }
 }
 
 module.exports = { createCallCheckout, onCallPaymentSuccess };

@@ -28,6 +28,9 @@ interface UseLiveSocketResult {
   sendMessage: (content: string) => void;
   latestTip: LiveTip | null;
   walletBalance: number | null;
+  /** FE-M1: true once the socket has delivered at least one wallet:updated event.
+   *  Callers should prefer the socket value over HTTP-fetched values once true. */
+  socketBalanceReceived: boolean;
   setWalletBalance: (b: number) => void;
   socketError: string | null;
 }
@@ -43,6 +46,10 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
 
   // Tracks the currently joined streamId so we can emit live:leave on change/unmount
   const joinedStreamRef = useRef<string | null>(null);
+  // SOCK-H6: prevent double live:join emissions when the effect re-runs
+  const hasJoinedRef = useRef(false);
+  // FE-M1: once the socket delivers a balance, prefer it over HTTP-fetched values
+  const socketBalanceReceivedRef = useRef(false);
 
   // ── Always-on: personal event bus (wallet updates, connection state) ─────────
   // Runs once on mount — connects the socket regardless of streamId so that
@@ -53,6 +60,9 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     const socket = connectSocket();
 
     const onWalletUpdated = (data: { balance: number }) => {
+      // FE-M1: mark that the authoritative socket value has arrived;
+      // callers that set balance via HTTP should check this flag first.
+      socketBalanceReceivedRef.current = true;
       setWalletBalance(data.balance);
     };
     const onConnect = () => {
@@ -106,6 +116,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
         socket.emit("live:leave", { streamId: joinedStreamRef.current });
         joinedStreamRef.current = null;
       }
+      hasJoinedRef.current = false;
       setMessages([]);
       setViewerCount(0);
       return;
@@ -117,6 +128,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     if (joinedStreamRef.current && joinedStreamRef.current !== streamId) {
       socket.emit("live:leave", { streamId: joinedStreamRef.current });
       joinedStreamRef.current = null;
+      hasJoinedRef.current = false;
     }
 
     // Reset UI state before registering new listeners so stale messages
@@ -125,11 +137,17 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     setViewerCount(0);
 
     const joinStream = () => {
+      // SOCK-H6: guard against double join when effect re-runs (e.g. StrictMode
+      // double-invoke or hot reload) while the socket is already connected.
+      if (hasJoinedRef.current) return;
+      hasJoinedRef.current = true;
       socket.emit("live:join", { streamId });
       joinedStreamRef.current = streamId;
     };
 
     const onConnectForStream = () => {
+      // Reset the guard on reconnect so we rejoin after a disconnect
+      hasJoinedRef.current = false;
       joinStream();
     };
 
@@ -172,6 +190,8 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
         socket.emit("live:leave", { streamId: joinedStreamRef.current });
         joinedStreamRef.current = null;
       }
+      // SOCK-H6: reset join guard on cleanup so re-mounting can join cleanly
+      hasJoinedRef.current = false;
       socket.off("connect", onConnectForStream);
       socket.off("live:history", onHistory);
       socket.off("live:message", onMessage);
@@ -195,5 +215,16 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     [streamId]
   );
 
-  return { messages, viewerCount, isConnected, reconnecting, sendMessage, latestTip, walletBalance, setWalletBalance, socketError };
+  return {
+    messages,
+    viewerCount,
+    isConnected,
+    reconnecting,
+    sendMessage,
+    latestTip,
+    walletBalance,
+    socketBalanceReceived: socketBalanceReceivedRef.current,
+    setWalletBalance,
+    socketError,
+  };
 }

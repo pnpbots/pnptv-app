@@ -7,6 +7,40 @@ const socketSingleton = require('../../services/socketSingleton');
 // Channel ref validation: alphanumeric + hyphens only (matches Restreamer slugs like 'pnptv-frank')
 const CHANNEL_REF_RE = /^[a-zA-Z0-9-]+$/;
 
+// CSS color validation — accepts hex (#RGB, #RRGGBB, #RRGGBBAA), rgb/rgba/hsl/hsla, and keywords
+const CSS_COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$|^(rgb|hsl)a?\([^)]+\)$|^(transparent|inherit|currentColor)$/i;
+
+// Private IP ranges that must never appear in user-supplied URLs
+const PRIVATE_IP_RE = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|169\.254\.|::1|fc00:|fd)/i;
+
+/**
+ * Validate a URL for use in overlay assets.
+ * - Must be parseable as a URL
+ * - Must use the https: protocol (prevents HTTP downgrade and non-URL schemes)
+ * - Hostname must not resolve to a private/loopback IP range (SSRF prevention)
+ *
+ * @param {string} raw
+ * @returns {{ valid: boolean, error?: string }}
+ */
+function validateOverlayUrl(raw) {
+  if (typeof raw !== 'string' || raw.length === 0) {
+    return { valid: false, error: 'URL must be a non-empty string' };
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return { valid: false, error: 'Invalid URL' };
+  }
+  if (parsed.protocol !== 'https:') {
+    return { valid: false, error: 'URL must use HTTPS' };
+  }
+  if (PRIVATE_IP_RE.test(parsed.hostname)) {
+    return { valid: false, error: 'URL hostname is not allowed' };
+  }
+  return { valid: true };
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/webapp/admin/stream-overlays
 // Admin only. Returns the overlay config for every channel.
@@ -119,6 +153,32 @@ const updateOverlay = async (req, res) => {
     return res.status(400).json({ error: 'No valid fields provided for update' });
   }
 
+  // CTRL-H1: Validate URL fields — must be https-only with no private IP hostnames
+  for (const urlField of ['logo_url', 'banner_image_url']) {
+    if (Object.prototype.hasOwnProperty.call(req.body, urlField) && req.body[urlField] !== null) {
+      const check = validateOverlayUrl(req.body[urlField]);
+      if (!check.valid) {
+        return res.status(400).json({ error: `${urlField}: ${check.error}` });
+      }
+    }
+  }
+
+  // CTRL-C4: Validate CSS color fields
+  for (const colorField of ['banner_bg_color', 'banner_text_color']) {
+    if (Object.prototype.hasOwnProperty.call(req.body, colorField) && req.body[colorField] !== null) {
+      if (typeof req.body[colorField] !== 'string' || !CSS_COLOR_RE.test(req.body[colorField])) {
+        return res.status(400).json({ error: `${colorField}: invalid CSS color value` });
+      }
+    }
+  }
+
+  // CTRL-C4: Cap banner_text at 250 characters
+  if (Object.prototype.hasOwnProperty.call(req.body, 'banner_text') && req.body.banner_text !== null) {
+    if (typeof req.body.banner_text !== 'string' || req.body.banner_text.length > 250) {
+      return res.status(400).json({ error: 'banner_text must not exceed 250 characters' });
+    }
+  }
+
   try {
     // Upsert: on first write for a channelRef, create the row.
     // On conflict, apply only the partial SET clauses built above.
@@ -135,10 +195,13 @@ const updateOverlay = async (req, res) => {
 
     const overlay = rows[0];
 
-    // Push real-time overlay update to all viewers currently in this channel room
+    // Push real-time overlay update to all viewers currently in this channel room.
+    // Strip updated_by — it is an internal admin user ID and must not be broadcast
+    // to unauthenticated or lower-privileged viewers watching the live stream.
     const io = socketSingleton.get();
     if (io) {
-      io.to(`live:${channelRef}`).emit('overlay:updated', overlay);
+      const { updated_by: _strip, ...overlayPublic } = overlay;
+      io.to(`live:${channelRef}`).emit('overlay:updated', overlayPublic);
     }
 
     logger.info(`Admin ${user.id} updated overlay for channel '${channelRef}'`);

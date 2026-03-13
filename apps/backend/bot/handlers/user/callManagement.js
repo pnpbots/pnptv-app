@@ -1,6 +1,4 @@
-const CallModel = require('../../../models/callModel');
-const CallService = require('../../services/callService');
-const PaymentService = require('../../services/paymentService');
+const BookingModel = require('../../../models/bookingModel');
 const logger = require('../../../utils/logger');
 
 /**
@@ -63,7 +61,7 @@ function registerCallManagementHandlers(bot) {
   bot.command('mycalls', async (ctx) => {
     try {
       const userId = ctx.from.id;
-      const calls = await CallModel.getByUser(userId, 10);
+      const calls = await BookingModel.getByUser(userId, 10);
 
       if (!calls || calls.length === 0) {
         await ctx.reply(
@@ -135,7 +133,7 @@ function registerCallManagementHandlers(bot) {
       await ctx.answerCbQuery();
 
       const callId = ctx.match[1];
-      const call = await CallModel.getById(callId);
+      const call = await BookingModel.getById(callId);
 
       if (!call || call.userId.toString() !== ctx.from.id.toString()) {
         await ctx.reply('❌ Call not found or access denied.');
@@ -191,7 +189,7 @@ function registerCallManagementHandlers(bot) {
       await ctx.answerCbQuery();
 
       const callId = ctx.match[1];
-      const call = await CallModel.getById(callId);
+      const call = await BookingModel.getById(callId);
 
       if (!call || call.userId.toString() !== ctx.from.id.toString()) {
         await ctx.reply('❌ Call not found or access denied.');
@@ -254,7 +252,7 @@ function registerCallManagementHandlers(bot) {
     if (ctx.session?.temp?.reschedulingCallId) {
       try {
         const callId = ctx.session.temp.reschedulingCallId;
-        const call = await CallModel.getById(callId);
+        const call = await BookingModel.getById(callId);
 
         if (!call) {
           delete ctx.session.temp.reschedulingCallId;
@@ -275,7 +273,7 @@ function registerCallManagementHandlers(bot) {
         const newTime = lines[1].trim();
 
         // Update call
-        await CallModel.updateStatus(callId, call.status, {
+        await BookingModel.updateStatus(callId, call.status, {
           scheduledDate: newDate,
           scheduledTime: newTime,
           rescheduledAt: new Date(),
@@ -329,7 +327,7 @@ function registerCallManagementHandlers(bot) {
       await ctx.answerCbQuery();
 
       const callId = ctx.match[1];
-      const call = await CallModel.getById(callId);
+      const call = await BookingModel.getById(callId);
 
       if (!call || call.userId.toString() !== ctx.from.id.toString()) {
         await ctx.reply('❌ Call not found or access denied.');
@@ -390,24 +388,30 @@ function registerCallManagementHandlers(bot) {
       await ctx.answerCbQuery('Processing cancellation...');
 
       const callId = ctx.match[1];
-      const refundPercentage = parseInt(ctx.match[2]);
-
-      const call = await CallModel.getById(callId);
+      // HIGH-04: Recalculate refund server-side instead of trusting callback_data
+      const call = await BookingModel.getById(callId);
 
       if (!call || call.userId.toString() !== ctx.from.id.toString()) {
         await ctx.reply('❌ Call not found or access denied.');
         return;
       }
 
-      // Cancel the call
-      await CallModel.updateStatus(callId, 'cancelled', {
-        cancelledAt: new Date(),
-        cancelledBy: 'user',
-        cancellationReason: 'User requested cancellation',
-        refundPercentage,
-      });
+      // HIGH-04: Recalculate refund percentage server-side
+      const scheduledDate = new Date(call.scheduledDate || call.startTimeUtc);
+      const now = new Date();
+      const hoursUntilCall = (scheduledDate - now) / (1000 * 60 * 60);
 
-      const refundAmount = (call.amount || 100) * (refundPercentage / 100);
+      let refundPercentage = 0;
+      if (hoursUntilCall >= 24) {
+        refundPercentage = 100;
+      } else if (hoursUntilCall >= 2) {
+        refundPercentage = 50;
+      }
+
+      // Cancel the call
+      await BookingModel.cancel(callId, 'User requested cancellation', 'user');
+
+      const refundAmount = (call.amount || call.priceCents / 100 || 100) * (refundPercentage / 100);
 
       let message = '✅ *Call Cancelled*\n\n';
       message += `Your call has been cancelled.\n\n`;

@@ -84,7 +84,6 @@ const registerPerformerManagementHandlers = require('../handlers/admin/performer
 
 const registerPNPLiveModelHandlers = require('../handlers/model/pnpLiveModelHandler');
 const { registerWallOfFameHandlers } = require('../handlers/group/wallOfFame');
-const registerPrivateCallHandlers = require('../handlers/user/privateCalls');
 const registerPrivateCallsProntoHandlers = require('../handlers/user/privateCallsPronto');
 const registerPaymentHistoryHandlers = require('../handlers/user/paymentHistory');
 const registerPaymentAnalyticsHandlers = require('../handlers/admin/paymentAnalytics');
@@ -672,15 +671,8 @@ const startBot = async () => {
     registerRoleManagementHandlers(bot);
     // registerPerformerManagementHandlers(bot);
     registerWallOfFameHandlers(bot);
-    // registerPrivateCallHandlers(bot);
-    // registerPrivateCallsProntoHandlers(bot);
-    // registerPaymentHistoryHandlers(bot);
-    // registerPaymentAnalyticsHandlers(bot);
-    // registerUserCallManagementHandlers(bot);
-    // registerCallFeedbackHandlers(bot);
-    // registerCallPackageHandlers(bot);
-    // registerPromoHandlers(bot);
     // --- End disabled user-facing handlers ---
+
     // Payment tutorial (active — /pay command)
     registerPaymentTutorialHandlers(bot);
 

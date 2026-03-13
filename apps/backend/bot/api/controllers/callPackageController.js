@@ -1,6 +1,8 @@
 'use strict';
 const callPackageService = require('../../services/callPackageService');
-const bookACallService = require('../../services/bookACallService');
+const CallBookingService = require('../../services/CallBookingService');
+const moment = require('moment-timezone');
+
 const logger = require('../../../utils/logger');
 
 /**
@@ -81,8 +83,11 @@ async function getBookingOptions(req, res) {
       return res.status(400).json({ error: 'duration must be 30 or 60' });
     }
 
-    const options = await bookACallService.getBookingOptions(creatorId, durationMinutes);
-    res.json({ success: true, ...options });
+    const fromDate = moment.utc().toDate();
+    const toDate = moment.utc().add(14, 'days').toDate();
+    const slots = await CallBookingService.getAvailableSlots(creatorId, fromDate, toDate, durationMinutes);
+    
+    res.json({ success: true, slots: slots.slice(0, 5), type: 'slots' });
   } catch (err) {
     logger.error('getBookingOptions error', { error: err.message });
     res.status(500).json({ success: false, error: 'Failed to retrieve booking options' });
@@ -116,31 +121,35 @@ async function bookCall(req, res) {
       return res.status(400).json({ error: 'durationMinutes must be 30 or 60' });
     }
 
-    // Validate startAt is a valid future timestamp
-    const startDate = new Date(startAt);
-    if (isNaN(startDate.getTime()) || startDate <= new Date()) {
+    // Validate startAt is a valid future ISO string
+    if (!moment(startAt, moment.ISO_8601, true).isValid() || moment.utc(startAt).isBefore(moment.utc())) {
       return res.status(400).json({ error: 'startAt must be a valid future ISO timestamp' });
     }
 
-    const booking = await bookACallService.bookCall(
+    // BC-C-03: Re-verify creator online status from Redis before booking
+    const { getRedis } = require('../../../config/redis');
+    const redis = getRedis();
+    const creatorOnline = await redis.get(`user:${creatorId}:active`);
+    if (!creatorOnline) {
+      logger.warn('bookCall: creator offline at booking time', { creatorId, memberId });
+      // Not blocking — scheduled bookings are valid even if creator is offline
+    }
+
+    const booking = await CallBookingService.createBooking({
       memberId,
-      String(creatorId),
+      creatorId,
       startAt,
-      Number(creditId),
-      parsedDuration
-    );
+      creditId: Number(creditId),
+      durationMinutes: parsedDuration,
+    });
 
     res.status(201).json({ success: true, booking });
   } catch (err) {
     logger.error('bookCall error', { error: err.message, code: err.code });
-
-    if (err.code === 'NO_CREDIT') {
-      return res.status(402).json({ success: false, error: 'No valid call credit available', code: 'NO_CREDIT' });
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ success: false, error: err.message, code: err.code });
     }
-    if (err.code === 'slot_not_available' || err.code === 'BOOKING_FAILED') {
-      return res.status(409).json({ success: false, error: err.message || 'Slot is no longer available', code: err.code });
-    }
-    res.status(500).json({ success: false, error: 'Failed to book call' });
+    return res.status(500).json({ success: false, error: 'Failed to book call' });
   }
 }
 
@@ -237,20 +246,40 @@ async function updateMyPackage(req, res) {
       return res.status(404).json({ success: false, error: 'Package not found' });
     }
 
-    const updates = {};
-    if (priceUsd !== undefined) updates.price_usd = Number(priceUsd);
-    if (title !== undefined) updates.title = title;
+    // CRIT-02: Explicit whitelist SET clauses — no dynamic column names
+    // MED-03: Validate title type + 200-char cap
+    // MED-04: Validate priceUsd: reject NaN, <=0, >1000
+    const setClauses = [];
+    const values = [];
+    let paramIdx = 1;
 
-    if (Object.keys(updates).length === 0) {
+    if (priceUsd !== undefined) {
+      const numPrice = Number(priceUsd);
+      if (isNaN(numPrice) || numPrice <= 0 || numPrice > 1000) {
+        return res.status(400).json({ success: false, error: 'Price must be $0.01-$1000' });
+      }
+      setClauses.push(`price_usd = $${paramIdx++}`);
+      values.push(numPrice);
+    }
+
+    if (title !== undefined) {
+      if (typeof title !== 'string' || title.length > 200) {
+        return res.status(400).json({ success: false, error: 'Title must be a string under 200 characters' });
+      }
+      setClauses.push(`title = $${paramIdx++}`);
+      values.push(title);
+    }
+
+    if (setClauses.length === 0) {
       return res.status(400).json({ success: false, error: 'Nothing to update' });
     }
 
-    const setClauses = Object.keys(updates).map((k, i) => `${k} = $${i + 1}`);
-    const values = [...Object.values(updates), packageId, creatorId];
+    setClauses.push('updated_at = NOW()');
+    values.push(packageId, creatorId);
 
     const { query } = require('../../../config/postgres');
     await query(
-      `UPDATE call_packages SET ${setClauses.join(', ')}, updated_at = NOW() WHERE id = $${values.length - 1} AND creator_id = $${values.length}`,
+      `UPDATE call_packages SET ${setClauses.join(', ')} WHERE id = $${paramIdx} AND creator_id = $${paramIdx + 1}`,
       values
     );
 

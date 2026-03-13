@@ -117,8 +117,9 @@ router.get('/auth/callback', callbackLimiter, async (req, res) => {
     const { code, state, error: oauthError } = req.query;
 
     if (oauthError) {
-      logger.warn('Canva OAuth denied', { error: oauthError });
-      return res.redirect('/admin/canva?canva_error=access_denied');
+      const desc = req.query.error_description || oauthError;
+      logger.warn('Canva OAuth denied', { error: oauthError, description: desc });
+      return res.redirect(`/admin/canva?canva_error=${encodeURIComponent(desc)}`);
     }
 
     if (!code || !state) {
