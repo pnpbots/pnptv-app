@@ -14,22 +14,16 @@ interface LivePlayerProps {
 
 export function LivePlayer({ src, title, poster, className = "", overlay }: LivePlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [status, setStatus] = useState<"loading" | "live" | "offline" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "live" | "offline" | "error" | "retrying">("loading");
+  const hlsRef = useRef<Hls | null>(null);
   const t = useI18n();
 
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !src) {
-      // No source provided — show offline instead of infinite spinner
-      if (!src) setStatus("offline");
-      return;
-    }
-
-    setStatus("loading");
-    let hls: Hls | null = null;
+  const initHls = (video: HTMLVideoElement, source: string) => {
+    hlsRef.current?.destroy();
+    hlsRef.current = null;
 
     if (Hls.isSupported()) {
-      hls = new Hls({
+      const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
         // Retry faster on live streams to handle brief RTMP reconnects
@@ -41,7 +35,8 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
         fragLoadingRetryDelay: 2000,
       });
 
-      hls.loadSource(src);
+      hlsRef.current = hls;
+      hls.loadSource(source);
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -53,15 +48,15 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
         console.warn("[LivePlayer] HLS error:", data.type, data.details, data.fatal ? "(FATAL)" : "");
         if (data.fatal) {
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            // Try to recover once before showing offline
+            // Show retrying spinner immediately, then go offline after 3s if not recovered
             console.warn("[LivePlayer] Fatal network error, attempting recovery…");
-            hls!.startLoad();
-            // If recovery fails, the next fatal error will set offline
+            setStatus("retrying");
+            hls.startLoad();
             setTimeout(() => {
-              if (hls && hls.media && hls.media.readyState === 0) {
+              if (hls.media && hls.media.readyState === 0) {
                 setStatus("offline");
               }
-            }, 8000);
+            }, 3000);
           } else {
             setStatus("error");
           }
@@ -69,34 +64,53 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
       // Safari native HLS
+      video.src = source;
       const onMetadata = () => {
         setStatus("live");
         video.play().catch(() => {});
       };
       const onError = () => setStatus("error");
-      video.src = src;
       video.addEventListener("loadedmetadata", onMetadata);
       video.addEventListener("error", onError);
-      return () => {
-        hls?.destroy();
-        video.removeEventListener("loadedmetadata", onMetadata);
-        video.removeEventListener("error", onError);
-      };
     } else {
       setStatus("error");
     }
+  };
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !src) {
+      // No source provided — show offline instead of infinite spinner
+      if (!src) setStatus("offline");
+      return;
+    }
+
+    setStatus("loading");
+    initHls(video, src);
 
     return () => {
-      hls?.destroy();
+      hlsRef.current?.destroy();
+      hlsRef.current = null;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
-  if (status === "loading") {
+  const handleRetry = () => {
+    const video = videoRef.current;
+    if (!video || !src) return;
+    setStatus("loading");
+    initHls(video, src);
+  };
+
+  if (status === "loading" || status === "retrying") {
     return (
       <div className={`relative aspect-video overflow-hidden rounded-xl ${className}`}>
         <Skeleton className="w-full h-full" />
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
           <div className="w-10 h-10 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+          {status === "retrying" && (
+            <p className="text-xs text-pnp-textSecondary/80 animate-pulse">Reconnecting…</p>
+          )}
         </div>
       </div>
     );
@@ -111,12 +125,20 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
           </svg>
           <p className="text-pnp-textSecondary font-medium">{t.live.streamOffline}</p>
           <p className="text-sm text-pnp-textSecondary/60 mt-1">{t.live.checkBackLater}</p>
-          <a
-            href="/live"
-            className="inline-block mt-4 px-4 py-2 rounded-lg text-xs font-semibold text-white btn-gradient"
-          >
-            Back to Live
-          </a>
+          <div className="flex items-center justify-center gap-2 mt-4">
+            <button
+              onClick={handleRetry}
+              className="px-4 py-2 rounded-lg text-xs font-semibold text-white btn-gradient"
+            >
+              Retry
+            </button>
+            <a
+              href="/live"
+              className="px-4 py-2 rounded-lg text-xs font-semibold text-pnp-textSecondary bg-pnp-surface border border-pnp-border hover:border-pnp-accent/40 transition-colors"
+            >
+              Back to Live
+            </a>
+          </div>
         </div>
       </div>
     );

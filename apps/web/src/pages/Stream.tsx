@@ -47,18 +47,29 @@ export default function Stream() {
   const [chatInput, setChatInput] = useState("");
   const [tipPaymentTab, setTipPaymentTab] = useState<"tokens" | "daimo">("tokens");
   const [tipping, setTipping] = useState(false);
+  const [tipSubmitting, setTipSubmitting] = useState(false);
   const [tipError, setTipError] = useState<string | null>(null);
   const [tipSuccess, setTipSuccess] = useState<string | null>(null);
   const [recentTips, setRecentTips] = useState<RecentTip[]>([]);
+  const [streamError, setStreamError] = useState(false);
 
   const {
     messages: chatMessages,
-    viewerCount,
+    viewerCount: socketViewerCount,
     isConnected: chatConnected,
+    reconnecting: chatReconnecting,
     sendMessage,
     latestTip,
     socketError,
   } = useLiveSocket(streamId || null);
+
+  // Viewer count: prefer the real-time socket value; fall back to a polled
+  // value from the streams API when the socket is not connected.
+  const [polledViewerCount, setPolledViewerCount] = useState(0);
+  const viewerCount = chatConnected ? socketViewerCount : polledViewerCount;
+
+  // Share button state
+  const [shareCopied, setShareCopied] = useState(false);
 
   // Load stream info.
   // streamId may be a Restreamer process ID (navigated from Community Live section)
@@ -72,6 +83,7 @@ export default function Stream() {
         if (found) {
           setStream(found);
           setError(null);
+          setStreamError(false);
           return;
         }
         // Not found in the Restreamer stream list — try resolving via the performers
@@ -98,17 +110,24 @@ export default function Stream() {
               };
               setStream(syntheticStream);
               setError(null);
+              setStreamError(false);
             } else {
               setError(t.live.streamNotFound);
+              setStreamError(true);
             }
           } else {
             setError(t.live.streamNotFound);
+            setStreamError(true);
           }
         } catch {
           setError(t.live.streamNotFound);
+          setStreamError(true);
         }
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load stream"));
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Failed to load stream");
+        setStreamError(true);
+      });
   }, [streamId]);
 
   useEffect(() => {
@@ -117,6 +136,25 @@ export default function Stream() {
     const interval = setInterval(loadStream, 30000);
     return () => clearInterval(interval);
   }, [loadStream]);
+
+  // Fallback poll: refresh viewer count from the streams endpoint every 30s
+  // when Socket.IO is disconnected so the displayed count does not freeze.
+  useEffect(() => {
+    if (chatConnected || !streamId) return;
+    const poll = () => {
+      getLiveStreams()
+        .then((data) => {
+          const found = (data.streams || []).find((s) => s.id === streamId);
+          if (found && typeof found.viewerCount === "number") {
+            setPolledViewerCount(found.viewerCount);
+          }
+        })
+        .catch(() => {});
+    };
+    poll();
+    const id = setInterval(poll, 30000);
+    return () => clearInterval(id);
+  }, [chatConnected, streamId]);
 
   // Fetch overlay config for this channel and subscribe to real-time updates
   useEffect(() => {
@@ -218,6 +256,7 @@ export default function Stream() {
       // dedicated checkout page in the same tab.  This avoids popup blockers
       // and gives the user the full Daimo embedded modal UX.
       setTipping(true);
+      setTipSubmitting(true);
       setTipError(null);
       setTipSuccess(null);
       try {
@@ -235,12 +274,14 @@ export default function Stream() {
         setTipError(err instanceof Error ? err.message : t.live.tipFailed);
       } finally {
         setTipping(false);
+        setTipSubmitting(false);
       }
       return;
     }
 
     // Token tip — fire directly.
     setTipping(true);
+    setTipSubmitting(true);
     setTipError(null);
     setTipSuccess(null);
     try {
@@ -251,6 +292,7 @@ export default function Stream() {
       setTipError(err instanceof Error ? err.message : t.live.tipFailed);
     } finally {
       setTipping(false);
+      setTipSubmitting(false);
     }
   };
 
@@ -284,6 +326,27 @@ export default function Stream() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     setHasNewMessages(false);
   };
+
+  const handleShare = useCallback(async () => {
+    const url = window.location.href;
+    const title = stream?.name ? `${stream.name} — PNPtv Live` : "PNPtv Live";
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title, url });
+      } catch {
+        // User cancelled or share failed — do nothing
+      }
+      return;
+    }
+    // Clipboard fallback for desktop
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    } catch {
+      // Clipboard unavailable — silently ignore
+    }
+  }, [stream?.name]);
 
   const handleFullscreen = useCallback(() => {
     const el = videoContainerRef.current;
@@ -345,14 +408,53 @@ export default function Stream() {
         <LiveRulesModal onAcknowledge={handleAcknowledgeRules} />
       )}
 
-      {/* Back link */}
-      <button onClick={() => navigate("/live")} className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors">
-        {String.fromCharCode(8592)} {t.live.backToLive}
-      </button>
+      {/* Back link + share */}
+      <div className="flex items-center justify-between">
+        <button onClick={() => navigate("/live")} className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors">
+          {String.fromCharCode(8592)} {t.live.backToLive}
+        </button>
+        <div className="flex items-center gap-1.5">
+          {/* Clipboard copy confirmation toast */}
+          {shareCopied && (
+            <span
+              className="text-[10px] text-pnp-textSecondary bg-pnp-surface border border-pnp-border px-2 py-0.5 rounded-full"
+              aria-live="polite"
+            >
+              Copied!
+            </span>
+          )}
+          <button
+            onClick={handleShare}
+            className="flex items-center justify-center w-8 h-8 rounded-full bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:text-pnp-textPrimary hover:border-pnp-accent/40 transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+            aria-label="Share stream"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+            </svg>
+          </button>
+        </div>
+      </div>
 
       {/* Video Player */}
       <div ref={videoContainerRef} className="relative -mx-4 sm:-mx-6">
         <LivePlayer src={stream.hlsUrl} title={stream.name} overlay={overlay} />
+        {streamError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-30 rounded-xl">
+            <div className="text-center">
+              <p className="text-white text-sm font-medium mb-3">Stream failed to load</p>
+              <button
+                onClick={() => {
+                  setStreamError(false);
+                  setLoading(true);
+                  loadStream().finally(() => setLoading(false));
+                }}
+                className="px-5 py-2.5 rounded-lg text-xs font-semibold text-white btn-gradient"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Mobile fullscreen toggle button (improvement #6) */}
         <button
@@ -403,8 +505,11 @@ export default function Stream() {
               key={amount}
               onClick={() => handleTip(amount)}
               disabled={tipping}
-              className="min-h-[44px] px-3 py-1.5 rounded-lg font-semibold text-xs transition-all text-white active:scale-95 disabled:opacity-50 btn-gradient whitespace-nowrap"
+              className="min-h-[44px] px-3 py-1.5 rounded-lg font-semibold text-xs transition-all text-white active:scale-95 disabled:opacity-50 btn-gradient whitespace-nowrap flex items-center gap-1.5"
             >
+              {tipSubmitting && (
+                <span className="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              )}
               {tipPaymentTab === "tokens" ? `${amount}T` : `$${amount}`}
             </button>
           ))}

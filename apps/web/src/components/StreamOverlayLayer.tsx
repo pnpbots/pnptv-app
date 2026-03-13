@@ -128,7 +128,6 @@ export function StreamOverlayLayer({ overlay }: StreamOverlayLayerProps) {
             color: banner_text_color,
             padding: "6px 12px",
             overflow: "hidden",
-            whiteSpace: "nowrap",
           }}
         >
           <span
@@ -136,11 +135,16 @@ export function StreamOverlayLayer({ overlay }: StreamOverlayLayerProps) {
               banner_style === "scroll"
                 ? {
                     display: "inline-block",
-                    animation: "pnptv-banner-scroll 18s linear infinite",
+                    whiteSpace: "nowrap",
+                    animation: `pnptv-banner-scroll ${Math.max(10, banner_text!.length * 0.15)}s linear infinite`,
                   }
                 : {
                     display: "block",
                     textAlign: "center",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    maxWidth: "100%",
                   }
             }
           >
