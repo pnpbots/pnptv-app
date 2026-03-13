@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { type EventItem, rsvpEvent, unrsvpEvent, updateEvent, getHangoutGroups, type HangoutGroup } from "@/lib/api";
+import { type EventItem, rsvpEvent, unrsvpEvent, updateEvent, getHangoutGroups, cancelEvent, type HangoutGroup } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 
 interface EventDetailModalProps {
@@ -220,7 +220,9 @@ export function EventDetailModal({ event: initialEvent, onClose, onRsvp, onUpdat
   const typeBg = isLive ? "rgba(255,69,58,0.12)" : "rgba(255,180,84,0.12)";
   const typeLabel = isLive ? "Live Stream" : "Hangout";
 
+  const isAdmin = user && (user.role === "admin" || user.role === "superadmin");
   const isCreator = user && (String(user.id) === String(event.creatorId) || String((user as { dbId?: string }).dbId) === String(event.creatorId));
+  const canManage = isCreator || isAdmin;
 
   const handleRsvp = async () => {
     setRsvping(true);
@@ -394,8 +396,8 @@ export function EventDetailModal({ event: initialEvent, onClose, onRsvp, onUpdat
             </div>
           )}
 
-          {/* Edit form (creator only) */}
-          {isCreator && showEdit && (
+          {/* Edit form (creator/admin only) */}
+          {canManage && showEdit && (
             <EditForm event={event} onSaved={handleUpdated} onCancel={() => setShowEdit(false)} />
           )}
 
@@ -442,15 +444,35 @@ export function EventDetailModal({ event: initialEvent, onClose, onRsvp, onUpdat
               </button>
             )}
 
-            {/* Edit (creator only) */}
-            {isCreator && !showEdit && (
-              <button
-                onClick={() => setShowEdit(true)}
-                className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
-                style={{ background: "rgba(255,255,255,0.05)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.08)" }}
-              >
-                Edit Event
-              </button>
+            {/* Edit (creator/admin only) */}
+            {canManage && !showEdit && (
+              <>
+                <button
+                  onClick={() => setShowEdit(true)}
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+                  style={{ background: "rgba(255,255,255,0.05)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.08)" }}
+                >
+                  Edit Event
+                </button>
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!window.confirm("Cancel this event?")) return;
+                    try {
+                      const res = await cancelEvent(event.id);
+                      if (res.success) {
+                        setEvent(ev => ({ ...ev, status: 'cancelled' }));
+                        onUpdated?.({ ...event, status: 'cancelled' });
+                        onClose();
+                      }
+                    } catch { /* silent */ }
+                  }}
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+                  style={{ background: "rgba(255,69,58,0.08)", color: "#FF453A" }}
+                >
+                  Cancel Event
+                </button>
+              </>
             )}
           </div>
         </div>

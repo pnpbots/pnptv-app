@@ -92,6 +92,26 @@ export function HighlightCarousel({
               onViewDetails={onViewDetails}
             />
           ))}
+          {canCreate && onCreateClick && (
+            <button
+              onClick={onCreateClick}
+              className="glass-card-sm flex-shrink-0 flex flex-col items-center justify-center gap-3 hover:border-white/20 active:scale-[0.98] transition-all group"
+              style={{ width: 200, minHeight: 200, background: "rgba(255,180,84,0.03)" }}
+            >
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center transition-transform group-hover:scale-110"
+                style={{ background: "rgba(255,180,84,0.1)", color: "#FFB454" }}
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+              </div>
+              <div className="text-center px-4">
+                <p className="text-sm font-bold text-white leading-tight">Create New Event</p>
+                <p className="text-[10px] mt-1 text-white/40">Host a stream or hangout</p>
+              </div>
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -236,7 +236,21 @@ export default function Home() {
                 ))}
               </>
             ) : (
-              highlights.slice(0, 10).map((item, i) => {
+              <>
+                {/* Create Event pill (mobile) */}
+                {canCreateLive && (
+                  <button
+                    onClick={() => setShowCreateEvent(true)}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold whitespace-nowrap border border-white/10 transition-all active:scale-95"
+                    style={{ background: "rgba(255,180,84,0.15)", color: "#FFB454", border: "1px solid rgba(255,180,84,0.3)" }}
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    Create Event
+                  </button>
+                )}
+                {highlights.slice(0, 10).map((item, i) => {
                 const label =
                   item.kind === "event"
                     ? (item.data as EventItem).title
@@ -256,7 +270,8 @@ export default function Home() {
                     <span className="max-w-[140px] truncate">{label}</span>
                   </button>
                 );
-              })
+              })}
+              </>
             )}
           </div>
         </div>
