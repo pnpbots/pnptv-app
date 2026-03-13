@@ -949,6 +949,7 @@ function initSocketIO(io) {
 
     socket.on('dm:send', async ({ recipientId, content } = {}) => {
       if (!recipientId || !content || !content.trim()) return;
+      if (content.length > 4000) { socket.emit('dm:error', { error: 'Message too long' }); return; }
       if (recipientId === user.id) return;
 
       // Block list check — mirrors REST endpoint behaviour
@@ -967,6 +968,36 @@ function initSocketIO(io) {
       } catch (blockErr) {
         logger.error('dm:send block check error', blockErr);
         return; // fail closed
+      }
+
+      // Check recipient's allowMessages privacy setting.
+      // privacy.allowMessages = true  → anyone may message (default)
+      // privacy.allowMessages = false → only followers of the recipient may message
+      // Admins and superadmins bypass this restriction.
+      const senderRole = user.role || '';
+      const isAdminSender = senderRole === 'admin' || senderRole === 'superadmin';
+      if (!isAdminSender) {
+        try {
+          const recipientPrivacyResult = await query(
+            'SELECT privacy FROM users WHERE id = $1',
+            [recipientId]
+          );
+          const recipientPrivacy = recipientPrivacyResult.rows[0]?.privacy || {};
+          const allowMessages = recipientPrivacy.allowMessages !== undefined ? recipientPrivacy.allowMessages : true;
+          if (!allowMessages) {
+            const followResult = await query(
+              'SELECT 1 FROM user_follows WHERE follower_id = $1 AND following_id = $2 LIMIT 1',
+              [user.id, recipientId]
+            );
+            if ((followResult.rowCount ?? followResult.rows.length) === 0) {
+              socket.emit('dm:error', { message: 'This user is not accepting messages' });
+              return;
+            }
+          }
+        } catch (privacyErr) {
+          logger.error('dm:send privacy check error', privacyErr);
+          return; // fail closed
+        }
       }
 
       // Free-tier daily DM limit — users without pnp-member entitlement are limited
@@ -1050,6 +1081,7 @@ function initSocketIO(io) {
         });
       } catch (err) {
         logger.error('dm:send error', err);
+        socket.emit('dm:error', { error: 'Failed to send message' });
       }
     });
 

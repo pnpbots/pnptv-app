@@ -187,6 +187,30 @@ const sendDmMediaMessage = async (req, res) => {
       return res.status(403).json({ error: 'Cannot send message to this user' });
     }
 
+    // Check recipient's allowMessages privacy setting.
+    // privacy.allowMessages = true  → anyone may message (default)
+    // privacy.allowMessages = false → only followers of the recipient may message
+    // Admins and superadmins bypass this restriction.
+    const senderRole = user.role || '';
+    const isAdminSender = senderRole === 'admin' || senderRole === 'superadmin';
+    if (!isAdminSender) {
+      const recipientPrivacyResult = await query(
+        'SELECT privacy FROM users WHERE id = $1',
+        [recipientId]
+      );
+      const recipientPrivacy = recipientPrivacyResult.rows[0]?.privacy || {};
+      const allowMessages = recipientPrivacy.allowMessages !== undefined ? recipientPrivacy.allowMessages : true;
+      if (!allowMessages) {
+        const followResult = await query(
+          'SELECT 1 FROM user_follows WHERE follower_id = $1 AND following_id = $2 LIMIT 1',
+          [user.id, recipientId]
+        );
+        if ((followResult.rowCount ?? followResult.rows.length) === 0) {
+          return res.status(403).json({ error: 'This user is not accepting messages' });
+        }
+      }
+    }
+
     const mediaResult = await processChatMedia(req.file, user.id);
     const caption = (req.body?.content || '').trim().slice(0, 500) || null;
 

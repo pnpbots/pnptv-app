@@ -1,6 +1,5 @@
 const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
-const { getRedis } = require('../../config/redis');
 
 // Check if a photo path is a valid web URL (not a Telegram file ID)
 const isValidPhotoUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
@@ -220,9 +219,9 @@ async function sendMessage(req, res) {
       });
     }
 
-    // Check if sender is blocked by recipient
+    // Check if either party has blocked the other
     const blockCheck = await query(
-      'SELECT id FROM blocked_users WHERE user_id = $1 AND blocked_user_id = $2',
+      'SELECT id FROM blocked_users WHERE (user_id = $1 AND blocked_user_id = $2) OR (user_id = $2 AND blocked_user_id = $1)',
       [recipientId, userId]
     );
 
@@ -231,6 +230,33 @@ async function sendMessage(req, res) {
         success: false,
         error: 'Cannot send message to this user'
       });
+    }
+
+    // Check recipient's allowMessages privacy setting.
+    // privacy.allowMessages = true  → anyone may message (default)
+    // privacy.allowMessages = false → only followers of the recipient may message
+    // Admins and superadmins bypass this restriction.
+    const senderRole = req.session?.user?.role || '';
+    const isAdminSender = senderRole === 'admin' || senderRole === 'superadmin';
+    if (!isAdminSender) {
+      const recipientPrivacyResult = await query(
+        'SELECT privacy FROM users WHERE id = $1',
+        [recipientId]
+      );
+      const recipientPrivacy = recipientPrivacyResult.rows[0]?.privacy || {};
+      const allowMessages = recipientPrivacy.allowMessages !== undefined ? recipientPrivacy.allowMessages : true;
+      if (!allowMessages) {
+        const followResult = await query(
+          'SELECT 1 FROM user_follows WHERE follower_id = $1 AND following_id = $2 LIMIT 1',
+          [userId, recipientId]
+        );
+        if ((followResult.rowCount ?? followResult.rows.length) === 0) {
+          return res.status(403).json({
+            success: false,
+            error: 'This user is not accepting messages'
+          });
+        }
+      }
     }
 
     // Insert message
@@ -260,37 +286,6 @@ async function sendMessage(req, res) {
       isMine: true
     };
 
-    // Increment free-tier DM counter (users without pnp-member entitlement are limited)
-    const role = req.session?.user?.role || '';
-    const { hasEntitlement } = require('../../bot/services/accessService');
-    const dmHasMembership = role === 'admin' || role === 'superadmin' ||
-      await hasEntitlement(String(req.session.user.id), 'pnp-member');
-    if (!dmHasMembership) {
-      try {
-        const redis = getRedis();
-        const today = new Date().toISOString().slice(0, 10);
-        const key = `pnptv:dm_limit:${req.session.user.id}:${today}`;
-        const newCount = await redis.incr(key);
-        if (newCount === 1) {
-          const now = new Date();
-          const midnight = new Date(now);
-          midnight.setUTCDate(midnight.getUTCDate() + 1);
-          midnight.setUTCHours(0, 0, 0, 0);
-          const ttl = Math.ceil((midnight - now) / 1000);
-          await redis.expire(key, ttl);
-        }
-        const createdAt = req.session.user.created_at || req.session.user.createdAt;
-        let limit = 3;
-        if (createdAt) {
-          const daysSince = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
-          if (daysSince > 14) limit = 1;
-        }
-        req._dmRemaining = Math.max(0, limit - newCount);
-      } catch (err) {
-        // Non-critical — don't block the message send
-      }
-    }
-
     // Emit real-time Socket.IO event to recipient
     const io = req.app.get('io');
     if (io) {
@@ -305,7 +300,7 @@ async function sendMessage(req, res) {
     res.json({
       success: true,
       message: responseMessage,
-      remaining: req._dmRemaining ?? null
+      remaining: req.dmLimit?.remaining ?? null
     });
 
   } catch (error) {

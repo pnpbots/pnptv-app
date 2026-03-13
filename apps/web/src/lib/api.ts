@@ -230,6 +230,8 @@ export interface LiveStream {
   description: string;
   hlsUrl: string;
   isLive: boolean;
+  /** Viewer count from Redis — included in GET /api/proxy/live/streams responses */
+  viewerCount?: number;
 }
 
 export function getLiveStreams(): Promise<{

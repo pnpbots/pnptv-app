@@ -497,6 +497,14 @@ export default function Stream() {
         </div>
       </div>
 
+      {/* Reconnecting indicator — shown when socket drops and is attempting to reconnect */}
+      {chatReconnecting && !chatConnected && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-pnp-surface border border-pnp-border" aria-live="polite">
+          <span className="w-3 h-3 border border-pnp-textSecondary border-t-transparent rounded-full animate-spin flex-shrink-0" />
+          <span className="text-[10px] text-pnp-textSecondary">Reconnecting to live chat...</span>
+        </div>
+      )}
+
       {/* Tip bar */}
       <div className="flex items-center gap-2">
         <div className="flex gap-1.5 flex-1 overflow-x-auto">

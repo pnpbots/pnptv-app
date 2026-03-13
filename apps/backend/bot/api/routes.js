@@ -4127,6 +4127,7 @@ app.use('/api/webapp/hangouts/groups', requireSessionAuth, hangoutVideoCallRoute
 app.post(
   '/api/webapp/dm/media/:recipientId',
   requireSessionAuth,
+  requireFreeTierDmLimit,
   uploadLimiter,
   uploadChatMedia,
   asyncHandler(chatMediaController.sendDmMediaMessage)
@@ -4476,7 +4477,7 @@ app.get('/api/proxy/live/streams', requireSessionAuth, requireMemberTier, asyncH
     // Strip trailing slash to prevent double-slash in HLS URLs (e.g. https://live.pnptv.app//memfs/...)
     const publicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
     const processes = resp.data || [];
-    const streams = processes
+    const rawStreams = processes
       .filter((p) => p.id?.startsWith('restreamer-ui:ingest:'))
       .map((p) => {
         const rawRefId = p.reference || p.id;
@@ -4498,6 +4499,22 @@ app.get('/api/proxy/live/streams', requireSessionAuth, requireMemberTier, asyncH
         };
       })
       .filter(Boolean);
+
+    // Enrich each live stream with the viewer count stored in Redis.
+    // Polling clients (Socket.IO fallback) can use this to keep the count
+    // accurate when the WebSocket connection is unavailable.
+    const redis = getRedis();
+    const streams = await Promise.all(
+      rawStreams.map(async (s) => {
+        try {
+          const raw = await redis.get(`live:viewers:${s.id}`);
+          const viewerCount = Math.max(0, parseInt(raw, 10) || 0);
+          return { ...s, viewerCount };
+        } catch {
+          return { ...s, viewerCount: 0 };
+        }
+      })
+    );
 
     res.json({ success: true, streams });
   } catch (error) {

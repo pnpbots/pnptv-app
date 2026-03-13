@@ -31,6 +31,65 @@ import {
   type TokenPurchase,
 } from "@/lib/api";
 
+// ── PerformerCard ─────────────────────────────────────────────────────────────
+// Extracted so each card can track its own image loading state independently.
+interface PerformerCardProps {
+  p: FeaturedPerformer;
+  isLive: boolean;
+  watchUrl: string | null;
+  onWatch: () => void;
+  watchLabel: string;
+  profileLabel: string;
+  featuredLabel: string;
+}
+
+function PerformerCard({ p, isLive, watchUrl, onWatch, watchLabel, profileLabel, featuredLabel }: PerformerCardProps) {
+  const [imgLoaded, setImgLoaded] = useState(false);
+
+  return (
+    <div
+      className={`rounded-xl border bg-pnp-surface p-3 flex flex-col items-center text-center ${isLive ? "border-red-500/50 ring-1 ring-red-500/20" : "border-pnp-border"}`}
+    >
+      <div className="relative">
+        {/* Skeleton shown until the image fires onLoad */}
+        {!imgLoaded && (
+          <div className="w-20 h-20 rounded-full mb-2 bg-pnp-surfaceHover animate-pulse" aria-hidden="true" />
+        )}
+        <img
+          src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
+          alt={p.displayName}
+          className={`w-20 h-20 rounded-full object-cover mb-2 border-2 ${isLive ? "border-red-500" : "border-pnp-border"} ${imgLoaded ? "block" : "hidden"}`}
+          onLoad={() => setImgLoaded(true)}
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = "/default-performer.svg";
+            setImgLoaded(true);
+          }}
+        />
+        {isLive && (
+          <span className="absolute -top-1 -right-1 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
+            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+            LIVE
+          </span>
+        )}
+      </div>
+      <span className="text-sm font-medium text-pnp-textPrimary truncate max-w-full">{p.displayName}</span>
+      {p.isFeatured && (
+        <span className="text-[10px] mt-0.5 font-semibold" style={{ color: "#5ED1C4" }}>{featuredLabel}</span>
+      )}
+      <button
+        onClick={onWatch}
+        className={`mt-2 w-full py-1.5 rounded-lg font-semibold text-xs active:scale-95 transition-all ${
+          isLive
+            ? "text-white bg-red-500 hover:bg-red-600"
+            : "text-pnp-textPrimary bg-pnp-surface border border-pnp-border hover:border-pnp-accent/40"
+        }`}
+      >
+        {isLive ? watchLabel : profileLabel}
+      </button>
+    </div>
+  );
+}
+
 const CALCOM_URL = import.meta.env.VITE_CALCOM_URL || "https://booking.pnptv.app";
 if (!CALCOM_URL.startsWith("https://")) {
   throw new Error(`Invalid CALCOM_URL: must start with https:// (got: ${CALCOM_URL})`);
