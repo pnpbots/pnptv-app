@@ -1550,6 +1550,9 @@ class PaymentService {
                 expiryDate,
                 language: userLanguage,
                 onboardingGuidePdf: guidePdf,
+                userUuid: user?.id || userId,
+                username: user?.username,
+                loginMethod: user?.last_login_method
               });
 
               if (welcomeEmailResult.success) {
@@ -2389,6 +2392,9 @@ class PaymentService {
                   expiryDate,
                   language: userLanguage,
                   onboardingGuidePdf: guidePdf,
+                  userUuid: user?.id || userId,
+                  username: user?.username,
+                  loginMethod: user?.last_login_method
                 });
 
                 if (welcomeEmailResult.success) {
@@ -4045,6 +4051,9 @@ class PaymentService {
           expiryDate: expiryDate || undefined,
           language: userLanguage,
           onboardingGuidePdf: guidePdf,
+          userUuid: user?.id || userId,
+          username: user?.username,
+          loginMethod: user?.last_login_method
         });
 
         if (welcomeResult.success) {

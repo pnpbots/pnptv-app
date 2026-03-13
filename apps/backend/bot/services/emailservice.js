@@ -122,9 +122,16 @@ class EmailService {
    * @param {number} options.duration - Plan duration in days
    * @param {Date} options.expiryDate - Subscription expiry date
    * @param {string} options.language - Email language (en/es)
+   * @param {string} options.userUuid - User's unique ID for recovery
+   * @param {string} options.username - User's username
+   * @param {string} options.loginMethod - Method used to login (telegram, x, email, deep_link)
    * @returns {Promise<Object>} Send result
    */
-  async sendWelcomeEmail({ to, customerName, planName, duration, expiryDate, language = 'es', onboardingGuidePdf = null }) {
+  async sendWelcomeEmail({ 
+    to, customerName, planName, duration, expiryDate, 
+    language = 'es', onboardingGuidePdf = null,
+    userUuid = null, username = null, loginMethod = null
+  }) {
     try {
       if (!this.transporters.pnptv) {
         logger.warn('PNPtv transporter not configured, skipping welcome email');
@@ -155,6 +162,9 @@ class EmailService {
           duration,
           expiryDate,
           language,
+          userUuid,
+          username,
+          loginMethod
         }),
         attachments,
       };
@@ -242,8 +252,40 @@ class EmailService {
    * Generate HTML for welcome email
    * @private
    */
-  generateWelcomeEmailHtml({ customerName, planName, duration, expiryDate, language = 'es' }) {
+  generateWelcomeEmailHtml({ customerName, planName, duration, expiryDate, language = 'es', userUuid, username, loginMethod }) {
     const isSpanish = language === 'es';
+
+    const recoveryInstructionsEs = userUuid ? `
+      <div style="background: #fff3e0; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #FFB454;">
+        <p style="margin: 0; color: #333;"><strong>🔑 Recuperación de Cuenta:</strong></p>
+        <p style="margin: 5px 0 0 0; font-size: 14px; color: #555;">Tu ID de recuperación único es: <strong style="font-family: monospace; font-size: 16px; color: #D4007A;">${userUuid}</strong></p>
+        <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">Por favor, guarda este ID en un lugar seguro. Es la <strong>única forma</strong> de recuperar el acceso a tu cuenta si pierdes tu método de inicio de sesión.</p>
+      </div>
+    ` : '';
+
+    const recoveryInstructionsEn = userUuid ? `
+      <div style="background: #fff3e0; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #FFB454;">
+        <p style="margin: 0; color: #333;"><strong>🔑 Account Recovery:</strong></p>
+        <p style="margin: 5px 0 0 0; font-size: 14px; color: #555;">Your unique recovery ID is: <strong style="font-family: monospace; font-size: 16px; color: #D4007A;">${userUuid}</strong></p>
+        <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">Please save this ID in a safe place. It is the <strong>only way</strong> to recover access to your account if you lose your login method.</p>
+      </div>
+    ` : '';
+
+    const loginDetailsEs = (username || loginMethod) ? `
+      <div style="background: #f0f7ff; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #667eea;">
+        <p style="margin: 0; color: #333;"><strong>👤 Detalles de Acceso:</strong></p>
+        ${username ? `<p style="margin: 5px 0 0 0; font-size: 14px; color: #555;">Usuario: <strong>@${username}</strong></p>` : ''}
+        ${loginMethod ? `<p style="margin: 5px 0 0 0; font-size: 14px; color: #555;">Método de inicio: <strong>${loginMethod}</strong></p>` : ''}
+      </div>
+    ` : '';
+
+    const loginDetailsEn = (username || loginMethod) ? `
+      <div style="background: #f0f7ff; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #667eea;">
+        <p style="margin: 0; color: #333;"><strong>👤 Access Details:</strong></p>
+        ${username ? `<p style="margin: 5px 0 0 0; font-size: 14px; color: #555;">Username: <strong>@${username}</strong></p>` : ''}
+        ${loginMethod ? `<p style="margin: 5px 0 0 0; font-size: 14px; color: #555;">Login method: <strong>${loginMethod}</strong></p>` : ''}
+      </div>
+    ` : '';
 
     if (isSpanish) {
       return `
@@ -286,11 +328,15 @@ class EmailService {
 
       <p>¡Gracias por unirte a PNPtv! Tu pago ha sido procesado exitosamente y tu cuenta ya está activa.</p>
 
+      ${loginDetailsEs}
+
       <div class="plan-details">
         <p><strong>📦 Plan:</strong> ${planName}</p>
         <p><strong>⏱️ Duración:</strong> ${duration >= 36500 ? 'Acceso de por vida' : `${duration} días`}</p>
         <p><strong>📅 Válido hasta:</strong> ${expiryDate ? new Date(expiryDate).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Permanente'}</p>
       </div>
+
+      ${recoveryInstructionsEs}
 
       <div class="instructions">
         <h3>🚀 Cómo acceder a PNPtv:</h3>
@@ -376,11 +422,15 @@ class EmailService {
 
       <p>Thank you for joining PNPtv! Your payment has been processed successfully and your account is now active.</p>
 
+      ${loginDetailsEn}
+
       <div class="plan-details">
         <p><strong>📦 Plan:</strong> ${planName}</p>
         <p><strong>⏱️ Duration:</strong> ${duration >= 36500 ? 'Lifetime access' : `${duration} days`}</p>
         <p><strong>📅 Valid until:</strong> ${expiryDate ? new Date(expiryDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Permanent'}</p>
       </div>
+
+      ${recoveryInstructionsEn}
 
       <div class="instructions">
         <h3>🚀 How to access PNPtv:</h3>

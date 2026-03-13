@@ -2669,6 +2669,11 @@ async function ensureEmailCredentials(userId, email, language) {
               <tr><td style="padding:8px 0;color:#A1A1A6;">Email:</td><td style="padding:8px 0;font-weight:bold;">${safeEmail}</td></tr>
               <tr><td style="padding:8px 0;color:#A1A1A6;">Contrase&ntilde;a:</td><td style="padding:8px 0;font-weight:bold;font-family:monospace;font-size:16px;">${plainPassword}</td></tr>
             </table>
+            <div style="background: rgba(255,180,84,0.1); border-left: 4px solid #FFB454; padding: 12px; margin: 16px 0; border-radius: 4px;">
+              <p style="margin: 0; color: #FFB454; font-weight: bold; font-size: 14px;">🔑 ID de Recuperaci&oacute;n:</p>
+              <p style="margin: 4px 0 0 0; font-family: monospace; font-size: 16px;">${userId}</p>
+              <p style="margin: 8px 0 0 0; font-size: 12px; color: #A1A1A6;"><strong>IMPORTANTE:</strong> Guarda este ID en un lugar seguro. Es la &uacute;nica forma de recuperar tu cuenta si pierdes el acceso.</p>
+            </div>
             <p style="font-size:13px;color:#A1A1A6;">Puedes cambiar tu contrase&ntilde;a en cualquier momento desde tu perfil.</p>
             <a href="https://app.pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Iniciar sesi&oacute;n</a>
           </div>`
@@ -2679,6 +2684,11 @@ async function ensureEmailCredentials(userId, email, language) {
               <tr><td style="padding:8px 0;color:#A1A1A6;">Email:</td><td style="padding:8px 0;font-weight:bold;">${safeEmail}</td></tr>
               <tr><td style="padding:8px 0;color:#A1A1A6;">Password:</td><td style="padding:8px 0;font-weight:bold;font-family:monospace;font-size:16px;">${plainPassword}</td></tr>
             </table>
+            <div style="background: rgba(255,180,84,0.1); border-left: 4px solid #FFB454; padding: 12px; margin: 16px 0; border-radius: 4px;">
+              <p style="margin: 0; color: #FFB454; font-weight: bold; font-size: 14px;">🔑 Recovery ID:</p>
+              <p style="margin: 4px 0 0 0; font-family: monospace; font-size: 16px;">${userId}</p>
+              <p style="margin: 8px 0 0 0; font-size: 12px; color: #A1A1A6;"><strong>IMPORTANT:</strong> Save this ID in a safe place. It is the only way to recover your account if you lose access.</p>
+            </div>
             <p style="font-size:13px;color:#A1A1A6;">You can change your password anytime from your profile settings.</p>
             <a href="https://app.pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Log In</a>
           </div>`,
@@ -2901,11 +2911,13 @@ app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (re
             to: customerEmail,
             customerName: user.first_name || username || 'Valued Customer',
             planName: 'Lifetime Member + 2 Months PRIME',
-            duration: 'Lifetime Member + 2 months PRIME',
+            duration: 36500, // lifetime
             expiryDate: primeExpiry,
             language,
             onboardingGuidePdf: guidePdf,
             userUuid: user.id || userId,
+            username: user.username || username,
+            loginMethod: user.last_login_method || 'deep_link'
           });
           logger.info('Meru welcome email sent', { to: customerEmail, code: meruCode });
         } catch (emailError) {
@@ -6026,8 +6038,11 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
                 to: u.email,
                 customerName: u.telegram || order.user_id,
                 planName,
-                guidePdf,
+                onboardingGuidePdf: guidePdf,
                 language,
+                userUuid: u.id,
+                username: u.username,
+                loginMethod: u.last_login_method
               });
               logger.info('BTCPay: invoice + welcome emails sent', { to: u.email, planId: order.plan_id });
             } catch (emailErr) {
