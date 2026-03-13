@@ -16,6 +16,7 @@ const TIMEZONES = [
   "America/Bogota",
   "Europe/London",
 ];
+const BREAK_MINUTE_OPTIONS = [0, 5, 10, 15, 20, 30] as const;
 
 interface SlotRow {
   enabled: boolean;
@@ -30,6 +31,7 @@ export function CreatorAvailabilitySettings() {
   const [online, setOnline] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [timezone, setTimezone] = useState("UTC");
+  const [breakMinutes, setBreakMinutes] = useState<number>(10);
   const [schedule, setSchedule] = useState<SlotRow[]>(defaultSlots());
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -43,6 +45,7 @@ export function CreatorAvailabilitySettings() {
         setOnline(res.isOnline ?? false);
         if (res.schedule) {
           const updated = defaultSlots();
+          let loadedBreak: number | undefined;
           DAY_KEYS.forEach((key, idx) => {
             const slot = res.schedule![key];
             if (slot) {
@@ -52,9 +55,13 @@ export function CreatorAvailabilitySettings() {
                 endTime: slot.endTime,
               };
               if (slot.timezone) setTimezone(slot.timezone);
+              if (slot.breakMinutes !== undefined && loadedBreak === undefined) {
+                loadedBreak = slot.breakMinutes;
+              }
             }
           });
           setSchedule(updated);
+          if (loadedBreak !== undefined) setBreakMinutes(loadedBreak);
         }
       })
       .catch(() => {})
@@ -92,6 +99,7 @@ export function CreatorAvailabilitySettings() {
           startTime: schedule[idx].startTime,
           endTime: schedule[idx].endTime,
           timezone,
+          breakMinutes,
         };
         return acc;
       }, {} as WeeklyAvailabilitySchedule);
@@ -166,6 +174,27 @@ export function CreatorAvailabilitySettings() {
             <option key={tz} value={tz}>{tz.replace(/_/g, " ")}</option>
           ))}
         </select>
+      </div>
+
+      {/* Break time between calls */}
+      <div>
+        <label className="block text-xs font-semibold mb-1.5" style={{ color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          Break Between Calls
+        </label>
+        <select
+          value={breakMinutes}
+          onChange={(e) => { setBreakMinutes(Number(e.target.value)); setSaved(false); }}
+          style={{ ...inputStyle, width: "100%" }}
+        >
+          {BREAK_MINUTE_OPTIONS.map((mins) => (
+            <option key={mins} value={mins}>
+              {mins === 0 ? "No break" : `${mins} minute${mins === 1 ? "" : "s"}`}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs" style={{ color: "#636366" }}>
+          Minimum gap required between consecutive bookings.
+        </p>
       </div>
 
       {/* Weekly schedule */}

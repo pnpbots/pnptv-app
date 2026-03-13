@@ -251,7 +251,7 @@ async function getAvailabilitySchedule(req, res) {
     const creatorId = String(sessionUser.id);
 
     const result = await query(
-      `SELECT day_of_week, start_time, end_time, timezone
+      `SELECT day_of_week, start_time, end_time, timezone, break_minutes
        FROM creator_availability_schedules
        WHERE creator_id = $1 AND is_active = true
        ORDER BY day_of_week, start_time`,
@@ -264,6 +264,7 @@ async function getAvailabilitySchedule(req, res) {
       start_time: String(row.start_time).slice(0, 5),
       end_time: String(row.end_time).slice(0, 5),
       timezone: row.timezone,
+      break_minutes: row.break_minutes,
     }));
 
     return res.json({ success: true, schedule });
@@ -305,6 +306,7 @@ async function saveAvailabilitySchedule(req, res) {
 
     const TIME_RE = /^\d{2}:\d{2}$/;
     const VALID_TZ_CHARS = /^[A-Za-z0-9/_+-]+$/;
+    const VALID_BREAK_MINUTES = new Set([0, 5, 10, 15, 20, 30]);
 
     for (let i = 0; i < schedule.length; i++) {
       const slot = schedule[i];
@@ -324,6 +326,12 @@ async function saveAvailabilitySchedule(req, res) {
       if (!slot.timezone || !VALID_TZ_CHARS.test(slot.timezone) || slot.timezone.length > 100) {
         return res.status(400).json({ success: false, error: `schedule[${i}].timezone is invalid` });
       }
+      if (slot.breakMinutes !== undefined) {
+        const bm = Number(slot.breakMinutes);
+        if (!Number.isInteger(bm) || !VALID_BREAK_MINUTES.has(bm)) {
+          return res.status(400).json({ success: false, error: `schedule[${i}].breakMinutes must be one of 0, 5, 10, 15, 20, 30` });
+        }
+      }
     }
 
     // Full replace strategy — deactivate all existing, insert new rows
@@ -333,17 +341,19 @@ async function saveAvailabilitySchedule(req, res) {
     );
 
     for (const slot of schedule) {
+      const breakMins = Number.isInteger(Number(slot.breakMinutes)) ? Number(slot.breakMinutes) : 10;
       await query(
         `INSERT INTO creator_availability_schedules
-           (creator_id, day_of_week, start_time, end_time, timezone, is_active)
-         VALUES ($1, $2, $3::time, $4::time, $5, true)
+           (creator_id, day_of_week, start_time, end_time, timezone, break_minutes, is_active)
+         VALUES ($1, $2, $3::time, $4::time, $5, $6, true)
          ON CONFLICT (creator_id, day_of_week, start_time)
          DO UPDATE SET
            end_time = EXCLUDED.end_time,
            timezone = EXCLUDED.timezone,
+           break_minutes = EXCLUDED.break_minutes,
            is_active = true,
            updated_at = NOW()`,
-        [creatorId, Number(slot.dayOfWeek), slot.startTime, slot.endTime, slot.timezone]
+        [creatorId, Number(slot.dayOfWeek), slot.startTime, slot.endTime, slot.timezone, breakMins]
       );
     }
 
@@ -396,6 +406,140 @@ async function setOnlineStatus(req, res) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// GET /api/webapp/creator/call-bookings
+// ---------------------------------------------------------------------------
+
+/**
+ * Get creator's call credits (upcoming + recent) — filterable by status.
+ * Since call_credits IS the booking record, we query that table directly.
+ * Query param: status = 'upcoming' | 'completed' | 'cancelled'
+ */
+async function getMyBookings(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+
+    const creatorId = String(sessionUser.id);
+    const { status } = req.query;
+
+    let statusFilter = '';
+    const params = [creatorId];
+
+    if (status === 'upcoming') {
+      // Upcoming = credits that still have uses remaining (unused or partial)
+      statusFilter = `AND cc.status IN ('unused', 'partial')`;
+    } else if (status === 'completed') {
+      statusFilter = `AND cc.status = 'completed'`;
+    } else if (status === 'cancelled') {
+      statusFilter = `AND cc.status IN ('expired', 'refunded')`;
+    }
+
+    const result = await query(`
+      SELECT
+        cc.id,
+        cc.member_id,
+        cc.creator_id,
+        cc.package_id,
+        cc.quantity_total,
+        cc.quantity_used,
+        cc.quantity_scheduled,
+        cc.status,
+        cc.expires_at,
+        cc.created_at,
+        cc.updated_at,
+        cp.duration_minutes,
+        cp.title AS package_title,
+        cp.price_usd,
+        u_member.username  AS member_username,
+        u_member.display_name AS member_display_name,
+        u_member.photo_url AS member_photo
+      FROM call_credits cc
+      JOIN call_packages cp ON cp.id = cc.package_id
+      JOIN users u_member  ON u_member.id = cc.member_id
+      WHERE cc.creator_id = $1
+      ${statusFilter}
+      ORDER BY cc.created_at DESC
+      LIMIT 50
+    `, params);
+
+    return res.json({ success: true, bookings: result.rows });
+  } catch (err) {
+    logger.error('[callBookingController] getMyBookings error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to load bookings' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/webapp/creator/call-earnings
+// ---------------------------------------------------------------------------
+
+/**
+ * Get creator's call revenue summary — total revenue, calls sold/completed, average rating.
+ */
+async function getCallEarnings(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+
+    const creatorId = String(sessionUser.id);
+
+    // Credits summary — counts of calls sold, completed, scheduled
+    const creditsResult = await query(`
+      SELECT
+        COUNT(*)                         AS total_credits_sold,
+        COALESCE(SUM(cc.quantity_total), 0) AS total_calls_sold,
+        COALESCE(SUM(cc.quantity_used), 0)  AS total_calls_completed,
+        COALESCE(SUM(cc.quantity_scheduled), 0) AS total_calls_scheduled
+      FROM call_credits cc
+      WHERE cc.creator_id = $1
+    `, [creatorId]);
+
+    // Revenue — join credits with packages to get price per purchase
+    const revenueResult = await query(`
+      SELECT
+        COALESCE(SUM(cp.price_usd), 0) AS total_revenue,
+        COUNT(DISTINCT cc.id)           AS total_purchases
+      FROM call_credits cc
+      JOIN call_packages cp ON cp.id = cc.package_id
+      WHERE cc.creator_id = $1
+    `, [creatorId]);
+
+    // Average rating from surveys
+    const ratingResult = await query(`
+      SELECT
+        COALESCE(AVG(rating), 0) AS average_rating,
+        COUNT(*)                 AS total_reviews
+      FROM call_booking_surveys
+      WHERE creator_id = $1
+    `, [creatorId]);
+
+    const credits = creditsResult.rows[0] || {};
+    const revenue = revenueResult.rows[0] || {};
+    const rating  = ratingResult.rows[0]  || {};
+
+    return res.json({
+      success: true,
+      earnings: {
+        totalRevenue:         parseFloat(revenue.total_revenue)          || 0,
+        totalPurchases:       parseInt(revenue.total_purchases, 10)      || 0,
+        totalCallsSold:       parseInt(credits.total_calls_sold, 10)     || 0,
+        totalCallsCompleted:  parseInt(credits.total_calls_completed, 10)|| 0,
+        totalCallsScheduled:  parseInt(credits.total_calls_scheduled, 10)|| 0,
+        averageRating:        parseFloat(rating.average_rating)          || 0,
+        totalReviews:         parseInt(rating.total_reviews, 10)         || 0,
+      },
+    });
+  } catch (err) {
+    logger.error('[callBookingController] getCallEarnings error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to load earnings' });
+  }
+}
+
 module.exports = {
   createCheckout,
   getBooking,
@@ -403,4 +547,6 @@ module.exports = {
   saveAvailabilitySchedule,
   setOnlineStatus,
   getAvailabilitySchedule,
+  getMyBookings,
+  getCallEarnings,
 };

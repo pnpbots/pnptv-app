@@ -6442,6 +6442,14 @@ app.put('/api/webapp/creator/online-status',
   requireSessionAuth,
   asyncHandler(callBookingController.setOnlineStatus));
 
+app.get('/api/webapp/creator/call-bookings',
+  requireSessionAuth,
+  asyncHandler(callBookingController.getMyBookings));
+
+app.get('/api/webapp/creator/call-earnings',
+  requireSessionAuth,
+  asyncHandler(callBookingController.getCallEarnings));
+
 // ==========================================
 // ATProto / Bluesky OAuth Routes (PUBLIC — no session required)
 // These must be mounted at app root so the client_id URL and redirect_uri

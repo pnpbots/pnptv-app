@@ -25,6 +25,12 @@ import {
   deleteCmsShow,
   uploadCmsMedia,
   createSocialPost,
+  getMyCallPackages,
+  createMyCallPackage,
+  updateMyCallPackage,
+  deactivateMyCallPackage,
+  getCreatorCallBookings,
+  getCreatorCallEarnings,
   type CreatorEligibility,
   type CreatorDashboard as DashboardData,
   type ModelEarnings,
@@ -32,6 +38,9 @@ import {
   type CmsPerformer,
   type CmsContent,
   type CmsShow,
+  type CallPackage,
+  type CreatorCallBooking,
+  type CreatorCallEarnings,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
@@ -44,6 +53,442 @@ const TIERS: { key: "ice" | "crystal" | "diamond"; label: string; price: number;
   { key: "crystal", label: "Crystal", price: 10, emoji: "🔮" },
   { key: "diamond", label: "Diamond", price: 15, emoji: "💎" },
 ];
+
+// ─── Call Package Manager ─────────────────────────────────────────────────────
+
+function CallPackageManager() {
+  const [packages, setPackages] = useState<CallPackage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Create form state
+  const [duration, setDuration] = useState<30 | 60>(30);
+  const [quantity, setQuantity] = useState(1);
+  const [price, setPrice] = useState("");
+  const [title, setTitle] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  // Edit state: packageId -> { priceUsd, title }
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editPrice, setEditPrice] = useState("");
+  const [editTitle, setEditTitle] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const loadPackages = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    getMyCallPackages()
+      .then((res) => setPackages(res.packages))
+      .catch((err) => setError(err.message || "Failed to load packages"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadPackages();
+  }, [loadPackages]);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const priceNum = parseFloat(price);
+    if (isNaN(priceNum) || priceNum <= 0 || priceNum > 1000) {
+      setCreateError("Price must be between $0.01 and $1000");
+      return;
+    }
+    setCreating(true);
+    setCreateError(null);
+    try {
+      await createMyCallPackage({
+        durationMinutes: duration,
+        quantity,
+        priceUsd: priceNum,
+        title: title.trim() || undefined,
+      });
+      setPrice("");
+      setTitle("");
+      setQuantity(1);
+      setDuration(30);
+      loadPackages();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to create package";
+      setCreateError(msg);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const startEdit = (pkg: CallPackage) => {
+    setEditingId(pkg.id);
+    setEditPrice(String(parseFloat(pkg.price_usd)));
+    setEditTitle(pkg.title ?? "");
+    setSaveError(null);
+  };
+
+  const handleSave = async (pkg: CallPackage) => {
+    const priceNum = parseFloat(editPrice);
+    if (isNaN(priceNum) || priceNum <= 0 || priceNum > 1000) {
+      setSaveError("Price must be between $0.01 and $1000");
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await updateMyCallPackage(pkg.id, {
+        priceUsd: priceNum,
+        title: editTitle.trim() || undefined,
+      });
+      setEditingId(null);
+      loadPackages();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to save changes";
+      setSaveError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeactivate = async (pkg: CallPackage) => {
+    if (!confirm(`Deactivate "${pkg.title || `${pkg.duration_minutes}min x${pkg.quantity}`}"? Members with existing credits will keep them.`)) return;
+    try {
+      await deactivateMyCallPackage(pkg.id);
+      loadPackages();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to deactivate";
+      setError(msg);
+    }
+  };
+
+  return (
+    <div className="space-y-4 mt-6">
+      <p className="text-sm font-semibold text-white">Call Packages</p>
+
+      {/* Create form */}
+      <div className="glass-card-sm p-4">
+        <p className="text-xs font-semibold text-white/70 mb-3 uppercase tracking-wide">New Package</p>
+        <form onSubmit={handleCreate} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-white/50 mb-1">Duration</label>
+              <select
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value) as 30 | 60)}
+                className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+              >
+                <option value={30}>30 minutes</option>
+                <option value={60}>60 minutes</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-white/50 mb-1">Quantity</label>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={quantity}
+                onChange={(e) => setQuantity(Number(e.target.value))}
+                className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-white/50 mb-1">Price (USD)</label>
+              <input
+                type="number"
+                min={0.01}
+                max={1000}
+                step={0.01}
+                placeholder="e.g. 49.99"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-white/50 mb-1">Title (optional)</label>
+              <input
+                type="text"
+                maxLength={80}
+                placeholder="e.g. Intro Session"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+              />
+            </div>
+          </div>
+          {createError && <p className="text-xs text-red-400">{createError}</p>}
+          <button
+            type="submit"
+            disabled={creating}
+            className="w-full py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            {creating ? "Creating…" : "Create Package"}
+          </button>
+        </form>
+      </div>
+
+      {/* Package list */}
+      {loading ? (
+        <p className="text-xs text-white/40 text-center py-4">Loading packages…</p>
+      ) : error ? (
+        <p className="text-xs text-red-400 text-center py-4">{error}</p>
+      ) : packages.length === 0 ? (
+        <p className="text-xs text-white/40 text-center py-4">No active packages yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {packages.map((pkg) => (
+            <div key={pkg.id} className="glass-card-sm p-4">
+              {editingId === pkg.id ? (
+                <div className="space-y-3">
+                  <p className="text-xs text-white/50">
+                    {pkg.duration_minutes} min · x{pkg.quantity}
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-white/50 mb-1">Price (USD)</label>
+                      <input
+                        type="number"
+                        min={0.01}
+                        max={1000}
+                        step={0.01}
+                        value={editPrice}
+                        onChange={(e) => setEditPrice(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-white/50 mb-1">Title</label>
+                      <input
+                        type="text"
+                        maxLength={80}
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                      />
+                    </div>
+                  </div>
+                  {saveError && <p className="text-xs text-red-400">{saveError}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleSave(pkg)}
+                      disabled={saving}
+                      className="flex-1 py-2 rounded-xl text-xs font-semibold text-white disabled:opacity-50"
+                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                    >
+                      {saving ? "Saving…" : "Save"}
+                    </button>
+                    <button
+                      onClick={() => { setEditingId(null); setSaveError(null); }}
+                      className="flex-1 py-2 rounded-xl text-xs text-white/60 border border-white/10 hover:bg-white/5"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    {pkg.title && (
+                      <p className="text-sm font-semibold text-white truncate">{pkg.title}</p>
+                    )}
+                    <p className="text-xs text-white/50 mt-0.5">
+                      {pkg.duration_minutes} min · {pkg.quantity} session{pkg.quantity !== 1 ? "s" : ""}
+                    </p>
+                    <p className="text-base font-bold mt-1" style={{ color: "#5ED1C4" }}>
+                      ${parseFloat(pkg.price_usd).toFixed(2)}
+                    </p>
+                    <p className="text-xs text-white/30 mt-0.5 font-mono">{pkg.sku}</p>
+                  </div>
+                  <div className="flex flex-col gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => startEdit(pkg)}
+                      className="px-3 py-1.5 rounded-lg text-xs text-white/70 border border-white/10 hover:bg-white/5 transition-colors"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeactivate(pkg)}
+                      className="px-3 py-1.5 rounded-lg text-xs text-red-400 border border-red-400/20 hover:bg-red-400/10 transition-colors"
+                    >
+                      Deactivate
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Call Earnings Summary ─────────────────────────────────────────────────────
+
+function CallEarningsSummary() {
+  const [earnings, setEarnings] = useState<CreatorCallEarnings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getCreatorCallEarnings()
+      .then((res) => {
+        if (res.success) setEarnings(res.earnings);
+        else setError("Failed to load call earnings");
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load call earnings"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="glass-card-sm p-4 mb-4">
+        <p className="text-xs font-semibold text-white/70 mb-3 uppercase tracking-wide">Call Earnings</p>
+        <div className="grid grid-cols-3 gap-2">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="animate-pulse h-14 rounded-lg bg-white/5" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !earnings) {
+    return null;
+  }
+
+  const stats: { label: string; value: string }[] = [
+    { label: "Revenue", value: `$${earnings.totalRevenue.toFixed(2)}` },
+    { label: "Purchases", value: String(earnings.totalPurchases) },
+    { label: "Calls Sold", value: String(earnings.totalCallsSold) },
+    { label: "Completed", value: String(earnings.totalCallsCompleted) },
+    { label: "Scheduled", value: String(earnings.totalCallsScheduled) },
+    {
+      label: earnings.totalReviews > 0 ? `Rating (${earnings.totalReviews})` : "Rating",
+      value: earnings.totalReviews > 0 ? `${earnings.averageRating.toFixed(1)} ★` : "—",
+    },
+  ];
+
+  return (
+    <div className="glass-card-sm p-4 mb-4">
+      <p className="text-xs font-semibold text-white/70 mb-3 uppercase tracking-wide">Call Earnings</p>
+      <div className="grid grid-cols-3 gap-2">
+        {stats.map((stat) => (
+          <div
+            key={stat.label}
+            className="rounded-xl px-3 py-2.5 text-center"
+            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
+          >
+            <p className="text-base font-bold text-white leading-tight">{stat.value}</p>
+            <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>{stat.label}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Upcoming Bookings ─────────────────────────────────────────────────────────
+
+const BOOKING_STATUS_LABELS: Record<CreatorCallBooking["status"], { label: string; color: string }> = {
+  unused:   { label: "Unused",    color: "#5ED1C4" },
+  partial:  { label: "Partial",   color: "#E69138" },
+  completed:{ label: "Completed", color: "#8E8E93" },
+  expired:  { label: "Expired",   color: "#8E8E93" },
+  refunded: { label: "Refunded",  color: "#EF4444" },
+};
+
+function UpcomingBookings() {
+  const [bookings, setBookings] = useState<CreatorCallBooking[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getCreatorCallBookings("upcoming")
+      .then((res) => {
+        if (res.success) setBookings(res.bookings.slice(0, 5));
+        else setError("Failed to load bookings");
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load bookings"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="glass-card-sm p-4 mb-4">
+      <p className="text-xs font-semibold text-white/70 mb-3 uppercase tracking-wide">Upcoming Bookings</p>
+
+      {loading ? (
+        <div className="space-y-2">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="animate-pulse h-12 rounded-lg bg-white/5" />
+          ))}
+        </div>
+      ) : error ? (
+        <p className="text-xs text-red-400 py-2">{error}</p>
+      ) : bookings.length === 0 ? (
+        <p className="text-xs py-4 text-center" style={{ color: "#8E8E93" }}>No upcoming bookings</p>
+      ) : (
+        <div className="space-y-2">
+          {bookings.map((booking) => {
+            const statusInfo = BOOKING_STATUS_LABELS[booking.status] ?? { label: booking.status, color: "#8E8E93" };
+            const memberName = booking.member_display_name || booking.member_username || "Member";
+            const initials = memberName.charAt(0).toUpperCase();
+            const remaining = booking.quantity_total - booking.quantity_used - booking.quantity_scheduled;
+            const purchasedAt = new Date(booking.created_at);
+            const dateStr = purchasedAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+            return (
+              <div
+                key={booking.id}
+                className="flex items-center gap-3 py-2.5 px-3 rounded-xl"
+                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+              >
+                {/* Member avatar */}
+                {booking.member_photo ? (
+                  <img
+                    src={booking.member_photo}
+                    alt={memberName}
+                    className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                  />
+                ) : (
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                  >
+                    {initials}
+                  </div>
+                )}
+
+                {/* Booking info */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-white truncate">{memberName}</p>
+                  <p className="text-xs" style={{ color: "#8E8E93" }}>
+                    {booking.duration_minutes} min &middot; {remaining} call{remaining !== 1 ? "s" : ""} remaining &middot; {dateStr}
+                  </p>
+                </div>
+
+                {/* Status badge */}
+                <span
+                  className="flex-shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full"
+                  style={{
+                    color: statusInfo.color,
+                    background: `${statusInfo.color}1A`,
+                    border: `1px solid ${statusInfo.color}33`,
+                  }}
+                >
+                  {statusInfo.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CriterionBar({ label, current, required, met }: { label: string; current: number; required: number; met: boolean }) {
   const pct = Math.min((current / required) * 100, 100);
@@ -592,6 +1037,9 @@ export default function CreatorDashboard() {
           {/* Overview Tab */}
           {activeTab === "overview" && (
             <>
+              <CallEarningsSummary />
+              <UpcomingBookings />
+
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="glass-card-sm p-4 text-center">
                   <p className="text-2xl font-bold text-white">{dashboard.subscriberCount}</p>
@@ -1216,7 +1664,10 @@ export default function CreatorDashboard() {
 
           {/* Availability Tab */}
           {activeTab === "availability" && (
-            <CreatorAvailabilitySettings />
+            <div className="space-y-4">
+              <CreatorAvailabilitySettings />
+              <CallPackageManager />
+            </div>
           )}
 
           {/* Settings Tab */}

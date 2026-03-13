@@ -11,6 +11,51 @@ const callPackageService = require('./callPackageService');
 const { query, getPool } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 
+/**
+ * Fetch the minimum break_minutes setting for a creator across all their active
+ * availability schedule rows.  Falls back to 0 if no schedule exists so that
+ * the slot list is unchanged when a creator has not configured the setting.
+ *
+ * @param {string} creatorId
+ * @returns {Promise<number>} break gap in minutes
+ */
+async function getCreatorBreakMinutes(creatorId) {
+  try {
+    const result = await query(
+      `SELECT COALESCE(MIN(break_minutes), 0) AS break_minutes
+       FROM creator_availability_schedules
+       WHERE creator_id = $1 AND is_active = true`,
+      [creatorId]
+    );
+    return parseInt(result.rows[0]?.break_minutes ?? 0, 10);
+  } catch (err) {
+    logger.warn('[bookACallService] could not fetch break_minutes', { creatorId, error: err.message });
+    return 0;
+  }
+}
+
+/**
+ * Filter a sorted list of slots so that consecutive slots have at least
+ * `breakMinutes` of gap between the end of one and the start of the next.
+ *
+ * @param {Array<{startUtc: string, endUtc: string}>} slots - already sorted ascending
+ * @param {number} breakMinutes
+ * @returns {Array}
+ */
+function applyBreakFilter(slots, breakMinutes) {
+  if (!breakMinutes || slots.length === 0) return slots;
+  const gap = breakMinutes * 60 * 1000;
+  const filtered = [slots[0]];
+  for (let i = 1; i < slots.length; i++) {
+    const prevEnd = new Date(filtered[filtered.length - 1].endUtc).getTime();
+    const nextStart = new Date(slots[i].startUtc).getTime();
+    if (nextStart - prevEnd >= gap) {
+      filtered.push(slots[i]);
+    }
+  }
+  return filtered;
+}
+
 const ONLINE_KEY = (userId) => `user:${userId}:active`;
 const IMMEDIATE_BUFFER_MINUTES = 15;
 
@@ -49,13 +94,16 @@ async function getBookingOptions(creatorId, durationMinutes = 30) {
   const fromDate = new Date();
   const toDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
 
-  const allSlots = await PrivateCallBookingService.getAvailableSlots(
-    creatorId, fromDate, toDate, durationMinutes
-  );
+  const [allSlots, breakMinutes] = await Promise.all([
+    PrivateCallBookingService.getAvailableSlots(creatorId, fromDate, toDate, durationMinutes),
+    getCreatorBreakMinutes(creatorId),
+  ]);
+
+  const filteredSlots = applyBreakFilter(allSlots, breakMinutes);
 
   return {
     type: 'slots',
-    slots: allSlots.slice(0, 5),
+    slots: filteredSlots.slice(0, 5),
     durationMinutes,
   };
 }

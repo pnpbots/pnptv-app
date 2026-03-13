@@ -516,6 +516,9 @@ export function BookCallModal({
 
       {!slotsLoading && !slotsError && slots.length > 0 && (
         <div className="space-y-2.5" role="listbox" aria-label="Available time slots">
+          <p className="text-xs pb-0.5" style={{ color: "#8E8E93" }}>
+            Times shown in your local timezone ({Intl.DateTimeFormat().resolvedOptions().timeZone})
+          </p>
           {slots.slice(0, 5).map((slot) => {
             const { day, date, time } = formatSlotDate(slot.startUtc);
             const isSelected = selectedSlot?.startUtc === slot.startUtc;

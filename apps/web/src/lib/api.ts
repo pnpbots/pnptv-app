@@ -4349,6 +4349,89 @@ export function getMyCallCredits(
   return request(`/api/webapp/my-call-credits${qs}`);
 }
 
+// ─── Creator: manage own call packages ───────────────────────────────────────
+
+export function getMyCallPackages(): Promise<{
+  success: boolean;
+  packages: CallPackage[];
+}> {
+  return request("/api/webapp/creator/call-packages");
+}
+
+export function createMyCallPackage(data: {
+  durationMinutes: 30 | 60;
+  quantity: number;
+  priceUsd: number;
+  title?: string;
+}): Promise<{ success: boolean; package: CallPackage }> {
+  return request("/api/webapp/creator/call-packages", {
+    method: "POST",
+    body: data,
+  });
+}
+
+export function updateMyCallPackage(
+  packageId: number,
+  data: { priceUsd?: number; title?: string }
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/call-packages/${packageId}`, {
+    method: "PUT",
+    body: data,
+  });
+}
+
+export function deactivateMyCallPackage(
+  packageId: number
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/call-packages/${packageId}`, {
+    method: "DELETE",
+  });
+}
+
+export interface CreatorCallBooking {
+  id: number;
+  member_id: string;
+  creator_id: string;
+  package_id: number;
+  quantity_total: number;
+  quantity_used: number;
+  quantity_scheduled: number;
+  status: "unused" | "partial" | "completed" | "expired" | "refunded";
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+  duration_minutes: number;
+  package_title: string | null;
+  price_usd: string;
+  member_username: string | null;
+  member_display_name: string | null;
+  member_photo: string | null;
+}
+
+export interface CreatorCallEarnings {
+  totalRevenue: number;
+  totalPurchases: number;
+  totalCallsSold: number;
+  totalCallsCompleted: number;
+  totalCallsScheduled: number;
+  averageRating: number;
+  totalReviews: number;
+}
+
+export function getCreatorCallBookings(
+  status?: "upcoming" | "completed" | "cancelled"
+): Promise<{ success: boolean; bookings: CreatorCallBooking[] }> {
+  const qs = status ? `?status=${status}` : "";
+  return request(`/api/webapp/creator/call-bookings${qs}`);
+}
+
+export function getCreatorCallEarnings(): Promise<{
+  success: boolean;
+  earnings: CreatorCallEarnings;
+}> {
+  return request("/api/webapp/creator/call-earnings");
+}
+
 export interface CallCheckoutPayload {
   packageId: number;
   provider: "epayco" | "daimo";
@@ -4424,6 +4507,7 @@ export interface AvailabilityDaySlot {
   startTime: string;
   endTime: string;
   timezone: string;
+  breakMinutes?: number;
 }
 
 export type WeeklyAvailabilitySchedule = {
