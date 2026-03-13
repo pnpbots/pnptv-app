@@ -506,6 +506,7 @@ class XPostService {
 
   /**
    * Upload media using OAuth 1.0a signed requests (v1.1 upload endpoint).
+   * Uses chunked (INIT/APPEND/FINALIZE) for files > 5MB or videos, simple upload otherwise.
    */
   static async uploadMediaToXV1WithOAuth1({ credentials, mediaUrl }) {
     const XOAuth1Service = require('./xOAuth1Service');
@@ -515,6 +516,15 @@ class XPostService {
       this.validateMediaSize(mimeType, size);
 
       const uploadUrl = X_MEDIA_UPLOAD_V1_URL;
+      const isVideo = mimeType?.startsWith('video/');
+      const SIMPLE_LIMIT = 5 * 1024 * 1024; // 5MB
+
+      // Use chunked upload for videos or large files
+      if (isVideo || size > SIMPLE_LIMIT) {
+        return await this._chunkedUploadOAuth1({ credentials, filePath, mimeType, size });
+      }
+
+      // Simple upload for small images
       const form = new FormData();
       form.append('media', fs.createReadStream(filePath), {
         filename: path.basename(filePath),
@@ -529,10 +539,121 @@ class XPostService {
 
       const mediaId = uploadRes.data?.media_id_string || String(uploadRes.data?.media_id || '');
       if (!mediaId) throw new Error('No media_id returned from v1.1 upload');
-      logger.info('OAuth1 media uploaded', { mediaId });
+      logger.info('OAuth1 media uploaded (simple)', { mediaId });
       return mediaId;
     } finally {
       try { await fs.promises.unlink(filePath); } catch (_) {} // eslint-disable-line no-empty
+    }
+  }
+
+  /**
+   * Chunked upload (INIT/APPEND/FINALIZE) with OAuth 1.0a for large files and videos.
+   */
+  static async _chunkedUploadOAuth1({ credentials, filePath, mimeType, size }) {
+    const XOAuth1Service = require('./xOAuth1Service');
+    const uploadUrl = X_MEDIA_UPLOAD_V1_URL;
+    const mediaCategory = this.getMediaCategory(mimeType);
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks for v1.1
+
+    logger.info('OAuth1 chunked media upload INIT', { mimeType, size, mediaCategory });
+
+    // INIT
+    const initParams = {
+      command: 'INIT',
+      total_bytes: String(size),
+      media_type: mimeType,
+      media_category: mediaCategory,
+    };
+    const initAuth = XOAuth1Service.buildAuthHeader('POST', uploadUrl, initParams, credentials);
+    const initRes = await axios.post(uploadUrl, new URLSearchParams(initParams), {
+      headers: { Authorization: initAuth, 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 30000,
+    });
+
+    const mediaId = initRes.data?.media_id_string || String(initRes.data?.media_id || '');
+    if (!mediaId) throw new Error('No media_id from OAuth1 chunked INIT');
+    logger.info('OAuth1 chunked INIT ok', { mediaId });
+
+    // APPEND chunks
+    const fileHandle = await fs.promises.open(filePath, 'r');
+    try {
+      const buffer = Buffer.alloc(CHUNK_SIZE);
+      let offset = 0;
+      let segment = 0;
+
+      while (true) {
+        const { bytesRead } = await fileHandle.read(buffer, 0, CHUNK_SIZE, offset);
+        if (!bytesRead) break;
+
+        const chunk = buffer.subarray(0, bytesRead);
+        const appendForm = new FormData();
+        appendForm.append('command', 'APPEND');
+        appendForm.append('media_id', mediaId);
+        appendForm.append('segment_index', String(segment));
+        appendForm.append('media_data', chunk.toString('base64'));
+
+        const appendAuth = XOAuth1Service.buildAuthHeader('POST', uploadUrl, {}, credentials);
+        await axios.post(uploadUrl, appendForm, {
+          headers: { ...appendForm.getHeaders(), Authorization: appendAuth },
+          timeout: 60000,
+          maxBodyLength: Infinity,
+        });
+
+        offset += bytesRead;
+        segment++;
+      }
+    } finally {
+      await fileHandle.close();
+    }
+
+    logger.info('OAuth1 chunked APPEND complete', { mediaId, segments: Math.ceil(size / CHUNK_SIZE) });
+
+    // FINALIZE
+    const finalizeParams = { command: 'FINALIZE', media_id: mediaId };
+    const finalizeAuth = XOAuth1Service.buildAuthHeader('POST', uploadUrl, finalizeParams, credentials);
+    const finalizeRes = await axios.post(uploadUrl, new URLSearchParams(finalizeParams), {
+      headers: { Authorization: finalizeAuth, 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 30000,
+      maxBodyLength: Infinity,
+    });
+
+    // Wait for processing if needed (videos)
+    const processingInfo = finalizeRes.data?.processing_info;
+    if (processingInfo) {
+      await this._waitForProcessingOAuth1(credentials, mediaId, processingInfo);
+    }
+
+    logger.info('OAuth1 chunked media upload complete', { mediaId });
+    return mediaId;
+  }
+
+  /**
+   * Poll processing status for OAuth 1.0a chunked uploads (videos).
+   */
+  static async _waitForProcessingOAuth1(credentials, mediaId, processingInfo) {
+    const XOAuth1Service = require('./xOAuth1Service');
+    let state = processingInfo?.state;
+    let checkAfterSecs = processingInfo?.check_after_secs || 5;
+
+    while (state === 'pending' || state === 'in_progress') {
+      await new Promise((r) => setTimeout(r, checkAfterSecs * 1000));
+
+      const statusParams = { command: 'STATUS', media_id: mediaId };
+      const statusAuth = XOAuth1Service.buildAuthHeader('GET', X_MEDIA_UPLOAD_V1_URL, statusParams, credentials);
+      const statusRes = await axios.get(X_MEDIA_UPLOAD_V1_URL, {
+        params: statusParams,
+        headers: { Authorization: statusAuth },
+        timeout: 15000,
+      });
+
+      const info = statusRes.data?.processing_info;
+      if (!info) break;
+      state = info.state;
+      checkAfterSecs = info.check_after_secs || 5;
+
+      if (state === 'failed') {
+        throw new Error(`OAuth1 media processing failed: ${JSON.stringify(info.error || {})}`);
+      }
     }
   }
 
