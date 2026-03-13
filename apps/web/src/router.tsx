@@ -39,6 +39,7 @@ const MainStage = lazy(() => import("@/pages/MainStage"));
 const DaHaus = lazy(() => import("@/pages/DaHaus"));
 const PostDetail = lazy(() => import("@/pages/PostDetail"));
 const Settings = lazy(() => import("@/pages/Settings"));
+const BookingConfirmation = lazy(() => import("@/pages/BookingConfirmation"));
 
 // Admin pages
 const StatsOverview = lazy(() => import("@/pages/admin/StatsOverview"));
@@ -129,8 +130,14 @@ export const router = createBrowserRouter([
         ),
       },
       {
-        path: "booking",
-        element: <Navigate to="/nearby" replace />,
+        path: "booking/:bookingId/confirm",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <BookingConfirmation />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
       },
       {
         path: "chat",
