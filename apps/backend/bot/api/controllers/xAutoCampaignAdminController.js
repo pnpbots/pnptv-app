@@ -113,6 +113,11 @@ const updateCampaign = async (req, res) => {
       return res.status(400).json({ error: 'Invalid grokMode' });
     }
 
+    const VALID_PERSONA_TYPES = new Set(['santino', 'lex', 'generic']);
+    if (updates.personaType && !VALID_PERSONA_TYPES.has(updates.personaType)) {
+      return res.status(400).json({ error: 'Invalid personaType. Must be: santino, lex, or generic' });
+    }
+
     if (updates.intervalMinutes !== undefined) {
       updates.intervalMinutes = Math.max(15, Number(updates.intervalMinutes) || 15);
     }

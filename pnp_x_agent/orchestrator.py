@@ -9,10 +9,7 @@ import urllib.parse
 def get_db_conn():
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
-        return psycopg2.connect(
-            dbname='pnptvbot', user='pnptvbot', password='Apelo801050#', 
-            host='172.20.0.2', port='5432', cursor_factory=RealDictCursor
-        )
+        raise ValueError("DATABASE_URL environment variable is required")
     
     try:
         if "://" in db_url:
@@ -85,26 +82,13 @@ class CampaignOrchestrator:
         print(f"A/B Test Deployed for {persona}. A:{id_a} B:{id_b}")
 
     def _log_test_to_db(self, persona, id_a, id_b, text_a, text_b):
-        # Using Node.js schema compatible logging if needed
-        # For simplicity, we create Python-specific tests table if it doesn't exist
+        # Log A/B tests to the Node.js-managed x_ab_tests table
         try:
             conn = get_db_conn()
             with conn.cursor() as cur:
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS x_ab_tests_python (
-                        test_id SERIAL PRIMARY KEY,
-                        persona VARCHAR(50),
-                        tweet_id_a VARCHAR(50),
-                        tweet_id_b VARCHAR(50),
-                        text_a TEXT,
-                        text_b TEXT,
-                        status VARCHAR(20) DEFAULT 'active',
-                        created_at TIMESTAMP DEFAULT NOW()
-                    )
-                """)
                 cur.execute(
-                    "INSERT INTO x_ab_tests_python (persona, tweet_id_a, tweet_id_b, text_a, text_b) VALUES (%s, %s, %s, %s, %s)",
-                    (persona, id_a, id_b, text_a, text_b)
+                    "INSERT INTO x_ab_tests (campaign_id, variant_a, variant_b) VALUES (NULL, %s, %s)",
+                    (id_a, id_b)
                 )
             conn.commit()
             conn.close()

@@ -823,6 +823,17 @@ const startBot = async () => {
       logger.warn(`Bogota analysis scheduler initialization failed: ${error.message}`);
     }
 
+    // Initialize X post analytics ingestion scheduler (every 6h)
+    try {
+      const XAnalyticsIngestionScheduler = require('./schedulers/xAnalyticsIngestionScheduler');
+      const xAnalyticsScheduler = new XAnalyticsIngestionScheduler();
+      xAnalyticsScheduler.start();
+      global.xAnalyticsScheduler = xAnalyticsScheduler;
+      logger.info('✓ X analytics ingestion scheduler initialized and started');
+    } catch (error) {
+      logger.warn(`X analytics ingestion scheduler initialization failed: ${error.message}`);
+    }
+
     // Initialize proactive reminder service
     try {
       const ProactiveReminderService = require('../services/proactiveReminderService');

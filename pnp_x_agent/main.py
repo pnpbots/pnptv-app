@@ -13,13 +13,9 @@ load_dotenv(override=True)
 
 def get_db_conn():
     db_url = os.getenv("DATABASE_URL")
-    print(f"--- V2 ROBUST STARTING (v2.1) ---")
-    
+
     if not db_url:
-        return psycopg2.connect(
-            dbname='pnptvbot', user='pnptvbot', password='Apelo801050#', 
-            host='172.20.0.2', port='5432', cursor_factory=RealDictCursor
-        )
+        raise ValueError("DATABASE_URL environment variable is required")
     
     try:
         # Robust parsing for postgresql://user:pass@host:port/dbname
@@ -52,7 +48,7 @@ def get_db_conn():
         raise
 
 if __name__ == "__main__":
-    print("Agent V2 Initializing...")
+    print("PNP X Agent initializing...")
     try:
         conn = get_db_conn()
         print("V2 Database Connection SUCCESSFUL!")

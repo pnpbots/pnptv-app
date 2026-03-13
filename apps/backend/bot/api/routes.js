@@ -3184,8 +3184,9 @@ Today: ${new Date().toISOString().split('T')[0]} UTC`;
   // Call Grok
   const replyText = await chatWithGrokManager({ messages, contextBlock });
 
-  // Save updated history
-  const assistantMsg = { role: 'assistant', content: replyText };
+  // Save updated history (cap assistant replies to 2000 chars to prevent history bloat)
+  const cappedReply = replyText.length > 2000 ? replyText.substring(0, 2000) : replyText;
+  const assistantMsg = { role: 'assistant', content: cappedReply };
   const updatedHistory = [...messages, assistantMsg].slice(-MAX_HISTORY);
   await redis.set(redisKey, JSON.stringify(updatedHistory), 'EX', HISTORY_TTL).catch(() => {});
 

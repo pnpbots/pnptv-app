@@ -19,7 +19,7 @@ const ITEMS_PER_PAGE = 20;
 const ALLOWED_UPDATE_COLUMNS = new Set([
   'name', 'topic', 'grok_mode', 'language', 'custom_prompt',
   'interval_minutes', 'active_hours_start', 'active_hours_end', 'max_posts',
-  'media_folder_id', 'persona_type',
+  'media_folder_id', 'persona_type', 'ab_test_mode',
 ]);
 
 class XAutoCampaignService {
@@ -488,6 +488,7 @@ class XAutoCampaignService {
       mode: campaign.grok_mode,
       language: grokLanguage,
       prompt,
+      personaType: campaign.persona_type || 'generic',
     });
 
     if (campaign.grok_mode === 'xPost') {
