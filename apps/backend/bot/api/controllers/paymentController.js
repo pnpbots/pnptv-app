@@ -6,6 +6,7 @@ const PaymentService = require('../../services/paymentService');
 const PaymentSecurityService = require('../../services/paymentSecurityService');
 const logger = require('../../../utils/logger');
 const { query } = require('../../../config/postgres');
+const { cache } = require('../../../config/redis');
 const NotificationEmitter = require('../../services/notificationEmitter');
 
 /**
@@ -644,39 +645,55 @@ class PaymentController {
             daimoPaymentId,
           });
 
-          // Trigger recovery inline — inject fallback metadata from DB row
-          // in case the Daimo API response lacks paymentId/userId in metadata
-          const recoveryMetadata = {
-            ...daimoCheck.metadata,
-            paymentId: daimoCheck.metadata?.paymentId || paymentId,
-            userId: daimoCheck.metadata?.userId || String(payment.userId || payment.user_id || ''),
-            planId: daimoCheck.metadata?.planId || payment.planId || payment.plan_id,
-          };
-          const webhookData = {
-            payment: {
-              id: daimoCheck.id,
-              status: daimoCheck.status,
-              source: daimoCheck.source,
-              destination: daimoCheck.destination,
-              metadata: recoveryMetadata,
-            },
-            _recovery: true,
-          };
-          const recoveryResult = await PaymentService.processDaimoWebhook(webhookData);
-
-          if (recoveryResult?.success) {
+          // Acquire recovery lock to prevent concurrent polling requests from
+          // triggering duplicate processDaimoWebhook calls
+          const recoveryLockKey = `polling_recovery:${paymentId}`;
+          const recoveryLockAcquired = await cache.acquireLock(recoveryLockKey, 30);
+          if (!recoveryLockAcquired) {
             return res.json({
               success: true,
-              status: 'completed',
-              message: 'Payment completed — your subscription is now active.',
+              status: 'processing_recovery',
+              message: 'Payment activation already in progress.',
             });
           }
 
-          return res.json({
-            success: true,
-            status: 'processing_recovery',
-            message: 'Payment completed — activating your subscription now.',
-          });
+          // Trigger recovery inline — inject fallback metadata from DB row
+          // in case the Daimo API response lacks paymentId/userId in metadata
+          try {
+            const recoveryMetadata = {
+              ...daimoCheck.metadata,
+              paymentId: daimoCheck.metadata?.paymentId || paymentId,
+              userId: daimoCheck.metadata?.userId || String(payment.userId || payment.user_id || ''),
+              planId: daimoCheck.metadata?.planId || payment.planId || payment.plan_id,
+            };
+            const webhookData = {
+              payment: {
+                id: daimoCheck.id,
+                status: daimoCheck.status,
+                source: daimoCheck.source,
+                destination: daimoCheck.destination,
+                metadata: recoveryMetadata,
+              },
+              _recovery: true,
+            };
+            const recoveryResult = await PaymentService.processDaimoWebhook(webhookData);
+
+            if (recoveryResult?.success) {
+              return res.json({
+                success: true,
+                status: 'completed',
+                message: 'Payment completed — your subscription is now active.',
+              });
+            }
+
+            return res.json({
+              success: true,
+              status: 'processing_recovery',
+              message: 'Payment completed — activating your subscription now.',
+            });
+          } finally {
+            await cache.releaseLock(recoveryLockKey);
+          }
         }
 
         if (daimoCheck.status === 'payment_bounced' || daimoCheck.status === 'payment_failed' || daimoCheck.rawStatus === 'bounced' || daimoCheck.rawStatus === 'expired') {

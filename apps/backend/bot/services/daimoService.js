@@ -57,7 +57,7 @@ class DaimoService {
       // Path 1: HMAC-SHA256 (new API) — uses Daimo-Signature header
       // Read fresh from env to avoid stale singleton after hot-reload
       const hmacSecret = process.env.DAIMO_WEBHOOK_HMAC_SECRET || this.webhookHmacSecret;
-      if (hmacSecret && signatureOrAuthHeader && signatureOrAuthHeader.includes('t=')) {
+      if (hmacSecret && signatureOrAuthHeader && signatureOrAuthHeader.includes('t=') && signatureOrAuthHeader.includes('v1=')) {
         const result = DaimoConfig.verifyWebhookSignature(signatureOrAuthHeader, rawBody, hmacSecret);
         if (!result.valid) {
           logger.error('Daimo HMAC webhook verification failed', { reason: result.reason });

@@ -2075,7 +2075,18 @@ class PaymentService {
       // planId is set to pkg.sku during Daimo payment creation (plan_id column is null).
       if (planId && planId.startsWith('CALL-')) {
         if (status === 'payment_completed' || status === 'succeeded') {
+          const callLockKey = `processing:payment:${paymentId}`;
+          const callLockAcquired = await cache.acquireLock(callLockKey, 120);
+          if (!callLockAcquired) {
+            return { success: true, alreadyProcessed: true };
+          }
           try {
+            // Check if already completed (idempotency)
+            const callPayment = await PaymentModel.getById(paymentId);
+            if (callPayment && (callPayment.status === 'completed' || callPayment.status === 'success')) {
+              return { success: true, alreadyProcessed: true };
+            }
+
             const callCheckoutService = require('./callCheckoutService');
             await callCheckoutService.onCallPaymentSuccess(paymentId);
 
@@ -2100,6 +2111,8 @@ class PaymentService {
               planId,
             });
             return { success: false, error: callErr.message };
+          } finally {
+            await cache.releaseLock(callLockKey);
           }
         }
         return { success: true, type: 'call_package' };
@@ -2129,7 +2142,23 @@ class PaymentService {
         if (status === 'payment_completed' || status === 'succeeded') {
           // Update user subscription FIRST, then mark payment completed
           // (mirrors ePayco: activate before marking complete so retries stay unblocked on plan errors)
-          const plan = await PlanModel.getById(planId);
+          let plan;
+          if (planId === 'creator_monthly') {
+            // Creator subscriptions use dynamic pricing — no plans row exists.
+            // Synthesize a minimal plan object from the payment record.
+            const paymentForPlan = await PaymentModel.getById(paymentId);
+            plan = {
+              id: 'creator_monthly',
+              name: 'Creator Monthly Subscription',
+              display_name: 'Creator Subscription',
+              price: String(paymentForPlan?.amount || 0),
+              duration_days: 30,
+              is_lifetime: false,
+              active: true,
+            };
+          } else {
+            plan = await PlanModel.getById(planId);
+          }
           const user = await UserModel.getById(userId);
 
           if (!plan) {
@@ -2235,21 +2264,40 @@ class PaymentService {
               throw new Error('Entitlement grant failed or incomplete for paid Daimo plan');
             }
 
-            // Creator subscription activation
-            if (planId === 'creator_monthly' && payment?.metadata?.creatorId) {
+            // Creator subscription activation + renewal extension
+            if (planId === 'creator_monthly') {
+              const creatorId = payment?.metadata?.creatorId || normalized?.metadata?.creatorId;
+              if (creatorId) {
+                try {
+                  const CreatorService = require('./creatorService');
+                  await CreatorService.subscribeToCreator(userId, creatorId, paymentId);
+                  logger.info('Creator subscription activated via Daimo webhook', {
+                    userId,
+                    creatorId,
+                    paymentId,
+                  });
+                } catch (creatorError) {
+                  logger.error('Creator subscription activation failed (non-critical):', {
+                    error: creatorError.message,
+                    userId,
+                    creatorId,
+                  });
+                }
+              }
+
+              // Extend subscription expires_at now that payment is confirmed
+              // (moved from creatorPayoutService._processRenewal to prevent free access)
               try {
-                const CreatorService = require('./creatorService');
-                await CreatorService.subscribeToCreator(userId, payment.metadata.creatorId, paymentId);
-                logger.info('Creator subscription activated via Daimo webhook', {
-                  userId,
-                  creatorId: payment.metadata.creatorId,
-                  paymentId,
-                });
-              } catch (creatorError) {
-                logger.error('Creator subscription activation failed (non-critical):', {
-                  error: creatorError.message,
-                  userId,
-                  creatorId: payment.metadata.creatorId,
+                await query(`
+                  UPDATE creator_subscriptions
+                  SET expires_at = expires_at + INTERVAL '30 days',
+                      payment_id = $1
+                  WHERE renewal_payment_id = $1
+                    AND status = 'active'
+                `, [paymentId]);
+              } catch (extendErr) {
+                logger.error('Failed to extend creator subscription expires_at', {
+                  paymentId, error: extendErr.message,
                 });
               }
             }

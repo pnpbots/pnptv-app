@@ -464,17 +464,14 @@ class CreatorPayoutService {
       return { renewed: false };
     }
 
-    // Extend the subscription by 30 days from its current expires_at (not from now,
-    // so no gap forms if the cron runs a day early).
-    // NOTE: earnings are NOT recorded here. They will be inserted only after the Daimo
-    // webhook confirms the payment (via CreatorService.subscribeToCreator called from
-    // the webhook handler). Recording earnings before payment confirmation would credit
-    // the creator for money that has not yet been received.
+    // NOTE: Do NOT extend expires_at here. The subscription is extended only after
+    // the Daimo webhook confirms the payment (via processDaimoWebhook → creator_monthly
+    // branch). Extending before payment would give free access if user never pays.
+    // Store the renewal payment ID so the webhook handler can find the subscription.
     await query(`
       UPDATE creator_subscriptions
       SET
-        expires_at = expires_at + INTERVAL '30 days',
-        payment_id = $1
+        renewal_payment_id = $1
       WHERE id    = $2
         AND status = 'active'
     `, [newPaymentId, subscription_id]);

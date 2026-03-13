@@ -177,7 +177,7 @@ export default function Subscribe() {
       try {
         const data = await getPaymentStatus(pollingPaymentId);
         if (cancelled) return;
-        if (data.status === "completed") {
+        if (data.status === "completed" || data.status === "paid" || data.status === "success") {
           setPollingPaymentId(null);
           setPaymentSuccess(true);
           await refreshUser();
@@ -262,10 +262,10 @@ export default function Subscribe() {
         const result = await createPayment(selectedPlan, provider);
         if (result.success && result.paymentUrl) {
           if (provider === "daimo" && result.paymentId) {
-            // Navigate in same tab for Daimo — avoids popup blockers
+            // Navigate in-SPA for Daimo — preserves React state
             // Store paymentId so we can resume polling if user comes back
             try { sessionStorage.setItem("pnp_pending_payment", result.paymentId); } catch {}
-            window.location.href = assertPaymentUrl(result.paymentUrl);
+            navigate(new URL(assertPaymentUrl(result.paymentUrl)).pathname);
           } else {
             window.open(assertPaymentUrl(result.paymentUrl), "_blank", "noopener,noreferrer");
             if (result.paymentId) {

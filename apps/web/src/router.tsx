@@ -581,7 +581,9 @@ export const router = createBrowserRouter([
     path: "/checkout/:paymentId",
     element: (
       <ModuleLoader>
-        <DaimoCheckout />
+        <VerificationGate>
+          <DaimoCheckout />
+        </VerificationGate>
       </ModuleLoader>
     ),
   },
