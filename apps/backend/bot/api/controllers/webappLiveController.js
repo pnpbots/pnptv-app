@@ -59,7 +59,8 @@ async function getRestreamerToken(restreamerUrl) {
 
 /**
  * Fetch all ingest processes from Restreamer.
- * Returns an empty array on failure (non-fatal).
+ * Throws a typed error on failure so callers can return a 503 to the client.
+ * The error has a `restreamerUnavailable` flag set to true.
  *
  * @param {string} restreamerUrl
  * @param {string|null} token
@@ -70,12 +71,21 @@ async function fetchRestreamerProcesses(restreamerUrl, token) {
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
     const resp = await axios.get(`${restreamerUrl}/api/v3/process`, {
       headers,
-      timeout: 10000,
+      timeout: 5000,
     });
+    if (resp.status !== 200) {
+      logger.warn(`Restreamer process list returned status ${resp.status}`);
+      const err = new Error(`Restreamer returned status ${resp.status}`);
+      err.restreamerUnavailable = true;
+      throw err;
+    }
     return (resp.data || []).filter(p => p.id?.startsWith('restreamer-ui:ingest:'));
   } catch (err) {
-    logger.warn(`Restreamer process fetch failed: ${err.message}`);
-    return [];
+    if (!err.restreamerUnavailable) {
+      logger.warn(`Restreamer process fetch failed: ${err.message}`);
+      err.restreamerUnavailable = true;
+    }
+    throw err;
   }
 }
 
@@ -142,6 +152,10 @@ const listStreams = async (req, res) => {
 
     return res.json({ success: true, streams });
   } catch (err) {
+    if (err.restreamerUnavailable) {
+      logger.warn('listStreams: Restreamer unavailable', { message: err.message });
+      return res.status(503).json({ success: false, error: 'Streaming service temporarily unavailable' });
+    }
     logger.error('webapp listStreams error', err);
     return res.status(502).json({ success: false, error: 'Failed to load streams from Restreamer' });
   }
@@ -190,8 +204,15 @@ const getRtmpKey = async (req, res) => {
     }
 
     // Fetch the process config from Restreamer to extract the RTMP stream name.
-    const token = await getRestreamerToken(restreamerUrl);
-    const processes = await fetchRestreamerProcesses(restreamerUrl, token);
+    let processes;
+    try {
+      const token = await getRestreamerToken(restreamerUrl);
+      processes = await fetchRestreamerProcesses(restreamerUrl, token);
+    } catch (fetchErr) {
+      logger.warn(`getRtmpKey: Restreamer unavailable for user ${user.id}: ${fetchErr.message}`);
+      return res.status(503).json({ success: false, error: 'Streaming service temporarily unavailable' });
+    }
+
     const proc = processes.find(p => p.reference === channelRef);
 
     if (!proc) {
@@ -263,8 +284,14 @@ const assignChannel = async (req, res) => {
   try {
     // Validate that the channel exists in Restreamer (unless unassigning).
     if (channelRef) {
-      const token = await getRestreamerToken(restreamerUrl);
-      const processes = await fetchRestreamerProcesses(restreamerUrl, token);
+      let processes;
+      try {
+        const token = await getRestreamerToken(restreamerUrl);
+        processes = await fetchRestreamerProcesses(restreamerUrl, token);
+      } catch (fetchErr) {
+        logger.warn(`assignChannel: Restreamer unavailable: ${fetchErr.message}`);
+        return res.status(503).json({ error: 'Streaming service temporarily unavailable' });
+      }
       const exists = processes.some(p => p.reference === channelRef);
       if (!exists) {
         return res.status(404).json({
@@ -311,16 +338,31 @@ const listChannels = async (req, res) => {
   const publicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
 
   try {
-    const [token, userRows] = await Promise.all([
-      getRestreamerToken(restreamerUrl),
-      getPool().query(
-        `SELECT id, username, first_name, last_name, live_channel
-         FROM users
-         WHERE live_channel IS NOT NULL`
-      ),
-    ]);
+    let token, userRows;
+    try {
+      [token, userRows] = await Promise.all([
+        getRestreamerToken(restreamerUrl),
+        getPool().query(
+          `SELECT id, username, first_name, last_name, live_channel
+           FROM users
+           WHERE live_channel IS NOT NULL`
+        ),
+      ]);
+    } catch (fetchErr) {
+      if (fetchErr.restreamerUnavailable) {
+        logger.warn(`listChannels: Restreamer unavailable: ${fetchErr.message}`);
+        return res.status(503).json({ error: 'Streaming service temporarily unavailable' });
+      }
+      throw fetchErr;
+    }
 
-    const processes = await fetchRestreamerProcesses(restreamerUrl, token);
+    let processes;
+    try {
+      processes = await fetchRestreamerProcesses(restreamerUrl, token);
+    } catch (fetchErr) {
+      logger.warn(`listChannels: Restreamer process fetch failed: ${fetchErr.message}`);
+      return res.status(503).json({ error: 'Streaming service temporarily unavailable' });
+    }
 
     // Build a map of channelRef -> assigned user
     const channelToUser = {};

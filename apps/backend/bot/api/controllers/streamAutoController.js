@@ -43,6 +43,24 @@ function scheduleNext(userId, state) {
     const currentState = activeTimers.get(userId);
     if (!currentState) return;
 
+    // Check the Redis streaming-active flag before emitting. If the user has
+    // stopped streaming (key = '0' or missing), halt the loop.
+    try {
+      const { getRedis } = require('../../../config/redis');
+      const redis = getRedis();
+      if (redis) {
+        const activeFlag = await redis.get(`streaming:active:${userId}`);
+        if (activeFlag === '0') {
+          logger.info('streamAutoController: streaming:active flag is 0, stopping auto-chat loop', { userId });
+          clearTimeout(currentState.timeoutId);
+          activeTimers.delete(userId);
+          return;
+        }
+      }
+    } catch (flagErr) {
+      logger.warn('streamAutoController: failed to check streaming:active flag, continuing', { userId, error: flagErr.message });
+    }
+
     const io = socketSingleton.get();
     if (!io) {
       logger.warn('streamAutoController: io not available, stopping auto-chat', { userId });
@@ -54,19 +72,26 @@ function scheduleNext(userId, state) {
     const content = messages[messageIndex % messages.length];
     const nextIndex = (messageIndex + 1) % messages.length;
 
-    io.to(`live:${streamId}`).emit('live:message', {
-      id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${userId}`,
-      streamId,
-      userId: 'bot',
-      username: 'PNPtv',
-      content,
-      createdAt: new Date(),
-      isBot: true,
-    });
+    // Wrap the individual message emit in its own try/catch so one failure
+    // does not abort the entire auto-chat sequence.
+    try {
+      io.to(`live:${streamId}`).emit('live:message', {
+        id: `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${userId}`,
+        streamId,
+        userId: 'bot',
+        username: 'PNPtv',
+        content,
+        createdAt: new Date(),
+        isBot: true,
+      });
 
-    logger.info('streamAutoController: emitted auto-chat message', { userId, streamId, messageIndex, content });
+      logger.info('streamAutoController: emitted auto-chat message', { userId, streamId, messageIndex, content });
+    } catch (emitErr) {
+      logger.error('streamAutoController: failed to emit auto-chat message, continuing to next', { userId, streamId, messageIndex, error: emitErr.message });
+    }
 
-    // Persist to Redis for chat history
+    // Persist to Redis for chat history — isolated so a Redis failure doesn't
+    // stop the loop either.
     try {
       const { getRedis } = require('../../../config/redis');
       const redis = getRedis();
@@ -311,6 +336,18 @@ async function stopAutoMessages(req, res) {
     if (activeTimers.has(userId)) {
       clearTimeout(activeTimers.get(userId).timeoutId);
       activeTimers.delete(userId);
+    }
+
+    // Set the Redis streaming-active flag to '0' so any in-flight scheduled
+    // callback sees the stop signal and halts the loop immediately.
+    try {
+      const { getRedis } = require('../../../config/redis');
+      const redis = getRedis();
+      if (redis) {
+        await redis.set(`streaming:active:${userId}`, '0', 'EX', 86400);
+      }
+    } catch (redisErr) {
+      logger.warn('stopAutoMessages: failed to set streaming:active flag in Redis', { userId, error: redisErr.message });
     }
 
     await pool.query(

@@ -171,6 +171,7 @@ class PNPLiveService {
    */
   static async createBooking(userId, modelId, durationMinutes, bookingTime, paymentMethod) {
     let client;
+    let bookingLockKey = null;
     try {
       // Validate duration
       if (![30, 60, 90].includes(durationMinutes)) {
@@ -203,6 +204,18 @@ class PNPLiveService {
       const model = await ModelService.getModelById(modelId);
       if (!model) {
         throw new Error('Model not found');
+      }
+
+      // Acquire a per-model-per-day Redis lock to prevent two concurrent requests
+      // from both passing the overlap check and double-booking the same slot.
+      const slotDate = bookingTimeUtc.toISOString().slice(0, 10); // YYYY-MM-DD
+      bookingLockKey = `booking:lock:${modelId}:${slotDate}`;
+      const lockAcquired = await cache.acquireLock(bookingLockKey, 10); // 10-second TTL
+      if (!lockAcquired) {
+        return {
+          success: false,
+          error: 'Another booking is being processed for this time slot. Please try again.',
+        };
       }
 
       client = await getClient();
@@ -304,6 +317,14 @@ class PNPLiveService {
       logger.error('Error creating PNP Live booking:', error);
       throw new Error('Failed to create booking: ' + error.message);
     } finally {
+      // Always release the booking lock so the slot is unblocked for future requests.
+      if (bookingLockKey) {
+        try {
+          await cache.releaseLock(bookingLockKey);
+        } catch (lockReleaseErr) {
+          logger.warn('Failed to release booking lock:', { bookingLockKey, error: lockReleaseErr.message });
+        }
+      }
       if (client) {
         client.release();
       }

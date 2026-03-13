@@ -56,6 +56,20 @@ class BroadcastScheduler {
     this.isRunning = true;
     logger.info('Broadcast scheduler started - checking for pending broadcasts every minute');
 
+    // Startup validation: if ENABLE_CRON is true, warn if the broadcast queue
+    // is not initialized within 10 seconds (queue may start asynchronously).
+    if (process.env.ENABLE_CRON === 'true') {
+      setTimeout(() => {
+        if (!global.broadcastQueueIntegration) {
+          logger.warn(
+            '[CRITICAL] Broadcast scheduler: ENABLE_CRON=true but broadcastQueueIntegration is NOT initialized after 10 seconds. ' +
+            'All broadcasts will fall back to synchronous direct delivery. ' +
+            'Verify that the queue worker is started and global.broadcastQueueIntegration is assigned before the scheduler.'
+          );
+        }
+      }, 10000);
+    }
+
     // Run initial check for any pending broadcasts
     try {
       await this.processPendingBroadcasts();
@@ -220,9 +234,11 @@ class BroadcastScheduler {
     try {
       logger.info(`Executing scheduled broadcast: ${broadcastId}`);
 
-      // Queue broadcast using async queue if available
+      // Queue broadcast using async queue if available.
+      // Access global.broadcastQueueIntegration via a null-safe accessor so that
+      // a missing queue never throws — it falls back to direct synchronous delivery.
       let results;
-      const queueIntegration = global.broadcastQueueIntegration;
+      const queueIntegration = global.broadcastQueueIntegration ?? null;
       if (queueIntegration) {
         try {
           const job = await queueIntegration.queueBroadcast(broadcastId);
@@ -232,11 +248,17 @@ class BroadcastScheduler {
           });
           results = { success: true, jobId: job.job_id, queued: true };
         } catch (error) {
-          logger.warn(`Failed to queue scheduled broadcast, falling back to sync: ${error.message}`);
+          logger.warn(
+            `Failed to queue scheduled broadcast ${broadcastId}, falling back to direct send: ${error.message}`
+          );
           results = await broadcastService.sendBroadcast(this.bot, broadcastId);
         }
       } else {
-        // Fallback if queue not initialized
+        // Queue not initialized — fall back to direct synchronous delivery so
+        // messages are never silently dropped.
+        logger.warn(
+          `broadcastQueueIntegration unavailable for broadcast ${broadcastId} — sending directly via broadcastService`
+        );
         results = await broadcastService.sendBroadcast(this.bot, broadcastId);
       }
 
