@@ -539,6 +539,57 @@ export function getMyChannel(): Promise<{
   return request("/api/webapp/live/my-channel");
 }
 
+// ── LiveKit WebRTC Streaming ──────────────────────────────────────────────────
+
+export interface WebRTCStreamConfig {
+  token: string;
+  wsUrl: string;
+  roomName: string;
+  channelRef: string;
+}
+
+export function getWebRTCStreamerConfig(): Promise<{ success: boolean } & WebRTCStreamConfig> {
+  return request("/api/webapp/live/webrtc/config");
+}
+
+export function getWebRTCViewerToken(channelRef: string): Promise<{
+  success: boolean;
+  token: string;
+  wsUrl: string;
+  roomName: string;
+}> {
+  return request(`/api/webapp/live/webrtc/viewer-token/${encodeURIComponent(channelRef)}`);
+}
+
+export function getWebRTCStreams(): Promise<{
+  success: boolean;
+  streams: Array<{
+    id: string;
+    channelRef: string;
+    name: string;
+    description: string;
+    isLive: boolean;
+    viewerCount: number;
+    userId: string | null;
+    photoUrl: string | null;
+  }>;
+}> {
+  return request("/api/webapp/live/webrtc/streams");
+}
+
+export function getWebRTCStreamStatus(channelRef: string): Promise<{
+  success: boolean;
+  isLive: boolean;
+  participantCount: number;
+  streamerConnected: boolean;
+}> {
+  return request(`/api/webapp/live/webrtc/status/${encodeURIComponent(channelRef)}`);
+}
+
+export function endWebRTCStream(): Promise<{ success: boolean }> {
+  return request("/api/webapp/live/webrtc/end", { method: "POST" });
+}
+
 // Streamer settings
 export interface StreamerSettings {
   qualityPreset: string;

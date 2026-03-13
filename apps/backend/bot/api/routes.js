@@ -2409,9 +2409,17 @@ const streamerSettingsController = require('./controllers/streamerSettingsContro
 app.get('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.getSettings));
 app.put('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.updateSettings));
 
-// Stream Bridge: browser → RTMP via WebSocket+FFmpeg
+// Stream Bridge: browser → RTMP via WebSocket+FFmpeg (legacy — kept for backward compat)
 const streamBridgeController = require('./controllers/streamBridgeController');
 app.get('/api/webapp/live/my-channel', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamBridgeController.getMyChannel));
+
+// LiveKit WebRTC Streaming — sub-500ms latency, replaces Restreamer pipeline
+const livekitStreamController = require('./controllers/livekitStreamController');
+app.get('/api/webapp/live/webrtc/config', requireSessionAuth, asyncHandler(livekitStreamController.getStreamerConfig));
+app.get('/api/webapp/live/webrtc/viewer-token/:channelRef', requireSessionAuth, requireMemberTier, asyncHandler(livekitStreamController.getViewerToken));
+app.get('/api/webapp/live/webrtc/streams', requireSessionAuth, requireMemberTier, asyncHandler(livekitStreamController.listStreams));
+app.get('/api/webapp/live/webrtc/status/:channelRef', requireSessionAuth, asyncHandler(livekitStreamController.getStreamStatus));
+app.post('/api/webapp/live/webrtc/end', requireSessionAuth, asyncHandler(livekitStreamController.endStream));
 
 // Stream Auto-Chat (Grok-generated messages that post to live chat at intervals)
 const streamAutoController = require('./controllers/streamAutoController');
