@@ -538,7 +538,7 @@ export function LiveKitMeetComponent({
       audio={true}
       connect={true}
       onDisconnected={() => onCallEnd()}
-      onError={(err) => {
+      onError={(err: any) => {
         console.error("LiveKit connection error", err);
         setConnectError(err?.message || "Failed to connect to video room. Please try again.");
       }}

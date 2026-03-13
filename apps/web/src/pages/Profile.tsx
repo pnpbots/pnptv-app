@@ -34,11 +34,13 @@ import {
   getMyEvents,
   rsvpEvent,
   unrsvpEvent,
+  cancelEvent,
   type UserProfile,
   type SocialPostItem,
   type EventItem,
 } from "@/lib/api";
 import { EventCard } from "@/components/events/EventCard";
+import { CreateEventModal } from "@/components/events/CreateEventModal";
 import { EventDetailModal } from "@/components/events/EventDetailModal";
 import PostCard from "@/components/profile/PostCard";
 import EditProfileModal from "@/components/profile/EditProfileModal";
@@ -115,6 +117,7 @@ export default function Profile() {
   const [myEvents, setMyEvents] = useState<EventItem[]>([]);
   const [myEventsLoading, setMyEventsLoading] = useState(false);
   const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
+  const [showCreateEvent, setShowCreateEvent] = useState(false);
 
   // Creator subscription state
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -1707,7 +1710,22 @@ export default function Profile() {
       {/* ── My Events (own profile only) ── */}
       {isOwnProfile && (
         <div className="mt-4">
-          <h2 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3">My Events</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-white/60 uppercase tracking-wider">My Events</h2>
+            {isAuthenticated && (
+              <button
+                onClick={() => setShowCreateEvent(true)}
+                className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full transition-all"
+                style={{ background: "rgba(255,180,84,0.12)", color: "#FFB454" }}
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                Create
+              </button>
+            )}
+          </div>
+
           {myEventsLoading ? (
             <div className="glass-card-sm p-4 animate-pulse">
               <div className="h-4 bg-white/10 rounded w-40 mb-2" />
@@ -1715,7 +1733,12 @@ export default function Profile() {
             </div>
           ) : myEvents.length === 0 ? (
             <div className="glass-card-sm p-6 text-center">
-              <p className="text-sm" style={{ color: "#8E8E93" }}>No events yet. Create one from the Home page.</p>
+              <p className="text-sm" style={{ color: "#8E8E93" }}>No events yet.</p>
+              {isAuthenticated && (
+                <button onClick={() => setShowCreateEvent(true)} className="mt-2.5 text-xs font-semibold" style={{ color: "#FFB454" }}>
+                  Create one
+                </button>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -1737,10 +1760,31 @@ export default function Profile() {
                       }
                     } catch { /* silent */ }
                   }}
+                  canCancel={String(event.creatorId) === String(user?.dbId || user?.id) || (user?.role === "admin" || user?.role === "superadmin")}
+                  onCancel={async (eventId) => {
+                    if (!window.confirm("Cancel this event?")) return;
+                    try {
+                      await cancelEvent(eventId);
+                      setMyEvents((prev) => prev.filter((e) => e.id !== eventId));
+                    } catch { /* silent */ }
+                  }}
                   onViewDetails={(event) => setDetailEvent(event)}
                 />
               ))}
             </div>
+          )}
+
+          {showCreateEvent && (
+            <CreateEventModal
+              canCreateLive={isAuthenticated && (user?.role === "model" || user?.role === "creator" || user?.role === "admin" || user?.role === "superadmin")}
+              userGroups={[]}
+              onClose={() => setShowCreateEvent(false)}
+              onCreated={(ev) => {
+                setShowCreateEvent(false);
+                setMyEvents((prev) => [ev, ...prev]);
+                setDetailEvent(ev);
+              }}
+            />
           )}
         </div>
       )}

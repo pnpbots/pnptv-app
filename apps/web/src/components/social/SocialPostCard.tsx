@@ -473,6 +473,7 @@ export default function SocialPostCard({
               <MentionText
                 text={translatedContent ?? post.content}
                 className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed block"
+                maxLength={200}
               />
               {translatedContent && (
                 <button

@@ -200,7 +200,7 @@ export default function MainStage() {
         {/* Mod Bot (right) — admin only, desktop */}
         {isAdmin && (
           <div className="hidden sm:flex flex-shrink-0 p-2">
-            <VideoCallModBot jitsiApi={jitsiApi} isAdmin={isAdmin} />
+            <VideoCallModBot room={jitsiApi} isAdmin={isAdmin} />
           </div>
         )}
 
