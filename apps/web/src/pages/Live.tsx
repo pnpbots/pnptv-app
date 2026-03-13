@@ -14,9 +14,11 @@ import { CreateEventModal } from "@/components/events/CreateEventModal";
 import type { EventItem } from "@/components/events/EventCard";
 
 const StreamerDashboard = lazy(() => import("@/components/streaming/StreamerDashboard"));
+const WebRTCStreamer = lazy(() => import("@/components/WebRTCStreamer"));
 import {
   getFeaturedPerformers,
   getLiveStreams,
+  getWebRTCStreams,
   getWalletBalance,
   getTokenPackages,
   buyTokens,
@@ -157,28 +159,47 @@ export default function Live() {
     socketBalanceReceived,
   } = useLiveSocket(null);
 
-  // Load performers + streams
+  // Load performers + streams (merge WebRTC + Restreamer HLS)
+  const fetchStreams = useCallback(() => {
+    return Promise.all([
+      getLiveStreams().catch(() => ({ streams: [] })),
+      getWebRTCStreams().catch(() => ({ streams: [] })),
+    ]).then(([hlsData, webrtcData]) => {
+      const hlsStreams = (hlsData.streams || []).filter((s: LiveStream) => s.isLive);
+      const webrtcStreams = (webrtcData.streams || [])
+        .filter((s: any) => s.isLive)
+        .map((s: any) => ({ ...s, hlsUrl: "" })); // WebRTC streams don't use hlsUrl
+      // Merge: WebRTC streams take priority over HLS for the same channel
+      const webrtcIds = new Set(webrtcStreams.map((s: any) => s.channelRef || s.id));
+      const merged = [
+        ...webrtcStreams,
+        ...hlsStreams.filter((s: any) => !webrtcIds.has(s.id)),
+      ];
+      return merged;
+    });
+  }, []);
+
   useEffect(() => {
     setPerformersLoading(true);
     setLoadError(false);
     Promise.all([
       getFeaturedPerformers(),
-      getLiveStreams(),
-    ]).then(([perfData, streamData]) => {
+      fetchStreams(),
+    ]).then(([perfData, mergedStreams]) => {
       setPerformers(perfData.performers || []);
-      setLiveStreams((streamData.streams || []).filter((s: LiveStream) => s.isLive));
+      setLiveStreams(mergedStreams as LiveStream[]);
     }).catch(() => {
       setLoadError(true);
     }).finally(() => setPerformersLoading(false));
 
     // Refresh streams periodically
     const interval = setInterval(() => {
-      getLiveStreams()
-        .then((data) => setLiveStreams((data.streams || []).filter((s: LiveStream) => s.isLive)))
+      fetchStreams()
+        .then((merged) => setLiveStreams(merged as LiveStream[]))
         .catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchStreams]);
 
   // Load wallet balance + packages when authenticated
   useEffect(() => {
@@ -834,15 +855,28 @@ export default function Live() {
         </div>
       )}
 
-      {/* Streamer Dashboard — full-screen overlay (OBS-like pro UI) */}
+      {/* WebRTC Streamer — sub-500ms latency via LiveKit */}
       {showBrowserStreamer && (
-        <Suspense fallback={
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-pnp-background">
-            <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+        <div className="fixed inset-0 z-50 bg-pnp-background overflow-y-auto">
+          <div className="max-w-2xl mx-auto px-4 py-6">
+            <button
+              onClick={() => setShowBrowserStreamer(false)}
+              className="mb-4 flex items-center gap-1.5 text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" />
+              </svg>
+              Back to Live
+            </button>
+            <Suspense fallback={
+              <div className="flex items-center justify-center py-20">
+                <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+              </div>
+            }>
+              <WebRTCStreamer />
+            </Suspense>
           </div>
-        }>
-          <StreamerDashboard onClose={() => setShowBrowserStreamer(false)} />
-        </Suspense>
+        </div>
       )}
 
       {showCreateEvent && (

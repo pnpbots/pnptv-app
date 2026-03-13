@@ -6,11 +6,13 @@ import { useAuth } from "@/hooks/useAuth";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 import { useI18n } from "@/lib/i18n";
 import { LivePlayer } from "@/components/LivePlayer";
+import { WebRTCPlayer } from "@/components/WebRTCPlayer";
 import { LiveRulesModal } from "@/components/LiveRulesModal";
 import { connectSocket } from "@/lib/socket";
 import {
   getLiveStreams,
   getAllPerformers,
+  getWebRTCStreams,
   sendTip,
   TIP_AMOUNTS,
   getStreamOverlayPublic,
@@ -37,6 +39,7 @@ export default function Stream() {
   const { isAuthenticated, login } = useAuth();
 
   const [stream, setStream] = useState<LiveStream | null>(null);
+  const [useWebRTC, setUseWebRTC] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<StreamOverlay | null>(null);
@@ -73,28 +76,51 @@ export default function Stream() {
   // Share button state
   const [shareCopied, setShareCopied] = useState(false);
 
-  // Load stream info.
-  // streamId may be a Restreamer process ID (navigated from Community Live section)
-  // or a performer ID like "live-42" / "db-42" (navigated from the performer grid
-  // when the backend injects isLive + hlsUrl directly on the performer object).
+  // Load stream info. Checks WebRTC (LiveKit) streams first, then falls back
+  // to Restreamer HLS streams and performer lookup.
   const loadStream = useCallback(() => {
     if (!streamId) return Promise.resolve();
-    return Promise.all([getLiveStreams(), getAllPerformers()])
-      .then(([data, perfData]) => {
-        const streams = data.streams || [];
+    const channelRef = extractChannelRef(streamId);
+
+    return Promise.all([
+      getWebRTCStreams().catch(() => ({ streams: [] })),
+      getLiveStreams().catch(() => ({ streams: [] })),
+      getAllPerformers().catch(() => ({ performers: [] })),
+    ])
+      .then(([webrtcData, hlsData, perfData]) => {
+        const webrtcStreams = webrtcData.streams || [];
+        const hlsStreams = hlsData.streams || [];
         const performers = perfData.performers || [];
 
-        // 1. Direct match by Restreamer process ID (e.g. "restreamer-ui:ingest:pnptv-santino")
-        const directMatch = streams.find((s) => s.id === streamId);
-        if (directMatch) {
-          setStream(directMatch);
+        // 1. Check WebRTC (LiveKit) streams — preferred, sub-500ms latency
+        const webrtcMatch = webrtcStreams.find(
+          (s: any) => s.channelRef === streamId || s.channelRef === channelRef || s.id === streamId
+        );
+        if (webrtcMatch && webrtcMatch.isLive) {
+          setStream({
+            id: webrtcMatch.channelRef || webrtcMatch.id,
+            name: webrtcMatch.name,
+            description: webrtcMatch.description || "",
+            hlsUrl: "", // Not used for WebRTC
+            isLive: true,
+          });
+          setUseWebRTC(true);
           setError(null);
           setStreamError(false);
           return;
         }
 
-        // 2. Match by performer ID (e.g. "db-8599671840" or "live-8599671840")
-        //    or userId (e.g. "8599671840") — resolve via performers endpoint
+        // 2. Direct match in Restreamer HLS streams
+        const hlsMatch = hlsStreams.find((s: any) => s.id === streamId || s.id === channelRef);
+        if (hlsMatch && hlsMatch.isLive) {
+          setStream(hlsMatch);
+          setUseWebRTC(false);
+          setError(null);
+          setStreamError(false);
+          return;
+        }
+
+        // 3. Match by performer (isLive + hlsUrl from backend)
         const performer = performers.find(
           (p: any) =>
             p.id === streamId ||
@@ -109,18 +135,19 @@ export default function Stream() {
             hlsUrl: performer.hlsUrl,
             isLive: true,
           });
+          setUseWebRTC(false);
           setError(null);
           setStreamError(false);
           return;
         }
 
-        // 3. Fuzzy match: streamId might be a channel ref like "pnptv-santino"
-        //    embedded in the Restreamer process ID
-        const fuzzyMatch = streams.find(
-          (s) => s.id.endsWith(`:${streamId}`) || s.id.includes(streamId)
+        // 4. Fuzzy match in HLS streams
+        const fuzzyMatch = hlsStreams.find(
+          (s: any) => s.id.includes(streamId) || (channelRef && s.id.includes(channelRef))
         );
         if (fuzzyMatch) {
           setStream(fuzzyMatch);
+          setUseWebRTC(false);
           setError(null);
           setStreamError(false);
           return;
@@ -442,7 +469,11 @@ export default function Stream() {
 
       {/* Video Player */}
       <div ref={videoContainerRef} className="relative -mx-4 sm:-mx-6">
-        <LivePlayer src={stream.hlsUrl} title={stream.name} overlay={overlay} />
+        {useWebRTC ? (
+          <WebRTCPlayer channelRef={extractChannelRef(stream.id) || stream.id} title={stream.name} />
+        ) : (
+          <LivePlayer src={stream.hlsUrl} title={stream.name} overlay={overlay} />
+        )}
         {streamError && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-30 rounded-xl">
             <div className="text-center">
