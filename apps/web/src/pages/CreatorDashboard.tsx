@@ -23,7 +23,7 @@ import { ContentTab } from "./creator/ContentTab";
 import { SettingsTab } from "./creator/SettingsTab";
 import { CallPackageManager } from "./creator/CallPackageManager";
 
-const BrowserStreamer = lazy(() => import("@/components/BrowserStreamer"));
+const BrowserStreamer = lazy(() => import("@/components/WebRTCStreamer"));
 
 const TIERS: { key: "ice" | "crystal" | "diamond"; label: string; emoji: string }[] = [
   { key: "ice", label: "Ice", emoji: "❄" },
