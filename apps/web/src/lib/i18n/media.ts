@@ -39,9 +39,9 @@ const strings = {
 
     // Category filter
     allSeries: "All",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     // Video card
     playingBadge: "PLAYING",
@@ -88,9 +88,9 @@ const strings = {
     getPrimeCta: "Obtener PRIME",
 
     allSeries: "Todos",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     playingBadge: "REPRODUCIENDO",
     episodePrefix: "Ep",
@@ -134,9 +134,9 @@ const strings = {
     getPrimeCta: "Obter PRIME",
 
     allSeries: "Todos",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     playingBadge: "REPRODUZINDO",
     episodePrefix: "Ep",
@@ -272,9 +272,9 @@ const strings = {
     getPrimeCta: "Obtenir PRIME",
 
     allSeries: "Tout",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     playingBadge: "EN LECTURE",
     episodePrefix: "Ép",
@@ -318,9 +318,9 @@ const strings = {
     getPrimeCta: "PRIME holen",
 
     allSeries: "Alle",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     playingBadge: "WIRD ABGESPIELT",
     episodePrefix: "Folge",
@@ -364,9 +364,9 @@ const strings = {
     getPrimeCta: "รับ PRIME",
 
     allSeries: "ทั้งหมด",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     playingBadge: "กำลังเล่น",
     episodePrefix: "ตอน",
@@ -410,9 +410,9 @@ const strings = {
     getPrimeCta: "Ottieni PRIME",
 
     allSeries: "Tutti",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     playingBadge: "IN RIPRODUZIONE",
     episodePrefix: "Ep",
@@ -456,9 +456,9 @@ const strings = {
     getPrimeCta: "PRIME Al",
 
     allSeries: "Tümü",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     playingBadge: "OYNATILIYOR",
     episodePrefix: "Bl",
@@ -502,9 +502,9 @@ const strings = {
     getPrimeCta: "Получить PRIME",
 
     allSeries: "Все",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     playingBadge: "ВОСПРОИЗВОДИТСЯ",
     episodePrefix: "Эп",
@@ -548,9 +548,9 @@ const strings = {
     getPrimeCta: "PRIME halen",
 
     allSeries: "Alle",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     playingBadge: "WORDT AFGESPEELD",
     episodePrefix: "Afl",
@@ -594,9 +594,9 @@ const strings = {
     getPrimeCta: "Lấy PRIME",
 
     allSeries: "Tất cả",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     playingBadge: "ĐANG PHÁT",
     episodePrefix: "Tập",
@@ -640,9 +640,9 @@ const strings = {
     getPrimeCta: "PRIMEを取得",
 
     allSeries: "すべて",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     playingBadge: "再生中",
     episodePrefix: "第",
@@ -686,9 +686,9 @@ const strings = {
     getPrimeCta: "Dapatkan PRIME",
 
     allSeries: "Semua",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     playingBadge: "DIPUTAR",
     episodePrefix: "Ep",
@@ -732,9 +732,9 @@ const strings = {
     getPrimeCta: "احصل على PRIME",
 
     allSeries: "الكل",
-    categoryClouding: "Clouding",
-    categorySlamming: "Slamming",
     categoryLiveShow: "Live Show",
+    categoryPrimeShorts: "PRIME Shorts",
+    categoryPrimeVideos: "PRIME Videos",
 
     playingBadge: "قيد التشغيل",
     episodePrefix: "حلقة",

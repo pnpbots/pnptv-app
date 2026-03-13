@@ -58,29 +58,65 @@ export default function Media() {
 
   const [activeVideo, setActiveVideo] = useState<PrimeVideo | null>(null);
   const [activeSeries, setActiveSeries] = useState<string>("all");
+  const [activeTags, setActiveTags] = useState<string[]>([]);
   const [videoReactions, setVideoReactions] = useState<ContentReaction[]>([]);
   const [reactionsLoading, setReactionsLoading] = useState(false);
   const { showTutorial, dismissTutorial } = useTutorial("prime");
 
-  // Dynamic categories derived from the actual data
+  // Content type categories (primary filter)
   const CATEGORIES = useMemo(() => {
     const cats = new Set(videos.map((v) => v.category).filter(Boolean));
     const labelMap: Record<string, string> = {
-      clouding: t.categoryClouding,
-      slamming: t.categorySlamming,
       live_show: t.categoryLiveShow,
+      prime_shorts: t.categoryPrimeShorts,
+      prime_videos: t.categoryPrimeVideos,
     };
-    return Array.from(cats).map((key) => ({
-      key: key!,
-      label: labelMap[key!.toLowerCase()] || key!.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-    }));
+    // Fixed order: live_show, prime_shorts, prime_videos
+    const order = ["live_show", "prime_shorts", "prime_videos"];
+    return order
+      .filter((key) => cats.has(key))
+      .map((key) => ({ key, label: labelMap[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) }));
   }, [videos, t]);
 
-  // Filter videos by selected category
+  // Tag labels (secondary filter)
+  const TAG_LABELS: { key: string; label: string }[] = [
+    { key: "slam", label: "Slam" },
+    { key: "clouds", label: "Clouds" },
+    { key: "outdoors", label: "Outdoors" },
+    { key: "group", label: "Group" },
+    { key: "meth-daddy", label: "Meth Daddy" },
+    { key: "twink", label: "Twink" },
+    { key: "colombian", label: "Colombian" },
+    { key: "venezuelan", label: "Venezuelan" },
+    { key: "threesome", label: "Threesome" },
+    { key: "golden-rain", label: "Golden Rain" },
+  ];
+
+  // Only show tags that exist in the current dataset
+  const AVAILABLE_TAGS = useMemo(() => {
+    const allTags = new Set(videos.flatMap((v) => v.tags || []));
+    return TAG_LABELS.filter((t) => allTags.has(t.key));
+  }, [videos]);
+
+  const toggleTag = (tag: string) => {
+    setActiveTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  };
+
+  // Filter videos by category + tags
   const filteredVideos = useMemo(() => {
-    if (activeSeries === "all") return videos;
-    return videos.filter((v) => v.category === activeSeries);
-  }, [videos, activeSeries]);
+    let result = videos;
+    if (activeSeries !== "all") {
+      result = result.filter((v) => v.category === activeSeries);
+    }
+    if (activeTags.length > 0) {
+      result = result.filter((v) =>
+        v.tags && activeTags.some((tag) => v.tags!.includes(tag))
+      );
+    }
+    return result;
+  }, [videos, activeSeries, activeTags]);
 
   const handleVideoClick = (video: PrimeVideo) => {
     if (!isPrime) { navigate("/subscribe"); return; }
@@ -318,6 +354,34 @@ export default function Media() {
               {cat.label}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Tag filters */}
+      {!isLoading && AVAILABLE_TAGS.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto pb-2 mb-4 scrollbar-none">
+          {AVAILABLE_TAGS.map((tag) => (
+            <button
+              key={tag.key}
+              onClick={() => toggleTag(tag.key)}
+              className={`flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
+                activeTags.includes(tag.key)
+                  ? "text-white"
+                  : "bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/50"
+              }`}
+              style={activeTags.includes(tag.key) ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
+            >
+              {tag.label}
+            </button>
+          ))}
+          {activeTags.length > 0 && (
+            <button
+              onClick={() => setActiveTags([])}
+              className="flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium text-pnp-textSecondary hover:text-white transition-colors"
+            >
+              Clear
+            </button>
+          )}
         </div>
       )}
 
