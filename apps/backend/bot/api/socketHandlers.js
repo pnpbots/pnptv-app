@@ -9,6 +9,7 @@ const NotificationEmitter = require('../services/notificationEmitter');
 const LiveStreamModel = require('../../models/liveStreamModel');
 const BlockedUser = require('../../models/blockedUser');
 const jaasBroadcastService = require('../services/jaasBroadcastService');
+const DmService = require('../services/dmService');
 
 // ── Lua script: atomic viewer-count decrement clamped to 0 ────────────────────
 // H4: Replaces the non-atomic decr + conditional set(0) pattern.
@@ -952,54 +953,6 @@ function initSocketIO(io) {
       if (content.length > 4000) { socket.emit('dm:error', { error: 'Message too long' }); return; }
       if (recipientId === user.id) return;
 
-      // Block list check — mirrors REST endpoint behaviour
-      try {
-        const { rows: blockRows } = await query(
-          `SELECT 1 FROM blocked_users
-           WHERE (user_id = $1 AND blocked_user_id = $2)
-              OR (user_id = $2 AND blocked_user_id = $1)
-           LIMIT 1`,
-          [recipientId, user.id]
-        );
-        if (blockRows.length > 0) {
-          socket.emit('dm:error', { message: 'Cannot send message to this user' });
-          return;
-        }
-      } catch (blockErr) {
-        logger.error('dm:send block check error', blockErr);
-        return; // fail closed
-      }
-
-      // Check recipient's allowMessages privacy setting.
-      // privacy.allowMessages = true  → anyone may message (default)
-      // privacy.allowMessages = false → only followers of the recipient may message
-      // Admins and superadmins bypass this restriction.
-      const senderRole = user.role || '';
-      const isAdminSender = senderRole === 'admin' || senderRole === 'superadmin';
-      if (!isAdminSender) {
-        try {
-          const recipientPrivacyResult = await query(
-            'SELECT privacy FROM users WHERE id = $1',
-            [recipientId]
-          );
-          const recipientPrivacy = recipientPrivacyResult.rows[0]?.privacy || {};
-          const allowMessages = recipientPrivacy.allowMessages !== undefined ? recipientPrivacy.allowMessages : true;
-          if (!allowMessages) {
-            const followResult = await query(
-              'SELECT 1 FROM user_follows WHERE follower_id = $1 AND following_id = $2 LIMIT 1',
-              [user.id, recipientId]
-            );
-            if ((followResult.rowCount ?? followResult.rows.length) === 0) {
-              socket.emit('dm:error', { message: 'This user is not accepting messages' });
-              return;
-            }
-          }
-        } catch (privacyErr) {
-          logger.error('dm:send privacy check error', privacyErr);
-          return; // fail closed
-        }
-      }
-
       // Free-tier daily DM limit — users without pnp-member entitlement are limited
       const EntitlementAccessService = require('./services/entitlementAccessService');
       const role = user.role || '';
@@ -1034,34 +987,30 @@ function initSocketIO(io) {
         socket.emit('dm:error', { message: 'Too many messages.' });
         return;
       }
-      try {
-        // Insert message
-        const { rows } = await query(
-          `INSERT INTO direct_messages (sender_id, recipient_id, content)
-           VALUES ($1, $2, $3)
-           RETURNING id, sender_id, recipient_id, content, is_read, created_at`,
-          [user.id, recipientId, content.trim()]
-        );
-        const msg = rows[0];
 
-        // Upsert dm_thread
-        const [a, b] = [user.id, recipientId].sort();
-        await query(
-          `INSERT INTO dm_threads (user_a, user_b, last_message_at, last_message, unread_for_a, unread_for_b)
-           VALUES ($1, $2, NOW(), $3, $4, $5)
-           ON CONFLICT (user_a, user_b) DO UPDATE SET
-             last_message_at = NOW(), last_message = $3,
-             unread_for_a = CASE WHEN dm_threads.user_a = $6 THEN 0 ELSE dm_threads.unread_for_a + 1 END,
-             unread_for_b = CASE WHEN dm_threads.user_b = $6 THEN 0 ELSE dm_threads.unread_for_b + 1 END`,
-          [a, b, content.trim().slice(0, 100),
-           user.id === a ? 0 : 1,
-           user.id === b ? 0 : 1,
-           user.id]
+      try {
+        const senderRole = user.role || '';
+        const isAdminSender = senderRole === 'admin' || senderRole === 'superadmin';
+
+        const message = await DmService.sendMessage(
+          user.id,
+          recipientId,
+          { content },
+          { isAdmin: isAdminSender }
         );
 
         // Deliver to sender and recipient
         const payload = {
-          ...msg,
+          id: message.id,
+          senderId: message.sender_id,
+          recipientId: message.recipient_id,
+          content: message.content,
+          mediaUrl: message.media_url,
+          mediaType: message.media_type,
+          mediaMime: message.media_mime,
+          mediaThumbUrl: message.media_thumb_url,
+          isRead: message.is_read,
+          createdAt: message.created_at,
           sender: {
             id: user.id,
             username: user.username,
@@ -1070,20 +1019,17 @@ function initSocketIO(io) {
           },
         };
         socket.emit('dm:sent', payload);
-        io.to(`user:${recipientId}`).emit('dm:received', payload);
-
-        // Notify recipient of new DM
-        NotificationEmitter.emit({
-          type: 'dm', category: 'messaging', priority: 'high',
-          actorId: user.id, targetUserId: recipientId,
-          entityType: 'message', entityId: String(msg.id),
-          message: `${user.firstName || user.username} sent you a message`,
-        });
+        io.to(`user:${message.recipient_id}`).emit('dm:received', payload);
       } catch (err) {
+        if (err.statusCode) {
+          socket.emit('dm:error', { message: err.message, code: err.code });
+          return;
+        }
         logger.error('dm:send error', err);
         socket.emit('dm:error', { error: 'Failed to send message' });
       }
     });
+
 
     socket.on('dm:typing', async ({ recipientId } = {}) => {
       if (!recipientId) return;

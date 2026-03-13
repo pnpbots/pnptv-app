@@ -2,6 +2,7 @@ const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { getRedis } = require('../../../config/redis');
 const { resolveUserId } = require('../../utils/helpers');
+const DmService = require('../../services/dmService');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -45,7 +46,7 @@ const getConversation = async (req, res) => {
   const { cursor } = req.query;
   try {
     const { rows } = await query(
-      `SELECT id, sender_id, recipient_id, content, is_read, created_at
+      `SELECT id, sender_id, recipient_id, content, media_url, media_type, is_read, created_at
        FROM direct_messages
        WHERE ((sender_id=$1 AND recipient_id=$2) OR (sender_id=$2 AND recipient_id=$1))
          AND is_deleted = false
@@ -53,29 +54,10 @@ const getConversation = async (req, res) => {
        ORDER BY created_at DESC LIMIT 30`,
       cursor ? [user.id, partnerId, cursor] : [user.id, partnerId]
     );
+
     // Mark messages as read
-    await query(
-      `UPDATE direct_messages SET is_read = true
-       WHERE sender_id=$1 AND recipient_id=$2 AND is_read=false`,
-      [partnerId, user.id]
-    );
-    // Reset unread count in thread
-    const [a, b] = [user.id, partnerId].sort();
-    try {
-      if (user.id === a) {
-        await query(
-          'UPDATE dm_threads SET unread_for_a = 0 WHERE user_a=$1 AND user_b=$2',
-          [a, b]
-        );
-      } else {
-        await query(
-          'UPDATE dm_threads SET unread_for_b = 0 WHERE user_a=$1 AND user_b=$2',
-          [a, b]
-        );
-      }
-    } catch (_err) {
-      // Best-effort thread counter reset; the conversation payload is still valid.
-    }
+    await DmService.markAsRead(user.id, partnerId);
+
     return res.json({ success: true, messages: rows.reverse() });
   } catch (err) {
     logger.error('getConversation error', err);
@@ -105,101 +87,47 @@ const sendMessage = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const requestedRecipientId = req.params.recipientId;
   const { content } = req.body;
-  if (!content?.trim()) return res.status(400).json({ error: 'Content required' });
-  if (requestedRecipientId === user.id) return res.status(400).json({ error: 'Cannot message yourself' });
-  const recipientId = await resolveUserId(requestedRecipientId);
-  if (!recipientId) return res.status(404).json({ error: 'Recipient not found' });
-  if (recipientId === user.id) return res.status(400).json({ error: 'Cannot message yourself' });
-  try {
-    // Check if either party has blocked the other (bidirectional)
-    const blockResult = await query(
-      `SELECT 1 FROM blocked_users
-       WHERE (user_id = $1 AND blocked_user_id = $2)
-          OR (user_id = $2 AND blocked_user_id = $1)
-       LIMIT 1`,
-      [recipientId, user.id]
-    );
-    const blockRows = Array.isArray(blockResult?.rows) ? blockResult.rows : [];
-    if (blockRows.length > 0) {
-      return res.status(403).json({ error: 'Cannot send message to this user' });
-    }
 
-    // Check recipient's allowMessages privacy setting.
-    // privacy.allowMessages = true  → anyone may message (default)
-    // privacy.allowMessages = false → only followers of the recipient may message
-    // Admins and superadmins bypass this restriction.
+  try {
     const senderRole = user.role || '';
     const isAdminSender = senderRole === 'admin' || senderRole === 'superadmin';
-    if (!isAdminSender) {
-      const recipientResult = await query(
-        'SELECT privacy FROM users WHERE id = $1',
-        [recipientId]
-      );
-      const recipientRows = Array.isArray(recipientResult?.rows) ? recipientResult.rows : [];
-      const recipientPrivacy = recipientRows[0]?.privacy || {};
-      const allowMessages = recipientPrivacy.allowMessages !== undefined ? recipientPrivacy.allowMessages : true;
 
-      if (!allowMessages) {
-        // Sender must be a follower of the recipient to bypass the restriction
-        const followResult = await query(
-          'SELECT 1 FROM user_follows WHERE follower_id = $1 AND following_id = $2 LIMIT 1',
-          [user.id, recipientId]
-        );
-        const followCount = typeof followResult?.rowCount === 'number'
-          ? followResult.rowCount
-          : (Array.isArray(followResult?.rows) ? followResult.rows.length : 0);
-        if (followCount === 0) {
-          return res.status(403).json({ error: 'This user is not accepting messages' });
-        }
-      }
-    }
-
-    const text = content.trim().slice(0, 4000);
-    const { rows } = await query(
-      `INSERT INTO direct_messages (sender_id, recipient_id, content)
-       VALUES ($1, $2, $3) RETURNING *`,
-      [user.id, recipientId, text]
+    const message = await DmService.sendMessage(
+      user.id,
+      requestedRecipientId,
+      { content },
+      { isAdmin: isAdminSender }
     );
-    const msg = rows[0];
-    // Upsert dm_threads
-    const [a, b] = [user.id, recipientId].sort();
-    if (user.id === a) {
-      await query(
-        `INSERT INTO dm_threads (user_a, user_b, last_message, last_message_at, unread_for_b)
-         VALUES ($1, $2, $3, NOW(), 1)
-         ON CONFLICT (user_a, user_b) DO UPDATE SET
-           last_message = EXCLUDED.last_message,
-           last_message_at = NOW(),
-           unread_for_b = dm_threads.unread_for_b + 1`,
-        [a, b, text.slice(0, 100)]
-      );
-    } else {
-      await query(
-        `INSERT INTO dm_threads (user_a, user_b, last_message, last_message_at, unread_for_a)
-         VALUES ($1, $2, $3, NOW(), 1)
-         ON CONFLICT (user_a, user_b) DO UPDATE SET
-           last_message = EXCLUDED.last_message,
-           last_message_at = NOW(),
-           unread_for_a = dm_threads.unread_for_a + 1`,
-        [a, b, text.slice(0, 100)]
-      );
-    }
+
     // Deliver to recipient via Socket.IO if available
     const io = req.app.get('io');
     if (io) {
-      io.to(`user:${recipientId}`).emit('dm:received', {
-        id: msg.id,
-        sender_id: msg.sender_id,
-        recipient_id: msg.recipient_id,
-        content: msg.content,
-        created_at: msg.created_at,
+      io.to(`user:${message.recipient_id}`).emit('dm:received', {
+        id: message.id,
+        sender_id: message.sender_id,
+        recipient_id: message.recipient_id,
+        content: message.content,
+        created_at: message.created_at,
+        sender: {
+          id: user.id,
+          username: user.username,
+          firstName: user.firstName || user.first_name,
+          photoUrl: user.photoUrl || user.photo_url,
+        }
       });
     }
-    return res.json({ success: true, message: msg, remaining: req.dmLimit?.remaining ?? null });
+
+    return res.json({ success: true, message, remaining: req.dmLimit?.remaining ?? null });
   } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message, code: err.code });
+    }
     logger.error('sendMessage DM error', err);
     return res.status(500).json({ error: 'Failed to send message' });
   }
 };
+
+module.exports = { getThreads, getConversation, getPartnerInfo, sendMessage };
+
 
 module.exports = { getThreads, getConversation, getPartnerInfo, sendMessage };
