@@ -213,7 +213,7 @@ const handleEpaycoWebhook = async (req, res) => {
     const stateCode = req.body.x_cod_transaction_state || normalizedState || req.body.x_transaction_state || 'unknown';
     const idempotencyKey = `epayco_${req.body.x_ref_payco}_${stateCode}`;
 
-    const acquired = await cache.acquireLock(idempotencyKey, 60);
+    const acquired = await cache.acquireLock(idempotencyKey, 180);
     if (!acquired) {
       logger.info('Duplicate ePayco webhook detected (already processed)', {
         refPayco: req.body.x_ref_payco,

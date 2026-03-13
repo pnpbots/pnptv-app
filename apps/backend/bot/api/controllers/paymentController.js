@@ -161,7 +161,8 @@ class PaymentController {
       if (paymentType === 'token_purchase') {
         const tokenAmount = payment.metadata?.tokensAmount || 0;
         const paymentAmountUsd = parseFloat(payment.amount) || payment.metadata?.usdAmount || 0;
-        const priceInCOP = Math.round(paymentAmountUsd * 4000);
+        const copRate = parseFloat(process.env.EPAYCO_USD_TO_COP || '4000');
+        const priceInCOP = Math.round(paymentAmountUsd * copRate);
         const amountCOPString = String(priceInCOP);
         const currencyCode = 'COP';
         const actualPaymentId = payment.id || payment.paymentId;
@@ -281,7 +282,8 @@ class PaymentController {
       const isPromo = payment.metadata?.promoId ? true : false;
 
       // Calculate price in COP using the actual payment amount
-      const priceInCOP = Math.round(paymentAmount * 4000);
+      const copRate = parseFloat(process.env.EPAYCO_USD_TO_COP || '4000');
+      const priceInCOP = Math.round(paymentAmount * copRate);
       const amountCOPString = String(priceInCOP);
       const currencyCode = 'COP';
 
@@ -745,8 +747,9 @@ class PaymentController {
           currentStatus: statusCheck.currentStatus,
         });
 
-        // Attempt recovery — pass callerUserId for C-03 ownership assertion.
-        await PaymentService.recoverStuckPendingPayment(paymentId, refPayco, req.session?.userId || null);
+        // Attempt recovery — pass callerUserId for ownership assertion.
+        const callerUserId = req.session?.user?.id || req.session?.userId || null;
+        await PaymentService.recoverStuckPendingPayment(paymentId, refPayco, callerUserId);
 
         return res.json({
           success: true,
@@ -1251,21 +1254,23 @@ class PaymentController {
         });
       }
 
-      // Payment is approved - this should not happen in normal flow
-      // The webhook should have been received already
-      logger.error('CRITICAL: Payment approved at ePayco but stuck pending locally - webhook was missed', {
+      // Payment is approved at ePayco but stuck pending locally — trigger recovery
+      logger.warn('Payment approved at ePayco but stuck pending locally - triggering recovery', {
         paymentId,
         refPayco,
-        action: 'ADMIN_INTERVENTION_NEEDED',
+        action: 'AUTO_RECOVERY',
       });
+
+      // Actually call the recovery to process the stuck payment
+      const recoveryResult = await PaymentService.recoverStuckPendingPayment(paymentId, refPayco, null);
 
       return res.json({
         success: true,
-        message: 'Webhook retry queued - admin notification sent',
-        action: 'ADMIN_MANUAL_INTERVENTION',
+        message: 'Payment recovery triggered',
+        action: 'AUTO_RECOVERED',
         paymentId,
         refPayco,
-        note: 'This indicates a system issue - webhooks should be received automatically',
+        recoveryResult,
       });
     } catch (error) {
       logger.error('Error retrying payment webhook', {
@@ -1336,6 +1341,14 @@ class PaymentController {
         });
       }
 
+      // Ownership check — prevent cross-account 3DS completion
+      const sessionUserId3ds = String(req.session?.user?.id || req.user?.id || '');
+      const paymentOwner3ds = String(payment.user_id || payment.userId || '');
+      if (!sessionUserId3ds || sessionUserId3ds !== paymentOwner3ds) {
+        logger.warn('complete3DS2Authentication ownership check failed', { paymentId, sessionUserId: sessionUserId3ds, paymentOwner: paymentOwner3ds });
+        return res.status(403).json({ success: false, error: 'Forbidden' });
+      }
+
       const refPayco = PaymentController.resolveEpaycoRef(payment)
         || await PaymentController.resolveEpaycoRefFromDb(paymentId);
 
@@ -1398,17 +1411,28 @@ class PaymentController {
           currentStatus,
         });
 
+        // Re-read payment to check if webhook already processed it (race condition guard)
+        const freshPayment = await PaymentModel.getById(paymentId);
+        if (freshPayment && freshPayment.status === 'completed') {
+          logger.info('3DS2: payment already completed by webhook, skipping activation', { paymentId });
+          return res.json({ success: true, message: 'Payment already processed' });
+        }
+
         // Activate subscription first, then mark completed to avoid polling race conditions.
         const userId = payment.user_id || payment.userId;
         const planId = payment.plan_id || payment.planId;
         const plan = await PlanModel.getById(planId);
 
         if (userId && plan) {
-          const expiryDate = new Date();
           const durationDays = plan.duration_days || plan.duration || 30;
-          expiryDate.setDate(expiryDate.getDate() + durationDays);
-
+          // Extend from current expiry if active (don't lose remaining days on renewal)
           const UserModel = require('../../../models/userModel');
+          const userForExpiry = await UserModel.getById(userId);
+          const currentExpiry = userForExpiry?.subscription?.expiry || userForExpiry?.subscription_expiry;
+          const expiryDate = (currentExpiry && new Date(currentExpiry) > new Date())
+            ? new Date(new Date(currentExpiry).getTime() + durationDays * 86400000)
+            : new Date(Date.now() + durationDays * 86400000);
+
           await UserModel.updateSubscription(userId, {
             status: 'active',
             planId,

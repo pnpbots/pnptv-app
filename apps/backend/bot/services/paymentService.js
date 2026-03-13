@@ -289,7 +289,7 @@ class PaymentService {
     // Internal amount is stored in USD and ePayco charge is sent in COP.
     const internalAmount = Number(payment?.amount);
     if (Number.isFinite(internalAmount) && internalAmount > 0) {
-      rawAmountCandidates.push(Math.round(internalAmount * 4000));
+      rawAmountCandidates.push(Math.round(internalAmount * parseFloat(process.env.EPAYCO_USD_TO_COP || '4000')));
       rawAmountCandidates.push(internalAmount);
     }
 
@@ -1230,6 +1230,15 @@ class PaymentService {
             });
           }
 
+          // Mark token purchase as completed
+          if (paymentIdOrType) {
+            await PaymentModel.updateStatus(paymentIdOrType, 'completed', {
+              transaction_id: x_transaction_id,
+              reference_code: x_ref_payco,
+              webhook_processed_at: new Date().toISOString(),
+            });
+          }
+
           return { success: true, type: 'token_purchase' };
         }
 
@@ -1532,7 +1541,7 @@ class PaymentService {
                 customerName: x_customer_name || user?.first_name || 'Valued Customer',
                 planName: plan.display_name || plan.name,
                 amount: parseFloat(x_amount),
-                currency: 'USD',
+                currency: x_currency_code || 'COP',
                 provider: 'epayco',
                 transactionId: x_ref_payco,
                 purchaseDate: new Date(),
@@ -2953,7 +2962,7 @@ class PaymentService {
       }
 
       const userId = payment.userId || payment.user_id;
-      const USD_TO_COP_RATE = Number(process.env.USD_TO_COP_RATE || 4350);
+      const USD_TO_COP_RATE = Number(process.env.EPAYCO_USD_TO_COP || process.env.USD_TO_COP_RATE || 4000);
       const amountCOP = Math.round((payment.amount || parseFloat(plan.price)) * USD_TO_COP_RATE);
       const paymentRef = `PAY-${paymentId.substring(0, 8).toUpperCase()}`;
       const normalizedBrowserInfo = this.buildChargeBrowserInfo({
