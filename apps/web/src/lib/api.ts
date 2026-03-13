@@ -4348,3 +4348,112 @@ export function getMyCallCredits(
   const qs = creatorId ? `?creatorId=${encodeURIComponent(creatorId)}` : "";
   return request(`/api/webapp/my-call-credits${qs}`);
 }
+
+export interface CallCheckoutPayload {
+  packageId: number;
+  provider: "epayco" | "daimo";
+  email: string;
+  quantity?: number;
+  selectedSlot?: string | null;
+}
+
+export interface CallCheckoutResponse {
+  success: boolean;
+  bookingId: number;
+  checkoutUrl?: string;
+  paymentId?: string;
+  startAt?: string;
+  durationMinutes?: number;
+}
+
+export function createCallCheckout(
+  data: CallCheckoutPayload
+): Promise<CallCheckoutResponse> {
+  return request("/api/webapp/book-call/checkout", {
+    method: "POST",
+    body: data,
+  });
+}
+
+export interface CallBookingLiveKit {
+  token: string;
+  wsUrl: string;
+  roomName: string;
+}
+
+export interface CallBooking {
+  id: number;
+  creator_id: string;
+  member_id: string;
+  package_id: number;
+  start_at: string;
+  end_at: string;
+  duration_minutes: 30 | 60;
+  status: "pending" | "confirmed" | "active" | "completed" | "cancelled" | "no_show";
+  payment_status: "pending" | "paid" | "refunded" | "failed";
+  creator_username: string;
+  creator_photo: string | null;
+  member_username: string;
+  livekit?: CallBookingLiveKit | null;
+  created_at: string;
+}
+
+export function getCallBooking(
+  bookingId: string | number
+): Promise<{ success: boolean; booking: CallBooking }> {
+  return request(`/api/webapp/book-call/bookings/${bookingId}`);
+}
+
+export interface CallSurveyPayload {
+  rating: 1 | 2 | 3 | 4 | 5;
+  feedback?: string;
+}
+
+export function submitCallSurvey(
+  bookingId: number,
+  data: CallSurveyPayload
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/book-call/bookings/${bookingId}/survey`, {
+    method: "POST",
+    body: data,
+  });
+}
+
+export interface AvailabilityDaySlot {
+  enabled: boolean;
+  startTime: string;
+  endTime: string;
+  timezone: string;
+}
+
+export type WeeklyAvailabilitySchedule = {
+  [day in "sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat"]: AvailabilityDaySlot;
+};
+
+export interface CreatorAvailabilityResponse {
+  success: boolean;
+  schedule: WeeklyAvailabilitySchedule | null;
+  isOnline: boolean;
+}
+
+export function getCreatorAvailabilitySchedule(): Promise<CreatorAvailabilityResponse> {
+  return request("/api/webapp/creator/availability");
+}
+
+export function saveCreatorAvailabilitySchedule(
+  schedule: WeeklyAvailabilitySchedule
+): Promise<{ success: boolean }> {
+  return request("/api/webapp/creator/availability", {
+    method: "PUT",
+    body: { schedule },
+  });
+}
+
+export function setCreatorOnlineStatus(
+  online: boolean
+): Promise<{ success: boolean; isOnline: boolean }> {
+  return request("/api/webapp/creator/online-status", {
+    method: "POST",
+    body: { online },
+  });
+}

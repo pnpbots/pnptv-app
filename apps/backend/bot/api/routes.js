@@ -6274,6 +6274,33 @@ app.get('/api/webapp/my-call-credits',
   requireSessionAuth,
   asyncHandler(callPackageController.myCallCredits));
 
+// ── Book a Call: Checkout, Booking Management & Creator Availability ─────────
+const callBookingController = require('./controllers/callBookingController');
+
+app.post('/api/webapp/book-call/checkout',
+  requireSessionAuth,
+  asyncHandler(callBookingController.createCheckout));
+
+app.get('/api/webapp/bookings/:bookingId',
+  requireSessionAuth,
+  asyncHandler(callBookingController.getBooking));
+
+app.post('/api/webapp/bookings/:bookingId/survey',
+  requireSessionAuth,
+  asyncHandler(callBookingController.submitSurvey));
+
+app.get('/api/webapp/creator/availability/schedule',
+  requireSessionAuth,
+  asyncHandler(callBookingController.getAvailabilitySchedule));
+
+app.post('/api/webapp/creator/availability/schedule',
+  requireSessionAuth,
+  asyncHandler(callBookingController.saveAvailabilitySchedule));
+
+app.put('/api/webapp/creator/online-status',
+  requireSessionAuth,
+  asyncHandler(callBookingController.setOnlineStatus));
+
 // ==========================================
 // ATProto / Bluesky OAuth Routes (PUBLIC — no session required)
 // These must be mounted at app root so the client_id URL and redirect_uri
