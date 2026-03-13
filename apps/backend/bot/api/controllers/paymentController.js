@@ -864,20 +864,13 @@ class PaymentController {
       } = req.body;
 
       const hasToken = typeof tokenCard === 'string' && tokenCard.trim().length >= 8;
-      const {
-        cardNumber: rawCardNumber,
-        expYear: rawExpYear,
-        expMonth: rawExpMonth,
-        cvc: rawCvc,
-      } = req.body;
-      const hasRawCardData = Boolean(rawCardNumber && rawExpYear && rawExpMonth && rawCvc);
 
       // Sanitize and validate email before sending to ePayco
       const sanitizedEmail = (typeof email === 'string' ? email : '').trim().toLowerCase();
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-      // Must have either a pre-tokenized card OR raw card data for server-side tokenization
-      if (!paymentId || (!hasToken && !hasRawCardData) || !name || !sanitizedEmail || !docType || !docNumber) {
+      // PCI compliance: only accept pre-tokenized cards (tokenized via ePayco.js in browser)
+      if (!paymentId || !hasToken || !name || !sanitizedEmail || !docType || !docNumber) {
         return res.status(400).json({
           success: false,
           error: 'Faltan campos requeridos. Debes enviar paymentId, datos de tarjeta y datos de titular.',
@@ -949,8 +942,22 @@ class PaymentController {
         logger.error('Payment timeout check failed (non-critical)', { error: err.message });
       }
 
+      // Ownership check: session user must own the payment
+      const sessionUserIdForCharge = String(req.session?.user?.id || req.user?.id || '');
+      const paymentForOwnership = await PaymentModel.getById(paymentId);
+      if (!paymentForOwnership) {
+        return res.status(404).json({ success: false, error: 'Payment not found' });
+      }
+      const paymentOwnerForCharge = String(paymentForOwnership.user_id || paymentForOwnership.userId || '');
+      if (!sessionUserIdForCharge || sessionUserIdForCharge !== paymentOwnerForCharge) {
+        logger.warn('processTokenizedCharge ownership check failed', {
+          paymentId, sessionUserId: sessionUserIdForCharge, paymentOwner: paymentOwnerForCharge,
+        });
+        return res.status(403).json({ success: false, error: 'Forbidden' });
+      }
+
       // Get userId for audit logging
-      const userId = await PaymentController.getUserIdFromPayment(paymentId);
+      const userId = paymentOwnerForCharge;
 
       // Security: Audit trail - charge attempted
       PaymentSecurityService.logPaymentEvent({
@@ -976,78 +983,8 @@ class PaymentController {
         },
       }).catch(() => {});
 
-      // If no pre-tokenized card, tokenize server-side with ePayco Node SDK
-      let resolvedToken = hasToken ? tokenCard.trim() : null;
-      if (!resolvedToken && hasRawCardData) {
-        try {
-          const { getEpaycoClient } = require('../../../config/epayco');
-          const epaycoClient = getEpaycoClient();
-          const cardNum = String(rawCardNumber).replace(/\s/g, '');
-          const expYear = String(rawExpYear).length === 2 ? '20' + rawExpYear : String(rawExpYear);
-          const expMonth = String(rawExpMonth).padStart(2, '0');
-          const cvc = String(rawCvc);
-          const creditInfo = {
-            'card[number]': cardNum,
-            'card[exp_year]': expYear,
-            'card[exp_month]': expMonth,
-            'card[cvc]': cvc,
-            'hasCvv': true,
-          };
-          logger.info('Server-side card tokenization started', {
-            paymentId,
-            cardBin: cardNum.substring(0, 6),
-            cardLast4: cardNum.slice(-4),
-            cardLength: cardNum.length,
-            expYear,
-            expMonth,
-            cvcLength: cvc.length,
-          });
-          const tokenResult = await epaycoClient.token.create(creditInfo);
-          if (tokenResult && tokenResult.status && tokenResult.id) {
-            resolvedToken = tokenResult.id;
-            logger.info('Server-side card tokenization succeeded', { paymentId, tokenId: resolvedToken.substring(0, 8) + '...' });
-          } else if (tokenResult && tokenResult.data && tokenResult.data.id) {
-            resolvedToken = tokenResult.data.id;
-            logger.info('Server-side card tokenization succeeded (data.id)', { paymentId });
-          } else {
-            const resultStr = JSON.stringify(tokenResult).substring(0, 300);
-            logger.error('Server-side tokenization returned unexpected format', { paymentId, result: resultStr });
-            // Detect ePayco API outage (502/HTML response parsed as invalid JWT)
-            const isEpaycoDown = resultStr.includes('Wrong number of segments')
-              || resultStr.includes('Bad Gateway')
-              || (tokenResult?.status === false && resultStr.includes('invalido o expirado'));
-            const isFranchiseReject = resultStr.includes('políticas de la franquicia')
-              || resultStr.includes('Rechazada');
-            const statusCode = isEpaycoDown ? 503 : 400;
-            let userError;
-            if (isEpaycoDown) {
-              userError = 'El procesador de pagos (ePayco) no está disponible en este momento. Por favor, intenta de nuevo en unos minutos.';
-            } else if (isFranchiseReject) {
-              userError = 'Tu banco o red de tarjeta no autorizó esta transacción. Por favor, intenta con otra tarjeta o contacta a tu banco para habilitar compras en línea.';
-            } else {
-              userError = 'No pudimos procesar tu tarjeta en este momento. Verifica los datos e intenta de nuevo, o prueba con otra tarjeta.';
-            }
-            return res.status(statusCode).json({
-              success: false,
-              error: userError,
-              retryable: isEpaycoDown,
-            });
-          }
-        } catch (tokenError) {
-          logger.error('Server-side card tokenization failed', { paymentId, error: tokenError.message });
-          const isEpaycoDown = tokenError.message?.includes('Wrong number of segments')
-            || tokenError.message?.includes('502')
-            || tokenError.message?.includes('ECONNREFUSED')
-            || tokenError.message?.includes('ETIMEDOUT');
-          return res.status(isEpaycoDown ? 503 : 400).json({
-            success: false,
-            error: isEpaycoDown
-              ? 'El procesador de pagos (ePayco) no está disponible en este momento. Por favor, intenta de nuevo en unos minutos.'
-              : 'No pudimos procesar tu tarjeta en este momento. Por favor, verifica los datos o intenta con otra tarjeta.',
-            retryable: isEpaycoDown,
-          });
-        }
-      }
+      // PCI: raw card data must never reach the server — reject if no token
+      const resolvedToken = tokenCard.trim();
 
       const chargeParams = {
         paymentId,
