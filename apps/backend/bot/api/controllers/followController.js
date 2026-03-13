@@ -53,6 +53,7 @@ const followUser = async (req, res) => {
       await query('UPDATE users SET followers_count = followers_count + 1 WHERE id = $1', [targetId]);
 
       // Fire notification (fire-and-forget)
+      const actorName = actor.first_name || actor.firstName || actor.username || 'Someone';
       NotificationEmitter.emit({
         type: 'follow',
         category: 'social',
@@ -61,7 +62,12 @@ const followUser = async (req, res) => {
         targetUserId: String(targetId),
         entityType: 'user',
         entityId: String(actor.id),
-        message: `${actor.first_name || actor.firstName || actor.username || 'Someone'} started following you`,
+        message: `${actorName} started following you`,
+        metadata: {
+          pushTitle: 'New Follower',
+          pushBody: `${actorName} started following you`,
+          url: `/profile/${actor.username || actor.id}`,
+        },
       });
     }
 

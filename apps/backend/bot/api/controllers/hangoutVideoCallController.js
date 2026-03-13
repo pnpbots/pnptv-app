@@ -226,7 +226,14 @@ async function notifyGroupMembers({ type, groupId, groupName, actor, callId, mes
       entityType: 'hangout_call',
       entityId: String(callId),
       message,
-      metadata: { groupId, groupName },
+      metadata: {
+        groupId,
+        groupName,
+        pushTitle: groupName || 'Hangout',
+        pushBody: message,
+        pushTag: `hangout-call-${groupId}`,
+        url: `/hangouts/${groupId}`,
+      },
     }).catch(() => {});
   } catch (err) {
     logger.error('notifyGroupMembers error', { type, groupId, error: err.message });

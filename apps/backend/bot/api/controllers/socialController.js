@@ -207,11 +207,18 @@ const createPost = async (req, res) => {
       const parentRow = await dbQuery('SELECT user_id FROM social_posts WHERE id = $1', [replyToId]);
       const parentAuthorId = parentRow.rows[0]?.user_id;
       if (parentAuthorId) {
+        const actorName = user.firstName || user.first_name || user.username;
+        const replyPreview = content && content.trim().length > 60 ? content.trim().slice(0, 57) + '...' : (content || '').trim();
         NotificationEmitter.emit({
           type: 'reply', category: 'social', priority: 'normal',
           actorId: user.id, targetUserId: parentAuthorId,
           entityType: 'post', entityId: String(replyToId),
-          message: `${user.firstName || user.first_name || user.username} replied to your post`,
+          message: replyPreview ? `${actorName} replied: "${replyPreview}"` : `${actorName} replied to your post`,
+          metadata: {
+            pushTitle: `${actorName} commented`,
+            pushBody: replyPreview ? `"${replyPreview}"` : 'Tap to view',
+            url: `/post/${replyToId}`,
+          },
         });
       }
     }
@@ -259,11 +266,26 @@ const toggleLike = async (req, res) => {
     if (result.liked) {
       const postAuthorId = postCheck.rows[0].user_id;
       if (postAuthorId) {
+        // Fetch post preview for rich notification
+        let postPreview = '';
+        try {
+          const { rows: postRows } = await dbQuery('SELECT content FROM social_posts WHERE id = $1', [postId]);
+          if (postRows[0]?.content) {
+            postPreview = postRows[0].content.length > 60 ? postRows[0].content.slice(0, 57) + '...' : postRows[0].content;
+          }
+        } catch (_) {}
+        const actorName = user.firstName || user.first_name || user.username;
+        const bodyText = postPreview ? `${actorName} liked your post: "${postPreview}"` : `${actorName} liked your post`;
         NotificationEmitter.emit({
           type: 'like', category: 'social', priority: 'normal',
           actorId: user.id, targetUserId: postAuthorId,
           entityType: 'post', entityId: String(postId),
-          message: `${user.firstName || user.first_name || user.username} liked your post`,
+          message: bodyText,
+          metadata: {
+            pushTitle: `${actorName} liked your post`,
+            pushBody: postPreview ? `"${postPreview}"` : 'Tap to view',
+            url: `/post/${postId}`,
+          },
         });
       }
     }
@@ -538,11 +560,19 @@ const createPostWithMedia = async (req, res) => {
       const parentRow = await dbQuery('SELECT user_id FROM social_posts WHERE id = $1', [replyToId]);
       const parentAuthorId = parentRow.rows[0]?.user_id;
       if (parentAuthorId) {
+        const actorName = user.firstName || user.first_name || user.username;
+        const replyRawContent = content ? content.toString() : '';
+        const replyPreview = replyRawContent.trim().length > 60 ? replyRawContent.trim().slice(0, 57) + '...' : replyRawContent.trim();
         NotificationEmitter.emit({
           type: 'reply', category: 'social', priority: 'normal',
           actorId: user.id, targetUserId: parentAuthorId,
           entityType: 'post', entityId: String(replyToId),
-          message: `${user.firstName || user.first_name || user.username} replied to your post`,
+          message: replyPreview ? `${actorName} replied: "${replyPreview}"` : `${actorName} replied to your post`,
+          metadata: {
+            pushTitle: `${actorName} commented`,
+            pushBody: replyPreview ? `"${replyPreview}"` : 'Tap to view',
+            url: `/post/${replyToId}`,
+          },
         });
       }
     }
@@ -762,11 +792,19 @@ const createPostWithMultiMedia = async (req, res) => {
       const parentRow = await dbQuery('SELECT user_id FROM social_posts WHERE id = $1', [replyToId]);
       const parentAuthorId = parentRow.rows[0]?.user_id;
       if (parentAuthorId) {
+        const actorName = user.firstName || user.first_name || user.username;
+        const replyRawContent = content ? content.toString() : '';
+        const replyPreview = replyRawContent.trim().length > 60 ? replyRawContent.trim().slice(0, 57) + '...' : replyRawContent.trim();
         NotificationEmitter.emit({
           type: 'reply', category: 'social', priority: 'normal',
           actorId: user.id, targetUserId: parentAuthorId,
           entityType: 'post', entityId: String(replyToId),
-          message: `${user.firstName || user.first_name || user.username} replied to your post`,
+          message: replyPreview ? `${actorName} replied: "${replyPreview}"` : `${actorName} replied to your post`,
+          metadata: {
+            pushTitle: `${actorName} commented`,
+            pushBody: replyPreview ? `"${replyPreview}"` : 'Tap to view',
+            url: `/post/${replyToId}`,
+          },
         });
       }
     }
