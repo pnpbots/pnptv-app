@@ -20,6 +20,7 @@ const CreatorService = require(path.join(backendPath, 'bot/services/creatorServi
 const CreatorPayoutService = require(path.join(backendPath, 'bot/services/creatorPayoutService'));
 const SubscriptionReminderEmailService = require(path.join(backendPath, 'services/subscriptionReminderEmailService'));
 const TelegramSubscriptionReminderService = require(path.join(backendPath, 'bot/services/subscriptionReminderService'));
+const NotificationDigestScheduler = require(path.join(backendPath, 'bot/services/notificationDigestScheduler'));
 
 /**
  * Initialize and start cron jobs
@@ -363,6 +364,17 @@ const startCronJobs = async (bot = null) => {
         }
       });
     }
+
+    // Daily notification digest email — runs at 10 AM UTC
+    // Sends an HTML summary of unread notifications to inactive users with verified emails
+    cron.schedule(process.env.NOTIFICATION_DIGEST_CRON || '0 10 * * *', async () => {
+      try {
+        logger.info('Running daily notification digest...');
+        await NotificationDigestScheduler.runDigest();
+      } catch (error) {
+        logger.error('Error in notification digest cron:', error);
+      }
+    });
 
     logger.info('✓ Cron jobs started successfully');
     return true;

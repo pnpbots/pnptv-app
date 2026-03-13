@@ -232,8 +232,8 @@ const startApiServer = (modeLabel) => {
   require('../services/notificationEmitter').setIO(io);
   initSocketIO(io);
 
-  // Start the daily notification email digest scheduler
-  require('../services/notificationDigestScheduler').start();
+  // NOTE: Daily notification digest scheduler is now managed by cron.js
+  // (see scripts/cron.js — NOTIFICATION_DIGEST_CRON)
 
   server.listen(PORT, '0.0.0.0', () => {
     const prefix = modeLabel ? `${modeLabel} ` : '';

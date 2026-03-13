@@ -49,6 +49,10 @@ const TYPE_TO_PREF = {
   follow:                 'follows',
   hangout_call:           'hangout_calls',
   hangout_creator_joined: 'hangout_calls',
+  reaction_post:          'reactions',
+  reaction_chat:          'reactions',
+  mention_post:           'mentions',
+  mention_chat:           'mentions',
 };
 
 /**
@@ -68,6 +72,10 @@ const TYPE_LABELS = {
   follow:                 { es: 'nuevo seguidor',                en: 'new follower' },
   hangout_call:           { es: 'llamada de hangout nueva',      en: 'new hangout call' },
   hangout_creator_joined: { es: 'creador se unió al hangout',   en: 'creator joined hangout' },
+  reaction_post:          { es: 'reacción a tu post',            en: 'reaction to your post' },
+  reaction_chat:          { es: 'reacción en chat',              en: 'chat reaction' },
+  mention_post:           { es: 'mención en un post',            en: 'post mention' },
+  mention_chat:           { es: 'mención en chat',               en: 'chat mention' },
 };
 
 const TYPE_ICON = {
@@ -83,6 +91,10 @@ const TYPE_ICON = {
   follow:                 '👤',
   hangout_call:           '📹',
   hangout_creator_joined: '🎬',
+  reaction_post:          '🔥',
+  reaction_chat:          '🔥',
+  mention_post:           '📣',
+  mention_chat:           '📣',
 };
 
 // ---------------------------------------------------------------------------
@@ -254,8 +266,17 @@ class NotificationDigestScheduler {
         AND u.last_active    < NOW() - INTERVAL '2 hours'
         AND EXISTS (
           SELECT 1
-          FROM jsonb_each_bool(u.notification_preferences) kv
-          WHERE kv.value = TRUE
+          FROM jsonb_each(u.notification_preferences) kv
+          WHERE kv.key != 'quiet_hours'
+            AND (
+              -- Legacy boolean format: key = true
+              (jsonb_typeof(kv.value) = 'boolean' AND kv.value::text = 'true')
+              -- New per-channel format: at least one channel enabled
+              OR (jsonb_typeof(kv.value) = 'object' AND EXISTS (
+                SELECT 1 FROM jsonb_each(kv.value) ch
+                WHERE ch.value::text = 'true'
+              ))
+            )
         )
       ORDER BY u.id
     `;

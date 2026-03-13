@@ -57,6 +57,15 @@ function buildUrl(type, entityType, entityId) {
       return entityId ? `${base}/social/post/${entityId}` : `${base}/social`;
     case 'dm':
       return entityId ? `${base}/dm/${entityId}` : `${base}/dm`;
+    case 'group_message':
+    case 'group_join':
+      return `${base}/hangouts`;
+    case 'reaction_post':
+    case 'mention_post':
+      return entityId ? `${base}/social/post/${entityId}` : `${base}/social`;
+    case 'reaction_chat':
+    case 'mention_chat':
+      return `${base}/hangouts`;
     case 'hangout_call':
     case 'hangout_creator_joined':
       return `${base}/main-stage`;

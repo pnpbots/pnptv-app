@@ -31,8 +31,9 @@ const UNREAD_COUNT_TTL = 300; // 5 minutes
 // Maximum number of recipients for a single emitToMany call.
 const MAX_FANOUT = 500;
 
-// Types that should NOT trigger a bot DM (would double-notify)
-const SKIP_BOT_TYPES = new Set(['dm', 'group_message']);
+// Types that should NOT trigger a bot DM.
+// Empty — all types now deliver to Telegram bot when the user has bot channel enabled.
+const SKIP_BOT_TYPES = new Set();
 
 // Notification types that originate from a specific user action toward another user.
 // These must be suppressed when a block relationship exists between actor and target.
@@ -131,6 +132,9 @@ function buildNotificationUrl(type, entityType, entityId) {
       return '/chat';
     case 'dm':
       return entityId ? `/dm/${entityId}` : '/dm';
+    case 'group_message':
+    case 'group_join':
+      return '/hangouts';
     case 'hangout_call':
     case 'hangout_creator_joined':
       return '/main-stage';
@@ -311,9 +315,8 @@ const NotificationEmitter = {
       }
     }
 
-    // ── Telegram Bot DM (opt-in: disabled by default for legacy, must explicitly enable) ──
-    // Skip dm/group_message types to avoid double-notifying
-    if (!SKIP_BOT_TYPES.has(type) && isChannelEnabled(prefVal, 'bot', false)) {
+    // ── Telegram Bot DM (enabled by default for all types) ──
+    if (!SKIP_BOT_TYPES.has(type) && isChannelEnabled(prefVal, 'bot', true)) {
       try {
         const canBot = await NotificationThrottleService.canSendBot(targetUserId);
         if (canBot) {
