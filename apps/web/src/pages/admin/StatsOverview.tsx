@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { StatCard } from "@/components/admin/StatCard";
 import { DataTable } from "@/components/admin/DataTable";
+import { ConfirmModal } from "@/components/admin/ConfirmModal";
+import { STATUS_BADGE_VARIANTS } from "@/components/admin/shared";
 import { Badge } from "@pnptv/ui-kit";
 import { ServiceCard } from "@/components/ServiceCard";
 import {
@@ -26,15 +28,6 @@ function formatDate(dateStr: unknown): string {
   });
 }
 
-const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
-  PRIME: "accent",
-  prime: "accent",
-  member: "success",
-  creator: "warning",
-  free: "default",
-  banned: "error",
-};
-
 // membershipBreakdown is keyed by subscription_status, not tier
 const MEMBERSHIP_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
   active: "success",
@@ -42,14 +35,6 @@ const MEMBERSHIP_BADGE_VARIANTS: Record<string, "default" | "accent" | "success"
   expired: "warning",
   cancelled: "error",
   churned: "error",
-};
-
-const STATUS_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
-  active: "success",
-  completed: "success",
-  pending: "warning",
-  failed: "error",
-  refunded: "default",
 };
 
 const DollarIcon = () => (
@@ -92,6 +77,7 @@ export default function StatsOverview() {
   const [error, setError] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [showRevokeConfirm, setShowRevokeConfirm] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -389,16 +375,7 @@ export default function StatsOverview() {
               </button>
               <button
                 disabled={!!actionLoading}
-                onClick={async () => {
-                  if (!confirm("This will revoke PRIME trials and send DMs. Are you sure?")) return;
-                  setActionLoading("revoke");
-                  try {
-                    const r = await triggerRevokeUnusedTrials(false);
-                    setActionMsg(r.message);
-                    setTimeout(() => setActionMsg(null), 8000);
-                  } catch { setActionMsg("Error"); }
-                  finally { setActionLoading(null); }
-                }}
+                onClick={() => setShowRevokeConfirm(true)}
                 className="px-3 py-1.5 text-xs rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 disabled:opacity-40 transition-colors"
               >
                 {actionLoading === "revoke" ? "Running..." : "Revoke Now"}
@@ -482,6 +459,26 @@ export default function StatsOverview() {
           />
         </div>
       </div>
+
+      <ConfirmModal
+        open={showRevokeConfirm}
+        title="Revoke Unused Trials"
+        message="This will revoke PRIME trials for inactive users and send each one a Cristina DM. Are you sure?"
+        confirmLabel="Revoke Now"
+        variant="danger"
+        onConfirm={async () => {
+          setShowRevokeConfirm(false);
+          setActionLoading("revoke");
+          try {
+            const r = await triggerRevokeUnusedTrials(false);
+            setActionMsg(r.message);
+            setTimeout(() => setActionMsg(null), 8000);
+          } catch { setActionMsg("Error"); }
+          finally { setActionLoading(null); }
+        }}
+        onCancel={() => setShowRevokeConfirm(false)}
+        loading={actionLoading === "revoke"}
+      />
     </div>
   );
 }

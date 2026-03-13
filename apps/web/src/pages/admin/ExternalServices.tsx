@@ -191,21 +191,8 @@ const ArrowRightIcon = () => (
 );
 
 export default function ExternalServices() {
-  const { isAuthenticated, isAdmin, user } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
-
-  if (!isAuthenticated || !isAdmin) {
-    return (
-      <div className="page-container">
-        <div className="text-center py-16">
-          <h1 className="text-xl font-bold text-pnp-textPrimary mb-2">Access Denied</h1>
-          <p className="text-sm text-pnp-textSecondary">
-            You must be signed in as an admin to access this page.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   const handleClick = (link: AdminLink) => {
     if (link.external) {

@@ -181,20 +181,20 @@ function PayoutSummaryCard({
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard
+        <PayoutStatCard
           label="Total Pending"
           value={fmtUsd(summary.total_pending)}
           highlight={parseFloat(String(summary.total_pending)) > 0}
         />
-        <StatCard
+        <PayoutStatCard
           label="Paid This Month"
           value={fmtUsd(summary.paid_this_month)}
         />
-        <StatCard
+        <PayoutStatCard
           label="Creators Awaiting Pay"
           value={String(summary.creators_with_pending)}
         />
-        <StatCard
+        <PayoutStatCard
           label="Platform Revenue (All Time)"
           value={fmtUsd(summary.total_platform_revenue)}
         />
@@ -210,7 +210,7 @@ function PayoutSummaryCard({
   );
 }
 
-function StatCard({
+function PayoutStatCard({
   label,
   value,
   highlight = false,
@@ -286,7 +286,10 @@ function CreatorDetailPanel({
     load();
   }, [load]);
 
+  const [showPayoutConfirm, setShowPayoutConfirm] = useState(false);
+
   const handlePayout = async () => {
+    setShowPayoutConfirm(false);
     setPayoutLoading(true);
     setPayoutMsg(null);
     try {
@@ -412,7 +415,7 @@ function CreatorDetailPanel({
                 </p>
               </div>
               <button
-                onClick={handlePayout}
+                onClick={() => setShowPayoutConfirm(true)}
                 disabled={payoutLoading || parseFloat(String(detail.payoutSummary.pending_total)) <= 0}
                 className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
               >
@@ -507,6 +510,18 @@ function CreatorDetailPanel({
           </div>
         )}
       </div>
+
+      {/* Payout confirm */}
+      <ConfirmModal
+        open={showPayoutConfirm}
+        title="Process Payout"
+        message={`Process payout of ${detail ? fmtUsd(detail.payoutSummary.pending_total) : "$0.00"} to @${detail?.creator.username ?? ""}?`}
+        confirmLabel="Pay Now"
+        variant="warning"
+        onConfirm={handlePayout}
+        onCancel={() => setShowPayoutConfirm(false)}
+        loading={payoutLoading}
+      />
 
       {/* Cancel confirm */}
       <ConfirmModal
@@ -603,6 +618,7 @@ export default function CreatorSubscriptions() {
 
   const [processAllLoading, setProcessAllLoading] = useState(false);
   const [processAllMsg, setProcessAllMsg] = useState<string | null>(null);
+  const [showProcessAllConfirm, setShowProcessAllConfirm] = useState(false);
 
   const loadCreators = useCallback(async () => {
     setLoadingCreators(true);
@@ -647,6 +663,7 @@ export default function CreatorSubscriptions() {
   }, [loadCreators, loadSummary]);
 
   const handleProcessAll = async () => {
+    setShowProcessAllConfirm(false);
     setProcessAllLoading(true);
     setProcessAllMsg(null);
     try {
@@ -801,7 +818,7 @@ export default function CreatorSubscriptions() {
         <PayoutSummaryCard
           summary={summary.summary}
           monthlyRevenue={summary.monthlyRevenue}
-          onProcessAll={handleProcessAll}
+          onProcessAll={() => setShowProcessAllConfirm(true)}
           processing={processAllLoading}
         />
       ) : null}
@@ -853,6 +870,17 @@ export default function CreatorSubscriptions() {
           }}
         />
       )}
+
+      <ConfirmModal
+        open={showProcessAllConfirm}
+        title="Process All Payouts"
+        message={`Process payouts for all ${summary?.summary.creators_with_pending ?? 0} creators with pending balances (${fmtUsd(summary?.summary.total_pending ?? 0)} total)?`}
+        confirmLabel="Process All"
+        variant="warning"
+        onConfirm={handleProcessAll}
+        onCancel={() => setShowProcessAllConfirm(false)}
+        loading={processAllLoading}
+      />
     </div>
   );
 }

@@ -54,23 +54,8 @@ function Spinner({ size = 16 }: { size?: number }) {
   );
 }
 
-// ─── Avatar Fallback ──────────────────────────────────────────────────────────
-
-function AvatarFallback({ username, size = 40 }: { username: string; size?: number }) {
-  return (
-    <div
-      className="flex items-center justify-center font-bold text-white rounded-full flex-shrink-0"
-      style={{
-        width: size,
-        height: size,
-        background: "linear-gradient(135deg, #D4007A, #E69138)",
-        fontSize: size / 2.8,
-      }}
-    >
-      {username.slice(0, 2).toUpperCase()}
-    </div>
-  );
-}
+// Re-export shared AvatarFallback for local use
+import { AvatarFallback } from "./AvatarFallback";
 
 // ─── Slot skeleton ────────────────────────────────────────────────────────────
 
@@ -870,7 +855,7 @@ export function BookCallModal({
         {/* Step indicator (dots) */}
         {step !== "SUCCESS" && (
           <div className="flex items-center justify-center gap-1.5 py-2.5 flex-shrink-0" aria-hidden="true">
-            {(["SELECT_PACKAGE", "SELECT_SLOT", "CHECKOUT"] as Step[]).map((s, idx) => {
+            {(["SELECT_PACKAGE", "SELECT_SLOT", "CHECKOUT"] as Step[]).map((s) => {
               const steps: Step[] = isOnline
                 ? ["SELECT_PACKAGE", "CHECKOUT"]
                 : ["SELECT_PACKAGE", "SELECT_SLOT", "CHECKOUT"];

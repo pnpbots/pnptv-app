@@ -205,6 +205,38 @@ const strings = {
     someCriteriaMet: (met: number, total: number) => `${met}/${total} criteria met — you're almost there!`,
     closestHint: (label: string, remaining: number) => `Closest: ${label} — ${remaining} more to go`,
     progressFootnote: "Post consistently, engage with the community, and grow your followers to unlock creator status.",
+
+    // Call Package Manager
+    callPackagesTitle: "Call Packages",
+    newPackageTitle: "New Package",
+    pkgDuration: "Duration",
+    pkgQuantity: "Quantity",
+    pkgPriceUsd: "Price (USD)",
+    pkgTitleOptional: "Title (optional)",
+    pkgTitlePlaceholder: "e.g. Intro Session",
+    pkgPricePlaceholder: "e.g. 49.99",
+    pkgPriceError: "Price must be between $0.01 and $1000",
+    pkgCreating: "Creating…",
+    pkgCreateBtn: "Create Package",
+    pkgLoadingPackages: "Loading packages…",
+    pkgLoadError: "Failed to load packages",
+    pkgNoPackages: "No active packages yet.",
+    pkgMinutes30: "30 minutes",
+    pkgMinutes60: "60 minutes",
+    pkgSessions: (qty: number) => `${qty} session${qty !== 1 ? "s" : ""}`,
+    pkgSaving: "Saving…",
+    pkgSaveBtn: "Save",
+    pkgSaveError: "Failed to save changes",
+    pkgEditBtn: "Edit",
+    pkgDeactivateBtn: "Deactivate",
+    pkgDeactivateConfirmTitle: "Deactivate Package",
+    pkgDeactivateConfirmMsg: (name: string) => `Deactivate "${name}"? Members with existing credits will keep them.`,
+    pkgDeactivateError: "Failed to deactivate",
+    pkgCreateError: "Failed to create package",
+
+    // Withdrawal confirmation
+    withdrawConfirmTitle: "Confirm Withdrawal",
+    withdrawConfirmMsg: (amount: string) => `Withdraw $${amount} to your configured payout method? This action cannot be undone.`,
   },
   es: {
     signInRequired: "Inicia sesión para acceder al Panel de Creador",
@@ -387,8 +419,41 @@ const strings = {
     someCriteriaMet: (met: number, total: number) => `${met}/${total} criterios cumplidos — ¡casi llegas!`,
     closestHint: (label: string, remaining: number) => `Más cercano: ${label} — faltan ${remaining}`,
     progressFootnote: "Publica con constancia, interactúa con la comunidad y crece tus seguidores para desbloquear el estado de creador.",
-  },
-} as const;
 
-export type CreatorStrings = typeof strings.en;
+    // Call Package Manager
+    callPackagesTitle: "Paquetes de Llamada",
+    newPackageTitle: "Nuevo Paquete",
+    pkgDuration: "Duración",
+    pkgQuantity: "Cantidad",
+    pkgPriceUsd: "Precio (USD)",
+    pkgTitleOptional: "Título (opcional)",
+    pkgTitlePlaceholder: "ej. Sesión Introductoria",
+    pkgPricePlaceholder: "ej. 49.99",
+    pkgPriceError: "El precio debe estar entre $0.01 y $1000",
+    pkgCreating: "Creando…",
+    pkgCreateBtn: "Crear Paquete",
+    pkgLoadingPackages: "Cargando paquetes…",
+    pkgLoadError: "Error al cargar paquetes",
+    pkgNoPackages: "Sin paquetes activos aún.",
+    pkgMinutes30: "30 minutos",
+    pkgMinutes60: "60 minutos",
+    pkgSessions: (qty: number) => `${qty} sesión${qty !== 1 ? "es" : ""}`,
+    pkgSaving: "Guardando…",
+    pkgSaveBtn: "Guardar",
+    pkgSaveError: "Error al guardar cambios",
+    pkgEditBtn: "Editar",
+    pkgDeactivateBtn: "Desactivar",
+    pkgDeactivateConfirmTitle: "Desactivar Paquete",
+    pkgDeactivateConfirmMsg: (name: string) => `¿Desactivar "${name}"? Los miembros con créditos existentes los conservarán.`,
+    pkgDeactivateError: "Error al desactivar",
+    pkgCreateError: "Error al crear paquete",
+
+    // Withdrawal confirmation
+    withdrawConfirmTitle: "Confirmar Retiro",
+    withdrawConfirmMsg: (amount: string) => `¿Retirar $${amount} a tu método de pago configurado? Esta acción no se puede deshacer.`,
+  },
+};
+
+type StringsMap = typeof strings;
+export type CreatorStrings = StringsMap["en"];
 export { strings as creator };

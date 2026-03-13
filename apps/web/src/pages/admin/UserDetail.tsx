@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
+import { TIER_BADGE_VARIANTS, STATUS_BADGE_VARIANTS } from "@/components/admin/shared";
 import { Badge } from "@pnptv/ui-kit";
 import {
   getAdminUser,
@@ -24,26 +25,6 @@ import {
   type AddOn,
   type AdminChannel,
 } from "@/lib/api";
-
-// ---------------------------------------------------------------------------
-// Badge variant maps
-// ---------------------------------------------------------------------------
-
-const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
-  PRIME: "accent",
-  prime: "accent",
-  member: "success",
-  creator: "warning",
-  free: "default",
-  banned: "error",
-};
-
-const STATUS_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
-  active: "success",
-  expired: "warning",
-  cancelled: "error",
-  free: "default",
-};
 
 // ---------------------------------------------------------------------------
 // Helpers

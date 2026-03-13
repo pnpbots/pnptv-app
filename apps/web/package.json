@@ -14,6 +14,8 @@
     "@directus/sdk": "^18.0.0",
     "@livekit/components-core": "^0.12.0",
     "@livekit/components-react": "^2.9.0",
+    "@livekit/krisp-noise-filter": "^0.3.4",
+    "@livekit/track-processors": "^0.7.2",
     "@pnptv/ui-kit": "*",
     "dompurify": "^3.3.2",
     "hls.js": "^1.5.0",

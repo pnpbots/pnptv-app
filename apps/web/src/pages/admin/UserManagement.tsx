@@ -4,6 +4,7 @@ import { DataTable } from "@/components/admin/DataTable";
 import { Pagination } from "@/components/admin/Pagination";
 import { SearchBar } from "@/components/admin/SearchBar";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
+import { TIER_BADGE_VARIANTS, STATUS_BADGE_VARIANTS, formatDateShort } from "@/components/admin/shared";
 import { Badge } from "@pnptv/ui-kit";
 import {
   getAdminUsers,
@@ -13,31 +14,6 @@ import {
   type AdminPlan,
   type AdminUserFilters,
 } from "@/lib/api";
-
-const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
-  PRIME: "accent",
-  member: "success",
-  creator: "warning",
-  free: "default",
-  banned: "error",
-};
-
-const STATUS_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
-  active: "success",
-  expired: "warning",
-  cancelled: "error",
-  churned: "error",
-  free: "default",
-};
-
-function formatDate(dateStr: string | undefined): string {
-  if (!dateStr) return "—";
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
 
 type BulkAction = "upgrade" | "downgrade" | "ban" | "unban";
 
@@ -250,14 +226,14 @@ export default function UserManagement() {
       key: "plan_expiry",
       header: "Expiry",
       render: (row: AdminUser) => (
-        <span className="text-pnp-textSecondary text-xs">{formatDate(row.plan_expiry)}</span>
+        <span className="text-pnp-textSecondary text-xs">{formatDateShort(row.plan_expiry)}</span>
       ),
     },
     {
       key: "created_at",
       header: "Joined",
       render: (row: AdminUser) => (
-        <span className="text-pnp-textSecondary text-xs">{formatDate(row.created_at)}</span>
+        <span className="text-pnp-textSecondary text-xs">{formatDateShort(row.created_at)}</span>
       ),
     },
     {

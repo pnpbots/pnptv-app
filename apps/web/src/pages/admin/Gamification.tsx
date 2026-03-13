@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import { useI18n } from "@/lib/i18n";
 import {
@@ -619,7 +618,6 @@ function CategorySection({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Gamification() {
-  const { isAdmin } = useAuth();
   const navigate = useNavigate();
   const t = useI18n();
   const g = t.gamification;
@@ -647,8 +645,8 @@ export default function Gamification() {
   }, [g.errorLoading]);
 
   useEffect(() => {
-    if (isAdmin) load();
-  }, [isAdmin, load]);
+    load();
+  }, [load]);
 
   const handleToggleHolders = useCallback((slug: string) => {
     setOpenHoldersSlug((prev) => (prev === slug ? null : slug));
@@ -660,14 +658,6 @@ export default function Gamification() {
     },
     [],
   );
-
-  if (!isAdmin) {
-    return (
-      <div className="max-w-2xl mx-auto px-4 py-16 text-center">
-        <p className="text-white/60">Admin access required</p>
-      </div>
-    );
-  }
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 pb-16">

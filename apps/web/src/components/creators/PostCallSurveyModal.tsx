@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { submitCallSurvey } from "@/lib/api";
 
 interface PostCallSurveyModalProps {
@@ -14,6 +14,16 @@ export function PostCallSurveyModal({ open, bookingId, creatorName, onClose }: P
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Escape key handler
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -33,10 +43,18 @@ export function PostCallSurveyModal({ open, bookingId, creatorName, onClose }: P
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Post-call survey"
+    >
       <div
         className="w-full max-w-sm rounded-2xl p-6"
         style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}
+        onClick={(e) => e.stopPropagation()}
       >
         {submitted ? (
           <div className="flex flex-col items-center gap-3 py-6">

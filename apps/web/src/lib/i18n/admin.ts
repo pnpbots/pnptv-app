@@ -193,7 +193,7 @@ const strings = {
       },
     },
   },
-} as const;
+};
 
-export type AdminStrings = typeof strings.en;
+export type AdminStrings = (typeof strings)["en"];
 export { strings as admin };

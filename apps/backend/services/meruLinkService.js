@@ -203,7 +203,8 @@ class MeruLinkService {
       await query(
         `INSERT INTO meru_payment_links (code, meru_link, product, status)
          VALUES ($1, $2, $3, 'active')
-         ON CONFLICT (code) DO UPDATE SET status = 'active'`,
+         ON CONFLICT (code) DO UPDATE SET
+           status = CASE WHEN meru_payment_links.status = 'used' THEN meru_payment_links.status ELSE 'active' END`,
         [meruCode, meruLink, product]
       );
 

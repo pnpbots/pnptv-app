@@ -12,9 +12,21 @@ const TIMEZONES = [
   "UTC",
   "America/New_York",
   "America/Chicago",
+  "America/Denver",
   "America/Los_Angeles",
   "America/Bogota",
+  "America/Mexico_City",
+  "America/Sao_Paulo",
+  "America/Argentina/Buenos_Aires",
+  "America/Lima",
+  "America/Santiago",
   "Europe/London",
+  "Europe/Madrid",
+  "Europe/Berlin",
+  "Europe/Paris",
+  "Asia/Tokyo",
+  "Asia/Bangkok",
+  "Australia/Sydney",
 ];
 const BREAK_MINUTE_OPTIONS = [0, 5, 10, 15, 20, 30] as const;
 
@@ -37,7 +49,6 @@ export function CreatorAvailabilitySettings() {
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [nextShowDate, setNextShowDate] = useState("");
 
   useEffect(() => {
     getCreatorAvailabilitySchedule()
@@ -80,7 +91,7 @@ export function CreatorAvailabilitySettings() {
     }
   }, [online]);
 
-  const updateSlot = (idx: number, field: keyof SlotRow, value: any) => {
+  const updateSlot = (idx: number, field: keyof SlotRow, value: string | boolean) => {
     setSchedule((prev) => {
       const next = [...prev];
       next[idx] = { ...next[idx], [field]: value };
@@ -188,7 +199,7 @@ export function CreatorAvailabilitySettings() {
         >
           {BREAK_MINUTE_OPTIONS.map((mins) => (
             <option key={mins} value={mins}>
-              {mins === 0 ? "No break" : `${mins} minute${mins === 1 ? "" : "s"}`}
+              {mins === 0 ? "No break" : `${mins} minutes`}
             </option>
           ))}
         </select>
@@ -241,19 +252,6 @@ export function CreatorAvailabilitySettings() {
             </div>
           ))}
         </div>
-      </div>
-
-      {/* Next show date */}
-      <div>
-        <label className="block text-xs font-semibold mb-1.5" style={{ color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          Next Show Date
-        </label>
-        <input
-          type="datetime-local"
-          value={nextShowDate}
-          onChange={(e) => setNextShowDate(e.target.value)}
-          style={{ ...inputStyle, width: "100%" }}
-        />
       </div>
 
       {error && <p className="text-xs" style={{ color: "#FF6B6B" }}>{error}</p>}

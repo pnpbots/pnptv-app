@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Badge, Skeleton } from "@pnptv/ui-kit";
 import { StatCard } from "@/components/admin/StatCard";
+import { TIER_BADGE_VARIANTS, AvatarInitial } from "@/components/admin/shared";
 import {
   getAdminSupportStats,
   getAdminSupportTickets,
@@ -66,15 +67,6 @@ const STATUS_COLORS: Record<string, string> = {
   closed: "text-pnp-textSecondary bg-pnp-surface border-pnp-border",
 };
 
-const TIER_BADGE_VARIANTS: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
-  PRIME: "accent",
-  prime: "accent",
-  member: "success",
-  creator: "warning",
-  free: "default",
-  banned: "error",
-};
-
 // ── SVG Icons ─────────────────────────────────────────────────────────────────
 
 const TicketIcon = () => (
@@ -120,19 +112,6 @@ const RefreshIcon = () => (
 );
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
-
-function AvatarInitial({ name, size = "md" }: { name: string; size?: "sm" | "md" }) {
-  const char = (name || "?")[0].toUpperCase();
-  const sz = size === "sm" ? "w-7 h-7 text-xs" : "w-9 h-9 text-sm";
-  return (
-    <div
-      className={`${sz} rounded-full flex items-center justify-center font-bold text-white flex-shrink-0`}
-      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-    >
-      {char}
-    </div>
-  );
-}
 
 function PriorityBadge({ priority }: { priority: string }) {
   return (
@@ -790,13 +769,16 @@ export default function SupportDashboard() {
   }, []);
 
   const handleTicketUpdate = useCallback((patch: Partial<AdminSupportTicket>) => {
-    setSelectedTicket((prev) => (prev ? { ...prev, ...patch } : prev));
-    setTickets((prev) =>
-      prev.map((t) =>
-        selectedTicket && t.userId === selectedTicket.userId ? { ...t, ...patch } : t
-      )
-    );
-  }, [selectedTicket]);
+    setSelectedTicket((prev) => {
+      if (!prev) return prev;
+      setTickets((tickets) =>
+        tickets.map((t) =>
+          t.userId === prev.userId ? { ...t, ...patch } : t
+        )
+      );
+      return { ...prev, ...patch };
+    });
+  }, []);
 
   const handleBackMobile = useCallback(() => {
     setShowDetailMobile(false);

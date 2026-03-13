@@ -4541,3 +4541,62 @@ export function setCreatorOnlineStatus(
     body: { online },
   });
 }
+
+// ─── Media Packs (Admin) ──────────────────────────────────────────────────────
+
+export interface MediaPack {
+  id: number;
+  slug: string;
+  name: string;
+  description?: string;
+  pack_type: "sticker" | "gif" | "emoji";
+  is_active: boolean;
+  is_premium: boolean;
+  item_count: number;
+  created_at: string;
+}
+
+export interface MediaPackItem {
+  id: number;
+  slug: string;
+  name: string;
+  alt_text?: string;
+  file_url: string;
+  thumbnail_url?: string;
+  file_type: string;
+  use_count: number;
+  is_active: boolean;
+}
+
+export function getMediaPacks(): Promise<{ packs: MediaPack[] }> {
+  return request("/api/webapp/media-packs");
+}
+
+export function getMediaPackItems(slug: string): Promise<{ items: MediaPackItem[] }> {
+  return request(`/api/webapp/media-packs/${encodeURIComponent(slug)}/items`);
+}
+
+export function createMediaPack(data: {
+  slug: string;
+  name: string;
+  description?: string;
+  pack_type: string;
+  is_premium: boolean;
+}): Promise<{ pack: MediaPack }> {
+  return request("/api/webapp/admin/media-packs", { method: "POST", body: data });
+}
+
+export function toggleMediaPack(packId: number, is_active: boolean): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/media-packs/${packId}/toggle`, {
+    method: "PATCH",
+    body: { is_active },
+  });
+}
+
+export function deleteMediaPack(packId: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/media-packs/${packId}`, { method: "DELETE" });
+}
+
+export function deleteMediaPackItem(itemId: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/media-packs/items/${itemId}`, { method: "DELETE" });
+}
