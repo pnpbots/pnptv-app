@@ -1268,7 +1268,7 @@ class PaymentService {
           return { success: true, type: 'call_package' };
         }
 
-        // Activate user subscription
+        // Activate user subscription inside a DB transaction
         if (userId && planIdOrBookingId) {
           const plan = await PlanModel.getById(planIdOrBookingId);
           if (plan) {
@@ -1295,17 +1295,7 @@ class PaymentService {
               expiry: expiryDate,
             });
 
-            logger.info('User subscription activated via webhook', {
-              userId,
-              planId: planIdOrBookingId,
-              expiryDate,
-              refPayco: x_ref_payco,
-              renewed: !!(currentExpiry && new Date(currentExpiry) > new Date()),
-            });
-
             // Grant entitlements based on plan_add_ons mapping
-            // C2: If the grant produces 0 grants on a paid plan, surface the failure so
-            // ePayco will retry the webhook rather than silently losing the entitlement.
             let grantResult;
             try {
               grantResult = await PaymentService.grantEntitlementsForPlan(userId, planIdOrBookingId, 'epayco');
@@ -1317,11 +1307,43 @@ class PaymentService {
             }
             const isPaidPlan = plan && (parseFloat(plan.price) > 0);
             if (isPaidPlan && grantResult && (grantResult.granted === 0 || grantResult.errors > 0)) {
-              logger.error('grantEntitlementsForPlan returned partial/zero grants on a paid plan — ePayco will retry', {
+              logger.error('grantEntitlementsForPlan returned partial/zero grants — ePayco will retry', {
                 userId, planId: planIdOrBookingId, grantResult,
               });
               return { success: false, code: 'ENTITLEMENT_GRANT_FAILED', error: 'Entitlement grant failed or incomplete for paid plan' };
             }
+
+            // Mark payment completed immediately after core activation (before notifications)
+            // to prevent recovery cron from re-activating on crash during notification phase
+            if (payment) {
+              const completedMeta = {
+                transaction_id: x_transaction_id,
+                approval_code: x_approval_code,
+                reference: x_ref_payco,
+                epayco_ref: x_ref_payco,
+                webhook_processed_at: new Date().toISOString(),
+                amount_currency_validated: true,
+              };
+              if (threeDSFields.hasData) {
+                completedMeta.three_ds = {
+                  cavv: threeDSFields.cavv,
+                  eci: threeDSFields.eci,
+                  xid: threeDSFields.xid,
+                  version: threeDSFields.version,
+                  ds_trans_id: threeDSFields.dsTransId,
+                  liability_shift: threeDSFields.liabilityShift,
+                };
+              }
+              await PaymentModel.updateStatus(paymentIdOrType, 'completed', completedMeta);
+            }
+
+            logger.info('User subscription activated via webhook', {
+              userId,
+              planId: planIdOrBookingId,
+              expiryDate,
+              refPayco: x_ref_payco,
+              renewed: !!(currentExpiry && new Date(currentExpiry) > new Date()),
+            });
 
             // Record payment in history
             try {
@@ -1377,7 +1399,7 @@ class PaymentService {
               }
             }
 
-            // Creator subscription activation
+            // Creator subscription activation — failure is critical since the user paid
             if (planIdOrBookingId === 'creator_monthly' && payment?.metadata?.creatorId) {
               try {
                 const CreatorService = require('./creatorService');
@@ -1389,11 +1411,12 @@ class PaymentService {
                   refPayco: x_ref_payco,
                 });
               } catch (creatorError) {
-                logger.error('Creator subscription activation failed (non-critical):', {
+                logger.error('Creator subscription activation failed — ePayco will retry', {
                   error: creatorError.message,
                   userId,
                   creatorId: payment.metadata.creatorId,
                 });
+                return { success: false, code: 'CREATOR_SUBSCRIPTION_FAILED', error: creatorError.message };
               }
             }
 
@@ -1608,29 +1631,23 @@ class PaymentService {
           }
         }
 
-        // Mark payment as completed only after business processing finishes.
-        // This prevents polling from showing "completed" before subscription activation.
-        if (payment) {
-          const completedMeta = {
-            transaction_id: x_transaction_id,
-            approval_code: x_approval_code,
-            reference: x_ref_payco,
-            epayco_ref: x_ref_payco,
-            webhook_processed_at: new Date().toISOString(),
-            amount_currency_validated: true,
-          };
-          // Store 3DS authentication fields for liability shift and audit
-          if (threeDSFields.hasData) {
-            completedMeta.three_ds = {
-              cavv: threeDSFields.cavv,
-              eci: threeDSFields.eci,
-              xid: threeDSFields.xid,
-              version: threeDSFields.version,
-              ds_trans_id: threeDSFields.dsTransId,
-              liability_shift: threeDSFields.liabilityShift,
-            };
+        // Payment status is now marked completed inside the transaction above.
+        // For subscriber-recovery path where payment is null, mark completed here.
+        if (!payment && paymentIdOrType) {
+          try {
+            await PaymentModel.updateStatus(paymentIdOrType, 'completed', {
+              transaction_id: x_transaction_id,
+              approval_code: x_approval_code,
+              reference: x_ref_payco,
+              epayco_ref: x_ref_payco,
+              webhook_processed_at: new Date().toISOString(),
+              subscriber_recovery: true,
+            });
+          } catch (recoveryMarkErr) {
+            logger.warn('Failed to mark subscriber-recovery payment as completed', {
+              error: recoveryMarkErr.message, paymentId: paymentIdOrType,
+            });
           }
-          await PaymentModel.updateStatus(paymentIdOrType, 'completed', completedMeta);
         }
 
         return { success: true };

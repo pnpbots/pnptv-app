@@ -8,6 +8,10 @@ const logger = require('../../../utils/logger');
 const { query } = require('../../../config/postgres');
 const { cache } = require('../../../config/redis');
 const NotificationEmitter = require('../../services/notificationEmitter');
+const InvoiceService = require('../../services/invoiceservice');
+const EmailService = require('../../services/emailservice');
+const PaymentNotificationService = require('../../services/paymentNotificationService');
+const BusinessNotificationService = require('../../services/businessNotificationService');
 
 /**
  * Payment Controller - Handles payment-related API endpoints
@@ -1417,6 +1421,104 @@ class PaymentController {
             message: `Your ${plan.name || 'PRIME'} subscription is now active!`,
             metadata: { planId, expiryDate: expiryDate.toISOString() },
           });
+
+          // Send all post-payment notifications (same as webhook path)
+          const userLang3ds = userForExpiry?.language || 'es';
+
+          // Telegram DM
+          try {
+            await PaymentService.sendPaymentConfirmationNotification({
+              userId,
+              plan,
+              transactionId: refPayco,
+              amount: payment.amount ? parseFloat(payment.amount) : parseFloat(plan.price),
+              expiryDate,
+              language: userLang3ds,
+              provider: 'epayco',
+            });
+          } catch (dmErr) {
+            logger.warn('3DS2: Telegram DM failed (non-critical)', { error: dmErr.message, paymentId });
+          }
+
+          // Admin notification
+          try {
+            const { getBotInstance } = require('../../core/bot');
+            const bot = getBotInstance();
+            await PaymentNotificationService.sendAdminPaymentNotification({
+              bot,
+              userId,
+              planName: plan.display_name || plan.name,
+              amount: payment.amount ? parseFloat(payment.amount) : parseFloat(plan.price),
+              provider: 'ePayco (3DS2)',
+              transactionId: refPayco,
+              customerName: userForExpiry?.first_name || 'Unknown',
+              customerEmail: payment.metadata?.customer_email || userForExpiry?.email || 'N/A',
+            });
+          } catch (adminErr) {
+            logger.warn('3DS2: admin notification failed (non-critical)', { error: adminErr.message, paymentId });
+          }
+
+          // Business channel notification
+          try {
+            await BusinessNotificationService.notifyPayment({
+              userId,
+              planName: plan.display_name || plan.name,
+              amount: payment.amount ? parseFloat(payment.amount) : parseFloat(plan.price),
+              provider: 'ePayco (3DS2)',
+              transactionId: refPayco,
+              customerName: userForExpiry?.first_name || 'Unknown',
+            });
+          } catch (bizErr) {
+            logger.warn('3DS2: business notification failed (non-critical)', { error: bizErr.message, paymentId });
+          }
+
+          // Invoice PDF + email
+          const customerEmail3ds = payment.metadata?.customer_email || userForExpiry?.email;
+          if (customerEmail3ds) {
+            try {
+              const invoiceAmount = payment.amount ? parseFloat(payment.amount) : parseFloat(plan.price);
+              const { buffer: invoicePdf } = await InvoiceService.generateInvoice({
+                invoiceNumber: refPayco || paymentId.substring(0, 8),
+                customerName: userForExpiry?.first_name || 'Valued Customer',
+                planName: plan.display_name || plan.name,
+                amount: invoiceAmount,
+                currency: 'USD',
+                provider: 'epayco',
+                transactionId: refPayco,
+                purchaseDate: new Date(),
+                expiryDate,
+                language: userLang3ds,
+              });
+
+              await EmailService.sendInvoiceEmail({
+                to: customerEmail3ds,
+                customerName: userForExpiry?.first_name || 'Valued Customer',
+                invoiceNumber: refPayco || paymentId.substring(0, 8),
+                amount: invoiceAmount,
+                planName: plan.display_name || plan.name,
+                invoicePdf,
+              });
+            } catch (invoiceErr) {
+              logger.warn('3DS2: invoice email failed (non-critical)', { error: invoiceErr.message, paymentId });
+            }
+
+            // Welcome email
+            try {
+              await EmailService.sendWelcomeEmail({
+                to: customerEmail3ds,
+                customerName: userForExpiry?.first_name || 'Valued Customer',
+                planName: plan.display_name || plan.name,
+                duration: plan.duration,
+                expiryDate,
+                language: userLang3ds,
+                userUuid: userForExpiry?.id || userId,
+                username: userForExpiry?.username,
+                loginMethod: userForExpiry?.last_login_method,
+              });
+            } catch (welcomeErr) {
+              logger.warn('3DS2: welcome email failed (non-critical)', { error: welcomeErr.message, paymentId });
+            }
+          }
         }
 
         await PaymentModel.updateStatus(paymentId, 'completed', {
