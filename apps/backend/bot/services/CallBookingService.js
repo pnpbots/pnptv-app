@@ -54,7 +54,11 @@ class CallBookingService {
 
         if (schedulesForDay.length > 0) {
           for (const schedule of schedulesForDay) {
-            const tz = schedule.timezone || 'UTC';
+            let tz = schedule.timezone || 'UTC';
+            if (!moment.tz.zone(tz)) {
+              logger.warn(`Invalid timezone "${tz}" in schedule for creator ${creatorId}, falling back to UTC`);
+              tz = 'UTC';
+            }
             let scheduleStart = moment.tz(`${currentDay.format('YYYY-MM-DD')}T${schedule.start_time}`, tz);
             let scheduleEnd = moment.tz(`${currentDay.format('YYYY-MM-DD')}T${schedule.end_time}`, tz);
 
@@ -108,7 +112,7 @@ class CallBookingService {
       return slots;
     } catch (error) {
       logger.error('Error getting available slots:', error);
-      return [];
+      throw error;
     }
   }
 
@@ -124,15 +128,16 @@ class CallBookingService {
       await client.query('BEGIN');
 
       // 1. Lock the credit FOR UPDATE to prevent double-spending
+      // SEC: bind creator_id to prevent a member from using another creator's credit for a different creator
       const creditResult = await client.query(
         `SELECT cc.*, cp.duration_minutes as pkg_duration
          FROM call_credits cc
          JOIN call_packages cp ON cp.id = cc.package_id
-         WHERE cc.id = $1 AND cc.member_id = $2
+         WHERE cc.id = $1 AND cc.member_id = $2 AND cc.creator_id = $3
            AND cc.status IN ('unused', 'partial')
            AND (cc.expires_at IS NULL OR cc.expires_at > NOW())
          FOR UPDATE`,
-        [creditId, memberId]
+        [creditId, memberId, creatorId]
       );
 
       if (creditResult.rows.length === 0) {

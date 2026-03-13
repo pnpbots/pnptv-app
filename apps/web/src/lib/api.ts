@@ -4495,7 +4495,6 @@ export interface CallCheckoutPayload {
 
 export interface CallCheckoutResponse {
   success: boolean;
-  bookingId: number;
   checkoutUrl?: string;
   paymentId?: string;
   startAt?: string;
@@ -4567,31 +4566,81 @@ export type WeeklyAvailabilitySchedule = {
   [day in "sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat"]: AvailabilityDaySlot;
 };
 
+export interface AvailabilityDayRow {
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  timezone: string;
+  break_minutes: number;
+}
+
 export interface CreatorAvailabilityResponse {
   success: boolean;
-  schedule: WeeklyAvailabilitySchedule | null;
-  isOnline: boolean;
+  schedule: AvailabilityDayRow[] | WeeklyAvailabilitySchedule | null;
+  online: boolean;
+  isOnline?: boolean;
 }
 
 export function getCreatorAvailabilitySchedule(): Promise<CreatorAvailabilityResponse> {
   return request("/api/webapp/creator/availability/schedule");
 }
 
+export interface AvailabilitySlotPayload {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  timezone: string;
+  breakMinutes: number;
+  enabled: boolean;
+}
+
 export function saveCreatorAvailabilitySchedule(
-  schedule: WeeklyAvailabilitySchedule
+  slots: AvailabilitySlotPayload[]
 ): Promise<{ success: boolean }> {
   return request("/api/webapp/creator/availability/schedule", {
     method: "PUT",
-    body: { schedule },
+    body: { slots },
   });
 }
 
 export function setCreatorOnlineStatus(
   online: boolean
-): Promise<{ success: boolean; isOnline: boolean }> {
+): Promise<{ success: boolean; online: boolean }> {
   return request("/api/webapp/creator/online-status", {
     method: "PUT",
     body: { online },
+  });
+}
+
+export function getNextShowDate(): Promise<{ nextShowDate: string | null }> {
+  return request("/api/webapp/creator/next-show-date");
+}
+
+export function setNextShowDate(
+  date: string | null
+): Promise<{ nextShowDate: string | null }> {
+  return request("/api/webapp/creator/next-show-date", {
+    method: "POST",
+    body: { nextShowDate: date },
+  });
+}
+
+export function completeCallBooking(
+  bookingId: number
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/bookings/${bookingId}/complete`, {
+    method: "POST",
+    body: {},
+  });
+}
+
+export function cancelCallBooking(
+  bookingId: number,
+  reason?: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/bookings/${bookingId}/cancel`, {
+    method: "POST",
+    body: { reason },
   });
 }
 

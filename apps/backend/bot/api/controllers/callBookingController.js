@@ -15,6 +15,8 @@ const { getRedis } = require('../../../config/redis');
 const callCheckoutService = require('../../services/callCheckoutService');
 const callPackageService = require('../../services/callPackageService');
 const livekitService = require('../../services/livekitService');
+const CallBookingService = require('../../services/CallBookingService');
+const moment = require('moment-timezone');
 const logger = require('../../../utils/logger');
 
 // Redis key for creator online presence
@@ -46,7 +48,7 @@ async function createCheckout(req, res) {
     if (!provider || !['epayco', 'daimo'].includes(provider)) {
       return res.status(400).json({ success: false, error: 'provider must be epayco or daimo' });
     }
-    if (!email || typeof email !== 'string' || !email.includes('@')) {
+    if (!email || typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ success: false, error: 'A valid email is required' });
     }
 
@@ -339,6 +341,9 @@ async function saveAvailabilitySchedule(req, res) {
       if (!slot.timezone || !VALID_TZ_CHARS.test(slot.timezone) || slot.timezone.length > 100) {
         return res.status(400).json({ success: false, error: `schedule[${i}].timezone is invalid` });
       }
+      if (!moment.tz.zone(slot.timezone)) {
+        return res.status(400).json({ success: false, error: `schedule[${i}].timezone is not a recognized IANA timezone` });
+      }
       if (slot.breakMinutes !== undefined) {
         const bm = Number(slot.breakMinutes);
         if (!Number.isInteger(bm) || !VALID_BREAK_MINUTES.has(bm)) {
@@ -526,6 +531,7 @@ async function getCallEarnings(req, res) {
     `, [creatorId]);
 
     // MED-05: Revenue — per-call revenue: price / quantity * quantity_used
+    // Exclude refunded credits so cancelled purchases don't inflate totals
     const revenueResult = await query(`
       SELECT
         COALESCE(SUM(cp.price_usd / NULLIF(cp.quantity, 0) * cc.quantity_used), 0) AS total_revenue,
@@ -533,6 +539,7 @@ async function getCallEarnings(req, res) {
       FROM call_credits cc
       JOIN call_packages cp ON cp.id = cc.package_id
       WHERE cc.creator_id = $1
+        AND cc.status NOT IN ('refunded')
     `, [creatorId]);
 
     // Average rating from surveys
@@ -566,6 +573,180 @@ async function getCallEarnings(req, res) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// PATCH /api/webapp/bookings/:bookingId/complete
+// ---------------------------------------------------------------------------
+
+/**
+ * Mark a booking as completed. Only the creator of the booking may call this.
+ * :bookingId is bookings.id (UUID).
+ */
+async function completeBooking(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const userId = String(sessionUser.id);
+    const { bookingId } = req.params;
+
+    if (!bookingId) {
+      return res.status(400).json({ success: false, error: 'Invalid bookingId' });
+    }
+
+    // Verify the caller is the creator of this booking
+    const ownerCheck = await query(
+      `SELECT b.id FROM bookings b
+       JOIN performers p ON p.id = b.performer_id
+       WHERE b.id = $1 AND p.user_id = $2`,
+      [bookingId, userId]
+    );
+    if (ownerCheck.rows.length === 0) {
+      return res.status(403).json({ success: false, error: 'Only the creator can complete this booking' });
+    }
+
+    await CallBookingService.completeBooking(bookingId);
+
+    logger.info('[callBookingController] booking completed', { bookingId, userId });
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('[callBookingController] completeBooking error', { error: err.message });
+    if (err.message && err.message.includes('not found or not in confirmed status')) {
+      return res.status(409).json({ success: false, error: err.message });
+    }
+    return res.status(500).json({ success: false, error: 'Failed to complete booking' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/webapp/bookings/:bookingId/cancel
+// ---------------------------------------------------------------------------
+
+/**
+ * Cancel a booking. Either the member or the creator of the booking may cancel.
+ * :bookingId is bookings.id (UUID).
+ * Body: { reason?: string }
+ */
+async function cancelBooking(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const userId = String(sessionUser.id);
+    const { bookingId } = req.params;
+
+    if (!bookingId) {
+      return res.status(400).json({ success: false, error: 'Invalid bookingId' });
+    }
+
+    // Verify the caller is either the member or the creator of this booking
+    const ownerCheck = await query(
+      `SELECT b.id FROM bookings b
+       JOIN performers p ON p.id = b.performer_id
+       WHERE b.id = $1 AND (b.user_id = $2 OR p.user_id = $2)`,
+      [bookingId, userId]
+    );
+    if (ownerCheck.rows.length === 0) {
+      return res.status(403).json({ success: false, error: 'Not authorised to cancel this booking' });
+    }
+
+    const reason = typeof req.body?.reason === 'string'
+      ? req.body.reason.trim().slice(0, 500)
+      : 'User cancellation';
+
+    await CallBookingService.cancelBooking(bookingId, reason);
+
+    logger.info('[callBookingController] booking cancelled', { bookingId, userId, reason });
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('[callBookingController] cancelBooking error', { error: err.message });
+    if (err.message && err.message.includes('not found or already in terminal status')) {
+      return res.status(409).json({ success: false, error: err.message });
+    }
+    return res.status(500).json({ success: false, error: 'Failed to cancel booking' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/webapp/creator/next-show-date
+// PUT /api/webapp/creator/next-show-date
+// ---------------------------------------------------------------------------
+
+/**
+ * Return the authenticated creator's next show date.
+ */
+async function getNextShowDate(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const creatorId = String(sessionUser.id);
+
+    const result = await query(
+      'SELECT next_show_date FROM performers WHERE user_id = $1',
+      [creatorId]
+    );
+
+    const nextShowDate = result.rows[0]?.next_show_date || null;
+    return res.json({ success: true, nextShowDate });
+  } catch (err) {
+    logger.error('[callBookingController] getNextShowDate error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to retrieve next show date' });
+  }
+}
+
+/**
+ * Set the authenticated creator's next show date.
+ * Body: { nextShowDate: ISO 8601 string, must be in the future }
+ */
+async function setNextShowDate(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const creatorId = String(sessionUser.id);
+
+    const { nextShowDate } = req.body;
+
+    // Allow explicit null/empty to clear the date
+    if (nextShowDate === null || nextShowDate === undefined || nextShowDate === '') {
+      await query(
+        'UPDATE performers SET next_show_date = NULL, updated_at = NOW() WHERE user_id = $1',
+        [creatorId]
+      );
+      return res.json({ success: true, nextShowDate: null });
+    }
+
+    // Validate ISO 8601 format
+    if (typeof nextShowDate !== 'string') {
+      return res.status(400).json({ success: false, error: 'nextShowDate must be an ISO 8601 string' });
+    }
+
+    // Use moment.ISO_8601 for strict parsing
+    const parsed = moment(nextShowDate, moment.ISO_8601, true);
+    if (!parsed.isValid()) {
+      return res.status(400).json({ success: false, error: 'nextShowDate must be a valid ISO 8601 timestamp' });
+    }
+    if (parsed.isSameOrBefore(moment.utc())) {
+      return res.status(400).json({ success: false, error: 'nextShowDate must be in the future' });
+    }
+
+    await query(
+      'UPDATE performers SET next_show_date = $1, updated_at = NOW() WHERE user_id = $2',
+      [parsed.toISOString(), creatorId]
+    );
+
+    logger.info('[callBookingController] next show date updated', { creatorId, nextShowDate: parsed.toISOString() });
+    return res.json({ success: true, nextShowDate: parsed.toISOString() });
+  } catch (err) {
+    logger.error('[callBookingController] setNextShowDate error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to update next show date' });
+  }
+}
+
 module.exports = {
   createCheckout,
   getBooking,
@@ -575,4 +756,8 @@ module.exports = {
   getAvailabilitySchedule,
   getMyBookings,
   getCallEarnings,
+  completeBooking,
+  cancelBooking,
+  getNextShowDate,
+  setNextShowDate,
 };

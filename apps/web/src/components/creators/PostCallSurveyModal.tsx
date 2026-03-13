@@ -15,6 +15,16 @@ export function PostCallSurveyModal({ open, bookingId, creatorName, onClose }: P
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Bug M-07: reset form state each time the modal is opened so stale data never shows
+  useEffect(() => {
+    if (open) {
+      setRating(0);
+      setFeedback("");
+      setSubmitted(false);
+      setError(null);
+    }
+  }, [open]);
+
   // Escape key handler
   useEffect(() => {
     if (!open) return;

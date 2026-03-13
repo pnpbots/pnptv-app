@@ -14,10 +14,26 @@ const { v4: uuidv4 } = require('uuid');
 const { query, getPool } = require('../../config/postgres');
 const PaymentModel = require('../../models/paymentModel');
 const callPackageService = require('./callPackageService');
+const { sendNotificationViaTelegram } = require('./notificationBotDelivery');
+const emailService = require('./emailservice');
 const logger = require('../../utils/logger');
 
 const CHECKOUT_DOMAIN = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
 const WEB_APP_URL = process.env.WEB_APP_URL || 'https://app.pnptv.app';
+
+/**
+ * Escape user-supplied values before interpolation into HTML templates.
+ * Prevents HTML/script injection in email bodies and Telegram HTML messages.
+ */
+function escapeHtml(str) {
+  if (typeof str !== 'string') return String(str);
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
 
 /**
  * Create a checkout for a call package.
@@ -220,7 +236,7 @@ async function onCallPaymentSuccess(paymentId) {
 
     // Update payment status to completed
     await client.query(
-      `UPDATE payments SET status = 'success', updated_at = NOW() WHERE id = $1 AND status = 'pending'`,
+      `UPDATE payments SET status = 'completed', updated_at = NOW() WHERE id = $1 AND status = 'pending'`,
       [paymentId]
     );
 
@@ -232,6 +248,90 @@ async function onCallPaymentSuccess(paymentId) {
       packageId,
       creditId: credit.id,
     });
+
+    // ── Post-payment notifications (fire-and-forget) ─────────────────────
+    // Notify buyer + creator that credits have been granted.
+    (async () => {
+      try {
+        const pkg = pkgResult.rows[0];
+        const buyerEmail = meta.email;
+
+        // Fetch creator info for notification context
+        const creatorResult = await query(
+          'SELECT username, display_name FROM users WHERE id = $1',
+          [creator_id]
+        );
+        const creator = creatorResult.rows[0] || {};
+        const creatorName = creator.display_name || creator.username || 'a creator';
+        const safeCreatorName = escapeHtml(creatorName);
+
+        // Telegram notification to buyer
+        const buyerMsg = `Payment confirmed! You now have <b>${quantity}</b> × ${pkg.duration_minutes}-min call credit(s) with <b>${safeCreatorName}</b>.\n\nGo to their profile to book your call.`;
+        await sendNotificationViaTelegram(payment.user_id, {
+          type: 'payment',
+          message: buyerMsg,
+          entityType: 'call_credit',
+          entityId: credit.id,
+        }).catch(() => {});
+
+        // Telegram notification to creator
+        const creatorMsg = `Someone just purchased <b>${quantity}</b> × ${pkg.duration_minutes}-min call package! Check your dashboard for upcoming bookings.`;
+        await sendNotificationViaTelegram(creator_id, {
+          type: 'payment',
+          message: creatorMsg,
+          entityType: 'call_credit',
+          entityId: credit.id,
+        }).catch(() => {});
+
+        // Email receipt to buyer
+        if (buyerEmail) {
+          const transporter = emailService.transporters.pnptv || emailService.transporters.easybots;
+          if (transporter) {
+            await transporter.sendMail({
+              from: '"PNPtv" <noreply@pnptv.app>',
+              to: buyerEmail,
+              subject: 'Payment Confirmed — Call Credits Ready! — PNPtv',
+              html: `
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; background: #f4f4f4; margin: 0; padding: 0; }
+  .container { max-width: 600px; margin: 20px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+  .header { text-align: center; padding-bottom: 20px; border-bottom: 3px solid #667eea; }
+  .header h1 { color: #667eea; margin: 0; font-size: 28px; }
+  .badge { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 16px 20px; border-radius: 8px; text-align: center; margin: 20px 0; }
+  .badge h2 { margin: 0; font-size: 20px; }
+  .details { background: #f8f9fa; padding: 16px 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #667eea; }
+  .details p { margin: 8px 0; }
+  .btn { display: inline-block; padding: 12px 28px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; border-radius: 6px; font-weight: bold; }
+  .footer { text-align: center; padding-top: 20px; border-top: 1px solid #ddd; color: #999; font-size: 12px; }
+</style></head><body>
+<div class="container">
+  <div class="header"><h1>PNPtv!</h1><p>Payment Receipt</p></div>
+  <div class="badge"><h2>Payment Confirmed</h2></div>
+  <p>Hi there,</p>
+  <p>Your payment has been processed successfully. Your call credits are ready to use!</p>
+  <div class="details">
+    <p><strong>Creator:</strong> ${safeCreatorName}</p>
+    <p><strong>Package:</strong> ${escapeHtml(String(pkg.duration_minutes))} min × ${escapeHtml(String(quantity))} call(s)</p>
+    <p><strong>Amount:</strong> $${escapeHtml(parseFloat(pkg.price_usd).toFixed(2))} USD</p>
+    <p><strong>SKU:</strong> ${escapeHtml(pkg.sku || '')}</p>
+  </div>
+  <p>Visit the creator's profile and click <strong>Book a Call</strong> to schedule your session.</p>
+  <div style="text-align:center;margin:20px 0;"><a href="${process.env.APP_PUBLIC_URL || 'https://app.pnptv.app'}" class="btn">Open PNPtv</a></div>
+  <div class="footer"><p>PNPtv | noreply@pnptv.app</p><p>This is an automated message. Please do not reply.</p></div>
+</div></body></html>`.trim(),
+            }).catch((emailErr) => {
+              logger.warn('[callCheckoutService] payment receipt email failed', { to: buyerEmail, error: emailErr.message });
+            });
+          }
+        }
+      } catch (notifErr) {
+        logger.warn('[callCheckoutService] post-payment notification error (non-fatal)', {
+          paymentId, error: notifErr.message,
+        });
+      }
+    })();
   } catch (txErr) {
     await client.query('ROLLBACK');
     logger.error('[callCheckoutService] onCallPaymentSuccess transaction failed', {

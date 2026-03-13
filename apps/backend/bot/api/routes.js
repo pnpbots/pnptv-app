@@ -29,6 +29,7 @@ const healthController = require('./controllers/healthController');
 const hangoutsController = require('./controllers/hangoutsController');
 const eventsController = require('./controllers/eventsController');
 const xOAuthRoutes = require('./xOAuthRoutes');
+const xOAuthController = require('./controllers/xOAuthController');
 const xFollowersRoutes = require('./xFollowersRoutes');
 const { adminGuard: xOAuthAdminGuard, adminGuard } = require('../../middleware/guards');
 const adminUserRoutes = require('./routes/adminUserRoutes');
@@ -2213,6 +2214,8 @@ app.use('/api/users', userManagementRoutes);
 // Nearby Geolocation API Routes
 app.use('/api/nearby', nearbyRoutes);
 
+// OAuth1 callback must be accessible without session (X redirects browser here)
+app.get('/api/admin/x/oauth/1a/callback', asyncHandler(xOAuthController.callbackOAuth1));
 app.use('/api/admin/x/oauth', xOAuthAdminGuard, xOAuthRoutes);
 app.use('/api/auth/x', xOAuthRoutes); // Alias for X Developer Portal redirect URI
 app.use('/api/x/followers', xFollowersRoutes);
@@ -5334,32 +5337,38 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
     const userId = String(user.telegram_id || user.id);
 
     // --- Resolve performer ID ---
-    // The frontend may send a Restreamer process ID (e.g. 'restreamer-ui:ingest:pnptv-santino')
-    // instead of a Directus performer ID. Resolve it to the actual performer via the
-    // users.live_channel → performers.user_id chain.
+    // The frontend may send:
+    //   a) A full Restreamer process ID:  'restreamer-ui:ingest:pnptv-santino'
+    //   b) A plain channel ref:           'pnptv-santino'
+    //   c) A numeric Directus performer ID (passthrough)
+    // Resolve (a) and (b) to the actual performer via the users.live_channel → performers chain.
     let resolvedPerformerId = String(performerId);
     const restreamerMatch = resolvedPerformerId.match(/^restreamer-ui:ingest:([\w-]+)$/);
-    if (restreamerMatch) {
-      const channelRef = restreamerMatch[1];
+    // Plain channel ref: contains a hyphen, starts with a non-numeric prefix, and is not a UUID
+    const plainChannelRef = !restreamerMatch && /^[a-zA-Z][\w-]+$/.test(resolvedPerformerId) && !/^\d+$/.test(resolvedPerformerId)
+      ? resolvedPerformerId
+      : null;
+    const channelRefToResolve = restreamerMatch ? restreamerMatch[1] : plainChannelRef;
+    if (channelRefToResolve) {
       try {
         const { rows } = await getPool().query(
           `SELECT p.id AS performer_id FROM performers p
            JOIN users u ON p.user_id = u.id
            WHERE u.live_channel = $1
            LIMIT 1`,
-          [channelRef]
+          [channelRefToResolve]
         );
         if (rows.length > 0 && rows[0].performer_id) {
           resolvedPerformerId = String(rows[0].performer_id);
         } else {
           // No performer linked — try using the user ID directly as performer lookup
-          const userRows = await getPool().query('SELECT id FROM users WHERE live_channel = $1 LIMIT 1', [channelRef]);
+          const userRows = await getPool().query('SELECT id FROM users WHERE live_channel = $1 LIMIT 1', [channelRefToResolve]);
           if (userRows.rows.length > 0) {
             resolvedPerformerId = String(userRows.rows[0].id);
           }
         }
       } catch (resolveErr) {
-        logger.warn(`Tips: failed to resolve channel ref '${channelRef}' to performer: ${resolveErr.message}`);
+        logger.warn(`Tips: failed to resolve channel ref '${channelRefToResolve}' to performer: ${resolveErr.message}`);
       }
     }
 
@@ -6474,19 +6483,21 @@ app.delete('/api/webapp/admin/creators/:creatorId/call-packages/:packageId',
   requireSessionAuth, adminGuard,
   asyncHandler(callPackageController.deactivatePackage));
 
-// CRIT-04: Rate limit booking options endpoint (30 requests/min)
+// CRIT-04: Rate limit booking options endpoint (30 requests/min, keyed by user ID)
 const bookCallOptionsLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Too many requests, please slow down' },
 });
 
-// BC-C-04: Rate limit booking endpoint (1 request per 5 seconds)
+// BC-C-04: Rate limit booking endpoint (3 requests per 60 seconds, keyed by user ID)
 const bookCallLimiter = rateLimit({
-  windowMs: 5 * 1000,
-  max: 1,
+  windowMs: 60 * 1000,
+  max: 3,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Please wait before booking again' },
@@ -6512,13 +6523,13 @@ app.get('/api/webapp/creator/call-packages',
   requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
   asyncHandler(callPackageController.listMyPackages));
 app.post('/api/webapp/creator/call-packages',
-  requireSessionAuth,
+  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
   asyncHandler(callPackageController.createMyPackage));
 app.put('/api/webapp/creator/call-packages/:packageId',
-  requireSessionAuth,
+  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
   asyncHandler(callPackageController.updateMyPackage));
 app.delete('/api/webapp/creator/call-packages/:packageId',
-  requireSessionAuth,
+  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
   asyncHandler(callPackageController.deactivateMyPackage));
 
 // ── Book a Call: Checkout, Booking Management & Creator Availability ─────────
@@ -6541,25 +6552,43 @@ app.get('/api/webapp/creator/availability/schedule',
   asyncHandler(callBookingController.getAvailabilitySchedule));
 
 app.post('/api/webapp/creator/availability/schedule',
-  requireSessionAuth,
+  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
   asyncHandler(callBookingController.saveAvailabilitySchedule));
 
 // BC-C-02: PUT alias for frontend compatibility
 app.put('/api/webapp/creator/availability/schedule',
-  requireSessionAuth,
+  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
   asyncHandler(callBookingController.saveAvailabilitySchedule));
 
 app.put('/api/webapp/creator/online-status',
-  requireSessionAuth,
+  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
   asyncHandler(callBookingController.setOnlineStatus));
 
 app.get('/api/webapp/creator/call-bookings',
-  requireSessionAuth,
+  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
   asyncHandler(callBookingController.getMyBookings));
 
 app.get('/api/webapp/creator/call-earnings',
-  requireSessionAuth,
+  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
   asyncHandler(callBookingController.getCallEarnings));
+
+// Creator: complete a booking (creator-only action)
+app.patch('/api/webapp/bookings/:bookingId/complete',
+  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  asyncHandler(callBookingController.completeBooking));
+
+// Member or creator: cancel a booking
+app.post('/api/webapp/bookings/:bookingId/cancel',
+  requireSessionAuth,
+  asyncHandler(callBookingController.cancelBooking));
+
+// Creator: get/set next show date
+app.get('/api/webapp/creator/next-show-date',
+  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  asyncHandler(callBookingController.getNextShowDate));
+app.put('/api/webapp/creator/next-show-date',
+  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  asyncHandler(callBookingController.setNextShowDate));
 
 // ==========================================
 // ATProto / Bluesky OAuth Routes (PUBLIC — no session required)

@@ -117,10 +117,12 @@ export function BookCallModal({
 
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
-  const [bookingId, setBookingId] = useState<number | null>(null);
   const [confirmedStartAt, setConfirmedStartAt] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const firstFocusRef = useRef<HTMLButtonElement>(null);
+  // Bug H-01: in-flight guard prevents double-submit
+  const checkoutInFlight = useRef(false);
 
   // ── Derived ─────────────────────────────────────────────────────────────────
 
@@ -141,8 +143,9 @@ export function BookCallModal({
     setProvider("epayco");
     setEmail("");
     setCheckoutError(null);
-    setBookingId(null);
     setConfirmedStartAt(null);
+    setIsProcessing(false);
+    checkoutInFlight.current = false;
 
     let cancelled = false;
     setPackagesLoading(true);
@@ -196,15 +199,15 @@ export function BookCallModal({
     };
   }, [step, creator.id, duration]);
 
-  // ── Escape key ──────────────────────────────────────────────────────────────
+  // ── Escape key — blocked while processing payment (Bug H-06) ────────────────
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !isProcessing) onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, isProcessing]);
 
   // ── Auto-focus ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -229,8 +232,11 @@ export function BookCallModal({
   }, [selectedSlot]);
 
   const handleCheckout = useCallback(async () => {
-    if (!activePackage) return;
+    // Bug H-01: prevent double-submit
+    if (checkoutInFlight.current || !activePackage) return;
+    checkoutInFlight.current = true;
     setCheckoutLoading(true);
+    setIsProcessing(true);
     setCheckoutError(null);
 
     try {
@@ -243,16 +249,21 @@ export function BookCallModal({
       });
 
       if (provider === "daimo" && res.checkoutUrl) {
-        // Navigate in-tab to the Daimo checkout page.  Store the bookingId so
-        // the user can still see their booking after the payment flow completes
-        // (the DaimoCheckout success screen links back to /booking/:id).
+        // Navigate in-tab to the Daimo checkout page.
         onClose();
         navigate(new URL(assertPaymentUrl(res.checkoutUrl)).pathname);
         return;
       }
 
-      // ePayco and any future non-Daimo providers — stay in modal and show SUCCESS.
-      setBookingId(res.bookingId);
+      // Bug C-02: ePayco — redirect to checkoutUrl instead of showing fake SUCCESS screen.
+      // The booking is not confirmed until payment webhook fires.
+      if (provider === "epayco" && res.checkoutUrl) {
+        window.location.href = res.checkoutUrl;
+        return;
+      }
+
+      // Fallback: show success screen for any provider that doesn't redirect
+      // (e.g. token-based or admin-created bookings)
       setConfirmedStartAt(res.startAt ?? null);
       setStep("SUCCESS");
     } catch (err: unknown) {
@@ -260,6 +271,8 @@ export function BookCallModal({
       setCheckoutError(msg);
     } finally {
       setCheckoutLoading(false);
+      setIsProcessing(false);
+      checkoutInFlight.current = false;
     }
   }, [activePackage, provider, email, quantity, selectedSlot, onClose, navigate]);
 
@@ -637,6 +650,7 @@ export function BookCallModal({
           id="checkout-email"
           type="email"
           required
+          maxLength={254}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
@@ -740,16 +754,6 @@ export function BookCallModal({
       </div>
 
       <div className="flex flex-col gap-2.5 w-full">
-        {bookingId && (
-          <button
-            type="button"
-            onClick={() => { navigate(`/booking/${bookingId}/confirm`); onClose(); }}
-            className="w-full min-h-[48px] rounded-2xl text-base font-bold text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
-            style={{ background: "linear-gradient(90deg, #D4007A, #E69138)" }}
-          >
-            View Booking
-          </button>
-        )}
         <button
           type="button"
           onClick={onClose}
@@ -780,8 +784,8 @@ export function BookCallModal({
   return (
     <div
       className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center"
-      style={{ background: "rgba(0,0,0,0.70)", backdropFilter: "blur(6px)" }}
-      onClick={onClose}
+      style={{ background: "rgba(0,0,0,0.70)" }}
+      onClick={isProcessing ? undefined : onClose}
       role="dialog"
       aria-modal="true"
       aria-label={`Book a call with ${creator.username}`}
@@ -838,12 +842,13 @@ export function BookCallModal({
             </div>
           </div>
 
-          {/* Close */}
+          {/* Close — disabled while payment is in-flight (Bug H-06) */}
           <button
             type="button"
-            onClick={onClose}
+            onClick={isProcessing ? undefined : onClose}
+            disabled={isProcessing}
             aria-label="Close booking modal"
-            className="w-9 h-9 flex items-center justify-center rounded-xl transition-opacity hover:opacity-80 active:scale-95 focus-visible:outline-none focus-visible:ring-2"
+            className="w-9 h-9 flex items-center justify-center rounded-xl transition-opacity hover:opacity-80 active:scale-95 focus-visible:outline-none focus-visible:ring-2 disabled:opacity-30 disabled:cursor-not-allowed"
             style={{ background: "rgba(255,255,255,0.08)", color: "#8E8E93" }}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">

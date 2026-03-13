@@ -17,6 +17,14 @@ export default function BookingConfirmation() {
 
   useEffect(() => {
     if (!bookingId) return;
+
+    // Bug: bookingId NaN crash — validate it's a pure integer string before casting
+    if (!/^\d+$/.test(bookingId)) {
+      setError("Invalid booking ID.");
+      setLoading(false);
+      return;
+    }
+
     getCallBooking(Number(bookingId))
       .then((res) => {
         setBooking(res.booking);
@@ -28,12 +36,14 @@ export default function BookingConfirmation() {
 
   // BC-H-03: Fetch fresh LiveKit token on "Join Call" click, not at page load
   const handleJoinCall = useCallback(async () => {
-    if (!bookingId) return;
+    if (!bookingId || !/^\d+$/.test(bookingId)) return;
     setJoining(true);
     try {
+      // Bug C-03: API returns { booking, livekit } at top level — not nested inside booking
       const res = await getCallBooking(Number(bookingId));
-      if ((res as any).livekit) {
-        setLivekit((res as any).livekit);
+      const livekitData = res.booking.livekit ?? (res as any).livekit ?? null;
+      if (livekitData) {
+        setLivekit(livekitData);
         setInCall(true);
       } else {
         setError("Unable to generate call token. Please try again.");
@@ -46,10 +56,26 @@ export default function BookingConfirmation() {
   }, [bookingId]);
 
   const startTime = booking?.start_at ? new Date(booking.start_at) : null;
-  const canJoin = useMemo(() => {
+  const [canJoin, setCanJoin] = useState(() => {
     if (!startTime) return false;
     return Date.now() >= startTime.getTime() - 15 * 60 * 1000;
-  }, [startTime]);
+  });
+
+  // Bug M-05: re-evaluate canJoin every 30 seconds so the Join button enables automatically
+  useEffect(() => {
+    // Sync initial value whenever booking loads
+    if (booking?.start_at) {
+      const start = new Date(booking.start_at);
+      setCanJoin(Date.now() >= start.getTime() - 15 * 60 * 1000);
+    }
+    const interval = setInterval(() => {
+      if (booking?.start_at) {
+        const start = new Date(booking.start_at);
+        setCanJoin(Date.now() >= start.getTime() - 15 * 60 * 1000);
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [booking?.start_at]);
 
   const timeUntilStart = useMemo(() => {
     if (!startTime) return "";
@@ -102,12 +128,6 @@ export default function BookingConfirmation() {
           roomName={livekit.roomName}
           onCallEnd={handleCallEnd}
           fullScreen
-        />
-        <PostCallSurveyModal
-          open={showSurvey}
-          bookingId={Number(bookingId)}
-          creatorName={booking.creator_username || "Creator"}
-          onClose={() => setShowSurvey(false)}
         />
       </div>
     );

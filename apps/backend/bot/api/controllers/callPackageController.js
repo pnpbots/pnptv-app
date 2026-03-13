@@ -1,6 +1,8 @@
 'use strict';
 const callPackageService = require('../../services/callPackageService');
 const CallBookingService = require('../../services/CallBookingService');
+const livekitService = require('../../services/livekitService');
+const callNotificationService = require('../../services/callNotificationService');
 const moment = require('moment-timezone');
 
 const logger = require('../../../utils/logger');
@@ -38,6 +40,9 @@ async function createPackage(req, res) {
     }
     if (!priceUsd || Number(priceUsd) <= 0) {
       return res.status(400).json({ error: 'priceUsd must be a positive number' });
+    }
+    if (title !== undefined && (typeof title !== 'string' || title.length > 200)) {
+      return res.status(400).json({ error: 'Title must be a string under 200 characters' });
     }
 
     const pkg = await callPackageService.createPackage(creatorId, {
@@ -116,7 +121,7 @@ async function bookCall(req, res) {
       return res.status(400).json({ success: false, error: 'You cannot book a call with yourself' });
     }
 
-    const parsedDuration = Number(durationMinutes) || 30;
+    const parsedDuration = Number(durationMinutes);
     if (![30, 60].includes(parsedDuration)) {
       return res.status(400).json({ error: 'durationMinutes must be 30 or 60' });
     }
@@ -124,6 +129,9 @@ async function bookCall(req, res) {
     // Validate startAt is a valid future ISO string
     if (!moment(startAt, moment.ISO_8601, true).isValid() || moment.utc(startAt).isBefore(moment.utc())) {
       return res.status(400).json({ error: 'startAt must be a valid future ISO timestamp' });
+    }
+    if (moment.utc(startAt).isAfter(moment.utc().add(90, 'days'))) {
+      return res.status(400).json({ error: 'Cannot book more than 90 days in advance' });
     }
 
     // BC-C-03: Re-verify creator online status from Redis before booking
@@ -142,6 +150,66 @@ async function bookCall(req, res) {
       creditId: Number(creditId),
       durationMinutes: parsedDuration,
     });
+
+    // ── Post-booking orchestration (fire-and-forget) ───────────────────────
+    // Generate LiveKit room + tokens, send confirmations, schedule reminders.
+    // Failures here must NOT block the booking response.
+    (async () => {
+      try {
+        const roomName = `call-credit-${Number(creditId)}`;
+        let livekitInfo = null;
+
+        if (livekitService.isConfigured()) {
+          await livekitService.ensureRoom(roomName);
+
+          // Fetch display names for both parties
+          const { query: dbQuery } = require('../../../config/postgres');
+          const [memberResult, creatorResult] = await Promise.all([
+            dbQuery('SELECT username, display_name, photo_url FROM users WHERE id = $1', [memberId]),
+            dbQuery('SELECT username, display_name, photo_url FROM users WHERE id = $1', [creatorId]),
+          ]);
+          const member = memberResult.rows[0] || {};
+          const creator = creatorResult.rows[0] || {};
+
+          livekitInfo = await livekitService.generateMeetingInfo(
+            roomName, memberId,
+            member.display_name || member.username || memberId,
+            member.photo_url || '', false
+          );
+
+          // Generate a separate creator token for the creator's notification
+          const creatorLivekitInfo = await livekitService.generateMeetingInfo(
+            roomName, creatorId,
+            creator.display_name || creator.username || creatorId,
+            creator.photo_url || '', true
+          );
+
+          // Send confirmations to both parties
+          await Promise.allSettled([
+            callNotificationService.sendBookingConfirmationToMember(
+              memberId,
+              { creator_name: creator.display_name || creator.username, start_at: startAt, duration_minutes: parsedDuration },
+              livekitInfo
+            ),
+            callNotificationService.sendBookingConfirmationToCreator(
+              creatorId,
+              { start_at: startAt, duration_minutes: parsedDuration },
+              { username: member.username, display_name: member.display_name },
+              creatorLivekitInfo
+            ),
+          ]);
+
+          // Schedule 1h and 15min reminders
+          callNotificationService.scheduleCallReminders(
+            Number(creditId), creatorId, memberId, startAt, livekitInfo
+          );
+        }
+      } catch (postErr) {
+        logger.warn('bookCall: post-booking orchestration error (non-fatal)', {
+          creditId, memberId, creatorId, error: postErr.message,
+        });
+      }
+    })();
 
     res.status(201).json({ success: true, booking });
   } catch (err) {
@@ -213,6 +281,9 @@ async function createMyPackage(req, res) {
     }
     if (!priceUsd || Number(priceUsd) <= 0 || Number(priceUsd) > 1000) {
       return res.status(400).json({ success: false, error: 'Price must be $0.01-$1000' });
+    }
+    if (title !== undefined && (typeof title !== 'string' || title.length > 200)) {
+      return res.status(400).json({ success: false, error: 'Title must be a string under 200 characters' });
     }
 
     const pkg = await callPackageService.createPackage(creatorId, {

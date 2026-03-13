@@ -30,7 +30,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS bookings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id TEXT NOT NULL REFERENCES users(id),
-  performer_id INTEGER REFERENCES performers(id),
+  performer_id UUID REFERENCES performers(id),
   slot_id UUID,
   call_type TEXT NOT NULL DEFAULT 'video',
   duration_minutes INTEGER NOT NULL DEFAULT 30,

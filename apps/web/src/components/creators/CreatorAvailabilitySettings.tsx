@@ -3,11 +3,14 @@ import {
   getCreatorAvailabilitySchedule,
   saveCreatorAvailabilitySchedule,
   setCreatorOnlineStatus,
+  getNextShowDate,
+  setNextShowDate,
+  type AvailabilityDayRow,
   type WeeklyAvailabilitySchedule,
 } from "@/lib/api";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const DAY_KEYS: Array<keyof WeeklyAvailabilitySchedule> = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 const TIMEZONES = [
   "UTC",
   "America/New_York",
@@ -39,6 +42,11 @@ interface SlotRow {
 const defaultSlots = (): SlotRow[] =>
   DAYS.map(() => ({ enabled: false, startTime: "09:00", endTime: "17:00" }));
 
+// Determine if the backend returned the legacy object format or the new array format
+function isArrayFormat(s: unknown): s is AvailabilityDayRow[] {
+  return Array.isArray(s);
+}
+
 export function CreatorAvailabilitySettings() {
   const [online, setOnline] = useState(false);
   const [toggling, setToggling] = useState(false);
@@ -50,42 +58,99 @@ export function CreatorAvailabilitySettings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Next show date state
+  const [nextShowDate, setNextShowDateState] = useState<string>("");
+  const [nextShowSaving, setNextShowSaving] = useState(false);
+  const [nextShowError, setNextShowError] = useState<string | null>(null);
+  const [nextShowSaved, setNextShowSaved] = useState(false);
+
   useEffect(() => {
-    getCreatorAvailabilitySchedule()
-      .then((res) => {
-        setOnline(res.isOnline ?? false);
+    let cancelled = false;
+
+    Promise.all([
+      getCreatorAvailabilitySchedule(),
+      getNextShowDate(),
+    ])
+      .then(([res, showDateRes]) => {
+        if (cancelled) return;
+
+        // Bug C-01 fix: backend returns `online` (not `isOnline`)
+        setOnline(res.online ?? res.isOnline ?? false);
+
         if (res.schedule) {
           const updated = defaultSlots();
           let loadedBreak: number | undefined;
-          DAY_KEYS.forEach((key, idx) => {
-            const slot = res.schedule![key];
-            if (slot) {
-              updated[idx] = {
-                enabled: slot.enabled,
-                startTime: slot.startTime,
-                endTime: slot.endTime,
-              };
-              if (slot.timezone) setTimezone(slot.timezone);
-              if (slot.breakMinutes !== undefined && loadedBreak === undefined) {
-                loadedBreak = slot.breakMinutes;
+
+          if (isArrayFormat(res.schedule)) {
+            // New array format: [{ day_of_week: 0, start_time, end_time, timezone, break_minutes }]
+            (res.schedule as AvailabilityDayRow[]).forEach((row) => {
+              const idx = row.day_of_week; // 0=Sunday, matching our DAYS array
+              if (idx >= 0 && idx < 7) {
+                updated[idx] = {
+                  enabled: true,
+                  startTime: row.start_time,
+                  endTime: row.end_time,
+                };
+                if (row.timezone) setTimezone(row.timezone);
+                if (row.break_minutes !== undefined && loadedBreak === undefined) {
+                  loadedBreak = row.break_minutes;
+                }
               }
-            }
-          });
+            });
+          } else {
+            // Legacy object format: { sun: { enabled, startTime, endTime, timezone, breakMinutes } }
+            const legacySchedule = res.schedule as WeeklyAvailabilitySchedule;
+            DAY_KEYS.forEach((key, idx) => {
+              const slot = legacySchedule[key];
+              if (slot) {
+                updated[idx] = {
+                  enabled: slot.enabled,
+                  startTime: slot.startTime,
+                  endTime: slot.endTime,
+                };
+                if (slot.timezone) setTimezone(slot.timezone);
+                if (slot.breakMinutes !== undefined && loadedBreak === undefined) {
+                  loadedBreak = slot.breakMinutes;
+                }
+              }
+            });
+          }
+
           setSchedule(updated);
           if (loadedBreak !== undefined) setBreakMinutes(loadedBreak);
         }
+
+        // Next show date
+        if (showDateRes.nextShowDate) {
+          // Convert UTC ISO string to datetime-local format (YYYY-MM-DDTHH:mm)
+          const d = new Date(showDateRes.nextShowDate);
+          const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+            .toISOString()
+            .slice(0, 16);
+          setNextShowDateState(local);
+        }
       })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .catch((err: Error) => {
+        if (!cancelled) setError(err.message || "Failed to load settings");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleToggleOnline = useCallback(async () => {
     setToggling(true);
+    setError(null);
     try {
+      // Bug: backend returns `online` not `isOnline`
       const res = await setCreatorOnlineStatus(!online);
-      setOnline(res.isOnline);
-    } catch {
-      setError("Failed to update status");
+      setOnline(res.online ?? (res as any).isOnline ?? !online);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to update status");
     } finally {
       setToggling(false);
     }
@@ -100,27 +165,59 @@ export function CreatorAvailabilitySettings() {
     setSaved(false);
   };
 
+  // Bug C-04 fix: transform frontend SlotRow[] → backend array payload
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     try {
-      const weeklySchedule = DAY_KEYS.reduce<WeeklyAvailabilitySchedule>((acc, key, idx) => {
-        acc[key] = {
-          enabled: schedule[idx].enabled,
-          startTime: schedule[idx].startTime,
-          endTime: schedule[idx].endTime,
+      const slots = schedule
+        .map((slot, idx) => ({
+          dayOfWeek: idx,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
           timezone,
           breakMinutes,
-        };
-        return acc;
-      }, {} as WeeklyAvailabilitySchedule);
-      await saveCreatorAvailabilitySchedule(weeklySchedule);
+          enabled: slot.enabled,
+        }))
+        .filter((s) => s.enabled);
+
+      await saveCreatorAvailabilitySchedule(slots);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    } catch {
-      setError("Failed to save schedule");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save schedule");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveNextShow = async () => {
+    setNextShowSaving(true);
+    setNextShowError(null);
+    try {
+      const isoDate = nextShowDate ? new Date(nextShowDate).toISOString() : null;
+      await setNextShowDate(isoDate);
+      setNextShowSaved(true);
+      setTimeout(() => setNextShowSaved(false), 3000);
+    } catch (err: unknown) {
+      setNextShowError(err instanceof Error ? err.message : "Failed to save next show date");
+    } finally {
+      setNextShowSaving(false);
+    }
+  };
+
+  const handleClearNextShow = async () => {
+    setNextShowSaving(true);
+    setNextShowError(null);
+    try {
+      await setNextShowDate(null);
+      setNextShowDateState("");
+      setNextShowSaved(true);
+      setTimeout(() => setNextShowSaved(false), 3000);
+    } catch (err: unknown) {
+      setNextShowError(err instanceof Error ? err.message : "Failed to clear next show date");
+    } finally {
+      setNextShowSaving(false);
     }
   };
 
@@ -173,6 +270,59 @@ export function CreatorAvailabilitySettings() {
         >
           {toggling ? "..." : online ? "Go Offline" : "Go Online"}
         </button>
+      </div>
+
+      {/* Next Show Date */}
+      <div
+        className="p-4 rounded-xl space-y-3"
+        style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}
+      >
+        <label className="block text-xs font-semibold" style={{ color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          Next Show Date
+        </label>
+        {nextShowDate && (
+          <p className="text-xs" style={{ color: "#AEAEB2" }}>
+            Currently set:{" "}
+            <span className="font-medium" style={{ color: "#EBEBF5" }}>
+              {new Date(nextShowDate).toLocaleDateString(undefined, {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          </p>
+        )}
+        <input
+          type="datetime-local"
+          value={nextShowDate}
+          onChange={(e) => { setNextShowDateState(e.target.value); setNextShowSaved(false); }}
+          style={{ ...inputStyle, width: "100%", colorScheme: "dark" }}
+        />
+        {nextShowError && (
+          <p className="text-xs" style={{ color: "#FF6B6B" }}>{nextShowError}</p>
+        )}
+        <div className="flex gap-2">
+          <button
+            onClick={handleSaveNextShow}
+            disabled={nextShowSaving || !nextShowDate}
+            className="flex-1 py-2 rounded-xl text-xs font-semibold text-white transition-opacity disabled:opacity-50"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            {nextShowSaving ? "Saving..." : nextShowSaved ? "Saved!" : "Set Date"}
+          </button>
+          {nextShowDate && (
+            <button
+              onClick={handleClearNextShow}
+              disabled={nextShowSaving}
+              className="px-4 py-2 rounded-xl text-xs font-semibold transition-opacity disabled:opacity-50"
+              style={{ background: "rgba(255,255,255,0.08)", color: "#8E8E93" }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Timezone selector */}
