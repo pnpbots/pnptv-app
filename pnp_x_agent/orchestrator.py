@@ -4,6 +4,44 @@ from psycopg2.extras import RealDictCursor
 from grok_client import GrokCognitiveEngine
 from x_api_manager import XMultiAccountManager
 
+import urllib.parse
+
+def get_db_conn():
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        return psycopg2.connect(
+            dbname='pnptvbot', user='pnptvbot', password='Apelo801050#', 
+            host='172.20.0.2', port='5432', cursor_factory=RealDictCursor
+        )
+    
+    try:
+        if "://" in db_url:
+            protocol, rest = db_url.split("://", 1)
+            if "@" in rest:
+                auth, connection = rest.rsplit("@", 1)
+                user, password = auth.split(":", 1)
+                password = urllib.parse.unquote(password)
+                
+                host_db = connection.split("/", 1)
+                host_port = host_db[0]
+                dbname = host_db[1] if len(host_db) > 1 else "postgres"
+                
+                if ":" in host_port:
+                    host, port = host_port.split(":")
+                else:
+                    host = host_port
+                    port = "5432"
+                
+                return psycopg2.connect(
+                    dbname=dbname, user=user, password=password,
+                    host=host, port=port, cursor_factory=RealDictCursor
+                )
+        
+        return psycopg2.connect(db_url, cursor_factory=RealDictCursor)
+    except Exception as e:
+        print(f"Connection failed: {e}")
+        raise
+
 class CampaignOrchestrator:
     def __init__(self):
         self.ai = GrokCognitiveEngine()
@@ -20,7 +58,7 @@ class CampaignOrchestrator:
     def _init_x_manager(self):
         # Fetch active accounts from DB to initialize manager
         try:
-            conn = psycopg2.connect(self.db_url, cursor_factory=RealDictCursor)
+            conn = get_db_conn()
             with conn.cursor() as cur:
                 cur.execute("SELECT handle, encrypted_access_token as access_token, encrypted_access_token as access_token_secret FROM x_accounts WHERE is_active = TRUE")
                 # Note: encryption/decryption logic might be needed here if Node.js uses a custom key.
@@ -47,15 +85,13 @@ class CampaignOrchestrator:
         print(f"A/B Test Deployed for {persona}. A:{id_a} B:{id_b}")
 
     def _log_test_to_db(self, persona, id_a, id_b, text_a, text_b):
-        # We can reuse x_post_jobs table or a new one.
-        # For simplicity in this 'merge', let's use x_post_jobs if possible or a dedicated tests table.
+        # Using Node.js schema compatible logging if needed
+        # For simplicity, we create Python-specific tests table if it doesn't exist
         try:
-            conn = psycopg2.connect(self.db_url)
+            conn = get_db_conn()
             with conn.cursor() as cur:
-                # Assuming we want to track these as specific tests
-                # If we don't have an ab_tests table, we just print for now or create it
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS x_ab_tests (
+                    CREATE TABLE IF NOT EXISTS x_ab_tests_python (
                         test_id SERIAL PRIMARY KEY,
                         persona VARCHAR(50),
                         tweet_id_a VARCHAR(50),
@@ -67,7 +103,7 @@ class CampaignOrchestrator:
                     )
                 """)
                 cur.execute(
-                    "INSERT INTO x_ab_tests (persona, tweet_id_a, tweet_id_b, text_a, text_b) VALUES (%s, %s, %s, %s, %s)",
+                    "INSERT INTO x_ab_tests_python (persona, tweet_id_a, tweet_id_b, text_a, text_b) VALUES (%s, %s, %s, %s, %s)",
                     (persona, id_a, id_b, text_a, text_b)
                 )
             conn.commit()

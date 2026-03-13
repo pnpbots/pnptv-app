@@ -245,6 +245,18 @@ class XAutoCampaignService {
       personaType: campaign.persona_type || 'generic',
     });
 
+    // Attach a random video if campaign has media folder
+    let mediaUrl = null;
+    if (campaign.media_folder_id) {
+      try {
+        mediaUrl = await this._getRandomMediaUrl(campaign.media_folder_id, campaign.campaign_id);
+      } catch (err) {
+        logger.warn('Failed to get random media for campaign', {
+          campaignId: campaign.campaign_id, error: err.message,
+        });
+      }
+    }
+
     // A/B test mode: in xPost mode, queue ALL 3 options at staggered intervals
     // and record them in x_ab_tests for performance tracking.
     if (campaign.grok_mode === 'xPost' && campaign.ab_test_mode) {
@@ -275,18 +287,6 @@ class XAutoCampaignService {
     // Normalize for X character limits and ensure required links
     const requiredLinks = ['pnptv.app'];
     const { text: normalizedText } = XPostService.ensureRequiredLinks(postText, requiredLinks);
-
-    // Attach a random video if campaign has media folder
-    let mediaUrl = null;
-    if (campaign.media_folder_id) {
-      try {
-        mediaUrl = await this._getRandomMediaUrl(campaign.media_folder_id, campaign.campaign_id);
-      } catch (err) {
-        logger.warn('Failed to get random media for campaign', {
-          campaignId: campaign.campaign_id, error: err.message,
-        });
-      }
-    }
 
     // Queue into existing x_post_jobs pipeline
     const postId = await XPostService.createPostJob({

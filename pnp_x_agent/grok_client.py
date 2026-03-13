@@ -8,8 +8,7 @@ class GrokCognitiveEngine:
     def generate_persona_post(self, system_rules, topic, model="grok-4-1-fast-reasoning"):
         # The system role must be the first message to enforce unfiltered subcultural rules
         messages = [
-            {"role": "system", "content": system_rules},
-            {"role": "user", "content": f"Generate an X post about: {topic}"}
+            {"role": "user", "content": f"System context: {system_rules}\n\nGenerate an X post about: {topic}"}
         ]
         # We elevate the temperature slightly for the chaotic, raw tone required
         response = self.client.chat.create(

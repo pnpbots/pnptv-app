@@ -1,99 +1,68 @@
 import os
 import pytz
 import psycopg2
+import urllib.parse
 from psycopg2.extras import RealDictCursor
 from apscheduler.schedulers.blocking import BlockingScheduler
-from orchestrator import CampaignOrchestrator
 from grok_client import GrokCognitiveEngine
 from x_api_manager import XMultiAccountManager
 from dotenv import load_dotenv
 
-# Use standard paths for .env if available
-load_dotenv()
+# Force reload of environment
+load_dotenv(override=True)
 
-def run_nightlife_campaign():
-    print("Initiating peak nightlife posting sequence...")
-    orchestrator = CampaignOrchestrator()
-    # Execute a scheduled post for the Santino persona at peak hours
-    # We can fetch a topic or persona-specific prompt from the database here.
-    orchestrator.execute_ab_test_post(
-        persona="santino",
-        topic_variant_a="Santino commanding a sub to bootybump using heavy Spanish slang",
-        topic_variant_b="Santino commanding a sub using primarily English"
-    )
-
-def daily_10am_analytics_sync():
-    print("Running 10:00 AM (Bogota) Analytics Sync & Evaluator Loop...")
+def get_db_conn():
     db_url = os.getenv("DATABASE_URL")
-    orchestrator = CampaignOrchestrator()
-    ai = GrokCognitiveEngine()
-
+    print(f"--- V2 ROBUST STARTING (v2.1) ---")
+    
+    if not db_url:
+        return psycopg2.connect(
+            dbname='pnptvbot', user='pnptvbot', password='Apelo801050#', 
+            host='172.20.0.2', port='5432', cursor_factory=RealDictCursor
+        )
+    
     try:
-        conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
-        with conn.cursor() as cur:
-            # Retrieve active A/B tests to evaluate
-            cur.execute("SELECT test_id, persona, tweet_id_a, tweet_id_b FROM x_ab_tests WHERE status = 'active' LIMIT 10")
-            active_tests = cur.fetchall()
-
-            for test in active_tests:
-                test_id = test['test_id']
-                persona = test['persona']
-                ids = [test['tweet_id_a'], test['tweet_id_b']]
-
-                # Extract the private metrics needed for conversion tracking
-                try:
-                    metrics = orchestrator.x_api.fetch_non_public_metrics(persona, ids)
-                    # Pass to the Evaluator Agent for self-optimization
-                    report = ai.evaluate_ab_test(str(metrics))
-                    print(f"=== DAILY FINDINGS REPORT (Test {test_id}) ===")
-                    print(report)
-                    print("=============================")
-
-                    # Log the report back to the database or mark as completed
-                    cur.execute(
-                        "UPDATE x_ab_tests SET status = 'evaluated', report = %s WHERE test_id = %s",
-                        (report, test_id)
-                    )
-                except Exception as e:
-                    print(f"Error evaluating test {test_id}: {e}")
-        conn.commit()
-        conn.close()
+        # Robust parsing for postgresql://user:pass@host:port/dbname
+        # handles special characters like # in password by using rsplit
+        if "://" in db_url:
+            protocol, rest = db_url.split("://", 1)
+            if "@" in rest:
+                auth, connection = rest.rsplit("@", 1)
+                user, password = auth.split(":", 1)
+                password = urllib.parse.unquote(password)
+                
+                host_db = connection.split("/", 1)
+                host_port = host_db[0]
+                dbname = host_db[1] if len(host_db) > 1 else "postgres"
+                
+                if ":" in host_port:
+                    host, port = host_port.split(":")
+                else:
+                    host = host_port
+                    port = "5432"
+                
+                return psycopg2.connect(
+                    dbname=dbname, user=user, password=password,
+                    host=host, port=port, cursor_factory=RealDictCursor
+                )
+        
+        return psycopg2.connect(db_url, cursor_factory=RealDictCursor)
     except Exception as e:
-        print(f"Error in daily analytics sync: {e}")
+        print(f"V2 connection failed: {e}")
+        raise
 
 if __name__ == "__main__":
-    # Ensure database table exists for A/B tests (first run)
+    print("Agent V2 Initializing...")
     try:
-        db_url = os.getenv("DATABASE_URL")
-        conn = psycopg2.connect(db_url)
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS x_ab_tests (
-                    test_id SERIAL PRIMARY KEY,
-                    persona VARCHAR(50),
-                    tweet_id_a VARCHAR(50),
-                    tweet_id_b VARCHAR(50),
-                    text_a TEXT,
-                    text_b TEXT,
-                    status VARCHAR(20) DEFAULT 'active',
-                    report TEXT,
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
-        conn.commit()
+        conn = get_db_conn()
+        print("V2 Database Connection SUCCESSFUL!")
         conn.close()
     except Exception as e:
-        print(f"Warning: Initial DB check failed: {e}")
+        print(f"V2 Initialization FATAL: {e}")
 
-    # Lock schedule strictly to Colombia time
     colombia_tz = pytz.timezone('America/Bogota')
     scheduler = BlockingScheduler(timezone=colombia_tz)
-
-    # Schedule the Daily Sync exactly at 10:00 AM Colombia time
-    scheduler.add_job(daily_10am_analytics_sync, 'cron', hour=10, minute=0)
-
-    # Schedule automated posting during the peak Bucaramanga nightlife hours (e.g., 2:00 AM)
-    scheduler.add_job(run_nightlife_campaign, 'cron', hour=2, minute=0)
-
-    print("Agentic X framework (Merged) initialized. Awaiting triggers in America/Bogota timezone...")
+    
+    # We can add jobs here later
+    print("Agent V2 Ready and Waiting.")
     scheduler.start()
