@@ -1995,6 +1995,22 @@ class PaymentService {
       if (planId === 'token_purchase') {
         if (status === 'payment_completed' || status === 'succeeded') {
           try {
+            // Underpayment guard — verify received USDC matches expected amount
+            const tokenPayment = await PaymentModel.getById(paymentId);
+            const expectedAmount = parseFloat(tokenPayment?.amount || '0');
+            const receivedAmount = DaimoService.convertUSDCToUSD(source?.amountUnits || '0');
+            if (receivedAmount > 0 && expectedAmount > 0 && receivedAmount < expectedAmount - 0.10) {
+              logger.error('Daimo token purchase: underpayment detected — not crediting', {
+                paymentId, expected: expectedAmount, received: receivedAmount,
+              });
+              await PaymentModel.updateStatus(paymentId, 'underpaid', {
+                expected_amount: expectedAmount,
+                received_amount: receivedAmount,
+                daimo_event_id: id,
+              });
+              return { success: false, error: 'Underpayment: token purchase not credited' };
+            }
+
             const TokenCheckoutService = require('./tokenCheckoutService');
             const creditResult = await TokenCheckoutService.creditTokensFromPayment(paymentId, 'daimo', {
               transactionId: source?.txHash || id,

@@ -223,8 +223,8 @@ export default function Stream() {
       try {
         const result = await sendTip(streamId || "", amount, undefined, "daimo");
         if (result.paymentUrl) {
-          // paymentUrl is the DaimoCheckout route — navigate in-tab.
-          navigate(new URL(assertPaymentUrl(result.paymentUrl)).pathname);
+          // Open checkout in new tab so user stays on the live stream
+          window.open(new URL(assertPaymentUrl(result.paymentUrl)).pathname, "_blank", "noopener,noreferrer");
         } else {
           // Backend returned success but no URL — treat as immediate success
           // (e.g. the tip was credited via a pre-funded balance).
