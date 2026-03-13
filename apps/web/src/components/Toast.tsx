@@ -1,26 +1,9 @@
 import React, { useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useNotifications } from "@/hooks/useNotifications";
+import { getNotificationDeepLink } from "@/lib/notificationDeepLink";
 
 const AUTO_DISMISS_MS = 6000;
-
-function getDeepLink(toast: { type: string; entityType?: string; entityId?: string; actor?: any }): string {
-  switch (toast.entityType) {
-    case "post":
-      return "/social";
-    case "message":
-      if (toast.actor?.id && /^\d+$/.test(String(toast.actor.id))) {
-        return `/dm/${toast.actor.id}`;
-      }
-      return "/";
-    case "group":
-      return "/chat";
-    case "payment":
-      return "/profile";
-    default:
-      return "/";
-  }
-}
 
 export function Toast() {
   const { latestToast, dismissToast } = useNotifications();
@@ -73,7 +56,14 @@ export function Toast() {
   const handleTap = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     dismissToast();
-    navigate(getDeepLink(latestToast));
+    navigate(
+      getNotificationDeepLink({
+        type: latestToast.type,
+        entityType: latestToast.entityType,
+        entityId: latestToast.entityId,
+        actorId: latestToast.actor?.id,
+      })
+    );
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -90,8 +80,7 @@ export function Toast() {
   };
 
   return (
-    <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 animate-slide-in-top">
-      {/* Outer wrapper is a div with role="button" to avoid nesting <button> inside <button> */}
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-sm animate-slide-in-top">
       <div
         role="button"
         tabIndex={0}
@@ -99,25 +88,25 @@ export function Toast() {
         onKeyDown={handleKeyDown}
         onMouseEnter={pauseTimer}
         onMouseLeave={resumeTimer}
-        className="flex items-center gap-3 px-4 py-3 rounded-xl glass-nav border border-pnp-border shadow-xl max-w-sm cursor-pointer select-none"
+        className="flex items-center gap-3 px-4 py-3 rounded-xl glass-nav border border-pnp-border shadow-xl cursor-pointer select-none"
       >
         {/* Actor avatar */}
         <div
-          className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold bg-gradient-to-br from-[#D4007A] to-[#E69138] text-white overflow-hidden"
+          className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold bg-gradient-to-br from-[#D4007A] to-[#E69138] text-white overflow-hidden"
           aria-hidden="true"
         >
           {latestToast.actor?.photoUrl ? (
             <img
               src={latestToast.actor.photoUrl}
               alt=""
-              className="w-8 h-8 rounded-full object-cover"
+              className="w-9 h-9 rounded-full object-cover"
             />
           ) : (
             (latestToast.actor?.firstName || latestToast.actor?.username || "!")[0].toUpperCase()
           )}
         </div>
 
-        <p className="text-xs text-pnp-textPrimary font-medium leading-snug line-clamp-2">
+        <p className="flex-1 text-[13px] text-pnp-textPrimary font-medium leading-snug line-clamp-2">
           {latestToast.message}
         </p>
 

@@ -33,6 +33,7 @@ interface NotificationsState {
   isConnected: boolean;
   isLoading: boolean;
   error: string | null;
+  hasMore: boolean;
   markAllRead: () => Promise<void>;
   markRead: (ids: number[]) => Promise<void>;
   fetchMore: () => Promise<void>;
@@ -50,6 +51,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Load initial notifications & counts + register push subscription
@@ -67,6 +69,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         setNotifications(notifRes.notifications);
         setUnreadCount(countRes.counts.total);
         setOffset(notifRes.notifications.length);
+        setHasMore(notifRes.notifications.length >= 30);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load notifications");
       } finally {
@@ -215,6 +218,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       const res = await fetchNotifications(30, offset);
       setNotifications((prev) => [...prev, ...res.notifications]);
       setOffset((prev) => prev + res.notifications.length);
+      setHasMore(res.notifications.length >= 30);
     } catch {
       // ignore
     }
@@ -231,6 +235,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     isConnected,
     isLoading,
     error,
+    hasMore,
     markAllRead,
     markRead,
     fetchMore,

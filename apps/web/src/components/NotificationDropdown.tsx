@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useI18n } from "@/lib/i18n";
+import { getNotificationDeepLink } from "@/lib/notificationDeepLink";
+import type { Notification } from "@/lib/api";
 
 type Category = "all" | "social" | "messaging" | "hangouts" | "other";
 
@@ -16,30 +18,12 @@ function timeAgo(date: string): string {
   return `${days}d`;
 }
 
-function getDeepLink(notif: { entityType?: string; actorId?: string }): string {
-  switch (notif.entityType) {
-    case "post":
-      return "/social";
-    case "message":
-      if (notif.actorId && /^\d+$/.test(String(notif.actorId))) {
-        return `/dm/${notif.actorId}`;
-      }
-      return "/";
-    case "group":
-      return "/chat";
-    case "payment":
-      return "/profile";
-    default:
-      return "/";
-  }
-}
-
 interface Props {
   onClose: () => void;
 }
 
 export function NotificationDropdown({ onClose }: Props) {
-  const { notifications, markAllRead, isLoading, error, fetchMore } = useNotifications();
+  const { notifications, markAllRead, markRead, isLoading, error, fetchMore, hasMore } = useNotifications();
   const t = useI18n();
   const [activeCategory, setActiveCategory] = useState<Category>("all");
   const navigate = useNavigate();
@@ -62,9 +46,13 @@ export function NotificationDropdown({ onClose }: Props) {
 
   const hasUnread = notifications.some((n) => !n.isRead);
 
-  const handleTap = (notif: { entityType?: string; actorId?: string }) => {
+  const handleTap = (notif: Notification) => {
+    // Mark as read on click
+    if (!notif.isRead) {
+      markRead([Number(notif.id)]);
+    }
     onClose();
-    navigate(getDeepLink(notif));
+    navigate(getNotificationDeepLink(notif));
   };
 
   const handleMarkAllRead = async () => {
@@ -78,10 +66,10 @@ export function NotificationDropdown({ onClose }: Props) {
     <div
       role="dialog"
       aria-label={t.notifications.notifications}
-      className="absolute right-0 top-12 w-80 max-w-[calc(100vw-1rem)] max-h-[70vh] flex flex-col rounded-xl glass-nav border border-pnp-border shadow-xl z-50 overflow-hidden"
+      className="absolute right-0 top-12 w-80 max-w-[calc(100vw-2rem)] max-h-[70vh] flex flex-col rounded-xl glass-nav border border-pnp-border shadow-xl z-50 overflow-hidden"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-pnp-border">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-pnp-border shrink-0">
         <h3 className="text-sm font-semibold text-pnp-textPrimary">
           {t.notifications.notifications}
         </h3>
@@ -96,7 +84,7 @@ export function NotificationDropdown({ onClose }: Props) {
       </div>
 
       {/* Category tabs */}
-      <div className="flex gap-1 px-3 py-2 border-b border-pnp-border overflow-x-auto no-scrollbar">
+      <div className="flex gap-1 px-3 py-2 border-b border-pnp-border overflow-x-auto no-scrollbar shrink-0">
         {CATEGORIES.map((cat) => (
           <button
             key={cat.key}
@@ -117,7 +105,7 @@ export function NotificationDropdown({ onClose }: Props) {
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="flex items-start gap-3 px-1 py-1 animate-pulse">
-              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-pnp-surface" />
+              <div className="flex-shrink-0 w-9 h-9 rounded-full bg-pnp-surface" />
               <div className="flex-1 space-y-2">
                 <div className="h-3 bg-pnp-surface rounded w-3/4" />
                 <div className="h-2.5 bg-pnp-surface rounded w-1/3" />
@@ -176,14 +164,14 @@ export function NotificationDropdown({ onClose }: Props) {
                 >
                   {/* Actor avatar */}
                   <div
-                    className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold bg-gradient-to-br from-[#D4007A] to-[#E69138] text-white overflow-hidden"
+                    className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold bg-gradient-to-br from-[#D4007A] to-[#E69138] text-white overflow-hidden"
                     aria-hidden="true"
                   >
                     {notif.actorPhotoUrl ? (
                       <img
                         src={notif.actorPhotoUrl}
                         alt=""
-                        className="w-8 h-8 rounded-full object-cover"
+                        className="w-9 h-9 rounded-full object-cover"
                       />
                     ) : (
                       (notif.actorFirstName || notif.actorUsername || "?")[0].toUpperCase()
@@ -192,7 +180,7 @@ export function NotificationDropdown({ onClose }: Props) {
 
                   <div className="flex-1 min-w-0">
                     <p
-                      className={`text-xs leading-snug ${
+                      className={`text-[13px] leading-snug ${
                         !notif.isRead
                           ? "text-pnp-textPrimary font-medium"
                           : "text-pnp-textSecondary"
@@ -200,29 +188,31 @@ export function NotificationDropdown({ onClose }: Props) {
                     >
                       {notif.message}
                     </p>
-                    <span className="text-[10px] text-pnp-textSecondary mt-0.5 block">
+                    <span className="text-[11px] text-pnp-textSecondary mt-1 block">
                       {timeAgo(notif.createdAt)}
                     </span>
                   </div>
 
                   {!notif.isRead && (
                     <span
-                      className="flex-shrink-0 w-2 h-2 rounded-full bg-pnp-accent mt-1.5"
+                      className="flex-shrink-0 w-2.5 h-2.5 rounded-full bg-pnp-accent mt-1.5"
                       aria-hidden="true"
                     />
                   )}
                 </button>
               ))}
 
-              {/* Load more */}
-              <div className="p-3 flex justify-center">
-                <button
-                  onClick={fetchMore}
-                  className={`text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors px-3 py-2 rounded-lg hover:bg-white/5 active:bg-white/10 ${focusRing}`}
-                >
-                  {t.notifications.loadMore}
-                </button>
-              </div>
+              {/* Load more — only show when there are more to fetch */}
+              {hasMore && (
+                <div className="p-3 flex justify-center">
+                  <button
+                    onClick={fetchMore}
+                    className={`text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors px-3 py-2 rounded-lg hover:bg-white/5 active:bg-white/10 ${focusRing}`}
+                  >
+                    {t.notifications.loadMore}
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>
