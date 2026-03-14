@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
-import { LiveKitMeetComponent } from "./LiveKitMeetComponent";
+import React, { useState, useCallback, useEffect } from "react";
+import { JitsiMeetComponent } from "./JitsiMeetComponent";
 import { VideoCallSidePanel, MobileBottomBar } from "./VideoCallSidePanel";
 import { VideoCallModBot } from "./VideoCallModBot";
 import { PermissionGate } from "@/components/PermissionGate";
@@ -17,10 +17,8 @@ interface SocketChatData {
 }
 
 interface VideoCallOverlayProps {
-  /** LiveKit participant JWT */
-  token: string;
-  /** LiveKit WebSocket URL (wss://lk.pnptv.app) */
-  wsUrl: string;
+  /** Full JaaS/Jitsi meeting URL */
+  meetingUrl: string;
   /** Room name for display/accessibility */
   roomName?: string;
   /** Group name for display in the header */
@@ -37,17 +35,16 @@ interface VideoCallOverlayProps {
   groupId?: number;
   /** User ID for side panel chat */
   userId?: string;
-  /** Pre-wired socket data from parent — avoids duplicate useHangoutSocket */
+  /** Pre-wired socket data from parent */
   socketChat?: SocketChatData;
-  /** Whether this overlay is inside the Main Stage (Radio PNP always plays) */
+  /** Whether this overlay is inside the Main Stage */
   isMainStage?: boolean;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function VideoCallOverlay({
-  token,
-  wsUrl,
+  meetingUrl,
   roomName,
   groupName,
   onClose,
@@ -61,11 +58,10 @@ export function VideoCallOverlay({
 }: VideoCallOverlayProps) {
   const isLandscape = useOrientation();
   const [viewMode, setViewMode] = useState<ViewMode>(initialMode);
-  const [participantCount, setParticipantCount] = useState(0);
   const [permsGranted, setPermsGranted] = useState(false);
   const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
-  // LiveKit Room object — provided by LiveKitMeetComponent via onRoomConnected
-  const [livekitRoom, setLivekitRoom] = useState<any>(null);
+  // Jitsi External API object — provided by JitsiMeetComponent via onApiReady
+  const [jitsiApi, setJitsiApi] = useState<any>(null);
 
   // Prevent body scroll in fullscreen mode
   useEffect(() => {
@@ -89,16 +85,8 @@ export function VideoCallOverlay({
     return () => document.removeEventListener("keydown", handler);
   }, [viewMode]);
 
-  const handleParticipantJoined = useCallback((count: number) => {
-    setParticipantCount(count);
-  }, []);
-
-  const handleParticipantLeft = useCallback((count: number) => {
-    setParticipantCount(count);
-  }, []);
-
-  const handleRoomConnected = useCallback((room: any) => {
-    setLivekitRoom(room);
+  const handleApiReady = useCallback((api: any) => {
+    setJitsiApi(api);
   }, []);
 
   const hasSidePanel = !!(groupId && userId);
@@ -140,15 +128,14 @@ export function VideoCallOverlay({
           </div>
         </div>
 
-        <LiveKitMeetComponent
-          token={token}
-          wsUrl={wsUrl}
+        <JitsiMeetComponent
+          meetingUrl={meetingUrl}
           roomName={roomName}
           onCallEnd={onClose}
           isAdmin={isAdmin}
           isModerator={isModerator}
           disableChat={true}
-          onRoomConnected={handleRoomConnected}
+          onApiReady={handleApiReady}
         />
       </div>
     );
@@ -181,21 +168,18 @@ export function VideoCallOverlay({
 
         {/* Video area */}
         <div className="flex-1 flex flex-col min-w-0 relative">
-          <LiveKitMeetComponent
-            token={token}
-            wsUrl={wsUrl}
+          <JitsiMeetComponent
+            meetingUrl={meetingUrl}
             roomName={roomName}
             onCallEnd={onClose}
-            onParticipantJoined={handleParticipantJoined}
-            onParticipantLeft={handleParticipantLeft}
             isAdmin={isAdmin}
             isModerator={isModerator}
             disableChat={true}
-            onRoomConnected={handleRoomConnected}
+            onApiReady={handleApiReady}
             fullScreen
           />
 
-          {/* View-mode controls overlay (above LiveKit's own control bar) */}
+          {/* View-mode controls overlay */}
           <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
             {/* Minimize to PiP */}
             <button
@@ -224,7 +208,7 @@ export function VideoCallOverlay({
         {/* Mod Bot (right, admin only) */}
         {isAdmin && (
           <div className="hidden sm:flex flex-shrink-0 p-2">
-            <VideoCallModBot room={livekitRoom} isAdmin={isAdmin} />
+            <VideoCallModBot room={jitsiApi} isAdmin={isAdmin} />
           </div>
         )}
 
@@ -270,11 +254,6 @@ export function VideoCallOverlay({
           <span className="text-xs font-medium text-pnp-textPrimary truncate">
             {groupName ? `Call - ${groupName}` : "Video Call"}
           </span>
-          {participantCount > 0 && (
-            <span className="text-[10px] text-pnp-textSecondary flex-shrink-0">
-              ({participantCount})
-            </span>
-          )}
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -332,26 +311,23 @@ export function VideoCallOverlay({
           </div>
         )}
 
-        {/* LiveKit video */}
+        {/* Jitsi video */}
         <div className="flex-1 min-w-0">
-          <LiveKitMeetComponent
-            token={token}
-            wsUrl={wsUrl}
+          <JitsiMeetComponent
+            meetingUrl={meetingUrl}
             roomName={roomName}
             onCallEnd={onClose}
-            onParticipantJoined={handleParticipantJoined}
-            onParticipantLeft={handleParticipantLeft}
             isAdmin={isAdmin}
             isModerator={isModerator}
             disableChat={true}
-            onRoomConnected={handleRoomConnected}
+            onApiReady={handleApiReady}
           />
         </div>
 
         {/* Mod Bot (desktop, admin only) */}
         {isAdmin && (
           <div className="hidden lg:flex flex-shrink-0 p-2 border-l border-white/5">
-            <VideoCallModBot room={livekitRoom} isAdmin={isAdmin} />
+            <VideoCallModBot room={jitsiApi} isAdmin={isAdmin} />
           </div>
         )}
       </div>

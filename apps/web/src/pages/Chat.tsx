@@ -394,9 +394,8 @@ export default function Chat() {
   // Lightbox
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
-  // Video call — LiveKit credentials
-  const [callToken, setCallToken] = useState<string | null>(null);
-  const [callWsUrl, setCallWsUrl] = useState<string | null>(null);
+  // Video call — JaaS/Jitsi credentials
+  const [callMeetingUrl, setCallMeetingUrl] = useState<string | null>(null);
   const [callId, setCallId] = useState<string | null>(null);
   const [callIsModerator, setCallIsModerator] = useState(false);
   const [callLoading, setCallLoading] = useState(false);
@@ -709,12 +708,11 @@ export default function Chat() {
     setCallLoading(true);
     try {
       const data = await startGroupCall(activeGroup.id);
-      if (data.livekit?.token && data.livekit?.wsUrl && data.call?.id) {
-        setCallToken(data.livekit.token);
-        setCallWsUrl(data.livekit.wsUrl);
+      if (data.jaas?.meetingUrl && data.call?.id) {
+        setCallMeetingUrl(data.jaas.meetingUrl);
         setCallId(data.call.id);
         setCallIsModerator(data.call?.isModerator ?? false);
-      } else if (data.livekit === null) {
+      } else if (data.jaas === null) {
         setUploadError(t.chat.videoCallsUnavailable);
       } else {
         setUploadError(t.chat.videoCallUrlInvalid);
@@ -736,8 +734,7 @@ export default function Chat() {
     if (activeGroup && resolvedCallId) {
       leaveGroupCall(activeGroup.id, resolvedCallId).catch(() => {});
     }
-    setCallToken(null);
-    setCallWsUrl(null);
+    setCallMeetingUrl(null);
     setCallId(null);
     setCallIsModerator(false);
   }, [activeGroup, callId, callState.callId]);
@@ -746,8 +743,7 @@ export default function Chat() {
   useEffect(() => {
     if (callState.endReason === "creator_left") {
       setUploadError(t.chat.callEndedHostLeft);
-      setCallToken(null);
-      setCallWsUrl(null);
+      setCallMeetingUrl(null);
       setCallId(null);
       setCallIsModerator(false);
     }
@@ -836,7 +832,7 @@ export default function Chat() {
 
   if (view === "chat" && activeGroup) {
     const canSend = !sending && (msgInput.trim().length > 0 || mediaFile !== null);
-    const showCallBanner = !callToken && callState.isActive;
+    const showCallBanner = !callMeetingUrl && callState.isActive;
 
     return (
       <div className="relative flex flex-col h-full">
@@ -910,7 +906,7 @@ export default function Chat() {
             </button>
           ) : (
             <VideoCallButton
-              hasActiveCall={!!callToken || callState.isActive}
+              hasActiveCall={!!callMeetingUrl || callState.isActive}
               onStartCall={handleStartCall}
               isLoading={callLoading}
               participantCount={callState.participantCount}
@@ -979,10 +975,9 @@ export default function Chat() {
         )}
 
         {/* Embedded video call (not for main group) */}
-        {callToken && callWsUrl && !activeGroup.isMain && (
+        {callMeetingUrl && !activeGroup.isMain && (
           <VideoCallOverlay
-            token={callToken}
-            wsUrl={callWsUrl}
+            meetingUrl={callMeetingUrl}
             groupName={activeGroup.name}
             onClose={handleEndCall}
             initialMode="embedded"
@@ -1065,7 +1060,7 @@ export default function Chat() {
                           </div>
                         </div>
                         {/* Invite button — only if call is active and not self */}
-                        {(callState.isActive || callToken) && !isMe && (
+                        {(callState.isActive || callMeetingUrl) && !isMe && (
                           <button
                             onClick={() => {
                               inviteToCall(member.userId);

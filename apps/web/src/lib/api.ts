@@ -26,10 +26,24 @@ export class ApiError extends Error {
   }
 }
 
+/** Network-level error (server unreachable, DNS failure, etc.) — distinct from HTTP errors. */
+export class NetworkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NetworkError";
+  }
+}
+
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 2000;
+
+function isNetworkError(err: unknown): boolean {
+  return err instanceof TypeError || (err instanceof Error && err.name === "NetworkError");
+}
+
 async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const { method = "GET", body, headers = {} } = options;
-
-  const res = await fetch(`${API_BASE}${path}`, {
+  const fetchOpts: RequestInit = {
     method,
     credentials: "include",
     headers: {
@@ -37,24 +51,37 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
       ...headers,
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
-  });
+  };
 
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: res.statusText }));
-    // error.error can be an object { code, message } from guard middleware — extract string safely
-    const errorMessage =
-      typeof error.error === "string"
-        ? error.error
-        : typeof (error.error as { message?: string })?.message === "string"
-          ? (error.error as { message: string }).message
-          : typeof error.message === "string"
-            ? error.message
-            : friendlyHttpError(res.status, `API error ${res.status}`);
-    const errorCode = typeof error.code === "string" ? error.code : undefined;
-    throw new ApiError(errorMessage, res.status, errorCode);
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch(`${API_BASE}${path}`, fetchOpts);
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ error: res.statusText }));
+        const errorMessage =
+          typeof error.error === "string"
+            ? error.error
+            : typeof (error.error as { message?: string })?.message === "string"
+              ? (error.error as { message: string }).message
+              : typeof error.message === "string"
+                ? error.message
+                : friendlyHttpError(res.status, `API error ${res.status}`);
+        const errorCode = typeof error.code === "string" ? error.code : undefined;
+        throw new ApiError(errorMessage, res.status, errorCode);
+      }
+
+      return res.json();
+    } catch (err) {
+      lastError = err;
+      // Only retry on network errors (server unreachable), not HTTP errors (4xx/5xx)
+      if (!isNetworkError(err) || attempt === MAX_RETRIES) throw err;
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+    }
   }
 
-  return res.json();
+  throw lastError;
 }
 
 // Auth endpoints
@@ -559,6 +586,13 @@ export function getWebRTCViewerToken(channelRef: string): Promise<{
   roomName: string;
 }> {
   return request(`/api/webapp/live/webrtc/viewer-token/${encodeURIComponent(channelRef)}`);
+}
+
+export function streamHeartbeat(channelRef: string): Promise<{ success: boolean; newBalance?: number }> {
+  return request("/api/webapp/live/webrtc/heartbeat", {
+    method: "POST",
+    body: JSON.stringify({ channelRef }),
+  });
 }
 
 export function getWebRTCStreams(): Promise<{
@@ -1354,9 +1388,9 @@ export interface StartCallResponse {
   success: boolean;
   isNew: boolean;
   call: ActiveCallInfo;
-  livekit: LiveKitCallInfo | null;
-  /** @deprecated Always null — kept for backward compatibility */
   jaas: JaasCallInfo | null;
+  /** @deprecated Always null — kept for backward compatibility */
+  livekit: LiveKitCallInfo | null;
 }
 
 export function startGroupCall(id: number): Promise<StartCallResponse> {
@@ -1370,9 +1404,9 @@ export function markGroupAsRead(groupId: number): Promise<{ success: boolean }> 
 export interface GetActiveCallResponse {
   success: boolean;
   call: ActiveCallInfo | null;
-  livekit: LiveKitCallInfo | null;
-  /** @deprecated Always null — kept for backward compatibility */
   jaas: JaasCallInfo | null;
+  /** @deprecated Always null — kept for backward compatibility */
+  livekit: LiveKitCallInfo | null;
 }
 
 export function getActiveGroupCall(groupId: number): Promise<GetActiveCallResponse> {
