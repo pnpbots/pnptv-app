@@ -48,6 +48,11 @@ import { connectSocket } from "@/lib/socket";
 import { translateText } from "@/lib/feedI18n";
 import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
 import { NearbyWidget } from "@/components/NearbyWidget";
+import { SpotlightStrip, type SpotlightItem } from "@/components/SpotlightStrip";
+import { getUpcomingEvents } from "@/lib/api";
+import type { EventItem } from "@/components/events/EventCard";
+import { CreateEventModal } from "@/components/events/CreateEventModal";
+import { EventDetailModal } from "@/components/events";
 import { HangoutsPaywall } from "@/components/HangoutsPaywall";
 import { ApiError } from "@/lib/api";
 
@@ -432,6 +437,12 @@ export default function Chat() {
     fromPhotoUrl: string | null;
   } | null>(null);
 
+  // SpotlightStrip — hangout events
+  const [hangoutEvents, setHangoutEvents] = useState<EventItem[]>([]);
+  const [showCreateEvent, setShowCreateEvent] = useState(false);
+  const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
+  const [eventKey, setEventKey] = useState(0);
+
   // ─── Group list loading ─────────────────────────────────────────────
 
   const loadGroups = useCallback(async () => {
@@ -444,10 +455,17 @@ export default function Chat() {
     }
   }, []);
 
+  const loadHangoutEvents = useCallback(() => {
+    getUpcomingEvents({ type: "hangout_event", limit: 8 })
+      .then((res) => { if (res.success) setHangoutEvents(res.events); })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     setIsLoading(true);
     loadGroups().finally(() => setIsLoading(false));
-  }, [loadGroups]);
+    loadHangoutEvents();
+  }, [loadGroups, loadHangoutEvents]);
 
   // Deep-link: auto-open group from /chat/:groupId
   const deepLinkHandled = useRef(false);
@@ -1318,6 +1336,34 @@ export default function Chat() {
         )}
       </div>
 
+      {/* SpotlightStrip — Main Stage pinned + hangout events */}
+      <SpotlightStrip
+        items={[
+          {
+            kind: "action",
+            id: "main-stage",
+            label: "Main Stage",
+            sublabel: "24/7 open",
+            icon: (
+              <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#5ED1C4" }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            ),
+            gradient: "linear-gradient(135deg, rgba(94,209,196,0.3), rgba(212,0,122,0.2))",
+            onClick: () => navigate("/main-stage"),
+            pinned: true,
+          },
+          ...hangoutEvents.map((ev) => ({ kind: "event" as const, data: ev })),
+        ]}
+        onItemClick={(item) => {
+          if (item.kind === "event") setDetailEvent(item.data);
+        }}
+        showAction={isPrime}
+        onAction={() => setShowCreateEvent(true)}
+        actionLabel="Create event"
+        emptyAction={isPrime ? () => setShowCreateEvent(true) : undefined}
+      />
+
       {/* Create group form */}
       {showCreate && (
         <div className="glass-card-sm p-4 mb-4 animate-fade-in-up">
@@ -1752,6 +1798,37 @@ export default function Chat() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Event modals */}
+      {showCreateEvent && (
+        <CreateEventModal
+          canCreateLive={false}
+          userGroups={groups}
+          onClose={() => setShowCreateEvent(false)}
+          onCreated={() => {
+            setShowCreateEvent(false);
+            setEventKey((k) => k + 1);
+            loadHangoutEvents();
+          }}
+        />
+      )}
+
+      {detailEvent && (
+        <EventDetailModal
+          event={detailEvent}
+          onClose={() => setDetailEvent(null)}
+          onRsvp={async (eventId, shouldRsvp) => {
+            // Update locally
+            setHangoutEvents((prev) =>
+              prev.map((e) => e.id === eventId ? { ...e, userRsvpd: shouldRsvp, rsvpCount: e.rsvpCount + (shouldRsvp ? 1 : -1) } : e)
+            );
+          }}
+          onUpdated={(updated) => {
+            setHangoutEvents((prev) => prev.map((e) => e.id === updated.id ? updated : e));
+            setDetailEvent(updated);
+          }}
+        />
       )}
     </div>
   );
