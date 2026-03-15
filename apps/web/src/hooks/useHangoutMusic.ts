@@ -30,15 +30,21 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage }: UseHangou
     return 0.5;
   });
   const [isLocalPlaying, setIsLocalPlaying] = useState(false);
+  const [shuffle, setShuffle] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stateRef = useRef<HangoutMusicTrackState | null>(null);
   const mainStageAutoStarted = useRef(false);
+  const groupIdRef = useRef<number | null>(groupId);
 
   // Keep stateRef in sync with remoteState
   useEffect(() => {
     stateRef.current = remoteState;
   }, [remoteState]);
+
+  useEffect(() => {
+    groupIdRef.current = groupId;
+  }, [groupId]);
 
   // Create audio element once on mount, destroy on unmount
   useEffect(() => {
@@ -49,7 +55,14 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage }: UseHangou
 
     const onPlay = () => setIsLocalPlaying(true);
     const onPause = () => setIsLocalPlaying(false);
-    const onEnded = () => setIsLocalPlaying(false);
+    const onEnded = () => {
+      setIsLocalPlaying(false);
+      const gid = groupIdRef.current;
+      if (gid) {
+        const s = connectSocket();
+        s.emit("hangout:music:ended", { groupId: gid });
+      }
+    };
 
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
@@ -130,9 +143,10 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage }: UseHangou
     if (!groupId) return;
     const socket = connectSocket();
 
-    const onMusicState = (data: HangoutMusicTrackState) => {
+    const onMusicState = (data: HangoutMusicTrackState & { shuffle?: boolean }) => {
       setRemoteState(data);
       applyState(data);
+      if (typeof data.shuffle === "boolean") setShuffle(data.shuffle);
     };
 
     const onMusicPlay = (data: HangoutMusicTrackState) => {
@@ -187,12 +201,17 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage }: UseHangou
       }
     };
 
+    const onMusicShuffle = (data: { shuffle: boolean }) => {
+      setShuffle(data.shuffle);
+    };
+
     socket.on("hangout:music:state", onMusicState);
     socket.on("hangout:music:play", onMusicPlay);
     socket.on("hangout:music:pause", onMusicPause);
     socket.on("hangout:music:resume", onMusicResume);
     socket.on("hangout:music:seek", onMusicSeek);
     socket.on("hangout:music:stop", onMusicStop);
+    socket.on("hangout:music:shuffle", onMusicShuffle);
 
     return () => {
       socket.off("hangout:music:state", onMusicState);
@@ -201,6 +220,7 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage }: UseHangou
       socket.off("hangout:music:resume", onMusicResume);
       socket.off("hangout:music:seek", onMusicSeek);
       socket.off("hangout:music:stop", onMusicStop);
+      socket.off("hangout:music:shuffle", onMusicShuffle);
     };
   }, [groupId, applyState]);
 
@@ -259,6 +279,12 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage }: UseHangou
     socket.emit("hangout:music:stop", { groupId });
   }, [groupId, isModerator]);
 
+  const toggleShuffle = useCallback(() => {
+    if (!groupId || !isModerator) return;
+    const socket = connectSocket();
+    socket.emit("hangout:music:shuffle", { groupId });
+  }, [groupId, isModerator]);
+
   return {
     remoteState,
     localVolume,
@@ -269,5 +295,7 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage }: UseHangou
     resume,
     seek,
     stop,
+    shuffle,
+    toggleShuffle,
   };
 }

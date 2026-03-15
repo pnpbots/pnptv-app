@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { getAdminStageTvStatus, getStageTvVideos, startStageTv, stopStageTv } from "@/lib/api";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -29,6 +30,137 @@ const ROTATION_INTERVALS = [
   { label: "2m", value: 120 },
   { label: "5m", value: 300 },
 ];
+
+// ─── Stage TV Admin ─────────────────────────────────────────────────────────
+
+function StageTvAdmin() {
+  const [status, setStatus] = useState<{ running: boolean; videos: string[]; startedAt: string | null }>({ running: false, videos: [], startedAt: null });
+  const [availableVideos, setAvailableVideos] = useState<string[]>([]);
+  const [selectedVideos, setSelectedVideos] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getAdminStageTvStatus().then((res) => {
+      if (res.success) setStatus({ running: res.running, videos: res.videos, startedAt: res.startedAt });
+    }).catch(() => {});
+    getStageTvVideos().then((res) => {
+      if (res.success) setAvailableVideos(res.videos);
+    }).catch(() => {});
+  }, []);
+
+  const toggleVideo = useCallback((v: string) => {
+    setSelectedVideos((prev) => {
+      const next = new Set(prev);
+      if (next.has(v)) next.delete(v); else next.add(v);
+      return next;
+    });
+  }, []);
+
+  const selectAll = useCallback(() => {
+    setSelectedVideos(new Set(availableVideos));
+  }, [availableVideos]);
+
+  const handleStart = useCallback(async () => {
+    const vids = Array.from(selectedVideos);
+    if (vids.length === 0) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await startStageTv(vids);
+      if (res.success) {
+        setStatus({ running: true, videos: vids, startedAt: new Date().toISOString() });
+      } else {
+        setError(res.error || "Failed to start");
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to start");
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedVideos]);
+
+  const handleStop = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await stopStageTv();
+      setStatus({ running: false, videos: [], startedAt: null });
+    } catch (err: any) {
+      setError(err.message || "Failed to stop");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return (
+    <div className="p-3 border-b border-white/5">
+      <p className="text-[10px] font-semibold text-pnp-textSecondary uppercase tracking-wider mb-2">Stage TV</p>
+
+      {/* Status indicator */}
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`inline-flex h-2 w-2 rounded-full ${status.running ? "bg-red-500 animate-pulse" : "bg-gray-500"}`} />
+        <span className="text-[11px] text-pnp-textPrimary">
+          {status.running ? `Running (${status.videos.length} video${status.videos.length !== 1 ? "s" : ""})` : "Stopped"}
+        </span>
+      </div>
+
+      {error && (
+        <p className="text-[10px] text-red-400 mb-2">{error}</p>
+      )}
+
+      {!status.running && (
+        <>
+          {/* Video selector */}
+          <div className="max-h-32 overflow-y-auto space-y-0.5 mb-2 scrollbar-thin">
+            {availableVideos.length === 0 && (
+              <p className="text-[10px] text-pnp-textSecondary italic">No videos found</p>
+            )}
+            {availableVideos.map((v) => (
+              <label key={v} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-white/5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectedVideos.has(v)}
+                  onChange={() => toggleVideo(v)}
+                  className="rounded border-white/20 bg-pnp-surface/30 text-pnp-accent focus:ring-pnp-accent/50 w-3.5 h-3.5"
+                />
+                <span className="text-[10px] text-pnp-textPrimary truncate flex-1">{v}</span>
+              </label>
+            ))}
+          </div>
+
+          {availableVideos.length > 1 && (
+            <button
+              onClick={selectAll}
+              className="text-[10px] text-pnp-accent/70 hover:text-pnp-accent mb-2 transition-colors"
+            >
+              Select all ({availableVideos.length})
+            </button>
+          )}
+
+          {/* Start button */}
+          <button
+            onClick={handleStart}
+            disabled={loading || selectedVideos.size === 0}
+            className="w-full py-2 rounded-lg text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-30 bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30"
+          >
+            {loading ? "Starting..." : `Start Stage TV (${selectedVideos.size} video${selectedVideos.size !== 1 ? "s" : ""})`}
+          </button>
+        </>
+      )}
+
+      {status.running && (
+        <button
+          onClick={handleStop}
+          disabled={loading}
+          className="w-full py-2 rounded-lg text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-30 bg-gray-500/20 text-gray-400 hover:bg-gray-500/30 border border-gray-500/30"
+        >
+          {loading ? "Stopping..." : "Stop Stage TV"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
@@ -381,6 +513,9 @@ export function VideoCallModBot({ room, isAdmin }: VideoCallModBotProps) {
             Shuffle
           </button>
         </div>
+
+        {/* ── Stage TV ────────────────────────────────────────────────────── */}
+        <StageTvAdmin />
 
         {/* ── Participants ────────────────────────────────────────────────── */}
         <div className="p-3">

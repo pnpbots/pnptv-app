@@ -140,6 +140,8 @@ const onlineUsersMap = new Map();
 // ── In-memory music state per hangout group ───────────────────────────────────
 // Map<groupId, { trackId, trackUrl, trackTitle, trackArtist, trackArt, isPlaying, position, startedAt }>
 const hangoutMusicState = new Map();
+// Cache of Ampache song list per hangout group (avoids repeated API calls for auto-advance)
+const hangoutPlaylistCache = new Map(); // Map<groupId, { songs: Array, fetchedAt: number }>
 
 function emitGroupPresence(io, gid) {
   const online = [];
@@ -586,7 +588,7 @@ function initSocketIO(io) {
           const effectivePosition = musicState.isPlaying && musicState.startedAt
             ? musicState.position + (Date.now() - musicState.startedAt) / 1000
             : musicState.position;
-          socket.emit('hangout:music:state', { ...musicState, position: effectivePosition });
+          socket.emit('hangout:music:state', { ...musicState, position: effectivePosition, shuffle: !!musicState.shuffle });
         }
 
         // Update presence map and emit presence to the joining socket and room
@@ -880,6 +882,7 @@ function initSocketIO(io) {
       try {
         const isMod = await isHangoutMod(user.id, gid);
         if (!isMod) { socket.emit('hangout:error', { message: 'Not a moderator', code: 'NOT_MOD' }); return; }
+        const existingShuffle = hangoutMusicState.get(gid)?.shuffle || false;
         const state = {
           trackId: String(trackId),
           trackUrl: String(trackUrl).slice(0, 500),
@@ -889,6 +892,7 @@ function initSocketIO(io) {
           isPlaying: true,
           position: 0,
           startedAt: Date.now(),
+          shuffle: existingShuffle,
         };
         hangoutMusicState.set(gid, state);
         io.to(`hangout:${gid}`).emit('hangout:music:play', state);
@@ -960,6 +964,88 @@ function initSocketIO(io) {
         hangoutMusicState.delete(gid);
         io.to(`hangout:${gid}`).emit('hangout:music:stop', {});
       } catch (err) { logger.error('hangout:music:stop error', err); }
+    });
+
+    // ── Music Auto-Advance ───────────────────────────────────────────────────
+
+    socket.on('hangout:music:ended', async ({ groupId } = {}) => {
+      if (!groupId) return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+      if (!rateLimit(`music-ended:${user.id}:${gid}`, 5, 10000)) return;
+      try {
+        const existing = hangoutMusicState.get(gid);
+        if (!existing || !existing.isPlaying) return;
+        // Debounce: multiple clients fire ended simultaneously
+        if (existing._lastAdvancedAt && Date.now() - existing._lastAdvancedAt < 2000) return;
+        existing._lastAdvancedAt = Date.now();
+        hangoutMusicState.set(gid, existing);
+
+        // Fetch songs from Ampache (cache for 5 min)
+        const AmpacheService = require('../services/ampacheService');
+        let cached = hangoutPlaylistCache.get(gid);
+        if (!cached || Date.now() - cached.fetchedAt > 300000) {
+          const songs = await AmpacheService.getSongs({ offset: 0, limit: 100 });
+          cached = { songs, fetchedAt: Date.now() };
+          hangoutPlaylistCache.set(gid, cached);
+        }
+        const songs = cached.songs;
+        if (!songs || songs.length === 0) return;
+
+        // Find next track
+        let nextSong;
+        const currentIdx = songs.findIndex(s => String(s.id) === String(existing.trackId));
+        if (existing.shuffle) {
+          // Random track excluding current
+          if (songs.length === 1) {
+            nextSong = songs[0];
+          } else {
+            let randomIdx;
+            do {
+              randomIdx = Math.floor(Math.random() * songs.length);
+            } while (randomIdx === currentIdx && songs.length > 1);
+            nextSong = songs[randomIdx];
+          }
+        } else {
+          // Sequential: next index, wrap around
+          const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % songs.length : 0;
+          nextSong = songs[nextIdx];
+        }
+
+        if (!nextSong) return;
+        const artistName = typeof nextSong.artist === 'object' ? (nextSong.artist?.name || 'Unknown') : String(nextSong.artist || 'Unknown');
+        const newState = {
+          trackId: String(nextSong.id),
+          trackUrl: `/api/proxy/media/stream/${nextSong.id}`,
+          trackTitle: String(nextSong.title || '').slice(0, 200),
+          trackArtist: artistName.slice(0, 200),
+          trackArt: nextSong.art ? String(nextSong.art).slice(0, 500) : null,
+          isPlaying: true,
+          position: 0,
+          startedAt: Date.now(),
+          shuffle: existing.shuffle || false,
+          _lastAdvancedAt: Date.now(),
+        };
+        hangoutMusicState.set(gid, newState);
+        io.to(`hangout:${gid}`).emit('hangout:music:play', newState);
+        logger.info(`Music auto-advanced in group ${gid}: ${newState.trackTitle}`);
+      } catch (err) { logger.error('hangout:music:ended auto-advance error', err); }
+    });
+
+    socket.on('hangout:music:shuffle', async ({ groupId } = {}) => {
+      if (!groupId) return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+      if (!rateLimit(`music-shuffle:${user.id}:${gid}`, 5, 10000)) return;
+      try {
+        const isMod = await isHangoutMod(user.id, gid);
+        if (!isMod) { socket.emit('hangout:error', { message: 'Not a moderator', code: 'NOT_MOD' }); return; }
+        const existing = hangoutMusicState.get(gid);
+        if (!existing) return;
+        existing.shuffle = !existing.shuffle;
+        hangoutMusicState.set(gid, existing);
+        io.to(`hangout:${gid}`).emit('hangout:music:shuffle', { shuffle: existing.shuffle });
+      } catch (err) { logger.error('hangout:music:shuffle error', err); }
     });
 
     // ── Direct Messages ──────────────────────────────────────────────────────

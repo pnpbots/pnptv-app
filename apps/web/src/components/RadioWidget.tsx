@@ -431,12 +431,12 @@ export function RadioWidget() {
           aria-hidden="true"
         />
 
-        {/* Icon: equalizer when playing, radio icon when paused/idle */}
+        {/* Icon: equalizer when playing, emoji when paused/idle */}
         <span className="relative flex items-center justify-center w-full h-full">
           {isPlaying ? (
             <EqualizerBars color="#fff" size="sm" />
           ) : (
-            <RadioIcon className="w-5 h-5 text-white" />
+            <span className="text-xl">🎧</span>
           )}
         </span>
       </button>
@@ -466,7 +466,7 @@ export function RadioWidget() {
             style={{ background: "linear-gradient(135deg, #8B5CF6, #D946EF)" }}
             aria-hidden="true"
           >
-            <RadioIcon className="w-4 h-4 text-white" />
+            <span className="text-sm">🎧</span>
           </div>
           <div>
             <h3 className="text-sm font-bold text-pnp-textPrimary leading-tight">PNP Radio</h3>
@@ -567,7 +567,7 @@ export function RadioWidget() {
               style={{ background: "rgba(139,92,246,0.15)" }}
               aria-hidden="true"
             >
-              <span style={{ color: "#8B5CF6" }}><RadioIcon className="w-6 h-6" /></span>
+              <span className="text-2xl">🎧</span>
             </div>
             <p className="text-sm font-semibold text-pnp-textPrimary text-center">No tracks found</p>
             <p className="text-xs text-pnp-textSecondary text-center">The radio library appears to be empty.</p>
@@ -600,7 +600,7 @@ export function RadioWidget() {
                       style={{ borderColor: "rgba(217,70,239,0.6)", borderTopColor: "transparent" }}
                     />
                   ) : (
-                    <span style={{ color: "rgba(217,70,239,0.6)" }}><RadioIcon className="w-12 h-12" /></span>
+                    <span className="text-4xl">🎧</span>
                   )}
                 </div>
               )}

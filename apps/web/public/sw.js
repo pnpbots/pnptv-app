@@ -1,6 +1,6 @@
 // PNPtv! Service Worker — Push Notifications + Offline App Shell Cache
 
-const CACHE_NAME = 'pnptv-v5';
+const CACHE_NAME = 'pnptv-v6';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -45,8 +45,21 @@ self.addEventListener('fetch', (event) => {
   // API calls: network only
   if (url.pathname.startsWith('/api/')) return;
 
-  // Static assets (JS/CSS/images): cache-first
-  if (url.pathname.match(/\.(js|css|png|jpg|jpeg|svg|webp|woff2?)$/)) {
+  // Hashed assets (JS/CSS in /assets/): network-first, cache fallback
+  // These filenames contain content hashes so stale cache = broken app after deploy
+  if (url.pathname.startsWith('/assets/')) {
+    event.respondWith(
+      fetch(request).then((resp) => {
+        const clone = resp.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+        return resp;
+      }).catch(() => caches.match(request))
+    );
+    return;
+  }
+
+  // Other static assets (images, fonts): cache-first
+  if (url.pathname.match(/\.(png|jpg|jpeg|svg|webp|woff2?)$/)) {
     event.respondWith(
       caches.match(request).then((cached) => cached || fetch(request).then((resp) => {
         const clone = resp.clone();

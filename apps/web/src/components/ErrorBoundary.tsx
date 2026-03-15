@@ -24,6 +24,25 @@ class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("ErrorBoundary caught:", error, errorInfo);
 
+    // Auto-reload on stale chunk errors (dynamic import fails after deploy)
+    const isChunkError =
+      error.message?.includes("Failed to fetch dynamically imported module") ||
+      error.message?.includes("Loading chunk") ||
+      error.message?.includes("Loading CSS chunk") ||
+      error.name === "ChunkLoadError";
+
+    if (isChunkError) {
+      const reloadKey = "pnptv_chunk_reload";
+      const lastReload = sessionStorage.getItem(reloadKey);
+      const now = Date.now();
+      // Only auto-reload once per 30 seconds to avoid infinite loops
+      if (!lastReload || now - Number(lastReload) > 30000) {
+        sessionStorage.setItem(reloadKey, String(now));
+        window.location.reload();
+        return;
+      }
+    }
+
     // Log to backend in production
     if (import.meta.env.MODE === "production") {
       fetch("/api/log-error", {

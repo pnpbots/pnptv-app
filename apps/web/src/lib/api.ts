@@ -4802,3 +4802,35 @@ export function deleteMediaPack(packId: number): Promise<{ success: boolean }> {
 export function deleteMediaPackItem(itemId: number): Promise<{ success: boolean }> {
   return request(`/api/webapp/admin/media-packs/items/${itemId}`, { method: "DELETE" });
 }
+
+// ============================================================================
+// Stage TV API
+// ============================================================================
+
+export function getStageTvStatus(): Promise<{ success: boolean; running: boolean; hlsUrl: string | null }> {
+  return request("/api/webapp/stage-tv/status");
+}
+
+export function getAdminStageTvStatus(): Promise<{
+  success: boolean;
+  running: boolean;
+  videos: string[];
+  pid: number | null;
+  startedAt: string | null;
+  startedBy: string | null;
+  hlsUrl: string | null;
+}> {
+  return request("/api/webapp/admin/stage-tv/status");
+}
+
+export function getStageTvVideos(): Promise<{ success: boolean; videos: string[] }> {
+  return request("/api/webapp/admin/stage-tv/videos");
+}
+
+export function startStageTv(videos: string[]): Promise<{ success: boolean; hlsUrl?: string; videoCount?: number; error?: string }> {
+  return request("/api/webapp/admin/stage-tv/start", { method: "POST", body: { videos } });
+}
+
+export function stopStageTv(): Promise<{ success: boolean }> {
+  return request("/api/webapp/admin/stage-tv/stop", { method: "POST" });
+}

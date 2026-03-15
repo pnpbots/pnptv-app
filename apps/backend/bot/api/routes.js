@@ -6842,6 +6842,167 @@ app.use('/api/courtesy-invites', courtesyInviteRoutes);
 app.get('/api/public/social/posts/:postId', asyncHandler(socialController.getPublicPost));
 
 // ==========================================
+// STAGE TV — 24/7 Video Loop → RTMP → Restreamer
+// ==========================================
+
+const { spawn: spawnProcess } = require('child_process');
+
+let stageTvProcess = null;
+let stageTvState = { running: false, videos: [], pid: null, startedAt: null, startedBy: null, hlsUrl: null };
+
+// Admin: list available video files
+app.get('/api/webapp/admin/stage-tv/videos', adminGuard, asyncHandler(async (req, res) => {
+  const uploadsDir = path.join(__dirname, '../../../../public/uploads/posts');
+  try {
+    const files = await fs.promises.readdir(uploadsDir);
+    const videos = files.filter(f => /^vid-.*\.mp4$/i.test(f)).sort();
+    res.json({ success: true, videos });
+  } catch (err) {
+    logger.error('stage-tv list videos error', err);
+    res.json({ success: true, videos: [] });
+  }
+}));
+
+// Admin: start Stage TV
+app.post('/api/webapp/admin/stage-tv/start', adminGuard, asyncHandler(async (req, res) => {
+  if (stageTvProcess) {
+    return res.status(409).json({ success: false, error: 'Stage TV is already running' });
+  }
+
+  const { videos } = req.body;
+  if (!Array.isArray(videos) || videos.length === 0) {
+    return res.status(400).json({ success: false, error: 'No videos selected' });
+  }
+
+  // Validate file names: must match vid-*.mp4 pattern, no path traversal
+  const uploadsDir = path.join(__dirname, '../../../../public/uploads/posts');
+  const validVideos = [];
+  for (const v of videos) {
+    const base = path.basename(String(v));
+    if (!/^vid-.*\.mp4$/i.test(base)) continue;
+    const fullPath = path.join(uploadsDir, base);
+    try {
+      await fs.promises.access(fullPath, fs.constants.R_OK);
+      validVideos.push(fullPath);
+    } catch {
+      // File doesn't exist or not readable — skip
+    }
+  }
+
+  if (validVideos.length === 0) {
+    return res.status(400).json({ success: false, error: 'No valid video files found' });
+  }
+
+  // Write concat playlist file
+  const tmpDir = path.join(__dirname, '../../../../tmp');
+  await fs.promises.mkdir(tmpDir, { recursive: true });
+  const playlistPath = path.join(tmpDir, 'stage-tv-playlist.txt');
+  const playlistContent = validVideos.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
+  await fs.promises.writeFile(playlistPath, playlistContent, 'utf8');
+
+  // Build RTMP URL
+  const restreamerUrl = (process.env.RESTREAMER_URL || 'http://restreamer:8080').replace(/^https?:\/\//, '');
+  const rtmpHost = restreamerUrl.split(':')[0] || 'restreamer';
+  const rtmpToken = process.env.RESTREAMER_RTMP_TOKEN || '';
+  const rtmpUrl = `rtmp://${rtmpHost}:1935/live/stage-tv${rtmpToken ? '?token=' + rtmpToken : ''}`;
+
+  const restreamerPublicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
+  const hlsUrl = `${restreamerPublicUrl}/memfs/stage-tv.m3u8`;
+
+  // Spawn FFmpeg
+  const ffmpegArgs = [
+    '-stream_loop', '-1',
+    '-re',
+    '-f', 'concat',
+    '-safe', '0',
+    '-i', playlistPath,
+    '-c:v', 'libx264',
+    '-preset', 'fast',
+    '-pix_fmt', 'yuv420p',
+    '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2',
+    '-b:v', '2500k',
+    '-maxrate', '3000k',
+    '-bufsize', '5000k',
+    '-g', '60',
+    '-c:a', 'aac',
+    '-b:a', '128k',
+    '-ar', '44100',
+    '-f', 'flv',
+    rtmpUrl,
+  ];
+
+  const proc = spawnProcess('ffmpeg', ffmpegArgs, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: false,
+  });
+
+  stageTvProcess = proc;
+  stageTvState = {
+    running: true,
+    videos: validVideos.map(p => path.basename(p)),
+    pid: proc.pid,
+    startedAt: new Date().toISOString(),
+    startedBy: req.session?.user?.id || 'admin',
+    hlsUrl,
+  };
+
+  proc.stderr.on('data', (chunk) => {
+    const msg = chunk.toString().slice(0, 500);
+    if (msg.includes('Error') || msg.includes('error')) {
+      logger.warn('stage-tv ffmpeg stderr:', msg);
+    }
+  });
+
+  proc.on('exit', (code) => {
+    logger.info(`stage-tv ffmpeg exited with code ${code}`);
+    stageTvProcess = null;
+    stageTvState = { running: false, videos: [], pid: null, startedAt: null, startedBy: null, hlsUrl: null };
+    try {
+      const io = req.app.get('io');
+      if (io) io.emit('stage-tv:stopped', {});
+    } catch { /* silent */ }
+  });
+
+  // Emit started event
+  try {
+    const io = req.app.get('io');
+    if (io) io.emit('stage-tv:started', { hlsUrl });
+  } catch { /* silent */ }
+
+  logger.info(`Stage TV started by ${stageTvState.startedBy} with ${validVideos.length} videos`);
+  res.json({ success: true, hlsUrl, videoCount: validVideos.length });
+}));
+
+// Admin: stop Stage TV
+app.post('/api/webapp/admin/stage-tv/stop', adminGuard, asyncHandler(async (req, res) => {
+  if (!stageTvProcess) {
+    return res.json({ success: true, message: 'Stage TV is not running' });
+  }
+  try {
+    stageTvProcess.kill('SIGTERM');
+  } catch (err) {
+    logger.warn('stage-tv kill error', err);
+  }
+  stageTvProcess = null;
+  stageTvState = { running: false, videos: [], pid: null, startedAt: null, startedBy: null, hlsUrl: null };
+  try {
+    const io = req.app.get('io');
+    if (io) io.emit('stage-tv:stopped', {});
+  } catch { /* silent */ }
+  res.json({ success: true });
+}));
+
+// Admin: full status
+app.get('/api/webapp/admin/stage-tv/status', adminGuard, (req, res) => {
+  res.json({ success: true, ...stageTvState });
+});
+
+// Public: minimal status (session-authed users only)
+app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
+  res.json({ success: true, running: stageTvState.running, hlsUrl: stageTvState.hlsUrl });
+});
+
+// ==========================================
 // OG / OPEN GRAPH ENDPOINTS
 // ==========================================
 // These routes serve minimal HTML pages with og: and twitter: meta tags.

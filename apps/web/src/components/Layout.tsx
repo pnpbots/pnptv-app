@@ -12,8 +12,7 @@ import { useNearbyToggle } from "@/components/NearbyBadge";
 import { getMessageThreads } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { LandingPage } from "@/pages/LandingPage";
-import { SidebarPlayer, MobilePlayer } from "@/components/SidebarPlayer";
-import { useMusicPlayer } from "@/hooks/useMusicPlayer";
+import { SidebarPlayer } from "@/components/SidebarPlayer";
 import { RadioWidget } from "@/components/RadioWidget";
 
 // ── HamburgerIcon / CloseIcon ─────────────────────────────────────────────────
@@ -39,7 +38,6 @@ function CloseIcon() {
 export function Layout() {
   const { isAuthenticated, isAdmin, user, isLoading } = useAuth();
   const { isTelegram } = useTelegram();
-  const { tracks: musicTracks } = useMusicPlayer();
   useViewportHeight();
   const navigate = useNavigate();
   const location = useLocation();
@@ -468,13 +466,12 @@ export function Layout() {
       )}
 
       {/* ── Main content ─────────────────────────────────────────────────────── */}
-      <main className={`flex-1 overflow-y-auto overscroll-contain lg:pl-60 lg:overflow-visible lg:pb-0 ${musicTracks.length > 0 ? "pb-28" : "pb-16"}`}>
+      <main className="flex-1 overflow-y-auto overscroll-contain lg:pl-60 lg:overflow-visible lg:pb-0 pb-16">
         <Outlet />
       </main>
 
-      {/* Mobile music player + bottom nav */}
+      {/* Bottom nav */}
       <div className="flex-shrink-0 lg:hidden">
-        <MobilePlayer />
         <BottomNav />
       </div>
 

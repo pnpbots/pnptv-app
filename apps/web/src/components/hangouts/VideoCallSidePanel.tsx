@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { searchNearby, getLiveStreams, type LiveStream, type GroupMessage } from "@/lib/api";
+import { searchNearby, getLiveStreams, getStageTvStatus, type LiveStream, type GroupMessage } from "@/lib/api";
+import { connectSocket } from "@/lib/socket";
+import { LivePlayer } from "@/components/LivePlayer";
 import { useTier } from "@/hooks/useTier";
 import { HangoutMusicBar } from "./HangoutMusicBar";
 
@@ -307,9 +309,54 @@ function SidePanelChat({ groupId, userId, className, socketChat }: { groupId: nu
   );
 }
 
+// ─── Stage TV Widget ──────────────────────────────────────────────────────────
+
+function StageTvWidget() {
+  const [status, setStatus] = useState<{ running: boolean; hlsUrl: string | null }>({ running: false, hlsUrl: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    getStageTvStatus().then((res) => {
+      if (!cancelled && res.success) setStatus({ running: res.running, hlsUrl: res.hlsUrl });
+    }).catch(() => {});
+
+    const socket = connectSocket();
+    const onStarted = (data: { hlsUrl: string }) => {
+      setStatus({ running: true, hlsUrl: data.hlsUrl });
+    };
+    const onStopped = () => {
+      setStatus({ running: false, hlsUrl: null });
+    };
+    socket.on("stage-tv:started", onStarted);
+    socket.on("stage-tv:stopped", onStopped);
+    return () => {
+      cancelled = true;
+      socket.off("stage-tv:started", onStarted);
+      socket.off("stage-tv:stopped", onStopped);
+    };
+  }, []);
+
+  if (!status.running || !status.hlsUrl) return null;
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1.5 px-1">
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+        </span>
+        <span className="text-[9px] text-pnp-textSecondary/60 uppercase tracking-wide font-semibold">Stage TV</span>
+      </div>
+      <div className="aspect-video rounded-lg overflow-hidden bg-black">
+        <LivePlayer src={status.hlsUrl} title="Stage TV" className="w-full h-full" />
+      </div>
+    </div>
+  );
+}
+
 // ─── Mobile Bottom Bar + Sheet ───────────────────────────────────────────────
 
-type MobileTab = "nearby" | "live" | "chat" | "radio" | "mod" | null;
+type MobileTab = "nearby" | "live" | "chat" | "radio" | "tv" | "mod" | null;
 
 export function MobileBottomBar({ groupId, userId, isAdmin = false, isLandscape = false, onOpenModBot, socketChat, isModerator = false, isMainStage = false }: MobileBottomBarProps) {
   const navigate = useNavigate();
@@ -398,6 +445,19 @@ export function MobileBottomBar({ groupId, userId, isAdmin = false, isLandscape 
         <span className="text-[9px] mt-0.5">Radio</span>
       </button>
 
+      {/* TV */}
+      <button
+        onClick={() => toggleTab("tv")}
+        className={`flex flex-col items-center justify-center flex-1 ${isLandscape ? "w-full py-3" : "h-full"} active:scale-95 transition-all ${
+          activeTab === "tv" ? "text-red-400" : "text-pnp-textSecondary"
+        }`}
+      >
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 20.25h12m-7.5-3v3m3-3v3m-10.125-3h17.25c.621 0 1.125-.504 1.125-1.125V4.875c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125z" />
+        </svg>
+        <span className="text-[9px] mt-0.5">TV</span>
+      </button>
+
       {/* Mod Bot (admin only) */}
       {isAdmin && onOpenModBot && (
         <button
@@ -449,6 +509,11 @@ export function MobileBottomBar({ groupId, userId, isAdmin = false, isLandscape 
           />
         </div>
       )}
+      {activeTab === "tv" && (
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          <StageTvWidget />
+        </div>
+      )}
     </>
   ) : null;
 
@@ -469,7 +534,7 @@ export function MobileBottomBar({ groupId, userId, isAdmin = false, isLandscape 
               {/* Close handle row */}
               <div className="flex items-center justify-between px-3 py-2 border-b border-white/5 flex-shrink-0">
                 <span className="text-[10px] font-semibold text-pnp-textSecondary uppercase tracking-wide">
-                  {activeTab === "nearby" ? "Nearby" : activeTab === "live" ? "Live" : activeTab === "chat" ? "Chat" : "Radio"}
+                  {activeTab === "nearby" ? "Nearby" : activeTab === "live" ? "Live" : activeTab === "chat" ? "Chat" : activeTab === "radio" ? "Radio" : "TV"}
                 </span>
                 <button
                   onClick={() => setActiveTab(null)}
@@ -588,6 +653,12 @@ export function VideoCallSidePanel({
           isModerator={isModerator}
           isMainStage={isMainStage}
         />
+      </div>
+
+      {/* Stage TV widget */}
+      <div className="h-px bg-white/5 mx-2" />
+      <div className="px-2 pb-1 flex-shrink-0">
+        <StageTvWidget />
       </div>
 
       {/* Divider */}
