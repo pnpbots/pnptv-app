@@ -14,12 +14,34 @@
 const { AccessToken, RoomServiceClient } = require('livekit-server-sdk');
 const logger = require('../../utils/logger');
 
-const LIVEKIT_URL = process.env.LIVEKIT_URL || 'http://livekit-server:7880';
+// Lazy-load tokenService so a failure in that module does not prevent
+// livekitStreamService (and the API server) from starting at all.
+let _tokenService = null;
+function getTokenService() {
+  if (!_tokenService) {
+    try {
+      _tokenService = require('./tokenService');
+    } catch (e) {
+      logger.error('[livekitStreamService] tokenService failed to load — viewer token balance checks disabled:', e.message);
+      // Return a safe no-op fallback so callers don't have to null-check.
+      _tokenService = {
+        hasSufficientBalance: async () => true,
+        deductTokens: async () => ({ success: true, newBalance: 0 }),
+        creditTokens: async () => true,
+        processStreamHeartbeat: async () => ({ success: true, newBalance: 0 }),
+      };
+    }
+  }
+  return _tokenService;
+}
+
+const LIVEKIT_URL = process.env.LIVEKIT_URL;
 const LIVEKIT_WS_URL = process.env.LIVEKIT_WS_URL || 'wss://pnptv.app/livekit-ws';
-const API_KEY = process.env.LIVEKIT_API_KEY || 'pnptv';
-const API_SECRET = process.env.LIVEKIT_API_SECRET || '_CwBLNh2mVaJPy9yu3MgrIzSajvS6_-_tratIvCx9SQ';
+const API_KEY = process.env.LIVEKIT_API_KEY;
+const API_SECRET = process.env.LIVEKIT_API_SECRET;
 
 const TOKEN_TTL_SECONDS = 6 * 60 * 60; // 6 hours for long streams
+const STREAM_JOIN_COST = 1; // Initial cost to join a stream
 
 let _roomService = null;
 function getRoomService() {
@@ -77,13 +99,23 @@ async function generateStreamerToken(channelRef, userId, displayName, photoUrl) 
 /**
  * Generate a viewer (subscriber-only) token for watching a live stream.
  * Grants: subscribe only (no publish).
+ * First, checks if the user has enough tokens to join.
  *
  * @param {string} channelRef
  * @param {string} userId
  * @param {string} displayName
- * @returns {Promise<string>} signed JWT
+ * @returns {Promise<string|null>} signed JWT, or null if balance is insufficient.
  */
 async function generateViewerToken(channelRef, userId, displayName) {
+  // Check user's token balance before issuing a token
+  const hasBalance = await getTokenService().hasSufficientBalance(userId, STREAM_JOIN_COST);
+  if (!hasBalance) {
+    logger.warn('Insufficient balance for user to join stream.', { userId, channelRef });
+    return null;
+  }
+  
+  // For now, we just check. Deduction logic will be part of the heartbeat.
+
   const roomName = toRoomName(channelRef);
 
   const at = new AccessToken(API_KEY, API_SECRET, {

@@ -27,80 +27,84 @@ const { query } = require('../../config/postgres');
 const { cache } = require('../../config/redis');
 const logger = require('../../utils/logger');
 const NotificationEmitter = require('./notificationEmitter');
-const fetch = require('node-fetch');
+const { createWalletClient, http, parseUnits, encodeFunctionData } = require('viem');
+const { privateKeyToAccount } = require('viem/accounts');
+const { optimism, base, arbitrum, polygon, mainnet } = require('viem/chains');
+const { SUPPORTED_CHAINS } = require('../../config/daimo');
 
-const DAIMO_API_BASE = 'https://api.daimo.com';
-const FETCH_TIMEOUT_MS = 30_000;
 const MINIMUM_PAYOUT_USD = 1.00;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-const fetchWithTimeout = (url, options = {}) => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  return fetch(url, { ...options, signal: controller.signal })
-    .finally(() => clearTimeout(timeoutId));
+// Map chain IDs to viem chain objects
+const VIEM_CHAINS = {
+  10: optimism,
+  8453: base,
+  42161: arbitrum,
+  137: polygon,
+  1: mainnet,
 };
 
+// ERC20 transfer ABI fragment
+const ERC20_TRANSFER_ABI = [
+  {
+    name: 'transfer',
+    type: 'function',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+];
+
 /**
- * Send USDC from the treasury to a creator's wallet via Daimo transfer API.
- * Returns { success, transferId, error }.
- *
- * The endpoint used is POST /v1/transfer. Override via DAIMO_TRANSFER_ENDPOINT
- * env var (e.g. "/v1/payouts") if Daimo changes their API path.
+ * Send USDC directly from treasury wallet to a creator's address via on-chain ERC20 transfer.
+ * Replaces the non-existent Daimo /v1/transfer endpoint.
+ * @returns {{ success: boolean, txHash?: string, error?: string }}
  */
-const sendDaimoTransfer = async ({ toAddress, amountUsd, creatorId, note }) => {
-  const apiKey = process.env.DAIMO_API_KEY;
-  if (!apiKey) {
-    return { success: false, error: 'DAIMO_API_KEY not configured' };
+const sendDirectUSDCTransfer = async ({ toAddress, amountUsd, creatorId, chainId = 10 }) => {
+  const privateKey = process.env.TREASURY_PRIVATE_KEY;
+  if (!privateKey) {
+    return { success: false, error: 'TREASURY_PRIVATE_KEY not configured' };
   }
 
-  const transferPath = process.env.DAIMO_TRANSFER_ENDPOINT || '/v1/transfer';
-  // amountUnits is a human-readable decimal string (e.g. "14.00")
-  const amountUnits = parseFloat(amountUsd).toFixed(2);
+  const chainInfo = SUPPORTED_CHAINS[chainId];
+  if (!chainInfo) {
+    return { success: false, error: `Unsupported chain ID: ${chainId}` };
+  }
 
-  const body = {
-    toAddress,
-    // USDC on Optimism
-    tokenAddress: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',
-    chainId: 10,
-    amountUnits,
-    note: note || 'PNPtv creator payout',
-    metadata: {
-      creatorId: String(creatorId),
-      source: 'pnptv-creator-payout',
-    },
-  };
+  const viemChain = VIEM_CHAINS[chainId];
+  if (!viemChain) {
+    return { success: false, error: `No viem chain config for chain ID: ${chainId}` };
+  }
 
   try {
-    const response = await fetchWithTimeout(`${DAIMO_API_BASE}${transferPath}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
+    const account = privateKeyToAccount(privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`);
+    const client = createWalletClient({
+      account,
+      chain: viemChain,
+      transport: http(),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.error('Daimo transfer API error', { status: response.status, error: errorText, creatorId });
-      return { success: false, error: `Daimo transfer API ${response.status}: ${errorText}` };
-    }
+    // USDC has 6 decimals
+    const amountUnits = parseUnits(parseFloat(amountUsd).toFixed(2), 6);
 
-    const data = await response.json();
-    const transfer = data.transfer || data;
-    const transferId = transfer.transferId || transfer.id || null;
+    const txHash = await client.writeContract({
+      address: chainInfo.usdc,
+      abi: ERC20_TRANSFER_ABI,
+      functionName: 'transfer',
+      args: [toAddress, amountUnits],
+    });
 
-    logger.info('Daimo transfer initiated', { creatorId, toAddress, amountUnits, transferId });
-    return { success: true, transferId };
+    logger.info('Direct USDC transfer sent', { creatorId, toAddress, amountUsd, chainId, txHash });
+    return { success: true, txHash };
   } catch (err) {
-    const isTimeout = err.name === 'AbortError';
-    logger.error(isTimeout ? 'Daimo transfer request timed out' : 'Daimo transfer request failed', {
+    logger.error('Direct USDC transfer failed', {
       creatorId,
+      toAddress,
+      chainId,
       error: err.message,
     });
-    return { success: false, error: isTimeout ? 'Daimo transfer request timed out' : err.message };
+    return { success: false, error: err.message };
   }
 };
 
@@ -126,13 +130,19 @@ class CreatorPayoutService {
           COALESCE(SUM(ce.amount_creator), 0)::numeric  AS total_creator,
           ARRAY_AGG(ce.id)                               AS earning_ids,
           u.creator_wallet_address,
+          u.creator_payout_chain_id,
+          u.payout_method,
+          u.fiat_payout_method,
+          u.fiat_payout_account,
           u.username,
           u.first_name
         FROM creator_earnings ce
         JOIN users u ON u.id = ce.creator_id
         WHERE ce.status  = 'available'
           AND ce.paid_at IS NULL
-        GROUP BY ce.creator_id, u.creator_wallet_address, u.username, u.first_name
+        GROUP BY ce.creator_id, u.creator_wallet_address, u.creator_payout_chain_id,
+                 u.payout_method, u.fiat_payout_method, u.fiat_payout_account,
+                 u.username, u.first_name
         HAVING COALESCE(SUM(ce.amount_creator), 0) >= $1
       `, [MINIMUM_PAYOUT_USD]);
       rows = result.rows;
@@ -186,7 +196,7 @@ class CreatorPayoutService {
    * @returns {{ skipped: boolean }}
    */
   static async _processCreatorPayout(creator) {
-    const { creator_id, total_creator, earning_ids, creator_wallet_address, username, first_name } = creator;
+    const { creator_id, total_creator, earning_ids, creator_wallet_address, creator_payout_chain_id, payout_method, fiat_payout_method, fiat_payout_account, username, first_name } = creator;
     const displayName = username || first_name || String(creator_id);
     const amountUsd = parseFloat(total_creator);
 
@@ -199,9 +209,11 @@ class CreatorPayoutService {
       return { skipped: true };
     }
 
-    // Creators without a wallet address are skipped — earnings roll over
-    if (!creator_wallet_address) {
-      logger.warn('CreatorPayoutService: creator has no wallet address, skipping', { creatorId: creator_id });
+    // Creators with no payout method configured are skipped — earnings roll over
+    const hasCryptoWallet = !!creator_wallet_address;
+    const hasFiatMethod = payout_method === 'fiat' && !!fiat_payout_method && !!fiat_payout_account;
+    if (!hasCryptoWallet && !hasFiatMethod) {
+      logger.warn('CreatorPayoutService: creator has no valid payout method, skipping', { creatorId: creator_id });
 
       await NotificationEmitter.emit({
         type: 'system',
@@ -218,19 +230,39 @@ class CreatorPayoutService {
       return { skipped: true };
     }
 
-    // Send Daimo outbound transfer
+    // Route payout by method: crypto (direct USDC transfer) or fiat (Peer Protocol)
+    let transferResult;
     const month = new Date().toISOString().slice(0, 7); // e.g. "2026-03"
-    const note = `PNPtv payout ${month} — $${amountUsd.toFixed(2)} USDC`;
 
-    const transferResult = await sendDaimoTransfer({
-      toAddress: creator_wallet_address,
-      amountUsd,
-      creatorId: creator_id,
-      note,
-    });
+    if (payout_method === 'fiat' && fiat_payout_method && fiat_payout_account) {
+      // Fiat off-ramp via Peer Protocol
+      try {
+        const peerProtocolService = require('./peerProtocolService');
+        transferResult = await peerProtocolService.sendFiatPayout({
+          amount: amountUsd,
+          provider: fiat_payout_method,
+          recipientHandle: fiat_payout_account,
+          creatorId: creator_id,
+        });
+      } catch (fiatErr) {
+        throw new Error(`Fiat payout failed: ${fiatErr.message}`);
+      }
+    } else if (creator_wallet_address) {
+      // Direct on-chain USDC transfer
+      transferResult = await sendDirectUSDCTransfer({
+        toAddress: creator_wallet_address,
+        amountUsd,
+        creatorId: creator_id,
+        chainId: creator_payout_chain_id || 10,
+      });
+    } else {
+      // No payout method configured — skip
+      logger.warn('CreatorPayoutService: creator has no valid payout method, skipping', { creatorId: creator_id });
+      return { skipped: true };
+    }
 
     if (!transferResult.success) {
-      throw new Error(`Daimo transfer failed: ${transferResult.error}`);
+      throw new Error(`Payout transfer failed: ${transferResult.error}`);
     }
 
     // Mark earnings as paid_out with an atomic UPDATE...RETURNING.
@@ -248,7 +280,7 @@ class CreatorPayoutService {
         AND paid_at IS NULL
       RETURNING amount_creator
     `, [
-      JSON.stringify({ daimo_transfer_id: transferResult.transferId }),
+      JSON.stringify({ txHash: transferResult.txHash || null, payoutMethod: payout_method || 'crypto' }),
       earning_ids,
     ]);
 
@@ -256,7 +288,7 @@ class CreatorPayoutService {
       // All rows were already paid by a concurrent run — skip notification to avoid confusion.
       logger.warn('CreatorPayoutService: earnings already marked paid by concurrent run, skipping', {
         creatorId: creator_id,
-        transferId: transferResult.transferId,
+        txHash: transferResult.txHash || null,
       });
       return { skipped: true };
     }
@@ -273,7 +305,8 @@ class CreatorPayoutService {
       message: `Your payout of $${amountUsd.toFixed(2)} USDC has been sent to your wallet!`,
       metadata: {
         amountUsd,
-        daimo_transfer_id: transferResult.transferId,
+        txHash: transferResult.txHash || null,
+        payoutMethod: payout_method || 'crypto',
         walletAddress: creator_wallet_address,
       },
     });
@@ -282,7 +315,8 @@ class CreatorPayoutService {
       creatorId: creator_id,
       displayName,
       amountUsd,
-      transferId: transferResult.transferId,
+      txHash: transferResult.txHash || null,
+      payoutMethod: payout_method || 'crypto',
       earningsCount: earning_ids.length,
     });
 

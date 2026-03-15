@@ -46,19 +46,6 @@ const joinCommunityRoom = async (req, res) => {
       isTrueModerator = false;
     }
 
-    // Membership check — only pnp-member (or higher) entitlement holders may join
-    // Admins/superadmins bypass entitlement gate
-    if (!isTrueModerator) {
-      const hasMembership = await EntitlementAccessService.hasEntitlement(userId, 'pnp-member');
-      if (!hasMembership) {
-        return res.status(403).json({
-          success: false,
-          error: 'A PNPtv membership is required to join the community room',
-          code: 'MEMBERSHIP_REQUIRED'
-        });
-      }
-    }
-
     // Get or create community room
     const room = await CommunityRoomService.getCommunityRoom();
 

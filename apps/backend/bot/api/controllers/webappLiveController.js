@@ -117,6 +117,9 @@ function sanitizeRefId(refId) {
 // Proxies to Restreamer API and returns active HLS streams.
 // ---------------------------------------------------------------------------
 const listStreams = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
   const user = req.session.user;
 
   const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
@@ -167,6 +170,9 @@ const listStreams = async (req, res) => {
 // by an admin before they can stream. If no channel is assigned, 404 is returned.
 // ---------------------------------------------------------------------------
 const getRtmpKey = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
   const user = req.session.user;
   if (!['model', 'creator', 'admin', 'superadmin'].includes(user.role)) {
     return res.status(403).json({

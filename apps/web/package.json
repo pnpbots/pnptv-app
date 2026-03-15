@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@daimo/sdk": "^1.0.0",
+    "@daimo/sdk": "^1.1.0",
     "@directus/sdk": "^18.0.0",
     "@livekit/components-core": "^0.12.0",
     "@livekit/components-react": "^2.9.0",

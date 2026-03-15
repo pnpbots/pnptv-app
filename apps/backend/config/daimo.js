@@ -16,6 +16,15 @@ const WEBHOOK_TIMESTAMP_TOLERANCE_S = 300; // 5 minutes
 const OPTIMISM_USDC_ADDRESS = '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85';
 const OPTIMISM_CHAIN_ID = 10;
 
+// Multi-chain USDC registry
+const SUPPORTED_CHAINS = {
+  10:    { name: 'Optimism',  usdc: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85' },
+  8453:  { name: 'Base',      usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
+  42161: { name: 'Arbitrum',  usdc: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' },
+  137:   { name: 'Polygon',   usdc: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359' },
+  1:     { name: 'Ethereum',  usdc: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' },
+};
+
 // Daimo Pay API base URL
 const DAIMO_API_BASE = 'https://api.daimo.com';
 
@@ -72,6 +81,7 @@ const getDaimoConfig = () => {
  */
 const createDaimoPayment = async ({
   amount, userId, planId, chatId, paymentId, description,
+  destinationAddress, destinationChainId,
 }) => {
   const config = getDaimoConfig();
   const apiKey = config.apiKey;
@@ -84,12 +94,21 @@ const createDaimoPayment = async ({
   const amountUnits = parseFloat(amount).toFixed(2);
 
   try {
+    // P2P: route to creator wallet/chain when provided, otherwise treasury
+    const destChainId = destinationChainId || config.chainId;
+    const destAddress = destinationAddress ? getAddress(destinationAddress) : config.treasuryAddress;
+    const chainInfo = SUPPORTED_CHAINS[destChainId];
+    if (!chainInfo) {
+      return { success: false, error: `Unsupported chain ID: ${destChainId}` };
+    }
+    const destToken = getAddress(chainInfo.usdc);
+
     const requestBody = {
       destination: {
         type: 'evm',
-        address: config.treasuryAddress,
-        chainId: config.chainId,
-        tokenAddress: config.token,
+        address: destAddress,
+        chainId: destChainId,
+        tokenAddress: destToken,
         amountUnits,
       },
       display: {
@@ -404,13 +423,9 @@ const normalizeDaimoPayload = (payload) => {
 
   if (format === 'v3') {
     const session = payload.data.session;
-    const eventTypeToStatus = {
-      'session.succeeded': 'payment_completed',
-      'session.bounced': 'payment_bounced',
-      'session.processing': 'payment_started',
-    };
-    const status = eventTypeToStatus[payload.type] || normalizeSessionStatus(session.status) || session.status;
-    return {
+    // Use raw session.status directly — avoid double-mapping via event type
+    const status = session.status || normalizeSessionStatus(session.status);
+    const normalized = {
       format,
       eventId: payload.id,
       sessionId: session.sessionId || session.id,
@@ -427,6 +442,13 @@ const normalizeDaimoPayload = (payload) => {
       metadata: session.metadata || null,
       isTestEvent: payload.isTestEvent === true,
     };
+    if (session.status === 'processing') {
+      logger.info('Daimo webhook: session processing — payment initiated but not yet confirmed', {
+        sessionId: session.sessionId || session.id,
+        eventType: payload.type,
+      });
+    }
+    return normalized;
   }
 
   if (format === 'v2') {
@@ -470,6 +492,12 @@ const normalizeDaimoPayload = (payload) => {
   };
 };
 
+/**
+ * Status helpers — single source of truth for webhook status classification.
+ */
+const isSucceeded = (s) => s === 'succeeded' || s === 'payment_completed';
+const isFailed = (s) => ['bounced', 'expired', 'payment_bounced', 'payment_failed'].includes(s);
+
 module.exports = {
   getDaimoConfig,
   createDaimoPayment,
@@ -481,8 +509,11 @@ module.exports = {
   verifyWebhookSignature,
   detectDaimoPayloadFormat,
   normalizeDaimoPayload,
+  isSucceeded,
+  isFailed,
   DAIMO_API_BASE,
   OPTIMISM_USDC_ADDRESS,
   OPTIMISM_CHAIN_ID,
   WEBHOOK_TIMESTAMP_TOLERANCE_S,
+  SUPPORTED_CHAINS,
 };

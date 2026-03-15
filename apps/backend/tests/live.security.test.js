@@ -361,6 +361,7 @@ describe('webappLiveController.listStreams — refId sanitization', () => {
   it('allows a normal reference ID', async () => {
     jest.spyOn(axios, 'post').mockResolvedValueOnce({ data: { access_token: 'tok' } });
     jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      status: 200,
       data: [makeProcess('abc-123_stream.m3u8')],
     });
 
@@ -379,6 +380,7 @@ describe('webappLiveController.listStreams — refId sanitization', () => {
   it('rejects a reference ID containing path traversal (../)', async () => {
     jest.spyOn(axios, 'post').mockResolvedValueOnce({ data: { access_token: 'tok' } });
     jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      status: 200,
       data: [makeProcess('../../../etc/passwd')],
     });
 
@@ -392,6 +394,7 @@ describe('webappLiveController.listStreams — refId sanitization', () => {
   it('rejects a reference ID containing query string characters', async () => {
     jest.spyOn(axios, 'post').mockResolvedValueOnce({ data: { access_token: 'tok' } });
     jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      status: 200,
       data: [makeProcess('stream?foo=bar&baz=qux')],
     });
 
@@ -412,7 +415,7 @@ describe('webappLiveController.listStreams — refId sanitization', () => {
     proc.id = 'restreamer-ui:ingest:'; // empty after prefix
 
     jest.spyOn(axios, 'post').mockResolvedValueOnce({ data: { access_token: 'tok' } });
-    jest.spyOn(axios, 'get').mockResolvedValueOnce({ data: [proc] });
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({ status: 200, data: [proc] });
 
     const { req, res } = mockReqRes();
     await listStreams(req, res);

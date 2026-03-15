@@ -28,6 +28,7 @@ const { registerXAccountHandlers } = require('./xAccountWizard');
 const { registerXPostWizardHandlers, handleTextInput: handleXPostTextInput, handleMediaInput: handleXPostMediaInput, getSession: getXPostSession, STEPS: XPOST_STEPS } = require('./xPostWizard');
 const { registerUserManagementHandlers } = require('./userManagementHandler');
 const XFollowersManagement = require('./xFollowersManagement');
+const registerPerformerManagementHandlers = require('./performerManagement');
 const PlaylistAdminService = require('../../services/PlaylistAdminService');
 const RadioAdminService = require('../../services/RadioAdminService');
 const CristinaAdminInfoService = require('../../../services/cristinaAdminInfoService');
@@ -6830,6 +6831,7 @@ const finalRegisterAdminHandlers = (bot) => {
   registerRadioAdminHandlers(bot);
   registerUserManagementHandlers(bot);
   XFollowersManagement.registerHandlers(bot);
+  registerPerformerManagementHandlers(bot);
 };
 
 module.exports = finalRegisterAdminHandlers;

@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
+const API_BASE = import.meta.env.VITE_API_URL || (window.location.hostname === "app.pnptv.app" ? "https://app.pnptv.app" : "https://pnptv.app");
 
 function friendlyHttpError(status: number, fallback: string): string {
   if (status === 413) return "File is too large. Max 512 MB (or 3 GB for creators).";
@@ -191,6 +191,13 @@ export function unlinkAtproto(): Promise<{ success: boolean; message: string }> 
   return request("/api/webapp/auth/atproto/unlink", { method: "POST" });
 }
 
+export function recoverAccount(email: string): Promise<{ success: boolean; message: string }> {
+  return request("/api/webapp/auth/recover-account", {
+    method: "POST",
+    body: { email },
+  });
+}
+
 /**
  * Initiates an ATProto/Bluesky OAuth flow for the given handle.
  * This is a redirect — the function builds the URL and navigates to it.
@@ -249,6 +256,16 @@ export function importSoundCloud(metadata: any): Promise<{
   return request("/api/proxy/media/import-soundcloud", {
     method: "POST",
     body: metadata,
+  });
+}
+
+export function requestSoundCloud(url: string): Promise<{
+  success: boolean;
+  requestId: number;
+}> {
+  return request("/api/webapp/radio/request-soundcloud", {
+    method: "POST",
+    body: { url },
   });
 }
 

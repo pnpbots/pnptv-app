@@ -16,8 +16,9 @@ class MediaPlayerModel {
     const query = `
       INSERT INTO media_library (
         title, artist, url, type, duration, category, cover_url,
-        description, uploader_id, uploader_name, language, is_public, is_explicit, tags, metadata
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        description, uploader_id, uploader_name, language, is_public, is_explicit, tags, metadata,
+        provider, external_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       RETURNING *
     `;
 
@@ -38,6 +39,8 @@ class MediaPlayerModel {
         mediaData.isExplicit || false,
         mediaData.tags || null,
         mediaData.metadata ? JSON.stringify(mediaData.metadata) : null,
+        mediaData.provider || 'local',
+        mediaData.externalId || mediaData.external_id || null,
       ]);
 
       // Invalidate cache
@@ -753,7 +756,8 @@ class MediaPlayerModel {
   static async updateMedia(mediaId, updates) {
     try {
       const allowedFields = ['title', 'artist', 'url', 'type', 'duration', 'category',
-                            'cover_url', 'description', 'is_public', 'is_explicit', 'tags'];
+                            'cover_url', 'description', 'is_public', 'is_explicit', 'tags',
+                            'provider', 'external_id'];
 
       const setClause = [];
       const values = [];

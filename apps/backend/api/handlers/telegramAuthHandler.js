@@ -2,6 +2,7 @@ const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const PDSProvisioningService = require('../../bot/services/PDSProvisioningService');
 const PlatformBanService = require('../../bot/services/platformBanService');
+const AuthentikService = require('../../services/authentikService');
 const { isAdminUser } = require('../../bot/utils/helpers');
 const crypto = require('crypto');
 
@@ -91,6 +92,17 @@ const handleTelegramAuth = async (req, res) => {
     const telegramUser = validation.data;
     logger.info(`Telegram auth attempt for user: ${telegramUser.id} (${telegramUser.username || 'no username'})`);
 
+    // --- Phase 1: Identity Consolidation via Authentik ---
+    // Ensure user has a persistent UUID (pnptv_id) in Authentik SSO
+    const pnptvId = await AuthentikService.syncTelegramUser(telegramUser);
+    if (!pnptvId) {
+      logger.error('Failed to sync user with Authentik SSO, aborting login');
+      return res.status(500).json({
+        error: 'Authentication sync failed',
+        message: 'No pudimos sincronizar tu cuenta con el sistema de identidad centralizado.'
+      });
+    }
+
     // Check if user exists in our database
     let userQuery = await query(
       `SELECT id, pnptv_id, telegram, username, email, subscription_status, tier, terms_accepted,
@@ -99,22 +111,25 @@ const handleTelegramAuth = async (req, res) => {
               COALESCE(onboarding_complete, false) as onboarding_complete,
               COALESCE(role, 'user') as role
        FROM users
-       WHERE telegram = $1`,
-      [telegramUser.id]
+       WHERE telegram = $1 OR pnptv_id = $2`,
+      [telegramUser.id, pnptvId]
     );
 
     if (userQuery.rows.length === 0) {
-      // User not in database - check if they need to be created with migrated subscription
-      logger.info(`User ${telegramUser.id} not in database, creating new user record`);
+      // User not in database - create new user record with Authentik UUID
+      logger.info(`User ${telegramUser.id} / ${pnptvId} not in database, creating new user record`);
 
       try {
-        // Create user with default 'free' status (will be auto-upgraded if they have active subscription)
         await query(
-          `INSERT INTO users (id, telegram, username, first_name, language, subscription_status, terms_accepted, age_verified, role)
-           VALUES ($1, $1, $2, $3, $4, 'free', false, false, 'user')
-           ON CONFLICT (telegram) WHERE telegram IS NOT NULL AND telegram <> '' DO NOTHING`,
+          `INSERT INTO users (id, telegram, pnptv_id, username, first_name, language, subscription_status, terms_accepted, age_verified, role)
+           VALUES ($1, $1, $2, $3, $4, $5, 'free', false, false, 'user')
+           ON CONFLICT (id) DO UPDATE SET
+             pnptv_id = EXCLUDED.pnptv_id,
+             username = COALESCE(EXCLUDED.username, users.username),
+             updated_at = NOW()`,
           [
             String(telegramUser.id),
+            pnptvId,
             telegramUser.username || '',
             telegramUser.first_name || '',
             telegramUser.language_code || 'en'
@@ -129,23 +144,23 @@ const handleTelegramAuth = async (req, res) => {
                   COALESCE(onboarding_complete, false) as onboarding_complete,
                   COALESCE(role, 'user') as role
            FROM users
-           WHERE telegram = $1`,
-          [telegramUser.id]
+           WHERE telegram = $1 OR pnptv_id = $2`,
+          [telegramUser.id, pnptvId]
         );
-
-        if (userQuery.rows.length === 0) {
-          logger.error(`Failed to create user ${telegramUser.id}`);
-          return res.status(500).json({
-            error: 'User creation failed',
-            redirect: '/auth/telegram-login'
-          });
-        }
       } catch (createError) {
-        logger.error('Error creating user:', createError);
+        logger.error('Error creating user record:', createError);
         return res.status(500).json({
           error: 'User creation failed',
           redirect: '/auth/telegram-login'
         });
+      }
+    } else {
+      // User exists, ensure pnptv_id is updated if missing
+      const dbUser = userQuery.rows[0];
+      if (!dbUser.pnptv_id || dbUser.pnptv_id !== pnptvId) {
+        logger.info(`Updating pnptv_id for user ${dbUser.id} to Authentik UUID ${pnptvId}`);
+        await query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2', [pnptvId, dbUser.id]);
+        dbUser.pnptv_id = pnptvId;
       }
     }
 
@@ -380,11 +395,10 @@ const checkAuthStatus = async (req, res) => {
       logger.warn('checkAuthStatus: DB refresh failed, using session values', dbErr.message);
     }
 
-    // Build auth_methods from session data (hybrid session: Telegram + ATProto + X may all coexist)
+    // Build auth_methods from session data (hybrid session: Telegram + ATProto may coexist)
     const authMethods = user.auth_methods || {
       telegram: !!(user.telegramId || user.telegram),
       atproto: !!user.atproto_did,
-      x: !!(user.x_user_id || user.xHandle),
     };
 
     res.json({
@@ -407,8 +421,6 @@ const checkAuthStatus = async (req, res) => {
         // ATProto / Bluesky identity
         atproto_did: user.atproto_did || null,
         atproto_handle: user.atproto_handle || null,
-        // X / Twitter identity
-        x_handle: user.xHandle || user.x_username || null,
         // Creator status
         creator_status: user.creator_status || 'none',
         creator_type: user.creator_type || null,

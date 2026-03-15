@@ -28,10 +28,7 @@ const ageVerificationController = require('./controllers/ageVerificationControll
 const healthController = require('./controllers/healthController');
 const hangoutsController = require('./controllers/hangoutsController');
 const eventsController = require('./controllers/eventsController');
-const xOAuthRoutes = require('./xOAuthRoutes');
-const xOAuthController = require('./controllers/xOAuthController');
-const xFollowersRoutes = require('./xFollowersRoutes');
-const { adminGuard: xOAuthAdminGuard, adminGuard } = require('../../middleware/guards');
+const { adminGuard } = require('../../middleware/guards');
 const adminUserRoutes = require('./routes/adminUserRoutes');
 const userManagementRoutes = require('./routes/userManagementRoutes');
 const nearbyRoutes = require('./routes/nearby.routes');
@@ -76,6 +73,7 @@ const jaasController = require('./controllers/jaasController');
 
 // ATProto controller for profile fetching, unlinking, and cross-posting
 const atprotoController = require('./controllers/atprotoController');
+const SoundCloudService = require('../../services/soundCloudService');
 
 /**
  * Page-level authentication middleware
@@ -291,18 +289,22 @@ if (!resolvedSessionSecret) {
   throw new Error('SESSION_SECRET must be configured (separate from JWT_SECRET)');
 }
 // Session middleware with explicit response hooks to ensure Set-Cookie header is set
+// SESSION_TTL: 7 days (was 90). `rolling: true` refreshes TTL on every
+// request, so active users stay logged in indefinitely but stolen/abandoned
+// cookies expire within a week. Override via SESSION_TTL env var (seconds).
+const SESSION_TTL_SECONDS = parseInt(process.env.SESSION_TTL, 10) || 7 * 86400;
 const sessionMiddleware = session({
-  store: new RedisStore({ client: redisClient, prefix: 'sess:', ttl: 90 * 86400 }),
+  store: new RedisStore({ client: redisClient, prefix: 'sess:', ttl: SESSION_TTL_SECONDS }),
   secret: resolvedSessionSecret,
   resave: false,
   saveUninitialized: false,
-  rolling: true, // Refresh session TTL on each request
-  name: '__pnptv_sid', // Obscure session cookie name (was: connect.sid)
+  rolling: true, // Refresh session TTL on each request — active users never expire
+  name: '__pnptv_sid',
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     sameSite: 'lax',
-    maxAge: 90 * 24 * 60 * 60 * 1000, // 90 days — active users stay logged in
+    maxAge: SESSION_TTL_SECONDS * 1000,
     path: '/',
     domain: process.env.NODE_ENV === 'production' ? '.pnptv.app' : undefined
   }
@@ -646,7 +648,7 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => {
   // Authenticated → go to the React SPA
   if (req.session?.user) {
-    return res.redirect(302, 'https://app.pnptv.app');
+    return res.redirect(302, 'https://pnptv.app');
   }
   // Not authenticated → show login
   return res.sendFile(path.join(__dirname, '../../../public/login.html'));
@@ -655,7 +657,7 @@ app.get('/', (req, res) => {
 // /login → same behaviour as /
 app.get('/login', (req, res) => {
   if (req.session?.user) {
-    return res.redirect(302, 'https://app.pnptv.app');
+    return res.redirect(302, 'https://pnptv.app');
   }
   return res.sendFile(path.join(__dirname, '../../../public/login.html'));
 });
@@ -899,6 +901,32 @@ const eventCoverUpload = multer({
     cb(new Error('Only image files are allowed'));
   }
 });
+
+// ── Magic bytes verification for in-memory uploads (avatars, event covers, etc.) ──
+// Multer only checks the Content-Type header which is trivially spoofable.
+// This middleware verifies the file's actual magic bytes using file-type.
+const verifyMagicBytes = (allowedMimes) => async (req, res, next) => {
+  const file = req.file;
+  if (!file || !file.buffer) return next();
+  try {
+    const detected = await FileType.fromBuffer(file.buffer);
+    if (!detected || !allowedMimes.has(detected.mime)) {
+      logger.warn('Upload rejected: magic bytes mismatch', {
+        claimed: file.mimetype,
+        detected: detected?.mime ?? 'unknown',
+        originalname: file.originalname,
+        userId: req.session?.user?.id,
+      });
+      return res.status(400).json({ error: 'File type does not match its contents. Upload rejected.' });
+    }
+  } catch (err) {
+    logger.error('Magic bytes verification error:', err);
+    return res.status(500).json({ error: 'File verification failed' });
+  }
+  return next();
+};
+
+const IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heif', 'image/heic', 'image/avif']);
 
 // ── Tiered upload limits: 512 MB for regular users, 3 GB for active creators ──
 const UPLOAD_LIMIT_REGULAR = 512 * 1024 * 1024;   // 512 MB
@@ -2214,12 +2242,6 @@ app.use('/api/users', userManagementRoutes);
 // Nearby Geolocation API Routes
 app.use('/api/nearby', nearbyRoutes);
 
-// OAuth1 callback must be accessible without session (X redirects browser here)
-app.get('/api/admin/x/oauth/1a/callback', asyncHandler(xOAuthController.callbackOAuth1));
-app.use('/api/admin/x/oauth', xOAuthAdminGuard, xOAuthRoutes);
-app.use('/api/auth/x', xOAuthRoutes); // Alias for X Developer Portal redirect URI
-app.use('/api/x/followers', xFollowersRoutes);
-
 // Health Check and Monitoring Endpoints
 app.get('/api/health', healthLimiter, asyncHandler(healthController.healthCheck));
 app.get('/api/metrics', healthLimiter, adminGuard, asyncHandler(healthController.performanceMetrics));
@@ -2271,6 +2293,30 @@ app.get('/api/webapp/auth/telegram/check', telegramCheckLimiter, asyncHandler(we
 app.post('/api/webapp/auth/telegram/widget', telegramWidgetLimiter, asyncHandler(webAppController.telegramWidgetAuth));
 app.post('/api/webapp/auth/email/register', authLimiter, asyncHandler(webAppController.emailRegister));
 app.post('/api/webapp/auth/email/login', authLimiter, asyncHandler(webAppController.emailLogin));
+
+// Request account recovery (Password Reset via Authentik)
+app.post('/api/webapp/auth/recover-account', authLimiter, asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ success: false, error: 'Email is required' });
+
+  // 1. Verify user exists in PNP DB
+  const user = await MediaPlayerModel.getPool().query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+  
+  if (user.rows.length === 0) {
+    // Return success anyway to prevent email enumeration
+    return res.json({ success: true, message: 'If an account exists with this email, a recovery link has been sent.' });
+  }
+
+  // 2. Trigger Authentik recovery
+  const result = await AuthentikService.requestPasswordReset(email);
+  
+  if (!result.success) {
+    logger.warn(`Failed to trigger Authentik recovery for ${email}: ${result.error}`);
+    // Still return success to user for security
+  }
+
+  res.json({ success: true, message: 'Recovery process initiated.' });
+}));
 app.get('/api/webapp/auth/verify-email', verifyEmailLimiter, asyncHandler(webAppController.verifyEmail));
 app.post('/api/webapp/auth/resend-verification', authLimiter, asyncHandler(webAppController.resendVerification));
 app.get('/api/webapp/auth/x/start', asyncHandler(webAppController.xLoginStart));
@@ -2284,8 +2330,8 @@ app.post('/api/webapp/auth/reset-password', authLimiter, asyncHandler(webAppCont
 // Web App Profile
 app.get('/api/webapp/profile', requireSessionAuth, asyncHandler(webAppController.getProfile));
 app.put('/api/webapp/profile', requireSessionAuth, asyncHandler(webAppController.updateProfile));
-app.post('/api/webapp/profile/avatar', requireSessionAuth, uploadLimiter, avatarUpload.single('avatar'), asyncHandler(webAppController.uploadAvatar));
-app.post('/api/webapp/upload/event-cover', requireSessionAuth, uploadLimiter, eventCoverUpload.single('media'), asyncHandler(webAppController.uploadEventCover));
+app.post('/api/webapp/profile/avatar', requireSessionAuth, uploadLimiter, avatarUpload.single('avatar'), verifyMagicBytes(IMAGE_MIMES), asyncHandler(webAppController.uploadAvatar));
+app.post('/api/webapp/upload/event-cover', requireSessionAuth, uploadLimiter, eventCoverUpload.single('media'), verifyMagicBytes(IMAGE_MIMES), asyncHandler(webAppController.uploadEventCover));
 
 // Web App Privacy Settings
 app.patch('/api/webapp/privacy', asyncHandler(async (req, res) => {
@@ -2304,17 +2350,14 @@ app.patch('/api/webapp/privacy', asyncHandler(async (req, res) => {
 
   const { query: dbQuery } = require('../../config/postgres');
 
-  // Build jsonb_set chain
-  let privacyExpr = "COALESCE(privacy, '{}'::jsonb)";
-  const params = [user.id];
-  for (const [key, val] of Object.entries(updates)) {
-    params.push(JSON.stringify(val));
-    privacyExpr = `jsonb_set(${privacyExpr}, '{${key}}', $${params.length}::jsonb)`;
-  }
+  // Merge validated keys in one parameterized JSONB operation.
+  // Never interpolate key names into SQL — even with an allowlist,
+  // defense-in-depth demands fully parameterized queries.
+  const params = [user.id, JSON.stringify(updates)];
 
   try {
     const result = await dbQuery(
-      `UPDATE users SET privacy = ${privacyExpr}, updated_at = NOW() WHERE id = $1 RETURNING privacy`,
+      `UPDATE users SET privacy = COALESCE(privacy, '{}'::jsonb) || $2::jsonb, updated_at = NOW() WHERE id = $1 RETURNING privacy`,
       params
     );
 
@@ -2423,6 +2466,7 @@ app.get('/api/webapp/live/webrtc/viewer-token/:channelRef', requireSessionAuth, 
 app.get('/api/webapp/live/webrtc/streams', requireSessionAuth, requireMemberTier, asyncHandler(livekitStreamController.listStreams));
 app.get('/api/webapp/live/webrtc/status/:channelRef', requireSessionAuth, asyncHandler(livekitStreamController.getStreamStatus));
 app.post('/api/webapp/live/webrtc/end', requireSessionAuth, asyncHandler(livekitStreamController.endStream));
+app.post('/api/webapp/live/webrtc/heartbeat', requireSessionAuth, asyncHandler(livekitStreamController.streamHeartbeat));
 
 // Stream Auto-Chat (Grok-generated messages that post to live chat at intervals)
 const streamAutoController = require('./controllers/streamAutoController');
@@ -2475,10 +2519,10 @@ app.get('/api/webapp/admin/overlay-library', adminGuard, asyncHandler(overlayLib
 
 // ─── Direct Overlay Asset Upload (logos & banners stored on disk) ─────────────
 // Ensure upload directories exist at startup
-const OVERLAY_LOGOS_DIR = '/opt/pnptvapp/public/uploads/overlays/logos';
-const OVERLAY_BANNERS_DIR = '/opt/pnptvapp/public/uploads/overlays/banners';
-fs.mkdirSync(OVERLAY_LOGOS_DIR, { recursive: true });
-fs.mkdirSync(OVERLAY_BANNERS_DIR, { recursive: true });
+const OVERLAY_LOGOS_DIR = path.join(process.cwd(), 'public/uploads/overlays/logos');
+const OVERLAY_BANNERS_DIR = path.join(process.cwd(), 'public/uploads/overlays/banners');
+try { fs.mkdirSync(OVERLAY_LOGOS_DIR, { recursive: true }); } catch (e) { logger.warn(`Could not create overlay logos dir: ${e.message}`); }
+try { fs.mkdirSync(OVERLAY_BANNERS_DIR, { recursive: true }); } catch (e) { logger.warn(`Could not create overlay banners dir: ${e.message}`); }
 
 const overlayAssetStorage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -4438,11 +4482,49 @@ app.delete('/api/webapp/account', requireSessionAuth, deleteAccountLimiter, asyn
 // Fix 4: Validate songId as numeric only (SSRF prevention)
 // Fix 5: Proxy the audio stream through Express (browser cannot reach http://ampache:80)
 // Fix 6: Use parseInt for offset/limit (unary + coerces NaN to 0 silently; parseInt + bounds enforced)
+// Resolve SoundCloud track metadata
+app.post('/api/proxy/media/resolve-soundcloud', requireSessionAuth, asyncHandler(async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ success: false, error: 'URL is required' });
+
+  const metadata = await SoundCloudService.resolveTrack(url);
+  if (!metadata) return res.status(400).json({ success: false, error: 'Failed to resolve SoundCloud track' });
+
+  res.json({ success: true, metadata });
+}));
+
+// Import SoundCloud track to library
+app.post('/api/proxy/media/import-soundcloud', requireSessionAuth, adminGuard, asyncHandler(async (req, res) => {
+  // ... (existing code)
+}));
+
+// Request SoundCloud track
+app.post('/api/webapp/radio/request-soundcloud', requireSessionAuth, asyncHandler(async (req, res) => {
+  const { url } = req.body;
+  const userId = req.user.id;
+
+  if (!url) return res.status(400).json({ success: false, error: 'URL is required' });
+
+  const metadata = await SoundCloudService.resolveTrack(url);
+  if (!metadata) return res.status(400).json({ success: false, error: 'Failed to resolve SoundCloud track' });
+
+  const result = await getPool().query(
+    `INSERT INTO radio_requests (user_id, song_name, artist, status, url, metadata)
+     VALUES ($1, $2, $3, 'pending', $4, $5)
+     RETURNING id`,
+    [userId, metadata.title, metadata.artist, url, JSON.stringify(metadata)]
+  );
+
+  res.json({ success: true, requestId: result.rows[0].id });
+}));
+
 app.get('/api/proxy/media/tracks', requireSessionAuth, asyncHandler(async (req, res) => {
   try {
     const AmpacheService = require('../services/ampacheService');
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
     const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 20), 100);
+    
+    // Fetch from Ampache
     const songs = await AmpacheService.getSongs({ offset, limit });
     const safeTracks = (songs || []).map(s => ({
       id: s.id,
@@ -4451,8 +4533,25 @@ app.get('/api/proxy/media/tracks', requireSessionAuth, asyncHandler(async (req, 
       album: s.album,
       art: s.art,
       time: s.time,
+      provider: 'local'
     }));
-    res.json({ success: true, tracks: safeTracks });
+
+    // Fetch from media_library (for SoundCloud etc.)
+    const dbMedia = await MediaPlayerModel.getMediaLibrary('audio', limit);
+    const dbTracks = (dbMedia || []).map(m => ({
+      id: `db_${m.id}`,
+      title: m.title,
+      artist: m.artist,
+      album: m.category,
+      art: m.cover_url,
+      time: m.duration,
+      provider: m.provider || 'local',
+      external_id: m.external_id,
+      url: m.url
+    }));
+
+    // Combine and return
+    res.json({ success: true, tracks: [...safeTracks, ...dbTracks] });
   } catch (error) {
     logger.error(`Media proxy tracks error: ${error.message}`);
     res.json({ success: true, tracks: [] });
@@ -5533,6 +5632,28 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
     try {
       const { createDaimoPayment } = require('../../config/daimo');
 
+      // Look up performer's wallet for P2P direct tip routing
+      let creatorWallet = null;
+      let creatorChainId = null;
+      let isP2P = false;
+      try {
+        const walletRes = await getPool().query(
+          `SELECT u.creator_wallet_address, u.creator_payout_chain_id
+           FROM performers p
+           JOIN users u ON u.id = p.user_id
+           WHERE p.id::text = $1 OR p.user_id::text = $1
+           LIMIT 1`,
+          [String(resolvedPerformerId)]
+        );
+        if (walletRes.rows.length > 0 && walletRes.rows[0].creator_wallet_address) {
+          creatorWallet = walletRes.rows[0].creator_wallet_address;
+          creatorChainId = walletRes.rows[0].creator_payout_chain_id || 10;
+          isP2P = true;
+        }
+      } catch (walletErr) {
+        logger.warn(`Tips: failed to look up creator wallet for P2P: ${walletErr.message}`);
+      }
+
       // Create payment record first
       const paymentRow = await getPool().query(
         `INSERT INTO payments (user_id, plan_id, amount, currency, provider, payment_method, status, metadata)
@@ -5542,7 +5663,13 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
           userId,
           null,
           numAmount,
-          JSON.stringify({ tipId: tip.id, performerId: String(resolvedPerformerId), planId: `tip-${tip.id}` }),
+          JSON.stringify({
+            tipId: tip.id,
+            performerId: String(resolvedPerformerId),
+            planId: `tip-${tip.id}`,
+            p2p: isP2P,
+            creatorWallet: creatorWallet || null,
+          }),
         ]
       );
       tipPaymentId = paymentRow.rows[0].id;
@@ -5553,6 +5680,9 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
         planId: `tip-${tip.id}`,
         paymentId: tipPaymentId,
         description: `Tip for ${performerName}`,
+        // P2P: route directly to creator's wallet if available
+        destinationAddress: creatorWallet || undefined,
+        destinationChainId: creatorChainId || undefined,
       });
       if (daimoResult.success && daimoResult.daimoPaymentId) {
         // Use internal checkout page (matches /checkout/:paymentId route)
@@ -6373,7 +6503,7 @@ app.get('/app', (req, res) => {
   if (!req.session?.user) {
     return res.redirect('/');
   }
-  return res.redirect(302, 'https://app.pnptv.app');
+  return res.redirect(302, 'https://pnptv.app');
 });
 
 app.get('/app/*', (req, res) => {
@@ -6503,7 +6633,8 @@ const bookCallLimiter = rateLimit({
   message: { success: false, error: 'Please wait before booking again' },
 });
 
-// Member: get booking options (immediate if creator online, else next 5 slots)
+// Member: get booking options — paginated (5 per page), live-status aware
+// Query: ?duration=30|60  ?offset=0
 app.get('/api/webapp/book-call/:creatorId/options',
   requireSessionAuth, bookCallOptionsLimiter,
   asyncHandler(callPackageController.getBookingOptions));

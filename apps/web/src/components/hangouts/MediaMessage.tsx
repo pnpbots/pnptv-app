@@ -1,58 +1,57 @@
-import React, { useState, memo } from "react";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
+import React, { useState } from "react";
 
 interface MediaMessageProps {
-  /** Full URL to the media file */
   mediaUrl: string;
-  /** Type of media: "image" or "video" */
   mediaType: "image" | "video";
-  /** Thumbnail URL (used for image display in bubble, full opens in lightbox) */
   thumbUrl?: string | null;
-  /** Intrinsic width of the media (for aspect ratio) */
   width?: number | null;
-  /** Intrinsic height of the media (for aspect ratio) */
   height?: number | null;
-  /** Called when user clicks an image to expand it in lightbox */
-  onExpandImage: (src: string) => void;
-  /** Whether this message is from the current user */
-  isMe?: boolean;
+  onExpandImage: (url: string) => void;
+  isMe: boolean;
 }
 
-// ─── Component ──────────────────────────────────────────────────────────────
-
-export const MediaMessage = memo(function MediaMessage({
+export function MediaMessage({
   mediaUrl,
   mediaType,
   thumbUrl,
   width,
   height,
   onExpandImage,
-  isMe = false,
+  isMe,
 }: MediaMessageProps) {
   const [imgError, setImgError] = useState(false);
-  const [vidError, setVidError] = useState(false);
-  const [imgLoaded, setImgLoaded] = useState(false);
+  const [videoError, setVideoError] = useState(false);
 
-  // Compute aspect ratio for placeholder sizing
-  const aspectRatio =
-    width && height && width > 0 && height > 0
-      ? Math.min(width / height, 2.5) // Cap at 2.5:1 for very wide images
-      : undefined;
-
-  // Show thumbnail in bubble, open full image in lightbox
-  const displayUrl = mediaType === "image" && thumbUrl ? thumbUrl : mediaUrl;
-
-  // ─── Image rendering ───────────────────────────────────────────────────
+  // Compute a max-width/aspect-ratio hint so images don't reflow.
+  // Capped at 240 px wide to fit in the bubble max-w-[75%] constraint.
+  const aspectStyle: React.CSSProperties =
+    width && height
+      ? { aspectRatio: `${width} / ${height}`, maxWidth: Math.min(width, 240) }
+      : { maxWidth: 240 };
 
   if (mediaType === "image") {
+    const src = thumbUrl || mediaUrl;
+
     if (imgError) {
       return (
-        <div className="mt-2 flex items-center gap-2 text-xs text-pnp-error">
-          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+        <div
+          className="flex items-center justify-center rounded-xl bg-white/5 text-xs text-pnp-textSecondary px-3 py-2"
+          style={{ maxWidth: 240 }}
+        >
+          <svg
+            className="w-4 h-4 mr-1.5 flex-shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3 20.25h18M3.75 3h16.5A.75.75 0 0121 3.75v16.5a.75.75 0 01-.75.75H3.75A.75.75 0 013 20.25V3.75A.75.75 0 013.75 3z"
+            />
           </svg>
-          <span>Image failed to load</span>
+          Image unavailable
         </div>
       );
     }
@@ -60,68 +59,64 @@ export const MediaMessage = memo(function MediaMessage({
     return (
       <button
         onClick={() => onExpandImage(mediaUrl)}
-        className="mt-2 block max-w-[240px] sm:max-w-[300px] rounded-xl overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background group"
+        className={`block rounded-xl overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent ${
+          isMe ? "self-end" : "self-start"
+        }`}
+        style={aspectStyle}
         aria-label="View full image"
       >
-        <div className="relative">
-          {/* Skeleton placeholder while loading */}
-          {!imgLoaded && (
-            <div
-              className="animate-pulse bg-pnp-surface rounded-xl"
-              style={{
-                aspectRatio: aspectRatio ? `${aspectRatio}` : undefined,
-                minHeight: aspectRatio ? undefined : "8rem",
-                width: "100%",
-              }}
-            />
-          )}
-          <img
-            src={displayUrl}
-            alt="Shared image"
-            loading="lazy"
-            className={`max-h-60 rounded-xl object-cover w-full group-hover:opacity-90 group-active:opacity-75 transition-opacity ${
-              imgLoaded ? "" : "absolute inset-0"
-            }`}
-            onLoad={() => setImgLoaded(true)}
-            onError={() => setImgError(true)}
-            style={{ display: imgLoaded ? undefined : "none" }}
-          />
-
-          {/* Expand indicator */}
-          <div className="absolute bottom-2 right-2 w-7 h-7 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
-            </svg>
-          </div>
-        </div>
+        <img
+          src={src}
+          alt=""
+          className="w-full h-full object-cover rounded-xl"
+          style={aspectStyle}
+          onError={() => setImgError(true)}
+          loading="lazy"
+        />
       </button>
     );
   }
 
-  // ─── Video rendering ──────────────────────────────────────────────────
-
-  if (vidError) {
+  // Video
+  if (videoError) {
     return (
-      <div className="mt-2 flex items-center gap-2 text-xs text-pnp-error">
-        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+      <div
+        className="flex items-center justify-center rounded-xl bg-white/5 text-xs text-pnp-textSecondary px-3 py-2"
+        style={{ maxWidth: 240 }}
+      >
+        <svg
+          className="w-4 h-4 mr-1.5 flex-shrink-0"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={1.5}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 01-2.25-2.25V9m12.841 9.091L16.5 19.5m-1.409-1.409c.407-.407.659-.97.659-1.591v-9a2.25 2.25 0 00-2.25-2.25h-9c-.621 0-1.184.252-1.591.659"
+          />
         </svg>
-        <span>Video failed to load</span>
+        Video unavailable
       </div>
     );
   }
 
   return (
-    <div className="mt-2 max-w-[240px] sm:max-w-[300px] rounded-xl overflow-hidden bg-pnp-surface">
+    <div
+      className={`rounded-xl overflow-hidden bg-black ${isMe ? "self-end" : "self-start"}`}
+      style={aspectStyle}
+    >
       <video
         src={mediaUrl}
+        poster={thumbUrl || undefined}
         controls
-        preload="metadata"
         playsInline
-        className="w-full max-h-60 object-cover"
-        onError={() => setVidError(true)}
-        aria-label="Shared video"
+        preload="metadata"
+        className="w-full h-full object-contain rounded-xl"
+        style={aspectStyle}
+        onError={() => setVideoError(true)}
       />
     </div>
   );
-});
+}

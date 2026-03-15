@@ -30,7 +30,6 @@ import {
   type FeaturedPerformer,
 } from "@/lib/api";
 import type { CreatorCardCreator } from "./CreatorCard";
-import { AvatarFallback } from "./AvatarFallback";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1183,7 +1182,7 @@ export function BookCallModal({
               <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
                 {creator.photo_url
                   ? <img src={creator.photo_url} alt="" className="w-full h-full object-cover" />
-                  : <AvatarFallback username={creator.username} size={32} />
+                  : <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>{creator.username?.slice(0, 2).toUpperCase()}</div>
                 }
               </div>
             )}

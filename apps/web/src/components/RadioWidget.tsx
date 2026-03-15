@@ -1,8 +1,17 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
-import type { MediaTrack } from "@/lib/api";
+import { resolveSoundCloud, importSoundCloud, requestSoundCloud, type MediaTrack } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function SoundCloudIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M11.56 17H19c2.21 0 4-1.79 4-4s-1.79-4-4-4c-.11 0-.21 0-.32.02C17.82 7.16 16.06 6 14 6c-.26 0-.51.02-.75.07C12.58 4.39 10.93 3 8.89 3c-2.32 0-4.28 1.71-4.63 3.96C1.91 7.28 0 9.38 0 12c0 2.1 1.27 3.91 3.1 4.68.03.01.05.02.08.02h8.38v.3c0 .17.13.3.3.3s.3-.13.3-.3V17z" />
+    </svg>
+  );
+}
 
 function formatTime(s: number): string {
   if (!s || !isFinite(s)) return "0:00";
@@ -173,15 +182,20 @@ const PlaylistRow = React.memo(function PlaylistRow({ track, isActive, isPlaying
 
       {/* Title + artist */}
       <div className="flex-1 min-w-0">
-        <p
-          className={[
-            "text-xs truncate leading-tight",
-            isActive ? "font-semibold" : "text-pnp-textPrimary",
-          ].join(" ")}
-          style={isActive ? { color: "#D946EF" } : undefined}
-        >
-          {track.title}
-        </p>
+        <div className="flex items-center gap-1.5">
+          <p
+            className={[
+              "text-xs truncate leading-tight",
+              isActive ? "font-semibold" : "text-pnp-textPrimary",
+            ].join(" ")}
+            style={isActive ? { color: "#D946EF" } : undefined}
+          >
+            {track.title}
+          </p>
+          {track.provider === "soundcloud" && (
+            <SoundCloudIcon className="w-3 h-3 text-[#ff5500] flex-shrink-0" />
+          )}
+        </div>
         {artistName && (
           <p className="text-[10px] text-pnp-textSecondary truncate leading-tight mt-0.5">{artistName}</p>
         )}
@@ -225,6 +239,50 @@ export function RadioWidget() {
     toggleRepeat,
     loadMore,
   } = useMusicPlayer();
+
+  const { isAdmin } = useAuth();
+  const [scUrl, setScUrl] = useState("");
+  const [isResolving, setIsResolving] = useState(false);
+
+  // User Request State
+  const [reqUrl, setReqUrl] = useState("");
+  const [isRequesting, setIsRequesting] = useState(false);
+
+  const handleRequestSC = async () => {
+    if (!reqUrl.trim()) return;
+    setIsRequesting(true);
+    try {
+      const res = await requestSoundCloud(reqUrl);
+      if (res.success) {
+        alert("Request sent successfully! An admin will review it.");
+        setReqUrl("");
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to send request");
+    } finally {
+      setIsRequesting(false);
+    }
+  };
+
+  const handleImportSC = async () => {
+    if (!scUrl.trim()) return;
+    setIsResolving(true);
+    try {
+      const res = await resolveSoundCloud(scUrl);
+      if (res.success && res.metadata) {
+        const importRes = await importSoundCloud(res.metadata);
+        if (importRes.success) {
+          alert("Track imported successfully!");
+          setScUrl("");
+          loadMore(); // Refresh list
+        }
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to import track");
+    } finally {
+      setIsResolving(false);
+    }
+  };
 
   // Panel open/close
   const [isOpen, setIsOpen] = useState(false);
@@ -434,6 +492,52 @@ export function RadioWidget() {
       {/* ── Body ─────────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex flex-col">
 
+        {/* SoundCloud Import Bar (Admin Only) */}
+        {isAdmin && (
+          <div className="px-4 py-2 bg-white/5 border-b border-white/5 flex gap-2">
+            <input
+              type="text"
+              value={scUrl}
+              onChange={(e) => setScUrl(e.target.value)}
+              placeholder="SoundCloud URL..."
+              className="flex-1 bg-black/40 border border-white/10 rounded px-2 py-1 text-[10px] text-white focus:outline-none focus:border-purple-500"
+            />
+            <button
+              onClick={handleImportSC}
+              disabled={isResolving || !scUrl.trim()}
+              className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-[10px] px-2 py-1 rounded transition-colors"
+            >
+              {isResolving ? "..." : "Add"}
+            </button>
+          </div>
+        )}
+
+        {/* Request Song Bar (Regular Users) */}
+        {!isAdmin && (
+          <div className="px-4 py-2 bg-white/5 border-b border-white/5 flex flex-col gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <SoundCloudIcon className="w-3 h-3 text-[#ff5500]" />
+              <span className="text-[10px] text-pnp-textSecondary font-medium uppercase tracking-tight">Request Track</span>
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={reqUrl}
+                onChange={(e) => setReqUrl(e.target.value)}
+                placeholder="Paste SoundCloud link..."
+                className="flex-1 bg-black/40 border border-white/10 rounded px-2 py-1 text-[10px] text-white focus:outline-none focus:border-[#ff5500]"
+              />
+              <button
+                onClick={handleRequestSC}
+                disabled={isRequesting || !reqUrl.trim()}
+                className="bg-[#ff5500] hover:bg-[#ff4400] disabled:opacity-50 text-white text-[10px] px-2 py-1 rounded transition-colors font-semibold"
+              >
+                {isRequesting ? "..." : "Request"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Loading tracks state (initial) */}
         {isLoadingTracks && !hasTrack && tracks.length === 0 && !loadError && (
           <div className="flex flex-col items-center justify-center gap-3 py-10 px-4">
@@ -503,9 +607,14 @@ export function RadioWidget() {
 
               {/* Track title + artist */}
               <div className="mt-3">
-                <p className="text-sm font-semibold text-pnp-textPrimary truncate leading-tight">
-                  {hasTrack ? currentTrack.title : "Select a track"}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-pnp-textPrimary truncate leading-tight">
+                    {hasTrack ? currentTrack.title : "Select a track"}
+                  </p>
+                  {currentTrack?.provider === "soundcloud" && (
+                    <SoundCloudIcon className="w-4 h-4 text-[#ff5500]" />
+                  )}
+                </div>
                 {artistName ? (
                   <p className="text-xs text-pnp-textSecondary truncate mt-0.5">{artistName}</p>
                 ) : !hasTrack ? (

@@ -76,10 +76,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         setIsLoading(false);
       }
 
-      // Register push subscription if not already subscribed
+      // Always re-register push subscription to keep it fresh
       try {
-        const subscribed = await isPushSubscribed();
-        if (!subscribed && Notification.permission === "granted") {
+        if (Notification.permission === "granted") {
           await subscribeToPush();
         }
       } catch {

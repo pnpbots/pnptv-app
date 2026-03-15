@@ -16,33 +16,7 @@ function useScreenCaptureGuard() {
   useEffect(() => {
     const root = document.getElementById("root");
 
-    // ── 1. Blur content when app loses visibility (app switcher, screen recording) ──
-    const onVisibility = () => {
-      if (!root) return;
-      if (document.visibilityState === "hidden") {
-        root.style.filter = "blur(30px)";
-        root.style.transition = "filter 0.05s";
-      } else {
-        root.style.filter = "";
-      }
-    };
-
-    // ── 2. Also blur on window blur (catches iOS app-switcher preview) ──
-    // Skip blur when a Jitsi/8x8 iframe is active (clicking inside iframe triggers window blur)
-    const onWindowBlur = () => {
-      if (root) {
-        const activeEl = document.activeElement;
-        const iframeSrc = (activeEl as HTMLIFrameElement)?.src || "";
-        if (activeEl?.tagName === "IFRAME" && (iframeSrc.includes("8x8.vc") || iframeSrc.includes("jit.si"))) {
-          return; // User clicked inside the video call iframe — don't blur
-        }
-        root.style.filter = "blur(30px)";
-        root.style.transition = "filter 0.05s";
-      }
-    };
-    const onWindowFocus = () => {
-      if (root) root.style.filter = "";
-    };
+    // ── 1 & 2. Visibility/window blur guards — DISABLED ──
 
     // ── 3. Block right-click context menu (prevents "Save Image As") ──
     const onContextMenu = (e: MouseEvent) => {
@@ -97,20 +71,14 @@ function useScreenCaptureGuard() {
       }
     }
 
-    document.addEventListener("visibilitychange", onVisibility);
     document.addEventListener("contextmenu", onContextMenu);
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("dragstart", onDragStart);
-    window.addEventListener("blur", onWindowBlur);
-    window.addEventListener("focus", onWindowFocus);
 
     return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
       document.removeEventListener("contextmenu", onContextMenu);
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("dragstart", onDragStart);
-      window.removeEventListener("blur", onWindowBlur);
-      window.removeEventListener("focus", onWindowFocus);
     };
   }, []);
 }

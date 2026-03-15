@@ -137,7 +137,7 @@ const unsubscribeFromCreator = async (req, res) => {
 const getWalletAddress = async (req, res) => {
   try {
     const { rows } = await query(
-      'SELECT creator_wallet_address, creator_wallet_verified, payout_method, meru_account FROM users WHERE id = $1',
+      'SELECT creator_wallet_address, creator_wallet_verified, payout_method, meru_account, creator_payout_chain_id, fiat_payout_method, fiat_payout_account FROM users WHERE id = $1',
       [req.user.id]
     );
     return res.json({
@@ -146,6 +146,9 @@ const getWalletAddress = async (req, res) => {
       verified: rows[0]?.creator_wallet_verified || false,
       payoutMethod: rows[0]?.payout_method || 'crypto',
       meruAccount: rows[0]?.meru_account || null,
+      payoutChainId: rows[0]?.creator_payout_chain_id || 10,
+      fiatPayoutMethod: rows[0]?.fiat_payout_method || null,
+      fiatPayoutAccount: rows[0]?.fiat_payout_account || null,
     });
   } catch (err) {
     logger.error('getWalletAddress error', err);
@@ -156,16 +159,32 @@ const getWalletAddress = async (req, res) => {
 // POST /api/webapp/creator/wallet
 const saveWalletAddress = async (req, res) => {
   try {
-    const { address, payoutMethod, meruAccount } = req.body || {};
-    const method = payoutMethod === 'meru' ? 'meru' : 'crypto';
+    const { address, payoutMethod, meruAccount, chainId, fiatProvider, fiatAccount } = req.body || {};
+    const SUPPORTED_CHAIN_IDS = [10, 8453, 42161, 137, 1];
+    const method = payoutMethod === 'meru' ? 'meru' : payoutMethod === 'fiat' ? 'fiat' : 'crypto';
 
     if (method === 'crypto') {
       if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
         return res.status(400).json({ error: 'Invalid Ethereum wallet address. Must be 0x followed by 40 hex characters.' });
       }
+      const resolvedChainId = chainId && SUPPORTED_CHAIN_IDS.includes(Number(chainId)) ? Number(chainId) : 10;
       await query(
-        'UPDATE users SET creator_wallet_address = $1, payout_method = $2, meru_account = NULL WHERE id = $3',
-        [address.toLowerCase(), 'crypto', req.user.id]
+        'UPDATE users SET creator_wallet_address = $1, payout_method = $2, meru_account = NULL, creator_payout_chain_id = $3 WHERE id = $4',
+        [address.toLowerCase(), 'crypto', resolvedChainId, req.user.id]
+      );
+    } else if (method === 'fiat') {
+      const VALID_FIAT_PROVIDERS = ['venmo', 'cashapp', 'zelle', 'paypal', 'wise', 'revolut'];
+      const provider = (fiatProvider || '').trim().toLowerCase();
+      const account = (fiatAccount || '').trim();
+      if (!VALID_FIAT_PROVIDERS.includes(provider)) {
+        return res.status(400).json({ error: 'Invalid fiat provider. Choose venmo, cashapp, zelle, paypal, wise, or revolut.' });
+      }
+      if (!account || account.length > 200) {
+        return res.status(400).json({ error: 'Fiat account handle/email is required (max 200 chars).' });
+      }
+      await query(
+        'UPDATE users SET payout_method = $1, fiat_payout_method = $2, fiat_payout_account = $3, creator_wallet_address = NULL, meru_account = NULL WHERE id = $4',
+        ['fiat', provider, account, req.user.id]
       );
     } else {
       const meru = (meruAccount || '').trim();

@@ -55,7 +55,7 @@ interface EditForm {
 // ---------------------------------------------------------------------------
 
 export default function UserDetail() {
-  const { id: userId } = useParams<{ id: string }>{};
+  const { id: userId } = useParams<{ id: string }>();
 
   const [user, setUser] = useState<AdminUser | null>(null);
   const [plans, setPlans] = useState<AdminPlan[]>([]);

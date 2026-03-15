@@ -11,6 +11,21 @@ const logger = require('../../../utils/logger');
 const { getPool } = require('../../../config/postgres');
 const livekitStreamService = require('../../services/livekitStreamService');
 
+// Lazy-load tokenService so a load failure degrades only the heartbeat
+// endpoint rather than crashing the entire controller at require time.
+let _tokenService = null;
+function getTokenService() {
+  if (!_tokenService) {
+    try {
+      _tokenService = require('../../services/tokenService');
+    } catch (e) {
+      logger.error('[livekitStreamController] tokenService failed to load — streamHeartbeat will be unavailable:', e.message);
+      _tokenService = null;
+    }
+  }
+  return _tokenService;
+}
+
 /**
  * GET /api/webapp/live/webrtc/config
  *
@@ -82,6 +97,13 @@ const getViewerToken = async (req, res) => {
     const token = await livekitStreamService.generateViewerToken(
       channelRef, user.id, displayName
     );
+
+    if (!token) {
+      return res.status(402).json({
+        success: false,
+        error: 'Insufficient funds. Please top up your tokens to watch.',
+      });
+    }
 
     return res.json({
       success: true,
@@ -196,10 +218,46 @@ const endStream = async (req, res) => {
   }
 };
 
+const streamHeartbeat = async (req, res) => {
+  const user = req.session.user;
+  const { channelRef } = req.body;
+
+  if (!channelRef) {
+    return res.status(400).json({ success: false, error: 'channelRef is required' });
+  }
+
+  try {
+    const svc = getTokenService();
+    if (!svc) {
+      // tokenService unavailable — allow the heartbeat silently so the stream is not interrupted
+      logger.warn('streamHeartbeat: tokenService unavailable, skipping token deduction', { userId: user.id, channelRef });
+      return res.json({ success: true, newBalance: null });
+    }
+
+    const result = await svc.processStreamHeartbeat(user.id, channelRef);
+
+    if (!result.success) {
+      if (result.error === 'INSUFFICIENT_FUNDS') {
+        return res.status(402).json({ success: false, error: 'Insufficient funds' });
+      }
+      if (result.error === 'STREAMER_NOT_FOUND') {
+        return res.status(404).json({ success: false, error: 'Streamer not found' });
+      }
+      return res.status(500).json({ success: false, error: 'Heartbeat failed' });
+    }
+
+    return res.json({ success: true, newBalance: result.newBalance });
+  } catch (err) {
+    logger.error('streamHeartbeat error', err);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+};
+
 module.exports = {
   getStreamerConfig,
   getViewerToken,
   listStreams,
   getStreamStatus,
   endStream,
+  streamHeartbeat,
 };

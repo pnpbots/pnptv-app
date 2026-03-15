@@ -13,6 +13,7 @@ import {
   getLiveStreams,
   getAllPerformers,
   getWebRTCStreams,
+  getWebRTCStreamStatus,
   sendTip,
   TIP_AMOUNTS,
   getStreamOverlayPublic,
@@ -81,22 +82,26 @@ export default function Stream() {
   const loadStream = useCallback(() => {
     if (!streamId) return Promise.resolve();
     const channelRef = extractChannelRef(streamId);
+    console.log("[Stream] Looking for:", streamId, "channelRef:", channelRef);
 
     return Promise.all([
       getWebRTCStreams().catch(() => ({ streams: [] })),
       getLiveStreams().catch(() => ({ streams: [] })),
       getAllPerformers().catch(() => ({ performers: [] })),
     ])
-      .then(([webrtcData, hlsData, perfData]) => {
+      .then(async ([webrtcData, hlsData, perfData]) => {
         const webrtcStreams = webrtcData.streams || [];
         const hlsStreams = hlsData.streams || [];
         const performers = perfData.performers || [];
+
+        console.log("[Stream] WebRTC streams:", webrtcStreams.length, "HLS streams:", hlsStreams.length, "Performers:", performers.length);
 
         // 1. Check WebRTC (LiveKit) streams — preferred, sub-500ms latency
         const webrtcMatch = webrtcStreams.find(
           (s: any) => s.channelRef === streamId || s.channelRef === channelRef || s.id === streamId
         );
         if (webrtcMatch && webrtcMatch.isLive) {
+          console.log("[Stream] Matched WebRTC stream:", webrtcMatch.channelRef);
           setStream({
             id: webrtcMatch.channelRef || webrtcMatch.id,
             name: webrtcMatch.name,
@@ -113,6 +118,7 @@ export default function Stream() {
         // 2. Direct match in Restreamer HLS streams
         const hlsMatch = hlsStreams.find((s: any) => s.id === streamId || s.id === channelRef);
         if (hlsMatch && hlsMatch.isLive) {
+          console.log("[Stream] Matched HLS stream:", hlsMatch.id);
           setStream(hlsMatch);
           setUseWebRTC(false);
           setError(null);
@@ -128,6 +134,7 @@ export default function Stream() {
             (p.slug && p.slug === streamId)
         );
         if (performer && performer.isLive && performer.hlsUrl) {
+          console.log("[Stream] Matched performer:", performer.id);
           setStream({
             id: performer.id,
             name: performer.displayName,
@@ -146,6 +153,7 @@ export default function Stream() {
           (s: any) => s.id.includes(streamId) || (channelRef && s.id.includes(channelRef))
         );
         if (fuzzyMatch) {
+          console.log("[Stream] Fuzzy-matched HLS stream:", fuzzyMatch.id);
           setStream(fuzzyMatch);
           setUseWebRTC(false);
           setError(null);
@@ -153,6 +161,56 @@ export default function Stream() {
           return;
         }
 
+        // 5. Check performer info to build an "offline" placeholder — the channel exists
+        // but nobody is streaming right now. This prevents "stream not found" when a valid
+        // creator navigates to their own stream URL before going live.
+        const offlinePerformer = performer || performers.find(
+          (p: any) =>
+            (p.live_channel && p.live_channel === channelRef) ||
+            (p.live_channel && p.live_channel === streamId)
+        );
+        if (offlinePerformer) {
+          console.log("[Stream] Performer found but offline:", offlinePerformer.id);
+          setStream({
+            id: channelRef || streamId,
+            name: offlinePerformer.displayName || offlinePerformer.name || channelRef || streamId,
+            description: offlinePerformer.bio || "",
+            hlsUrl: "",
+            isLive: false,
+          });
+          setUseWebRTC(false);
+          setError(null);
+          setStreamError(false);
+          return;
+        }
+
+        // 6. Last resort: call the WebRTC status endpoint directly for the specific channel.
+        // If the channel exists in LiveKit (room was created even with 0 participants), show
+        // it as "offline" rather than "not found". This handles the streamer's own page view
+        // before they go live.
+        if (channelRef) {
+          try {
+            const status = await getWebRTCStreamStatus(channelRef);
+            console.log("[Stream] Direct channel status for", channelRef, ":", status);
+            // Even if isLive=false, we know the channel ref is valid — show an offline page
+            // instead of a hard "not found" error so the streamer can still see their page.
+            setStream({
+              id: channelRef,
+              name: channelRef.replace(/^pnptv-/, "").replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+              description: "",
+              hlsUrl: "",
+              isLive: status.isLive || false,
+            });
+            setUseWebRTC(status.isLive || false);
+            setError(null);
+            setStreamError(false);
+            return;
+          } catch {
+            console.log("[Stream] Channel status check failed for", channelRef, "- treating as not found");
+          }
+        }
+
+        console.log("[Stream] No stream found for:", streamId);
         setError(t.live.streamNotFound);
         setStreamError(true);
       })

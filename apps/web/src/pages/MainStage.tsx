@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import { Card, Button } from "@pnptv/ui-kit";
-import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { PermissionGate } from "@/components/PermissionGate";
@@ -16,8 +15,7 @@ import { UpcomingEvents } from "@/components/events";
 
 export default function MainStage() {
   const { user, isAuthenticated } = useAuth();
-  const { isFree, isAdmin } = useTier();
-  const navigate = useNavigate();
+  const { isAdmin } = useTier();
   const [occupancy, setOccupancy] = useState<number>(0);
   const [occupancyUsers, setOccupancyUsers] = useState<
     Array<{ userId: string; displayName: string; role: string; joinedAt: string }>
@@ -101,39 +99,6 @@ export default function MainStage() {
     setJitsiApi(api);
   }, []);
 
-  // ─── Free tier gate ────────────────────────────────────────────────────
-
-  if (isAuthenticated && isFree) {
-    return (
-      <div className="p-4 pb-24 max-w-2xl mx-auto">
-        <Helmet>
-          <title>Main Stage | PNPtv</title>
-        </Helmet>
-        <div className="flex flex-col items-center justify-center min-h-[60vh] px-6">
-          <div
-            className="w-24 h-24 rounded-full flex items-center justify-center mb-6"
-            style={{ background: "linear-gradient(135deg, rgba(94,209,196,0.15), rgba(212,0,122,0.15))", border: "1px solid rgba(94,209,196,0.3)" }}
-          >
-            <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#5ED1C4" }}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Main Stage</h2>
-          <p className="text-sm text-pnp-textSecondary text-center max-w-xs mb-8">
-            Join the 24/7 community video room to hang out, chat, and vibe with the community. Upgrade to Member to unlock access.
-          </p>
-          <button
-            onClick={() => navigate("/subscribe")}
-            className="px-6 py-3 rounded-full text-base font-semibold text-white"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-          >
-            Upgrade to Member
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   // ─── Joined: fullscreen with side panel + mod bot ──────────────────────
 
   if (joined && iframeSrc) {
@@ -204,8 +169,8 @@ export default function MainStage() {
           </div>
         )}
 
-        {/* Mobile in-call bar — paid users only, portrait=bottom, landscape=side */}
-        {userId && !isFree && (
+        {/* Mobile in-call bar */}
+        {userId && (
           <div className="sm:hidden">
             <MobileBottomBar
               groupId={1}

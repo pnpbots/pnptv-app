@@ -243,21 +243,6 @@ const joinGroup = async (req, res) => {
   const groupId = parseInt(req.params.id);
   if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
 
-  // Entitlement check: pnp-member required to join subgroups
-  const joinRole = user.role || req.session?.user?.role || '';
-  const joinIsAdmin = joinRole === 'admin' || joinRole === 'superadmin';
-  if (!joinIsAdmin) {
-    const EntitlementAccessService = require('../../services/entitlementAccessService');
-    const joinHasMembership = await EntitlementAccessService.hasEntitlement(String(user.id || req.session?.user?.id), 'pnp-member');
-    if (!joinHasMembership) {
-      return res.status(403).json({
-        success: false,
-        error: 'Member subscription required',
-        code: 'MEMBER_REQUIRED',
-      });
-    }
-  }
-
   try {
     const { rows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
@@ -427,21 +412,6 @@ const sendMessage = async (req, res) => {
   const { content } = req.body;
 
   if (!content?.trim()) return res.status(400).json({ error: 'Content required' });
-
-  // Entitlement check: pnp-member required to send messages in subgroups
-  const msgRole = user.role || req.session?.user?.role || '';
-  const msgIsAdmin = msgRole === 'admin' || msgRole === 'superadmin';
-  if (!msgIsAdmin) {
-    const EntitlementAccessService = require('../../services/entitlementAccessService');
-    const msgHasMembership = await EntitlementAccessService.hasEntitlement(String(user.id || req.session?.user?.id), 'pnp-member');
-    if (!msgHasMembership) {
-      return res.status(403).json({
-        success: false,
-        error: 'Member subscription required',
-        code: 'MEMBER_REQUIRED',
-      });
-    }
-  }
 
   try {
     if (!(await isMember(groupId, user.id))) {

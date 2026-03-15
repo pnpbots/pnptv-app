@@ -1455,6 +1455,36 @@ function initSocketIO(io) {
         // SOCK-H4: Do not send rtmpTarget to the client — it exposes the internal
         // RTMP server address and stream key which are server-side concerns only.
         socket.emit('stream:started', { channelRef });
+
+        // Notify followers
+        const { getBotInstance } = require('../core/bot');
+        const bot = getBotInstance();
+        if (bot) {
+          LiveStreamModel.notifyFollowers(
+            user.id,
+            {
+              hostName: user.first_name || user.username,
+              title: 'Live Stream',
+              streamId: channelRef,
+            },
+            async (subscriberId, message, streamId) => {
+              try {
+                await bot.telegram.sendMessage(
+                  subscriberId,
+                  message,
+                  {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                      [Markup.button.callback('📺 Join Stream', `live_join_${streamId}`)],
+                    ]),
+                  }
+                );
+              } catch (error) {
+                logger.warn('Failed to send notification to follower', { subscriberId, error: error.message });
+              }
+            }
+          ).catch(err => logger.error('Error notifying followers:', err));
+        }
       } catch (err) {
         logger.error('stream:start error', { userId: user.id, channelRef, err });
         socket.emit('stream:error', { message: 'Failed to start stream. Please try again.' });
@@ -1558,8 +1588,7 @@ function initSocketIO(io) {
 
     // ── JaaS → Restreamer broadcast bridge (DISABLED) ───────────────────────
     //
-    /*
-    socket.on('stream:start-jaas', async ({ conferenceId, roomName } = {}) => {
+        socket.on('stream:start-jaas', async ({ conferenceId, roomName } = {}) => {
       if (!conferenceId || typeof conferenceId !== 'string' || conferenceId.length > 512) {
         socket.emit('stream:error', { message: 'Invalid or missing conferenceId for JaaS broadcast.' });
         return;
@@ -1607,14 +1636,12 @@ function initSocketIO(io) {
         socket.emit('stream:jaas-stopped', { conferenceId });
       }
     });
-    */
 
     socket.on('disconnect', async () => {
       logger.info(`Socket disconnected: user ${user.id}`);
 
       // Clean up any running JaaS broadcast (DISABLED)
-      /*
-      if (socket.data.jaasBroadcastActive && socket.data.jaasConferenceId) {
+            if (socket.data.jaasBroadcastActive && socket.data.jaasConferenceId) {
         const conferenceId = socket.data.jaasConferenceId;
         jaasBroadcastService.stopBroadcast(user.id, conferenceId).catch((err) => {
           logger.warn('JaaS broadcast cleanup on disconnect failed', { userId: user.id, conferenceId, error: err.message });
@@ -1622,7 +1649,6 @@ function initSocketIO(io) {
         socket.data.jaasBroadcastActive = false;
         socket.data.jaasConferenceId    = null;
       }
-      */
 
       // Clean up any running FFmpeg browser-stream process
       if (socket.data.ffmpegProcess) {
@@ -1661,13 +1687,14 @@ function initSocketIO(io) {
       if (presenceEntry) {
         presenceEntry.socketIds.delete(socket.id);
         if (presenceEntry.socketIds.size === 0) {
-          // Last tab/connection closed — remove from presence and notify groups
-          for (const gid of presenceEntry.hangoutGroupIds) {
-            presenceEntry.hangoutGroupIds.delete(gid);
-            // Emit after a tiny delay so the socket fully disconnects first
+          // Last tab/connection closed — remove from presence and notify groups.
+          // Snapshot the set before clearing to avoid mutating during iteration.
+          const groupIds = [...presenceEntry.hangoutGroupIds];
+          presenceEntry.hangoutGroupIds.clear();
+          onlineUsersMap.delete(user.id);
+          for (const gid of groupIds) {
             setImmediate(() => emitGroupPresence(io, gid));
           }
-          onlineUsersMap.delete(user.id);
         }
       }
     });

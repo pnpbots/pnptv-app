@@ -288,49 +288,12 @@ export default function SocialFeedTabs({
       {/* Post Composer (hidden on WoF/Following tabs when showComposer=true) */}
       {showComposer && isAuthenticated && activeTab === "all" && (
         <div className="mb-6">
-          {isActiveCreator && showBulkUpload ? (
-            <div className="glass-card-sm p-4">
-              <BulkVideoUpload
-                onSuccess={(newPosts) => {
-                  setPosts((prev) => [...newPosts.reverse(), ...prev]);
-                  setShowBulkUpload(false);
-                }}
-                onCancel={() => setShowBulkUpload(false)}
-              />
-            </div>
-          ) : (
-            <>
-              <PostComposer
-                compact
-                onPostCreated={(newPost) => {
-                  setPosts((prev) => [newPost, ...prev]);
-                }}
-              />
-              {isActiveCreator && (
-                <button
-                  onClick={() => setShowBulkUpload(true)}
-                  className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 hover:bg-white/5 hover:border-white/20 transition-colors w-full justify-center"
-                  style={{ color: "#E69138" }}
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={1.5}
-                    aria-hidden="true"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
-                    />
-                  </svg>
-                  {t.bulkUploadVideos}
-                </button>
-              )}
-            </>
-          )}
+          <PostComposer
+            compact
+            onPostCreated={(newPost) => {
+              setPosts((prev) => [newPost, ...prev]);
+            }}
+          />
         </div>
       )}
 

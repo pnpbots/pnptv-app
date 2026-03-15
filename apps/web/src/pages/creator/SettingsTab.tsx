@@ -14,6 +14,23 @@ const TIERS: { key: "ice" | "crystal" | "diamond"; label: string; price: number;
   { key: "diamond", label: "Diamond", price: 15, emoji: "💎" },
 ];
 
+const CHAIN_OPTIONS: { id: number; name: string }[] = [
+  { id: 10, name: "Optimism" },
+  { id: 8453, name: "Base" },
+  { id: 42161, name: "Arbitrum" },
+  { id: 137, name: "Polygon" },
+  { id: 1, name: "Ethereum" },
+];
+
+const FIAT_PROVIDERS: { key: string; label: string }[] = [
+  { key: "venmo", label: "Venmo" },
+  { key: "cashapp", label: "CashApp" },
+  { key: "zelle", label: "Zelle" },
+  { key: "paypal", label: "PayPal" },
+  { key: "wise", label: "Wise" },
+  { key: "revolut", label: "Revolut" },
+];
+
 interface SettingsTabProps {
   dashboard: DashboardData & { success: boolean };
   t: CreatorStrings;
@@ -21,13 +38,20 @@ interface SettingsTabProps {
 
 export function SettingsTab({ dashboard, t }: SettingsTabProps) {
   // Payout method state
-  const [payoutMethod, setPayoutMethod] = useState<"crypto" | "meru">("crypto");
+  const [payoutMethod, setPayoutMethod] = useState<"crypto" | "meru" | "fiat">("crypto");
   const [walletAddress, setWalletAddress] = useState<string>(dashboard.walletAddress || "");
   const [meruAccount, setMeruAccount] = useState<string>("");
   const [walletLoading, setWalletLoading] = useState(true);
   const [walletSaving, setWalletSaving] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [walletSuccess, setWalletSuccess] = useState<string | null>(null);
+
+  // Chain preference state (for crypto payouts)
+  const [payoutChainId, setPayoutChainId] = useState<number>(10);
+
+  // Fiat payout state
+  const [fiatProvider, setFiatProvider] = useState<string>("");
+  const [fiatAccount, setFiatAccount] = useState<string>("");
 
   // Load wallet data
   const loadWallet = useCallback(async () => {
@@ -38,6 +62,9 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
         setPayoutMethod(res.payoutMethod || "crypto");
         setWalletAddress(res.address || "");
         setMeruAccount(res.meruAccount || "");
+        setPayoutChainId(res.payoutChainId || 10);
+        setFiatProvider(res.fiatPayoutMethod || "");
+        setFiatAccount(res.fiatPayoutAccount || "");
       }
     } catch {
       // Non-critical
@@ -62,7 +89,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
       }
       setWalletSaving(true);
       try {
-        const res = await saveCreatorWallet({ payoutMethod: "crypto", address: trimmed });
+        const res = await saveCreatorWallet({ payoutMethod: "crypto", address: trimmed, chainId: payoutChainId });
         if (res.success) {
           setWalletSuccess(t.walletSavedCrypto);
           setWalletAddress(trimmed.toLowerCase());
@@ -71,6 +98,32 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
         }
       } catch (err) {
         setWalletError(err instanceof Error ? err.message : t.errorSaveWallet);
+      } finally {
+        setWalletSaving(false);
+      }
+    } else if (payoutMethod === "fiat") {
+      if (!fiatProvider) {
+        setWalletError(t.errorFiatProviderEmpty || "Select a payout provider.");
+        return;
+      }
+      if (!fiatAccount.trim()) {
+        setWalletError(t.errorFiatAccountEmpty || "Enter your account handle or email.");
+        return;
+      }
+      setWalletSaving(true);
+      try {
+        const res = await saveCreatorWallet({
+          payoutMethod: "fiat",
+          fiatProvider,
+          fiatAccount: fiatAccount.trim(),
+        });
+        if (res.success) {
+          setWalletSuccess(t.walletSavedFiat || "Fiat payout info saved successfully.");
+        } else {
+          setWalletError((res as { error?: string }).error || "Failed to save fiat payout info.");
+        }
+      } catch (err) {
+        setWalletError(err instanceof Error ? err.message : "Failed to save fiat payout info.");
       } finally {
         setWalletSaving(false);
       }
@@ -107,9 +160,10 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
         {/* Method selector */}
         <div className="flex gap-2 mb-4">
           {([
-            { key: "meru", label: t.payoutMeruLabel, icon: "📱" },
-            { key: "crypto", label: t.payoutCryptoLabel, icon: "🔑" },
-          ] as const).map((opt) => (
+            { key: "meru" as const, label: t.payoutMeruLabel, icon: "📱" },
+            { key: "crypto" as const, label: t.payoutCryptoLabel, icon: "🔑" },
+            { key: "fiat" as const, label: t.payoutFiatLabel || "Fiat", icon: "💵" },
+          ]).map((opt) => (
             <button
               key={opt.key}
               onClick={() => {
@@ -153,6 +207,36 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
               className="w-full px-3 py-2.5 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors"
             />
           </div>
+        ) : payoutMethod === "fiat" ? (
+          <div className="mb-3">
+            <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>{t.fiatInputHint || "Select your preferred payout provider and enter your account."}</p>
+            <select
+              value={fiatProvider}
+              onChange={(e) => {
+                setFiatProvider(e.target.value);
+                setWalletError(null);
+                setWalletSuccess(null);
+              }}
+              className="w-full px-3 py-2.5 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors mb-2"
+            >
+              <option value="" className="bg-[#1a1a2e]">— Select provider —</option>
+              {FIAT_PROVIDERS.map((p) => (
+                <option key={p.key} value={p.key} className="bg-[#1a1a2e]">{p.label}</option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={fiatAccount}
+              onChange={(e) => {
+                setFiatAccount(e.target.value);
+                setWalletError(null);
+                setWalletSuccess(null);
+              }}
+              placeholder={t.fiatAccountPlaceholder || "username, email, or phone"}
+              autoComplete="off"
+              className="w-full px-3 py-2.5 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors"
+            />
+          </div>
         ) : (
           <div className="mb-3">
             <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>{t.cryptoInputHint}</p>
@@ -169,6 +253,16 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
               autoComplete="off"
               className="w-full px-3 py-2.5 rounded-lg text-sm font-mono text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors"
             />
+            <p className="text-xs mt-3 mb-1" style={{ color: "#8E8E93" }}>{t.chainSelectorHint || "Preferred payout chain"}</p>
+            <select
+              value={payoutChainId}
+              onChange={(e) => setPayoutChainId(Number(e.target.value))}
+              className="w-full px-3 py-2.5 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors"
+            >
+              {CHAIN_OPTIONS.map((c) => (
+                <option key={c.id} value={c.id} className="bg-[#1a1a2e]">{c.name}</option>
+              ))}
+            </select>
           </div>
         )}
 
@@ -185,7 +279,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
 
         <button
           onClick={handleSaveWallet}
-          disabled={walletSaving || walletLoading || (payoutMethod === "crypto" ? !walletAddress.trim() : !meruAccount.trim())}
+          disabled={walletSaving || walletLoading || (payoutMethod === "crypto" ? !walletAddress.trim() : payoutMethod === "fiat" ? (!fiatProvider || !fiatAccount.trim()) : !meruAccount.trim())}
           className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
           style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
         >

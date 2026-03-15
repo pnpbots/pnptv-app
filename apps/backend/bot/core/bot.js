@@ -66,71 +66,59 @@ const wallOfFameGuard = require('./middleware/wallOfFameGuard');
 const notificationsTopicGuard = require('./middleware/notificationsTopicGuard');
 const logger = require('../../utils/logger');
 const performanceMonitor = require('../../utils/performanceMonitor');
-// Media popularity tracking
-const MediaPopularityService = require('../services/mediaPopularityService');
-const MediaPopularityScheduler = require('../services/mediaPopularityScheduler');
-// Handlers
-const registerUserHandlers = require('../handlers/user');
-const registerAdminHandlers = require('../handlers/admin');
-const registerPaymentHandlers = require('../handlers/payments');
-const registerMediaHandlers = require('../handlers/media');
-const registerModerationHandlers = require('../handlers/moderation');
-const registerModerationAdminHandlers = require('../handlers/moderation/adminCommands');
-const registerAccessControlHandlers = require('../handlers/moderation/accessControlCommands');
-const registerJitsiModeratorHandlers = require('../handlers/moderation/jitsiModerator');
-const registerCallManagementHandlers = require('../handlers/admin/callManagement');
-const registerRoleManagementHandlers = require('../handlers/admin/roleManagement');
-const registerPerformerManagementHandlers = require('../handlers/admin/performerManagement');
 
-const registerPNPLiveModelHandlers = require('../handlers/model/pnpLiveModelHandler');
-const { registerWallOfFameHandlers } = require('../handlers/group/wallOfFame');
-const registerPrivateCallsProntoHandlers = require('../handlers/user/privateCallsPronto');
-const registerPaymentHistoryHandlers = require('../handlers/user/paymentHistory');
-const registerPaymentAnalyticsHandlers = require('../handlers/admin/paymentAnalytics');
-const registerUserCallManagementHandlers = require('../handlers/user/callManagement');
-const registerCallFeedbackHandlers = require('../handlers/user/callFeedback');
-const registerCallPackageHandlers = require('../handlers/user/callPackages');
-const { registerPromoHandlers } = require('../handlers/promo/promoHandler');
-const registerPaymentTutorialHandlers = require('../handlers/user/paymentTutorial');
-const { getLanguage } = require('../utils/helpers');
-const { t } = require('../../utils/i18n');
-const { buildOnboardingPrompt } = require('../handlers/user/menu');
-const UserService = require('../services/userService');
-// Middleware
-const { setupAgeVerificationMiddleware } = require('./middleware/ageVerificationRequired');
-// Services
-const CallReminderService = require('../services/callReminderService');
-const GroupCleanupService = require('../services/groupCleanupService');
-const broadcastScheduler = require('../../services/broadcastScheduler');
-const MembershipCleanupService = require('../services/membershipCleanupService');
-const BusinessNotificationService = require('../services/businessNotificationService');
-const TutorialReminderService = require('../services/tutorialReminderService');
-const MessageRateLimiter = require('../services/messageRateLimiter');
+// ─── Safe require helper ────────────────────────────────────────────────────
+// Prevents a broken handler/service module from crashing the entire process.
+// The API server + auth MUST always start, even if individual modules fail.
+const _noop = () => {};
+const _noopObj = {};
+function safeRequire(modulePath, fallback) {
+  try { return require(modulePath); } catch (e) {
+    const fb = fallback !== undefined ? fallback : _noop;
+    console.error(`[SAFE_REQUIRE] Failed to load ${modulePath}: ${e.message}`);
+    return fb;
+  }
+}
 
-const CommunityPostScheduler = require('./schedulers/communityPostScheduler');
-const XPostScheduler = require('./schedulers/xPostScheduler');
-const CanvaExportScheduler = require('./schedulers/canvaExportScheduler');
-const { initializeWorker: initializePrivateCallsWorker } = require('../../workers/privateCallsWorker');
-const PNPLiveWorker = require('../../workers/pnpLiveWorker');
-const cristinaTicketWorker = require('../services/cristinaTicketWorker');
-const CristinaOnboardingReminders = require('../services/cristinaOnboardingReminders');
-const { startCronJobs } = require('../../../../scripts/cron');
-// Models for cache prewarming
-// Support model for ticket tracking
-const SupportTopicModel = require('../../models/supportTopicModel');
-// Support routing service and handlers
-const supportRoutingService = require('../services/supportRoutingService');
-const registerSupportRoutingHandlers = require('../handlers/support/supportRouting');
-const slaMonitor = require('../services/slaMonitor');
-// Async Broadcast Queue
-const { initializeAsyncBroadcastQueue } = require('../services/initializeQueue');
-// API Server
+// ─── Core API server (MUST load — these are critical) ───────────────────────
 const http = require('http');
 const { Server: SocketIOServer } = require('socket.io');
-const { initSocketIO } = require('../api/socketHandlers');
+const { initSocketIO } = safeRequire('../api/socketHandlers', { initSocketIO: _noop });
 const apiApp = require('../api/routes');
-// Broadcast buttons presets
-const BroadcastButtonModel = require('../../models/broadcastButtonModel');
+
+// ─── Utilities (critical) ───────────────────────────────────────────────────
+const { getLanguage } = require('../utils/helpers');
+const { t } = require('../../utils/i18n');
+const UserService = require('../services/userService');
+
+// ─── Handlers (non-critical — wrapped in safeRequire) ───────────────────────
+const registerAdminHandlers = safeRequire('../handlers/admin');
+const registerModerationAdminHandlers = safeRequire('../handlers/moderation/adminCommands');
+const registerRoleManagementHandlers = safeRequire('../handlers/admin/roleManagement');
+const { registerWallOfFameHandlers } = safeRequire('../handlers/group/wallOfFame', { registerWallOfFameHandlers: _noop });
+const registerPaymentTutorialHandlers = safeRequire('../handlers/user/paymentTutorial');
+const registerSupportRoutingHandlers = safeRequire('../handlers/support/supportRouting');
+const { buildOnboardingPrompt } = safeRequire('../handlers/user/menu', { buildOnboardingPrompt: _noop });
+
+// ─── Services (non-critical — wrapped in safeRequire) ───────────────────────
+const supportRoutingService = safeRequire('../services/supportRoutingService', _noopObj);
+const slaMonitor = safeRequire('../services/slaMonitor', _noopObj);
+const GroupCleanupService = safeRequire('../services/groupCleanupService', _noopObj);
+const broadcastScheduler = safeRequire('../../services/broadcastScheduler', _noopObj);
+const MembershipCleanupService = safeRequire('../services/membershipCleanupService', _noopObj);
+const BusinessNotificationService = safeRequire('../services/businessNotificationService', _noopObj);
+const MessageRateLimiter = safeRequire('../services/messageRateLimiter', _noopObj);
+const cristinaTicketWorker = safeRequire('../services/cristinaTicketWorker', _noopObj);
+const CristinaOnboardingReminders = safeRequire('../services/cristinaOnboardingReminders', _noopObj);
+const SupportTopicModel = safeRequire('../../models/supportTopicModel', _noopObj);
+const BroadcastButtonModel = safeRequire('../../models/broadcastButtonModel', _noopObj);
+const { initializeAsyncBroadcastQueue } = safeRequire('../services/initializeQueue', { initializeAsyncBroadcastQueue: _noop });
+const { startCronJobs } = safeRequire('../../../../scripts/cron', { startCronJobs: _noop });
+
+// ─── Schedulers (non-critical) ──────────────────────────────────────────────
+const CommunityPostScheduler = safeRequire('./schedulers/communityPostScheduler', null);
+const XPostScheduler = safeRequire('./schedulers/xPostScheduler', null);
+const CanvaExportScheduler = safeRequire('./schedulers/canvaExportScheduler', null);
 // Variable de estado para saber si el bot está iniciado
 let botStarted = false;
 let botInstance = null;
@@ -230,6 +218,7 @@ const startApiServer = (modeLabel) => {
   apiApp.set('io', io);
   require('../services/socketSingleton').set(io);
   require('../services/notificationEmitter').setIO(io);
+  require('../services/pushNotificationService').initialize();
   initSocketIO(io);
 
   // NOTE: Daily notification digest scheduler is now managed by cron.js
@@ -334,6 +323,20 @@ const startBot = async () => {
       logger.warn(`Redis initialization failed, continuing without cache: ${error.message}`);
       logger.warn('⚠️  Performance may be degraded without caching');
     }
+
+    // ─── CRITICAL: Start API server EARLY ───────────────────────────────
+    // The Express API server (auth, webapp endpoints) MUST be available
+    // even if bot handler registration fails later. This ensures login
+    // and all webapp functionality keeps working no matter what.
+    // startApiServer() is idempotent — subsequent calls are no-ops.
+    try {
+      startApiServer('Core');
+      logger.info('✓ Core API server started (auth endpoints available)');
+    } catch (apiStartError) {
+      logger.error(`CRITICAL: Failed to start core API server: ${apiStartError.message}`);
+      // Don't exit — continue and try again later in the startup sequence
+    }
+
     // Create bot instance
     const bot = new Telegraf(process.env.BOT_TOKEN);
 
@@ -357,8 +360,10 @@ const startBot = async () => {
     });
 
     // Mono — personal AI business assistant (admin-only)
-    const { registerMonoHandlers } = require('../handlers/admin/monoHandler');
-    registerMonoHandlers(bot);
+    try {
+      const { registerMonoHandlers } = require('../handlers/admin/monoHandler');
+      registerMonoHandlers(bot);
+    } catch (e) { logger.error(`Mono handler failed to load: ${e.message}`); }
 
     // FIX: Register /admin command early using admin handler directly
     bot.command('admin', async (ctx) => {
@@ -429,49 +434,52 @@ const startBot = async () => {
       return next();
     });
 
-    // Register middleware
-    bot.use(sessionMiddleware());
-    bot.use(privateOutboundGuardMiddleware());
-    bot.use(userExistsMiddleware()); // Check if user exists in DB, force onboarding if not
-    bot.use(globalBanCheck()); // Block globally banned users
-    bot.use(rateLimitMiddleware());
+    // ─── Register middleware (best-effort — failures must not crash startup) ───
+    const middlewareList = [
+      ['sessionMiddleware', () => bot.use(sessionMiddleware())],
+      ['privateOutboundGuard', () => bot.use(privateOutboundGuardMiddleware())],
+      ['userExists', () => bot.use(userExistsMiddleware())],
+      ['globalBanCheck', () => bot.use(globalBanCheck())],
+      ['rateLimit', () => bot.use(rateLimitMiddleware())],
+      ['groupSecurityEnforcement', () => bot.use(groupSecurityEnforcementMiddleware())],
+      ['chatCleanup', () => bot.use(chatCleanupMiddleware())],
+      ['groupMessageAutoDelete', () => bot.use(groupMessageAutoDeleteMiddleware())],
+      ['botAdditionPrevention', () => bot.use(botAdditionPreventionMiddleware())],
+      ['autoModeration', () => bot.use(autoModerationMiddleware())],
+      ['moderationFilter', () => bot.use(moderationFilter())],
+      ['primeChannelSilentRedirect', () => bot.use(primeChannelSilentRedirectMiddleware())],
+      ['groupBehavior', () => bot.use(groupBehaviorMiddleware())],
+      ['cristinaGroupFilter', () => bot.use(cristinaGroupFilterMiddleware())],
+      ['groupMenuRedirect', () => bot.use(groupMenuRedirectMiddleware())],
+      ['groupCallbackRedirect', () => bot.use(groupCallbackRedirectMiddleware())],
+      ['wallOfFameGuard', () => bot.use(wallOfFameGuard())],
+      ['notificationsTopicGuard', () => bot.use(notificationsTopicGuard())],
+      ['groupCommandRestriction', () => bot.use(groupCommandRestrictionMiddleware())],
+      ['notificationsAutoDelete', () => bot.use(notificationsAutoDelete())],
+      ['mediaMirror', () => bot.use(mediaMirrorMiddleware())],
+      ['topicPermissions', () => bot.use(topicPermissionsMiddleware())],
+      ['topicModeration', () => bot.use(topicModerationMiddleware())],
+      ['mediaOnlyValidator', () => bot.use(mediaOnlyValidator())],
+    ];
+    let mwLoaded = 0;
+    for (const [name, register] of middlewareList) {
+      try { register(); mwLoaded++; } catch (e) {
+        logger.error(`Middleware "${name}" failed to register: ${e.message}`);
+      }
+    }
+    logger.info(`✓ Middleware registered (${mwLoaded}/${middlewareList.length})`);
 
-    // CRITICAL: Group security enforcement - MUST be early in the chain
-    // This prevents the bot from operating in unauthorized groups/channels
-    bot.use(groupSecurityEnforcementMiddleware());
+    // Group security handlers (my_chat_member events)
+    try {
+      registerGroupSecurityHandlers(bot);
+      logger.info('✓ Group security handlers registered');
+    } catch (e) { logger.error(`Group security handlers failed: ${e.message}`); }
 
-    bot.use(chatCleanupMiddleware());
-    bot.use(groupMessageAutoDeleteMiddleware()); // Auto-delete bot messages in groups after 5 minutes
-    // DISABLED: bot.use(usernameEnforcement()); // Username enforcement rules disabled
-    bot.use(botAdditionPreventionMiddleware()); // Prevent unauthorized bot additions
-    bot.use(autoModerationMiddleware()); // Auto-moderation for links, spam, flooding
-    bot.use(moderationFilter());
-
-    // Group behavior rules (OVERRIDE all previous rules)
-    bot.use(primeChannelSilentRedirectMiddleware()); // PRIME channel: silent redirect to private (no messages in channel)
-    bot.use(groupBehaviorMiddleware()); // Route all bot messages to topic 3135, 3-min delete
-    bot.use(cristinaGroupFilterMiddleware()); // Filter personal info from Cristina in groups
-    bot.use(groupMenuRedirectMiddleware()); // Redirect menu button clicks to private
-    bot.use(groupCallbackRedirectMiddleware()); // Redirect inline button callbacks to deep links
-    bot.use(wallOfFameGuard()); // Wall of Fame topic is bot-only
-    bot.use(notificationsTopicGuard()); // Notifications topic is bot-only (and env admins)
-    bot.use(groupCommandRestrictionMiddleware()); // Block all commands except /menu in groups
-
-    // Topic-specific middlewares
-    bot.use(notificationsAutoDelete()); // Auto-delete in notifications topic
-    bot.use(mediaMirrorMiddleware()); // Mirror media to PNPtv Gallery
-    bot.use(topicPermissionsMiddleware()); // Admin-only and approval queue
-    bot.use(topicModerationMiddleware()); // Anti-spam, anti-flood for topics
-    bot.use(mediaOnlyValidator()); // Media-only validation for PNPtv Gallery
-
-    // CRITICAL: Register group security handlers (my_chat_member events)
-    // This auto-leaves unauthorized groups when bot is added
-    registerGroupSecurityHandlers(bot);
-    logger.info('✓ Group security handlers registered');
-
-    // PRIME channel → social feed mirror (real-time auto-sync)
-    const { registerPrimeChannelMirrorHandler } = require('../handlers/channel/primeChannelMirrorHandler');
-    registerPrimeChannelMirrorHandler(bot);
+    // PRIME channel → social feed mirror
+    try {
+      const { registerPrimeChannelMirrorHandler } = require('../handlers/channel/primeChannelMirrorHandler');
+      registerPrimeChannelMirrorHandler(bot);
+    } catch (e) { logger.error(`Prime channel mirror handler failed: ${e.message}`); }
 
     // Register handlers
 
@@ -657,31 +665,28 @@ const startBot = async () => {
     });
 
 
-    // --- User-facing handlers DISABLED (migrated to web app) ---
-    // registerUserHandlers(bot);
-    registerAdminHandlers(bot); // This registers radio, live streams, community premium, and community posts handlers
-    // registerPNPLiveModelHandlers(bot);
-    // registerPaymentHandlers(bot);
-    // registerMediaHandlers(bot);
-    // registerModerationHandlers(bot);
-    registerModerationAdminHandlers(bot);
-    // registerAccessControlHandlers(bot);
-    // registerJitsiModeratorHandlers(bot);
-    // registerCallManagementHandlers(bot);
-    registerRoleManagementHandlers(bot);
-    // registerPerformerManagementHandlers(bot);
-    registerWallOfFameHandlers(bot);
-    // --- End disabled user-facing handlers ---
-
-    // Payment tutorial (active — /pay command)
-    registerPaymentTutorialHandlers(bot);
-
-    // Register support routing handlers (for forum topic-based support)
-    registerSupportRoutingHandlers(bot);
+    // ─── Register bot handlers (best-effort — failures must not crash startup) ───
+    const handlerList = [
+      ['adminHandlers', () => registerAdminHandlers(bot)],
+      ['moderationAdminHandlers', () => registerModerationAdminHandlers(bot)],
+      ['roleManagementHandlers', () => registerRoleManagementHandlers(bot)],
+      ['wallOfFameHandlers', () => registerWallOfFameHandlers(bot)],
+      ['paymentTutorialHandlers', () => registerPaymentTutorialHandlers(bot)],
+      ['supportRoutingHandlers', () => registerSupportRoutingHandlers(bot)],
+    ];
+    let hLoaded = 0;
+    for (const [name, register] of handlerList) {
+      try { register(); hLoaded++; } catch (e) {
+        logger.error(`Handler "${name}" failed to register: ${e.message}`);
+      }
+    }
+    logger.info(`✓ Bot handlers registered (${hLoaded}/${handlerList.length})`);
 
     // Initialize support routing service with telegram instance
-    supportRoutingService.initialize(bot.telegram);
-    logger.info('✓ Support routing service initialized');
+    try {
+      supportRoutingService.initialize(bot.telegram);
+      logger.info('✓ Support routing service initialized');
+    } catch (e) { logger.error(`Support routing service init failed: ${e.message}`); }
     // Start SLA monitor if configured (after support routing is ready)
     const slaCheckInterval = parseInt(process.env.SLA_CHECK_INTERVAL) || 3600000;
     if (process.env.SUPPORT_GROUP_ID && process.env.SLA_MONITOR_ENABLED !== 'false') {

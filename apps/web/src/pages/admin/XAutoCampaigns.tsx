@@ -389,6 +389,9 @@ export default function XAutoCampaigns() {
     label: string;
   } | null>(null);
 
+  // OAuth app selector
+  const [oauthApp, setOauthApp] = useState<"generic" | "santino" | "lex">("generic");
+
   // Grok Manager chat state
   const [grokOpen, setGrokOpen] = useState(false);
   const [grokMessages, setGrokMessages] = useState<GrokChatMessage[]>([]);
@@ -911,21 +914,32 @@ export default function XAutoCampaigns() {
           >
             🔥 {t.admin.xCampaigns.actions.lifetime100}
           </button>
-          <button
-            onClick={async () => {
-              try {
-                const res = await startXOAuth1();
-                if (res.url) {
-                  window.location.href = res.url;
+          <div className="flex items-center gap-1.5">
+            <select
+              value={oauthApp}
+              onChange={(e) => setOauthApp(e.target.value as "generic" | "santino" | "lex")}
+              className="px-2 py-2 rounded-lg text-sm bg-pnp-surface border border-pnp-border text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
+            >
+              <option value="generic">PNP Tv</option>
+              <option value="santino">SXNTINX</option>
+              <option value="lex">Lex</option>
+            </select>
+            <button
+              onClick={async () => {
+                try {
+                  const res = await startXOAuth1(oauthApp);
+                  if (res.url) {
+                    window.location.href = res.url;
+                  }
+                } catch (err: unknown) {
+                  setError(err instanceof Error ? err.message : "Failed to start X OAuth");
                 }
-              } catch (err: unknown) {
-                setError(err instanceof Error ? err.message : "Failed to start X OAuth");
-              }
-            }}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-pnp-surface border border-pnp-border text-pnp-textPrimary hover:border-pnp-accent/50 transition-colors"
-          >
-            + {t.admin.xCampaigns.actions.addAccount}
-          </button>
+              }}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-pnp-surface border border-pnp-border text-pnp-textPrimary hover:border-pnp-accent/50 transition-colors"
+            >
+              + {t.admin.xCampaigns.actions.addAccount}
+            </button>
+          </div>
         </div>
 
         {showForm && (

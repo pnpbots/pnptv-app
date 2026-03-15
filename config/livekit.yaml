@@ -8,6 +8,7 @@ rtc:
   use_external_ip: true
 redis:
   address: redis-pnptv:6379
+  password: YLDnxNczPrRzLR3FEuA5CHhGAwHfB2sk2t43Jewd
   db: 1
 keys:
   pnptv: _CwBLNh2mVaJPy9yu3MgrIzSajvS6_-_tratIvCx9SQ

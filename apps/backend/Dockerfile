@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation libnss3 libatk1.0-0 libatk-bridge2.0-0 \
     libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
     libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 \
+    ffmpeg \
     tini curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -65,4 +66,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:3001/health || exit 1
 
 ENTRYPOINT ["tini", "--"]
-CMD ["node", "apps/backend/bot/core/bot.js"]
+CMD ["node", "--dns-result-order=ipv4first", "apps/backend/bot/core/bot.js"]

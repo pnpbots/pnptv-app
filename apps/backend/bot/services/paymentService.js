@@ -2083,7 +2083,7 @@ class PaymentService {
         return { success: true, type: 'token_purchase' };
       }
 
-      // Fix 2.1: Tip payments — planId is prefixed with 'tip-' during Daimo payment creation.
+      // Tip payments — planId is prefixed with 'tip-' during Daimo payment creation.
       // Confirm the tip and return immediately without touching subscription logic.
       if (planId && planId.startsWith('tip-')) {
         const tipId = parseInt(planId.split('-')[1], 10);
@@ -2099,6 +2099,37 @@ class PaymentService {
           } catch (tipErr) {
             logger.error('Daimo tip confirmation failed', { tipId, error: tipErr.message });
           }
+
+          // P2P awareness: if tip was NOT P2P, record creator earnings (85/15 split)
+          // so the monthly payout cron picks it up. P2P tips go directly to creator wallet.
+          const tipPayment = await PaymentModel.getById(paymentId);
+          const tipMeta = tipPayment?.metadata || {};
+          if (tipMeta.p2p !== true && tipMeta.performerId) {
+            try {
+              const tipAmount = parseFloat(tipPayment?.amount || source?.amountUnits || '0');
+              if (tipAmount > 0) {
+                const creatorShare = parseFloat((tipAmount * 0.85).toFixed(2));
+                const platformShare = parseFloat((tipAmount * 0.15).toFixed(2));
+                const { query } = require('../../config/postgres');
+                await query(`
+                  INSERT INTO creator_earnings (creator_id, source_type, source_id, amount_total, amount_creator, amount_platform, status)
+                  VALUES ($1, 'tip', $2, $3, $4, $5, 'available')
+                  ON CONFLICT DO NOTHING
+                `, [tipMeta.performerId, String(tipId), tipAmount, creatorShare, platformShare]);
+                logger.info('Creator earnings recorded for non-P2P tip', {
+                  performerId: tipMeta.performerId, tipId, tipAmount, creatorShare,
+                });
+              }
+            } catch (earningsErr) {
+              logger.error('Failed to record creator earnings for tip (non-critical)', {
+                tipId, error: earningsErr.message,
+              });
+            }
+          } else if (tipMeta.p2p === true) {
+            logger.info('P2P tip — funds sent directly to creator wallet, no earnings row needed', {
+              tipId, creatorWallet: tipMeta.creatorWallet,
+            });
+          }
         }
         // Mark tip payment as completed
         if (paymentId) {
@@ -2106,6 +2137,7 @@ class PaymentService {
             transaction_id: source?.txHash || id,
             daimo_event_id: id,
             tipId,
+            p2p: metadata?.p2p || false,
           });
         }
 

@@ -30,11 +30,11 @@ function canonicalWebUrl(pathname) {
 }
 
 function redirectToCanonicalApp(res) {
-  return res.redirect('https://app.pnptv.app');
+  return res.redirect('https://pnptv.app');
 }
 
 function redirectToCanonicalAuthError(res) {
-  return res.redirect('https://app.pnptv.app/?error=auth_failed');
+  return res.redirect('https://pnptv.app/?error=auth_failed');
 }
 
 function generatePnptvId() {

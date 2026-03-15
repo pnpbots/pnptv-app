@@ -1,6 +1,12 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from "react";
 import { getMediaTracks, type MediaTrack } from "@/lib/api";
 
+declare global {
+  interface Window {
+    SC: any;
+  }
+}
+
 interface MusicPlayerState {
   tracks: MediaTrack[];
   currentTrack: MediaTrack | null;
@@ -36,11 +42,10 @@ const MusicPlayerContext = createContext<MusicPlayerContextType | null>(null);
 
 export function MusicPlayerProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  // Fix 2: ref so handleTrackEnd always calls the latest next()
+  const soundcloudPlayerRef = useRef<any>(null);
+  const scIframeRef = useRef<HTMLIFrameElement | null>(null);
   const nextRef = useRef<() => void>(() => {});
-  // Fix 4: generation counter to guard against stale async responses
   const playGenRef = useRef(0);
-  // Fix 8: ref to prevent duplicate concurrent loadMore requests
   const loadingRef = useRef(false);
 
   const [tracks, setTracks] = useState<MediaTrack[]>([]);
@@ -49,7 +54,6 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
-  // Fix 3: validate localStorage volume — clamp to [0,1], reject NaN/Infinity
   const [volume, setVolumeState] = useState(() => {
     const saved = localStorage.getItem("pnp:music:volume");
     if (saved) {
@@ -63,20 +67,26 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingTracks, setIsLoadingTracks] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  // Fix 5: error state for when Ampache is down
   const [loadError, setLoadError] = useState<string | null>(null);
   const offsetRef = useRef(0);
   const shuffleHistoryRef = useRef<number[]>([]);
 
-  // Create audio element once — Fix 1: no ended listener here; handled by the
-  // re-attach effect below so the closure always reflects the current repeat value.
+  // Local audio element effects
   useEffect(() => {
     const audio = new Audio();
     audio.volume = volume;
     audioRef.current = audio;
 
-    const onTimeUpdate = () => setProgress(audio.currentTime);
-    const onDurationChange = () => setDuration(audio.duration || 0);
+    const onTimeUpdate = () => {
+      if (currentTrack?.provider !== "soundcloud") {
+        setProgress(audio.currentTime);
+      }
+    };
+    const onDurationChange = () => {
+      if (currentTrack?.provider !== "soundcloud") {
+        setDuration(audio.duration || 0);
+      }
+    };
     const onCanPlay = () => setIsLoading(false);
     const onWaiting = () => setIsLoading(true);
     const onPlay = () => setIsPlaying(true);
@@ -98,7 +108,34 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentTrack]);
+
+  // Handle track ended
+  const handleTrackEnd = useCallback(() => {
+    if (repeat === "one") {
+      if (currentTrack?.provider === "soundcloud") {
+        soundcloudPlayerRef.current?.seekTo(0);
+        soundcloudPlayerRef.current?.play();
+      } else {
+        const audio = audioRef.current;
+        if (audio) {
+          audio.currentTime = 0;
+          audio.play().catch(() => {});
+        }
+      }
+      return;
+    }
+    nextRef.current();
+  }, [repeat, currentTrack]);
+
+  // Audio element ended event
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onEnded = () => handleTrackEnd();
+    audio.addEventListener("ended", onEnded);
+    return () => audio.removeEventListener("ended", onEnded);
+  }, [handleTrackEnd]);
 
   // Load initial tracks
   useEffect(() => {
@@ -111,60 +148,87 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
           setHasMore(res.tracks.length >= 30);
         }
       })
-      // Fix 5: surface Ampache unavailability instead of silently swallowing
       .catch(() => { setLoadError("Music service unavailable"); })
       .finally(() => setIsLoadingTracks(false));
   }, []);
 
-  // Fix 7: MediaSession — metadata only, re-runs when track changes
+  // SoundCloud Widget API loading
   useEffect(() => {
-    if (!currentTrack || !("mediaSession" in navigator)) return;
-    const artistName = typeof currentTrack.artist === "string"
-      ? currentTrack.artist
-      : currentTrack.artist?.name || "Unknown";
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: currentTrack.title,
-      artist: artistName,
-      artwork: currentTrack.art ? [{ src: currentTrack.art, sizes: "256x256" }] : [],
-    });
-  }, [currentTrack]);
-
-  // Fix 1+2: handleTrackEnd uses nextRef — no stale closure on next()
-  const handleTrackEnd = useCallback(() => {
-    if (repeat === "one") {
-      const audio = audioRef.current;
-      if (audio) {
-        audio.currentTime = 0;
-        audio.play().catch(() => {});
+    if (window.SC) return;
+    const script = document.createElement("script");
+    script.src = "https://w.soundcloud.com/player/api.js";
+    script.async = true;
+    script.onload = () => {
+      if (scIframeRef.current) {
+        soundcloudPlayerRef.current = window.SC.Widget(scIframeRef.current);
+        soundcloudPlayerRef.current.bind(window.SC.Widget.Events.FINISH, () => {
+          handleTrackEnd();
+        });
+        soundcloudPlayerRef.current.bind(window.SC.Widget.Events.PLAY, () => setIsPlaying(true));
+        soundcloudPlayerRef.current.bind(window.SC.Widget.Events.PAUSE, () => setIsPlaying(false));
+        soundcloudPlayerRef.current.setVolume(volume * 100);
       }
-      return;
-    }
-    nextRef.current();
-  }, [repeat]);
+    };
+    document.body.appendChild(script);
+  }, [handleTrackEnd, volume]);
 
-  // Re-attach ended handler whenever handleTrackEnd changes (i.e. repeat changes)
+  // Hidden SoundCloud iframe
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const onEnded = () => handleTrackEnd();
-    audio.addEventListener("ended", onEnded);
-    return () => audio.removeEventListener("ended", onEnded);
-  }, [handleTrackEnd]);
+    const iframe = document.createElement("iframe");
+    iframe.id = "soundcloud-player";
+    iframe.style.display = "none";
+    iframe.src = "https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/tracks/1";
+    document.body.appendChild(iframe);
+    scIframeRef.current = iframe;
+    return () => { document.body.removeChild(iframe); };
+  }, []);
 
-  // Fix 4: playTrack uses a generation counter to drop stale responses
+  // Poll SoundCloud position/duration
+  useEffect(() => {
+    let interval: any;
+    if (isPlaying && currentTrack?.provider === "soundcloud" && soundcloudPlayerRef.current) {
+      interval = setInterval(() => {
+        soundcloudPlayerRef.current.getPosition((ms: number) => {
+          setProgress(ms / 1000);
+        });
+        soundcloudPlayerRef.current.getDuration((ms: number) => {
+          setDuration(ms / 1000);
+        });
+      }, 500);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isPlaying, currentTrack]);
+
   const playTrack = useCallback(async (track: MediaTrack) => {
     const audio = audioRef.current;
     if (!audio) return;
     const gen = ++playGenRef.current;
     setIsLoading(true);
     setCurrentTrack(track);
+
     try {
-      // Point directly at the proxy endpoint — backend streams audio.
-      // This avoids the Docker-internal URL that getMediaStreamUrl() returns,
-      // which is unreachable from the browser.
-      audio.src = `/api/proxy/media/stream/${track.id}`;
-      audio.volume = volume;
-      await audio.play();
+      // Stop other players
+      audio.pause();
+      if (soundcloudPlayerRef.current) soundcloudPlayerRef.current.pause();
+
+      if (track.provider === "soundcloud") {
+        if (soundcloudPlayerRef.current && track.url) {
+          soundcloudPlayerRef.current.load(track.url, {
+            auto_play: true,
+            callback: () => {
+              setIsPlaying(true);
+              setIsLoading(false);
+              soundcloudPlayerRef.current.setVolume(volume * 100);
+            }
+          });
+        }
+      } else {
+        audio.src = `/api/proxy/media/stream/${track.id}`;
+        audio.volume = volume;
+        await audio.play();
+      }
     } catch {
       if (gen === playGenRef.current) setIsLoading(false);
     }
@@ -181,7 +245,11 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
       setCurrentIndex(idx >= 0 ? idx : 0);
       playTrack(track);
     } else if (currentTrack) {
-      audioRef.current?.play().catch(() => {});
+      if (currentTrack.provider === "soundcloud") {
+        soundcloudPlayerRef.current?.play();
+      } else {
+        audioRef.current?.play().catch(() => {});
+      }
     } else if (list.length > 0) {
       setCurrentIndex(0);
       playTrack(list[0]);
@@ -190,6 +258,9 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
+    if (soundcloudPlayerRef.current) {
+      soundcloudPlayerRef.current.pause();
+    }
   }, []);
 
   const togglePlay = useCallback(() => {
@@ -226,8 +297,28 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
 
   const prev = useCallback(() => {
     if (tracks.length === 0) return;
+    
+    // SoundCloud logic
+    if (currentTrack?.provider === "soundcloud") {
+      soundcloudPlayerRef.current?.getPosition((ms: number) => {
+        if (ms > 3000) {
+          soundcloudPlayerRef.current?.seekTo(0);
+        } else {
+          const prevIdx = currentIndex - 1;
+          if (prevIdx >= 0) {
+            setCurrentIndex(prevIdx);
+            playTrack(tracks[prevIdx]);
+          } else if (repeat === "all") {
+            const last = tracks.length - 1;
+            setCurrentIndex(last);
+            playTrack(tracks[last]);
+          }
+        }
+      });
+      return;
+    }
+
     const audio = audioRef.current;
-    // If more than 3s in, restart current track
     if (audio && audio.currentTime > 3) {
       audio.currentTime = 0;
       return;
@@ -243,29 +334,26 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
     }
     setCurrentIndex(prevIdx);
     playTrack(tracks[prevIdx]);
-  }, [tracks, currentIndex, repeat, playTrack]);
+  }, [tracks, currentIndex, repeat, playTrack, currentTrack]);
 
-  // Fix 2: keep nextRef current so handleTrackEnd always calls the latest next()
-  useEffect(() => { nextRef.current = next; }, [next]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Fix 7: MediaSession action handlers — must be after prev/next declarations
-  useEffect(() => {
-    if (!("mediaSession" in navigator)) return;
-    navigator.mediaSession.setActionHandler("play", () => audioRef.current?.play());
-    navigator.mediaSession.setActionHandler("pause", () => audioRef.current?.pause());
-    navigator.mediaSession.setActionHandler("previoustrack", () => prev());
-    navigator.mediaSession.setActionHandler("nexttrack", () => next());
-  }, [prev, next]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { nextRef.current = next; }, [next]);
 
   const seek = useCallback((time: number) => {
-    const audio = audioRef.current;
-    if (audio) audio.currentTime = time;
-  }, []);
+    if (currentTrack?.provider === "soundcloud") {
+      soundcloudPlayerRef.current?.seekTo(time * 1000);
+    } else {
+      const audio = audioRef.current;
+      if (audio) audio.currentTime = time;
+    }
+  }, [currentTrack]);
 
   const setVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v));
     setVolumeState(clamped);
     if (audioRef.current) audioRef.current.volume = clamped;
+    if (soundcloudPlayerRef.current) {
+      soundcloudPlayerRef.current.setVolume(clamped * 100);
+    }
     localStorage.setItem("pnp:music:volume", String(clamped));
   }, []);
 
@@ -278,7 +366,6 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
     setRepeat((r) => (r === "off" ? "all" : r === "all" ? "one" : "off"));
   }, []);
 
-  // Fix 8: loadingRef prevents duplicate concurrent requests
   const loadMore = useCallback(() => {
     if (loadingRef.current || !hasMore) return;
     loadingRef.current = true;
