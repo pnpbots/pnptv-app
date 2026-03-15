@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 import { isTelegramContext, getTelegramWebApp, waitForTelegramSdk } from "@/lib/telegram";
-import { telegramAuth, checkAuthStatus, apiLogout, ApiError, type TelegramAuthResponse } from "@/lib/api";
+import { telegramAuth, checkAuthStatus, apiLogout, ApiError, NetworkError, type TelegramAuthResponse } from "@/lib/api";
 import { disconnectSocket } from "@/lib/socket";
 import React from "react";
 
 interface PnptvUser {
   id: string; // Authentik UUID (pnptv_id)
+  dbId: string; // Database row ID (telegram ID or legacy ID)
   telegramId: string | number;
   username?: string;
   firstName: string;
@@ -39,8 +40,13 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 
 function mapTelegramUser(u: NonNullable<TelegramAuthResponse["user"]>): PnptvUser {
+  // DB id is always the numeric row ID (telegram ID or legacy ID)
+  // pnptv_id / pnptvId is the Authentik UUID
+  const rawId = String(u.id || u.telegram_id);
+  const uuid = String(u.pnptv_id || u.pnptvId || rawId);
   return {
-    id: String(u.pnptv_id || u.id || u.telegram_id),
+    id: uuid,
+    dbId: rawId,
     telegramId: u.telegram_id || u.id,
     username: u.username,
     firstName: u.first_name,
@@ -78,13 +84,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         } else {
           // Browser or Telegram without initData: check existing session
-          try {
-            const status = await checkAuthStatus();
-            if (status.authenticated && status.user) {
-              setUser(mapTelegramUser(status.user));
+          // Retry up to 2 extra times on transient failures to avoid flashing
+          // the landing page when the session is actually valid
+          const SESSION_RETRIES = 2;
+          const SESSION_RETRY_DELAY = 1000;
+          let lastErr: unknown;
+          for (let attempt = 0; attempt <= SESSION_RETRIES; attempt++) {
+            try {
+              const status = await checkAuthStatus();
+              if (status.authenticated && status.user) {
+                setUser(mapTelegramUser(status.user));
+              }
+              lastErr = null;
+              break;
+            } catch (err) {
+              lastErr = err;
+              // Don't retry on explicit 401 — the session is genuinely gone
+              if (err instanceof ApiError && err.status === 401) break;
+              if (attempt < SESSION_RETRIES) {
+                await new Promise((r) => setTimeout(r, SESSION_RETRY_DELAY));
+              }
             }
-          } catch (err) {
-            console.warn("[AuthProvider] Session check failed:", err);
+          }
+          if (lastErr) {
+            console.warn("[AuthProvider] Session check failed after retries:", lastErr);
           }
         }
       } catch (err) {
