@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { telegramWidgetAuth, TelegramWidgetUser } from "@/lib/api";
+import { telegramWidgetAuth, recoverAccount, TelegramWidgetUser } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { LanguageSelector } from "@/components/LanguageSelector"; // Import LanguageSelector
 
@@ -247,7 +247,7 @@ export function LandingPage() {
   const { refreshUser } = useAuth();
 
   const [loginOpen, setLoginOpen] = useState(false);
-  const [loginView, setLoginView] = useState<"options" | "telegram" | "email">("options");
+  const [loginView, setLoginView] = useState<"options" | "telegram" | "email" | "recover">("options");
 
   const [widgetStatus, setWidgetStatus] = useState<"idle" | "verifying" | "error">("idle");
   const [widgetBlocked, setWidgetBlocked] = useState(false);
@@ -256,6 +256,11 @@ export function LandingPage() {
   const [passVal, setPassVal] = useState("");
   const [emailLoading, setEmailLoading] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
+
+  const [recoverEmail, setRecoverEmail] = useState("");
+  const [recoverLoading, setRecoverLoading] = useState(false);
+  const [recoverSent, setRecoverSent] = useState(false);
+  const [recoverError, setRecoverError] = useState<string | null>(null);
 
   const [activeSheet, setActiveSheet] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -330,6 +335,21 @@ export function LandingPage() {
     finally { setEmailLoading(false); }
   };
 
+  const handleRecover = async () => {
+    if (!recoverEmail.trim() || !recoverEmail.includes("@")) return;
+    setRecoverLoading(true);
+    setRecoverError(null);
+    try {
+      const res = await recoverAccount(recoverEmail.trim().toLowerCase());
+      if (res.success) {
+        setRecoverSent(true);
+      } else {
+        setRecoverError(res.message || "Recovery failed");
+      }
+    } catch { setRecoverError("Connection error. Try again."); }
+    finally { setRecoverLoading(false); }
+  };
+
   const sheet = activeSheet ? sheets[activeSheet] : null;
 
   return (
@@ -395,7 +415,44 @@ export function LandingPage() {
                       </svg>
                       Continue with Email
                     </button>
+
+                    <button onClick={() => { setLoginView("recover"); setRecoverSent(false); setRecoverError(null); setRecoverEmail(""); }} className="w-full text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-2">
+                      Had an X (Twitter) account? Recover it here
+                    </button>
                   </>
+                )}
+
+                {loginView === "recover" && (
+                  <div className="space-y-3">
+                    <button onClick={() => setLoginView("options")} className="flex items-center gap-1 text-xs text-pnp-textSecondary hover:text-white transition-colors">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                      Back
+                    </button>
+                    <div className="text-center space-y-1 pb-2">
+                      <p className="text-sm font-semibold text-white">Account Recovery</p>
+                      <p className="text-xs text-pnp-textSecondary">Enter the email linked to your old X or PNPtv account. We'll send a recovery link to set a new password.</p>
+                    </div>
+                    {recoverSent ? (
+                      <div className="text-center py-4 space-y-2">
+                        <svg className="w-10 h-10 mx-auto text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <p className="text-sm text-green-400 font-medium">Recovery link sent!</p>
+                        <p className="text-xs text-pnp-textSecondary">Check your email inbox (and spam folder) for a link to set your password. Then come back and log in with Email.</p>
+                      </div>
+                    ) : (
+                      <>
+                        <input type="email" placeholder="Your email address" value={recoverEmail} onChange={e => setRecoverEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && handleRecover()}
+                          className="w-full px-3 py-2.5 rounded-xl text-sm text-white bg-pnp-surface border border-pnp-border focus:border-pnp-accent focus:outline-none placeholder-pnp-textSecondary/50 transition-colors" />
+                        {recoverError && <p className="text-pnp-error text-xs">{recoverError}</p>}
+                        <button onClick={handleRecover} disabled={recoverLoading || !recoverEmail.includes("@")}
+                          className="btn-gradient w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-50 flex items-center justify-center gap-2">
+                          {recoverLoading && <Spinner />}
+                          {recoverLoading ? "Sending…" : "Send Recovery Link"}
+                        </button>
+                      </>
+                    )}
+                  </div>
                 )}
 
                 {loginView === "telegram" && (
