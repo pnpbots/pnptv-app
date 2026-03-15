@@ -109,8 +109,8 @@ class DmService {
           priority: 'high',
           actorId: senderId,
           targetUserId: resolvedRecipientId,
-          entityType: 'message',
-          entityId: String(message.id),
+          entityType: 'user',
+          entityId: String(senderId),
           message: `${senderName} sent you a message`,
           metadata: {
             senderId,
