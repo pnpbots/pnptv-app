@@ -1,9 +1,7 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { JitsiMeetComponent } from "./JitsiMeetComponent";
-import { VideoCallSidePanel, MobileBottomBar } from "./VideoCallSidePanel";
 import { VideoCallModBot } from "./VideoCallModBot";
 import { PermissionGate } from "@/components/PermissionGate";
-import { useOrientation } from "@/hooks/useOrientation";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -56,10 +54,8 @@ export function VideoCallOverlay({
   socketChat,
   isMainStage = false,
 }: VideoCallOverlayProps) {
-  const isLandscape = useOrientation();
   const [viewMode, setViewMode] = useState<ViewMode>(initialMode);
   const [permsGranted, setPermsGranted] = useState(false);
-  const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
   // Jitsi External API object — provided by JitsiMeetComponent via onApiReady
   const [jitsiApi, setJitsiApi] = useState<any>(null);
 
@@ -88,8 +84,6 @@ export function VideoCallOverlay({
   const handleApiReady = useCallback((api: any) => {
     setJitsiApi(api);
   }, []);
-
-  const hasSidePanel = !!(groupId && userId);
 
   // ─── PiP (Picture-in-Picture) mode ────────────────────────────────────
 
@@ -151,22 +145,7 @@ export function VideoCallOverlay({
         aria-modal="true"
         aria-label="Video call fullscreen"
       >
-        {/* Side panel (left) */}
-        {hasSidePanel && (
-          <div className="hidden sm:flex flex-shrink-0 p-2">
-            <VideoCallSidePanel
-              groupId={groupId!}
-              userId={userId!}
-              collapsed={sidePanelCollapsed}
-              onToggleCollapse={() => setSidePanelCollapsed((p) => !p)}
-              socketChat={socketChat}
-              isModerator={isModerator}
-              isMainStage={isMainStage}
-            />
-          </div>
-        )}
-
-        {/* Video area */}
+        {/* Video area — widgets (Nearby, Cristina, Radio) float on top via Layout.tsx */}
         <div className="flex-1 flex flex-col min-w-0 relative">
           <JitsiMeetComponent
             meetingUrl={meetingUrl}
@@ -212,20 +191,6 @@ export function VideoCallOverlay({
           </div>
         )}
 
-        {/* Mobile bottom bar */}
-        {hasSidePanel && (
-          <div className="sm:hidden">
-            <MobileBottomBar
-              groupId={groupId!}
-              userId={userId!}
-              isAdmin={isAdmin}
-              isLandscape={isLandscape}
-              socketChat={socketChat}
-              isModerator={isModerator}
-              isMainStage={isMainStage}
-            />
-          </div>
-        )}
       </div>
     );
   }
@@ -294,24 +259,8 @@ export function VideoCallOverlay({
         </div>
       </div>
 
-      {/* Embedded layout with side panel */}
+      {/* Video — widgets (Nearby, Cristina, Radio) float on top via Layout.tsx */}
       <div className="flex">
-        {/* Side panel (desktop only in embedded mode) */}
-        {hasSidePanel && (
-          <div className="hidden lg:flex flex-shrink-0 border-r border-white/5">
-            <VideoCallSidePanel
-              groupId={groupId!}
-              userId={userId!}
-              collapsed={sidePanelCollapsed}
-              onToggleCollapse={() => setSidePanelCollapsed((p) => !p)}
-              socketChat={socketChat}
-              isModerator={isModerator}
-              isMainStage={isMainStage}
-            />
-          </div>
-        )}
-
-        {/* Jitsi video */}
         <div className="flex-1 min-w-0">
           <JitsiMeetComponent
             meetingUrl={meetingUrl}
@@ -331,21 +280,6 @@ export function VideoCallOverlay({
           </div>
         )}
       </div>
-
-      {/* Mobile bottom bar */}
-      {hasSidePanel && (
-        <div className="lg:hidden">
-          <MobileBottomBar
-            groupId={groupId!}
-            userId={userId!}
-            isAdmin={isAdmin}
-            isLandscape={isLandscape}
-            socketChat={socketChat}
-            isModerator={isModerator}
-            isMainStage={isMainStage}
-          />
-        </div>
-      )}
     </div>
   );
 }
