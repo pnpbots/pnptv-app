@@ -184,7 +184,7 @@ export default function SocialPostCard({
 
   return (
     <div
-      className="glass-card-sm p-4 cursor-pointer"
+      className="glass-card-sm pt-4 pb-4 pr-4 pl-14 cursor-pointer relative"
       onClick={toggleReplies}
       id={`post-${post.id}`}
       style={
@@ -196,47 +196,46 @@ export default function SocialPostCard({
           : undefined
       }
     >
-      <div className="flex gap-3">
-        {/* Avatar — promoted posts show PNPtv logo, others show user photo */}
-        <button
-          onClick={(e) => { e.stopPropagation(); if (!post.is_promoted) onNavigate(authorPath); }}
-          className="flex-shrink-0"
-        >
-          {post.is_promoted ? (
-            <img
-              src="/Logo2-50.png"
-              alt="PNPtv!"
-              className="w-10 h-10 rounded-full object-cover"
-              style={{ background: "#1a1a2e" }}
-            />
-          ) : isValidPhotoUrl(post.author_photo) ? (
-            <img
-              src={post.author_photo}
-              alt={`${post.author_first_name || post.author_username || "User"}'s avatar`}
-              className="w-10 h-10 rounded-full object-cover"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
-                const sib = (e.target as HTMLImageElement).nextElementSibling as HTMLElement | null;
-                if (sib) sib.style.removeProperty("display");
-              }}
-            />
-          ) : null}
-          {!post.is_promoted && (
-            <div
-              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
-              style={{
-                background: "linear-gradient(135deg, #D4007A, #E69138)",
-                color: "#fff",
-                display: isValidPhotoUrl(post.author_photo) ? "none" : undefined,
-              }}
-            >
-              {(post.author_first_name || post.author_username || "?")[0].toUpperCase()}
-            </div>
-          )}
-        </button>
+      {/* Avatar — pinned to upper-left corner */}
+      <button
+        onClick={(e) => { e.stopPropagation(); if (!post.is_promoted) onNavigate(authorPath); }}
+        className="absolute -top-2 -left-2 z-10 flex-shrink-0"
+      >
+        {post.is_promoted ? (
+          <img
+            src="/Logo2-50.png"
+            alt="PNPtv!"
+            className="w-10 h-10 rounded-full object-cover ring-2 ring-[#1C1C1E]"
+            style={{ background: "#1a1a2e" }}
+          />
+        ) : isValidPhotoUrl(post.author_photo) ? (
+          <img
+            src={post.author_photo}
+            alt={`${post.author_first_name || post.author_username || "User"}'s avatar`}
+            className="w-10 h-10 rounded-full object-cover ring-2 ring-[#1C1C1E]"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+              const sib = (e.target as HTMLImageElement).nextElementSibling as HTMLElement | null;
+              if (sib) sib.style.removeProperty("display");
+            }}
+          />
+        ) : null}
+        {!post.is_promoted && (
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ring-2 ring-[#1C1C1E]"
+            style={{
+              background: "linear-gradient(135deg, #D4007A, #E69138)",
+              color: "#fff",
+              display: isValidPhotoUrl(post.author_photo) ? "none" : undefined,
+            }}
+          >
+            {(post.author_first_name || post.author_username || "?")[0].toUpperCase()}
+          </div>
+        )}
+      </button>
 
-        {/* Content */}
-        <div className="flex-1 min-w-0">
+      {/* Content */}
+      <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={(e) => { e.stopPropagation(); onNavigate(authorPath); }}
@@ -833,7 +832,6 @@ export default function SocialPostCard({
               )}
             </div>
           )}
-        </div>
       </div>
 
       {/* Content Disclaimer Modal */}

@@ -27,6 +27,7 @@ import {
   type AnnouncementItem
 } from "@/components/events";
 import { SocialFeedTabs } from "@/components/social";
+import { SpotlightStrip, type SpotlightItem } from "@/components/SpotlightStrip";
 
 interface Announcement extends AnnouncementItem {}
 
@@ -167,115 +168,33 @@ export default function Home() {
         </span>
       </div>
 
-      {/* Compact room access buttons */}
-      <div className="grid grid-cols-2 gap-2 mb-3">
-        <button
-          onClick={() => navigate("/da-haus")}
-          className="flex items-center gap-2.5 px-3 py-2.5 glass-card-sm hover:border-white/20 active:scale-[0.98] transition-all text-left"
-          style={{ borderLeft: "3px solid rgba(162,89,255,0.5)" }}
-        >
-          <div
-            className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
-            style={{ background: "rgba(162,89,255,0.15)" }}
-          >
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-              style={{ color: "#A259FF" }}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold text-white leading-none">Da Haus</p>
-            <p className="text-[9px] mt-0.5" style={{ color: "#A259FF" }}>Free for all</p>
-          </div>
-        </button>
-        <button
-          onClick={() => navigate("/main-stage")}
-          className="flex items-center gap-2.5 px-3 py-2.5 glass-card-sm hover:border-white/20 active:scale-[0.98] transition-all text-left"
-          style={{ borderLeft: "3px solid rgba(94,209,196,0.5)" }}
-        >
-          <div
-            className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
-            style={{ background: "rgba(94,209,196,0.15)" }}
-          >
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-              style={{ color: "#5ED1C4" }}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold text-white leading-none">Main Stage</p>
-            <p className="text-[9px] mt-0.5" style={{ color: "#5ED1C4" }}>Member+</p>
-          </div>
-        </button>
-      </div>
-
-      {/* Mobile-only event pills */}
-      {(highlights.length > 0 || annLoading || evLoading) && (
-        <div className="lg:hidden mb-4 -mx-4 px-4 overflow-x-auto scrollbar-hide">
-          <div className="flex gap-2 pb-1">
-            {annLoading || evLoading ? (
-              <>
-                {[80, 110, 90].map((w, i) => (
-                  <div
-                    key={i}
-                    className="flex-shrink-0 h-7 rounded-full bg-white/5 animate-pulse"
-                    style={{ width: w }}
-                  />
-                ))}
-              </>
-            ) : (
-              <>
-                {/* Create Event pill (mobile) */}
-                {canCreateLive && (
-                  <button
-                    onClick={() => setShowCreateEvent(true)}
-                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold whitespace-nowrap border border-white/10 transition-all active:scale-95"
-                    style={{ background: "rgba(255,180,84,0.15)", color: "#FFB454", border: "1px solid rgba(255,180,84,0.3)" }}
-                  >
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                    </svg>
-                    Create Event
-                  </button>
-                )}
-                {highlights.slice(0, 10).map((item, i) => {
-                const label =
-                  item.kind === "event"
-                    ? (item.data as EventItem).title
-                    : String(
-                        (item.data as AnnouncementItem).title ||
-                          (item.data as AnnouncementItem).body ||
-                          ""
-                      ).slice(0, 35);
-                const isEvent = item.kind === "event";
-                return (
-                  <button
-                    key={i}
-                    onClick={() => isEvent && setDetailEvent(item.data as EventItem)}
-                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-medium text-white/70 whitespace-nowrap border border-white/10 bg-white/5 hover:border-white/20 active:scale-95 transition-all"
-                  >
-                    <span>{isEvent ? "📅" : "📢"}</span>
-                    <span className="max-w-[140px] truncate">{label}</span>
-                  </button>
-                );
-              })}
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Quick access row — SpotlightStrip */}
+      <SpotlightStrip
+        items={[
+          {
+            kind: "action",
+            id: "main-stage",
+            label: "Main Stage",
+            sublabel: "24/7 open",
+            icon: (
+              <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#5ED1C4" }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            ),
+            gradient: "linear-gradient(135deg, rgba(94,209,196,0.3), rgba(212,0,122,0.2))",
+            onClick: () => navigate("/main-stage"),
+            pinned: true,
+          },
+          ...events.map((ev) => ({ kind: "event" as const, data: ev })),
+        ]}
+        onItemClick={(item) => {
+          if (item.kind === "event") setDetailEvent(item.data);
+        }}
+        showAction
+        onAction={() => setShowCreateEvent(true)}
+        actionLabel="Create event"
+        emptyAction={!evLoading ? () => setShowCreateEvent(true) : undefined}
+      />
 
       {/* Two-column layout */}
       <div className="lg:flex lg:gap-6 lg:items-start">
