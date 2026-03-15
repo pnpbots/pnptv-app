@@ -154,32 +154,40 @@ export function JitsiMeetComponent({
         configOverwrite: {
           prejoinPageEnabled: false,
           startWithVideoMuted: false,
+          startWithAudioMuted: !(isAdmin || isModerator),
           disableDeepLinking: true,
           disableThirdPartyRequests: true,
           enableClosePage: false,
           hideConferenceSubject: false,
           disableInviteFunctions: true,
-          lobbyModeEnabled: false,
+          // Lobby ON — JWT-authenticated users are auto-admitted (see event below)
+          lobbyModeEnabled: true,
           requireDisplayName: false,
           enableInsecureRoomNameWarning: false,
           startInTileView: true,
           maxFullResolutionParticipants: 9,
+          // Camera always on — no toggle to disable it
+          videoMutedDisabled: true,
           filmstrip: {
             disableResizable: true,
           },
-          // Mobile-specific bandwidth/performance config (improvement #4)
+          // Block screen sharing for non-moderators
+          ...(!isAdmin && !isModerator ? { disableScreensharing: true } : {}),
+          // Mobile-specific bandwidth/performance config
           ...(isMobile ? {
             enableLayerSuspension: true,
             channelLastN: 4,
             adaptiveLastN: true,
             p2p: { enabled: true },
           } : {}),
+          // Toolbar: no 'camera' button for anyone (camera always on)
+          // Mods get mute-everyone, security, desktop (screen share)
           ...(isAdmin || isModerator
             ? {
                 toolbarButtons: isMobile
-                  ? ['camera', 'microphone', 'desktop', 'tileview', 'fullscreen', 'settings', 'videoquality']
+                  ? ['microphone', 'tileview', 'fullscreen', 'settings', 'videoquality', 'desktop']
                   : [
-                      'camera', 'microphone', 'desktop', 'participants-pane',
+                      'microphone', 'desktop', 'participants-pane',
                       'closedcaptions', 'noisesuppression', 'fullscreen',
                       'settings', 'videoquality', 'tileview', 'select-background',
                       'mute-everyone', 'security',
@@ -187,15 +195,12 @@ export function JitsiMeetComponent({
               }
             : {
                 toolbarButtons: isMobile
-                  ? ['camera', 'microphone', 'tileview', 'fullscreen']
+                  ? ['microphone', 'tileview', 'fullscreen']
                   : [
-                      'participants-pane',
-                      'closedcaptions',
-                      'noisesuppression',
-                      'fullscreen',
-                      'settings',
+                      'microphone', 'participants-pane',
+                      'closedcaptions', 'noisesuppression',
+                      'fullscreen', 'settings',
                     ],
-                startWithAudioMuted: true,
               }),
         },
         interfaceConfigOverwrite: {
@@ -226,6 +231,14 @@ export function JitsiMeetComponent({
           if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
         }
       });
+
+      // Lobby auto-admit: when this user is a moderator, automatically approve
+      // anyone who knocks (all app users have valid JWTs — no outsiders can knock).
+      if (isAdmin || isModerator) {
+        api.addListener("lobbyParticipantJoined", (participant: { id: string }) => {
+          try { api.executeCommand("answerKnockingParticipant", participant.id, true); } catch {}
+        });
+      }
 
       api.addListener("videoConferenceLeft", () => {
         onCallEndRef.current?.();

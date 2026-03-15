@@ -123,12 +123,13 @@ class JaaSService {
                     email: userEmail,
                     avatar: resolveAvatarUrl(userAvatar),
                     moderator: isModerator ? 'true' : 'false',
-                    'hidden-from-recorder': 'false'
+                    'hidden-from-recorder': isModerator ? 'false' : 'true'
                 },
                 features: {
                     livestreaming: enableLivestreaming,
                     recording: enableRecording,
                     transcription: enableTranscription,
+                    'screen-sharing': isModerator,
                     'outbound-call': false,
                     'sip-outbound-call': false
                 }
