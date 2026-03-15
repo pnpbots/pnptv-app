@@ -528,49 +528,30 @@ class NearbyController {
         [userId]
       );
       const viewer = viewerRows[0];
-      if (!viewer || viewer.location_lat == null || viewer.location_lng == null) {
-        // No location — return members without distance
-        const { rows: members } = await dbQuery(
+
+      // Return ALL group members (no limit — show every member of the hangout).
+        // Rewards users who participate in hangouts.
+        const { rows } = await dbQuery(
           `SELECT u.id AS user_id, u.username, u.first_name AS name, u.photo_file_id AS photo_url,
+                  u.location_lat, u.location_lng,
                   CASE WHEN u.last_active > NOW() - INTERVAL '5 minutes' THEN true ELSE false END AS is_online
            FROM hangout_group_members hgm
            JOIN users u ON u.id = hgm.user_id
            WHERE hgm.group_id = $1
              AND u.id != $2
-             AND u.is_deleted = false
-           ORDER BY u.first_name ASC
-           LIMIT 45`,
+             AND u.is_deleted = false`,
           [groupId, userId]
         );
-        const sanitized = members.map((r) => ({
-          ...r,
-          photo_url: r.photo_url && (r.photo_url.startsWith('/') || r.photo_url.startsWith('http')) ? r.photo_url : null,
-          distance_km: null,
-        }));
-        return res.status(200).json({ success: true, total: sanitized.length, users: sanitized });
-      }
 
-      const lat = parseFloat(viewer.location_lat);
-      const lng = parseFloat(viewer.location_lng);
-
-      const { rows } = await dbQuery(
-        `SELECT u.id AS user_id, u.username, u.first_name AS name, u.photo_file_id AS photo_url,
-                u.location_lat, u.location_lng,
-                CASE WHEN u.last_active > NOW() - INTERVAL '5 minutes' THEN true ELSE false END AS is_online
-         FROM hangout_group_members hgm
-         JOIN users u ON u.id = hgm.user_id
-         WHERE hgm.group_id = $1
-           AND u.id != $2
-           AND u.is_deleted = false
-         LIMIT 200`,
-        [groupId, userId]
-      );
+      const hasViewerLocation = viewer && viewer.location_lat != null && viewer.location_lng != null;
+      const lat = hasViewerLocation ? parseFloat(viewer.location_lat) : 0;
+      const lng = hasViewerLocation ? parseFloat(viewer.location_lng) : 0;
 
       const R = 6371;
       const toRad = (d) => (d * Math.PI) / 180;
-      const withDistance = rows.map((r) => {
+      const users = rows.map((r) => {
         let distKm = null;
-        if (r.location_lat != null && r.location_lng != null) {
+        if (hasViewerLocation && r.location_lat != null && r.location_lng != null) {
           const dLat = toRad(parseFloat(r.location_lat) - lat);
           const dLng = toRad(parseFloat(r.location_lng) - lng);
           const a =
@@ -589,13 +570,14 @@ class NearbyController {
         };
       });
 
-      // Null distances go last
-      withDistance.sort((a, b) => {
+      // Online first, then by distance (null distances last), then alphabetical
+      users.sort((a, b) => {
+        if (a.is_online !== b.is_online) return a.is_online ? -1 : 1;
+        if (a.distance_km === null && b.distance_km === null) return (a.name || '').localeCompare(b.name || '');
         if (a.distance_km === null) return 1;
         if (b.distance_km === null) return -1;
         return a.distance_km - b.distance_km;
       });
-      const users = withDistance.slice(0, 45);
 
       return res.status(200).json({ success: true, total: users.length, users });
     } catch (error) {

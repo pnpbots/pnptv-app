@@ -52,7 +52,7 @@ function getContext(pathname: string): NearbyContext {
 function getContextLabel(ctx: NearbyContext): string {
   switch (ctx) {
     case "feed": return "Recent Posters";
-    case "hangouts": return "Nearby Members";
+    case "hangouts": return "Group Members";
     case "live": return "In This Stream";
     case "events": return "Event Attendees";
     case "profile": return "Everyone Nearby";
