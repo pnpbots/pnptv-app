@@ -737,15 +737,7 @@ const startBot = async () => {
     } catch (error) {
       logger.warn(`Broadcast button tables initialization failed (broadcasts will run without presets until fixed): ${error.message}`);
     }
-    // Initialize media popularity scheduler
-    try {
-      const mediaPopularityScheduler = new MediaPopularityScheduler(bot);
-      await mediaPopularityScheduler.initialize();
-      logger.info('✓ Media popularity scheduler initialized');
-    } catch (error) {
-      logger.error(`Media popularity scheduler initialization failed: ${error.message}`);
-      logger.warn('⚠️  Automated media announcements will not work');
-    }
+    // Media popularity scheduler (removed in X integration purge)
     // Initialize async broadcast queue
     try {
       const queueIntegration = await initializeAsyncBroadcastQueue(bot, {

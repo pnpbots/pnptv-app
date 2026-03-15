@@ -513,7 +513,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
         }
         const nextIdx = baseParams.length + 1;
         return {
-          text: sql.replace('$LIFETIME_IDS', `${nextIdx}::text[]`),
+          text: sql.replace('$LIFETIME_IDS', `$${nextIdx}::text[]`),
           values: [...baseParams, lifetimeUserIdStrings],
         };
       };
