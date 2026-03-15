@@ -17,6 +17,11 @@ const X_MEDIA_CHUNK_SIZE = 1 * 1024 * 1024; // 1MB (v2 limit)
 
 // Inline OAuth2 token refresh (formerly in xOAuthService)
 async function refreshAccountTokens(account) {
+  // NEVER refresh OAuth 1.0a tokens via OAuth 2.0 — they are permanent
+  if (account.oauth_version === '1.0a') {
+    throw new Error(`Cannot refresh OAuth 1.0a account @${account.handle} via OAuth 2.0 flow`);
+  }
+
   let refreshData;
   try {
     refreshData = PaymentSecurityService.decryptSensitiveData(account.encrypted_refresh_token);
@@ -541,6 +546,13 @@ class XPostService {
         timeout: 15000,
       });
     } catch (error) {
+      logger.error('OAuth1 tweet post failed', {
+        handle: account.handle,
+        status: error?.response?.status,
+        responseData: error?.response?.data,
+        consumerKeyRef: ref,
+        consumerKeyPrefix: consumerKey?.substring(0, 6),
+      });
       if (error?.response?.status === 403) {
         throw new Error(`403 Forbidden al publicar tweet OAuth1 con @${account.handle}. Verifica los permisos de la app.`);
       }
@@ -1110,6 +1122,21 @@ class XPostService {
   }
 
   static async getValidAccessToken(account) {
+    // OAuth 1.0a tokens are permanent — never refresh via OAuth 2.0 flow
+    if (account.oauth_version === '1.0a') {
+      let decrypted;
+      try {
+        decrypted = PaymentSecurityService.decryptSensitiveData(account.encrypted_access_token);
+      } catch (error) {
+        throw new Error(`OAuth 1.0a access token decryption failed for @${account.handle}: ${error.message}`);
+      }
+      const accessToken = decrypted?.accessToken || decrypted?.token;
+      if (!accessToken) {
+        throw new Error(`Token de acceso OAuth 1.0a inválido para @${account.handle}`);
+      }
+      return accessToken;
+    }
+
     let decrypted;
     try {
       decrypted = PaymentSecurityService.decryptSensitiveData(account.encrypted_access_token);
@@ -1132,14 +1159,6 @@ class XPostService {
     }
 
     const accessToken = decrypted?.accessToken || decrypted?.token;
-
-    // OAuth 1.0a tokens are permanent — skip expiry check and refresh entirely
-    if (account.oauth_version === '1.0a') {
-      if (!accessToken) {
-        throw new Error(`Token de acceso OAuth 1.0a inválido para @${account.handle}`);
-      }
-      return accessToken;
-    }
 
     // OAuth 2.0: check expiry and refresh if needed
     const expiresAt = decrypted?.expiresAt ? new Date(decrypted.expiresAt) : account.token_expires_at;

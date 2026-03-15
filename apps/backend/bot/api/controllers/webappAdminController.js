@@ -262,6 +262,8 @@ const updateUser = async (req, res) => {
     if (email !== undefined) {
       queryParts.push(`email = $${paramIndex++}`);
       values.push(email);
+      // Admin-set emails are trusted — mark verified so the user isn't blocked on login
+      queryParts.push(`email_verified = true`);
     }
     if (subscriptionStatus !== undefined) {
       queryParts.push(`subscription_status = $${paramIndex++}`);
@@ -378,6 +380,77 @@ const banUser = async (req, res) => {
     return res.json({ success: true, user: result.rows[0], action: ban ? 'banned' : 'unbanned' });
   } catch (error) {
     logger.error('Error banning user:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * DELETE /api/webapp/admin/users/:id
+ * Soft-delete a user: set deleted_at, clear PII, destroy sessions.
+ * Superadmin-only to prevent accidental mass deletions.
+ */
+const deleteUser = async (req, res) => {
+  const admin = req.user;
+
+  try {
+    const { id: userId } = req.params;
+
+    // Prevent admins from deleting themselves
+    if (String(admin.id) === String(userId)) {
+      return res.status(400).json({ error: 'You cannot delete your own account' });
+    }
+
+    // Prevent deleting other admins/superadmins
+    const targetCheck = await query('SELECT id, username, role FROM users WHERE id = $1', [userId]);
+    if (targetCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const target = targetCheck.rows[0];
+    if (target.role === 'admin' || target.role === 'superadmin') {
+      return res.status(403).json({ error: 'Cannot delete admin users. Remove their admin role first.' });
+    }
+
+    // Soft-delete: mark as deleted, clear PII, revoke access
+    await query(
+      `UPDATE users SET
+         deleted_at = NOW(),
+         is_deleted = true,
+         is_active = false,
+         tier = 'banned',
+         subscription_status = 'expired',
+         role = 'user',
+         creator_status = 'none',
+         email = NULL,
+         bio = NULL,
+         photo_file_id = NULL,
+         plan_id = NULL,
+         updated_at = NOW()
+       WHERE id = $1`,
+      [userId]
+    );
+
+    // Destroy all active sessions
+    try {
+      const redis = require('../../../config/redis').client;
+      const keys = await redis.keys('sess:*');
+      for (const key of keys) {
+        const val = await redis.get(key);
+        if (val && val.includes(userId.toString())) {
+          await redis.del(key);
+        }
+      }
+    } catch (sessErr) {
+      logger.warn('Failed to destroy sessions for deleted user', { userId, error: sessErr.message });
+    }
+
+    // Invalidate Redis user cache
+    await cache.del(`user:${userId}`);
+
+    logger.info('Admin deleted user', { adminId: admin.id, userId, username: target.username });
+
+    return res.json({ success: true, message: `User ${target.username || userId} has been deleted` });
+  } catch (error) {
+    logger.error('Error deleting user:', error);
     return res.status(500).json({ error: error.message });
   }
 };
@@ -525,9 +598,20 @@ const bulkUpdateUsers = async (req, res) => {
       return res.status(400).json({ error: 'userIds must be a non-empty array' });
     }
 
-    const validActions = ['upgrade', 'downgrade', 'ban', 'unban'];
+    const validActions = ['upgrade', 'downgrade', 'ban', 'unban', 'delete'];
     if (!validActions.includes(action)) {
       return res.status(400).json({ error: `Invalid action. Must be one of: ${validActions.join(', ')}` });
+    }
+
+    // Prevent bulk-deleting admin users
+    if (action === 'delete') {
+      const adminCheck = await query(
+        `SELECT id FROM users WHERE id = ANY($1::text[]) AND role IN ('admin', 'superadmin')`,
+        [userIds]
+      );
+      if (adminCheck.rows.length > 0) {
+        return res.status(403).json({ error: 'Cannot delete admin users. Remove their admin role first.' });
+      }
     }
 
     let updated = 0;
@@ -576,6 +660,18 @@ const bulkUpdateUsers = async (req, res) => {
             `UPDATE users SET tier = 'free', updated_at = NOW() WHERE id = $1`,
             [userId]
           );
+        } else if (action === 'delete') {
+          await query(
+            `UPDATE users SET
+               deleted_at = NOW(), is_deleted = true, is_active = false,
+               tier = 'banned', subscription_status = 'expired',
+               role = 'user', creator_status = 'none',
+               email = NULL, bio = NULL, photo_file_id = NULL, plan_id = NULL,
+               updated_at = NOW()
+             WHERE id = $1`,
+            [userId]
+          );
+          await cache.del(`user:${userId}`);
         }
         updated++;
       } catch (userError) {
@@ -1628,6 +1724,7 @@ module.exports = {
   getUser,
   updateUser,
   banUser,
+  deleteUser,
   listPosts,
   deletePost,
   listHangouts,

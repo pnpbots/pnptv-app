@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { RouterProvider } from "react-router-dom";
 import { HelmetProvider } from "react-helmet-async";
 import { AuthProvider } from "@/hooks/useAuth";
@@ -91,11 +91,42 @@ function useDocumentDir() {
   }, [lang]);
 }
 
+function UpdateBanner() {
+  const [waitingSW, setWaitingSW] = useState<ServiceWorker | null>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => setWaitingSW((e as CustomEvent).detail);
+    window.addEventListener("sw-update-available", handler);
+    return () => window.removeEventListener("sw-update-available", handler);
+  }, []);
+
+  if (!waitingSW) return null;
+
+  return (
+    <div
+      className="fixed top-0 left-0 right-0 z-[9999] flex items-center justify-center gap-3 px-4 py-3 text-sm font-semibold text-white animate-fade-in-up"
+      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+    >
+      <span>A new version of PNPtv! is available</span>
+      <button
+        onClick={() => {
+          waitingSW.postMessage({ type: "SKIP_WAITING" });
+        }}
+        className="px-4 py-1.5 rounded-lg text-sm font-bold transition-all active:scale-95"
+        style={{ background: "rgba(255,255,255,0.25)", backdropFilter: "blur(4px)" }}
+      >
+        Update Now
+      </button>
+    </div>
+  );
+}
+
 function AppOverlays() {
   const { isAuthenticated } = useAuth();
   useDocumentDir();
   return (
     <>
+      <UpdateBanner />
       <PWAInstallBanner />
       <PermissionOnboarding isAuthenticated={isAuthenticated} />
       <NotificationPermissionPrompt isAuthenticated={isAuthenticated} />

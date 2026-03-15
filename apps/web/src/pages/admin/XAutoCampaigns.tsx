@@ -134,7 +134,7 @@ function GrokActionCard({ action, accounts, onApply, t }: {
     <div className="mt-2 p-3 rounded-lg bg-pnp-accent/10 border border-pnp-accent/30">
       <p className="text-xs font-semibold text-pnp-accent mb-1">{t.admin.xCampaigns.grok.proposal}</p>
       <p className="text-xs text-pnp-textPrimary mb-0.5"><strong>{t.admin.xCampaigns.table.campaign}:</strong> {action.name}</p>
-      <p className="text-xs text-pnp-textSecondary mb-0.5">{action.language} | every {action.intervalMinutes}min | UTC {action.activeHoursStart}–{action.activeHoursEnd}</p>
+      <p className="text-xs text-pnp-textSecondary mb-0.5">{action.language} | every {action.intervalMinutes}min | UTC {String(Math.floor((action.activeHoursStart ?? 0) / 60)).padStart(2, "0")}:{String((action.activeHoursStart ?? 0) % 60).padStart(2, "0")}–{String(Math.floor((action.activeHoursEnd ?? 0) / 60)).padStart(2, "0")}:{String((action.activeHoursEnd ?? 0) % 60).padStart(2, "0")}</p>
       <p className="text-xs text-pnp-textSecondary mb-0.5 line-clamp-2">{action.topic}</p>
       {action.attachVideos && (
         <p className="text-xs text-purple-400 mb-2">&#9654; {t.admin.xCampaigns.form.attachVideos}</p>
@@ -275,8 +275,8 @@ Always include $100 and lifetime/forever. Hook must be ALL CAPS. CTA must use �
   grokMode: "xPost",
   language: "en",
   intervalMinutes: 240,
-  activeHoursStart: 14,
-  activeHoursEnd: 23,
+  activeHoursStart: 840,
+  activeHoursEnd: 1380,
 };
 
 type CampaignStatus = "all" | "active" | "paused" | "completed";
@@ -344,8 +344,8 @@ const defaultForm = {
   language: "es",
   customPrompt: "",
   intervalMinutes: 240,
-  activeHoursStart: 8,
-  activeHoursEnd: 23,
+  activeHoursStart: 480,
+  activeHoursEnd: 1380,
   maxPosts: "",
   attachVideos: false,
   personaType: "generic" as "santino" | "lex" | "generic",
@@ -681,8 +681,8 @@ export default function XAutoCampaigns() {
         language: action.language || "en",
         customPrompt: action.customPrompt,
         intervalMinutes: action.intervalMinutes || 480,
-        activeHoursStart: action.activeHoursStart ?? 14,
-        activeHoursEnd: action.activeHoursEnd ?? 23,
+        activeHoursStart: action.activeHoursStart ?? 840,
+        activeHoursEnd: action.activeHoursEnd ?? 1380,
         mediaFolderId: action.attachVideos && mediaFolderId ? mediaFolderId : undefined,
       });
       setSuccess(`Campaign "${action.name}" created (paused)`);
@@ -738,7 +738,7 @@ export default function XAutoCampaigns() {
         <span className="text-xs">
           Every {formatInterval(row.interval_minutes)}
           <br />
-          <span className="text-pnp-textSecondary">{row.active_hours_start}:00\u2013{row.active_hours_end}:00 UTC</span>
+          <span className="text-pnp-textSecondary">{String(Math.floor(row.active_hours_start / 60)).padStart(2, "0")}:{String(row.active_hours_start % 60).padStart(2, "0")}{"\u2013"}{String(Math.floor(row.active_hours_end / 60)).padStart(2, "0")}:{String(row.active_hours_end % 60).padStart(2, "0")} UTC</span>
         </span>
       ),
     },
@@ -1053,23 +1053,25 @@ export default function XAutoCampaigns() {
               <div>
                 <label className="text-xs text-pnp-textSecondary block mb-1">{t.admin.xCampaigns.form.hoursStart}</label>
                 <input
-                  type="number"
-                  value={form.activeHoursStart}
-                  onChange={(e) => setForm((f) => ({ ...f, activeHoursStart: parseInt(e.target.value) || 0 }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
-                  min={0}
-                  max={23}
+                  type="time"
+                  value={`${String(Math.floor(form.activeHoursStart / 60)).padStart(2, "0")}:${String(form.activeHoursStart % 60).padStart(2, "0")}`}
+                  onChange={(e) => {
+                    const [h, m] = e.target.value.split(":").map(Number);
+                    setForm((f) => ({ ...f, activeHoursStart: h * 60 + (m || 0) }));
+                  }}
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary focus:border-pnp-accent focus:outline-none"
                 />
               </div>
               <div>
                 <label className="text-xs text-pnp-textSecondary block mb-1">{t.admin.xCampaigns.form.hoursEnd}</label>
                 <input
-                  type="number"
-                  value={form.activeHoursEnd}
-                  onChange={(e) => setForm((f) => ({ ...f, activeHoursEnd: parseInt(e.target.value) || 23 }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
-                  min={0}
-                  max={23}
+                  type="time"
+                  value={`${String(Math.floor(form.activeHoursEnd / 60)).padStart(2, "0")}:${String(form.activeHoursEnd % 60).padStart(2, "0")}`}
+                  onChange={(e) => {
+                    const [h, m] = e.target.value.split(":").map(Number);
+                    setForm((f) => ({ ...f, activeHoursEnd: h * 60 + (m || 0) }));
+                  }}
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary focus:border-pnp-accent focus:outline-none"
                 />
               </div>
             </div>

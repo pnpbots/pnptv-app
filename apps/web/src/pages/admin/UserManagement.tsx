@@ -15,7 +15,7 @@ import {
   type AdminUserFilters,
 } from "@/lib/api";
 
-type BulkAction = "upgrade" | "downgrade" | "ban" | "unban";
+type BulkAction = "upgrade" | "downgrade" | "ban" | "unban" | "delete";
 
 interface UpgradeForm {
   planId: string;
@@ -165,6 +165,7 @@ export default function UserManagement() {
     downgrade: "Downgrade to Free",
     ban: "Ban Selected",
     unban: "Unban Selected",
+    delete: "Delete Selected",
   };
 
   const BULK_ACTION_VARIANTS: Record<BulkAction, "default" | "warning" | "danger"> = {
@@ -172,6 +173,7 @@ export default function UserManagement() {
     downgrade: "warning",
     ban: "danger",
     unban: "default",
+    delete: "danger",
   };
 
   const columns = [
@@ -387,6 +389,12 @@ export default function UserManagement() {
             className="px-3 py-1.5 text-xs rounded-lg bg-pnp-border text-pnp-textSecondary border border-pnp-border hover:bg-pnp-surface transition-colors"
           >
             Unban Selected
+          </button>
+          <button
+            onClick={() => openBulkAction("delete")}
+            className="px-3 py-1.5 text-xs rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors"
+          >
+            Delete Selected
           </button>
           <button
             onClick={() => setSelectedIds(new Set())}

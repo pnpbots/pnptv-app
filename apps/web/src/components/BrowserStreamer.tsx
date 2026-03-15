@@ -30,12 +30,22 @@ import type { Socket } from "socket.io-client";
 
 // ─── Quality Presets ─────────────────────────────────────────────────────────
 
-const QUALITY_PRESETS = [
+const QUALITY_PRESETS_PORTRAIT = [
+  { id: "720p",  label: "720p HD",      width: 720,  height: 1280, videoBitrate: 2_500_000, audioBitrate: 128000, fps: 30 },
+  { id: "480p",  label: "480p SD",      width: 480,  height: 854,  videoBitrate: 1_000_000, audioBitrate: 128000, fps: 30 },
+  { id: "360p",  label: "360p Low",     width: 360,  height: 640,  videoBitrate:   600_000, audioBitrate:  96000, fps: 24 },
+  { id: "1080p", label: "1080p Full HD",width: 1080, height: 1920, videoBitrate: 4_500_000, audioBitrate: 192000, fps: 30 },
+] as const;
+
+const QUALITY_PRESETS_LANDSCAPE = [
   { id: "720p",  label: "720p HD",      width: 1280, height: 720,  videoBitrate: 2_500_000, audioBitrate: 128000, fps: 30 },
   { id: "480p",  label: "480p SD",      width: 854,  height: 480,  videoBitrate: 1_000_000, audioBitrate: 128000, fps: 30 },
   { id: "360p",  label: "360p Low",     width: 640,  height: 360,  videoBitrate:   600_000, audioBitrate:  96000, fps: 24 },
   { id: "1080p", label: "1080p Full HD",width: 1920, height: 1080, videoBitrate: 4_500_000, audioBitrate: 192000, fps: 30 },
 ] as const;
+
+type Orientation = "portrait" | "landscape";
+const QUALITY_PRESETS = QUALITY_PRESETS_PORTRAIT;
 
 type PresetId = typeof QUALITY_PRESETS[number]["id"];
 type QualityPreset = typeof QUALITY_PRESETS[number];
@@ -257,9 +267,16 @@ export default function BrowserStreamer() {
   const [selectedPresetId, setSelectedPresetId] = useState<PresetId>("720p");
   const selectedPreset = useMemo(
     (): QualityPreset =>
-      QUALITY_PRESETS.find((p) => p.id === selectedPresetId) ?? QUALITY_PRESETS[0],
-    [selectedPresetId]
+      activePresets.find((p) => p.id === selectedPresetId) ?? activePresets[0],
+    [selectedPresetId, activePresets]
   );
+
+  // Orientation + fullscreen
+  const [orientation, setOrientation] = useState<Orientation>("portrait");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+
+  const activePresets = orientation === "portrait" ? QUALITY_PRESETS_PORTRAIT : QUALITY_PRESETS_LANDSCAPE;
 
   // Screen sharing + PiP state
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -307,6 +324,13 @@ export default function BrowserStreamer() {
   });
 
   // ── Browser support check ────────────────────────────────────────────────
+  // Sync fullscreen state when user exits via Escape
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
   useEffect(() => {
     if (
       typeof window === "undefined" ||
@@ -528,8 +552,9 @@ export default function BrowserStreamer() {
           cameraVideo &&
           cameraVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
         ) {
-          const pipW = Math.round(canvas.width * 0.25);
-          const pipH = Math.round(pipW * (9 / 16));
+          const isPortrait = canvas.height > canvas.width;
+          const pipW = Math.round(canvas.width * (isPortrait ? 0.3 : 0.25));
+          const pipH = Math.round(pipW * (isPortrait ? (16 / 9) : (9 / 16)));
           const margin = 12;
 
           let pipX: number;
@@ -1054,13 +1079,62 @@ export default function BrowserStreamer() {
           <h2 className="text-base font-bold text-white">{t.browserStreamerTitle}</h2>
           <p className="text-xs text-pnp-textSecondary mt-0.5">{t.browserStreamerSubtitle}</p>
         </div>
-        <StatusBadge status={status} t={t} />
+        <div className="flex items-center gap-2">
+          {/* Orientation toggle */}
+          <button
+            onClick={() => {
+              const next: Orientation = orientation === "portrait" ? "landscape" : "portrait";
+              setOrientation(next);
+              if (permission === "granted" && status === "idle" && !isScreenSharing) {
+                const nextPresets = next === "portrait" ? QUALITY_PRESETS_PORTRAIT : QUALITY_PRESETS_LANDSCAPE;
+                const preset = nextPresets.find((p) => p.id === selectedPresetId) ?? nextPresets[0];
+                startPreview(selectedCamera, selectedMic, preset);
+              }
+            }}
+            disabled={isStreaming}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent hover:text-pnp-textPrimary transition-all disabled:opacity-50"
+            title={orientation === "portrait" ? "Switch to landscape" : "Switch to portrait"}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              {orientation === "portrait" ? (
+                <rect x="6" y="3" width="12" height="18" rx="2" />
+              ) : (
+                <rect x="3" y="6" width="18" height="12" rx="2" />
+              )}
+            </svg>
+            {orientation === "portrait" ? "Portrait" : "Landscape"}
+          </button>
+          {/* Fullscreen */}
+          <button
+            onClick={() => {
+              const el = previewContainerRef.current;
+              if (!el) return;
+              if (!document.fullscreenElement) {
+                el.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+              } else {
+                document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+              }
+            }}
+            className="flex items-center justify-center w-8 h-8 rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent hover:text-pnp-textPrimary transition-all"
+            title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              {isFullscreen ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+              )}
+            </svg>
+          </button>
+          <StatusBadge status={status} t={t} />
+        </div>
       </div>
 
       {/* Camera / screen preview */}
       <div
-        className="relative w-full overflow-hidden rounded-2xl bg-pnp-surface border border-pnp-border"
-        style={{ aspectRatio: "16/9" }}
+        ref={previewContainerRef}
+        className={`relative w-full overflow-hidden rounded-2xl bg-pnp-surface border border-pnp-border ${isFullscreen ? "!rounded-none !border-0" : ""}`}
+        style={{ aspectRatio: orientation === "portrait" ? "9/16" : "16/9" }}
       >
         {/* Hidden canvas for compositing — always mounted so ref is available */}
         <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
@@ -1236,7 +1310,7 @@ export default function BrowserStreamer() {
             role="group"
             aria-label="Stream quality preset"
           >
-            {QUALITY_PRESETS.map((preset) => {
+            {activePresets.map((preset) => {
               const active = preset.id === selectedPresetId;
               return (
                 <button

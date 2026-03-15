@@ -113,6 +113,7 @@ class Plan {
          FROM ${this.TABLE} p
          LEFT JOIN plan_add_ons pa ON pa.plan_id = p.id
          LEFT JOIN add_ons ao ON ao.id = pa.add_on_id
+         WHERE p.active = true
          GROUP BY p.id
          ORDER BY p.price ASC`
       );

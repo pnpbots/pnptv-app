@@ -217,12 +217,13 @@ export default function CampaignForm({
             {t.admin.xCampaigns.form.hoursStart}
           </label>
           <input
-            type="number"
-            value={form.activeHoursStart}
-            onChange={(e) => setForm((f) => ({ ...f, activeHoursStart: parseInt(e.target.value) || 0 }))}
-            className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
-            min={0}
-            max={23}
+            type="time"
+            value={`${String(Math.floor(form.activeHoursStart / 60)).padStart(2, "0")}:${String(form.activeHoursStart % 60).padStart(2, "0")}`}
+            onChange={(e) => {
+              const [h, m] = e.target.value.split(":").map(Number);
+              setForm((f) => ({ ...f, activeHoursStart: h * 60 + (m || 0) }));
+            }}
+            className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary focus:border-pnp-accent focus:outline-none"
           />
         </div>
         <div>
@@ -230,12 +231,13 @@ export default function CampaignForm({
             {t.admin.xCampaigns.form.hoursEnd}
           </label>
           <input
-            type="number"
-            value={form.activeHoursEnd}
-            onChange={(e) => setForm((f) => ({ ...f, activeHoursEnd: parseInt(e.target.value) || 23 }))}
-            className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
-            min={0}
-            max={23}
+            type="time"
+            value={`${String(Math.floor(form.activeHoursEnd / 60)).padStart(2, "0")}:${String(form.activeHoursEnd % 60).padStart(2, "0")}`}
+            onChange={(e) => {
+              const [h, m] = e.target.value.split(":").map(Number);
+              setForm((f) => ({ ...f, activeHoursEnd: h * 60 + (m || 0) }));
+            }}
+            className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary focus:border-pnp-accent focus:outline-none"
           />
         </div>
       </div>

@@ -212,11 +212,11 @@ class XAutoCampaignService {
           AND (
             CASE
               WHEN c.active_hours_start < c.active_hours_end THEN
-                EXTRACT(HOUR FROM NOW()) >= c.active_hours_start
-                AND EXTRACT(HOUR FROM NOW()) < c.active_hours_end
+                (EXTRACT(HOUR FROM NOW()) * 60 + EXTRACT(MINUTE FROM NOW())) >= c.active_hours_start
+                AND (EXTRACT(HOUR FROM NOW()) * 60 + EXTRACT(MINUTE FROM NOW())) < c.active_hours_end
               ELSE
-                EXTRACT(HOUR FROM NOW()) >= c.active_hours_start
-                OR EXTRACT(HOUR FROM NOW()) < c.active_hours_end
+                (EXTRACT(HOUR FROM NOW()) * 60 + EXTRACT(MINUTE FROM NOW())) >= c.active_hours_start
+                OR (EXTRACT(HOUR FROM NOW()) * 60 + EXTRACT(MINUTE FROM NOW())) < c.active_hours_end
             END
           )
         FOR UPDATE SKIP LOCKED

@@ -107,14 +107,20 @@ async function generateStreamerToken(channelRef, userId, displayName, photoUrl) 
  * @returns {Promise<string|null>} signed JWT, or null if balance is insufficient.
  */
 async function generateViewerToken(channelRef, userId, displayName) {
-  // Check user's token balance before issuing a token
-  const hasBalance = await getTokenService().hasSufficientBalance(userId, STREAM_JOIN_COST);
+  // Check balance and deduct tokens at join time (not heartbeat)
+  const tokenSvc = getTokenService();
+  const hasBalance = await tokenSvc.hasSufficientBalance(userId, STREAM_JOIN_COST);
   if (!hasBalance) {
     logger.warn('Insufficient balance for user to join stream.', { userId, channelRef });
     return null;
   }
-  
-  // For now, we just check. Deduction logic will be part of the heartbeat.
+
+  const deduction = await tokenSvc.deductTokens(userId, STREAM_JOIN_COST, `stream-join:${channelRef}`);
+  if (!deduction.success) {
+    logger.warn('Token deduction failed at stream join', { userId, channelRef });
+    return null;
+  }
+  logger.info('Stream join token deducted', { userId, channelRef, cost: STREAM_JOIN_COST, newBalance: deduction.newBalance });
 
   const roomName = toRoomName(channelRef);
 

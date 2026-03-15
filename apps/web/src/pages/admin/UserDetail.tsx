@@ -10,6 +10,7 @@ import {
   getAdminPlans,
   updateAdminUser,
   banAdminUser,
+  deleteAdminUser,
   getUserLabel,
   getLabelColor,
   type AdminUser,
@@ -77,6 +78,9 @@ export default function UserDetail() {
   const [banConfirmOpen, setBanConfirmOpen] = useState(false);
   const [banAction, setBanAction] = useState<"ban" | "unban">("ban");
   const [banLoading, setBanLoading] = useState(false);
+
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -159,6 +163,21 @@ export default function UserDetail() {
       setBanConfirmOpen(false);
     } finally {
       setBanLoading(false);
+    }
+  };
+
+  const executeDelete = async () => {
+    if (!userId) return;
+    setDeleteLoading(true);
+    try {
+      await deleteAdminUser(userId);
+      setDeleteConfirmOpen(false);
+      navigate("/admin/users");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+      setDeleteConfirmOpen(false);
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -421,6 +440,24 @@ export default function UserDetail() {
         </div>
       </div>
 
+      {/* Delete User Section */}
+      <div className="rounded-xl bg-red-500/5 border border-red-500/20 p-5 space-y-3">
+        <h2 className="text-sm font-semibold text-red-400 uppercase tracking-wider">
+          Delete User
+        </h2>
+        <p className="text-xs text-pnp-textSecondary">
+          Permanently delete this user. Their account will be deactivated, personal data cleared, and all sessions destroyed. This cannot be undone.
+        </p>
+        <div className="flex justify-end">
+          <button
+            onClick={() => setDeleteConfirmOpen(true)}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors min-h-[44px] bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20"
+          >
+            Delete User
+          </button>
+        </div>
+      </div>
+
       <ConfirmModal
         open={banConfirmOpen}
         title={banAction === "ban" ? "Ban User" : "Unban User"}
@@ -434,6 +471,17 @@ export default function UserDetail() {
         onConfirm={executeBan}
         onCancel={() => setBanConfirmOpen(false)}
         loading={banLoading}
+      />
+
+      <ConfirmModal
+        open={deleteConfirmOpen}
+        title="Delete User"
+        message={`Are you sure you want to permanently delete @${user.username || user.id}? Their data will be cleared and this action cannot be undone.`}
+        confirmLabel="Delete User"
+        variant="danger"
+        onConfirm={executeDelete}
+        onCancel={() => setDeleteConfirmOpen(false)}
+        loading={deleteLoading}
       />
     </div>
   );
