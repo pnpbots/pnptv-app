@@ -27,7 +27,7 @@ const { registerBroadcastHandlers } = require('./broadcastManagement');
 const { registerXAccountHandlers } = require('./xAccountWizard');
 const { registerXPostWizardHandlers, handleTextInput: handleXPostTextInput, handleMediaInput: handleXPostMediaInput, getSession: getXPostSession, STEPS: XPOST_STEPS } = require('./xPostWizard');
 const { registerUserManagementHandlers } = require('./userManagementHandler');
-const XFollowersManagement = require('./xFollowersManagement');
+// XFollowersManagement removed (X integration purged)
 const registerPerformerManagementHandlers = require('./performerManagement');
 const PlaylistAdminService = require('../../services/PlaylistAdminService');
 const RadioAdminService = require('../../services/RadioAdminService');
@@ -6830,7 +6830,6 @@ const finalRegisterAdminHandlers = (bot) => {
   registerPlaylistAdminHandlers(bot);
   registerRadioAdminHandlers(bot);
   registerUserManagementHandlers(bot);
-  XFollowersManagement.registerHandlers(bot);
   registerPerformerManagementHandlers(bot);
 };
 
