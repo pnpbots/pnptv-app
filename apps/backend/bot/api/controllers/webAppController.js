@@ -1468,7 +1468,7 @@ const forgotPassword = async (req, res) => {
       [user.id, token, expiresAt.toISOString()]
     );
 
-    const resetUrl = `${process.env.WEBAPP_URL || 'https://pnptv.app'}/reset-password.html?token=${token}`;
+    const resetUrl = `${process.env.WEBAPP_URL || 'https://app.pnptv.app'}/reset-password?token=${token}`;
     await emailService.send({
       to: email,
       subject: 'PNPtv – Restablecer contraseña',

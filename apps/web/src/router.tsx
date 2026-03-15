@@ -8,6 +8,7 @@ import { TierGate } from "@/components/TierGate";
 
 const Home = lazy(() => import("@/pages/Home"));
 const LoginPage = lazy(() => import("@/pages/LoginPage"));
+const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
 const Media = lazy(() => import("@/pages/Media"));
 const Live = lazy(() => import("@/pages/Live"));
 const Stream = lazy(() => import("@/pages/Stream"));
@@ -474,6 +475,14 @@ export const router = createBrowserRouter([
         ),
       },
     ],
+  },
+  {
+    path: "/reset-password",
+    element: (
+      <ModuleLoader>
+        <ResetPassword />
+      </ModuleLoader>
+    ),
   },
   {
     path: "/login",
