@@ -9,6 +9,7 @@ const jaasService = require('../../services/jaasService');
 const NotificationEmitter = require('../../services/notificationEmitter');
 const { hasAccess } = require('../../services/accessService');
 const BlockedUser = require('../../../models/blockedUser');
+const matrixService = require('../../services/matrixService');
 // Check if a photo path is a valid web URL (not a Telegram file ID)
 const isValidPhotoUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
 
@@ -294,6 +295,19 @@ const joinGroup = async (req, res) => {
       });
     }
 
+    // Sync Matrix room membership — fire-and-forget (non-blocking, non-fatal)
+    matrixService.inviteToHangoutRoom(groupId, {
+      id:                  user.id,
+      telegram:            user.telegram || String(user.id),
+      username:            user.username || null,
+      first_name:          user.firstName || user.first_name || null,
+      matrix_user_id:      user.matrix_user_id      || null,
+      matrix_access_token: user.matrix_access_token || null,
+      matrix_device_id:    user.matrix_device_id    || null,
+    }).catch((matrixErr) => {
+      logger.warn(`[Matrix] joinGroup sync failed for user ${user.id} / group ${groupId}: ${matrixErr.message}`);
+    });
+
     return res.json({ success: true });
   } catch (err) {
     logger.error('joinGroup error', err);
@@ -317,6 +331,14 @@ const leaveGroup = async (req, res) => {
       'DELETE FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
       [groupId, user.id]
     );
+
+    // Sync Matrix room membership — fire-and-forget (non-blocking, non-fatal)
+    matrixService.removeFromHangoutRoom(groupId, {
+      id:             user.id,
+      matrix_user_id: user.matrix_user_id || null,
+    }).catch((matrixErr) => {
+      logger.warn(`[Matrix] leaveGroup sync failed for user ${user.id} / group ${groupId}: ${matrixErr.message}`);
+    });
 
     return res.json({ success: true });
   } catch (err) {

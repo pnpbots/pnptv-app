@@ -10,6 +10,7 @@ const LiveStreamModel = require('../../models/liveStreamModel');
 const BlockedUser = require('../../models/blockedUser');
 const jaasBroadcastService = require('../services/jaasBroadcastService');
 const DmService = require('../services/dmService');
+const matrixService = require('../services/matrixService');
 
 // ── Lua script: atomic viewer-count decrement clamped to 0 ────────────────────
 // H4: Replaces the non-atomic decr + conditional set(0) pattern.
@@ -615,6 +616,22 @@ function initSocketIO(io) {
           const redis = getRedis();
           await redis.del(`hangout:unread:${gid}:${user.id}`);
         } catch (_) { /* non-fatal */ }
+
+        // Ensure this user is in the Matrix room for this hangout — fire-and-forget.
+        // This is a best-effort sync: the authoritative membership change happens in
+        // the REST joinGroup handler, but sockets may connect before that in edge cases
+        // (e.g. the Matrix room was created after the user joined the PG group).
+        matrixService.inviteToHangoutRoom(gid, {
+          id:                  user.id,
+          telegram:            user.telegram || String(user.id),
+          username:            user.username || null,
+          first_name:          user.firstName || user.first_name || null,
+          matrix_user_id:      user.matrix_user_id      || null,
+          matrix_access_token: user.matrix_access_token || null,
+          matrix_device_id:    user.matrix_device_id    || null,
+        }).catch((matrixErr) => {
+          logger.debug(`[Matrix] hangout:join sync failed for user ${user.id} / group ${gid}: ${matrixErr.message}`);
+        });
       } catch (err) {
         logger.error('hangout:join error', err);
       }
