@@ -1,12 +1,12 @@
 // PNPtv! Service Worker — Push Notifications + Offline App Shell Cache
 
-const CACHE_NAME = 'pnptv-v6';
+const CACHE_NAME = 'pnptv-v7';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/Logo2-50.png',
-  '/icon-192.png',
-  '/icon-512.png',
+  '/app-icon-192.png',
+  '/app-icon-512.png',
 ];
 
 // Install: pre-cache app shell

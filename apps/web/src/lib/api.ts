@@ -4834,3 +4834,27 @@ export function startStageTv(videos: string[]): Promise<{ success: boolean; hlsU
 export function stopStageTv(): Promise<{ success: boolean }> {
   return request("/api/webapp/admin/stage-tv/stop", { method: "POST" });
 }
+
+// ============================================================================
+// Radio Requests API (Admin)
+// ============================================================================
+
+export interface RadioRequest {
+  id: number;
+  user_id: string;
+  song_name: string;
+  artist: string;
+  status: "pending" | "approved" | "rejected";
+  url: string | null;
+  metadata: Record<string, unknown> | null;
+  requested_at: string;
+  updated_at: string | null;
+}
+
+export function getRadioRequests(status = "pending"): Promise<{ success: boolean; requests: RadioRequest[] }> {
+  return request(`/api/webapp/admin/radio/requests?status=${status}`);
+}
+
+export function updateRadioRequest(requestId: number, status: "approved" | "rejected"): Promise<{ success: boolean; request: RadioRequest }> {
+  return request(`/api/webapp/admin/radio/requests/${requestId}`, { method: "PUT", body: { status } });
+}

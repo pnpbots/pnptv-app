@@ -4493,6 +4493,34 @@ app.post('/api/proxy/media/import-soundcloud', requireSessionAuth, adminGuard, a
   // ... (existing code)
 }));
 
+// Admin: list radio requests (webapp session auth)
+app.get('/api/webapp/admin/radio/requests', adminGuard, asyncHandler(async (req, res) => {
+  const status = req.query.status || 'pending';
+  const validStatuses = ['pending', 'approved', 'rejected'];
+  const query = validStatuses.includes(status)
+    ? { text: 'SELECT * FROM radio_requests WHERE status = $1 ORDER BY requested_at DESC LIMIT 50', values: [status] }
+    : { text: 'SELECT * FROM radio_requests ORDER BY requested_at DESC LIMIT 50', values: [] };
+  const result = await getPool().query(query.text, query.values);
+  res.json({ success: true, requests: result.rows });
+}));
+
+// Admin: approve/reject radio request (webapp session auth)
+app.put('/api/webapp/admin/radio/requests/:requestId', adminGuard, asyncHandler(async (req, res) => {
+  const { requestId } = req.params;
+  const { status } = req.body;
+  if (!['approved', 'rejected'].includes(status)) {
+    return res.status(400).json({ success: false, error: 'Invalid status' });
+  }
+  const result = await getPool().query(
+    'UPDATE radio_requests SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+    [status, parseInt(requestId, 10)]
+  );
+  if (result.rows.length === 0) {
+    return res.status(404).json({ success: false, error: 'Request not found' });
+  }
+  res.json({ success: true, request: result.rows[0] });
+}));
+
 // Request SoundCloud track
 app.post('/api/webapp/radio/request-soundcloud', requireSessionAuth, asyncHandler(async (req, res) => {
   const { url } = req.body;

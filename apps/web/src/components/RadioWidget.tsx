@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
-import { resolveSoundCloud, importSoundCloud, requestSoundCloud, type MediaTrack } from "@/lib/api";
+import { resolveSoundCloud, importSoundCloud, requestSoundCloud, getRadioRequests, updateRadioRequest, type MediaTrack, type RadioRequest } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -212,6 +212,112 @@ const PlaylistRow = React.memo(function PlaylistRow({ track, isActive, isPlaying
     </button>
   );
 });
+
+// ── Pending Requests Panel (Admin) ────────────────────────────────────────────
+
+function PendingRequestsPanel({ onImport }: { onImport: (url: string) => void }) {
+  const [requests, setRequests] = useState<RadioRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const [acting, setActing] = useState<number | null>(null);
+
+  useEffect(() => {
+    getRadioRequests("pending")
+      .then((res) => {
+        if (res.success) setRequests(res.requests || []);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleAction = useCallback(async (id: number, status: "approved" | "rejected", url?: string | null) => {
+    setActing(id);
+    try {
+      const res = await updateRadioRequest(id, status);
+      if (res.success) {
+        setRequests((prev) => prev.filter((r) => r.id !== id));
+        if (status === "approved" && url) {
+          onImport(url);
+        }
+      }
+    } catch { /* silent */ }
+    setActing(null);
+  }, [onImport]);
+
+  if (loading || requests.length === 0) return null;
+
+  return (
+    <div className="border-b border-white/5">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2 hover:bg-white/5 transition-colors"
+      >
+        <div className="flex items-center gap-1.5">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+          </span>
+          <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">
+            {requests.length} request{requests.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+        <svg
+          className={`w-3 h-3 text-pnp-textSecondary transition-transform ${expanded ? "rotate-180" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+        </svg>
+      </button>
+
+      {expanded && (
+        <div className="max-h-40 overflow-y-auto px-2 pb-2 space-y-1">
+          {requests.map((req) => (
+            <div
+              key={req.id}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/5"
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] text-pnp-textPrimary font-medium truncate">
+                  {req.song_name || "Unknown"}
+                </p>
+                <p className="text-[9px] text-pnp-textSecondary truncate">
+                  {req.artist || "Unknown artist"}
+                  {req.url && (
+                    <span className="ml-1 text-[#ff5500]">SC</span>
+                  )}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {/* Approve — auto-fills import bar */}
+                <button
+                  onClick={() => handleAction(req.id, "approved", req.url)}
+                  disabled={acting === req.id}
+                  className="w-6 h-6 flex items-center justify-center rounded bg-emerald-500/20 hover:bg-emerald-500/30 active:scale-95 transition-all disabled:opacity-40"
+                  title="Approve & import"
+                >
+                  <svg className="w-3 h-3 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                </button>
+                {/* Reject */}
+                <button
+                  onClick={() => handleAction(req.id, "rejected")}
+                  disabled={acting === req.id}
+                  className="w-6 h-6 flex items-center justify-center rounded bg-red-500/20 hover:bg-red-500/30 active:scale-95 transition-all disabled:opacity-40"
+                  title="Reject"
+                >
+                  <svg className="w-3 h-3 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Main RadioWidget component ────────────────────────────────────────────────
 
@@ -511,6 +617,9 @@ export function RadioWidget() {
             </button>
           </div>
         )}
+
+        {/* Pending Requests (Admin Only) */}
+        {isAdmin && <PendingRequestsPanel onImport={(url) => { setScUrl(url); }} />}
 
         {/* Request Song Bar (Regular Users) */}
         {!isAdmin && (
