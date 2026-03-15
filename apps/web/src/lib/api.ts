@@ -1166,6 +1166,31 @@ export function adminUnflagWofPost(postId: number): Promise<{ success: boolean }
   return request(`/api/admin/social/posts/${postId}/wof`, { method: "DELETE" });
 }
 
+// ── Matrix bridge endpoints ───────────────────────────────────────────────────
+
+export function getMatrixToken(): Promise<{
+  success: boolean;
+  matrixUserId: string;
+  accessToken: string;
+  homeserverUrl: string;
+}> {
+  return request("/api/webapp/matrix/token");
+}
+
+export function getOrCreateDmRoom(userId: string): Promise<{
+  success: boolean;
+  roomId: string;
+}> {
+  return request(`/api/webapp/matrix/dm/${userId}`, { method: "POST" });
+}
+
+export function getOrCreateHangoutRoom(groupId: number): Promise<{
+  success: boolean;
+  roomId: string;
+}> {
+  return request(`/api/webapp/matrix/hangout-room/${groupId}`, { method: "POST" });
+}
+
 export function getWofStats(): Promise<{ total_posts: number; total_likes: number; unique_contributors: number }> {
   return request("/api/webapp/social/wof/stats");
 }

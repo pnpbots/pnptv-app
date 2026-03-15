@@ -56,6 +56,7 @@ const applyRoutes = require('./routes/applyRoutes');
 const pdsRoutes = require('./routes/pdsRoutes');
 const blueskyRoutes = require('./routes/blueskyRoutes');
 const elementRoutes = require('./routes/elementRoutes');
+const matrixController = require('./controllers/matrixController');
 const creatorRoutes = require('./routes/creatorRoutes');
 const gamificationRoutes = require('./routes/gamificationRoutes');
 const canvaRoutes = require('./routes/canvaRoutes');
@@ -6562,6 +6563,15 @@ app.use('/api/apply', applyRoutes);
 app.use('/api/pds', pdsRoutes);
 app.use('/api/bluesky', blueskyRoutes);
 app.use('/api/element', elementRoutes);
+
+// ==========================================
+// Matrix / Synapse bridge routes
+// All endpoints require an authenticated session
+// ==========================================
+app.get('/api/webapp/matrix/token', requireSessionAuth, asyncHandler(matrixController.getToken));
+app.post('/api/webapp/matrix/dm/:userId', requireSessionAuth, asyncHandler(matrixController.getOrCreateDmRoom));
+app.post('/api/webapp/matrix/hangout-room/:groupId', requireSessionAuth, asyncHandler(matrixController.getOrCreateHangoutRoom));
+app.post('/api/webapp/matrix/hangout-room/:groupId/sync-members', requireSessionAuth, asyncHandler(matrixController.syncHangoutRoomMembers));
 
 // Creator monetization routes
 app.use('/api/webapp/creator', creatorRoutes);

@@ -17,9 +17,11 @@ import {
   sendMessage,
   sendDmMediaMessage,
   markThreadAsRead,
+  getOrCreateDmRoom,
   type MessageThread,
   type DirectMessage,
 } from "@/lib/api";
+import { useRoomMessages, sendMatrixMessage } from "@/hooks/useMatrix";
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -558,7 +560,8 @@ function Conversation({
   userRole: string | null | undefined;
 }) {
   const { dm: t } = useI18n();
-  const [messages, setMessages] = useState<DirectMessage[]>([]);
+  // REST messages — initial load + fallback
+  const [restMessages, setRestMessages] = useState<DirectMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [msgInput, setMsgInput] = useState("");
@@ -566,7 +569,10 @@ function Conversation({
   const [sendError, setSendError] = useState<string | null>(null);
   const [partnerName, setPartnerName] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Matrix room
+  const [matrixRoomId, setMatrixRoomId] = useState<string | null>(null);
+  const [matrixInitError, setMatrixInitError] = useState<string | null>(null);
 
   // Free-tier DM quota tracking
   const [dmRemaining, setDmRemaining] = useState<number | null>(null);
@@ -583,29 +589,78 @@ function Conversation({
   // Lightbox
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
+  // Matrix live messages (only active when roomId is known)
+  const { messages: matrixMessages, loading: matrixLoading } = useRoomMessages(matrixRoomId);
+
+  // Convert Matrix messages to DirectMessage shape for the existing bubble components
+  const matrixAsDmMessages: DirectMessage[] = matrixMessages.map((m) => ({
+    id: m.eventId,
+    content: m.body,
+    isMine: m.isMine,
+    createdAt: new Date(m.timestamp).toISOString(),
+    mediaUrl: undefined,
+    mediaType: undefined,
+    mediaThumbUrl: undefined,
+  }));
+
+  // Final message list: prefer Matrix when available, fall back to REST
+  const messages: DirectMessage[] = matrixRoomId
+    ? matrixAsDmMessages.length > 0
+      ? matrixAsDmMessages
+      : restMessages
+    : restMessages;
+
   const loadMessages = useCallback(async () => {
     try {
       const data = await getMessages(userId, 50);
-      setMessages(data.messages || []);
+      setRestMessages(data.messages || []);
+      // Also pick up partner name from thread data if available
       setLoadError(null);
     } catch {
       setLoadError(t.loadMessagesError);
     }
   }, [userId, t.loadMessagesError]);
 
+  // Bootstrap: load REST messages immediately, then silently try to get Matrix room
   useEffect(() => {
     setIsLoading(true);
     loadMessages().finally(() => setIsLoading(false));
     markThreadAsRead(userId).catch(() => {});
 
+    // Try to establish Matrix DM room (non-blocking — Matrix is real-time upgrade)
+    getOrCreateDmRoom(userId)
+      .then((res) => {
+        if (res.success) setMatrixRoomId(res.roomId);
+      })
+      .catch(() => {
+        // Matrix unavailable — REST polling fallback
+        setMatrixInitError("real-time unavailable");
+      });
+  }, [userId, loadMessages]);
+
+  // REST polling fallback when Matrix is not available
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (matrixRoomId || matrixInitError === null) {
+      // Matrix connected or still trying — no need to poll
+      if (pollRef.current) clearInterval(pollRef.current);
+      return;
+    }
+    // Matrix failed — fall back to 4-second polling
     pollRef.current = setInterval(() => {
       loadMessages();
     }, 4000);
-
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [userId, loadMessages]);
+  }, [matrixRoomId, matrixInitError, loadMessages]);
+
+  // Cleanup poll on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -673,19 +728,25 @@ function Conversation({
 
     try {
       if (hasMedia && mediaFile) {
+        // Media always goes via REST (Matrix doesn't handle file uploads here)
         const data = await sendDmMediaMessage(userId, mediaFile, text || undefined);
         if (data.success && data.message) {
-          setMessages((prev) => [...prev, data.message]);
+          setRestMessages((prev) => [...prev, data.message]);
         }
         if (data.remaining !== undefined) {
           setDmRemaining(data.remaining);
           if (data.limit !== undefined) setDmLimit(data.limit);
         }
         clearMedia();
+      } else if (matrixRoomId) {
+        // Text goes via Matrix when room is available (real-time delivery)
+        await sendMatrixMessage(matrixRoomId, text);
+        // Matrix Timeline listener will append the message automatically
       } else {
+        // Fallback to REST when Matrix is unavailable
         const data = await sendMessage(userId, text);
         if (data.success && data.message) {
-          setMessages((prev) => [...prev, data.message]);
+          setRestMessages((prev) => [...prev, data.message]);
         }
         if (data.remaining !== undefined) {
           setDmRemaining(data.remaining);
@@ -712,7 +773,7 @@ function Conversation({
     } finally {
       setSending(false);
     }
-  }, [sending, msgInput, mediaFile, userId, clearMedia, isFree, dmRemaining, t.limitReached, t.sendFailed, t.uploadFailed]);
+  }, [sending, msgInput, mediaFile, userId, matrixRoomId, clearMedia, isFree, dmRemaining, t.limitReached, t.sendFailed, t.uploadFailed]);
 
   const handleNavigate = useCallback(
     (path: string) => navigate(path),

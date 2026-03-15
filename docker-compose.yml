@@ -356,6 +356,9 @@ services:
       SYNAPSE_CONFIG_DIR: /data
       UID: "991"
       GID: "991"
+      # OIDC client credentials — interpolated by homeserver.yaml via %(VAR)s syntax
+      SYNAPSE_OIDC_CLIENT_ID: ${SYNAPSE_OIDC_CLIENT_ID}
+      SYNAPSE_OIDC_CLIENT_SECRET: ${SYNAPSE_OIDC_CLIENT_SECRET}
     networks:
       - pnptvapp_net
     depends_on:

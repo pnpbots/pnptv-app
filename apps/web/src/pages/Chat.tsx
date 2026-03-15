@@ -28,6 +28,7 @@ import {
   requestJoinGroup,
   getJoinRequests,
   handleJoinRequest,
+  getOrCreateHangoutRoom,
   type HangoutGroup,
   type GroupMessage,
   type StartCallResponse,
@@ -35,6 +36,7 @@ import {
   type DiscoverGroup,
   type JoinRequest,
 } from "@/lib/api";
+import { useRoomMessages, sendMatrixMessage } from "@/hooks/useMatrix";
 import {
   MediaUploadButton,
   MediaPreview,
@@ -376,10 +378,41 @@ export default function Chat() {
   const isNearBottom = useRef(true);
   const prevScrollHeight = useRef(0);
 
-  // Socket hook
+  // Matrix room for hangout chat
+  const [matrixRoomId, setMatrixRoomId] = useState<string | null>(null);
+  const { messages: matrixMessages } = useRoomMessages(matrixRoomId);
+
+  // Convert Matrix messages to GroupMessage shape for existing MessageBubble components.
+  // We use a stable hash of the eventId string as the numeric id field.
+  const matrixAsGroupMessages: GroupMessage[] = matrixMessages.map((m) => {
+    // FNV-1a 32-bit hash for stable numeric id
+    let hash = 2166136261;
+    for (let i = 0; i < m.eventId.length; i++) {
+      hash ^= m.eventId.charCodeAt(i);
+      hash = (hash * 16777619) >>> 0;
+    }
+    return {
+      id: hash,
+      room: matrixRoomId ?? "",
+      content: m.body,
+      user_id: m.senderId,
+      username: m.senderId.split(":")[0].replace(/^@/, "") ?? "",
+      first_name: m.senderId.split(":")[0].replace(/^@/, "") ?? "",
+      photo_url: null,
+      created_at: new Date(m.timestamp).toISOString(),
+      media_url: null,
+      media_type: null,
+      media_mime: null,
+      media_thumb_url: null,
+      media_width: null,
+      media_height: null,
+    } satisfies GroupMessage;
+  });
+
+  // Socket hook — kept for presence, typing, calls, and Socket.IO-delivered messages
   const {
-    messages,
-    sendMessage,
+    messages: socketMessages,
+    sendMessage: socketSendMessage,
     emitTyping,
     typingUsers,
     callState,
@@ -390,6 +423,52 @@ export default function Chat() {
     onlineMembers,
     inviteToCall,
   } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId);
+
+  // Merge messages: when Matrix is active use it as primary; Socket.IO messages fill the initial
+  // load and media messages (which are never sent via Matrix in this implementation).
+  // Deduplicate by id to avoid showing the same message twice.
+  const messages: GroupMessage[] = React.useMemo(() => {
+    if (!matrixRoomId || matrixMessages.length === 0) return socketMessages;
+
+    const seen = new Set<string>();
+    const merged: GroupMessage[] = [];
+
+    // Socket.IO messages first (they include media + older history)
+    for (const m of socketMessages) {
+      seen.add(String(m.id));
+      merged.push(m);
+    }
+
+    // Matrix messages appended — skip any that duplicate a socket message id
+    for (const m of matrixAsGroupMessages) {
+      if (!seen.has(String(m.id))) {
+        seen.add(String(m.id));
+        merged.push(m);
+      }
+    }
+
+    // Sort by created_at ascending
+    return merged.sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+  }, [socketMessages, matrixAsGroupMessages, matrixRoomId, matrixMessages.length]);
+
+  // sendMessage: route text through Matrix when available, otherwise Socket.IO
+  const sendMessage = useCallback(
+    async (text: string) => {
+      if (matrixRoomId) {
+        try {
+          await sendMatrixMessage(matrixRoomId, text);
+        } catch {
+          // Matrix send failed — fall back to Socket.IO
+          socketSendMessage(text);
+        }
+      } else {
+        socketSendMessage(text);
+      }
+    },
+    [matrixRoomId, socketSendMessage]
+  );
 
   // Media upload state
   const [mediaFile, setMediaFile] = useState<File | null>(null);
@@ -633,8 +712,6 @@ export default function Chat() {
     if (showTutorial) dismissTutorial();
     setActiveGroup(group);
     setView("chat");
-    setCallToken(null);
-    setCallWsUrl(null);
     setCallId(null);
     setCallIsModerator(false);
     setMessagesLoading(true);
@@ -645,6 +722,12 @@ export default function Chat() {
 
     // Mark as read
     markGroupAsRead(group.id).catch(() => {});
+
+    // Silently try to provision a Matrix room for this group (non-blocking upgrade)
+    setMatrixRoomId(null);
+    getOrCreateHangoutRoom(group.id)
+      .then((res) => { if (res.success) setMatrixRoomId(res.roomId); })
+      .catch(() => { /* Matrix unavailable — Socket.IO continues as sole message source */ });
 
     // If there's already an active call, fetch the URL so the banner/overlay appears.
     // We only auto-open the overlay when the user explicitly clicks Join (not on entering
@@ -667,8 +750,7 @@ export default function Chat() {
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
     setView("list");
     setActiveGroup(null);
-    setCallToken(null);
-    setCallWsUrl(null);
+    setMatrixRoomId(null);
     setCallId(null);
     setCallIsModerator(false);
     setShowOnline(false);
