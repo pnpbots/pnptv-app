@@ -117,7 +117,6 @@ export interface TelegramAuthResponse {
 export interface AuthMethods {
   telegram: boolean;
   atproto: boolean;
-  x: boolean;
 }
 
 export interface AuthStatusResponse {
@@ -125,7 +124,6 @@ export interface AuthStatusResponse {
   user?: TelegramAuthResponse["user"] & {
     atproto_did?: string | null;
     atproto_handle?: string | null;
-    x_handle?: string | null;
     auth_methods?: AuthMethods;
     creator_status?: string;
     creator_type?: string | null;
@@ -193,15 +191,6 @@ export function unlinkAtproto(): Promise<{ success: boolean; message: string }> 
   return request("/api/webapp/auth/atproto/unlink", { method: "POST" });
 }
 
-export function unlinkX(): Promise<{ success: boolean; message: string }> {
-  return request("/api/webapp/auth/x/unlink", { method: "POST" });
-}
-
-export function getXLoginUrl(): string {
-  const base = import.meta.env.VITE_API_URL || "https://pnptv.app";
-  return `${base}/api/webapp/auth/x/start?redirect=true`;
-}
-
 /**
  * Initiates an ATProto/Bluesky OAuth flow for the given handle.
  * This is a redirect — the function builds the URL and navigates to it.
@@ -226,6 +215,8 @@ export interface MediaTrack {
   url: string;
   art?: string;
   time: number;
+  provider?: "local" | "soundcloud";
+  external_id?: string;
 }
 
 export function getMediaTracks(
@@ -233,6 +224,32 @@ export function getMediaTracks(
   limit = 20
 ): Promise<{ success: boolean; tracks: MediaTrack[] }> {
   return request(`/api/proxy/media/tracks?offset=${offset}&limit=${limit}`);
+}
+
+export function resolveSoundCloud(url: string): Promise<{
+  success: boolean;
+  metadata: {
+    title: string;
+    artist: string;
+    coverUrl: string;
+    externalId: string;
+    url: string;
+  };
+}> {
+  return request("/api/proxy/media/resolve-soundcloud", {
+    method: "POST",
+    body: { url },
+  });
+}
+
+export function importSoundCloud(metadata: any): Promise<{
+  success: boolean;
+  track: MediaTrack;
+}> {
+  return request("/api/proxy/media/import-soundcloud", {
+    method: "POST",
+    body: metadata,
+  });
 }
 
 export function searchMedia(
@@ -2609,6 +2626,15 @@ export interface CanvaExportJob {
   error_message?: string;
   created_at: string;
   updated_at: string;
+}
+
+export function getXLoginUrl(): string {
+  const base = import.meta.env.VITE_API_URL || "https://pnptv.app";
+  return `${base}/api/webapp/auth/x/start`;
+}
+
+export function unlinkX(): Promise<{ success: boolean }> {
+  return request("/api/webapp/auth/x/unlink", { method: "POST" });
 }
 
 export function getCanvaLoginUrl(): string {
