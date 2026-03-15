@@ -11,6 +11,38 @@ class SoundCloudService {
     try {
       logger.info(`Resolving SoundCloud track: ${trackUrl}`);
 
+      // Resolve short URLs (on.soundcloud.com, snd.sc) to canonical soundcloud.com URLs
+      if (/^https?:\/\/(on\.soundcloud\.com|snd\.sc)\//i.test(trackUrl)) {
+        try {
+          const headResp = await axios.head(trackUrl, { maxRedirects: 5, timeout: 10000 });
+          if (headResp.request?.res?.responseUrl) {
+            trackUrl = headResp.request.res.responseUrl;
+          }
+        } catch (redirectErr) {
+          // axios may throw on redirect but still resolve — check the response
+          if (redirectErr.response?.headers?.location) {
+            trackUrl = redirectErr.response.headers.location;
+          } else if (redirectErr.request?.res?.responseUrl) {
+            trackUrl = redirectErr.request.res.responseUrl;
+          } else {
+            logger.warn('SoundCloud short URL redirect failed, trying GET fallback', redirectErr.message);
+            try {
+              const getResp = await axios.get(trackUrl, { maxRedirects: 5, timeout: 10000 });
+              if (getResp.request?.res?.responseUrl) {
+                trackUrl = getResp.request.res.responseUrl;
+              }
+            } catch (getErr) {
+              if (getErr.request?.res?.responseUrl) {
+                trackUrl = getErr.request.res.responseUrl;
+              }
+            }
+          }
+        }
+        // Strip query params from resolved URL for cleaner OEmbed lookup
+        try { trackUrl = trackUrl.split('?')[0]; } catch { /* keep as-is */ }
+        logger.info(`Resolved short URL to: ${trackUrl}`);
+      }
+
       // Use SoundCloud's OEmbed API (no API key required for basic info)
       const response = await axios.get('https://soundcloud.com/oembed', {
         params: {
@@ -57,7 +89,7 @@ class SoundCloudService {
    * @returns {boolean}
    */
   static isSoundCloudUrl(url) {
-    return /^(https?:\/\/)?(www\.)?(soundcloud\.com|snd\.sc)\/.*$/.test(url);
+    return /^(https?:\/\/)?(www\.)?(soundcloud\.com|on\.soundcloud\.com|snd\.sc)\/.*$/.test(url);
   }
 }
 
