@@ -848,6 +848,8 @@ export default function Chat() {
     if (showTutorial) dismissTutorial();
     setActiveGroup(group);
     setView("chat");
+    // Update URL so NearbyWidget and other route-aware components detect the hangout
+    navigate(`/chat/${group.id}`, { replace: true });
     setCallId(null);
     setCallIsModerator(false);
     setMessagesLoading(true);
@@ -885,6 +887,7 @@ export default function Chat() {
   const closeChat = () => {
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
     setView("list");
+    navigate("/chat", { replace: true });
     setActiveGroup(null);
     setMatrixRoomId(null);
     setCallId(null);
