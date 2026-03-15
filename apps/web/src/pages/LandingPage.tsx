@@ -373,14 +373,6 @@ export function LandingPage() {
             <p className="text-pnp-textSecondary text-xs">The #1 queer PNP community</p>
           </div>
 
-          {/* Create account */}
-          <Link
-            to="/join"
-            className="btn-gradient w-full py-3.5 rounded-xl text-sm font-bold text-white text-center"
-          >
-            Create new account
-          </Link>
-
           {/* Join existing — accordion */}
           <div className="w-full">
             <button
