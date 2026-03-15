@@ -1149,53 +1149,136 @@ export default function Chat() {
                   </svg>
                 </button>
               </div>
-              {/* Member list */}
-              <div className="overflow-y-auto flex-1 px-4 pb-6 space-y-2">
+              {/* Member grid / list */}
+              <div className="overflow-y-auto flex-1 px-4 pb-6">
                 {onlineMembers.length === 0 ? (
                   <p className="text-center text-sm py-6" style={{ color: "#8E8E93" }}>{t.chat.noOtherMembersOnline}</p>
-                ) : (
-                  onlineMembers.map((member) => {
-                    const isMe = member.userId === user?.dbId;
+                ) : !activeGroup.isMain ? (
+                  /* ── Member-created hangouts: 3×3 grid with promo placeholders ── */
+                  (() => {
+                    const GRID = 9;
+                    const shown = onlineMembers.slice(0, GRID);
+                    const promoCards = [
+                      { label: "Learn DashPay", icon: "💳", color: "#5ED1C4" },
+                      { label: "Buy Tokens", icon: "🪙", color: "#E69138" },
+                      { label: "Upgrade to Prime", icon: "⭐", color: "#D4007A" },
+                      { label: "Invite Friends", icon: "🔗", color: "#7B61FF" },
+                      { label: "Earn Rewards", icon: "🎁", color: "#00D4E8" },
+                      { label: "Go Live", icon: "📡", color: "#FF6B6B" },
+                      { label: "Create Hangout", icon: "🏠", color: "#48c774" },
+                      { label: "Explore Nearby", icon: "📍", color: "#FBFF00" },
+                      { label: "Get Verified", icon: "✅", color: "#1DA1F2" },
+                    ];
+                    const placeholders = promoCards.slice(0, GRID - shown.length);
                     return (
-                      <div key={member.userId} className="flex items-center gap-3 py-2">
-                        {/* Avatar */}
-                        {member.photoUrl ? (
-                          <img src={member.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
-                        ) : (
+                      <div className="grid grid-cols-3 gap-2">
+                        {shown.map((member) => {
+                          const isMe = member.userId === user?.dbId;
+                          return (
+                            <button
+                              key={member.userId}
+                              onClick={() => { setShowOnline(false); navigate(`/profile/${member.userId}`); }}
+                              className="w-full rounded-xl overflow-hidden hover:ring-1 hover:ring-white/20 active:scale-[0.97] transition-all"
+                              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
+                            >
+                              <div className="relative h-16 w-full">
+                                {member.photoUrl ? (
+                                  <img
+                                    src={member.photoUrl}
+                                    alt={member.name}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).style.display = "none";
+                                      const sib = (e.target as HTMLElement).nextElementSibling as HTMLElement | null;
+                                      if (sib) sib.style.display = "flex";
+                                    }}
+                                  />
+                                ) : null}
+                                <div
+                                  className="absolute inset-0 flex items-center justify-center text-lg font-bold"
+                                  style={{
+                                    background: "linear-gradient(135deg, #D4007A, #E69138)",
+                                    color: "#fff",
+                                    display: member.photoUrl ? "none" : undefined,
+                                  }}
+                                >
+                                  {(member.name || "?")[0].toUpperCase()}
+                                </div>
+                                <span className="absolute bottom-0.5 left-0.5 w-2 h-2 rounded-full bg-green-400 ring-1 ring-black/30" />
+                              </div>
+                              <div className="px-1.5 py-1.5">
+                                <p className="text-[10px] font-bold text-white truncate leading-tight">
+                                  {member.name}{isMe ? " (You)" : ""}
+                                </p>
+                                <p className="text-[8px] truncate leading-tight mt-0.5" style={{ color: "#8E8E93" }}>Online</p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                        {placeholders.map((promo, i) => (
                           <div
-                            className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                            key={`promo-${i}`}
+                            className="w-full rounded-xl overflow-hidden opacity-70 hover:opacity-100 transition-opacity cursor-default"
+                            style={{ background: "rgba(255,255,255,0.03)", border: "1px dashed rgba(255,255,255,0.10)" }}
                           >
-                            {(member.name || "?")[0].toUpperCase()}
+                            <div
+                              className="h-16 w-full flex items-center justify-center text-2xl"
+                              style={{ background: `${promo.color}15` }}
+                            >
+                              {promo.icon}
+                            </div>
+                            <div className="px-1.5 py-1.5">
+                              <p className="text-[10px] font-bold truncate leading-tight" style={{ color: promo.color }}>{promo.label}</p>
+                              <p className="text-[8px] truncate leading-tight mt-0.5" style={{ color: "#8E8E9366" }}>Coming soon</p>
+                            </div>
                           </div>
-                        )}
-                        {/* Name */}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-white truncate">
-                            {member.name}{isMe ? ` ${t.chat.you}` : ""}
-                          </p>
-                          <div className="flex items-center gap-1 mt-0.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                            <span className="text-xs" style={{ color: "#8E8E93" }}>{t.chat.online}</span>
-                            <NearbyBadge distanceKm={(member as any).distance_km} variant="compact" />
-                          </div>
-                        </div>
-                        {/* Invite button — only if call is active and not self */}
-                        {(callState.isActive || callMeetingUrl) && !isMe && (
-                          <button
-                            onClick={() => {
-                              inviteToCall(member.userId);
-                              setShowOnline(false);
-                            }}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white flex-shrink-0 transition-all active:scale-95"
-                            style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
-                          >
-                            {t.chat.invite}
-                          </button>
-                        )}
+                        ))}
                       </div>
                     );
-                  })
+                  })()
+                ) : (
+                  /* ── Main/community hangouts: original list view ── */
+                  <div className="space-y-2">
+                    {onlineMembers.map((member) => {
+                      const isMe = member.userId === user?.dbId;
+                      return (
+                        <div key={member.userId} className="flex items-center gap-3 py-2">
+                          {member.photoUrl ? (
+                            <img src={member.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                          ) : (
+                            <div
+                              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                            >
+                              {(member.name || "?")[0].toUpperCase()}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-white truncate">
+                              {member.name}{isMe ? ` ${t.chat.you}` : ""}
+                            </p>
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                              <span className="text-xs" style={{ color: "#8E8E93" }}>{t.chat.online}</span>
+                              <NearbyBadge distanceKm={(member as any).distance_km} variant="compact" />
+                            </div>
+                          </div>
+                          {(callState.isActive || callMeetingUrl) && !isMe && (
+                            <button
+                              onClick={() => {
+                                inviteToCall(member.userId);
+                                setShowOnline(false);
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white flex-shrink-0 transition-all active:scale-95"
+                              style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
+                            >
+                              {t.chat.invite}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
               {/* View on Map button */}
