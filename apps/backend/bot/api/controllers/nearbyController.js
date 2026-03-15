@@ -439,6 +439,464 @@ class NearbyController {
   }
 
   /**
+   * GET /api/webapp/nearby/feed-posters
+   * Returns the 45 most-recent social post authors sorted by distance from the requesting user.
+   * Each result carries metadata about the user's last post for context.
+   */
+  static async feedPosters(req, res) {
+    try {
+      const userId = req.session?.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+      const { rows: viewerRows } = await dbQuery(
+        `SELECT location_lat, location_lng FROM users WHERE id = $1`,
+        [userId]
+      );
+      const viewer = viewerRows[0];
+      if (!viewer || viewer.location_lat == null || viewer.location_lng == null) {
+        return res.status(200).json({ success: true, total: 0, users: [] });
+      }
+
+      const lat = parseFloat(viewer.location_lat);
+      const lng = parseFloat(viewer.location_lng);
+
+      // Distinct-on pattern: for each user grab their most recent post, then
+      // compute Haversine distance in JS and sort/limit there.
+      const { rows } = await dbQuery(
+        `SELECT DISTINCT ON (u.id)
+           u.id                                                         AS user_id,
+           u.username,
+           u.first_name                                                 AS name,
+           u.photo_file_id                                              AS photo_url,
+           u.location_lat,
+           u.location_lng,
+           sp.id                                                        AS last_post_id,
+           sp.media_url                                                 AS last_post_media,
+           LEFT(sp.content, 80)                                         AS last_post_caption,
+           sp.created_at                                                AS last_post_at,
+           CASE WHEN u.last_active > NOW() - INTERVAL '5 minutes'
+                THEN true ELSE false END                                AS is_online
+         FROM users u
+         JOIN social_posts sp ON sp.user_id = u.id AND sp.is_deleted = false
+         WHERE u.id != $1
+           AND u.is_deleted = false
+           AND u.location_lat IS NOT NULL
+           AND u.location_lng IS NOT NULL
+           AND u.location_sharing_enabled = true
+         ORDER BY u.id, sp.created_at DESC`,
+        [userId]
+      );
+
+      // Compute Haversine distance and sort ascending
+      const R = 6371;
+      const toRad = (d) => (d * Math.PI) / 180;
+      const withDistance = rows.map((r) => {
+        const dLat = toRad(parseFloat(r.location_lat) - lat);
+        const dLng = toRad(parseFloat(r.location_lng) - lng);
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(toRad(lat)) * Math.cos(toRad(parseFloat(r.location_lat))) *
+          Math.sin(dLng / 2) ** 2;
+        const distKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const photoUrl = r.photo_url &&
+          (r.photo_url.startsWith('/') || r.photo_url.startsWith('http'))
+          ? r.photo_url : null;
+        return {
+          user_id: r.user_id,
+          username: r.username,
+          name: r.name,
+          photo_url: photoUrl,
+          last_post_id: r.last_post_id,
+          last_post_media: r.last_post_media,
+          last_post_caption: r.last_post_caption,
+          last_post_at: r.last_post_at,
+          distance_km: Math.round(distKm * 10) / 10,
+          is_online: r.is_online,
+        };
+      });
+
+      withDistance.sort((a, b) => a.distance_km - b.distance_km);
+      const users = withDistance.slice(0, 45);
+
+      return res.status(200).json({ success: true, total: users.length, users });
+    } catch (error) {
+      logger.error('❌ feedPosters error:', error);
+      return res.status(500).json({ error: 'Failed to fetch feed posters' });
+    }
+  }
+
+  /**
+   * GET /api/webapp/nearby/hangout-members/:groupId
+   * Returns members of a hangout group sorted by distance from the requesting user.
+   * The requesting user must be a member of the group.
+   */
+  static async hangoutMembers(req, res) {
+    try {
+      const userId = req.session?.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+      const groupId = parseInt(req.params.groupId, 10);
+      if (!groupId || isNaN(groupId)) {
+        return res.status(400).json({ error: 'Invalid group ID' });
+      }
+
+      // Verify membership
+      const { rows: memberCheck } = await dbQuery(
+        `SELECT 1 FROM hangout_group_members WHERE group_id = $1 AND user_id = $2`,
+        [groupId, userId]
+      );
+      if (memberCheck.length === 0) {
+        return res.status(403).json({ error: 'You are not a member of this group' });
+      }
+
+      // Get requesting user's location
+      const { rows: viewerRows } = await dbQuery(
+        `SELECT location_lat, location_lng FROM users WHERE id = $1`,
+        [userId]
+      );
+      const viewer = viewerRows[0];
+      if (!viewer || viewer.location_lat == null || viewer.location_lng == null) {
+        // No location — return members without distance
+        const { rows: members } = await dbQuery(
+          `SELECT u.id AS user_id, u.username, u.first_name AS name, u.photo_file_id AS photo_url,
+                  CASE WHEN u.last_active > NOW() - INTERVAL '5 minutes' THEN true ELSE false END AS is_online
+           FROM hangout_group_members hgm
+           JOIN users u ON u.id = hgm.user_id
+           WHERE hgm.group_id = $1
+             AND u.id != $2
+             AND u.is_deleted = false
+           ORDER BY u.first_name ASC
+           LIMIT 45`,
+          [groupId, userId]
+        );
+        const sanitized = members.map((r) => ({
+          ...r,
+          photo_url: r.photo_url && (r.photo_url.startsWith('/') || r.photo_url.startsWith('http')) ? r.photo_url : null,
+          distance_km: null,
+        }));
+        return res.status(200).json({ success: true, total: sanitized.length, users: sanitized });
+      }
+
+      const lat = parseFloat(viewer.location_lat);
+      const lng = parseFloat(viewer.location_lng);
+
+      const { rows } = await dbQuery(
+        `SELECT u.id AS user_id, u.username, u.first_name AS name, u.photo_file_id AS photo_url,
+                u.location_lat, u.location_lng,
+                CASE WHEN u.last_active > NOW() - INTERVAL '5 minutes' THEN true ELSE false END AS is_online
+         FROM hangout_group_members hgm
+         JOIN users u ON u.id = hgm.user_id
+         WHERE hgm.group_id = $1
+           AND u.id != $2
+           AND u.is_deleted = false
+         LIMIT 200`,
+        [groupId, userId]
+      );
+
+      const R = 6371;
+      const toRad = (d) => (d * Math.PI) / 180;
+      const withDistance = rows.map((r) => {
+        let distKm = null;
+        if (r.location_lat != null && r.location_lng != null) {
+          const dLat = toRad(parseFloat(r.location_lat) - lat);
+          const dLng = toRad(parseFloat(r.location_lng) - lng);
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat)) * Math.cos(toRad(parseFloat(r.location_lat))) *
+            Math.sin(dLng / 2) ** 2;
+          distKm = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
+        }
+        return {
+          user_id: r.user_id,
+          username: r.username,
+          name: r.name,
+          photo_url: r.photo_url && (r.photo_url.startsWith('/') || r.photo_url.startsWith('http')) ? r.photo_url : null,
+          distance_km: distKm,
+          is_online: r.is_online,
+        };
+      });
+
+      // Null distances go last
+      withDistance.sort((a, b) => {
+        if (a.distance_km === null) return 1;
+        if (b.distance_km === null) return -1;
+        return a.distance_km - b.distance_km;
+      });
+      const users = withDistance.slice(0, 45);
+
+      return res.status(200).json({ success: true, total: users.length, users });
+    } catch (error) {
+      logger.error('❌ hangoutMembers error:', error);
+      return res.status(500).json({ error: 'Failed to fetch hangout members' });
+    }
+  }
+
+  /**
+   * GET /api/webapp/nearby/stream-viewers/:streamId
+   * Returns active viewers of a live stream sorted by distance from the requesting user.
+   * The stream host is always included as the first result.
+   * Falls back gracefully when viewers have no location set.
+   */
+  static async streamViewers(req, res) {
+    try {
+      const userId = req.session?.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+      const streamId = req.params.streamId;
+      if (!streamId) return res.status(400).json({ error: 'Invalid stream ID' });
+
+      // Fetch stream to verify it exists and get host
+      const { rows: streamRows } = await dbQuery(
+        `SELECT id, host_id, title, status FROM live_streams WHERE id = $1`,
+        [streamId]
+      );
+      if (streamRows.length === 0) {
+        return res.status(404).json({ error: 'Stream not found' });
+      }
+      const stream = streamRows[0];
+
+      // Get requesting user's location
+      const { rows: viewerRows } = await dbQuery(
+        `SELECT location_lat, location_lng FROM users WHERE id = $1`,
+        [userId]
+      );
+      const myLoc = viewerRows[0];
+      const myLat = myLoc?.location_lat != null ? parseFloat(myLoc.location_lat) : null;
+      const myLng = myLoc?.location_lng != null ? parseFloat(myLoc.location_lng) : null;
+
+      // Get active viewer IDs from stream_viewers (left_at IS NULL = still watching)
+      const { rows: activeViewerRows } = await dbQuery(
+        `SELECT DISTINCT viewer_id FROM stream_viewers
+         WHERE stream_id = $1 AND left_at IS NULL AND viewer_id IS NOT NULL`,
+        [streamId]
+      );
+      const viewerIds = activeViewerRows.map((r) => r.viewer_id);
+
+      // Always include the host; union with active viewer IDs
+      const allIds = Array.from(new Set([stream.host_id, ...viewerIds]));
+
+      if (allIds.length === 0) {
+        return res.status(200).json({ success: true, total: 0, stream_title: stream.title, users: [] });
+      }
+
+      const placeholders = allIds.map((_, i) => `$${i + 2}`).join(', ');
+      const { rows } = await dbQuery(
+        `SELECT u.id AS user_id, u.username, u.first_name AS name, u.photo_file_id AS photo_url,
+                u.location_lat, u.location_lng,
+                CASE WHEN u.last_active > NOW() - INTERVAL '5 minutes' THEN true ELSE false END AS is_online,
+                CASE WHEN u.id = $1 THEN true ELSE false END AS is_host
+         FROM users u
+         WHERE u.id IN (${placeholders})
+           AND u.is_deleted = false`,
+        [stream.host_id, ...allIds]
+      );
+
+      const R = 6371;
+      const toRad = (d) => (d * Math.PI) / 180;
+      const withDistance = rows.map((r) => {
+        let distKm = null;
+        if (myLat !== null && myLng !== null && r.location_lat != null && r.location_lng != null) {
+          const dLat = toRad(parseFloat(r.location_lat) - myLat);
+          const dLng = toRad(parseFloat(r.location_lng) - myLng);
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(myLat)) * Math.cos(toRad(parseFloat(r.location_lat))) *
+            Math.sin(dLng / 2) ** 2;
+          distKm = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
+        }
+        return {
+          user_id: r.user_id,
+          username: r.username,
+          name: r.name,
+          photo_url: r.photo_url && (r.photo_url.startsWith('/') || r.photo_url.startsWith('http')) ? r.photo_url : null,
+          distance_km: distKm,
+          is_online: r.is_online,
+          is_host: r.is_host,
+        };
+      });
+
+      // Host first, then by distance (nulls last)
+      withDistance.sort((a, b) => {
+        if (a.is_host && !b.is_host) return -1;
+        if (!a.is_host && b.is_host) return 1;
+        if (a.distance_km === null) return 1;
+        if (b.distance_km === null) return -1;
+        return a.distance_km - b.distance_km;
+      });
+      const users = withDistance.slice(0, 45);
+
+      return res.status(200).json({
+        success: true,
+        total: users.length,
+        stream_title: stream.title,
+        stream_status: stream.status,
+        users,
+      });
+    } catch (error) {
+      logger.error('❌ streamViewers error:', error);
+      return res.status(500).json({ error: 'Failed to fetch stream viewers' });
+    }
+  }
+
+  /**
+   * GET /api/webapp/nearby/event-attendees/:eventId
+   * Returns RSVPed attendees of an event sorted by distance from the requesting user.
+   */
+  static async eventAttendees(req, res) {
+    try {
+      const userId = req.session?.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+      const eventId = req.params.eventId;
+      if (!eventId) return res.status(400).json({ error: 'Invalid event ID' });
+
+      // Verify event exists
+      const { rows: eventRows } = await dbQuery(
+        `SELECT id, title, scheduled_at, status FROM events WHERE id = $1`,
+        [eventId]
+      );
+      if (eventRows.length === 0) {
+        return res.status(404).json({ error: 'Event not found' });
+      }
+      const event = eventRows[0];
+
+      // Get requesting user's location
+      const { rows: viewerRows } = await dbQuery(
+        `SELECT location_lat, location_lng FROM users WHERE id = $1`,
+        [userId]
+      );
+      const myLoc = viewerRows[0];
+      const myLat = myLoc?.location_lat != null ? parseFloat(myLoc.location_lat) : null;
+      const myLng = myLoc?.location_lng != null ? parseFloat(myLoc.location_lng) : null;
+
+      const { rows } = await dbQuery(
+        `SELECT u.id AS user_id, u.username, u.first_name AS name, u.photo_file_id AS photo_url,
+                u.location_lat, u.location_lng,
+                CASE WHEN u.last_active > NOW() - INTERVAL '5 minutes' THEN true ELSE false END AS is_online,
+                er.created_at AS rsvp_at
+         FROM event_rsvps er
+         JOIN users u ON u.id = er.user_id
+         WHERE er.event_id = $1
+           AND u.is_deleted = false
+         LIMIT 200`,
+        [eventId]
+      );
+
+      const R = 6371;
+      const toRad = (d) => (d * Math.PI) / 180;
+      const withDistance = rows.map((r) => {
+        let distKm = null;
+        if (myLat !== null && myLng !== null && r.location_lat != null && r.location_lng != null) {
+          const dLat = toRad(parseFloat(r.location_lat) - myLat);
+          const dLng = toRad(parseFloat(r.location_lng) - myLng);
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(myLat)) * Math.cos(toRad(parseFloat(r.location_lat))) *
+            Math.sin(dLng / 2) ** 2;
+          distKm = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
+        }
+        return {
+          user_id: r.user_id,
+          username: r.username,
+          name: r.name,
+          photo_url: r.photo_url && (r.photo_url.startsWith('/') || r.photo_url.startsWith('http')) ? r.photo_url : null,
+          distance_km: distKm,
+          is_online: r.is_online,
+          rsvp_at: r.rsvp_at,
+        };
+      });
+
+      // Sort by distance ascending, nulls last
+      withDistance.sort((a, b) => {
+        if (a.distance_km === null) return 1;
+        if (b.distance_km === null) return -1;
+        return a.distance_km - b.distance_km;
+      });
+      const users = withDistance.slice(0, 45);
+
+      return res.status(200).json({
+        success: true,
+        total: users.length,
+        event_title: event.title,
+        event_scheduled_at: event.scheduled_at,
+        event_status: event.status,
+        users,
+      });
+    } catch (error) {
+      logger.error('❌ eventAttendees error:', error);
+      return res.status(500).json({ error: 'Failed to fetch event attendees' });
+    }
+  }
+
+  /**
+   * GET /api/webapp/nearby/all-users
+   * Returns all users who have shared their location (including offline),
+   * sorted by distance from the requesting user. Equivalent to searchNearby
+   * but always includes an is_online field and does not require a lat/lng param
+   * (uses the stored location of the requesting user).
+   */
+  static async allUsers(req, res) {
+    try {
+      const userId = req.session?.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+      // Resolve requesting user's stored location
+      const { rows: viewerRows } = await dbQuery(
+        `SELECT location_lat, location_lng FROM users WHERE id = $1`,
+        [userId]
+      );
+      const viewer = viewerRows[0];
+      if (!viewer || viewer.location_lat == null || viewer.location_lng == null) {
+        return res.status(200).json({ success: true, total: 0, users: [] });
+      }
+
+      const lat = parseFloat(viewer.location_lat);
+      const lng = parseFloat(viewer.location_lng);
+
+      const { rows } = await dbQuery(
+        `SELECT u.id AS user_id, u.username, u.first_name AS name, u.photo_file_id AS photo_url,
+                u.location_lat, u.location_lng,
+                CASE WHEN u.last_active > NOW() - INTERVAL '5 minutes' THEN true ELSE false END AS is_online
+         FROM users u
+         WHERE u.id != $1
+           AND u.is_deleted = false
+           AND u.location_lat IS NOT NULL
+           AND u.location_lng IS NOT NULL
+           AND u.location_sharing_enabled = true`,
+        [userId]
+      );
+
+      const R = 6371;
+      const toRad = (d) => (d * Math.PI) / 180;
+      const withDistance = rows.map((r) => {
+        const dLat = toRad(parseFloat(r.location_lat) - lat);
+        const dLng = toRad(parseFloat(r.location_lng) - lng);
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(toRad(lat)) * Math.cos(toRad(parseFloat(r.location_lat))) *
+          Math.sin(dLng / 2) ** 2;
+        const distKm = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
+        return {
+          user_id: r.user_id,
+          username: r.username,
+          name: r.name,
+          photo_url: r.photo_url && (r.photo_url.startsWith('/') || r.photo_url.startsWith('http')) ? r.photo_url : null,
+          distance_km: distKm,
+          is_online: r.is_online,
+        };
+      });
+
+      withDistance.sort((a, b) => a.distance_km - b.distance_km);
+      const users = withDistance.slice(0, 45);
+
+      return res.status(200).json({ success: true, total: users.length, users });
+    } catch (error) {
+      logger.error('❌ allUsers error:', error);
+      return res.status(500).json({ error: 'Failed to fetch users' });
+    }
+  }
+
+  /**
    * GET /api/nearby/distance/:userId
    * Get distance between authenticated user and target user
    */

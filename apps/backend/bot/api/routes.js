@@ -4333,6 +4333,13 @@ app.post('/api/webapp/nearby/places/submit', asyncHandler(async (req, res) => {
   return res.json({ success: true, message: 'Place submitted for review!' });
 }));
 
+// Context-aware nearby endpoints (session-auth required)
+app.get('/api/webapp/nearby/feed-posters', requireSessionAuth, asyncHandler((req, res) => NearbyController.feedPosters(req, res)));
+app.get('/api/webapp/nearby/hangout-members/:groupId', requireSessionAuth, asyncHandler((req, res) => NearbyController.hangoutMembers(req, res)));
+app.get('/api/webapp/nearby/stream-viewers/:streamId', requireSessionAuth, asyncHandler((req, res) => NearbyController.streamViewers(req, res)));
+app.get('/api/webapp/nearby/event-attendees/:eventId', requireSessionAuth, asyncHandler((req, res) => NearbyController.eventAttendees(req, res)));
+app.get('/api/webapp/nearby/all-users', requireSessionAuth, asyncHandler((req, res) => NearbyController.allUsers(req, res)));
+
 // Referral: get my code + stats
 app.get('/api/webapp/me/referral', asyncHandler(async (req, res) => {
   const user = req.session?.user;
@@ -4491,7 +4498,40 @@ app.post('/api/proxy/media/resolve-soundcloud', requireSessionAuth, asyncHandler
 
 // Import SoundCloud track to library
 app.post('/api/proxy/media/import-soundcloud', requireSessionAuth, adminGuard, asyncHandler(async (req, res) => {
-  // ... (existing code)
+  const { title, artist, coverUrl, url, externalId, label } = req.body;
+  if (!title || !url) return res.status(400).json({ success: false, error: 'Title and URL required' });
+
+  // Check for duplicate
+  const existing = await getPool().query(
+    'SELECT id FROM media_library WHERE url = $1 OR (external_id = $2 AND external_id IS NOT NULL)',
+    [url, externalId || null]
+  );
+  if (existing.rows.length > 0) {
+    return res.status(409).json({ success: false, error: 'Track already in library' });
+  }
+
+  const result = await getPool().query(
+    `INSERT INTO media_library (title, artist, url, type, cover_url, provider, external_id, is_public, label)
+     VALUES ($1, $2, $3, 'audio', $4, 'soundcloud', $5, true, $6)
+     RETURNING *`,
+    [title, artist || 'Unknown', url, coverUrl || null, externalId || null, label || null]
+  );
+
+  res.json({ success: true, track: result.rows[0] });
+}));
+
+// Fetch SoundCloud artist catalog
+app.post('/api/proxy/media/soundcloud-artist', requireSessionAuth, adminGuard, asyncHandler(async (req, res) => {
+  const { artistUrl } = req.body;
+  if (!artistUrl) return res.status(400).json({ success: false, error: 'Artist URL required' });
+
+  try {
+    const tracks = await SoundCloudService.getArtistTracks(artistUrl);
+    res.json({ success: true, tracks: tracks || [] });
+  } catch (err) {
+    logger.error('Artist catalog fetch error:', err.message);
+    res.json({ success: true, tracks: [] });
+  }
 }));
 
 // Admin: list radio requests (webapp session auth)
@@ -4571,7 +4611,9 @@ app.get('/api/proxy/media/tracks', requireSessionAuth, asyncHandler(async (req, 
       time: m.duration,
       provider: m.provider || 'local',
       external_id: m.external_id,
-      url: m.url
+      url: m.url,
+      soundcloud_url: m.provider === 'soundcloud' ? m.url : undefined,
+      label: m.label || undefined
     }));
 
     // Combine and return

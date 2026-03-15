@@ -224,6 +224,8 @@ export interface MediaTrack {
   time: number;
   provider?: "local" | "soundcloud";
   external_id?: string;
+  soundcloud_url?: string;
+  label?: string;
 }
 
 export function getMediaTracks(
@@ -249,13 +251,13 @@ export function resolveSoundCloud(url: string): Promise<{
   });
 }
 
-export function importSoundCloud(metadata: any): Promise<{
+export function importSoundCloud(metadata: any, label?: string): Promise<{
   success: boolean;
   track: MediaTrack;
 }> {
   return request("/api/proxy/media/import-soundcloud", {
     method: "POST",
-    body: metadata,
+    body: { ...metadata, label },
   });
 }
 
@@ -266,6 +268,16 @@ export function requestSoundCloud(url: string): Promise<{
   return request("/api/webapp/radio/request-soundcloud", {
     method: "POST",
     body: { url },
+  });
+}
+
+export function getSoundCloudArtistTracks(artistUrl: string): Promise<{
+  success: boolean;
+  tracks: Array<{ title: string; artist: string; coverUrl: string; url: string; externalId: string }>;
+}> {
+  return request("/api/proxy/media/soundcloud-artist", {
+    method: "POST",
+    body: { artistUrl },
   });
 }
 
@@ -4882,4 +4894,41 @@ export function getRadioRequests(status = "pending"): Promise<{ success: boolean
 
 export function updateRadioRequest(requestId: number, status: "approved" | "rejected"): Promise<{ success: boolean; request: RadioRequest }> {
   return request(`/api/webapp/admin/radio/requests/${requestId}`, { method: "PUT", body: { status } });
+}
+
+// ============================================================================
+// Nearby Context API
+// ============================================================================
+
+export interface NearbyContextUser {
+  user_id: number | string;
+  username?: string | null;
+  name?: string | null;
+  photo_url?: string | null;
+  distance_km: number;
+  is_online?: boolean;
+  // Feed context extras:
+  last_post_media?: string | null;
+  last_post_caption?: string | null;
+  last_post_at?: string | null;
+}
+
+export function getNearbyFeedPosters(): Promise<{ success: boolean; users: NearbyContextUser[] }> {
+  return request("/api/webapp/nearby/feed-posters");
+}
+
+export function getNearbyHangoutMembers(groupId: number): Promise<{ success: boolean; users: NearbyContextUser[] }> {
+  return request(`/api/webapp/nearby/hangout-members/${groupId}`);
+}
+
+export function getNearbyStreamViewers(streamId: string): Promise<{ success: boolean; users: NearbyContextUser[] }> {
+  return request(`/api/webapp/nearby/stream-viewers/${encodeURIComponent(streamId)}`);
+}
+
+export function getNearbyEventAttendees(eventId: string): Promise<{ success: boolean; users: NearbyContextUser[] }> {
+  return request(`/api/webapp/nearby/event-attendees/${encodeURIComponent(eventId)}`);
+}
+
+export function getNearbyAllUsers(): Promise<{ success: boolean; users: NearbyContextUser[] }> {
+  return request("/api/webapp/nearby/all-users");
 }
