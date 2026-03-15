@@ -6845,6 +6845,26 @@ if (process.env.SENTRY_DSN) {
   app.use(Sentry.Handlers.errorHandler());
 }
 
+// ==========================================
+// OG PRERENDER — serves dynamic meta tags for social media crawlers
+// nginx routes crawler UAs to /api/og-prerender?path=...
+// ==========================================
+const { ogPrerenderMiddleware } = require('./middleware/ogPrerender');
+app.get('/api/og-prerender', (req, res, next) => {
+  // Rewrite req.path from query param so the middleware can match routes
+  const targetPath = req.query.path || '/';
+  req.url = targetPath;
+  req.path = targetPath;
+  ogPrerenderMiddleware(req, res, next);
+}, (_req, res) => {
+  // Fallback if middleware calls next()
+  res.type('html').send(`<!DOCTYPE html><html><head>
+    <meta property="og:title" content="PNPtv!" />
+    <meta property="og:image" content="${process.env.APP_PUBLIC_URL || 'https://app.pnptv.app'}/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head><body></body></html>`);
+});
+
 // Export app WITHOUT 404/error handlers
 // These will be added in bot.js AFTER the webhook callback
 module.exports = app;
