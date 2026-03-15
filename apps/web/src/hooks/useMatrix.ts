@@ -262,6 +262,115 @@ export async function sendReadReceipt(
   }
 }
 
+// ── sendReaction — add an emoji reaction to a message ─────────────────────────
+
+export async function sendReaction(
+  roomId: string,
+  eventId: string,
+  emoji: string
+): Promise<ISendEventResponse> {
+  const client = await initMatrix();
+  return client.sendEvent(roomId, "m.reaction", {
+    "m.relates_to": {
+      rel_type: "m.annotation",
+      event_id: eventId,
+      key: emoji,
+    },
+  });
+}
+
+// ── redactEvent — remove a reaction (or any event) ───────────────────────────
+
+export async function redactEvent(
+  roomId: string,
+  eventId: string
+): Promise<void> {
+  const client = await initMatrix();
+  await client.redactEvent(roomId, eventId);
+}
+
+// ── useRoomReactions — live reaction map for a room ──────────────────────────
+
+export interface ReactionEntry {
+  emoji: string;
+  count: number;
+  users: { userId: string; reactionEventId: string }[];
+}
+
+export function useRoomReactions(roomId: string | null): {
+  /** Map from target eventId → list of reaction entries */
+  reactions: Map<string, ReactionEntry[]>;
+} {
+  const [reactions, setReactions] = useState<Map<string, ReactionEntry[]>>(new Map());
+
+  useEffect(() => {
+    if (!roomId) { setReactions(new Map()); return; }
+
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      try {
+        const client = await initMatrix();
+        if (cancelled) return;
+
+        const buildReactionMap = () => {
+          const room = client.getRoom(roomId);
+          if (!room) return;
+
+          const map = new Map<string, ReactionEntry[]>();
+          const timeline = room.getLiveTimeline().getEvents();
+
+          for (const ev of timeline) {
+            if (ev.getType() !== "m.reaction") continue;
+            const rel = ev.getContent()?.["m.relates_to"];
+            if (!rel || rel.rel_type !== "m.annotation") continue;
+
+            const targetId = rel.event_id as string;
+            const emoji = rel.key as string;
+            const senderId = ev.getSender() ?? "";
+            const reactionEventId = ev.getId() ?? "";
+
+            if (!map.has(targetId)) map.set(targetId, []);
+            const entries = map.get(targetId)!;
+            let entry = entries.find((e) => e.emoji === emoji);
+            if (!entry) {
+              entry = { emoji, count: 0, users: [] };
+              entries.push(entry);
+            }
+            // Deduplicate by userId+emoji
+            if (!entry.users.some((u) => u.userId === senderId)) {
+              entry.count++;
+              entry.users.push({ userId: senderId, reactionEventId });
+            }
+          }
+
+          if (!cancelled) setReactions(map);
+        };
+
+        buildReactionMap();
+
+        // Rebuild on any timeline event (new reaction or redaction)
+        const onTimeline = (event: MatrixEvent, room: any) => {
+          if (!room || room.roomId !== roomId) return;
+          if (event.getType() === "m.reaction" || event.getType() === "m.room.redaction") {
+            buildReactionMap();
+          }
+        };
+
+        client.on(RoomEvent.Timeline, onTimeline);
+        return () => { client.off(RoomEvent.Timeline, onTimeline); };
+      } catch { /* Matrix unavailable */ }
+    };
+
+    let cleanup: (() => void) | undefined;
+    bootstrap().then((fn) => { cleanup = fn; }).catch(() => {});
+
+    return () => { cancelled = true; cleanup?.(); };
+  }, [roomId]);
+
+  return { reactions };
+}
+
 // ── getMatrixTimeline — synchronous snapshot of timeline events ───────────────
 
 export function getMatrixTimeline(roomId: string): MatrixMessage[] {

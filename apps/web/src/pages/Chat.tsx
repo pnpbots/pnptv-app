@@ -36,7 +36,16 @@ import {
   type DiscoverGroup,
   type JoinRequest,
 } from "@/lib/api";
-import { useRoomMessages, sendMatrixMessage, sendMatrixMediaMessage, sendReadReceipt } from "@/hooks/useMatrix";
+import {
+  useRoomMessages,
+  sendMatrixMessage,
+  sendMatrixMediaMessage,
+  sendReadReceipt,
+  sendReaction,
+  redactEvent,
+  useRoomReactions,
+  type ReactionEntry,
+} from "@/hooks/useMatrix";
 import {
   MediaUploadButton,
   MediaPreview,
@@ -59,6 +68,10 @@ import { HangoutsPaywall } from "@/components/HangoutsPaywall";
 import { ApiError } from "@/lib/api";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
+
+// ─── Reaction emojis (PNP-themed) ──────────────────────────────────────────
+
+const QUICK_REACTIONS = ["❤️", "😈", "💨", "🧊", "💎", "🔥"];
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -110,6 +123,16 @@ interface MessageBubbleProps {
   onNavigate: (path: string) => void;
   onExpandImage: (src: string) => void;
   currentUserId?: string;
+  /** Matrix event ID for this message (for reactions) */
+  matrixEventId?: string;
+  /** Reactions on this message */
+  reactions?: ReactionEntry[];
+  /** Called when user toggles a reaction emoji */
+  onReaction?: (eventId: string, emoji: string) => void;
+  /** Called when user taps reply */
+  onReply?: (msg: GroupMessage) => void;
+  /** Quoted reply reference */
+  replyTo?: { name: string; content: string } | null;
 }
 
 const MessageBubble = memo(function MessageBubble({
@@ -119,6 +142,11 @@ const MessageBubble = memo(function MessageBubble({
   onNavigate,
   onExpandImage,
   currentUserId,
+  matrixEventId,
+  reactions,
+  onReaction,
+  onReply,
+  replyTo,
 }: MessageBubbleProps) {
   const profilePath = isMe ? "/profile" : `/profile/${msg.user_id}`;
   const hasMedia = !!(msg.media_url && msg.media_type);
@@ -165,7 +193,7 @@ const MessageBubble = memo(function MessageBubble({
       </button>
 
       {/* Bubble */}
-      <div className={`max-w-[75%] ${isMe ? "text-right items-end" : "items-start"} flex flex-col`}>
+      <div className={`max-w-[75%] ${isMe ? "text-right items-end" : "items-start"} flex flex-col group`}>
         {/* Name + time */}
         <div className={`flex items-center gap-1.5 mb-0.5 ${isMe ? "justify-end" : ""}`}>
           <button
@@ -178,6 +206,17 @@ const MessageBubble = memo(function MessageBubble({
             {timeAgo(msg.created_at)}
           </span>
         </div>
+
+        {/* Reply quote */}
+        {replyTo && (
+          <div
+            className={`rounded-xl px-2.5 py-1.5 mb-1 text-[11px] border-l-2 ${isMe ? "self-end" : "self-start"}`}
+            style={{ background: "rgba(255,255,255,0.04)", borderColor: "#D4007A", color: "#8E8E93" }}
+          >
+            <span className="font-semibold" style={{ color: "#D4007A" }}>{replyTo.name}</span>
+            <p className="truncate max-w-[200px]">{replyTo.content}</p>
+          </div>
+        )}
 
         {/* Text content */}
         {hasText && (
@@ -224,6 +263,56 @@ const MessageBubble = memo(function MessageBubble({
               onExpandImage={onExpandImage}
               isMe={isMe}
             />
+          </div>
+        )}
+
+        {/* Reaction pills */}
+        {reactions && reactions.length > 0 && (
+          <div className={`flex flex-wrap gap-1 mt-1 ${isMe ? "justify-end" : ""}`}>
+            {reactions.map((r) => {
+              const myReaction = currentUserId && r.users.some((u) => u.userId.includes(currentUserId));
+              return (
+                <button
+                  key={r.emoji}
+                  onClick={() => matrixEventId && onReaction?.(matrixEventId, r.emoji)}
+                  className={`flex items-center gap-0.5 px-1.5 h-6 rounded-full text-xs border transition-all active:scale-95 ${
+                    myReaction
+                      ? "bg-pnp-accent/20 border-pnp-accent"
+                      : "bg-white/5 border-white/10 hover:bg-white/10"
+                  }`}
+                >
+                  <span>{r.emoji}</span>
+                  <span className="text-[10px]" style={{ color: myReaction ? "#D4007A" : "#8E8E93" }}>{r.count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Quick-react + reply — shown on hover/focus */}
+        {matrixEventId && (
+          <div className={`flex items-center gap-0.5 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${isMe ? "justify-end" : ""}`}>
+            {QUICK_REACTIONS.slice(0, 4).map((emoji) => (
+              <button
+                key={emoji}
+                onClick={() => onReaction?.(matrixEventId, emoji)}
+                className="text-sm hover:scale-125 transition-transform p-0.5 rounded hover:bg-white/10"
+                aria-label={`React ${emoji}`}
+              >
+                {emoji}
+              </button>
+            ))}
+            {onReply && (
+              <button
+                onClick={() => onReply(msg)}
+                className="p-1 rounded hover:bg-white/10 transition-colors ml-0.5"
+                aria-label="Reply"
+              >
+                <svg className="w-3.5 h-3.5" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                </svg>
+              </button>
+            )}
           </div>
         )}
 
@@ -408,6 +497,41 @@ export default function Chat() {
       media_height: null,
     } satisfies GroupMessage;
   });
+
+  // Map from GroupMessage numeric id → Matrix eventId (for reactions)
+  const matrixEventIdMap = React.useMemo(() => {
+    const map = new Map<number, string>();
+    matrixMessages.forEach((m) => {
+      let hash = 2166136261;
+      for (let i = 0; i < m.eventId.length; i++) {
+        hash ^= m.eventId.charCodeAt(i);
+        hash = (hash * 16777619) >>> 0;
+      }
+      map.set(hash, m.eventId);
+    });
+    return map;
+  }, [matrixMessages]);
+
+  // Matrix reactions for this room
+  const { reactions: matrixReactions } = useRoomReactions(matrixRoomId);
+
+  // Reply-to state
+  const [replyToMsg, setReplyToMsg] = useState<GroupMessage | null>(null);
+
+  // Handle reaction toggle
+  const handleReaction = useCallback(async (eventId: string, emoji: string) => {
+    if (!matrixRoomId) return;
+    // Check if user already reacted with this emoji — if so, redact it
+    const entries = matrixReactions.get(eventId);
+    const myUserId = matrixMessages[0]?.senderId?.split(":")[0] || "";
+    const existing = entries?.find((e) => e.emoji === emoji);
+    const myEntry = existing?.users.find((u) => u.userId.includes(myUserId));
+    if (myEntry) {
+      redactEvent(matrixRoomId, myEntry.reactionEventId).catch(() => {});
+    } else {
+      sendReaction(matrixRoomId, eventId, emoji).catch(() => {});
+    }
+  }, [matrixRoomId, matrixReactions, matrixMessages]);
 
   // Socket hook — kept for presence, typing, calls, and Socket.IO-delivered messages
   const {
@@ -826,6 +950,7 @@ export default function Chat() {
       setUploadProgress(null);
     } finally {
       setSending(false);
+      setReplyToMsg(null);
     }
   }, [sending, activeGroup, msgInput, mediaFile, clearMedia, sendMessage, t.chat]);
 
@@ -1356,6 +1481,11 @@ export default function Chat() {
                   onNavigate={handleNavigate}
                   onExpandImage={handleExpandImage}
                   currentUserId={user?.dbId != null ? String(user.dbId) : user?.id ? String(user.id) : undefined}
+                  matrixEventId={matrixEventIdMap.get(msg.id)}
+                  reactions={matrixEventIdMap.get(msg.id) ? matrixReactions.get(matrixEventIdMap.get(msg.id)!) ?? undefined : undefined}
+                  onReaction={handleReaction}
+                  onReply={setReplyToMsg}
+                  replyTo={null}
                 />
               </React.Fragment>
             ))
@@ -1365,6 +1495,27 @@ export default function Chat() {
 
         {/* Typing indicator */}
         <TypingIndicator users={typingUsers} />
+
+        {/* Reply-to bar */}
+        {replyToMsg && (
+          <div className="mx-4 mb-1 flex items-center gap-2 px-3 py-2 rounded-xl animate-fade-in-up" style={{ background: "rgba(212,0,122,0.08)", borderLeft: "3px solid #D4007A" }}>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-semibold" style={{ color: "#D4007A" }}>
+                {replyToMsg.first_name || replyToMsg.username || "User"}
+              </p>
+              <p className="text-xs text-pnp-textSecondary truncate">{replyToMsg.content || "[media]"}</p>
+            </div>
+            <button
+              onClick={() => setReplyToMsg(null)}
+              className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-white/10"
+              aria-label="Cancel reply"
+            >
+              <svg className="w-3.5 h-3.5" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
 
         {/* Upload preview */}
         {mediaFile && mediaPreviewUrl && (
