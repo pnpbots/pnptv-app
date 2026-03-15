@@ -13,8 +13,59 @@ const X_MEDIA_UPLOAD_V2_BASE = 'https://api.x.com/2/media/upload';
 const X_MEDIA_UPLOAD_V1_URL = 'https://upload.twitter.com/1.1/media/upload.json';
 const X_MAX_TEXT_LENGTH = 280;
 const X_TOKEN_EXPIRY_BUFFER_MS = 2 * 60 * 1000;
-const XOAuthService = require('./xOAuthService');
 const X_MEDIA_CHUNK_SIZE = 1 * 1024 * 1024; // 1MB (v2 limit)
+
+// Inline OAuth2 token refresh (formerly in xOAuthService)
+async function refreshAccountTokens(account) {
+  let refreshData;
+  try {
+    refreshData = PaymentSecurityService.decryptSensitiveData(account.encrypted_refresh_token);
+  } catch (error) {
+    logger.warn('Failed to decrypt X refresh token', { accountId: account.account_id, error: error.message });
+  }
+
+  const refreshToken = refreshData?.refreshToken || account.encrypted_refresh_token;
+  if (!refreshToken) throw new Error('Refresh token no disponible para X');
+
+  const clientId = process.env.TWITTER_CLIENT_ID;
+  const clientSecret = process.env.TWITTER_CLIENT_SECRET;
+  if (!clientId) throw new Error('TWITTER_CLIENT_ID not configured');
+
+  const payload = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: clientId,
+  });
+  const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+  if (clientSecret) {
+    headers.Authorization = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`;
+  }
+
+  const response = await axios.post('https://api.twitter.com/2/oauth2/token', payload.toString(), { headers, timeout: 15000 });
+  const tokens = response.data;
+
+  const tokenExpiresAt = tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null;
+
+  const encryptedAccess = PaymentSecurityService.encryptSensitiveData({
+    accessToken: tokens.access_token,
+    tokenType: tokens.token_type,
+    scope: tokens.scope,
+    expiresAt: tokenExpiresAt?.toISOString() || null,
+  });
+  if (!encryptedAccess) throw new Error('No se pudo cifrar el access token actualizado de X');
+
+  const encryptedRefresh = tokens.refresh_token
+    ? PaymentSecurityService.encryptSensitiveData({ refreshToken: tokens.refresh_token })
+    : account.encrypted_refresh_token;
+  if (tokens.refresh_token && !encryptedRefresh) throw new Error('No se pudo cifrar el refresh token actualizado de X');
+
+  await db.query(
+    `UPDATE x_accounts SET encrypted_access_token = $1, encrypted_refresh_token = $2, token_expires_at = $3, updated_at = CURRENT_TIMESTAMP WHERE account_id = $4`,
+    [encryptedAccess, encryptedRefresh, tokenExpiresAt, account.account_id]
+  );
+
+  return { accessToken: tokens.access_token, refreshToken: tokens.refresh_token || refreshToken };
+}
 
 // ---------------------------------------------------------------------------
 // SSRF Protection — URL validation for outbound media downloads
@@ -1073,7 +1124,7 @@ class XPostService {
     if (!decrypted) {
       logger.error('X access token decryption returned null — triggering token refresh', { accountId: account.account_id });
       try {
-        const refreshed = await XOAuthService.refreshAccountTokens(account);
+        const refreshed = await refreshAccountTokens(account);
         return refreshed.accessToken;
       } catch (refreshErr) {
         throw new Error(`X access token decryption failed and refresh also failed for account ${account.account_id}`);
@@ -1095,7 +1146,7 @@ class XPostService {
 
     if (expiresAt && expiresAt.getTime() - Date.now() <= X_TOKEN_EXPIRY_BUFFER_MS) {
       try {
-        const refreshed = await XOAuthService.refreshAccountTokens(account);
+        const refreshed = await refreshAccountTokens(account);
         return refreshed.accessToken;
       } catch (refreshErr) {
         logger.error('X token refresh failed — deactivating account and pausing campaigns', {
@@ -1264,3 +1315,4 @@ class XPostService {
 }
 
 module.exports = XPostService;
+module.exports.refreshAccountTokens = refreshAccountTokens;

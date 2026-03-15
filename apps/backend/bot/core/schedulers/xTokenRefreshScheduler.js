@@ -2,7 +2,7 @@
 
 const db = require('../../../utils/db');
 const logger = require('../../../utils/logger');
-const XOAuthService = require('../../services/xOAuthService');
+const { refreshAccountTokens } = require('../../services/xPostService');
 
 // Refresh tokens 30 minutes before they expire
 const REFRESH_BUFFER_MS = 30 * 60 * 1000;
@@ -55,7 +55,7 @@ class XTokenRefreshScheduler {
 
       for (const account of accounts) {
         try {
-          await XOAuthService.refreshAccountTokens(account);
+          await refreshAccountTokens(account);
           logger.info('Proactive X token refresh succeeded', {
             handle: account.handle,
             accountId: account.account_id,

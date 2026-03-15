@@ -1,7 +1,7 @@
 const { Markup } = require('telegraf');
 const PermissionService = require('../../services/permissionService');
 const XPostService = require('../../services/xPostService');
-const XOAuthService = require('../../services/xOAuthService');
+// XOAuthService removed — OAuth2 connect flow disabled
 const logger = require('../../../utils/logger');
 
 const DEFAULT_SESSION_KEY = 'sharePostData';
@@ -190,19 +190,8 @@ const connectXAccount = async (ctx) => {
       await ctx.answerCbQuery('❌ No autorizado');
       return;
     }
-    const authUrl = await XOAuthService.createAuthUrl({
-      adminId: ctx.from.id,
-      adminUsername: ctx.from.username || null,
-    });
     await safeAnswer(ctx);
-    const message = '🔗 Conectar cuenta de X\n\n'
-      + '1) Abre este enlace.\n'
-      + '2) Autoriza la cuenta.\n'
-      + '3) Regresa al bot y selecciona la cuenta.';
-    await ctx.reply(
-      message,
-      Markup.inlineKeyboard([Markup.button.url('Abrir enlace', authUrl)])
-    );
+    await ctx.reply('⚠️ X OAuth2 login has been removed. Use OAuth 1.0a accounts instead.');
   } catch (error) {
     logger.error('Error starting X OAuth flow:', error);
     await ctx.answerCbQuery('❌ Error').catch(() => {});

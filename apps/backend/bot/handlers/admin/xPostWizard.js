@@ -1,7 +1,7 @@
 const { Markup } = require('telegraf');
 const PermissionService = require('../../services/permissionService');
 const XPostService = require('../../services/xPostService');
-const XOAuthService = require('../../services/xOAuthService');
+// XOAuthService removed — OAuth2 connect flow disabled
 const GrokService = require('../../services/grokService');
 const logger = require('../../../utils/logger');
 const dateTimePicker = require('../../utils/dateTimePicker');
@@ -1231,19 +1231,8 @@ const registerXPostWizardHandlers = (bot) => {
     if (!isAdmin) return ctx.answerCbQuery('❌ No autorizado');
 
     try {
-      const authUrl = await XOAuthService.createAuthUrl({
-        adminId: ctx.from.id,
-        adminUsername: ctx.from.username || null,
-      });
       await safeAnswer(ctx);
-      await ctx.reply(
-        '🔗 *Conectar cuenta de X*\n\n'
-        + '1) Abre el enlace de abajo.\n'
-        + '2) Autoriza la cuenta.\n'
-        + '3) Regresa y selecciona la cuenta.',
-        { parse_mode: 'Markdown' },
-      );
-      await ctx.reply(authUrl, { disable_web_page_preview: true });
+      await ctx.reply('⚠️ X OAuth2 login has been removed. Use OAuth 1.0a accounts instead.', { parse_mode: 'Markdown' });
     } catch (error) {
       logger.error('Error starting X OAuth from wizard:', error);
       await ctx.answerCbQuery('❌ Error').catch(() => {});

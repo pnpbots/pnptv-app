@@ -14,7 +14,7 @@
 const db = require('../../../utils/db');
 const logger = require('../../../utils/logger');
 const PaymentSecurityService = require('../../services/paymentSecurityService');
-const XOAuthService = require('../../services/xOAuthService');
+const { refreshAccountTokens } = require('../../services/xPostService');
 const axios = require('axios');
 
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
@@ -207,7 +207,7 @@ class XAnalyticsIngestionScheduler {
       // Refresh if expiring soon
       if (expiresAt && expiresAt.getTime() - Date.now() <= 2 * 60 * 1000) {
         try {
-          const refreshed = await XOAuthService.refreshAccountTokens(account);
+          const refreshed = await refreshAccountTokens(account);
           return refreshed.accessToken;
         } catch {
           return null;
