@@ -2300,7 +2300,7 @@ app.post('/api/webapp/auth/recover-account', authLimiter, asyncHandler(async (re
   if (!email) return res.status(400).json({ success: false, error: 'Email is required' });
 
   // 1. Verify user exists in PNP DB
-  const user = await MediaPlayerModel.getPool().query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+  const user = await getPool().query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
   
   if (user.rows.length === 0) {
     // Return success anyway to prevent email enumeration
@@ -2308,6 +2308,7 @@ app.post('/api/webapp/auth/recover-account', authLimiter, asyncHandler(async (re
   }
 
   // 2. Trigger Authentik recovery
+  const AuthentikService = require('../../services/authentikService');
   const result = await AuthentikService.requestPasswordReset(email);
   
   if (!result.success) {
