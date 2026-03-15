@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { connectSocket } from "@/lib/socket";
 import { getGroupMessages, type GroupMessage } from "@/lib/api";
+import { sendTyping as matrixSendTyping, useRoomTyping } from "@/hooks/useMatrix";
 
 interface OnlineMember {
   userId: string;
@@ -28,7 +29,8 @@ const EMPTY_CALL: CallState = {
 
 export function useHangoutSocket(
   groupId: number | null,
-  userId: string | undefined
+  userId: string | undefined,
+  matrixRoomId?: string | null
 ) {
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   // Internal map tracks typing state by userId to prevent collisions when two
@@ -41,6 +43,9 @@ export function useHangoutSocket(
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [onlineMembers, setOnlineMembers] = useState<OnlineMember[]>([]);
+
+  // Matrix typing users (merged below)
+  const { typingUsers: matrixTypingUsers } = useRoomTyping(matrixRoomId ?? null);
 
   // Refs for debouncing and cleanup
   const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -252,15 +257,21 @@ export function useHangoutSocket(
     [groupId]
   );
 
-  // Emit typing indicator (debounced 2s)
+  // Emit typing indicator (debounced 2s) — tries Matrix first, always emits via socket
   const emitTyping = useCallback(() => {
     if (!groupId) return;
     const now = Date.now();
     if (now - lastTypingEmit.current < 2000) return;
     lastTypingEmit.current = now;
+
+    // Matrix typing (fire-and-forget)
+    if (matrixRoomId) {
+      matrixSendTyping(matrixRoomId, true, 3000).catch(() => {});
+    }
+
     const socket = connectSocket();
     socket.emit("hangout:typing", { groupId });
-  }, [groupId]);
+  }, [groupId, matrixRoomId]);
 
   // Load older messages via HTTP (for infinite scroll)
   // Uses refs to avoid stale closures and prevent multiple concurrent calls
@@ -294,11 +305,20 @@ export function useHangoutSocket(
     [groupId]
   );
 
+  // Merge socket + Matrix typing users (deduplicate by name)
+  const mergedTypingUsers = React.useMemo(() => {
+    const names = new Set(typingUsers);
+    for (const mu of matrixTypingUsers) {
+      names.add(mu.displayName);
+    }
+    return Array.from(names);
+  }, [typingUsers, matrixTypingUsers]);
+
   return {
     messages,
     sendMessage,
     emitTyping,
-    typingUsers,
+    typingUsers: mergedTypingUsers,
     callState,
     isConnected,
     loadOlderMessages,

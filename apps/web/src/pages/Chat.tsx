@@ -36,7 +36,7 @@ import {
   type DiscoverGroup,
   type JoinRequest,
 } from "@/lib/api";
-import { useRoomMessages, sendMatrixMessage } from "@/hooks/useMatrix";
+import { useRoomMessages, sendMatrixMessage, sendMatrixMediaMessage, sendReadReceipt } from "@/hooks/useMatrix";
 import {
   MediaUploadButton,
   MediaPreview,
@@ -422,7 +422,7 @@ export default function Chat() {
     isLoadingMore,
     onlineMembers,
     inviteToCall,
-  } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId);
+  } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId, matrixRoomId);
 
   // Merge messages: when Matrix is active use it as primary; Socket.IO messages fill the initial
   // load and media messages (which are never sent via Matrix in this implementation).
@@ -654,6 +654,9 @@ export default function Chat() {
 
   // ─── Smart auto-scroll ─────────────────────────────────────────────
 
+  // Track last read-receipt eventId to avoid spamming
+  const lastReceiptId = useRef<string | null>(null);
+
   const handleScroll = useCallback(() => {
     const el = messagesContainerRef.current;
     if (!el) return;
@@ -665,7 +668,16 @@ export default function Chat() {
       prevScrollHeight.current = el.scrollHeight;
       loadOlderMessages();
     }
-  }, [hasMore, isLoadingMore, loadOlderMessages]);
+
+    // Send Matrix read receipt when near bottom
+    if (isNearBottom.current && matrixRoomId && matrixMessages.length > 0) {
+      const lastMsg = matrixMessages[matrixMessages.length - 1];
+      if (lastMsg.eventId !== lastReceiptId.current) {
+        lastReceiptId.current = lastMsg.eventId;
+        sendReadReceipt(matrixRoomId, lastMsg.eventId);
+      }
+    }
+  }, [hasMore, isLoadingMore, loadOlderMessages, matrixRoomId, matrixMessages]);
 
   // Start (and cancel) the messagesLoading fallback timer whenever the active group changes.
   // Using a useEffect here ensures the previous timer is always cancelled before a new one
@@ -791,6 +803,16 @@ export default function Chat() {
         setUploadProgress(100);
         // Message will arrive via socket broadcast, no need to manually append
         if (!data.success) throw new Error(t.chat.errorUploadFailed);
+        // Bridge media to Matrix room (fire-and-forget)
+        if (matrixRoomId && data.message?.media_url) {
+          const isVideo = data.message.media_type === "video";
+          sendMatrixMediaMessage(
+            matrixRoomId,
+            data.message.media_url,
+            isVideo ? "m.video" : "m.image",
+            text || "media"
+          ).catch(() => {});
+        }
         clearMedia();
       } else {
         // Text messages go via socket for instant delivery
@@ -941,7 +963,7 @@ export default function Chat() {
     const showCallBanner = !callMeetingUrl && callState.isActive;
 
     return (
-      <div className="relative flex flex-col h-full">
+      <div className="fixed inset-0 flex flex-col bg-pnp-background z-[30]">
         {/* Membership paywall — shown when a non-member tries to start/join a call */}
         {showPaywall && (
           <HangoutsPaywall onBack={() => setShowPaywall(false)} />
@@ -1203,7 +1225,7 @@ export default function Chat() {
         <div
           ref={messagesContainerRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0"
+          className="flex-1 overflow-y-auto px-4 py-3 pb-20 space-y-3 min-h-0"
         >
           {/* Loading more indicator */}
           {isLoadingMore && (

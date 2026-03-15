@@ -96,7 +96,7 @@ export function VideoCallOverlay({
   if (viewMode === "pip") {
     return (
       <div
-        className="fixed bottom-24 right-4 z-50 w-40 h-28 sm:w-56 sm:h-36 rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10 animate-fade-in-up"
+        className="fixed bottom-24 right-4 z-[35] w-40 h-28 sm:w-56 sm:h-36 rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10 animate-fade-in-up"
         style={{ touchAction: "none" }}
         role="dialog"
         aria-label="Video call picture-in-picture"
@@ -146,7 +146,7 @@ export function VideoCallOverlay({
   if (viewMode === "fullscreen") {
     return (
       <div
-        className="fixed inset-0 z-50 bg-pnp-background flex"
+        className="fixed inset-0 z-[35] bg-pnp-background flex"
         role="dialog"
         aria-modal="true"
         aria-label="Video call fullscreen"

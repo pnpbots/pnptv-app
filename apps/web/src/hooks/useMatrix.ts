@@ -4,6 +4,7 @@ import {
   type MatrixClient,
   type MatrixEvent,
   RoomEvent,
+  RoomMemberEvent,
   ClientEvent,
   SyncState,
   type ISendEventResponse,
@@ -51,20 +52,41 @@ export interface MatrixMessage {
   body: string;
   timestamp: number;
   isMine: boolean;
+  mediaUrl?: string;
+  mediaType?: "image" | "video" | "file";
+  mediaMime?: string;
 }
 
 function eventToMessage(event: MatrixEvent, myUserId: string): MatrixMessage | null {
   if (event.getType() !== "m.room.message") return null;
   const content = event.getContent();
-  if (content.msgtype !== "m.text" || typeof content.body !== "string") return null;
-  return {
+  const msgtype = content.msgtype;
+
+  const base = {
     eventId: event.getId() ?? `${event.getSender()}-${event.getTs()}`,
     roomId: event.getRoomId() ?? "",
     senderId: event.getSender() ?? "",
-    body: content.body,
     timestamp: event.getTs(),
     isMine: event.getSender() === myUserId,
   };
+
+  if (msgtype === "m.text" && typeof content.body === "string") {
+    return { ...base, body: content.body };
+  }
+
+  if (msgtype === "m.image" || msgtype === "m.video" || msgtype === "m.file") {
+    const mediaType = msgtype === "m.image" ? "image" : msgtype === "m.video" ? "video" : "file";
+    const url = content.url ?? content.external_url ?? "";
+    return {
+      ...base,
+      body: content.body ?? "",
+      mediaUrl: url,
+      mediaType,
+      mediaMime: content.info?.mimetype,
+    };
+  }
+
+  return null;
 }
 
 // ── useRoomMessages — live-updating message list for a single room ─────────────
@@ -153,6 +175,91 @@ export async function sendMatrixMessage(
 ): Promise<ISendEventResponse> {
   const client = await initMatrix();
   return client.sendTextMessage(roomId, text);
+}
+
+// ── sendMatrixMediaMessage — send a media message (external URL) to a room ────
+
+export async function sendMatrixMediaMessage(
+  roomId: string,
+  url: string,
+  msgtype: "m.image" | "m.video" | "m.file",
+  body: string
+): Promise<ISendEventResponse> {
+  const client = await initMatrix();
+  return client.sendEvent(roomId, "m.room.message", {
+    msgtype,
+    body: body || "media",
+    url,
+  });
+}
+
+// ── sendTyping — send typing indicator to a room ─────────────────────────────
+
+export async function sendTyping(
+  roomId: string,
+  isTyping: boolean,
+  timeoutMs = 3000
+): Promise<void> {
+  const client = await initMatrix();
+  await client.sendTyping(roomId, isTyping, timeoutMs);
+}
+
+// ── useRoomTyping — live typing users for a room ─────────────────────────────
+
+export function useRoomTyping(roomId: string | null): { typingUsers: { userId: string; displayName: string }[] } {
+  const [typingUsers, setTypingUsers] = useState<{ userId: string; displayName: string }[]>([]);
+
+  useEffect(() => {
+    if (!roomId) { setTypingUsers([]); return; }
+
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      try {
+        const client = await initMatrix();
+        if (cancelled) return;
+        const myId = client.getUserId() ?? "";
+
+        const onTyping = () => {
+          const room = client.getRoom(roomId);
+          if (!room) return;
+          const members = room.getMembers().filter((m) => m.typing && m.userId !== myId);
+          if (!cancelled) {
+            setTypingUsers(members.map((m) => ({ userId: m.userId, displayName: m.name || m.userId })));
+          }
+        };
+
+        client.on(RoomMemberEvent.Typing, onTyping);
+        return () => { client.off(RoomMemberEvent.Typing, onTyping); };
+      } catch { /* Matrix unavailable */ }
+    };
+
+    let cleanup: (() => void) | undefined;
+    bootstrap().then((fn) => { cleanup = fn; }).catch(() => {});
+
+    return () => { cancelled = true; cleanup?.(); };
+  }, [roomId]);
+
+  return { typingUsers };
+}
+
+// ── sendReadReceipt — mark an event as read ──────────────────────────────────
+
+export async function sendReadReceipt(
+  roomId: string,
+  eventId: string
+): Promise<void> {
+  try {
+    const client = await initMatrix();
+    const room = client.getRoom(roomId);
+    if (!room) return;
+    const event = room.getLiveTimeline().getEvents().find((ev) => ev.getId() === eventId);
+    if (event) {
+      await client.sendReadReceipt(event);
+    }
+  } catch {
+    // Non-critical — silently ignore
+  }
 }
 
 // ── getMatrixTimeline — synchronous snapshot of timeline events ───────────────

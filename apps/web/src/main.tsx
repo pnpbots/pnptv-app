@@ -20,7 +20,7 @@ requestAnimationFrame(() => {
 
 // ── Service Worker update detection ────────────────────────────────────────
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").then((reg) => {
+  navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then((reg) => {
     // Check for updates every 60s
     setInterval(() => reg.update(), 60_000);
 

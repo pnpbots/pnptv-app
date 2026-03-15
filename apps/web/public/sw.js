@@ -1,10 +1,11 @@
 // PNPtv! Service Worker — Push Notifications + Offline App Shell Cache
 
-const CACHE_NAME = 'pnptv-v7';
+const CACHE_NAME = 'pnptv-v9';
 const APP_SHELL = [
-  '/',
-  '/index.html',
   '/Logo2-50.png',
+  '/logo-login.png',
+  '/logo-header.png',
+  '/logo-nav.png',
   '/app-icon-192.png',
   '/app-icon-512.png',
 ];
@@ -70,11 +71,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Navigation: network-first, fallback to cached index.html (SPA)
+  // Navigation (HTML): always network, no cache (ensures fresh chunk references)
   if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request).catch(() => caches.match('/index.html'))
-    );
+    event.respondWith(fetch(request));
     return;
   }
 });

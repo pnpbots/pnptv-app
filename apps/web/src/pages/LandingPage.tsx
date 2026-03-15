@@ -365,7 +365,7 @@ export function LandingPage() {
         <div className="w-full max-w-xs flex flex-col items-center gap-4">
 
           {/* Logo — hero centerpiece */}
-          <img src="/Logo2-50.png" alt="PNPtv!" className="h-20 w-auto" />
+          <img src="/logo-login.png" alt="PNPtv!" className="w-56 h-auto" />
 
           {/* Tagline */}
           <div>

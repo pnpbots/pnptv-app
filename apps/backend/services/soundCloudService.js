@@ -91,6 +91,181 @@ class SoundCloudService {
   static isSoundCloudUrl(url) {
     return /^(https?:\/\/)?(www\.)?(soundcloud\.com|on\.soundcloud\.com|snd\.sc)\/.*$/.test(url);
   }
+
+  /**
+   * Extract the artist profile URL from a SoundCloud track URL.
+   * e.g. https://soundcloud.com/artist-name/track-name → https://soundcloud.com/artist-name
+   * Works with or without trailing slashes and with query strings.
+   * Returns null if the URL doesn't look like a track URL (i.e. already an artist page).
+   *
+   * @param {string} trackUrl - Full SoundCloud track URL
+   * @returns {string|null} Artist profile URL, or null if it cannot be determined
+   */
+  static extractArtistUrl(trackUrl) {
+    try {
+      const clean = trackUrl.split('?')[0].replace(/\/$/, '');
+      // Must be soundcloud.com/<artist>/<track> — exactly two path segments after the host
+      const match = clean.match(/^(https?:\/\/(?:www\.)?soundcloud\.com\/([^/]+))\/[^/]+$/);
+      if (!match) return null;
+      return match[1]; // https://soundcloud.com/<artist>
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fetch all (up to 20) tracks from an artist profile URL.
+   *
+   * Strategy:
+   *  1. Fetch the artist page HTML.
+   *  2. Try to parse the `window.__sc_hydration` JSON blob that SoundCloud
+   *     injects into every server-rendered page — it contains full track objects
+   *     with `permalink_url` fields.
+   *  3. Fall back to regex-scraping `soundcloud.com/<artist>/<track>` href
+   *     patterns from the raw HTML.
+   *  4. Deduplicate, limit to 20 URLs, then call resolveTrack() on each one
+   *     (resolveTrack uses the public OEmbed API — no key needed).
+   *
+   * @param {string} artistUrl - Artist profile URL, e.g. https://soundcloud.com/artist-name
+   * @returns {Promise<Array<Object>>} Array of track metadata objects (same shape as resolveTrack)
+   */
+  static async getArtistTracks(artistUrl) {
+    try {
+      logger.info(`Fetching artist tracks from SoundCloud: ${artistUrl}`);
+
+      // Normalize: strip trailing slash and query string
+      const baseArtistUrl = artistUrl.split('?')[0].replace(/\/$/, '');
+
+      // Extract the artist slug from the URL for later path filtering
+      const slugMatch = baseArtistUrl.match(/soundcloud\.com\/([^/]+)$/);
+      if (!slugMatch) {
+        logger.warn(`getArtistTracks: cannot extract artist slug from "${artistUrl}"`);
+        return [];
+      }
+      const artistSlug = slugMatch[1];
+
+      // Fetch the artist page HTML
+      let html;
+      try {
+        const resp = await axios.get(baseArtistUrl, {
+          timeout: 15000,
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+              '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9'
+          },
+          maxRedirects: 5
+        });
+        html = resp.data;
+      } catch (fetchErr) {
+        logger.error(`getArtistTracks: failed to fetch artist page for "${artistSlug}":`, fetchErr.message);
+        return [];
+      }
+
+      if (typeof html !== 'string' || html.length === 0) {
+        logger.warn(`getArtistTracks: empty HTML body for "${artistSlug}"`);
+        return [];
+      }
+
+      // --- Strategy 1: parse window.__sc_hydration ---
+      const trackUrls = new Set();
+
+      const hydrationMatch = html.match(/window\.__sc_hydration\s*=\s*(\[[\s\S]*?\]);\s*<\/script>/);
+      if (hydrationMatch) {
+        try {
+          const hydration = JSON.parse(hydrationMatch[1]);
+          for (const entry of hydration) {
+            // Each entry is { hydratable: string, data: {...} }
+            const data = entry && entry.data;
+            if (!data) continue;
+
+            // Top-level track object
+            if (data.kind === 'track' && data.permalink_url) {
+              trackUrls.add(data.permalink_url.split('?')[0]);
+              continue;
+            }
+
+            // Collection of tracks (e.g. a user's track list page)
+            if (Array.isArray(data.collection)) {
+              for (const item of data.collection) {
+                if (item && item.kind === 'track' && item.permalink_url) {
+                  trackUrls.add(item.permalink_url.split('?')[0]);
+                }
+              }
+            }
+
+            // Nested tracks inside playlists / likes
+            if (data.tracks && Array.isArray(data.tracks)) {
+              for (const item of data.tracks) {
+                if (item && item.kind === 'track' && item.permalink_url) {
+                  trackUrls.add(item.permalink_url.split('?')[0]);
+                }
+              }
+            }
+          }
+          logger.info(`getArtistTracks: hydration parse found ${trackUrls.size} track URL(s) for "${artistSlug}"`);
+        } catch (parseErr) {
+          logger.warn(`getArtistTracks: hydration JSON parse failed for "${artistSlug}":`, parseErr.message);
+        }
+      }
+
+      // --- Strategy 2: regex scrape as fallback ---
+      if (trackUrls.size === 0) {
+        logger.info(`getArtistTracks: falling back to regex scrape for "${artistSlug}"`);
+        // Match href="https://soundcloud.com/<artist>/<track>" patterns
+        // Exclude: sets, albums, reposts, profile sub-pages (likes, following, etc.)
+        const hrefRegex = new RegExp(
+          `https://soundcloud\\.com/${escapeRegExp(artistSlug)}/(?!sets/|albums/|reposts/|likes/|following/|followers/)[^/"'?#]+`,
+          'g'
+        );
+        let m;
+        while ((m = hrefRegex.exec(html)) !== null) {
+          trackUrls.add(m[0].split('?')[0]);
+          if (trackUrls.size >= 20) break;
+        }
+        logger.info(`getArtistTracks: regex scrape found ${trackUrls.size} track URL(s) for "${artistSlug}"`);
+      }
+
+      if (trackUrls.size === 0) {
+        logger.warn(`getArtistTracks: no tracks found for "${artistSlug}" — page may require JS rendering`);
+        return [];
+      }
+
+      // Limit to 20 and resolve metadata for each track
+      const limitedUrls = Array.from(trackUrls).slice(0, 20);
+      logger.info(`getArtistTracks: resolving metadata for ${limitedUrls.length} track(s) for "${artistSlug}"`);
+
+      // Resolve concurrently but cap parallelism at 5 to avoid hammering OEmbed
+      const results = [];
+      const CONCURRENCY = 5;
+      for (let i = 0; i < limitedUrls.length; i += CONCURRENCY) {
+        const batch = limitedUrls.slice(i, i + CONCURRENCY);
+        const settled = await Promise.allSettled(batch.map((url) => SoundCloudService.resolveTrack(url)));
+        for (const outcome of settled) {
+          if (outcome.status === 'fulfilled' && outcome.value !== null) {
+            results.push(outcome.value);
+          }
+        }
+      }
+
+      logger.info(`getArtistTracks: resolved ${results.length} track(s) for "${artistSlug}"`);
+      return results;
+    } catch (error) {
+      logger.error('getArtistTracks: unexpected error:', error.message);
+      return [];
+    }
+  }
+}
+
+/**
+ * Escape a string for use inside a RegExp character class / pattern.
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 module.exports = SoundCloudService;

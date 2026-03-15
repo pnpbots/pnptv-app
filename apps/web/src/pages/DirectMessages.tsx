@@ -21,7 +21,7 @@ import {
   type MessageThread,
   type DirectMessage,
 } from "@/lib/api";
-import { useRoomMessages, sendMatrixMessage } from "@/hooks/useMatrix";
+import { useRoomMessages, sendMatrixMessage, sendMatrixMediaMessage } from "@/hooks/useMatrix";
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -736,6 +736,16 @@ function Conversation({
         if (data.remaining !== undefined) {
           setDmRemaining(data.remaining);
           if (data.limit !== undefined) setDmLimit(data.limit);
+        }
+        // Bridge media to Matrix room (fire-and-forget)
+        if (matrixRoomId && data.message?.mediaUrl) {
+          const isVideo = data.message.mediaType === "video";
+          sendMatrixMediaMessage(
+            matrixRoomId,
+            data.message.mediaUrl,
+            isVideo ? "m.video" : "m.image",
+            text || "media"
+          ).catch(() => {});
         }
         clearMedia();
       } else if (matrixRoomId) {

@@ -64,7 +64,7 @@ export function BottomNav() {
             }
           >
             {item.icon === "logo" ? (
-              <img src="/Logo2-50.png" alt="PRIME" className="h-5 w-auto" />
+              <img src="/logo-nav.png" alt="PRIME" className="w-14 h-auto" />
             ) : (
               item.icon
             )}

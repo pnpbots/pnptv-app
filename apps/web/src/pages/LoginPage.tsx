@@ -240,9 +240,9 @@ export function LoginPage() {
         style={{ background: "radial-gradient(circle, #E69138, transparent 70%)" }} />
 
       <div className="glass-card neon-glow animate-subtle-glow w-full max-w-md p-8 sm:p-10 relative z-10 animate-fade-in-up">
-        <div className="text-center mb-6">
-          <img src="/Logo2-50.png" alt="PNPTV" className="h-14 w-auto mx-auto" />
-          <p className="text-sm mt-2 font-medium" style={{ color: "#E69138" }}>{t.tagline}</p>
+        <div className="text-center mb-8">
+          <img src="/logo-login.png" alt="PNPtv!" className="w-64 sm:w-72 h-auto mx-auto" />
+          <p className="text-sm mt-4 font-medium" style={{ color: "#E69138" }}>{t.tagline}</p>
         </div>
 
         <div className="space-y-4">
