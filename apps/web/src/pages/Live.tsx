@@ -9,10 +9,12 @@ import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 import { useI18n } from "@/lib/i18n";
-import { UpcomingEvents } from "@/components/events/UpcomingEvents";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
+import { EventDetailModal } from "@/components/events";
 import type { EventItem } from "@/components/events/EventCard";
 import { CallPackageCards } from "@/components/creators/CallPackageCards";
+import { SpotlightStrip, type SpotlightItem } from "@/components/SpotlightStrip";
+import { getUpcomingEvents } from "@/lib/api";
 
 const StreamerDashboard = lazy(() => import("@/components/streaming/StreamerDashboard"));
 const WebRTCStreamer = lazy(() => import("@/components/WebRTCStreamer"));
@@ -122,6 +124,8 @@ export default function Live() {
   const canCreateLive = isAuthenticated && (user?.role === "model" || user?.role === "creator" || user?.role === "admin" || user?.role === "superadmin");
   const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [liveEventsKey, setLiveEventsKey] = useState(0);
+  const [liveEvents, setLiveEvents] = useState<EventItem[]>([]);
+  const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
 
   // Performers & streams
   const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
@@ -180,6 +184,12 @@ export default function Live() {
     });
   }, []);
 
+  const loadLiveEvents = useCallback(() => {
+    getUpcomingEvents({ type: "live_stream", limit: 8 })
+      .then((res) => { if (res.success) setLiveEvents(res.events); })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     setPerformersLoading(true);
     setLoadError(false);
@@ -192,6 +202,7 @@ export default function Live() {
     }).catch(() => {
       setLoadError(true);
     }).finally(() => setPerformersLoading(false));
+    loadLiveEvents();
 
     // Refresh streams periodically
     const interval = setInterval(() => {
@@ -394,15 +405,35 @@ export default function Live() {
           </button>
         </div>
       )}
-      {/* ── Upcoming Live Events ── */}
-      <UpcomingEvents
-        key={liveEventsKey}
-        type="live_stream"
-        limit={6}
-        title="Scheduled Live Events"
-        canCreate={canCreateLive}
-        onCreateClick={() => setShowCreateEvent(true)}
-        className="mb-2"
+      {/* ── SpotlightStrip — active streams pinned + upcoming live events ── */}
+      <SpotlightStrip
+        items={[
+          ...liveStreams
+            .filter((s) => s.isLive)
+            .map((s) => ({
+              kind: "action" as const,
+              id: `stream-${s.id}`,
+              label: s.title || s.performerName || "Live",
+              sublabel: "LIVE NOW",
+              icon: (
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
+                </span>
+              ),
+              gradient: "linear-gradient(135deg, rgba(212,0,122,0.35), rgba(230,145,56,0.25))",
+              onClick: () => navigate(`/live/${s.id}`),
+              pinned: true,
+            })),
+          ...liveEvents.map((ev) => ({ kind: "event" as const, data: ev })),
+        ]}
+        onItemClick={(item) => {
+          if (item.kind === "event") setDetailEvent(item.data);
+        }}
+        showAction={canCreateLive}
+        onAction={() => setShowCreateEvent(true)}
+        actionLabel="Schedule live"
+        emptyAction={canCreateLive ? () => setShowCreateEvent(true) : undefined}
       />
 
       {/* ── Performer Grid ── */}
@@ -896,6 +927,23 @@ export default function Live() {
           onCreated={(_event: EventItem) => {
             setShowCreateEvent(false);
             setLiveEventsKey((k) => k + 1);
+            loadLiveEvents();
+          }}
+        />
+      )}
+
+      {detailEvent && (
+        <EventDetailModal
+          event={detailEvent}
+          onClose={() => setDetailEvent(null)}
+          onRsvp={async (eventId, shouldRsvp) => {
+            setLiveEvents((prev) =>
+              prev.map((e) => e.id === eventId ? { ...e, userRsvpd: shouldRsvp, rsvpCount: e.rsvpCount + (shouldRsvp ? 1 : -1) } : e)
+            );
+          }}
+          onUpdated={(updated) => {
+            setLiveEvents((prev) => prev.map((e) => e.id === updated.id ? updated : e));
+            setDetailEvent(updated);
           }}
         />
       )}
