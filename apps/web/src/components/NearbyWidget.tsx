@@ -18,6 +18,18 @@ import {
 import { useRoomMessages, sendMatrixMessage } from "@/hooks/useMatrix";
 import type { UserProfile } from "@/lib/api";
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return days === 1 ? "Yesterday" : `${days}d ago`;
+}
+
 // ── Constants ────────────────────────────────────────────────────────────────
 const LEMON = "#FBFF00";
 const GRID_SIZE = 9;
@@ -39,7 +51,7 @@ function getContext(pathname: string): NearbyContext {
 
 function getContextLabel(ctx: NearbyContext): string {
   switch (ctx) {
-    case "feed": return "Nearby Posters";
+    case "feed": return "Recent Posters";
     case "hangouts": return "Nearby Members";
     case "live": return "In This Stream";
     case "events": return "Event Attendees";
@@ -392,10 +404,12 @@ function UserCard({
           {initial}
         </div>
 
-        {/* Distance tier emoji */}
-        <span className="absolute bottom-0.5 left-0.5 text-xs drop-shadow-lg">
-          {tier.emoji}
-        </span>
+        {/* Distance tier emoji (hidden when no distance) */}
+        {member.distance_km != null && (
+          <span className="absolute bottom-0.5 left-0.5 text-xs drop-shadow-lg">
+            {tier.emoji}
+          </span>
+        )}
 
         {/* Live: Model badge */}
         {context === "live" && member.isModel && (
@@ -441,7 +455,10 @@ function UserCard({
       <div className="px-1.5 py-1.5">
         <p className="text-[10px] font-bold text-white truncate leading-tight">{displayName}</p>
         <p className="text-[8px] truncate leading-tight mt-0.5" style={{ color: "#8E8E93" }}>
-          {distLabel} · {tier.short}
+          {member.distance_km != null
+            ? `${distLabel} · ${tier.short}`
+            : member.last_post_caption || (member.last_post_at ? timeAgo(member.last_post_at) : "Posted recently")
+          }
         </p>
       </div>
     </button>

@@ -448,28 +448,15 @@ class NearbyController {
       const userId = req.session?.user?.id;
       if (!userId) return res.status(401).json({ error: 'Not authenticated' });
 
-      const { rows: viewerRows } = await dbQuery(
-        `SELECT location_lat, location_lng FROM users WHERE id = $1`,
-        [userId]
-      );
-      const viewer = viewerRows[0];
-      if (!viewer || viewer.location_lat == null || viewer.location_lng == null) {
-        return res.status(200).json({ success: true, total: 0, users: [] });
-      }
-
-      const lat = parseFloat(viewer.location_lat);
-      const lng = parseFloat(viewer.location_lng);
-
-      // Distinct-on pattern: for each user grab their most recent post, then
-      // compute Haversine distance in JS and sort/limit there.
+      // Get the 44 most recent unique posters (regardless of location).
+      // Rewards active community members over passive users.
+      // Each user appears once with their most recent post.
       const { rows } = await dbQuery(
         `SELECT DISTINCT ON (u.id)
            u.id                                                         AS user_id,
            u.username,
            u.first_name                                                 AS name,
            u.photo_file_id                                              AS photo_url,
-           u.location_lat,
-           u.location_lng,
            sp.id                                                        AS last_post_id,
            sp.media_url                                                 AS last_post_media,
            LEFT(sp.content, 80)                                         AS last_post_caption,
@@ -480,24 +467,13 @@ class NearbyController {
          JOIN social_posts sp ON sp.user_id = u.id AND sp.is_deleted = false
          WHERE u.id != $1
            AND u.is_deleted = false
-           AND u.location_lat IS NOT NULL
-           AND u.location_lng IS NOT NULL
-           AND u.location_sharing_enabled = true
          ORDER BY u.id, sp.created_at DESC`,
         [userId]
       );
 
-      // Compute Haversine distance and sort ascending
-      const R = 6371;
-      const toRad = (d) => (d * Math.PI) / 180;
-      const withDistance = rows.map((r) => {
-        const dLat = toRad(parseFloat(r.location_lat) - lat);
-        const dLng = toRad(parseFloat(r.location_lng) - lng);
-        const a =
-          Math.sin(dLat / 2) ** 2 +
-          Math.cos(toRad(lat)) * Math.cos(toRad(parseFloat(r.location_lat))) *
-          Math.sin(dLng / 2) ** 2;
-        const distKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      // Sort by most recent post first, limit to 44
+      rows.sort((a, b) => new Date(b.last_post_at) - new Date(a.last_post_at));
+      const users = rows.slice(0, 44).map((r) => {
         const photoUrl = r.photo_url &&
           (r.photo_url.startsWith('/') || r.photo_url.startsWith('http'))
           ? r.photo_url : null;
@@ -510,13 +486,10 @@ class NearbyController {
           last_post_media: r.last_post_media,
           last_post_caption: r.last_post_caption,
           last_post_at: r.last_post_at,
-          distance_km: Math.round(distKm * 10) / 10,
+          distance_km: null,
           is_online: r.is_online,
         };
       });
-
-      withDistance.sort((a, b) => a.distance_km - b.distance_km);
-      const users = withDistance.slice(0, 45);
 
       return res.status(200).json({ success: true, total: users.length, users });
     } catch (error) {
