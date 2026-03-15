@@ -11,6 +11,7 @@ import {
   getNearbyStreamViewers,
   getNearbyEventAttendees,
   getNearbyAllUsers,
+  getWalletBalance,
   type NearbyUser,
   type NearbyPlace,
   type NearbyContextUser,
@@ -499,6 +500,13 @@ export function NearbyWidget() {
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(0);
   const [hangoutGroupName, setHangoutGroupName] = useState<string | null>(null);
+  const [tokenBalance, setTokenBalance] = useState<number | null>(null);
+
+  // Fetch token balance for live context gate
+  useEffect(() => {
+    if (context !== "live") return;
+    getWalletBalance().then((d) => setTokenBalance(d.balance)).catch(() => setTokenBalance(0));
+  }, [context]);
 
   // Sub-view state
   const [view, setView] = useState<WidgetView>("grid");
@@ -822,6 +830,9 @@ export function NearbyWidget() {
   };
 
   const totalCount = members.length + places.length;
+
+  // Live context: only show Nearby for users who have tokens
+  if (context === "live" && (tokenBalance === null || tokenBalance <= 0)) return null;
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (

@@ -845,10 +845,13 @@ class NearbyController {
         };
       });
 
-      withDistance.sort((a, b) => a.distance_km - b.distance_km);
-      const users = withDistance.slice(0, 45);
+      // Sort: online first, then by distance
+      withDistance.sort((a, b) => {
+        if (a.is_online !== b.is_online) return a.is_online ? -1 : 1;
+        return a.distance_km - b.distance_km;
+      });
 
-      return res.status(200).json({ success: true, total: users.length, users });
+      return res.status(200).json({ success: true, total: withDistance.length, users: withDistance });
     } catch (error) {
       logger.error('❌ allUsers error:', error);
       return res.status(500).json({ error: 'Failed to fetch users' });
