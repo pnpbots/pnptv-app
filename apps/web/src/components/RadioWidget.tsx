@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
-import { resolveSoundCloud, importSoundCloud, requestSoundCloud, getRadioRequests, updateRadioRequest, type MediaTrack, type RadioRequest } from "@/lib/api";
+import { resolveSoundCloud, importSoundCloud, requestSoundCloud, getRadioRequests, updateRadioRequest, getSoundCloudArtistTracks, type MediaTrack, type RadioRequest } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -21,6 +21,16 @@ function formatTime(s: number): string {
 function getArtistName(artist: { name: string } | string | undefined): string {
   if (!artist) return "";
   return typeof artist === "string" ? artist : artist.name;
+}
+
+function extractArtistUrl(trackUrl: string): string | null {
+  try {
+    const url = new URL(trackUrl);
+    if (!url.hostname.includes("soundcloud.com")) return null;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length >= 1) return `https://soundcloud.com/${parts[0]}`;
+  } catch {}
+  return null;
 }
 
 // ── Inline SVG icon components ────────────────────────────────────────────────
@@ -192,8 +202,24 @@ const PlaylistRow = React.memo(function PlaylistRow({ track, isActive, isPlaying
           >
             {track.title}
           </p>
-          {track.provider === "soundcloud" && (
+          {track.provider === "soundcloud" && track.soundcloud_url ? (
+            <a
+              href={track.soundcloud_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title="Open on SoundCloud"
+              className="flex-shrink-0"
+            >
+              <SoundCloudIcon className="w-3 h-3 text-[#ff5500] hover:text-[#ff7733] transition-colors" />
+            </a>
+          ) : track.provider === "soundcloud" ? (
             <SoundCloudIcon className="w-3 h-3 text-[#ff5500] flex-shrink-0" />
+          ) : null}
+          {track.label && (
+            <span className="text-[8px] px-1 py-px rounded-full bg-purple-500/20 text-purple-300 font-medium flex-shrink-0 leading-tight">
+              {track.label}
+            </span>
           )}
         </div>
         {artistName && (
@@ -215,11 +241,12 @@ const PlaylistRow = React.memo(function PlaylistRow({ track, isActive, isPlaying
 
 // ── Pending Requests Panel (Admin) ────────────────────────────────────────────
 
-function PendingRequestsPanel({ onImport }: { onImport: (url: string) => void }) {
+function PendingRequestsPanel({ onAutoImport }: { onAutoImport: (url: string) => void }) {
   const [requests, setRequests] = useState<RadioRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [acting, setActing] = useState<number | null>(null);
+  const [feedback, setFeedback] = useState<{ id: number; type: "approved" | "rejected" } | null>(null);
 
   useEffect(() => {
     getRadioRequests("pending")
@@ -230,19 +257,39 @@ function PendingRequestsPanel({ onImport }: { onImport: (url: string) => void })
       .finally(() => setLoading(false));
   }, []);
 
-  const handleAction = useCallback(async (id: number, status: "approved" | "rejected", url?: string | null) => {
-    setActing(id);
+  const handleApprove = useCallback(async (req: RadioRequest) => {
+    setActing(req.id);
     try {
-      const res = await updateRadioRequest(id, status);
+      const res = await updateRadioRequest(req.id, "approved");
       if (res.success) {
-        setRequests((prev) => prev.filter((r) => r.id !== id));
-        if (status === "approved" && url) {
-          onImport(url);
+        setFeedback({ id: req.id, type: "approved" });
+        // Auto-import: resolve + import in one step
+        if (req.url) {
+          onAutoImport(req.url);
         }
+        setTimeout(() => {
+          setRequests((prev) => prev.filter((r) => r.id !== req.id));
+          setFeedback(null);
+        }, 800);
       }
     } catch { /* silent */ }
     setActing(null);
-  }, [onImport]);
+  }, [onAutoImport]);
+
+  const handleReject = useCallback(async (id: number) => {
+    setActing(id);
+    try {
+      const res = await updateRadioRequest(id, "rejected");
+      if (res.success) {
+        setFeedback({ id, type: "rejected" });
+        setTimeout(() => {
+          setRequests((prev) => prev.filter((r) => r.id !== id));
+          setFeedback(null);
+        }, 800);
+      }
+    } catch { /* silent */ }
+    setActing(null);
+  }, []);
 
   if (loading || requests.length === 0) return null;
 
@@ -270,49 +317,92 @@ function PendingRequestsPanel({ onImport }: { onImport: (url: string) => void })
       </button>
 
       {expanded && (
-        <div className="max-h-40 overflow-y-auto px-2 pb-2 space-y-1">
-          {requests.map((req) => (
-            <div
-              key={req.id}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/5"
-            >
-              <div className="flex-1 min-w-0">
-                <p className="text-[11px] text-pnp-textPrimary font-medium truncate">
-                  {req.song_name || "Unknown"}
-                </p>
-                <p className="text-[9px] text-pnp-textSecondary truncate">
-                  {req.artist || "Unknown artist"}
-                  {req.url && (
-                    <span className="ml-1 text-[#ff5500]">SC</span>
+        <div className="max-h-48 overflow-y-auto px-2 pb-2 space-y-1">
+          {requests.map((req) => {
+            const meta = req.metadata as Record<string, any> | null;
+            const coverUrl = meta?.coverUrl || meta?.thumbnail_url;
+            const isFeedback = feedback?.id === req.id;
+            return (
+              <div
+                key={req.id}
+                className={[
+                  "flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all",
+                  isFeedback && feedback.type === "approved" ? "bg-emerald-500/20" :
+                  isFeedback && feedback.type === "rejected" ? "bg-red-500/20" :
+                  "bg-white/5",
+                ].join(" ")}
+              >
+                {/* Cover art thumbnail */}
+                <div className="w-8 h-8 rounded flex-shrink-0 overflow-hidden">
+                  {coverUrl ? (
+                    <img src={coverUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div
+                      className="w-full h-full flex items-center justify-center"
+                      style={{ background: "linear-gradient(135deg, rgba(255,85,0,0.3), rgba(255,85,0,0.15))" }}
+                    >
+                      <SoundCloudIcon className="w-3.5 h-3.5 text-[#ff5500]" />
+                    </div>
                   )}
-                </p>
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] text-pnp-textPrimary font-medium truncate">
+                    {req.song_name || "Unknown"}
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <p className="text-[9px] text-pnp-textSecondary truncate">
+                      {req.artist || "Unknown artist"}
+                    </p>
+                    {req.url && (
+                      <a
+                        href={req.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                        title="Open on SoundCloud"
+                      >
+                        <SoundCloudIcon className="w-3 h-3 text-[#ff5500] hover:text-[#ff7733] transition-colors" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  {isFeedback ? (
+                    <span className={`text-[10px] font-semibold ${feedback.type === "approved" ? "text-emerald-400" : "text-red-400"}`}>
+                      {feedback.type === "approved" ? "Imported!" : "Rejected"}
+                    </span>
+                  ) : (
+                    <>
+                      {/* Approve — auto-imports the track */}
+                      <button
+                        onClick={() => handleApprove(req)}
+                        disabled={acting === req.id}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 active:scale-95 transition-all disabled:opacity-40"
+                        title="Approve & import"
+                      >
+                        <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      </button>
+                      {/* Reject */}
+                      <button
+                        onClick={() => handleReject(req.id)}
+                        disabled={acting === req.id}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-red-500/20 hover:bg-red-500/40 active:scale-95 transition-all disabled:opacity-40"
+                        title="Reject"
+                      >
+                        <svg className="w-3.5 h-3.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                {/* Approve — auto-fills import bar */}
-                <button
-                  onClick={() => handleAction(req.id, "approved", req.url)}
-                  disabled={acting === req.id}
-                  className="w-6 h-6 flex items-center justify-center rounded bg-emerald-500/20 hover:bg-emerald-500/30 active:scale-95 transition-all disabled:opacity-40"
-                  title="Approve & import"
-                >
-                  <svg className="w-3 h-3 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                </button>
-                {/* Reject */}
-                <button
-                  onClick={() => handleAction(req.id, "rejected")}
-                  disabled={acting === req.id}
-                  className="w-6 h-6 flex items-center justify-center rounded bg-red-500/20 hover:bg-red-500/30 active:scale-95 transition-all disabled:opacity-40"
-                  title="Reject"
-                >
-                  <svg className="w-3 h-3 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -368,6 +458,13 @@ export function RadioWidget() {
   const { isAdmin } = useAuth();
   const [scUrl, setScUrl] = useState("");
   const [isResolving, setIsResolving] = useState(false);
+  const [importLabel, setImportLabel] = useState("");
+  const [importFeedback, setImportFeedback] = useState<string | null>(null);
+
+  // Artist catalog state (admin)
+  const [artistTracks, setArtistTracks] = useState<Array<{ title: string; artist: string; coverUrl: string; url: string; externalId: string }>>([]);
+  const [showArtistCatalog, setShowArtistCatalog] = useState(false);
+  const [fetchingCatalog, setFetchingCatalog] = useState(false);
 
   // User Request State
   const [reqUrl, setReqUrl] = useState("");
@@ -389,24 +486,63 @@ export function RadioWidget() {
     }
   };
 
+  // Auto-import: resolve + import in one step (used by approve button)
+  const autoImportSC = useCallback(async (url: string) => {
+    try {
+      const res = await resolveSoundCloud(url);
+      if (res.success && res.metadata) {
+        const importRes = await importSoundCloud(res.metadata, importLabel || undefined);
+        if (importRes.success) {
+          loadMore();
+        }
+      }
+    } catch { /* silent — feedback already shown in panel */ }
+  }, [importLabel, loadMore]);
+
   const handleImportSC = async () => {
     if (!scUrl.trim()) return;
     setIsResolving(true);
+    setImportFeedback(null);
     try {
       const res = await resolveSoundCloud(scUrl);
       if (res.success && res.metadata) {
-        const importRes = await importSoundCloud(res.metadata);
+        const importRes = await importSoundCloud(res.metadata, importLabel || undefined);
         if (importRes.success) {
-          alert("Track imported successfully!");
+          setImportFeedback("Track imported!");
           setScUrl("");
-          loadMore(); // Refresh list
+          loadMore();
+          // Fetch artist catalog
+          const artistUrl = extractArtistUrl(res.metadata.url);
+          if (artistUrl) {
+            setFetchingCatalog(true);
+            try {
+              const catalogRes = await getSoundCloudArtistTracks(artistUrl);
+              if (catalogRes.success && catalogRes.tracks?.length > 0) {
+                setArtistTracks(catalogRes.tracks);
+                setShowArtistCatalog(true);
+              }
+            } catch { /* silent */ }
+            setFetchingCatalog(false);
+          }
+          setTimeout(() => setImportFeedback(null), 2500);
         }
       }
     } catch (err: any) {
-      alert(err.message || "Failed to import track");
+      setImportFeedback(err.message || "Failed to import");
+      setTimeout(() => setImportFeedback(null), 3000);
     } finally {
       setIsResolving(false);
     }
+  };
+
+  const handleImportCatalogTrack = async (track: { title: string; artist: string; coverUrl: string; url: string; externalId: string }) => {
+    try {
+      const importRes = await importSoundCloud(track, importLabel || undefined);
+      if (importRes.success) {
+        setArtistTracks((prev) => prev.filter((t) => t.url !== track.url));
+        loadMore();
+      }
+    } catch { /* silent */ }
   };
 
   // Panel open/close
@@ -607,52 +743,84 @@ export function RadioWidget() {
 
         {/* SoundCloud Import Bar (Admin Only) */}
         {isAdmin && (
-          <div className="px-4 py-2 bg-white/5 border-b border-white/5 flex gap-2">
-            <input
-              type="text"
-              value={scUrl}
-              onChange={(e) => setScUrl(e.target.value)}
-              placeholder="SoundCloud URL..."
-              className="flex-1 bg-black/40 border border-white/10 rounded px-2 py-1 text-[10px] text-white focus:outline-none focus:border-purple-500"
-            />
-            <button
-              onClick={handleImportSC}
-              disabled={isResolving || !scUrl.trim()}
-              className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-[10px] px-2 py-1 rounded transition-colors"
-            >
-              {isResolving ? "..." : "Add"}
-            </button>
+          <div className="px-4 py-2 bg-white/5 border-b border-white/5 space-y-1.5">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={scUrl}
+                onChange={(e) => setScUrl(e.target.value)}
+                placeholder="SoundCloud URL..."
+                className="flex-1 bg-black/40 border border-white/10 rounded px-2 py-1 text-[10px] text-white focus:outline-none focus:border-purple-500"
+              />
+              <button
+                onClick={handleImportSC}
+                disabled={isResolving || !scUrl.trim()}
+                className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-[10px] px-2 py-1 rounded transition-colors"
+              >
+                {isResolving ? "..." : "Add"}
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] text-pnp-textSecondary">Label:</span>
+              <select
+                value={importLabel}
+                onChange={(e) => setImportLabel(e.target.value)}
+                className="bg-black/40 border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white focus:outline-none focus:border-purple-500"
+              >
+                <option value="">None</option>
+                <option value="Label 1">Label 1</option>
+                <option value="Label 2">Label 2</option>
+                <option value="Label 3">Label 3</option>
+              </select>
+              {importFeedback && (
+                <span className={`text-[10px] font-semibold ${importFeedback.includes("Failed") ? "text-red-400" : "text-emerald-400"}`}>
+                  {importFeedback}
+                </span>
+              )}
+              {fetchingCatalog && (
+                <span className="text-[9px] text-pnp-textSecondary animate-pulse">Fetching catalog...</span>
+              )}
+            </div>
+
+            {/* Artist Catalog Panel */}
+            {showArtistCatalog && artistTracks.length > 0 && (
+              <div className="bg-black/30 rounded-lg border border-white/5 p-2 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold text-[#ff5500]">
+                    Artist Catalog ({artistTracks.length} tracks)
+                  </span>
+                  <button
+                    onClick={() => { setShowArtistCatalog(false); setArtistTracks([]); }}
+                    className="text-[9px] text-pnp-textSecondary hover:text-white transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+                <div className="max-h-28 overflow-y-auto space-y-0.5">
+                  {artistTracks.map((t) => (
+                    <div key={t.url} className="flex items-center gap-1.5 py-0.5">
+                      {t.coverUrl && (
+                        <img src={t.coverUrl} alt="" className="w-5 h-5 rounded flex-shrink-0 object-cover" />
+                      )}
+                      <span className="text-[10px] text-pnp-textPrimary truncate flex-1">{t.title}</span>
+                      <button
+                        onClick={() => handleImportCatalogTrack(t)}
+                        className="text-[9px] text-purple-400 hover:text-purple-300 font-semibold flex-shrink-0 transition-colors"
+                      >
+                        +Add
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* Pending Requests (Admin Only) */}
-        {isAdmin && <PendingRequestsPanel onImport={(url) => { setScUrl(url); }} />}
+        {isAdmin && <PendingRequestsPanel onAutoImport={autoImportSC} />}
 
-        {/* Request Song Bar (Regular Users) */}
-        {!isAdmin && (
-          <div className="px-4 py-2 bg-white/5 border-b border-white/5 flex flex-col gap-1.5">
-            <div className="flex items-center gap-1.5">
-              <SoundCloudIcon className="w-3 h-3 text-[#ff5500]" />
-              <span className="text-[10px] text-pnp-textSecondary font-medium uppercase tracking-tight">Request Track</span>
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={reqUrl}
-                onChange={(e) => setReqUrl(e.target.value)}
-                placeholder="Paste SoundCloud link..."
-                className="flex-1 bg-black/40 border border-white/10 rounded px-2 py-1 text-[10px] text-white focus:outline-none focus:border-[#ff5500]"
-              />
-              <button
-                onClick={handleRequestSC}
-                disabled={isRequesting || !reqUrl.trim()}
-                className="bg-[#ff5500] hover:bg-[#ff4400] disabled:opacity-50 text-white text-[10px] px-2 py-1 rounded transition-colors font-semibold"
-              >
-                {isRequesting ? "..." : "Request"}
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Request Song Bar removed — users request via support ticket */}
 
         {/* Loading tracks state (initial) */}
         {isLoadingTracks && !hasTrack && tracks.length === 0 && !loadError && (
@@ -727,15 +895,37 @@ export function RadioWidget() {
                   <p className="text-sm font-semibold text-pnp-textPrimary truncate leading-tight">
                     {hasTrack ? currentTrack.title : "Select a track"}
                   </p>
-                  {currentTrack?.provider === "soundcloud" && (
+                  {currentTrack?.provider === "soundcloud" && currentTrack.soundcloud_url ? (
+                    <a href={currentTrack.soundcloud_url} target="_blank" rel="noopener noreferrer" title="Open on SoundCloud">
+                      <SoundCloudIcon className="w-4 h-4 text-[#ff5500] hover:text-[#ff7733] transition-colors" />
+                    </a>
+                  ) : currentTrack?.provider === "soundcloud" ? (
                     <SoundCloudIcon className="w-4 h-4 text-[#ff5500]" />
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  {artistName ? (
+                    currentTrack?.provider === "soundcloud" && currentTrack.soundcloud_url ? (
+                      <a
+                        href={extractArtistUrl(currentTrack.soundcloud_url) || currentTrack.soundcloud_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-[#ff5500] hover:text-[#ff7733] truncate transition-colors"
+                      >
+                        {artistName}
+                      </a>
+                    ) : (
+                      <p className="text-xs text-pnp-textSecondary truncate">{artistName}</p>
+                    )
+                  ) : !hasTrack ? (
+                    <p className="text-xs text-pnp-textSecondary">PNP Radio</p>
+                  ) : null}
+                  {currentTrack?.label && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-medium flex-shrink-0">
+                      {currentTrack.label}
+                    </span>
                   )}
                 </div>
-                {artistName ? (
-                  <p className="text-xs text-pnp-textSecondary truncate mt-0.5">{artistName}</p>
-                ) : !hasTrack ? (
-                  <p className="text-xs text-pnp-textSecondary mt-0.5">PNP Radio</p>
-                ) : null}
               </div>
 
               {/* Progress bar */}
