@@ -91,6 +91,18 @@ class UserLocation {
   }
 
   /**
+   * Get user location by user ID
+   */
+  static async getByUserId(userId) {
+    const result = await query(
+      `SELECT user_id, latitude, longitude, accuracy, is_online, last_seen
+       FROM user_locations WHERE user_id = $1`,
+      [userId]
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
    * Clear old offline locations
    */
   static async clearOldLocations(hoursOld = 24) {

@@ -8,11 +8,13 @@ import { CristinaWidget } from "@/components/CristinaWidget";
 
 import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
+import { useNearbyToggle } from "@/components/NearbyBadge";
 import { getMessageThreads } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { LandingPage } from "@/pages/LandingPage";
 import { SidebarPlayer, MobilePlayer } from "@/components/SidebarPlayer";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
+import { RadioWidget } from "@/components/RadioWidget";
 
 // ── HamburgerIcon / CloseIcon ─────────────────────────────────────────────────
 
@@ -44,6 +46,7 @@ export function Layout() {
   const t = useI18n();
   const [dmUnread, setDmUnread] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { enabled: nearbyEnabled, toggle: toggleNearby } = useNearbyToggle();
   const mobileMenuRef = useRef<HTMLDivElement>(null);
 
   const primaryLinks = [
@@ -168,6 +171,18 @@ export function Layout() {
                   {dmUnread > 9 ? "9+" : dmUnread}
                 </span>
               )}
+            </button>
+            <button
+              onClick={toggleNearby}
+              className="p-1.5 rounded-lg transition-colors"
+              style={{ color: nearbyEnabled ? "#FBFF00" : "#8E8E93" }}
+              aria-label={nearbyEnabled ? "Disable nearby" : "Enable nearby"}
+              title={nearbyEnabled ? "Nearby: ON" : "Nearby: OFF"}
+            >
+              <svg className="w-5 h-5" fill={nearbyEnabled ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+              </svg>
             </button>
             <NotificationBell />
           </div>
@@ -303,6 +318,17 @@ export function Layout() {
                 {dmUnread > 9 ? "9+" : dmUnread}
               </span>
             )}
+          </button>
+          <button
+            onClick={toggleNearby}
+            className="p-1 rounded-lg transition-colors"
+            style={{ color: nearbyEnabled ? "#FBFF00" : "#8E8E93" }}
+            aria-label={nearbyEnabled ? "Disable nearby" : "Enable nearby"}
+          >
+            <svg className="w-5 h-5" fill={nearbyEnabled ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+            </svg>
           </button>
           <NotificationBell />
 
@@ -451,6 +477,9 @@ export function Layout() {
         <MobilePlayer />
         <BottomNav />
       </div>
+
+      {/* PNP Radio floating widget */}
+      {isAuthenticated && <RadioWidget />}
 
       {/* Cristina AI Support Widget */}
       {isAuthenticated && <CristinaWidget />}

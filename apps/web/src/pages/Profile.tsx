@@ -50,6 +50,8 @@ import MonetizeContentCard from "@/components/profile/MonetizeContentCard";
 import IdentityConnections from "@/components/profile/IdentityConnections";
 import { BookCallModal } from "@/components/creators/BookCallModal";
 import type { CreatorCardCreator } from "@/components/creators/CreatorCard";
+import { NearbyBadge, useNearbyToggle } from "@/components/NearbyBadge";
+import { getDistanceToUser } from "@/lib/api";
 
 function resolvePhotoUrl(url: string | null | undefined): string | null {
   if (!url) return null;
@@ -95,6 +97,16 @@ export default function Profile() {
   const [lang, setLang] = useState<"en" | "es">("en");
   const [langSaving, setLangSaving] = useState(false);
   const [langError, setLangError] = useState<string | null>(null);
+
+  // Nearby distance (for other users' profiles)
+  const [profileDistanceKm, setProfileDistanceKm] = useState<number | null>(null);
+  const { enabled: nearbyEnabled } = useNearbyToggle();
+  useEffect(() => {
+    if (isOwnProfile || !nearbyEnabled || !targetUserId) return;
+    getDistanceToUser(targetUserId).then((res) => {
+      if (res.success) setProfileDistanceKm(res.distance_km);
+    }).catch(() => {});
+  }, [targetUserId, isOwnProfile, nearbyEnabled]);
 
   // Go Live state
   const [showGoLive, setShowGoLive] = useState(false);
@@ -944,6 +956,9 @@ export default function Profile() {
             </div>
             {profile.username && (
               <p className="text-sm" style={{ color: "#8E8E93" }}>@{profile.username}</p>
+            )}
+            {!isOwnProfile && profileDistanceKm != null && (
+              <NearbyBadge distanceKm={profileDistanceKm} variant="detailed" />
             )}
             {profile.bio && (
               <p className="text-sm text-white/80 mt-2 leading-relaxed">{profile.bio}</p>

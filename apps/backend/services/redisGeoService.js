@@ -105,8 +105,8 @@ class RedisGeoService {
       } = options;
 
       // Validate inputs
-      if (radiusKm < 0.1 || radiusKm > 100) {
-        throw new Error('Radius must be between 0.1 and 100 km');
+      if (radiusKm < 0.1 || radiusKm > 20000) {
+        throw new Error('Radius must be between 0.1 and 20000 km');
       }
 
       // Query Redis GEO — ioredis positional-arg style with WITHCOORD + WITHDIST

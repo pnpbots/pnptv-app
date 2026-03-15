@@ -3,7 +3,7 @@ import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { getAllPerformers, type FeaturedPerformer } from "@/lib/api";
-import { NearbyWidget } from "@/components/NearbyWidget";
+import { NearbyBadge } from "@/components/NearbyBadge";
 import { BookCallModal } from "@/components/creators/BookCallModal";
 import type { CreatorCardCreator } from "@/components/creators/CreatorCard";
 
@@ -195,15 +195,8 @@ function CreatorCard({ performer, userCity, userCountry, onViewChannel, onBookCa
           </p>
         )}
 
-        {/* NearbyWidget — creator context */}
-        <NearbyWidget
-          context="creator"
-          creatorCity={null}
-          creatorCountry={null}
-          userCity={userCity}
-          userCountry={userCountry}
-          creatorName={performer.displayName}
-        />
+        {/* Nearby badge — distance-based */}
+        <NearbyBadge distanceKm={(performer as any).distance_km} variant="compact" />
 
         {/* CTA */}
         <button

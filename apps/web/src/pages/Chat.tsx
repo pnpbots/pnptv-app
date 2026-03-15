@@ -48,6 +48,7 @@ import { connectSocket } from "@/lib/socket";
 import { translateText } from "@/lib/feedI18n";
 import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
 import { NearbyWidget } from "@/components/NearbyWidget";
+import { NearbyBadge, useNearbyToggle } from "@/components/NearbyBadge";
 import { SpotlightStrip, type SpotlightItem } from "@/components/SpotlightStrip";
 import { getUpcomingEvents } from "@/lib/api";
 import type { EventItem } from "@/components/events/EventCard";
@@ -1073,14 +1074,7 @@ export default function Chat() {
                           <div className="flex items-center gap-1 mt-0.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
                             <span className="text-xs" style={{ color: "#8E8E93" }}>{t.chat.online}</span>
-                            <NearbyWidget
-                              context="post"
-                              authorCity={(member as any).city}
-                              authorCountry={(member as any).country}
-                              userCity={user?.city}
-                              userCountry={user?.country}
-                              isCreator={false}
-                            />
+                            <NearbyBadge distanceKm={(member as any).distance_km} variant="compact" />
                           </div>
                         </div>
                         {/* Invite button — only if call is active and not self */}
@@ -1830,6 +1824,9 @@ export default function Chat() {
           }}
         />
       )}
+
+      {/* Nearby FAB — floating widget for discovering nearby members */}
+      <NearbyWidget />
     </div>
   );
 }

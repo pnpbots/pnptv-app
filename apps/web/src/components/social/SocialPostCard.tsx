@@ -29,6 +29,7 @@ export interface SocialPostCardProps {
   onAcceptDisclaimer?: () => Promise<void>;
   viewerCity?: string | null;
   viewerCountry?: string | null;
+  distanceKm?: number | null;
 }
 
 function timeAgo(dateStr: string, nowLabel: string): string {
@@ -61,6 +62,7 @@ export default function SocialPostCard({
   onAcceptDisclaimer,
   viewerCity,
   viewerCountry,
+  distanceKm,
 }: SocialPostCardProps) {
   const { feed: t } = useI18n();
   const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
@@ -253,14 +255,8 @@ export default function SocialPostCard({
             </span>
 
             {/* Nearby badge */}
-            {post.author_city && post.author_country && (
-              <NearbyBadge
-                userCity={post.author_city}
-                userCountry={post.author_country}
-                viewerCity={viewerCity}
-                viewerCountry={viewerCountry}
-                username={post.author_first_name || post.author_username || "User"}
-              />
+            {distanceKm != null && (
+              <NearbyBadge distanceKm={distanceKm} variant="compact" />
             )}
 
             {/* Featured / Promoted badge */}

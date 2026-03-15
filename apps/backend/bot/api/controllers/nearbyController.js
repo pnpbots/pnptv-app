@@ -117,7 +117,7 @@ class NearbyController {
       // Validate types
       const lat = parseFloat(latitude);
       const lon = parseFloat(longitude);
-      const rad = Math.min(parseFloat(radius) || 25, 50);
+      const rad = Math.min(parseFloat(radius) || 25, 20000);
 
       if (isNaN(lat) || isNaN(lon) || isNaN(rad)) {
         return res.status(400).json({
@@ -435,6 +435,55 @@ class NearbyController {
     } catch (error) {
       logger.error('getFavorites error:', error);
       return res.status(500).json({ error: 'Failed to get favorites' });
+    }
+  }
+
+  /**
+   * GET /api/nearby/distance/:userId
+   * Get distance between authenticated user and target user
+   */
+  static async getDistanceToUser(req, res) {
+    try {
+      const myId = req.userId || req.user?.id;
+      if (!myId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const targetId = req.params.userId;
+      if (!targetId) return res.status(400).json({ error: 'Missing userId' });
+
+      const redisGeoService = require('../../../services/redisGeoService');
+      const UserLocation = require('../../../models/userLocation');
+
+      let myLoc = await redisGeoService.getUserLocation(myId);
+      if (!myLoc) {
+        const dbRow = await UserLocation.getByUserId(myId);
+        if (dbRow) myLoc = { latitude: parseFloat(dbRow.latitude), longitude: parseFloat(dbRow.longitude) };
+      }
+
+      let targetLoc = await redisGeoService.getUserLocation(targetId);
+      if (!targetLoc) {
+        const dbRow = await UserLocation.getByUserId(targetId);
+        if (dbRow) targetLoc = { latitude: parseFloat(dbRow.latitude), longitude: parseFloat(dbRow.longitude) };
+      }
+
+      if (!myLoc || !targetLoc) {
+        return res.json({ success: true, distance_km: null });
+      }
+
+      // Haversine distance
+      const R = 6371;
+      const dLat = ((targetLoc.latitude - myLoc.latitude) * Math.PI) / 180;
+      const dLon = ((targetLoc.longitude - myLoc.longitude) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((myLoc.latitude * Math.PI) / 180) *
+          Math.cos((targetLoc.latitude * Math.PI) / 180) *
+          Math.sin(dLon / 2) ** 2;
+      const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+      return res.json({ success: true, distance_km: Math.round(distance * 10) / 10 });
+    } catch (error) {
+      logger.error('❌ getDistanceToUser error:', error);
+      return res.status(500).json({ error: 'Failed to get distance' });
     }
   }
 }

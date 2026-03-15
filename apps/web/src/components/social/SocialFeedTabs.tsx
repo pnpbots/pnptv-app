@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { PostComposer } from "@/components/PostComposer";
 import { BulkVideoUpload } from "@/components/BulkVideoUpload";
 import SocialPostCard from "@/components/social/SocialPostCard";
@@ -13,6 +13,7 @@ import {
   type SocialPostItem,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { useNearbyDistances } from "@/components/NearbyBadge";
 
 export interface SocialFeedTabsProps {
   currentUserId: string;
@@ -94,6 +95,14 @@ export default function SocialFeedTabs({
 
   // Content disclaimer local mirror (so we can flip it on accept without prop-drilling)
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(contentDisclaimerAccepted);
+
+  // Nearby distance lookup — collect all unique author IDs across feed slices
+  const allAuthorIds = useMemo(() => {
+    const ids = new Set<string>();
+    posts.forEach((p) => ids.add(String(p.author_id)));
+    return Array.from(ids);
+  }, [posts]);
+  const nearbyDistances = useNearbyDistances(allAuthorIds);
 
   // Sync prop changes
   useEffect(() => {
@@ -279,6 +288,7 @@ export default function SocialFeedTabs({
         onAcceptDisclaimer={handleAcceptDisclaimer}
         viewerCity={viewerCity}
         viewerCountry={viewerCountry}
+        distanceKm={nearbyDistances.get(String(post.author_id)) ?? null}
       />
     ));
   }

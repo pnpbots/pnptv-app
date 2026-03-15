@@ -29,6 +29,7 @@ const healthController = require('./controllers/healthController');
 const hangoutsController = require('./controllers/hangoutsController');
 const eventsController = require('./controllers/eventsController');
 const { adminGuard } = require('../../middleware/guards');
+const xOAuthRoutes = require('./xOAuthRoutes');
 const adminUserRoutes = require('./routes/adminUserRoutes');
 const userManagementRoutes = require('./routes/userManagementRoutes');
 const nearbyRoutes = require('./routes/nearby.routes');
@@ -1358,6 +1359,10 @@ const adminCheckLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, keyGenerator
 app.get('/api/admin/check', adminCheckLimiter, adminGuard, (req, res) => {
   res.json({ isAdmin: true });
 });
+
+// X OAuth routes (admin-guarded for account management, public alias for callback)
+app.use('/api/admin/x/oauth', adminGuard, xOAuthRoutes);
+app.use('/api/auth/x', xOAuthRoutes);
 
 // Audit log middleware — registered here so it covers ALL /api/admin/* routes,
 // including those defined before the RBAC block further down the file.
@@ -3059,6 +3064,7 @@ app.post('/api/webapp/admin/users/bulk-update', adminGuard, asyncHandler(webappA
 app.get('/api/webapp/admin/users/:id', adminGuard, asyncHandler(webappAdminController.getUser));
 app.put('/api/webapp/admin/users/:id', adminGuard, asyncHandler(webappAdminController.updateUser));
 app.post('/api/webapp/admin/users/:id/ban', adminGuard, asyncHandler(webappAdminController.banUser));
+app.delete('/api/webapp/admin/users/:id', adminGuard, asyncHandler(webappAdminController.deleteUser));
 app.get('/api/webapp/admin/posts', adminGuard, asyncHandler(webappAdminController.listPosts));
 app.delete('/api/webapp/admin/posts/:id', adminGuard, asyncHandler(webappAdminController.deletePost));
 app.get('/api/webapp/admin/hangouts', adminGuard, asyncHandler(webappAdminController.listHangouts));
@@ -4249,6 +4255,12 @@ app.get('/api/webapp/nearby/search', asyncHandler(async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
   req.user = { id: user.id, userId: user.id };
   return NearbyController.searchNearby(req, res);
+}));
+app.get('/api/webapp/nearby/distance/:userId', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+  req.user = { id: user.id, userId: user.id };
+  return NearbyController.getDistanceToUser(req, res);
 }));
 app.get('/api/webapp/nearby/places', asyncHandler(async (req, res) => {
   const user = req.session?.user;

@@ -379,6 +379,12 @@ export function searchNearby(
   );
 }
 
+export function getDistanceToUser(
+  userId: string
+): Promise<{ success: boolean; distance_km: number | null }> {
+  return request(`/api/webapp/nearby/distance/${userId}`);
+}
+
 export interface NearbyPlace {
   id: number;
   name: string;
@@ -3074,6 +3080,12 @@ export function updateAdminUser(
   fields: { username?: string; email?: string; subscriptionStatus?: string; subscriptionPlan?: string; tier?: string; planExpiry?: string }
 ): Promise<{ success: boolean; user: AdminUser }> {
   return request(`/api/webapp/admin/users/${id}`, { method: "PUT", body: fields });
+}
+
+export function deleteAdminUser(
+  id: string
+): Promise<{ success: boolean; message: string }> {
+  return request(`/api/webapp/admin/users/${id}`, { method: "DELETE" });
 }
 
 export function banAdminUser(
