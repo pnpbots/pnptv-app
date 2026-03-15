@@ -498,6 +498,7 @@ export function NearbyWidget() {
   const [places, setPlaces] = useState<NearbyPlace[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(0);
+  const [hangoutGroupName, setHangoutGroupName] = useState<string | null>(null);
 
   // Sub-view state
   const [view, setView] = useState<WidgetView>("grid");
@@ -602,8 +603,10 @@ export function NearbyWidget() {
             if (hangoutGroupId) {
               const res = await getNearbyHangoutMembers(hangoutGroupId).catch(() => null);
               if (!cancelled && res?.success && res.users) {
+                // Cap at 44 — first slot is reserved for group chat card
                 const sorted = [...res.users].sort((a, b) => (a.distance_km ?? 9999) - (b.distance_km ?? 9999));
-                setMembers(sorted.map((u) => ({ ...u, allowDirectDm: true })) as NearbyMember[]);
+                setMembers(sorted.slice(0, 44).map((u) => ({ ...u, allowDirectDm: true })) as NearbyMember[]);
+                if ((res as any).groupName) setHangoutGroupName((res as any).groupName);
               }
             } else {
               // Fallback: generic nearby search
@@ -704,6 +707,7 @@ export function NearbyWidget() {
   // ── Build paged grid items ─────────────────────────────────────────────────
   const allGridItems: GridItem[] = React.useMemo(() => {
     const showCommunity = context === "feed" || context === "default";
+    const showHangoutChat = context === "hangouts" && hangoutGroupId;
 
     if (context === "default") {
       // Classic interleaved users + places
@@ -729,8 +733,12 @@ export function NearbyWidget() {
       const communityItem: GridItem = { kind: "community", data: { type: "community", name: "PNPtv Community" } };
       return [communityItem, ...userItems];
     }
+    if (showHangoutChat) {
+      const hangoutChatItem: GridItem = { kind: "community", data: { type: "community", name: hangoutGroupName || "Group Chat" } };
+      return [hangoutChatItem, ...userItems];
+    }
     return userItems;
-  }, [members, places, context]);
+  }, [members, places, context, hangoutGroupId, hangoutGroupName]);
 
   const totalPages = Math.ceil(allGridItems.length / GRID_SIZE);
   const gridItems = allGridItems.slice(page * GRID_SIZE, (page + 1) * GRID_SIZE);
@@ -794,11 +802,13 @@ export function NearbyWidget() {
     openDm(member);
   }, [openDm]);
 
-  // Open community group chat
+  // Open community/hangout group chat
   const openCommunityChat = useCallback(() => {
     closeModal();
-    navigate(`/chat/${COMMUNITY_GROUP_ID}`);
-  }, [closeModal, navigate]);
+    // In hangouts context, stay on current group; otherwise go to community
+    const targetGroup = context === "hangouts" && hangoutGroupId ? hangoutGroupId : COMMUNITY_GROUP_ID;
+    navigate(`/chat/${targetGroup}`);
+  }, [closeModal, navigate, context, hangoutGroupId]);
 
   // ── FAB position ───────────────────────────────────────────────────────────
   const MY_ORDER = 1;

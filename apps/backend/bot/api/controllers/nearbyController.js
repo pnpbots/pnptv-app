@@ -513,14 +513,18 @@ class NearbyController {
         return res.status(400).json({ error: 'Invalid group ID' });
       }
 
-      // Verify membership
+      // Verify membership + get group name
       const { rows: memberCheck } = await dbQuery(
-        `SELECT 1 FROM hangout_group_members WHERE group_id = $1 AND user_id = $2`,
+        `SELECT hg.name AS group_name
+         FROM hangout_group_members hgm
+         JOIN hangout_groups hg ON hg.id = hgm.group_id
+         WHERE hgm.group_id = $1 AND hgm.user_id = $2`,
         [groupId, userId]
       );
       if (memberCheck.length === 0) {
         return res.status(403).json({ error: 'You are not a member of this group' });
       }
+      const groupName = memberCheck[0].group_name || `Group ${groupId}`;
 
       // Get requesting user's location
       const { rows: viewerRows } = await dbQuery(
@@ -579,7 +583,7 @@ class NearbyController {
         return a.distance_km - b.distance_km;
       });
 
-      return res.status(200).json({ success: true, total: users.length, users });
+      return res.status(200).json({ success: true, total: users.length, users, groupName });
     } catch (error) {
       logger.error('❌ hangoutMembers error:', error);
       return res.status(500).json({ error: 'Failed to fetch hangout members' });
