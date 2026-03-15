@@ -54,25 +54,26 @@ function buildUrl(type, entityType, entityId) {
       return entityId ? `${base}/profile/${entityId}` : base;
     case 'like':
     case 'reply':
-      return entityId ? `${base}/social/post/${entityId}` : `${base}/social`;
-    case 'dm':
-      return entityId ? `${base}/dm/${entityId}` : `${base}/dm`;
-    case 'group_message':
-    case 'group_join':
-      return `${base}/hangouts`;
     case 'reaction_post':
     case 'mention_post':
       return entityId ? `${base}/social/post/${entityId}` : `${base}/social`;
+    case 'dm':
+      return entityId ? `${base}/dm/${entityId}` : `${base}/dm`;
     case 'reaction_chat':
     case 'mention_chat':
-      return `${base}/hangouts`;
+    case 'group_message':
+    case 'group_join':
+    case 'group_join_request':
+    case 'group_request_accepted':
     case 'hangout_call':
     case 'hangout_creator_joined':
-      return `${base}/main-stage`;
+      return entityId ? `${base}/chat/${entityId}` : `${base}/chat`;
     case 'wof_winner':
       return `${base}/social`;
     case 'payment':
       return `${base}/subscribe`;
+    case 'live_stream_started':
+      return entityId ? `${base}/live/${entityId}` : `${base}/live`;
     default:
       return base;
   }

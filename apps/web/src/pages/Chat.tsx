@@ -6,7 +6,7 @@ import React, {
   memo,
 } from "react";
 import { Helmet } from "react-helmet-async";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { useTutorial } from "@/hooks/useTutorial";
@@ -335,6 +335,7 @@ export default function Chat() {
   const { user } = useAuth();
   const { isPrime, isMember, isFree, isBanned, isAdmin } = useTier();
   const navigate = useNavigate();
+  const { groupId: urlGroupId } = useParams<{ groupId?: string }>();
   const t = useI18n();
   const { showTutorial, dismissTutorial } = useTutorial("hangouts");
 
@@ -447,6 +448,17 @@ export default function Chat() {
     setIsLoading(true);
     loadGroups().finally(() => setIsLoading(false));
   }, [loadGroups]);
+
+  // Deep-link: auto-open group from /chat/:groupId
+  const deepLinkHandled = useRef(false);
+  useEffect(() => {
+    if (!urlGroupId || deepLinkHandled.current || isLoading || groups.length === 0) return;
+    const target = groups.find((g) => String(g.id) === urlGroupId);
+    if (target) {
+      deepLinkHandled.current = true;
+      openChat(target);
+    }
+  }, [urlGroupId, isLoading, groups]);
 
   // ─── Group creation ─────────────────────────────────────────────────
 
@@ -598,12 +610,6 @@ export default function Chat() {
       setError("Your account has been suspended and you cannot access hangouts.");
       return;
     }
-    // Free-tier users cannot enter hangout rooms — redirect to subscribe
-    if (isFree) {
-      navigate("/subscribe");
-      return;
-    }
-
     // Dismiss the tutorial immediately when entering a chat so the overlay
     // can never surface while the user is in the chat input view.
     if (showTutorial) dismissTutorial();
@@ -1447,21 +1453,6 @@ export default function Chat() {
       ) : (
         /* Group list */
         <div className="space-y-2">
-          {/* Free-tier upgrade prompt */}
-          {isFree && (
-            <div className="glass-card-sm p-4 mb-2 text-center border border-pnp-accent/30">
-              <p className="text-sm text-pnp-textSecondary mb-2">
-                {t.chat.freeTierJoinPrompt}
-              </p>
-              <button
-                onClick={() => navigate("/subscribe")}
-                className="px-4 py-2 rounded-full text-sm font-semibold text-white active:scale-95 transition-transform"
-                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-              >
-                {t.chat.freeTierJoinButton}
-              </button>
-            </div>
-          )}
           {groups.map((group) => (
             <button
               key={group.id}
@@ -1614,14 +1605,7 @@ export default function Chat() {
                         {group.memberCount} {group.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}{group.description ? ` \u00b7 ${group.description}` : ""}
                       </p>
                     </div>
-                    {isFree ? (
-                      <button
-                        onClick={() => navigate("/subscribe")}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 border border-pnp-accent/50 text-pnp-accent hover:bg-pnp-accent/10 active:scale-95 transition-all"
-                      >
-                        {t.chat.freeTierDiscoverButton}
-                      </button>
-                    ) : group.isPublic ? (
+                    {group.isPublic ? (
                       <button
                         onClick={() => handleDiscoverJoin(group)}
                         className="btn-gradient px-3 py-1.5 rounded-lg text-white text-xs font-semibold flex-shrink-0 active:scale-95 transition-transform"

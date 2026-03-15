@@ -53,7 +53,6 @@ const AdminNotifications = lazy(() => import("@/pages/admin/AdminNotifications")
 const ExternalServices = lazy(() => import("@/pages/admin/ExternalServices"));
 const NearbyPlaces = lazy(() => import("@/pages/admin/NearbyPlaces"));
 const CanvaIntegration = lazy(() => import("@/pages/admin/CanvaIntegration"));
-const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
 const AdminDemographics = lazy(() => import("@/pages/admin/AdminDemographics"));
 const Mono = lazy(() => import("@/pages/admin/Mono"));
 const Gamification = lazy(() => import("@/pages/admin/Gamification"));
@@ -141,6 +140,16 @@ export const router = createBrowserRouter([
       },
       {
         path: "chat",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <Chat />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "chat/:groupId",
         element: (
           <ModuleLoader>
             <VerificationGate>
@@ -293,6 +302,11 @@ export const router = createBrowserRouter([
           </ModuleLoader>
         ),
       },
+      { path: "hangouts", element: <Navigate to="/chat" replace /> },
+      { path: "pnplive", element: <Navigate to="/live" replace /> },
+      { path: "pnptv-haus", element: <Navigate to="/da-haus" replace /> },
+      { path: "community-room", element: <Navigate to="/da-haus" replace /> },
+      { path: "portal", element: <Navigate to="/" replace /> },
     ],
   },
   {
@@ -384,14 +398,6 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <CanvaIntegration />
-          </ModuleLoader>
-        ),
-      },
-      {
-        path: "x-campaigns",
-        element: (
-          <ModuleLoader>
-            <XAutoCampaigns />
           </ModuleLoader>
         ),
       },

@@ -33,19 +33,22 @@ export function getNotificationDeepLink(notif: {
 
     case "group_message":
     case "group_join":
+    case "group_join_request":
+    case "group_request_accepted":
     case "reaction_chat":
     case "mention_chat":
-      return "/chat";
-
     case "hangout_call":
     case "hangout_creator_joined":
-      return "/main-stage";
+      return entityId ? `/chat/${entityId}` : "/chat";
 
     case "payment":
       return "/subscribe";
 
     case "wof_winner":
       return "/social";
+
+    case "live_stream_started":
+      return entityId ? `/live/${entityId}` : "/live";
 
     case "announcement":
     case "system":
@@ -64,7 +67,10 @@ export function getNotificationDeepLink(notif: {
       }
       return "/dm";
     case "group":
-      return "/chat";
+    case "hangout":
+      return entityId ? `/chat/${entityId}` : "/chat";
+    case "stream":
+      return entityId ? `/live/${entityId}` : "/live";
     case "payment":
       return "/subscribe";
     default:

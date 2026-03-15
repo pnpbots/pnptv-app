@@ -217,7 +217,7 @@ const createPost = async (req, res) => {
           metadata: {
             pushTitle: `${actorName} commented`,
             pushBody: replyPreview ? `"${replyPreview}"` : 'Tap to view',
-            url: `/post/${replyToId}`,
+            url: `/social/post/${replyToId}`,
           },
         });
       }
@@ -284,7 +284,7 @@ const toggleLike = async (req, res) => {
           metadata: {
             pushTitle: `${actorName} liked your post`,
             pushBody: postPreview ? `"${postPreview}"` : 'Tap to view',
-            url: `/post/${postId}`,
+            url: `/social/post/${postId}`,
           },
         });
       }
@@ -571,7 +571,7 @@ const createPostWithMedia = async (req, res) => {
           metadata: {
             pushTitle: `${actorName} commented`,
             pushBody: replyPreview ? `"${replyPreview}"` : 'Tap to view',
-            url: `/post/${replyToId}`,
+            url: `/social/post/${replyToId}`,
           },
         });
       }
@@ -803,7 +803,7 @@ const createPostWithMultiMedia = async (req, res) => {
           metadata: {
             pushTitle: `${actorName} commented`,
             pushBody: replyPreview ? `"${replyPreview}"` : 'Tap to view',
-            url: `/post/${replyToId}`,
+            url: `/social/post/${replyToId}`,
           },
         });
       }

@@ -69,22 +69,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const init = async () => {
       try {
         await waitForTelegramSdk();
-        
-        // Ensure we are in Telegram context
-        if (!isTelegramContext()) {
-          console.warn("[AuthProvider] Not in Telegram context. Access restricted.");
-          setIsLoading(false);
-          return;
-        }
 
-        const webapp = getTelegramWebApp();
+        const webapp = isTelegramContext() ? getTelegramWebApp() : null;
         if (webapp?.initData) {
           const res = await telegramAuth(webapp.initData);
           if (res.success && res.user) {
             setUser(mapTelegramUser(res.user));
           }
         } else {
-          // Fallback: check if we already have a session
+          // Browser or Telegram without initData: check existing session
           try {
             const status = await checkAuthStatus();
             if (status.authenticated && status.user) {

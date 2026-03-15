@@ -129,21 +129,76 @@ function buildNotificationUrl(type, entityType, entityId) {
       return entityId ? `/social/post/${entityId}` : '/social';
     case 'reaction_chat':
     case 'mention_chat':
-      return '/chat';
-    case 'dm':
-      return entityId ? `/dm/${entityId}` : '/dm';
     case 'group_message':
     case 'group_join':
-      return '/hangouts';
+    case 'group_join_request':
+    case 'group_request_accepted':
     case 'hangout_call':
     case 'hangout_creator_joined':
-      return '/main-stage';
+      return entityId ? `/chat/${entityId}` : '/chat';
+    case 'dm':
+      return entityId ? `/dm/${entityId}` : '/dm';
     case 'wof_winner':
       return '/social';
     case 'payment':
       return '/subscribe';
+    case 'live_stream_started':
+      return entityId ? `/live/${entityId}` : '/live';
     default:
       return '/';
+  }
+}
+
+/**
+ * Build a human-readable push title for a notification type.
+ * Uses the actor name (from the DB row) when available.
+ */
+function buildPushTitle(type, row) {
+  const actor = row.actor_first_name || row.actor_username || '';
+  switch (type) {
+    case 'follow':        return 'New Follower';
+    case 'like':          return actor ? `${actor} liked your post` : 'New Like';
+    case 'reply':         return actor ? `${actor} commented` : 'New Comment';
+    case 'dm':            return actor ? `${actor} sent a message` : 'New Message';
+    case 'group_message': return 'New Group Message';
+    case 'group_join':    return 'New Group Member';
+    case 'hangout_call':  return 'Hangout Call Started';
+    case 'hangout_creator_joined': return 'Creator Joined Call';
+    case 'reaction_post': return actor ? `${actor} reacted` : 'New Reaction';
+    case 'reaction_chat': return actor ? `${actor} reacted` : 'New Reaction';
+    case 'mention_post':  return actor ? `${actor} mentioned you` : 'You were mentioned';
+    case 'mention_chat':  return actor ? `${actor} mentioned you` : 'You were mentioned';
+    case 'payment':       return 'Payment Confirmed';
+    case 'wof_winner':    return 'Wall of Fame';
+    case 'creator_approved':       return 'Creator Approved!';
+    case 'creator_rejected':       return 'Creator Application';
+    case 'creator_new_subscriber': return 'New Subscriber';
+    case 'creator_subscriber_left': return 'Subscriber Left';
+    case 'creator_strike':         return 'Content Strike';
+    case 'creator_suspended':      return 'Creator Status';
+    case 'announcement':  return 'PNPtv Announcement';
+    case 'system':        return 'PNPtv';
+    default:              return 'PNPtv';
+  }
+}
+
+/**
+ * Build a descriptive push body for a notification type.
+ * Falls back to the generic notification message.
+ */
+function buildPushBody(type, row) {
+  const actor = row.actor_first_name || row.actor_username || 'Someone';
+  const msg = row.message;
+  switch (type) {
+    case 'follow':        return `@${row.actor_username || actor} just followed you`;
+    case 'like':          return msg || `${actor} liked your post`;
+    case 'reply':         return msg || `${actor} commented on your post`;
+    case 'dm':            return msg || `${actor} sent you a message`;
+    case 'group_message': return msg || `New message in group`;
+    case 'group_join':    return msg || `${actor} joined your group`;
+    case 'mention_post':  return msg || `${actor} mentioned you in a post`;
+    case 'mention_chat':  return msg || `${actor} mentioned you in chat`;
+    default:              return msg || 'Tap to view';
   }
 }
 
@@ -304,8 +359,8 @@ const NotificationEmitter = {
           const PushNotificationService = require('./pushNotificationService');
           const meta = (typeof row.metadata === 'object' && row.metadata) || {};
           await PushNotificationService.sendToUser(targetUserId, {
-            title: meta.pushTitle || 'PNPtv!',
-            body: meta.pushBody || row.message,
+            title: meta.pushTitle || buildPushTitle(type, row),
+            body: meta.pushBody || buildPushBody(type, row),
             url: meta.url || buildNotificationUrl(type, entityType, entityId),
             tag: meta.pushTag || `${type}-${entityId || 'general'}`,
           });
