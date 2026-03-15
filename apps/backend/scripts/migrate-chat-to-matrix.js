@@ -141,23 +141,53 @@ async function synapseGet(path_, token = null) {
   return data;
 }
 
+// Rate-limit aware wrapper — retries on 429
+async function withRetry(fn, maxRetries = 3) {
+  for (let i = 0; i <= maxRetries; i++) {
+    try { return await fn(); } catch (err) {
+      if (err.statusCode === 429 && i < maxRetries) {
+        const wait = (err.retry_after_ms || 3000) + 500;
+        await new Promise(r => setTimeout(r, wait));
+      } else throw err;
+    }
+  }
+}
+
 // ── Admin token (from matrixService module via direct call) ───────────────────
 
 let _adminToken = null;
 
 async function getAdminToken() {
   if (_adminToken) return _adminToken;
+  // Try direct token from env first (avoids login rate limits)
+  if (process.env.MATRIX_ADMIN_TOKEN) {
+    _adminToken = process.env.MATRIX_ADMIN_TOKEN;
+    log('Auth', `Using pre-set admin token`);
+    return _adminToken;
+  }
   const adminUser     = process.env.MATRIX_ADMIN_USER || 'pnptv_admin';
   const adminPassword = process.env.MATRIX_ADMIN_PASSWORD;
   if (!adminPassword) {
     throw new Error('MATRIX_ADMIN_PASSWORD env var not set — cannot obtain admin token');
   }
-  const loginResp = await synapsePost('/_matrix/client/v3/login', {
-    type:       'm.login.password',
-    identifier: { type: 'm.id.user', user: adminUser },
-    password:   adminPassword,
-    initial_device_display_name: 'pnptv-migration-script',
-  });
+  let loginResp;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      loginResp = await synapsePost('/_matrix/client/v3/login', {
+        type:       'm.login.password',
+        identifier: { type: 'm.id.user', user: adminUser },
+        password:   adminPassword,
+        initial_device_display_name: 'pnptv-migration-script',
+      });
+      break;
+    } catch (err) {
+      if (err.errcode === 'M_LIMIT_EXCEEDED' && attempt < 7) {
+        const wait = (err.retry_after_ms || 10000) + 2000;
+        log('Auth', `Rate limited, waiting ${wait}ms before retry (attempt ${attempt+1}/8)...`);
+        await new Promise(r => setTimeout(r, wait));
+      } else throw err;
+    }
+  }
   _adminToken = loginResp.access_token;
   log('Auth', `Obtained admin token for @${adminUser}:${MATRIX_SERVER_NAME}`);
   return _adminToken;
@@ -259,26 +289,21 @@ async function sendMessageToMatrix(matrixRoomId, msg, senderToken, senderMatrixI
     return;
   }
 
-  // Try sending as the original user with timestamp override
-  // The ?ts parameter requires admin or appservice privileges in Synapse.
-  // We use the admin token to send on behalf of the user via the
-  // /_matrix/client/v3/rooms/{roomId}/send path with ?user_id for masquerading,
-  // which requires the server admin scope on the token.
-  // If the sender token works with ?ts, use it directly; otherwise fall back
-  // to the admin token with user_id masquerade.
-  const tsParam = `?ts=${createdMs}&user_id=${encodeURIComponent(senderMatrixId)}`;
-  const putPath = `/_matrix/client/v3/rooms/${encodeURIComponent(matrixRoomId)}/send/m.room.message/${txnId}${tsParam}`;
+  // Send as the original user using their own token (they should be room members)
+  // First try with sender's token, then fall back to admin token with sender prefix
+  const putPath = `/_matrix/client/v3/rooms/${encodeURIComponent(matrixRoomId)}/send/m.room.message/${txnId}`;
 
   try {
-    await synapsePut(putPath, content, adminToken);
+    await synapsePut(putPath, content, senderToken);
   } catch (sendErr) {
     if (sendErr.errcode === 'M_FORBIDDEN' || sendErr.statusCode === 403) {
-      // Try without masquerade as a last resort (message will appear as admin)
-      const plainPath = `/_matrix/client/v3/rooms/${encodeURIComponent(matrixRoomId)}/send/m.room.message/${txnId}?ts=${createdMs}`;
-      await synapsePut(plainPath, {
-        ...content,
-        body: `[${msg.first_name || msg.username || 'User'}] ${content.body}`,
-      }, adminToken);
+      // Sender not in room — try admin token with sender name prefix
+      try {
+        await synapsePut(putPath + '_adm', {
+          ...content,
+          body: `[${msg.first_name || msg.username || 'User'}] ${content.body}`,
+        }, adminToken);
+      } catch { throw sendErr; }
     } else {
       throw sendErr;
     }
@@ -287,14 +312,16 @@ async function sendMessageToMatrix(matrixRoomId, msg, senderToken, senderMatrixI
 
 // ── Send fallback welcome message ─────────────────────────────────────────────
 
-async function sendFallbackWelcome(matrixRoomId, adminToken) {
+async function sendFallbackWelcome(matrixRoomId, adminToken, creatorToken = null) {
   if (DRY_RUN) {
     log('Fallback', `[DRY] Would send fallback welcome to ${matrixRoomId}`);
     return;
   }
   const txnId = `welcome_${matrixRoomId}_${Date.now()}`;
   const putPath = `/_matrix/client/v3/rooms/${encodeURIComponent(matrixRoomId)}/send/m.room.message/${txnId}`;
-  await synapsePut(putPath, { msgtype: 'm.text', body: FALLBACK_WELCOME }, adminToken);
+  // Try creator token first (they're in the room), fall back to admin
+  const token = creatorToken || adminToken;
+  await synapsePut(putPath, { msgtype: 'm.text', body: FALLBACK_WELCOME }, token);
 }
 
 // ── Migrate messages for a given PG room into an existing Matrix room ─────────
@@ -323,6 +350,17 @@ async function migrateRoomMessages(tag, pgRoom, matrixRoomId, adminToken, sender
   }
 
   log(tag, `Migrating ${messages.length} messages from "${pgRoom}" into ${matrixRoomId}...`);
+
+  // Make admin a room admin so masquerading works
+  if (!DRY_RUN) {
+    const adminMatrixId = `@${process.env.MATRIX_ADMIN_USER || 'pnptv_admin'}:${MATRIX_SERVER_NAME}`;
+    try {
+      await synapsePost(`/_synapse/admin/v1/rooms/${encodeURIComponent(matrixRoomId)}/make_room_admin`, { user_id: adminMatrixId }, adminToken);
+      log(tag, `  Admin joined room as admin`);
+    } catch (joinErr) {
+      warn(tag, `  Admin room join failed (${joinErr.errcode || joinErr.statusCode}): ${joinErr.message} — messages may fail`);
+    }
+  }
 
   let successCount = 0;
   let failCount    = 0;
@@ -484,8 +522,18 @@ async function migrateHangoutRooms(adminToken, senderTokenCache) {
         }
       }
 
-      // Migrate messages
-      await migrateRoomMessages(tag, room, matrixRoomId, adminToken, senderTokenCache);
+      // Send privacy upgrade welcome message (using creator's token who IS in the room)
+      if (!DRY_RUN) {
+        try {
+          const creatorCreds = await matrixService.getMatrixToken(creatorUser.id);
+          await sendFallbackWelcome(matrixRoomId, adminToken, creatorCreds.accessToken);
+          log(tag, `  Welcome message sent`);
+        } catch (wErr) {
+          warn(tag, `  Welcome message failed: ${wErr.message}`);
+        }
+      } else {
+        log(tag, `  [DRY] Would send welcome message`);
+      }
 
     } catch (groupErr) {
       err(tag, `Failed to process hangout ${groupId}: ${groupErr.message}`);
@@ -638,7 +686,7 @@ async function migrateDmConversations(adminToken, senderTokenCache) {
         `SELECT id, telegram, username, first_name,
                 matrix_user_id, matrix_access_token, matrix_device_id
          FROM users
-         WHERE id = ANY($1::int[]) AND is_deleted = false`,
+         WHERE id = ANY($1::text[]) AND is_deleted = false`,
         [[user_a, user_b]]
       );
 
