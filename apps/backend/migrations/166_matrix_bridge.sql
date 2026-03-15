@@ -22,8 +22,8 @@ CREATE TABLE IF NOT EXISTS hangout_matrix_rooms (
 -- user_a < user_b enforced in application layer to prevent duplicate pairs
 CREATE TABLE IF NOT EXISTS dm_matrix_rooms (
   id             SERIAL PRIMARY KEY,
-  user_a         INTEGER NOT NULL,
-  user_b         INTEGER NOT NULL,
+  user_a         TEXT NOT NULL,
+  user_b         TEXT NOT NULL,
   matrix_room_id TEXT NOT NULL UNIQUE,
   created_at     TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(user_a, user_b)
