@@ -2294,29 +2294,11 @@ app.post('/api/webapp/auth/telegram/widget', telegramWidgetLimiter, asyncHandler
 app.post('/api/webapp/auth/email/register', authLimiter, asyncHandler(webAppController.emailRegister));
 app.post('/api/webapp/auth/email/login', authLimiter, asyncHandler(webAppController.emailLogin));
 
-// Request account recovery (Password Reset via Authentik)
+// Request account recovery — delegates to the existing forgot-password handler
 app.post('/api/webapp/auth/recover-account', authLimiter, asyncHandler(async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ success: false, error: 'Email is required' });
-
-  // 1. Verify user exists in PNP DB
-  const user = await getPool().query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
-  
-  if (user.rows.length === 0) {
-    // Return success anyway to prevent email enumeration
-    return res.json({ success: true, message: 'If an account exists with this email, a recovery link has been sent.' });
-  }
-
-  // 2. Trigger Authentik recovery
-  const AuthentikService = require('../../services/authentikService');
-  const result = await AuthentikService.requestPasswordReset(email);
-  
-  if (!result.success) {
-    logger.warn(`Failed to trigger Authentik recovery for ${email}: ${result.error}`);
-    // Still return success to user for security
-  }
-
-  res.json({ success: true, message: 'Recovery process initiated.' });
+  // Reuse the existing forgot-password flow (sends real SMTP email with reset link)
+  req.body.email = req.body.email || '';
+  return webAppController.forgotPassword(req, res);
 }));
 app.get('/api/webapp/auth/verify-email', verifyEmailLimiter, asyncHandler(webAppController.verifyEmail));
 app.post('/api/webapp/auth/resend-verification', authLimiter, asyncHandler(webAppController.resendVerification));
