@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { getXLoginUrl, telegramWidgetAuth, TelegramWidgetUser } from "@/lib/api"; // Removed 'type' keyword
+import { telegramWidgetAuth, TelegramWidgetUser } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { LanguageSelector } from "@/components/LanguageSelector"; // Import LanguageSelector
 
@@ -252,7 +252,6 @@ export function LandingPage() {
   const [widgetStatus, setWidgetStatus] = useState<"idle" | "verifying" | "error">("idle");
   const [widgetBlocked, setWidgetBlocked] = useState(false);
   const [widgetError, setWidgetError] = useState<string | null>(null);
-  const [xRedirecting, setXRedirecting] = useState(false);
   const [emailVal, setEmailVal] = useState("");
   const [passVal, setPassVal] = useState("");
   const [emailLoading, setEmailLoading] = useState(false);
@@ -308,12 +307,6 @@ export function LandingPage() {
         } catch { /* keep polling */ }
       }, 5000);
     } catch { /* silent */ }
-  };
-
-  const handleX = () => {
-    setXRedirecting(true);
-    localStorage.setItem("pnptv_last_auth", "x");
-    window.location.href = getXLoginUrl();
   };
 
   const handleEmail = async () => {
@@ -394,15 +387,6 @@ export function LandingPage() {
                         <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248l-1.97 9.289c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.062 13.85l-2.946-.924c-.64-.203-.654-.64.136-.953l11.5-4.431c.534-.194 1.001.13.81.706z" />
                       </svg>
                       Continue with Telegram
-                    </button>
-
-                    <button onClick={handleX} disabled={xRedirecting} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white border border-pnp-border hover:border-white/30 hover:bg-pnp-surface transition-colors disabled:opacity-50">
-                      {xRedirecting ? <Spinner /> : (
-                        <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.748l7.73-8.835L1.254 2.25H8.08l4.253 5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                        </svg>
-                      )}
-                      {xRedirecting ? "Redirecting…" : "Continue with X"}
                     </button>
 
                     <button onClick={() => setLoginView("email")} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-pnp-textSecondary border border-pnp-border hover:border-white/30 hover:text-white hover:bg-pnp-surface transition-colors">
