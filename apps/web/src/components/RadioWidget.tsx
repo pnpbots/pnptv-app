@@ -319,6 +319,25 @@ function PendingRequestsPanel({ onImport }: { onImport: (url: string) => void })
   );
 }
 
+// ── Shared stagger helper (all 3 widgets share these keys) ──────────────────
+const WIDGET_KEYS = [
+  { key: "radio_fab_corner", order: 0, defaultCorner: "bl" },
+  { key: "nearby_fab_corner", order: 1, defaultCorner: "br" },
+  { key: "cristina_fab_corner", order: 2, defaultCorner: "tr" },
+] as const;
+
+function getCornerOffset(myOrder: number, myCorner: string): number {
+  let count = 0;
+  for (const { key, order, defaultCorner } of WIDGET_KEYS) {
+    if (order >= myOrder) continue;
+    try {
+      const otherCorner = localStorage.getItem(key) || defaultCorner;
+      if (otherCorner === myCorner) count++;
+    } catch {}
+  }
+  return count;
+}
+
 // ── Main RadioWidget component ────────────────────────────────────────────────
 
 export function RadioWidget() {
@@ -393,23 +412,13 @@ export function RadioWidget() {
   // Panel open/close
   const [isOpen, setIsOpen] = useState(false);
 
-  // FAB corner: bl = bottom-left (default), br = bottom-right
-  const [fabCorner, setFabCorner] = useState<"bl" | "br">(() => {
-    try {
-      return (localStorage.getItem("radio_fab_corner") as "bl" | "br") || "bl";
-    } catch {
-      return "bl";
-    }
+  // FAB corner: tl/tr/bl/br — draggable to any corner
+  type Corner = "tl" | "tr" | "bl" | "br";
+  const [fabCorner, setFabCorner] = useState<Corner>(() => {
+    try { return (localStorage.getItem("radio_fab_corner") as Corner) || "bl"; } catch { return "bl"; }
   });
-
-  // Drag state
   const fabRef = useRef<HTMLDivElement>(null);
-  const dragState = useRef<{
-    startX: number;
-    startY: number;
-    dragging: boolean;
-    moved: boolean;
-  }>({ startX: 0, startY: 0, dragging: false, moved: false });
+  const dragState = useRef<{ startX: number; startY: number; dragging: boolean; moved: boolean }>({ startX: 0, startY: 0, dragging: false, moved: false });
 
   const handleFabPointerDown = useCallback((e: React.PointerEvent) => {
     dragState.current = { startX: e.clientX, startY: e.clientY, dragging: true, moved: false };
@@ -430,18 +439,15 @@ export function RadioWidget() {
     if (!dragState.current.dragging) return;
     const wasDragged = dragState.current.moved;
     dragState.current.dragging = false;
-    if (!wasDragged) return; // tap — let onClick handle open/close
+    if (!wasDragged) return;
     e.preventDefault();
     e.stopPropagation();
-    if (fabRef.current) {
-      fabRef.current.style.transition = "";
-      fabRef.current.style.transform = "";
-    }
-    const newCorner: "bl" | "br" = e.clientX < window.innerWidth / 2 ? "bl" : "br";
+    if (fabRef.current) { fabRef.current.style.transition = ""; fabRef.current.style.transform = ""; }
+    const isLeft = e.clientX < window.innerWidth / 2;
+    const isTop = e.clientY < window.innerHeight / 2;
+    const newCorner: Corner = isTop ? (isLeft ? "tl" : "tr") : (isLeft ? "bl" : "br");
     setFabCorner(newCorner);
-    try {
-      localStorage.setItem("radio_fab_corner", newCorner);
-    } catch { /* storage unavailable */ }
+    try { localStorage.setItem("radio_fab_corner", newCorner); } catch {}
   }, []);
 
   // Playlist infinite scroll
@@ -480,23 +486,24 @@ export function RadioWidget() {
   const progressPct = duration ? (progress / duration) * 100 : 0;
   const artistName = getArtistName(currentTrack?.artist);
 
-  // ── Panel position classes ──────────────────────────────────────────────────
-  const panelPosition =
-    fabCorner === "bl"
-      ? "fixed bottom-[88px] left-3 sm:bottom-24 sm:left-4"
-      : "fixed bottom-[88px] right-3 sm:bottom-24 sm:right-4";
-
-  const fabPosition =
-    fabCorner === "bl"
-      ? "fixed bottom-20 left-3 sm:bottom-24 sm:left-4"
-      : "fixed bottom-20 right-3 sm:bottom-24 sm:right-4";
+  // ── Corner position styles (with stagger offset for FAB overlap prevention) ─
+  const MY_ORDER = 0;
+  const offset = getCornerOffset(MY_ORDER, fabCorner);
+  const isTop = fabCorner.startsWith("t");
+  const isLeft = fabCorner.endsWith("l");
+  const fabPosStyle = {
+    [isTop ? "top" : "bottom"]: `calc(5rem + ${offset * 56}px)`,
+    [isLeft ? "left" : "right"]: "0.75rem",
+    touchAction: "none" as const,
+  };
+  // Panel is now a centered modal overlay (same style as NearbyWidget)
 
   // ── FAB (closed) ─────────────────────────────────────────────────────────────
   const fab = (
     <div
       ref={fabRef}
-      className={`${fabPosition} z-[38]`}
-      style={{ transition: "left 0.3s ease, right 0.3s ease", touchAction: "none" }}
+      className="fixed z-[38]"
+      style={fabPosStyle}
       onPointerDown={handleFabPointerDown}
       onPointerMove={handleFabPointerMove}
       onPointerUp={handleFabPointerUp}
@@ -515,9 +522,7 @@ export function RadioWidget() {
       )}
 
       <button
-        onClick={() => {
-          if (!dragState.current.moved) setIsOpen(true);
-        }}
+        onClick={() => { if (!dragState.current.moved) setIsOpen(true); }}
         className={[
           "relative w-12 h-12 rounded-full shadow-lg flex items-center justify-center",
           "transition-transform hover:scale-110 active:scale-95",
@@ -552,14 +557,16 @@ export function RadioWidget() {
   // ── Panel (open) ──────────────────────────────────────────────────────────────
   const panel = isOpen ? (
     <div
-      className={[
-        panelPosition,
-        "z-[42] w-[320px] max-w-[calc(100vw-24px)] flex flex-col overflow-hidden",
-        "rounded-2xl shadow-2xl border border-white/10",
-      ].join(" ")}
-      style={{ background: "rgba(15, 12, 25, 0.97)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      onClick={() => setIsOpen(false)}
+    >
+      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)" }} />
+    <div
+      className="relative w-full max-w-[380px] flex flex-col overflow-hidden rounded-2xl shadow-2xl border border-white/10"
+      style={{ background: "rgba(15, 12, 25, 0.97)", maxHeight: "85vh" }}
       role="dialog"
       aria-label="PNP Radio player"
+      onClick={(e) => e.stopPropagation()}
     >
       {/* ── Header ───────────────────────────────────────────────────────────── */}
       <div
@@ -929,6 +936,7 @@ export function RadioWidget() {
           </>
         )}
       </div>
+    </div>
     </div>
   ) : null;
 

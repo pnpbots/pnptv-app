@@ -1,25 +1,41 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { useNearbyToggle, getTier, NearbyBadge } from "@/components/NearbyBadge";
+import { useNearbyToggle, getTier, toggleNearby } from "@/components/NearbyBadge";
 import { searchNearby, type NearbyUser } from "@/lib/api";
 
 // ── Lemon-yellow constants ──────────────────────────────────────────────────
 const LEMON = "#FBFF00";
-const LEMON_BG = "rgba(251,255,0,0.12)";
-const LEMON_BORDER = "rgba(251,255,0,0.30)";
-
-const PAGE_SIZE = 9;
+const GRID_SIZE = 9;
 const MAX_USERS = 45;
 
 interface NearbyMember {
-  user_id: string;
+  user_id: number;
   username?: string | null;
   name?: string | null;
   photo_url?: string | null;
   distance_km: number;
 }
 
-// ── Hangouts Floating Action Button + Bottom Sheet ──────────────────────────
+// ── Shared stagger helper (all 3 widgets share these keys) ──────────────────
+const WIDGET_KEYS = [
+  { key: "radio_fab_corner", order: 0, defaultCorner: "bl" },
+  { key: "nearby_fab_corner", order: 1, defaultCorner: "br" },
+  { key: "cristina_fab_corner", order: 2, defaultCorner: "tr" },
+] as const;
+
+function getCornerOffset(myOrder: number, myCorner: string): number {
+  let count = 0;
+  for (const { key, order, defaultCorner } of WIDGET_KEYS) {
+    if (order >= myOrder) continue;
+    try {
+      const otherCorner = localStorage.getItem(key) || defaultCorner;
+      if (otherCorner === myCorner) count++;
+    } catch {}
+  }
+  return count;
+}
+
+// ── Nearby 3×3 Grid Widget ──────────────────────────────────────────────────
 
 export function NearbyWidget() {
   const { enabled, position } = useNearbyToggle();
@@ -27,7 +43,44 @@ export function NearbyWidget() {
   const [open, setOpen] = useState(false);
   const [members, setMembers] = useState<NearbyMember[]>([]);
   const [loading, setLoading] = useState(false);
-  const [page, setPage] = useState(1);
+
+  // FAB corner: tl/tr/bl/br — draggable to any corner
+  type Corner = "tl" | "tr" | "bl" | "br";
+  const [fabCorner, setFabCorner] = useState<Corner>(() => {
+    try { return (localStorage.getItem("nearby_fab_corner") as Corner) || "br"; } catch { return "br"; }
+  });
+  const fabRef = useRef<HTMLDivElement>(null);
+  const dragState = useRef<{ startX: number; startY: number; dragging: boolean; moved: boolean }>({ startX: 0, startY: 0, dragging: false, moved: false });
+
+  const handleFabPointerDown = useCallback((e: React.PointerEvent) => {
+    dragState.current = { startX: e.clientX, startY: e.clientY, dragging: true, moved: false };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, []);
+
+  const handleFabPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragState.current.dragging) return;
+    const dx = e.clientX - dragState.current.startX;
+    const dy = e.clientY - dragState.current.startY;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) dragState.current.moved = true;
+    if (!dragState.current.moved || !fabRef.current) return;
+    fabRef.current.style.transition = "none";
+    fabRef.current.style.transform = `translate(${dx}px, ${dy}px)`;
+  }, []);
+
+  const handleFabPointerUp = useCallback((e: React.PointerEvent) => {
+    if (!dragState.current.dragging) return;
+    const wasDragged = dragState.current.moved;
+    dragState.current.dragging = false;
+    if (!wasDragged) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (fabRef.current) { fabRef.current.style.transition = ""; fabRef.current.style.transform = ""; }
+    const isLeft = e.clientX < window.innerWidth / 2;
+    const isTop = e.clientY < window.innerHeight / 2;
+    const newCorner: Corner = isTop ? (isLeft ? "tl" : "tr") : (isLeft ? "bl" : "br");
+    setFabCorner(newCorner);
+    try { localStorage.setItem("nearby_fab_corner", newCorner); } catch {}
+  }, []);
 
   // Fetch nearby users when panel opens
   useEffect(() => {
@@ -50,87 +103,134 @@ export function NearbyWidget() {
     return () => { cancelled = true; };
   }, [open, enabled, position?.lat, position?.lng]);
 
-  // Reset page when closing
-  useEffect(() => { if (!open) setPage(1); }, [open]);
+  const gridMembers = members.slice(0, GRID_SIZE);
 
-  if (!enabled || !position) return null;
-
-  const visibleMembers = members.slice(0, page * PAGE_SIZE);
-  const hasMore = members.length > visibleMembers.length;
+  // Compute stagger offset so FABs in the same corner don't overlap
+  const MY_ORDER = 1;
+  const offset = getCornerOffset(MY_ORDER, fabCorner);
+  const isTop = fabCorner.startsWith("t");
+  const isLeft = fabCorner.endsWith("l");
+  const posStyle = {
+    [isTop ? "top" : "bottom"]: `calc(5rem + ${offset * 56}px)`,
+    [isLeft ? "left" : "right"]: "0.75rem",
+    touchAction: "none" as const,
+  };
 
   return (
     <>
-      {/* FAB */}
-      <button
-        onClick={() => setOpen(true)}
-        className="fixed bottom-20 right-4 z-40 w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-transform active:scale-90"
-        style={{
-          background: LEMON,
-          boxShadow: `0 4px 20px ${LEMON}40`,
-        }}
-        aria-label="Nearby members"
+      {/* FAB — draggable to any corner */}
+      <div
+        ref={fabRef}
+        className="fixed z-[38]"
+        style={posStyle}
+        onPointerDown={handleFabPointerDown}
+        onPointerMove={handleFabPointerMove}
+        onPointerUp={handleFabPointerUp}
       >
-        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="#0a0a14" strokeWidth={2.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
-        </svg>
-        {members.length > 0 && (
-          <span
-            className="absolute -top-1 -right-1 min-w-[20px] h-5 flex items-center justify-center rounded-full text-[10px] font-bold px-1"
-            style={{ background: "#D4007A", color: "#fff" }}
-          >
-            {members.length}
-          </span>
-        )}
-      </button>
+        <button
+          onClick={() => { if (!dragState.current.moved) setOpen(true); }}
+          className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-transform active:scale-90"
+          style={{
+            background: LEMON,
+            boxShadow: `0 4px 20px ${LEMON}40`,
+          }}
+          aria-label="Nearby members"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="#0a0a14" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+          </svg>
+          {members.length > 0 && (
+            <span
+              className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[9px] font-bold px-1"
+              style={{ background: "#D4007A", color: "#fff" }}
+            >
+              {members.length}
+            </span>
+          )}
+        </button>
+      </div>
 
-      {/* Bottom Sheet Overlay */}
+      {/* Modal Overlay — 3×3 Grid */}
       {open && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
           onClick={() => setOpen(false)}
         >
           {/* Backdrop */}
-          <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} />
+          <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)" }} />
 
-          {/* Sheet */}
+          {/* Modal */}
           <div
-            className="relative w-full max-w-lg rounded-t-2xl overflow-hidden animate-slide-up"
-            style={{ background: "#1C1C1E", border: `1px solid ${LEMON_BORDER}`, borderBottom: "none", maxHeight: "70vh" }}
+            className="relative w-full max-w-[380px] rounded-2xl overflow-hidden animate-fade-in-up"
+            style={{ background: "#1C1C1E", border: "1px solid rgba(251,255,0,0.20)" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+            <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
               <div className="flex items-center gap-2">
-                <span className="text-lg">📍</span>
-                <h3 className="text-base font-bold" style={{ color: LEMON }}>Nearby Members</h3>
+                <span className="text-base">📍</span>
+                <h3 className="text-sm font-bold" style={{ color: LEMON }}>Nearby</h3>
+                {members.length > 0 && (
+                  <span className="text-[10px] font-medium" style={{ color: "rgba(251,255,0,0.6)" }}>
+                    {members.length} found
+                  </span>
+                )}
               </div>
               <button
                 onClick={() => setOpen(false)}
-                className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+                className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
               >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="#8E8E93" strokeWidth={2}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#8E8E93" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
 
-            {/* Content */}
-            <div className="overflow-y-auto p-4 space-y-2" style={{ maxHeight: "calc(70vh - 64px)" }}>
-              {loading ? (
-                <div className="flex items-center justify-center py-10">
+            {/* Grid content */}
+            <div className="p-3">
+              {!enabled || !position ? (
+                <div className="text-center py-12 px-4">
+                  <div className="text-3xl mb-3">📍</div>
+                  <p className="text-sm font-semibold" style={{ color: LEMON }}>
+                    {!enabled ? "Nearby is off" : "Waiting for location..."}
+                  </p>
+                  <p className="text-xs mt-2" style={{ color: "#8E8E93" }}>
+                    {!enabled
+                      ? "Turn on location access to discover members near you"
+                      : "Your browser is requesting location — please allow access if prompted"}
+                  </p>
+                  {!enabled ? (
+                    <button
+                      onClick={() => toggleNearby()}
+                      className="mt-4 px-5 py-2 rounded-full text-sm font-bold transition-all active:scale-95 hover:brightness-110"
+                      style={{ background: LEMON, color: "#0a0a14" }}
+                    >
+                      Enable Location
+                    </button>
+                  ) : (
+                    <div className="mt-4 flex items-center justify-center gap-2">
+                      <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: `${LEMON}30`, borderTopColor: LEMON }} />
+                      <span className="text-xs" style={{ color: "#8E8E9399" }}>Acquiring GPS...</span>
+                    </div>
+                  )}
+                </div>
+              ) : loading ? (
+                <div className="flex items-center justify-center py-12">
                   <div className="w-6 h-6 border-2 rounded-full animate-spin" style={{ borderColor: `${LEMON}30`, borderTopColor: LEMON }} />
                 </div>
-              ) : members.length === 0 ? (
-                <div className="text-center py-10">
-                  <p className="text-sm" style={{ color: "#8E8E93" }}>No nearby members found yet</p>
+              ) : gridMembers.length === 0 ? (
+                <div className="text-center py-12">
+                  <p className="text-sm" style={{ color: "#8E8E93" }}>No nearby members found</p>
                   <p className="text-xs mt-1" style={{ color: "#8E8E9366" }}>Keep your location on to discover others</p>
                 </div>
               ) : (
-                <>
-                  {visibleMembers.map((m) => {
+                <div className="grid grid-cols-3 gap-2">
+                  {gridMembers.map((m) => {
                     const tier = getTier(m.distance_km);
-                    const distLabel = m.distance_km < 1 ? `${Math.round(m.distance_km * 1000)}m` : `${Math.round(m.distance_km)}km`;
+                    const distLabel = m.distance_km < 1
+                      ? `${Math.round(m.distance_km * 1000)}m`
+                      : `${Math.round(m.distance_km)}km`;
                     const displayName = m.name || m.username || "Anonymous";
                     const initial = displayName[0]?.toUpperCase() || "?";
 
@@ -138,70 +238,55 @@ export function NearbyWidget() {
                       <button
                         key={m.user_id}
                         onClick={() => { setOpen(false); navigate(`/profile/${m.user_id}`); }}
-                        className="w-full flex items-center gap-3 p-3 rounded-xl transition-colors hover:bg-white/5 active:bg-white/10"
-                        style={{ border: `1px solid rgba(255,255,255,0.06)` }}
+                        className="w-full rounded-xl overflow-hidden hover:ring-1 hover:ring-white/20 active:scale-[0.97] transition-all"
+                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
                       >
-                        {/* Avatar */}
-                        {m.photo_url ? (
-                          <img
-                            src={m.photo_url}
-                            alt={displayName}
-                            className="w-10 h-10 rounded-full object-cover flex-shrink-0"
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.removeAttribute("style"); }}
-                          />
-                        ) : null}
-                        <div
-                          className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                          style={{
-                            background: "linear-gradient(135deg, #D4007A, #E69138)",
-                            color: "#fff",
-                            display: m.photo_url ? "none" : undefined,
-                          }}
-                        >
-                          {initial}
+                        {/* Cover — avatar or gradient fallback */}
+                        <div className="relative h-16 w-full">
+                          {m.photo_url ? (
+                            <img
+                              src={m.photo_url}
+                              alt={displayName}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                const el = e.target as HTMLImageElement;
+                                el.style.display = "none";
+                                el.nextElementSibling?.removeAttribute("style");
+                              }}
+                            />
+                          ) : null}
+                          <div
+                            className="absolute inset-0 flex items-center justify-center text-lg font-bold"
+                            style={{
+                              background: "linear-gradient(135deg, #D4007A, #E69138)",
+                              color: "#fff",
+                              display: m.photo_url ? "none" : undefined,
+                            }}
+                          >
+                            {initial}
+                          </div>
+                          {/* Distance tier emoji badge */}
+                          <span className="absolute bottom-0.5 left-0.5 text-xs drop-shadow-lg">
+                            {tier.emoji}
+                          </span>
                         </div>
 
                         {/* Info */}
-                        <div className="flex-1 min-w-0 text-left">
-                          <p className="text-sm font-semibold text-white truncate">{displayName}</p>
-                          {m.username && (
-                            <p className="text-[10px] truncate" style={{ color: "#8E8E93" }}>@{m.username}</p>
-                          )}
+                        <div className="px-1.5 py-1.5">
+                          <p className="text-[10px] font-bold text-white truncate leading-tight">{displayName}</p>
+                          <p className="text-[8px] truncate leading-tight mt-0.5" style={{ color: "#8E8E93" }}>
+                            {distLabel} · {tier.short}
+                          </p>
                         </div>
-
-                        {/* Distance pill */}
-                        <span
-                          className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold"
-                          style={{ background: LEMON_BG, color: LEMON, border: `1px solid ${LEMON_BORDER}` }}
-                        >
-                          {tier.emoji} {distLabel}
-                        </span>
                       </button>
                     );
                   })}
-
-                  {/* Load more */}
-                  {hasMore && (
-                    <button
-                      onClick={() => setPage((p) => p + 1)}
-                      className="w-full py-3 rounded-xl text-sm font-semibold transition-colors hover:bg-white/5"
-                      style={{ color: LEMON, border: `1px dashed ${LEMON_BORDER}` }}
-                    >
-                      Load More ({members.length - visibleMembers.length} remaining)
-                    </button>
-                  )}
-                </>
+                </div>
               )}
             </div>
           </div>
         </div>
       )}
-
-      {/* Slide-up animation */}
-      <style>{`
-        @keyframes slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
-        .animate-slide-up { animation: slide-up 0.3s cubic-bezier(0.22, 1, 0.36, 1) both; }
-      `}</style>
     </>
   );
 }

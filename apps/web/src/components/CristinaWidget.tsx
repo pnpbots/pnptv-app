@@ -1,5 +1,24 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { useLocation } from "react-router-dom";
+
+// ── Shared stagger helper (all 3 widgets share these keys) ──────────────────
+const WIDGET_KEYS = [
+  { key: "radio_fab_corner", order: 0, defaultCorner: "bl" },
+  { key: "nearby_fab_corner", order: 1, defaultCorner: "br" },
+  { key: "cristina_fab_corner", order: 2, defaultCorner: "tr" },
+] as const;
+
+function getCornerOffset(myOrder: number, myCorner: string): number {
+  let count = 0;
+  for (const { key, order, defaultCorner } of WIDGET_KEYS) {
+    if (order >= myOrder) continue;
+    try {
+      const otherCorner = localStorage.getItem(key) || defaultCorner;
+      if (otherCorner === myCorner) count++;
+    } catch {}
+  }
+  return count;
+}
+
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
 import { getSocket } from "@/lib/socket";
@@ -213,7 +232,6 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
 
 export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   const { user } = useAuth();
-  const location = useLocation();
   const { support: t } = useI18n();
   const [isOpen, setIsOpen] = useState(mode === "page");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -233,9 +251,10 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [hasUnreadReply, setHasUnreadReply] = useState(false);
 
-  // FAB corner position: "br" (bottom-right) | "bl" (bottom-left)
-  const [fabCorner, setFabCorner] = useState<"br" | "bl">(() => {
-    try { return (localStorage.getItem("cristina_fab_corner") as "br" | "bl") || "br"; } catch { return "br"; }
+  // FAB corner: tl/tr/bl/br — draggable to any corner
+  type Corner = "tl" | "tr" | "bl" | "br";
+  const [fabCorner, setFabCorner] = useState<Corner>(() => {
+    try { return (localStorage.getItem("cristina_fab_corner") as Corner) || "tr"; } catch { return "tr"; }
   });
   const fabRef = useRef<HTMLDivElement>(null);
   const dragState = useRef<{ startX: number; startY: number; dragging: boolean; moved: boolean }>({ startX: 0, startY: 0, dragging: false, moved: false });
@@ -259,17 +278,15 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
     if (!dragState.current.dragging) return;
     const wasDragged = dragState.current.moved;
     dragState.current.dragging = false;
-    if (!wasDragged) return; // let onClick handle tap
+    if (!wasDragged) return;
     e.preventDefault();
     e.stopPropagation();
-    if (fabRef.current) {
-      fabRef.current.style.transition = "";
-      fabRef.current.style.transform = "";
-    }
-    const midX = window.innerWidth / 2;
-    const newCorner = e.clientX < midX ? "bl" : "br";
+    if (fabRef.current) { fabRef.current.style.transition = ""; fabRef.current.style.transform = ""; }
+    const isLeft = e.clientX < window.innerWidth / 2;
+    const isTop = e.clientY < window.innerHeight / 2;
+    const newCorner: Corner = isTop ? (isLeft ? "tl" : "tr") : (isLeft ? "bl" : "br");
     setFabCorner(newCorner);
-    try { localStorage.setItem("cristina_fab_corner", newCorner); } catch { /* ignore */ }
+    try { localStorage.setItem("cristina_fab_corner", newCorner); } catch {}
   }, []);
 
   // Tutorial state
@@ -291,14 +308,6 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   const canCreateTicket = userMessageCount >= MIN_TURNS_FOR_TICKET;
   const hasOpenTicket = !!(ticket && ticket.status !== "closed");
 
-  // In widget mode, suppress the FAB and panel on routes that have their own
-  // fixed bottom input bars (Hangouts chat, Direct Messages conversation) to
-  // prevent the widget from overlapping the send button.
-  const SUPPRESSED_PATHS = ["/chat", "/messages"];
-  const isSuppressedRoute =
-    mode === "widget" &&
-    SUPPRESSED_PATHS.some((p) => location.pathname.startsWith(p));
-
   // All hooks are declared unconditionally before any early returns (Rules of Hooks).
 
   // Keep refs in sync with state so socket listeners avoid stale closures
@@ -307,7 +316,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
 
   // Load suggestions on first open
   useEffect(() => {
-    if (!isOnboarded || isSuppressedRoute) return;
+    if (!isOnboarded) return;
     if (isOpen && suggestions.length === 0) {
       getSupportSuggestions(lang)
         .then((res) => {
@@ -315,7 +324,7 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
         })
         .catch(() => {});
     }
-  }, [isOpen, lang, isOnboarded, isSuppressedRoute]);
+  }, [isOpen, lang, isOnboarded]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -520,7 +529,6 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
 
   // Early exits — after ALL hooks have been declared.
   if (!isOnboarded) return null;
-  if (isSuppressedRoute) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -562,21 +570,28 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
 
   // FAB button (widget mode only)
   if (mode === "widget" && !isOpen) {
-    const fabPositionClass = fabCorner === "bl"
-      ? "fixed bottom-20 left-3 z-[38] flex flex-col items-start gap-2 sm:bottom-24 sm:left-4 safe-area-bottom"
-      : "fixed bottom-20 right-3 z-[38] flex flex-col items-end gap-2 sm:bottom-24 sm:right-4 safe-area-bottom";
+    // Compute stagger offset so FABs in the same corner don't overlap
+    const MY_ORDER = 2;
+    const offset = getCornerOffset(MY_ORDER, fabCorner);
+    const isTopCorner = fabCorner.startsWith("t");
+    const isLeftCorner = fabCorner.endsWith("l");
+    const fabPosStyle = {
+      [isTopCorner ? "top" : "bottom"]: `calc(5rem + ${offset * 56}px)`,
+      [isLeftCorner ? "left" : "right"]: "0.75rem",
+      touchAction: "none" as const,
+    };
     return (
       <div
         ref={fabRef}
-        className={fabPositionClass}
-        style={{ transition: "left 0.3s ease, right 0.3s ease", touchAction: "none" }}
+        className={`fixed z-[38] flex flex-col ${isLeftCorner ? "items-start" : "items-end"} gap-2`}
+        style={fabPosStyle}
         onPointerDown={handleFabPointerDown}
         onPointerMove={handleFabPointerMove}
         onPointerUp={handleFabPointerUp}
       >
         <button
           onClick={() => { if (!dragState.current.moved) { setIsOpen(true); setHasUnreadReply(false); } }}
-          className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-full shadow-lg flex items-center justify-center text-xl sm:text-2xl transition-transform hover:scale-110 active:scale-95"
+          className="relative w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-xl transition-transform hover:scale-110 active:scale-95"
           style={{
             background: "linear-gradient(135deg, #5BC8F5, #00D4E8)",
           }}
@@ -618,16 +633,13 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
       className={
         mode === "page"
           ? "flex flex-col h-[calc(100dvh-12rem)] max-h-[800px] glass-card-sm rounded-2xl overflow-hidden"
-          : "fixed z-[42] flex flex-col overflow-hidden shadow-2xl " +
-            "inset-0 w-full h-full " +
-            (fabCorner === "bl"
-              ? "sm:inset-auto sm:bottom-24 sm:left-4 sm:w-[400px] sm:h-[600px] sm:rounded-2xl"
-              : "sm:inset-auto sm:bottom-24 sm:right-4 sm:w-[400px] sm:h-[600px] sm:rounded-2xl")
+          : "relative w-full max-w-[380px] flex flex-col overflow-hidden rounded-2xl shadow-2xl border border-white/10"
       }
       style={{
         background: "rgba(20, 20, 30, 0.98)",
-        ...(mode === "page" ? { border: "1px solid rgba(255,255,255,0.08)" } : {}),
+        ...(mode === "page" ? { border: "1px solid rgba(255,255,255,0.08)" } : { maxHeight: "85vh" }),
       }}
+      onClick={(e) => e.stopPropagation()}
     >
       {/* Header */}
       <div
@@ -1352,14 +1364,13 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
   // Widget mode: show backdrop on mobile
   if (mode === "widget") {
     return (
-      <>
-        {/* Mobile backdrop */}
-        <div
-          className="fixed inset-0 bg-black/50 z-[41] sm:hidden"
-          onClick={() => setIsOpen(false)}
-        />
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        onClick={() => setIsOpen(false)}
+      >
+        <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)" }} />
         {chatPanel}
-      </>
+      </div>
     );
   }
 

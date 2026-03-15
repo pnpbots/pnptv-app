@@ -14,6 +14,7 @@ import { useI18n } from "@/lib/i18n";
 import { LandingPage } from "@/pages/LandingPage";
 import { SidebarPlayer } from "@/components/SidebarPlayer";
 import { RadioWidget } from "@/components/RadioWidget";
+import { NearbyWidget } from "@/components/NearbyWidget";
 
 // ── HamburgerIcon / CloseIcon ─────────────────────────────────────────────────
 
@@ -142,7 +143,7 @@ export function Layout() {
       <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-60 lg:flex-col border-r border-pnp-border glass-nav">
         {/* Sidebar header */}
         <div className="flex items-center justify-between px-6 h-16 border-b border-pnp-border">
-          <img src="/Logo2-50.png" alt="PNPTV" className="h-8 w-auto" />
+          <img src="/logo-header.png" alt="PNPtv!" className="h-7 w-auto" />
           <div className="flex items-center gap-2">
             {isAdmin && (
               <button
@@ -287,7 +288,7 @@ export function Layout() {
           >
             <HamburgerIcon />
           </button>
-          <img src="/Logo2-50.png" alt="PNPTV" className="h-7 w-auto" />
+          <img src="/logo-header.png" alt="PNPtv!" className="h-7 w-auto" />
         </div>
 
         <div className="flex items-center gap-2">
@@ -363,7 +364,7 @@ export function Layout() {
           >
             {/* Header */}
             <div className="flex items-center justify-between px-4 h-14 border-b border-pnp-border">
-              <img src="/Logo2-50.png" alt="PNPTV" className="h-7 w-auto" />
+              <img src="/logo-header.png" alt="PNPtv!" className="h-7 w-auto" />
               <button
                 className="p-1.5 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
                 onClick={() => setMobileMenuOpen(false)}
@@ -475,10 +476,13 @@ export function Layout() {
         <BottomNav />
       </div>
 
-      {/* PNP Radio floating widget */}
+      {/* PNP Radio floating widget — bottom-left */}
       {isAuthenticated && <RadioWidget />}
 
-      {/* Cristina AI Support Widget */}
+      {/* Nearby members widget — bottom-right */}
+      {isAuthenticated && <NearbyWidget />}
+
+      {/* Cristina AI Support Widget — top-right */}
       {isAuthenticated && <CristinaWidget />}
 
       {/* Toast notifications */}

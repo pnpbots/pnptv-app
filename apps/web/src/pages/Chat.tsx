@@ -47,7 +47,6 @@ import {
 import { connectSocket } from "@/lib/socket";
 import { translateText } from "@/lib/feedI18n";
 import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
-import { NearbyWidget } from "@/components/NearbyWidget";
 import { NearbyBadge, useNearbyToggle } from "@/components/NearbyBadge";
 import { SpotlightStrip, type SpotlightItem } from "@/components/SpotlightStrip";
 import { getUpcomingEvents } from "@/lib/api";
@@ -1825,8 +1824,6 @@ export default function Chat() {
         />
       )}
 
-      {/* Nearby FAB — floating widget for discovering nearby members */}
-      <NearbyWidget />
     </div>
   );
 }
