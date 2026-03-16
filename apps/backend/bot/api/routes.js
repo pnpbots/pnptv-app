@@ -3917,6 +3917,7 @@ app.post('/api/webapp/chat/messages/:messageId/react', requireSessionAuth, async
 app.get('/api/webapp/chat/messages/:messageId/reactions', asyncHandler(reactionController.getChatReactions));
 // DM reactions
 app.post('/api/webapp/dm/messages/:messageId/react', requireSessionAuth, asyncHandler(reactionController.reactToDm));
+app.get('/api/webapp/dm/messages/:messageId/reactions', requireSessionAuth, asyncHandler(reactionController.getDmReactions));
 // Content reactions (PRIME videos / audio — contentId is a Directus integer ID)
 app.get('/api/webapp/content/:contentId/reactions', softAuth, asyncHandler(reactionController.getContentReactions));
 app.post('/api/webapp/content/:contentId/react', requireSessionAuth, socialActionLimiter, asyncHandler(reactionController.reactToContent));

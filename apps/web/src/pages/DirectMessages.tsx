@@ -18,9 +18,11 @@ import {
   sendDmMediaMessage,
   markThreadAsRead,
   getOrCreateDmRoom,
+  reactToDm,
   type MessageThread,
   type DirectMessage,
 } from "@/lib/api";
+import EmojiReactionBar, { type Reaction } from "@/components/EmojiReactionBar";
 import { useRoomMessages, sendMatrixMessage, sendMatrixMediaMessage } from "@/hooks/useMatrix";
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -170,6 +172,9 @@ interface DmBubbleProps {
   partnerName: string;
   onNavigate: (path: string) => void;
   onExpandImage: (src: string) => void;
+  reactions?: Reaction[];
+  onReaction?: (messageId: number, emoji: string) => void;
+  currentUserId?: string;
 }
 
 const DmBubble = memo(function DmBubble({
@@ -179,6 +184,9 @@ const DmBubble = memo(function DmBubble({
   currentUser,
   onNavigate,
   onExpandImage,
+  reactions,
+  onReaction,
+  currentUserId,
 }: DmBubbleProps) {
   const { dm: t } = useI18n();
   const isMe = msg.isMine;
@@ -250,6 +258,17 @@ const DmBubble = memo(function DmBubble({
             mediaType={msg.mediaType!}
             thumbUrl={msg.mediaThumbUrl}
             onExpandImage={onExpandImage}
+          />
+        )}
+
+        {/* Reactions */}
+        {typeof msg.id === "number" && (
+          <EmojiReactionBar
+            reactions={reactions || []}
+            onToggle={(emoji) => onReaction?.(msg.id as number, emoji)}
+            currentUserId={currentUserId}
+            size="sm"
+            className={`mt-1 ${isMe ? "justify-end" : ""}`}
           />
         )}
       </div>
@@ -574,6 +593,9 @@ function Conversation({
   const [matrixRoomId, setMatrixRoomId] = useState<string | null>(null);
   const [matrixInitError, setMatrixInitError] = useState<string | null>(null);
 
+  // DM reactions: messageId -> Reaction[]
+  const [dmReactions, setDmReactions] = useState<Map<number, Reaction[]>>(new Map());
+
   // Free-tier DM quota tracking
   const [dmRemaining, setDmRemaining] = useState<number | null>(null);
   const [dmLimit, setDmLimit] = useState(3);
@@ -794,6 +816,21 @@ function Conversation({
     setLightboxSrc(src);
   }, []);
 
+  const handleDmReaction = useCallback(async (messageId: number, emoji: string) => {
+    try {
+      const result = await reactToDm(messageId, emoji);
+      if (result.success) {
+        setDmReactions(prev => {
+          const next = new Map(prev);
+          next.set(messageId, result.reactions);
+          return next;
+        });
+      }
+    } catch {
+      // Silently fail — reaction is non-critical
+    }
+  }, []);
+
   const limitReached = isFree && dmRemaining !== null && dmRemaining <= 0;
   const canSend = !sending && !limitReached && (msgInput.trim().length > 0 || mediaFile !== null);
 
@@ -884,6 +921,9 @@ function Conversation({
               partnerName={partnerName}
               onNavigate={handleNavigate}
               onExpandImage={handleExpandImage}
+              reactions={typeof msg.id === "number" ? dmReactions.get(msg.id) : undefined}
+              onReaction={handleDmReaction}
+              currentUserId={currentUser?.dbId ?? undefined}
             />
           ))
         )}

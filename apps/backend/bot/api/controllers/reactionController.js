@@ -106,6 +106,20 @@ async function reactToDm(req, res) {
   }
 }
 
+// GET /api/webapp/dm/messages/:messageId/reactions
+async function getDmReactions(req, res) {
+  const messageId = parseInt(req.params.messageId, 10);
+  if (!Number.isFinite(messageId) || messageId <= 0) return res.status(400).json({ error: 'Invalid message ID' });
+
+  try {
+    const reactions = await reactionService.getDmReactions(messageId);
+    return res.json({ reactions });
+  } catch (err) {
+    logger.error('[reactionController] getDmReactions:', err.message);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+}
+
 // GET /api/webapp/content/:contentId/reactions
 async function getContentReactions(req, res) {
   const contentId = parseInt(req.params.contentId, 10);
@@ -142,4 +156,4 @@ async function reactToContent(req, res) {
   }
 }
 
-module.exports = { reactToPost, getPostReactions, reactToChatMessage, getChatReactions, reactToDm, getContentReactions, reactToContent };
+module.exports = { reactToPost, getPostReactions, reactToChatMessage, getChatReactions, reactToDm, getDmReactions, getContentReactions, reactToContent };

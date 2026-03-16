@@ -1817,6 +1817,30 @@ export function markThreadAsRead(otherUserId: string): Promise<{
   });
 }
 
+// ── DM Reactions ──────────────────────────────────────────────────────────────
+
+export function reactToDm(
+  messageId: number,
+  emoji: string
+): Promise<{
+  success: boolean;
+  added: boolean;
+  reactions: Array<{ emoji: string; count: number; users: Array<{ id: string; username: string }> }>;
+}> {
+  return request(`/api/webapp/dm/messages/${messageId}/react`, {
+    method: "POST",
+    body: { emoji },
+  });
+}
+
+export function getDmReactions(
+  messageId: number
+): Promise<{
+  reactions: Array<{ emoji: string; count: number; users: Array<{ id: string; username: string }> }>;
+}> {
+  return request(`/api/webapp/dm/messages/${messageId}/reactions`);
+}
+
 // ============================================================================
 // Phase 1: Notifications API
 // ============================================================================
