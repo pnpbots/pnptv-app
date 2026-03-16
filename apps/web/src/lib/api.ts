@@ -1817,6 +1817,30 @@ export function markThreadAsRead(otherUserId: string): Promise<{
   });
 }
 
+// ── Chat Message Reactions ────────────────────────────────────────────────────
+
+export function reactToChatMessage(
+  messageId: number,
+  emoji: string
+): Promise<{
+  success: boolean;
+  added: boolean;
+  reactions: Array<{ emoji: string; count: number; users: Array<{ id: string; username: string }> }>;
+}> {
+  return request(`/api/webapp/chat/messages/${messageId}/react`, {
+    method: "POST",
+    body: { emoji },
+  });
+}
+
+export function getChatReactions(
+  messageId: number
+): Promise<{
+  reactions: Array<{ emoji: string; count: number; users: Array<{ id: string; username: string }> }>;
+}> {
+  return request(`/api/webapp/chat/messages/${messageId}/reactions`);
+}
+
 // ── DM Reactions ──────────────────────────────────────────────────────────────
 
 export function reactToDm(

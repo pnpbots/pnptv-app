@@ -29,6 +29,7 @@ import {
   getJoinRequests,
   handleJoinRequest,
   getOrCreateHangoutRoom,
+  reactToChatMessage,
   type HangoutGroup,
   type GroupMessage,
   type StartCallResponse,
@@ -518,18 +519,41 @@ export default function Chat() {
   // Reply-to state
   const [replyToMsg, setReplyToMsg] = useState<GroupMessage | null>(null);
 
-  // Handle reaction toggle
-  const handleReaction = useCallback(async (eventId: string, emoji: string) => {
+  // REST-based reactions for all messages (works regardless of Matrix)
+  const [restReactions, setRestReactions] = useState<Map<number, ReactionEntry[]>>(new Map());
+
+  // Handle reaction toggle — uses REST API for all messages
+  const handleReaction = useCallback(async (idOrEventId: string, emoji: string) => {
+    // Try REST API reaction (uses numeric message ID)
+    const numId = parseInt(idOrEventId, 10);
+    if (Number.isFinite(numId) && numId > 0) {
+      try {
+        const result = await reactToChatMessage(numId, emoji);
+        if (result.success) {
+          setRestReactions(prev => {
+            const next = new Map(prev);
+            next.set(numId, (result.reactions || []).map(r => ({
+              emoji: r.emoji,
+              count: r.count,
+              users: r.users.map(u => ({ userId: u.id, reactionEventId: '' })),
+            })));
+            return next;
+          });
+        }
+      } catch { /* silently fail */ }
+      return;
+    }
+
+    // Fallback: Matrix event ID reaction
     if (!matrixRoomId) return;
-    // Check if user already reacted with this emoji — if so, redact it
-    const entries = matrixReactions.get(eventId);
+    const entries = matrixReactions.get(idOrEventId);
     const myUserId = matrixMessages[0]?.senderId?.split(":")[0] || "";
     const existing = entries?.find((e) => e.emoji === emoji);
     const myEntry = existing?.users.find((u) => u.userId.includes(myUserId));
     if (myEntry) {
       redactEvent(matrixRoomId, myEntry.reactionEventId).catch(() => {});
     } else {
-      sendReaction(matrixRoomId, eventId, emoji).catch(() => {});
+      sendReaction(matrixRoomId, idOrEventId, emoji).catch(() => {});
     }
   }, [matrixRoomId, matrixReactions, matrixMessages]);
 
@@ -1481,8 +1505,12 @@ export default function Chat() {
                   onNavigate={handleNavigate}
                   onExpandImage={handleExpandImage}
                   currentUserId={user?.dbId != null ? String(user.dbId) : user?.id ? String(user.id) : undefined}
-                  matrixEventId={matrixEventIdMap.get(msg.id)}
-                  reactions={matrixEventIdMap.get(msg.id) ? matrixReactions.get(matrixEventIdMap.get(msg.id)!) ?? undefined : undefined}
+                  matrixEventId={matrixEventIdMap.get(msg.id) || String(msg.id)}
+                  reactions={
+                    matrixEventIdMap.get(msg.id)
+                      ? matrixReactions.get(matrixEventIdMap.get(msg.id)!) ?? restReactions.get(msg.id) ?? undefined
+                      : restReactions.get(msg.id) ?? undefined
+                  }
                   onReaction={handleReaction}
                   onReply={setReplyToMsg}
                   replyTo={null}
