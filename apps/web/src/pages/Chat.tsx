@@ -30,6 +30,7 @@ import {
   handleJoinRequest,
   getOrCreateHangoutRoom,
   reactToChatMessage,
+  getChatReactions,
   type HangoutGroup,
   type GroupMessage,
   type StartCallResponse,
@@ -72,7 +73,7 @@ const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 
 // ─── Reaction emojis (PNP-themed) ──────────────────────────────────────────
 
-const QUICK_REACTIONS = ["❤️", "😈", "💨", "🧊", "💎", "🔥"];
+const QUICK_REACTIONS = ["❤️", "😈", "💨", "🧊", "💎", "🔥", "👹", "🍆", "🍑"];
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -271,7 +272,7 @@ const MessageBubble = memo(function MessageBubble({
         {reactions && reactions.length > 0 && (
           <div className={`flex flex-wrap gap-1 mt-1 ${isMe ? "justify-end" : ""}`}>
             {reactions.map((r) => {
-              const myReaction = currentUserId && r.users.some((u) => u.userId.includes(currentUserId));
+              const myReaction = currentUserId && r.users.some((u) => u.userId === currentUserId || u.userId.includes(currentUserId));
               return (
                 <button
                   key={r.emoji}
@@ -293,7 +294,7 @@ const MessageBubble = memo(function MessageBubble({
         {/* Quick-react + reply — shown on hover/focus */}
         {matrixEventId && (
           <div className={`flex items-center gap-0.5 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${isMe ? "justify-end" : ""}`}>
-            {QUICK_REACTIONS.slice(0, 4).map((emoji) => (
+            {QUICK_REACTIONS.slice(0, 6).map((emoji) => (
               <button
                 key={emoji}
                 onClick={() => onReaction?.(matrixEventId, emoji)}
@@ -521,6 +522,37 @@ export default function Chat() {
 
   // REST-based reactions for all messages (works regardless of Matrix)
   const [restReactions, setRestReactions] = useState<Map<number, ReactionEntry[]>>(new Map());
+  const loadedReactionIds = useRef<Set<number>>(new Set());
+
+  // Load existing reactions for messages on initial load
+  useEffect(() => {
+    const messageIds = messages
+      .map(m => m.id)
+      .filter(id => Number.isFinite(id) && id > 0 && !loadedReactionIds.current.has(id));
+    if (messageIds.length === 0) return;
+
+    messageIds.forEach(id => loadedReactionIds.current.add(id));
+
+    // Fetch reactions for each message (batched concurrently, max 10 at a time)
+    const batch = messageIds.slice(0, 20);
+    Promise.allSettled(batch.map(id =>
+      getChatReactions(id).then(res => ({ id, reactions: res.reactions }))
+    )).then(results => {
+      setRestReactions(prev => {
+        const next = new Map(prev);
+        for (const r of results) {
+          if (r.status === 'fulfilled' && r.value.reactions.length > 0) {
+            next.set(r.value.id, r.value.reactions.map(rx => ({
+              emoji: rx.emoji,
+              count: rx.count,
+              users: rx.users.map(u => ({ userId: u.id, reactionEventId: '' })),
+            })));
+          }
+        }
+        return next;
+      });
+    });
+  }, [messages]);
 
   // Handle reaction toggle — uses REST API for all messages
   const handleReaction = useCallback(async (idOrEventId: string, emoji: string) => {
@@ -880,6 +912,8 @@ export default function Chat() {
     setMsgInput("");
     setUploadError(null);
     clearMedia();
+    setRestReactions(new Map());
+    loadedReactionIds.current.clear();
     isNearBottom.current = true;
 
     // Mark as read

@@ -6,7 +6,7 @@ export type Reaction = {
   users: { id: string; username: string }[];
 };
 
-export const DEFAULT_EMOJIS = ['❤️', '😈', '💨', '🧊', '💎'];
+export const DEFAULT_EMOJIS = ['❤️', '😈', '💨', '🧊', '💎', '👹', '🍆', '🍑'];
 
 interface EmojiReactionBarProps {
   reactions: Reaction[];

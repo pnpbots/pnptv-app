@@ -19,6 +19,7 @@ import {
   markThreadAsRead,
   getOrCreateDmRoom,
   reactToDm,
+  getDmReactions,
   type MessageThread,
   type DirectMessage,
 } from "@/lib/api";
@@ -595,6 +596,7 @@ function Conversation({
 
   // DM reactions: messageId -> Reaction[]
   const [dmReactions, setDmReactions] = useState<Map<number, Reaction[]>>(new Map());
+  const loadedDmReactionIds = useRef<Set<number>>(new Set());
 
   // Free-tier DM quota tracking
   const [dmRemaining, setDmRemaining] = useState<number | null>(null);
@@ -659,6 +661,30 @@ function Conversation({
         setMatrixInitError("real-time unavailable");
       });
   }, [userId, loadMessages]);
+
+  // Load existing reactions for DM messages
+  useEffect(() => {
+    const ids = messages
+      .filter(m => typeof m.id === "number")
+      .map(m => m.id as number)
+      .filter(id => id > 0 && !loadedDmReactionIds.current.has(id));
+    if (ids.length === 0) return;
+    ids.forEach(id => loadedDmReactionIds.current.add(id));
+
+    Promise.allSettled(ids.slice(0, 20).map(id =>
+      getDmReactions(id).then(res => ({ id, reactions: res.reactions }))
+    )).then(results => {
+      setDmReactions(prev => {
+        const next = new Map(prev);
+        for (const r of results) {
+          if (r.status === "fulfilled" && r.value.reactions.length > 0) {
+            next.set(r.value.id, r.value.reactions);
+          }
+        }
+        return next;
+      });
+    });
+  }, [messages]);
 
   // REST polling fallback when Matrix is not available
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
