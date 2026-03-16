@@ -330,17 +330,26 @@ async function getOrCreateDmRoom(userA, userB) {
 
   const roomId = roomResp.room_id;
 
-  // Auto-join userB via the Synapse admin join endpoint (no invite flow needed)
+  // Auto-join userB — try using their own token first (they were invited above),
+  // fall back to Synapse admin join endpoint
   try {
-    const adminToken = await getAdminToken();
     await synapsePost(
-      `/_synapse/admin/v1/join/${encodeURIComponent(roomId)}`,
-      { user_id: credB.matrixUserId },
-      adminToken
+      `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
+      {},
+      credB.accessToken
     );
-  } catch (joinErr) {
-    // Non-fatal: userB was invited above and can join manually via the client
-    logger.warn(`[Matrix] Admin join failed for DM room ${roomId} / user ${credB.matrixUserId}: ${joinErr.message}`);
+  } catch (directJoinErr) {
+    logger.debug(`[Matrix] Direct join failed for ${credB.matrixUserId}, trying admin join: ${directJoinErr.message}`);
+    try {
+      const adminToken = await getAdminToken();
+      await synapsePost(
+        `/_synapse/admin/v1/join/${encodeURIComponent(roomId)}`,
+        { user_id: credB.matrixUserId },
+        adminToken
+      );
+    } catch (adminJoinErr) {
+      logger.warn(`[Matrix] Admin join also failed for DM room ${roomId} / user ${credB.matrixUserId}: ${adminJoinErr.message}`);
+    }
   }
 
   // Persist mapping
