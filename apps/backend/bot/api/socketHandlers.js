@@ -122,7 +122,7 @@ setInterval(() => {
 const MSG_RETURNING_COLS = `
   id, room, user_id, username, first_name, photo_url, content,
   media_url, media_type, media_mime, media_thumb_url,
-  media_width, media_height, media_metadata, created_at
+  media_width, media_height, media_metadata, reply_to_id, created_at
 `;
 
 // ── Stream ID validation regex (module-scope so it is compiled once) ─────────
@@ -325,12 +325,22 @@ function initSocketIO(io) {
       socket.join(`chat:${room}`);
       try {
         const { rows } = await query(
-          `SELECT ${MSG_RETURNING_COLS}
-           FROM chat_messages
-           WHERE room = $1 AND is_deleted = false
-           ORDER BY created_at DESC LIMIT 50`,
+          `SELECT m.id, m.room, m.user_id, m.username, m.first_name, m.photo_url, m.content,
+                  m.media_url, m.media_type, m.media_mime, m.media_thumb_url,
+                  m.media_width, m.media_height, m.media_metadata, m.reply_to_id, m.created_at,
+                  r.first_name AS reply_name, r.username AS reply_username, r.content AS reply_content
+           FROM chat_messages m
+           LEFT JOIN chat_messages r ON r.id = m.reply_to_id
+           WHERE m.room = $1 AND m.is_deleted = false
+           ORDER BY m.created_at DESC LIMIT 50`,
           [room]
         );
+        for (const msg of rows) {
+          if (msg.reply_to_id && (msg.reply_name || msg.reply_username)) {
+            msg.reply_to = { name: msg.reply_name || msg.reply_username || 'User', content: (msg.reply_content || '[media]').slice(0, 100) };
+          }
+          delete msg.reply_name; delete msg.reply_username; delete msg.reply_content;
+        }
         socket.emit('chat:history', rows.reverse());
       } catch (err) {
         logger.error('chat:join history error', err);
@@ -338,9 +348,10 @@ function initSocketIO(io) {
     });
 
     // Text message
-    socket.on('chat:message', async ({ room = 'general', content } = {}) => {
+    socket.on('chat:message', async ({ room = 'general', content, replyToId } = {}) => {
       if (!content || !content.trim()) return;
       if (content.length > 2000) return;
+      const parsedReplyToId = replyToId ? parseInt(replyToId, 10) : null;
 
       // Hangout rooms require membership and no block relationship with the group creator
       const hangoutMatch = String(room).match(/^hangout:(\d+)$/);
@@ -389,12 +400,22 @@ function initSocketIO(io) {
         const photoUrl = user.photoUrl || user.photo_url || null;
 
         const { rows } = await query(
-          `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content)
-           VALUES ($1, $2, $3, $4, $5, $6)
+          `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content, reply_to_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
            RETURNING ${MSG_RETURNING_COLS}`,
-          [room, user.id, user.username || null, firstName, photoUrl, content.trim()]
+          [room, user.id, user.username || null, firstName, photoUrl, content.trim(), parsedReplyToId]
         );
-        io.to(`chat:${room}`).emit('chat:message', rows[0]);
+        const msg = rows[0];
+        if (msg.reply_to_id) {
+          const { rows: replyRows } = await query(
+            'SELECT first_name, username, content FROM chat_messages WHERE id = $1',
+            [msg.reply_to_id]
+          );
+          if (replyRows[0]) {
+            msg.reply_to = { name: replyRows[0].first_name || replyRows[0].username || 'User', content: (replyRows[0].content || '[media]').slice(0, 100) };
+          }
+        }
+        io.to(`chat:${room}`).emit('chat:message', msg);
       } catch (err) {
         logger.error('chat:message error', err);
         socket.emit('chat:error', { message: 'Failed to save message' });
@@ -549,14 +570,25 @@ function initSocketIO(io) {
         const room = `hangout:${gid}`;
         socket.join(room);
 
-        // Send recent message history
+        // Send recent message history (with reply-to snippets)
         const { rows: history } = await query(
-          `SELECT ${MSG_RETURNING_COLS}
-           FROM chat_messages
-           WHERE room = $1 AND is_deleted = false
-           ORDER BY created_at DESC LIMIT 50`,
+          `SELECT m.id, m.room, m.user_id, m.username, m.first_name, m.photo_url, m.content,
+                  m.media_url, m.media_type, m.media_mime, m.media_thumb_url,
+                  m.media_width, m.media_height, m.media_metadata, m.reply_to_id, m.created_at,
+                  r.first_name AS reply_name, r.username AS reply_username, r.content AS reply_content
+           FROM chat_messages m
+           LEFT JOIN chat_messages r ON r.id = m.reply_to_id
+           WHERE m.room = $1 AND m.is_deleted = false
+           ORDER BY m.created_at DESC LIMIT 50`,
           [room]
         );
+        // Attach reply_to object for clients
+        for (const msg of history) {
+          if (msg.reply_to_id && (msg.reply_name || msg.reply_username)) {
+            msg.reply_to = { name: msg.reply_name || msg.reply_username || 'User', content: (msg.reply_content || '[media]').slice(0, 100) };
+          }
+          delete msg.reply_name; delete msg.reply_username; delete msg.reply_content;
+        }
         socket.emit('hangout:history', history.reverse());
 
         // Send active call info if any
@@ -646,9 +678,10 @@ function initSocketIO(io) {
     });
 
     // Hangout text message via Socket.IO (alternative to REST POST)
-    socket.on('hangout:message', async ({ groupId, content } = {}) => {
+    socket.on('hangout:message', async ({ groupId, content, replyToId } = {}) => {
       if (!groupId || !content || !content.trim()) return;
       if (content.length > 2000) return;
+      const parsedReplyToId = replyToId ? parseInt(replyToId, 10) : null;
 
       const gid = parseInt(groupId, 10);
       if (!Number.isFinite(gid)) return;
@@ -712,16 +745,31 @@ function initSocketIO(io) {
         const photoUrl = user.photoUrl || user.photo_url || null;
 
         const { rows } = await query(
-          `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content)
-           VALUES ($1, $2, $3, $4, $5, $6)
+          `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content, reply_to_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
            RETURNING ${MSG_RETURNING_COLS}`,
-          [room, user.id, user.username || null, firstName, photoUrl, content.trim()]
+          [room, user.id, user.username || null, firstName, photoUrl, content.trim(), parsedReplyToId]
         );
+
+        // If replying, attach the replied-to message snippet for clients
+        const msg = rows[0];
+        if (msg.reply_to_id) {
+          const { rows: replyRows } = await query(
+            'SELECT first_name, username, content FROM chat_messages WHERE id = $1',
+            [msg.reply_to_id]
+          );
+          if (replyRows[0]) {
+            msg.reply_to = {
+              name: replyRows[0].first_name || replyRows[0].username || 'User',
+              content: (replyRows[0].content || '[media]').slice(0, 100),
+            };
+          }
+        }
 
         // Touch activity timestamp for 72h inactivity cleanup
         await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [gid]);
 
-        io.to(room).emit('chat:message', rows[0]);
+        io.to(room).emit('chat:message', msg);
 
         // ── Push notifications to offline hangout members ──
         // Fire-and-forget: don't block the message flow

@@ -246,21 +246,22 @@ class XAutoCampaignService {
     });
 
     // Attach a random video if campaign has media folder
-    let mediaUrl = null;
+    let media = null;
     if (campaign.media_folder_id) {
       try {
-        mediaUrl = await this._getRandomMediaUrl(campaign.media_folder_id, campaign.campaign_id);
+        media = await this._getRandomMediaUrl(campaign.media_folder_id, campaign.campaign_id);
       } catch (err) {
         logger.warn('Failed to get random media for campaign', {
           campaignId: campaign.campaign_id, error: err.message,
         });
       }
     }
+    const mediaUrl = media ? media.url : null;
 
     // A/B test mode: in xPost mode, queue ALL 3 options at staggered intervals
     // and record them in x_ab_tests for performance tracking.
     if (campaign.grok_mode === 'xPost' && campaign.ab_test_mode) {
-      return this._generateAndQueueABTest(campaign, grokResponse, mediaUrl);
+      return this._generateAndQueueABTest(campaign, grokResponse, media);
     }
 
     // For xPost mode, Grok returns 3 options (A/B/C) — pick one randomly
@@ -272,8 +273,32 @@ class XAutoCampaignService {
       postText = this._stripOptionLabel(grokResponse);
     }
 
+    // Create a social_posts record so the tweet link shows rich Twitter cards
+    let socialPostLink = 'pnptv.app';
+    try {
+      const socialResult = await db.query(
+        `INSERT INTO social_posts (user_id, content, media_url, media_type, video_title, video_description, video_thumbnail_url, is_shareable)
+         VALUES ($1, $2, $3, 'video', $4, $5, $6, true)
+         RETURNING id`,
+        [
+          'SYSTEM',
+          postText,
+          mediaUrl,
+          media?.title || null,
+          media?.description || postText.slice(0, 300),
+          media?.thumbnailUrl || null,
+        ]
+      );
+      const socialPostId = socialResult.rows[0].id;
+      socialPostLink = `app.pnptv.app/social/post/${socialPostId}`;
+    } catch (err) {
+      logger.warn('Failed to create social_post for campaign tweet', {
+        campaignId: campaign.campaign_id, error: err.message,
+      });
+    }
+
     // Smart truncation: X allows 280 chars, URLs count as 23 via t.co.
-    // Reserve 24 chars (23 for link + 1 newline) for the pnptv.app link.
+    // Reserve 24 chars (23 for link + 1 newline) for the link.
     const X_TEXT_BUDGET = 280 - 24; // 256 chars for text body
     if (postText.length > X_TEXT_BUDGET) {
       logger.warn('Post text exceeds X limit, smart-truncating', {
@@ -285,7 +310,7 @@ class XAutoCampaignService {
     }
 
     // Normalize for X character limits and ensure required links
-    const requiredLinks = ['pnptv.app'];
+    const requiredLinks = [socialPostLink];
     const { text: normalizedText } = XPostService.ensureRequiredLinks(postText, requiredLinks);
 
     // Queue into existing x_post_jobs pipeline
@@ -342,7 +367,8 @@ class XAutoCampaignService {
    * Records a single x_ab_tests row linking all 3 variants.
    * Returns the post_id of variant A (the first one).
    */
-  static async _generateAndQueueABTest(campaign, grokResponse, mediaUrl) {
+  static async _generateAndQueueABTest(campaign, grokResponse, media) {
+    const mediaUrl = media ? media.url : null;
     const optionRegex = /(?:OPCI[OÓ]N|OPTION)\s+[ABC][\s:.\-—]*([\s\S]*?)(?=(?:OPCI[OÓ]N|OPTION)\s+[ABC]|$)/gi;
     const options = [];
     let match;
@@ -358,15 +384,38 @@ class XAutoCampaignService {
 
     const intervalMs = (campaign.interval_minutes || 240) * 60 * 1000;
     const stagger = Math.floor(intervalMs / 3);
-    const requiredLinks = ['pnptv.app'];
     const X_TEXT_BUDGET = 280 - 24;
     const now = new Date();
 
     const postIds = [];
     for (let i = 0; i < Math.min(options.length, 3); i++) {
       let postText = options[i];
+
+      // Create social_post for rich Twitter card
+      let socialPostLink = 'pnptv.app';
+      try {
+        const socialResult = await db.query(
+          `INSERT INTO social_posts (user_id, content, media_url, media_type, video_title, video_description, video_thumbnail_url, is_shareable)
+           VALUES ($1, $2, $3, 'video', $4, $5, $6, true)
+           RETURNING id`,
+          [
+            'SYSTEM',
+            postText,
+            mediaUrl,
+            media?.title || null,
+            media?.description || postText.slice(0, 300),
+            media?.thumbnailUrl || null,
+          ]
+        );
+        socialPostLink = `app.pnptv.app/social/post/${socialResult.rows[0].id}`;
+      } catch (err) {
+        logger.warn('Failed to create social_post for A/B variant', {
+          campaignId: campaign.campaign_id, variant: i, error: err.message,
+        });
+      }
+
       if (postText.length > X_TEXT_BUDGET) postText = this._smartTruncate(postText, X_TEXT_BUDGET);
-      const { text: normalizedText } = XPostService.ensureRequiredLinks(postText, requiredLinks);
+      const { text: normalizedText } = XPostService.ensureRequiredLinks(postText, [socialPostLink]);
       const scheduledAt = new Date(now.getTime() + i * stagger);
 
       const postId = await XPostService.createPostJob({
@@ -577,37 +626,37 @@ class XAutoCampaignService {
   }
 
   /**
-   * Pick a random video URL from a Directus folder, avoiding recently used videos.
+   * Pick a random video from a Directus folder, avoiding recently used videos.
    * Tracks used media per campaign to prevent repeats until all videos have been used.
-   * Returns the asset URL or null if no videos found.
+   * Returns { url, title, description, thumbnailUrl } or null if no videos found.
    */
   static async _getRandomMediaUrl(folderId, campaignId = null) {
     if (!DIRECTUS_TOKEN) return null;
 
     // Try Redis cache first to avoid Directus API call on every generation
-    let allIds = null;
+    let allFiles = null;
     const videoCacheKey = `pnpapp:xcampaign:videos:${folderId}`;
     try {
       const cached = await cache.get(videoCacheKey);
-      if (cached) allIds = cached;
+      if (cached) allFiles = cached;
     } catch { /* fall through to Directus */ }
 
-    if (!allIds) {
+    if (!allFiles) {
       const res = await fetch(
-        `${DIRECTUS_URL}/files?filter[folder][_eq]=${folderId}&filter[type][_starts_with]=video&fields[]=id&limit=200`,
+        `${DIRECTUS_URL}/files?filter[folder][_eq]=${folderId}&filter[type][_starts_with]=video&fields[]=id&fields[]=title&fields[]=description&limit=200`,
         { headers: { Authorization: `Bearer ${DIRECTUS_TOKEN}` } }
       );
       const data = await res.json();
 
       if (!data.data || data.data.length === 0) return null;
 
-      allIds = data.data.map((f) => f.id);
+      allFiles = data.data.map((f) => ({ id: f.id, title: f.title || null, description: f.description || null }));
       try {
-        await cache.set(videoCacheKey, allIds, VIDEO_CACHE_TTL);
+        await cache.set(videoCacheKey, allFiles, VIDEO_CACHE_TTL);
       } catch { /* cache failure is non-fatal */ }
     }
 
-    if (!allIds || allIds.length === 0) return null;
+    if (!allFiles || allFiles.length === 0) return null;
 
     // Get recently used media IDs for this campaign to avoid repeats
     let usedIds = new Set();
@@ -618,7 +667,7 @@ class XAutoCampaignService {
            WHERE campaign_id = $1 AND media_url IS NOT NULL
            ORDER BY created_at DESC
            LIMIT $2`,
-          [campaignId, Math.max(allIds.length - 1, 1)]
+          [campaignId, Math.max(allFiles.length - 1, 1)]
         );
         for (const row of usedResult.rows) {
           // Extract file ID from the Directus asset URL
@@ -633,18 +682,23 @@ class XAutoCampaignService {
     }
 
     // Filter out recently used videos
-    let available = allIds.filter((id) => !usedIds.has(id));
+    let available = allFiles.filter((f) => !usedIds.has(f.id));
 
     // If all videos have been used, reset and allow all
     if (available.length === 0) {
-      available = allIds;
+      available = allFiles;
       logger.info('All media used for campaign, resetting pool', {
-        campaignId, totalVideos: allIds.length,
+        campaignId, totalVideos: allFiles.length,
       });
     }
 
     const chosen = available[Math.floor(Math.random() * available.length)];
-    return `${DIRECTUS_PUBLIC_URL}/assets/${chosen}`;
+    return {
+      url: `${DIRECTUS_PUBLIC_URL}/assets/${chosen.id}`,
+      title: chosen.title,
+      description: chosen.description,
+      thumbnailUrl: `${DIRECTUS_PUBLIC_URL}/assets/${chosen.id}?key=system-medium-cover`,
+    };
   }
 
   // ---------------------------------------------------------------------------

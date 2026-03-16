@@ -409,15 +409,25 @@ const getMessages = async (req, res) => {
               cm.content,
               cm.media_url, cm.media_type, cm.media_mime,
               cm.media_thumb_url, cm.media_width, cm.media_height,
-              cm.media_metadata,
+              cm.media_metadata, cm.reply_to_id,
+              r.first_name AS reply_name, r.username AS reply_username, r.content AS reply_content,
               cm.created_at
        FROM chat_messages cm
        LEFT JOIN users u ON u.id = cm.user_id
+       LEFT JOIN chat_messages r ON r.id = cm.reply_to_id
        WHERE cm.room=$1 AND cm.is_deleted=false
          ${cursor ? 'AND cm.created_at < $2' : ''}
        ORDER BY cm.created_at DESC LIMIT 50`,
       cursor ? [room, cursor] : [room]
     );
+
+    // Attach reply_to object and clean up helper columns
+    for (const msg of rows) {
+      if (msg.reply_to_id && (msg.reply_name || msg.reply_username)) {
+        msg.reply_to = { name: msg.reply_name || msg.reply_username || 'User', content: (msg.reply_content || '[media]').slice(0, 100) };
+      }
+      delete msg.reply_name; delete msg.reply_username; delete msg.reply_content;
+    }
 
     return res.json({ success: true, messages: rows.reverse().map(normalizeMessage) });
   } catch (err) {

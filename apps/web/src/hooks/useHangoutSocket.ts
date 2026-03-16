@@ -246,13 +246,13 @@ export function useHangoutSocket(
     };
   }, [groupId, userId, dedupeMessages]);
 
-  // Send message via socket
+  // Send message via socket (with optional reply-to)
   const sendMessage = useCallback(
-    (content: string) => {
+    (content: string, replyToId?: number | null) => {
       const trimmed = content.trim().slice(0, 2000);
       if (!groupId || !trimmed) return;
       const socket = connectSocket();
-      socket.emit("hangout:message", { groupId, content: trimmed });
+      socket.emit("hangout:message", { groupId, content: trimmed, replyToId: replyToId || undefined });
     },
     [groupId]
   );

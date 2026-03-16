@@ -156,7 +156,9 @@ const MessageBubble = memo(function MessageBubble({
   const [translatedContent, setTranslatedContent] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
+  const [showActions, setShowActions] = useState(false);
   const showAvatarFallback = !isValidPhotoUrl(msg.photo_url) || avatarError;
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleTranslate = useCallback(async () => {
     if (isTranslating) return;
@@ -167,6 +169,14 @@ const MessageBubble = memo(function MessageBubble({
     if (result) setTranslatedContent(result);
     setIsTranslating(false);
   }, [isTranslating, translatedContent, msg.content, userLang]);
+
+  // Long-press to show action bar on mobile
+  const onTouchStart = useCallback(() => {
+    longPressTimer.current = setTimeout(() => setShowActions(true), 400);
+  }, []);
+  const onTouchEnd = useCallback(() => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+  }, []);
 
   return (
     <div className={`flex gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
@@ -195,7 +205,12 @@ const MessageBubble = memo(function MessageBubble({
       </button>
 
       {/* Bubble */}
-      <div className={`max-w-[75%] ${isMe ? "text-right items-end" : "items-start"} flex flex-col group`}>
+      <div
+        className={`max-w-[75%] ${isMe ? "text-right items-end" : "items-start"} flex flex-col group`}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+      >
         {/* Name + time */}
         <div className={`flex items-center gap-1.5 mb-0.5 ${isMe ? "justify-end" : ""}`}>
           <button
@@ -291,14 +306,14 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         )}
 
-        {/* Quick-react + reply — shown on hover/focus */}
+        {/* Quick-react + reply — visible on hover (desktop) or long-press (mobile) */}
         {matrixEventId && (
-          <div className={`flex items-center gap-0.5 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${isMe ? "justify-end" : ""}`}>
+          <div className={`flex items-center gap-0.5 mt-0.5 transition-opacity ${showActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"} ${isMe ? "justify-end" : ""}`}>
             {QUICK_REACTIONS.slice(0, 6).map((emoji) => (
               <button
                 key={emoji}
-                onClick={() => onReaction?.(matrixEventId, emoji)}
-                className="text-sm hover:scale-125 transition-transform p-0.5 rounded hover:bg-white/10"
+                onClick={() => { onReaction?.(matrixEventId, emoji); setShowActions(false); }}
+                className="text-sm hover:scale-125 active:scale-125 transition-transform p-0.5 rounded hover:bg-white/10 active:bg-white/10"
                 aria-label={`React ${emoji}`}
               >
                 {emoji}
@@ -306,12 +321,23 @@ const MessageBubble = memo(function MessageBubble({
             ))}
             {onReply && (
               <button
-                onClick={() => onReply(msg)}
-                className="p-1 rounded hover:bg-white/10 transition-colors ml-0.5"
+                onClick={() => { onReply(msg); setShowActions(false); }}
+                className="p-1 rounded hover:bg-white/10 active:bg-white/10 transition-colors ml-0.5"
                 aria-label="Reply"
               >
                 <svg className="w-3.5 h-3.5" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                </svg>
+              </button>
+            )}
+            {showActions && (
+              <button
+                onClick={() => setShowActions(false)}
+                className="p-1 rounded hover:bg-white/10 active:bg-white/10 transition-colors ml-0.5"
+                aria-label="Close"
+              >
+                <svg className="w-3 h-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             )}
@@ -972,6 +998,7 @@ export default function Chat() {
 
     setSending(true);
     const text = msgInput.trim();
+    const currentReplyToId = replyToMsg?.id ?? null;
     setMsgInput("");
 
     try {
@@ -999,7 +1026,7 @@ export default function Chat() {
         clearMedia();
       } else {
         // Text messages go via socket for instant delivery
-        sendMessage(text);
+        sendMessage(text, currentReplyToId);
       }
     } catch (err) {
       if (!hasMediaFile) setMsgInput(text);
@@ -1011,7 +1038,7 @@ export default function Chat() {
       setSending(false);
       setReplyToMsg(null);
     }
-  }, [sending, activeGroup, msgInput, mediaFile, clearMedia, sendMessage, t.chat]);
+  }, [sending, activeGroup, msgInput, mediaFile, clearMedia, sendMessage, replyToMsg, t.chat]);
 
   // ─── Video call ─────────────────────────────────────────────────────
 
@@ -1545,7 +1572,7 @@ export default function Chat() {
                   }
                   onReaction={handleReaction}
                   onReply={setReplyToMsg}
-                  replyTo={null}
+                  replyTo={msg.reply_to || null}
                 />
               </React.Fragment>
             ))

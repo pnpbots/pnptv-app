@@ -1296,6 +1296,8 @@ export interface GroupMessage {
   media_thumb_url: string | null;
   media_width: number | null;
   media_height: number | null;
+  reply_to_id?: number | null;
+  reply_to?: { name: string; content: string } | null;
   created_at: string;
 }
 
