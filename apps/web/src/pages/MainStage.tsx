@@ -4,8 +4,8 @@ import { Card, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { PermissionGate } from "@/components/PermissionGate";
-import { JitsiMeetComponent, VideoCallSidePanel, VideoCallModBot, MobileBottomBar } from "@/components/hangouts";
-import { useOrientation } from "@/hooks/useOrientation";
+import { JitsiMeetComponent, VideoCallModBot } from "@/components/hangouts";
+
 import {
   joinCommunityRoom,
   getCommunityRoomOccupancy,
@@ -28,8 +28,6 @@ export default function MainStage() {
   const [occupancyError, setOccupancyError] = useState(false);
   const [showPermGate, setShowPermGate] = useState(false);
   const [jitsiApi, setJitsiApi] = useState<any>(null);
-  const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
-  const isLandscape = useOrientation();
   useEffect(() => {
     getCommunityRoomOccupancy()
       .then((res) => {
@@ -102,27 +100,11 @@ export default function MainStage() {
   // ─── Joined: fullscreen with side panel + mod bot ──────────────────────
 
   if (joined && iframeSrc) {
-    const userId = user?.id ? String(user.id) : undefined;
-
     return (
       <div className="fixed inset-0 z-50 bg-black flex">
         <Helmet>
           <title>Main Stage | PNPtv</title>
         </Helmet>
-
-        {/* Side panel (left) — desktop only */}
-        {userId && (
-          <div className="hidden sm:flex flex-shrink-0 p-2">
-            <VideoCallSidePanel
-              groupId={1}
-              userId={userId}
-              collapsed={sidePanelCollapsed}
-              onToggleCollapse={() => setSidePanelCollapsed((p) => !p)}
-              isModerator={isAdmin}
-              isMainStage={true}
-            />
-          </div>
-        )}
 
         {/* Center: header + Jitsi */}
         <div className="flex-1 flex flex-col min-w-0">
@@ -169,19 +151,6 @@ export default function MainStage() {
           </div>
         )}
 
-        {/* Mobile in-call bar */}
-        {userId && (
-          <div className="sm:hidden">
-            <MobileBottomBar
-              groupId={1}
-              userId={userId}
-              isAdmin={isAdmin}
-              isLandscape={isLandscape}
-              isModerator={isAdmin}
-              isMainStage={true}
-            />
-          </div>
-        )}
       </div>
     );
   }

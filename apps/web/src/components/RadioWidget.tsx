@@ -430,7 +430,7 @@ function getCornerOffset(myOrder: number, myCorner: string): number {
 
 // ── Main RadioWidget component ────────────────────────────────────────────────
 
-export function RadioWidget() {
+export function RadioWidget({ compact = false }: { compact?: boolean } = {}) {
   const {
     tracks,
     currentTrack,
@@ -1129,6 +1129,32 @@ export function RadioWidget() {
     </div>
     </div>
   ) : null;
+
+  // ── Compact mode (strip icon) ──────────────────────────────────────────────
+  if (compact) {
+    return (
+      <>
+        {panel}
+        <button
+          onClick={() => setIsOpen(true)}
+          className="relative w-9 h-9 rounded-full shadow-lg flex items-center justify-center transition-transform active:scale-90"
+          style={{ background: "linear-gradient(135deg, #8B5CF6, #D946EF)" }}
+          aria-label="Open PNP Radio player"
+        >
+          <span className="relative flex items-center justify-center w-full h-full">
+            {isPlaying ? (
+              <EqualizerBars color="#fff" size="sm" />
+            ) : (
+              <span className="text-sm">🎧</span>
+            )}
+          </span>
+          {isPlaying && (
+            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 ring-1 ring-black" />
+          )}
+        </button>
+      </>
+    );
+  }
 
   return (
     <>

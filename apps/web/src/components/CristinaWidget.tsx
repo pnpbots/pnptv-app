@@ -52,6 +52,7 @@ type WidgetView = "helpCenter" | "chat" | "tutorial" | "ticketForm" | "ticketVie
 
 interface CristinaWidgetProps {
   mode?: "widget" | "page";
+  compact?: boolean;
 }
 
 interface TutorialStep {
@@ -230,7 +231,7 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
   },
 ];
 
-export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
+export function CristinaWidget({ mode = "widget", compact = false }: CristinaWidgetProps) {
   const { user } = useAuth();
   const { support: t } = useI18n();
   const [isOpen, setIsOpen] = useState(mode === "page");
@@ -567,6 +568,23 @@ export function CristinaWidget({ mode = "widget" }: CristinaWidgetProps) {
     };
     return map[topicId] ?? topicId;
   };
+
+  // Compact FAB (widget strip mode)
+  if (compact && !isOpen) {
+    return (
+      <button
+        onClick={() => { setIsOpen(true); setHasUnreadReply(false); }}
+        className="relative w-9 h-9 rounded-full shadow-lg flex items-center justify-center text-sm transition-transform active:scale-90"
+        style={{ background: "linear-gradient(135deg, #5BC8F5, #00D4E8)" }}
+        aria-label={t.openWidgetAriaLabel}
+      >
+        <span className="relative">🧜‍♀️</span>
+        {hasUnreadReply && (
+          <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500 ring-1 ring-black" />
+        )}
+      </button>
+    );
+  }
 
   // FAB button (widget mode only)
   if (mode === "widget" && !isOpen) {

@@ -1239,9 +1239,6 @@ export default function Chat() {
             initialMode="embedded"
             isAdmin={isAdmin}
             isModerator={callIsModerator}
-            groupId={activeGroup.id}
-            userId={user?.id ? String(user.id) : undefined}
-            socketChat={{ messages, sendMessage, emitTyping, typingUsers }}
           />
         )}
 

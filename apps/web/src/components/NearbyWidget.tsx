@@ -469,7 +469,7 @@ function UserCard({
 // ── Main NearbyWidget ─────────────────────────────────────────────────────────
 type WidgetView = "grid" | "profile" | "dm" | "place";
 
-export function NearbyWidget() {
+export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
   const { enabled, position } = useNearbyToggle();
   const navigate = useNavigate();
   const location = useLocation();
@@ -838,37 +838,59 @@ export function NearbyWidget() {
   return (
     <>
       {/* FAB */}
-      <div
-        ref={fabRef}
-        className="fixed z-[38]"
-        style={posStyle}
-        onPointerDown={handleFabPointerDown}
-        onPointerMove={handleFabPointerMove}
-        onPointerUp={handleFabPointerUp}
-      >
+      {compact ? (
         <button
-          onClick={() => { if (!dragState.current.moved) setOpen(true); }}
-          className={`${inHangout ? "w-9 h-9" : "w-12 h-12"} rounded-full flex items-center justify-center shadow-lg transition-transform active:scale-90`}
+          onClick={() => setOpen(true)}
+          className="relative w-9 h-9 rounded-full shadow-lg flex items-center justify-center transition-transform active:scale-90"
           style={{ background: LEMON, boxShadow: `0 4px 20px ${LEMON}40` }}
           aria-label="Nearby members"
         >
-          <svg className={inHangout ? "w-4 h-4" : "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="#0a0a14" strokeWidth={2.5}>
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#0a0a14" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
           </svg>
           {totalCount > 0 && (
             <span
-              className={`absolute ${inHangout ? "-top-0.5 -right-0.5 min-w-[14px] h-[14px] text-[7px]" : "-top-1 -right-1 min-w-[18px] h-[18px] text-[9px]"} flex items-center justify-center rounded-full font-bold px-1`}
+              className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] text-[7px] flex items-center justify-center rounded-full font-bold px-1"
               style={{ background: LEMON, color: "#0a0a14" }}
             >
               {totalCount}
             </span>
           )}
-          {inHangout && (
-            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 ring-2 ring-pnp-background animate-pulse" />
-          )}
         </button>
-      </div>
+      ) : (
+        <div
+          ref={fabRef}
+          className="fixed z-[38]"
+          style={posStyle}
+          onPointerDown={handleFabPointerDown}
+          onPointerMove={handleFabPointerMove}
+          onPointerUp={handleFabPointerUp}
+        >
+          <button
+            onClick={() => { if (!dragState.current.moved) setOpen(true); }}
+            className={`${inHangout ? "w-9 h-9" : "w-12 h-12"} rounded-full flex items-center justify-center shadow-lg transition-transform active:scale-90`}
+            style={{ background: LEMON, boxShadow: `0 4px 20px ${LEMON}40` }}
+            aria-label="Nearby members"
+          >
+            <svg className={inHangout ? "w-4 h-4" : "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="#0a0a14" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+            </svg>
+            {totalCount > 0 && (
+              <span
+                className={`absolute ${inHangout ? "-top-0.5 -right-0.5 min-w-[14px] h-[14px] text-[7px]" : "-top-1 -right-1 min-w-[18px] h-[18px] text-[9px]"} flex items-center justify-center rounded-full font-bold px-1`}
+                style={{ background: LEMON, color: "#0a0a14" }}
+              >
+                {totalCount}
+              </span>
+            )}
+            {inHangout && (
+              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 ring-2 ring-pnp-background animate-pulse" />
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Modal Overlay */}
       {open && (

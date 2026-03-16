@@ -4,6 +4,7 @@ import { BottomNav } from "./BottomNav";
 import { useAuth } from "@/hooks/useAuth";
 import { useTelegram } from "@/hooks/useTelegram";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
+import { useOrientation } from "@/hooks/useOrientation";
 import { CristinaWidget } from "@/components/CristinaWidget";
 
 import { NotificationBell } from "@/components/NotificationBell";
@@ -47,6 +48,14 @@ export function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { enabled: nearbyEnabled, toggle: toggleNearby } = useNearbyToggle();
   const mobileMenuRef = useRef<HTMLDivElement>(null);
+  const isLandscape = useOrientation();
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" ? window.innerWidth < 1024 : false);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 1024);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const primaryLinks = [
     { to: "/", label: t.nav.home, end: true },
@@ -475,14 +484,29 @@ export function Layout() {
         <BottomNav />
       </div>
 
-      {/* PNP Radio floating widget — bottom-left */}
-      {isAuthenticated && <RadioWidget />}
+      {/* Widgets: compact strip in landscape video calls on mobile, normal FABs otherwise */}
+      {isAuthenticated && (() => {
+        const inVideoCall = location.pathname.startsWith("/chat/") || location.pathname === "/main-stage";
+        const showWidgetStrip = isLandscape && isMobile && inVideoCall;
 
-      {/* Nearby members widget — bottom-right */}
-      {isAuthenticated && <NearbyWidget />}
+        if (showWidgetStrip) {
+          return (
+            <div className="fixed bottom-3 right-3 z-[38] flex items-center gap-2 rounded-full px-2 py-1.5" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}>
+              <RadioWidget compact />
+              <NearbyWidget compact />
+              <CristinaWidget compact />
+            </div>
+          );
+        }
 
-      {/* Cristina AI Support Widget — top-right */}
-      {isAuthenticated && <CristinaWidget />}
+        return (
+          <>
+            <RadioWidget />
+            <NearbyWidget />
+            <CristinaWidget />
+          </>
+        );
+      })()}
 
       {/* Toast notifications */}
       {isAuthenticated && <Toast />}

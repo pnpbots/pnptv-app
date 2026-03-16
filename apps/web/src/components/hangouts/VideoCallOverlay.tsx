@@ -7,13 +7,6 @@ import { PermissionGate } from "@/components/PermissionGate";
 
 type ViewMode = "fullscreen" | "embedded" | "pip";
 
-interface SocketChatData {
-  messages: import("@/lib/api").GroupMessage[];
-  sendMessage: (content: string) => void;
-  emitTyping: () => void;
-  typingUsers: string[];
-}
-
 interface VideoCallOverlayProps {
   /** Full JaaS/Jitsi meeting URL */
   meetingUrl: string;
@@ -29,12 +22,6 @@ interface VideoCallOverlayProps {
   isAdmin?: boolean;
   /** Group owner or call creator — also receives moderator toolbar */
   isModerator?: boolean;
-  /** Group ID for side panel chat */
-  groupId?: number;
-  /** User ID for side panel chat */
-  userId?: string;
-  /** Pre-wired socket data from parent */
-  socketChat?: SocketChatData;
   /** Whether this overlay is inside the Main Stage */
   isMainStage?: boolean;
 }
@@ -49,9 +36,6 @@ export function VideoCallOverlay({
   initialMode = "embedded",
   isAdmin = false,
   isModerator = false,
-  groupId,
-  userId,
-  socketChat,
   isMainStage = false,
 }: VideoCallOverlayProps) {
   const [viewMode, setViewMode] = useState<ViewMode>(initialMode);
