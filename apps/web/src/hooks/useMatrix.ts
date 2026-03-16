@@ -16,6 +16,15 @@ import { getMatrixToken } from "@/lib/api";
 let matrixClient: MatrixClient | null = null;
 let initPromise: Promise<MatrixClient> | null = null;
 
+/** Reset the singleton so the next initMatrix() call fetches a fresh token. */
+function resetMatrixClient() {
+  if (matrixClient) {
+    try { matrixClient.stopClient(); } catch { /* ignore */ }
+  }
+  matrixClient = null;
+  initPromise = null;
+}
+
 async function initMatrix(): Promise<MatrixClient> {
   if (matrixClient) return matrixClient;
   if (initPromise) return initPromise;
@@ -27,6 +36,14 @@ async function initMatrix(): Promise<MatrixClient> {
       baseUrl: homeserverUrl,
       accessToken,
       userId: matrixUserId,
+    });
+
+    // Auto-reset on auth failure so next call fetches a fresh token
+    client.on(ClientEvent.Sync, (state: SyncState, _prev: SyncState | null, data?: { error?: { httpStatus?: number; errcode?: string } }) => {
+      if (state === SyncState.Error && (data?.error?.httpStatus === 401 || data?.error?.errcode === "M_UNKNOWN_TOKEN")) {
+        console.warn("[Matrix] Token expired (401), resetting client for re-auth");
+        resetMatrixClient();
+      }
     });
 
     await client.startClient({ initialSyncLimit: 20 });
@@ -412,6 +429,8 @@ export function useMatrix() {
           if (state === SyncState.Error) {
             if (!cancelled) setError("Matrix sync error");
             client.off(ClientEvent.Sync, onSync);
+            // Token may have expired — reset so a page navigation retries
+            resetMatrixClient();
           }
         };
 
