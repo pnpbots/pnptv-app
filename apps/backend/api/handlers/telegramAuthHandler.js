@@ -130,7 +130,7 @@ const handleTelegramAuth = async (req, res) => {
           [
             String(telegramUser.id),
             pnptvId,
-            telegramUser.username || '',
+            (telegramUser.username || '').toUpperCase(),
             telegramUser.first_name || '',
             telegramUser.language_code || 'en'
           ]

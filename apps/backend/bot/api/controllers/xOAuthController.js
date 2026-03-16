@@ -278,7 +278,7 @@ const handleCallback = async (req, res) => {
               subscription_status, tier, role, terms_accepted, is_active, created_at, updated_at)
              VALUES ($1,$2,$3,$4,$5,$6,$7,'free','free','user',false,true,NOW(),NOW())
              RETURNING ${RETURN_COLS}`,
-            [uuidv4(), uuidv4(), firstName, rest.join(' ') || null, xHandle, xHandle, xId]
+            [uuidv4(), uuidv4(), firstName, rest.join(' ') || null, xHandle ? xHandle.toUpperCase() : xHandle, xHandle, xId]
           );
           user = rows[0];
           logger.info(`Created new user via X web login: ${user.id} (@${xHandle})`);

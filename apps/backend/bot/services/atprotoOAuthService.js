@@ -381,7 +381,7 @@ async function linkAtprotoToUser(did, handle, pdsUrl, expressSession) {
     // Use the handle (sanitized) as both username and id prefix.
     // id is VARCHAR(255) so a UUID is valid.
     const newId = crypto.randomUUID();
-    const safeUsername = handle.replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 50) || `bsky_${newId.slice(0, 8)}`;
+    const safeUsername = (handle.replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 50) || `BSKY_${newId.slice(0, 8)}`).toUpperCase();
     const result = await query(
       `INSERT INTO users (id, username, atproto_did, atproto_handle, atproto_pds_url,
                           subscription_status, tier, status, role, created_at, updated_at)

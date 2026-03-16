@@ -394,7 +394,7 @@ class UserModel {
       for (const [key, col] of Object.entries(fieldMap)) {
         if (updates[key] !== undefined) {
           setClauses.push(`${col} = $${paramIndex++}`);
-          values.push(updates[key]);
+          values.push(key === 'username' && updates[key] ? updates[key].toUpperCase() : updates[key]);
         }
       }
 

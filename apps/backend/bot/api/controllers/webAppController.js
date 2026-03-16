@@ -61,14 +61,15 @@ async function verifyPassword(password, stored) {
 async function createWebUser({ id, firstName, lastName, username, email, passwordHash, telegramId, twitterHandle, xId, photoFileId } = {}) {
   const userId = id || uuidv4();
   const pnptvId = generatePnptvId();
-  let baseUsername = username || (firstName ? `${firstName}${lastName ? `_${lastName}` : ''}`.toLowerCase().replace(/[^a-z0-9_]/g, '_') : null);
+  let baseUsername = username || (firstName ? `${firstName}${lastName ? `_${lastName}` : ''}`.replace(/[^a-zA-Z0-9_]/g, '_') : null);
+  if (baseUsername) baseUsername = baseUsername.toUpperCase();
 
   // Resolve username uniqueness: try base, then base_2, base_3, etc.
   let displayName = baseUsername;
   if (displayName) {
     let suffix = 2;
     while (true) {
-      const { rows: existing } = await query('SELECT id FROM users WHERE username = $1', [displayName]);
+      const { rows: existing } = await query('SELECT id FROM users WHERE UPPER(username) = $1', [displayName]);
       if (existing.length === 0) break;
       displayName = `${baseUsername}_${suffix}`;
       suffix++;
@@ -79,8 +80,8 @@ async function createWebUser({ id, firstName, lastName, username, email, passwor
   // Always ensure a username — fallback to pnptv_XXXXXX if nothing was derivable
   if (!displayName) {
     while (true) {
-      const candidate = `pnptv_${uuidv4().replace(/-/g, '').substring(0, 6)}`;
-      const { rows: exists } = await query('SELECT id FROM users WHERE username = $1', [candidate]);
+      const candidate = `PNPTV_${uuidv4().replace(/-/g, '').substring(0, 6).toUpperCase()}`;
+      const { rows: exists } = await query('SELECT id FROM users WHERE UPPER(username) = $1', [candidate]);
       if (exists.length === 0) { displayName = candidate; break; }
     }
   }

@@ -319,7 +319,7 @@ class AuthController {
         [
           userId,
           email.toLowerCase(),
-          username,
+          username.toUpperCase(),
           hashedPassword,
           'model',
           false,
