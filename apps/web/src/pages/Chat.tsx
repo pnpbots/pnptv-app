@@ -171,11 +171,14 @@ const MessageBubble = memo(function MessageBubble({
   }, [isTranslating, translatedContent, msg.content, userLang]);
 
   // Long-press to show action bar on mobile
-  const onTouchStart = useCallback(() => {
+  const onTouchStart = useCallback((e: React.TouchEvent) => {
+    // Don't start long-press if tapping on an action button
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-action-bar]')) return;
     longPressTimer.current = setTimeout(() => setShowActions(true), 400);
   }, []);
   const onTouchEnd = useCallback(() => {
-    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
   }, []);
 
   return (
@@ -308,10 +311,15 @@ const MessageBubble = memo(function MessageBubble({
 
         {/* Quick-react + reply — visible on hover (desktop) or long-press (mobile) */}
         {matrixEventId && (
-          <div className={`flex items-center gap-0.5 mt-0.5 transition-opacity ${showActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"} ${isMe ? "justify-end" : ""}`}>
+          <div
+            data-action-bar
+            className={`flex items-center gap-0.5 mt-0.5 transition-opacity ${showActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"} ${isMe ? "justify-end" : ""}`}
+            onTouchStart={(e) => e.stopPropagation()}
+          >
             {QUICK_REACTIONS.slice(0, 6).map((emoji) => (
               <button
                 key={emoji}
+                onTouchEnd={(e) => { e.stopPropagation(); onReaction?.(matrixEventId, emoji); setShowActions(false); }}
                 onClick={() => { onReaction?.(matrixEventId, emoji); setShowActions(false); }}
                 className="text-sm hover:scale-125 active:scale-125 transition-transform p-0.5 rounded hover:bg-white/10 active:bg-white/10"
                 aria-label={`React ${emoji}`}
@@ -321,6 +329,7 @@ const MessageBubble = memo(function MessageBubble({
             ))}
             {onReply && (
               <button
+                onTouchEnd={(e) => { e.stopPropagation(); onReply(msg); setShowActions(false); }}
                 onClick={() => { onReply(msg); setShowActions(false); }}
                 className="p-1 rounded hover:bg-white/10 active:bg-white/10 transition-colors ml-0.5"
                 aria-label="Reply"
@@ -332,6 +341,7 @@ const MessageBubble = memo(function MessageBubble({
             )}
             {showActions && (
               <button
+                onTouchEnd={(e) => { e.stopPropagation(); setShowActions(false); }}
                 onClick={() => setShowActions(false)}
                 className="p-1 rounded hover:bg-white/10 active:bg-white/10 transition-colors ml-0.5"
                 aria-label="Close"
