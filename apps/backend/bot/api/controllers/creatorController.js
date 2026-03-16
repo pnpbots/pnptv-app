@@ -350,6 +350,46 @@ const getStrikes = async (req, res) => {
   }
 };
 
+// GET /api/webapp/creator/milestones
+// Returns pending milestone notifications for the authenticated user
+const getMilestones = async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, milestone_type, status, created_at, responded_at, decline_cooldown_until
+       FROM creator_milestone_notifications
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 20`,
+      [req.user.id]
+    );
+    return res.json({ success: true, milestones: rows });
+  } catch (err) {
+    logger.error('getMilestones error', err);
+    return res.status(500).json({ error: 'Failed to load milestones' });
+  }
+};
+
+// POST /api/webapp/creator/milestones/:id/respond
+// Body: { response: 'accepted' | 'declined' }
+const respondToMilestone = async (req, res) => {
+  try {
+    const { response } = req.body || {};
+    if (!response || !['accepted', 'declined'].includes(response)) {
+      return res.status(400).json({ error: "response must be 'accepted' or 'declined'" });
+    }
+    const result = await CreatorService.respondToMilestone(
+      req.user.id,
+      req.params.id,
+      response
+    );
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    logger.error('respondToMilestone error', err);
+    return res.status(status).json({ error: err.message });
+  }
+};
+
 // POST /api/webapp/creator/:creatorId/strike
 // Protected at route level by roleGuard('admin', 'superadmin')
 const issueStrike = async (req, res) => {
@@ -393,4 +433,6 @@ module.exports = {
   listEnrollments,
   approveEnrollment,
   rejectEnrollment,
+  getMilestones,
+  respondToMilestone,
 };

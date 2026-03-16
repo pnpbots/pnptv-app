@@ -1,7 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
-const agoraTokenService = require('../services/agora/agoraTokenService');
 
 const CATEGORIES = {
   MUSIC: 'music',
@@ -275,11 +274,9 @@ class LiveStreamModel {
       );
 
       const stream = this._mapRowToStream(result.rows[0]);
-      const hostToken = agoraTokenService.generateHostToken(channelName, hostId);
 
       return {
         ...stream,
-        hostToken,
         channelName,
       };
     } catch (error) {
@@ -469,11 +466,9 @@ class LiveStreamModel {
       }
 
       const updatedStream = await this._incrementViewerCounts(streamId, 1);
-      const viewerToken = agoraTokenService.generateViewerToken(stream.channelName || stream.streamId, userId);
 
       return {
         stream: updatedStream || stream,
-        viewerToken,
       };
     } catch (error) {
       logger.error('Error joining stream', { streamId, userId, error: error.message });

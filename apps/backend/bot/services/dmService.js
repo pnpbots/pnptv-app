@@ -43,13 +43,14 @@ class DmService {
       throw { statusCode: 403, message: 'Cannot send message to this user', code: 'BLOCKED' };
     }
 
-    // 2. Privacy check (allowMessages)
+    // 2. Privacy check (allowMessages) + creator DM policy
     if (!isAdmin) {
-      const privacyResult = await query(
-        'SELECT privacy FROM users WHERE id = $1',
+      const recipientResult = await query(
+        'SELECT privacy, role, creator_status FROM users WHERE id = $1',
         [resolvedRecipientId]
       );
-      const privacy = privacyResult.rows[0]?.privacy || {};
+      const recipientRow = recipientResult.rows[0] || {};
+      const privacy = recipientRow.privacy || {};
       const allowMessages = privacy.allowMessages !== undefined ? privacy.allowMessages : true;
 
       if (!allowMessages) {
@@ -59,6 +60,38 @@ class DmService {
         );
         if ((followResult.rowCount ?? followResult.rows.length) === 0) {
           throw { statusCode: 403, message: 'This user is not accepting messages', code: 'PRIVACY_RESTRICTED' };
+        }
+      }
+
+      // Creator DM policy: active models can restrict DMs to subscribers + mutual follows only
+      if (recipientRow.role === 'model' && recipientRow.creator_status === 'active') {
+        const dmPolicy = privacy.creatorDmPolicy || 'subscribers_and_mutuals';
+        if (dmPolicy === 'subscribers_and_mutuals') {
+          const [subscriberCheck, mutualCheck] = await Promise.all([
+            query(
+              `SELECT 1 FROM user_entitlements
+               WHERE user_id = $1 AND add_on_id = 'creator-subscription' AND creator_id = $2
+                 AND (is_lifetime = true OR expires_at > NOW())
+               LIMIT 1`,
+              [String(senderId), String(resolvedRecipientId)]
+            ),
+            query(
+              `SELECT 1 FROM user_follows f1
+               JOIN user_follows f2
+                 ON f1.follower_id = f2.following_id AND f1.following_id = f2.follower_id
+               WHERE f1.follower_id = $1 AND f1.following_id = $2
+               LIMIT 1`,
+              [senderId, resolvedRecipientId]
+            ),
+          ]);
+
+          if (subscriberCheck.rows.length === 0 && mutualCheck.rows.length === 0) {
+            throw {
+              statusCode: 403,
+              message: 'Only subscribers and mutual follows can message this creator',
+              code: 'CREATOR_DM_RESTRICTED',
+            };
+          }
         }
       }
     }

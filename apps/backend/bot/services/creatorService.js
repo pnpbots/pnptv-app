@@ -186,6 +186,17 @@ class CreatorService {
       [app.user_id, priceUsd]
     );
 
+    // Generate subscription code, live channel slug, and set DM policy
+    try {
+      await this.finaliseCreatorActivation(app.user_id, 'full_time');
+    } catch (activationErr) {
+      logger.warn('approveApplication: finaliseCreatorActivation failed (non-fatal)', {
+        applicationId,
+        userId: app.user_id,
+        error: activationErr.message,
+      });
+    }
+
     NotificationEmitter.emit({
       type: 'creator_approved',
       category: 'commerce',
@@ -697,6 +708,246 @@ class CreatorService {
     return rows;
   }
 
+  // ── Milestone Notifications ──────────────────────────────────────────────────
+
+  /**
+   * Check eligibility and, if newly met, insert a milestone notification row.
+   * Called after post creation, receiving likes, or gaining followers.
+   * @returns {{ eligible: boolean, notificationId: number|null }}
+   */
+  static async checkAndNotifyMilestones(userId) {
+    const { eligible } = await this.checkEligibility(userId);
+    if (!eligible) return { eligible: false, notificationId: null };
+
+    // Only insert if no pending or accepted notification already exists
+    const existing = await query(
+      `SELECT id FROM creator_milestone_notifications
+       WHERE user_id = $1
+         AND milestone_type = 'eligible'
+         AND status IN ('pending', 'accepted')
+       LIMIT 1`,
+      [userId]
+    );
+    if (existing.rows.length > 0) {
+      return { eligible: true, notificationId: null };
+    }
+
+    // Also skip if user declined within the 30-day cooldown window
+    const declined = await query(
+      `SELECT id FROM creator_milestone_notifications
+       WHERE user_id = $1
+         AND milestone_type = 'eligible'
+         AND status = 'declined'
+         AND decline_cooldown_until > NOW()
+       LIMIT 1`,
+      [userId]
+    );
+    if (declined.rows.length > 0) {
+      return { eligible: true, notificationId: null };
+    }
+
+    const { rows } = await query(
+      `INSERT INTO creator_milestone_notifications
+         (user_id, milestone_type, status)
+       VALUES ($1, 'eligible', 'pending')
+       RETURNING id`,
+      [userId]
+    );
+
+    const notificationId = rows[0].id;
+
+    NotificationEmitter.emit({
+      type: 'creator_eligible',
+      category: 'commerce',
+      priority: 'normal',
+      actorId: userId,
+      targetUserId: userId,
+      entityType: 'creator_milestone',
+      entityId: String(notificationId),
+      message: 'You qualify as a creator! Tap to activate your creator profile and start earning.',
+    });
+
+    return { eligible: true, notificationId };
+  }
+
+  /**
+   * Accept or decline a milestone notification.
+   * @param {string} userId
+   * @param {number|string} notificationId
+   * @param {'accepted'|'declined'} response
+   */
+  static async respondToMilestone(userId, notificationId, response) {
+    if (!['accepted', 'declined'].includes(response)) {
+      throw new Error("response must be 'accepted' or 'declined'");
+    }
+
+    const { rows } = await query(
+      `SELECT * FROM creator_milestone_notifications
+       WHERE id = $1 AND user_id = $2 AND status = 'pending'`,
+      [notificationId, userId]
+    );
+    if (rows.length === 0) {
+      throw Object.assign(new Error('Milestone notification not found or already responded'), { statusCode: 404 });
+    }
+
+    if (response === 'declined') {
+      await query(
+        `UPDATE creator_milestone_notifications
+         SET status = 'declined',
+             responded_at = NOW(),
+             decline_cooldown_until = NOW() + INTERVAL '30 days',
+             updated_at = NOW()
+         WHERE id = $1`,
+        [notificationId]
+      );
+      return { responded: true, response: 'declined' };
+    }
+
+    // Accepted — mark as accepted and kick off enrollment
+    await query(
+      `UPDATE creator_milestone_notifications
+       SET status = 'accepted', responded_at = NOW(), updated_at = NOW()
+       WHERE id = $1`,
+      [notificationId]
+    );
+
+    return { responded: true, response: 'accepted', redirectToEnrollment: true };
+  }
+
+  // ── Engagement Score ──────────────────────────────────────────────────────────
+
+  /**
+   * Calculate engagement score for the last 30 days and suggest a tier.
+   * @returns {{ score: number, suggestedTier: 'ice'|'crystal'|'diamond', suggestedPrice: number }}
+   */
+  static async calculateEngagementScore(userId) {
+    const [likesRes, commentsRes, followersRes] = await Promise.all([
+      query(
+        `SELECT COALESCE(SUM(sp.likes_count), 0)::int AS likes
+         FROM social_posts sp
+         WHERE sp.user_id = $1
+           AND sp.is_deleted = false
+           AND sp.created_at >= NOW() - INTERVAL '30 days'`,
+        [userId]
+      ),
+      query(
+        `SELECT COUNT(*)::int AS comments
+         FROM social_posts c
+         JOIN social_posts p ON c.reply_to_id = p.id
+         WHERE p.user_id = $1
+           AND c.is_deleted = false
+           AND c.created_at >= NOW() - INTERVAL '30 days'`,
+        [userId]
+      ),
+      query(
+        `SELECT COUNT(*)::int AS new_followers
+         FROM user_follows
+         WHERE following_id = $1
+           AND created_at >= NOW() - INTERVAL '30 days'`,
+        [userId]
+      ),
+    ]);
+
+    const likes = likesRes.rows[0]?.likes || 0;
+    const comments = commentsRes.rows[0]?.comments || 0;
+    const newFollowers = followersRes.rows[0]?.new_followers || 0;
+    const score = likes + comments + newFollowers;
+
+    let suggestedTier = 'ice';
+    let suggestedPrice = 5.00;
+    if (score >= 200) {
+      suggestedTier = 'diamond';
+      suggestedPrice = 15.00;
+    } else if (score >= 50) {
+      suggestedTier = 'crystal';
+      suggestedPrice = 10.00;
+    }
+
+    return { score, suggestedTier, suggestedPrice, breakdown: { likes, comments, newFollowers } };
+  }
+
+  /**
+   * Returns suggested subscription price based on current engagement score.
+   * @returns {{ price: number, tier: string }}
+   */
+  static async getCreatorSubscriptionPrice(creatorId) {
+    const { suggestedTier, suggestedPrice } = await this.calculateEngagementScore(creatorId);
+    return { price: suggestedPrice, tier: suggestedTier };
+  }
+
+  // ── Post-Approval Activation Steps ────────────────────────────────────────────
+
+  /**
+   * Called after approveEnrollment / approveApplication to generate the subscription
+   * code, live channel slug, set role, and lock DM policy for the newly active creator.
+   * @param {string} userId
+   * @param {string} creatorType  e.g. 'ice', 'crystal', 'diamond', 'full_time'
+   */
+  static async finaliseCreatorActivation(userId, creatorType) {
+    // Fetch the username so we can derive a meaningful channel slug
+    const userRes = await query(
+      'SELECT username, live_channel, creator_subscription_code, privacy FROM users WHERE id = $1',
+      [userId]
+    );
+    const user = userRes.rows[0];
+    if (!user) throw new Error('User not found during creator activation');
+
+    const updates = {};
+
+    // Generate subscription code only if not already set
+    if (!user.creator_subscription_code) {
+      const codeRes = await query('SELECT generate_creator_code() AS code');
+      updates.creator_subscription_code = codeRes.rows[0].code;
+    }
+
+    // Generate live_channel slug only if not already set
+    if (!user.live_channel) {
+      const channelRes = await query(
+        'SELECT generate_live_channel($1, $2) AS channel',
+        [user.username || 'creator', userId]
+      );
+      updates.live_channel = channelRes.rows[0].channel;
+    }
+
+    // Merge creatorDmPolicy into existing privacy JSONB
+    const existingPrivacy = user.privacy || {};
+    if (!existingPrivacy.creatorDmPolicy) {
+      existingPrivacy.creatorDmPolicy = 'subscribers_and_mutuals';
+      updates.privacy = existingPrivacy;
+    }
+
+    if (Object.keys(updates).length === 0) return; // Nothing to change
+
+    const setClauses = [];
+    const params = [];
+    let paramIdx = 1;
+
+    if (updates.creator_subscription_code !== undefined) {
+      setClauses.push(`creator_subscription_code = $${paramIdx++}`);
+      params.push(updates.creator_subscription_code);
+    }
+    if (updates.live_channel !== undefined) {
+      setClauses.push(`live_channel = $${paramIdx++}`);
+      params.push(updates.live_channel);
+    }
+    if (updates.privacy !== undefined) {
+      setClauses.push(`privacy = $${paramIdx++}`);
+      params.push(JSON.stringify(updates.privacy));
+    }
+
+    params.push(userId);
+    await query(
+      `UPDATE users SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`,
+      params
+    );
+
+    logger.info('finaliseCreatorActivation: applied', {
+      userId,
+      creatorType,
+      appliedKeys: Object.keys(updates),
+    });
+  }
+
   // ── Enrollment ──────────────────────────────────────────────────────────────
 
   static async submitEnrollment(userId, { tier, paymentMethod, paymentAddress, paymentNetwork, signatureData }, idDocumentPath, ip) {
@@ -810,6 +1061,17 @@ class CreatorService {
        WHERE id = $1`,
       [enrollment.user_id, enrollment.tier, price]
     );
+
+    // Generate subscription code, live channel slug, and set DM policy
+    try {
+      await this.finaliseCreatorActivation(enrollment.user_id, enrollment.tier);
+    } catch (activationErr) {
+      logger.warn('approveEnrollment: finaliseCreatorActivation failed (non-fatal)', {
+        enrollmentId,
+        userId: enrollment.user_id,
+        error: activationErr.message,
+      });
+    }
 
     try {
       NotificationEmitter.emit({

@@ -66,6 +66,11 @@ router.delete('/cms/shows/:id', authGuard, cmsCreatorController.deleteShow);
 
 router.post('/cms/upload', authGuard, ...cmsCreatorController.uploadMedia);
 
+// ── Milestone routes (auth required) ─────────────────────────────────────────
+// IMPORTANT: must come BEFORE /:creatorId/* param routes
+router.get('/milestones', authGuard, creatorController.getMilestones);
+router.post('/milestones/:id/respond', authGuard, creatorController.respondToMilestone);
+
 // ── Admin routes ──────────────────────────────────────────────────────────────
 // IMPORTANT: static paths must come BEFORE /:creatorId/* param routes
 router.get('/applications', authGuard, roleGuard('admin', 'superadmin'), creatorController.listApplications);

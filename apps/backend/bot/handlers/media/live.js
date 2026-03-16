@@ -199,7 +199,7 @@ const registerLiveHandlers = (bot) => {
 
       // Join the stream
       try {
-        const { stream, viewerToken } = await LiveStreamModel.joinStream(
+        const { stream } = await LiveStreamModel.joinStream(
           streamId,
           userId,
           user.firstName || user.username || 'Anonymous',
