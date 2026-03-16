@@ -140,8 +140,6 @@ const onlineUsersMap = new Map();
 // ── In-memory music state per hangout group ───────────────────────────────────
 // Map<groupId, { trackId, trackUrl, trackTitle, trackArtist, trackArt, isPlaying, position, startedAt }>
 const hangoutMusicState = new Map();
-// Cache of Ampache song list per hangout group (avoids repeated API calls for auto-advance)
-const hangoutPlaylistCache = new Map(); // Map<groupId, { songs: Array, fetchedAt: number }>
 
 function emitGroupPresence(io, gid) {
   const online = [];
@@ -997,54 +995,8 @@ function initSocketIO(io) {
         existing._lastAdvancedAt = Date.now();
         hangoutMusicState.set(gid, existing);
 
-        // Fetch songs from Ampache (cache for 5 min)
-        const AmpacheService = require('../services/ampacheService');
-        let cached = hangoutPlaylistCache.get(gid);
-        if (!cached || Date.now() - cached.fetchedAt > 300000) {
-          const songs = await AmpacheService.getSongs({ offset: 0, limit: 100 });
-          cached = { songs, fetchedAt: Date.now() };
-          hangoutPlaylistCache.set(gid, cached);
-        }
-        const songs = cached.songs;
-        if (!songs || songs.length === 0) return;
-
-        // Find next track
-        let nextSong;
-        const currentIdx = songs.findIndex(s => String(s.id) === String(existing.trackId));
-        if (existing.shuffle) {
-          // Random track excluding current
-          if (songs.length === 1) {
-            nextSong = songs[0];
-          } else {
-            let randomIdx;
-            do {
-              randomIdx = Math.floor(Math.random() * songs.length);
-            } while (randomIdx === currentIdx && songs.length > 1);
-            nextSong = songs[randomIdx];
-          }
-        } else {
-          // Sequential: next index, wrap around
-          const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % songs.length : 0;
-          nextSong = songs[nextIdx];
-        }
-
-        if (!nextSong) return;
-        const artistName = typeof nextSong.artist === 'object' ? (nextSong.artist?.name || 'Unknown') : String(nextSong.artist || 'Unknown');
-        const newState = {
-          trackId: String(nextSong.id),
-          trackUrl: `/api/proxy/media/stream/${nextSong.id}`,
-          trackTitle: String(nextSong.title || '').slice(0, 200),
-          trackArtist: artistName.slice(0, 200),
-          trackArt: nextSong.art ? String(nextSong.art).slice(0, 500) : null,
-          isPlaying: true,
-          position: 0,
-          startedAt: Date.now(),
-          shuffle: existing.shuffle || false,
-          _lastAdvancedAt: Date.now(),
-        };
-        hangoutMusicState.set(gid, newState);
-        io.to(`hangout:${gid}`).emit('hangout:music:play', newState);
-        logger.info(`Music auto-advanced in group ${gid}: ${newState.trackTitle}`);
+        // Auto-advance disabled (Ampache removed)
+        logger.info(`Music ended in group ${gid}, no auto-advance available`);
       } catch (err) { logger.error('hangout:music:ended auto-advance error', err); }
     });
 

@@ -213,7 +213,7 @@ export function verifyAgeSelf(): Promise<{ success: boolean }> {
   return request("/api/verify-age-self", { method: "POST" });
 }
 
-// Media proxy (Ampache)
+// Media proxy
 export interface MediaTrack {
   id: string;
   title: string;
@@ -4058,93 +4058,6 @@ export function adminExtendCreatorSubscription(
   );
 }
 
-// ─── Ampache Media Management ─────────────────────────────────────────────────
-
-export interface AmpacheFile {
-  name: string;
-  size: number;
-  modified: string;
-  category: string;
-}
-
-export function getAmpacheFiles(): Promise<{
-  success: boolean;
-  files: { music: AmpacheFile[]; podcasts: AmpacheFile[]; videos: AmpacheFile[] };
-}> {
-  return request("/api/webapp/admin/ampache/files");
-}
-
-export async function uploadAmpacheFiles(
-  category: string,
-  files: File[]
-): Promise<{ success: boolean; uploaded: { name: string; size: number; category: string }[] }> {
-  const formData = new FormData();
-  formData.append("category", category);
-  files.forEach((f) => formData.append("files", f));
-
-  const res = await fetch(`${API_BASE}/api/webapp/admin/ampache/files/upload`, {
-    method: "POST",
-    credentials: "include",
-    body: formData,
-  });
-
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(error.error || `Upload failed (${res.status})`);
-  }
-  return res.json();
-}
-
-export function deleteAmpacheFile(
-  category: string,
-  filename: string
-): Promise<{ success: boolean }> {
-  return request(`/api/webapp/admin/ampache/files/${category}/${encodeURIComponent(filename)}`, {
-    method: "DELETE",
-  });
-}
-
-export function renameAmpacheFile(
-  category: string,
-  filename: string,
-  newName: string
-): Promise<{ success: boolean; newName: string }> {
-  return request(
-    `/api/webapp/admin/ampache/files/${category}/${encodeURIComponent(filename)}/rename`,
-    { method: "PUT", body: { newName } }
-  );
-}
-
-export interface AmpacheFileTags {
-  title: string;
-  artist: string;
-  album: string;
-  genre: string;
-  year: number | null;
-  track: number | null;
-  duration: number;
-}
-
-export function getAmpacheFileTags(
-  category: string,
-  filename: string
-): Promise<{ success: boolean; tags: AmpacheFileTags }> {
-  return request(
-    `/api/webapp/admin/ampache/files/${category}/${encodeURIComponent(filename)}/tags`
-  );
-}
-
-export function updateAmpacheFileTags(
-  category: string,
-  filename: string,
-  tags: { title?: string; artist?: string; album?: string; genre?: string; year?: string; trackNumber?: string }
-): Promise<{ success: boolean }> {
-  return request(
-    `/api/webapp/admin/ampache/files/${category}/${encodeURIComponent(filename)}/tags`,
-    { method: "PUT", body: tags }
-  );
-}
-
 // ─── Overlay Asset Direct Upload ─────────────────────────────────────────────
 
 export interface UploadedOverlayAsset {
@@ -4215,7 +4128,6 @@ export interface MediaLibraryVideo {
   duration: number;
   is_prime: boolean;
   is_public: boolean;
-  ampache_song_id: string | null;
   created_at: string;
   updated_at: string;
 }

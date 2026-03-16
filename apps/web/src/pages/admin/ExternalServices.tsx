@@ -54,13 +54,6 @@ const SECTIONS: Section[] = [
         external: true,
       },
       {
-        title: "Ampache Admin",
-        description: "Media library management",
-        url: import.meta.env.VITE_AMPACHE_URL || "https://media.pnptv.app",
-        badge: "Media",
-        external: true,
-      },
-      {
         title: "Restreamer Admin",
         description: "Live stream management",
         url: import.meta.env.VITE_RESTREAMER_URL || "https://live.pnptv.app",

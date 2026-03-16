@@ -107,7 +107,7 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage }: UseHangou
   }, []);
 
   // Main stage auto-start: if we are the moderator and no music state arrives within 1.5s,
-  // automatically start the first available Ampache track as Radio PNP
+  // automatically start the first available track as Radio PNP
   useEffect(() => {
     if (!isMainStage || !isModerator || mainStageAutoStarted.current || !groupId) return;
 

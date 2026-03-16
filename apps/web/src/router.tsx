@@ -62,7 +62,6 @@ const StreamManagement = lazy(() => import("@/pages/admin/StreamManagement"));
 const SupportDashboard = lazy(() => import("@/pages/admin/SupportDashboard"));
 const AccessMatrix = lazy(() => import("@/pages/admin/AccessMatrix"));
 const CreatorSubscriptions = lazy(() => import("@/pages/admin/CreatorSubscriptions"));
-const AmpacheMedia = lazy(() => import("@/pages/admin/AmpacheMedia"));
 const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
 
 export const router = createBrowserRouter([
@@ -464,14 +463,6 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <CreatorSubscriptions />
-          </ModuleLoader>
-        ),
-      },
-      {
-        path: "ampache-media",
-        element: (
-          <ModuleLoader>
-            <AmpacheMedia />
           </ModuleLoader>
         ),
       },
