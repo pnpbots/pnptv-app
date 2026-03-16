@@ -14,6 +14,7 @@ import { EventDetailModal } from "@/components/events";
 import type { EventItem } from "@/components/events/EventCard";
 import { CallPackageCards } from "@/components/creators/CallPackageCards";
 import { SpotlightStrip, type SpotlightItem } from "@/components/SpotlightStrip";
+import { BuyTokensModal } from "@/components/BuyTokensModal";
 import { getUpcomingEvents } from "@/lib/api";
 
 const StreamerDashboard = lazy(() => import("@/components/streaming/StreamerDashboard"));
@@ -137,13 +138,9 @@ export default function Live() {
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
   const [dpnsHandle, setDpnsHandle] = useState<string | null>(null);
   const [showBuyModal, setShowBuyModal] = useState(false);
-  const [buyMethod, setBuyMethod] = useState<'select' | 'card' | 'wallet' | 'dash'>('select');
-  const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
-  const [buyingPackage, setBuyingPackage] = useState<string | null>(null);
   const [showDpnsInput, setShowDpnsInput] = useState(false);
   const [dpnsInput, setDpnsInput] = useState("");
   const [dpnsSaving, setDpnsSaving] = useState(false);
-  const [buyError, setBuyError] = useState<string | null>(null);
 
   // Wallet history
   const [showWalletHistory, setShowWalletHistory] = useState(false);
@@ -591,7 +588,7 @@ export default function Live() {
             <button onClick={openWalletHistory} className="text-[10px] text-pnp-textSecondary hover:text-pnp-accent transition-colors">
               {t.live.history}
             </button>
-            <button onClick={() => { setBuyError(null); setBuyMethod('select'); setShowBuyModal(true); }} className="px-2 py-1 rounded-md text-[10px] font-semibold text-white btn-gradient">
+            <button onClick={() => setShowBuyModal(true)} className="px-2 py-1 rounded-md text-[10px] font-semibold text-white btn-gradient">
               {t.live.buyTokens}
             </button>
           </div>
@@ -696,164 +693,12 @@ export default function Live() {
       </div>
 
       {/* Buy Tokens Modal */}
-      {showBuyModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
-          onClick={() => setShowBuyModal(false)}
-        >
-          <div
-            className="w-full max-w-lg bg-pnp-background border border-pnp-border rounded-t-2xl p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal header — shared between both steps */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                {buyMethod !== 'select' && (
-                  <button
-                    onClick={() => { setBuyMethod('select'); setBuyError(null); }}
-                    className="flex items-center justify-center w-7 h-7 rounded-full bg-pnp-surface hover:bg-pnp-surfaceHover transition-colors"
-                    aria-label="Back to payment method selection"
-                  >
-                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
-                )}
-                <h2 className="text-base font-bold text-pnp-textPrimary">
-                  {buyMethod === 'select' ? 'Buy PNP Tokens' : 'Choose a Package'}
-                </h2>
-              </div>
-              <button
-                onClick={() => setShowBuyModal(false)}
-                className="flex items-center justify-center w-8 h-8 rounded-full text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors"
-                aria-label="Close"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Step 1: Payment method selector */}
-            {buyMethod === 'select' && (
-              <div className="space-y-2">
-                <p className="text-xs text-pnp-textSecondary mb-3">
-                  Select how you want to pay for your tokens.
-                </p>
-
-                {/* Card */}
-                <button
-                  onClick={() => setBuyMethod('card')}
-                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-green-500/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
-                >
-                  <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(76,175,80,0.15)" }}>
-                    <svg className="w-5 h-5" style={{ color: "#4CAF50" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                      <rect x="2" y="5" width="20" height="14" rx="2" ry="2" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M2 10h20" />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-pnp-textPrimary">Buy with Card</p>
-                    <p className="text-xs text-pnp-textSecondary truncate">Visa, Mastercard, PSE</p>
-                  </div>
-                  <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-
-                {/* Wallet */}
-                <button
-                  onClick={() => setBuyMethod('wallet')}
-                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-violet-500/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
-                >
-                  <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(124,58,237,0.15)" }}>
-                    <svg className="w-5 h-5" style={{ color: "#7C3AED" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-pnp-textPrimary">Buy with Wallet</p>
-                    <p className="text-xs text-pnp-textSecondary truncate">USDC on Base — fast &amp; easy</p>
-                  </div>
-                  <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-
-                {/* Dash / Privacy */}
-                <button
-                  onClick={() => setBuyMethod('dash')}
-                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-sky-400/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
-                >
-                  <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(0,140,231,0.15)" }}>
-                    <svg className="w-5 h-5" style={{ color: "#008CE7" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-pnp-textPrimary">Buy with More Privacy</p>
-                    <p className="text-xs text-pnp-textSecondary truncate">Dash cryptocurrency</p>
-                  </div>
-                  <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-              </div>
-            )}
-
-            {/* Step 2: Package grid after method selected */}
-            {buyMethod !== 'select' && (
-              <>
-                {/* Method explanation */}
-                <p className="text-xs text-pnp-textSecondary mb-4 leading-relaxed">
-                  {buyMethod === 'card' && "Pay instantly with your credit or debit card via ePayco. Secure checkout — your card details are never stored on our servers."}
-                  {buyMethod === 'wallet' && "Pay with USDC stablecoin from any crypto wallet via Daimo. Fast, low fees, and no personal info required."}
-                  {buyMethod === 'dash' && "Pay with Dash cryptocurrency via BTCPay Server. Maximum privacy — fully anonymous, no account needed."}
-                </p>
-
-                {buyError && <p className="text-xs text-pnp-error mb-3">{buyError}</p>}
-
-                {tokenPackages.length === 0 ? (
-                  <p className="text-sm text-pnp-textSecondary text-center py-6">{t.live.loadingPackages}</p>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2 mb-4">
-                    {tokenPackages.map((pkg) => (
-                      <button
-                        key={pkg.id}
-                        onClick={() => handleBuyTokens(pkg)}
-                        disabled={buyingPackage === pkg.id}
-                        className="p-3 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-pnp-accent/50 active:scale-[0.98] transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
-                      >
-                        <p className="text-lg font-bold text-pnp-textPrimary">{pkg.tokens}</p>
-                        <p className="text-xs text-pnp-textSecondary">{t.live.tokensLabel}</p>
-                        <p className="text-sm font-semibold mt-1" style={{
-                          color: buyMethod === 'card' ? '#4CAF50' : buyMethod === 'wallet' ? '#7C3AED' : '#008CE7'
-                        }}>${pkg.usd}</p>
-                        {buyingPackage === pkg.id && (
-                          <p className="text-[10px] text-pnp-textSecondary mt-1">{t.live.opening}</p>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* Dash-specific DPNS info — only shown for the Dash method */}
-                {buyMethod === 'dash' && (
-                  <div className="flex items-start gap-2 p-3 rounded-lg bg-pnp-surface border border-pnp-border/50">
-                    <svg className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#008CE7" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <p className="text-[11px] text-pnp-textSecondary">
-                      {t.live.buyTokensCheckoutNote}
-                      {dpnsHandle && t.live.yourDashIdentity(dpnsHandle)}
-                    </p>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <BuyTokensModal
+        isOpen={showBuyModal}
+        onClose={() => setShowBuyModal(false)}
+        onSuccess={(newBalance) => setTokenBalance(newBalance)}
+        dpnsHandle={dpnsHandle}
+      />
 
       {/* Wallet History Modal */}
       {showWalletHistory && (

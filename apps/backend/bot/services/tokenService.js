@@ -5,12 +5,13 @@
  *
  * Manages user token balances for all pay-per-use features.
  * This service is the single source of truth for token transactions.
- *
- * TODO: Integrate with Directus/Postgres database to persist balances.
+ * Integrates with user_token_wallets table.
  */
 
 const logger = require('../../utils/logger');
 const userService = require('./userService');
+const { query, getClient } = require('../../config/postgres');
+const { cache } = require('../../config/redis');
 
 const STREAM_HEARTBEAT_COST = 1;
 const STREAM_HEARTBEAT_REVENUE = 1; // Assuming 1:1 payout for now
@@ -23,12 +24,18 @@ const STREAM_HEARTBEAT_REVENUE = 1; // Assuming 1:1 payout for now
  * @returns {Promise<boolean>} True if the user has enough tokens, false otherwise.
  */
 async function hasSufficientBalance(userId, requiredAmount) {
-  // STUB: Replace with actual DB lookup.
   try {
-    const user = await userService.fetchUserById(userId);
-    // This part is a placeholder for actual token balance logic.
-    // In a real scenario, this would be a direct DB query on a wallet table.
-    const currentBalance = 999; // Assume user has enough tokens for now.
+    const res = await query(
+      'SELECT balance_tokens FROM user_token_wallets WHERE user_id = $1',
+      [String(userId)]
+    );
+    
+    if (res.rows.length === 0) {
+      // If no wallet exists, they have 0 tokens
+      return requiredAmount <= 0;
+    }
+    
+    const currentBalance = res.rows[0].balance_tokens;
     return currentBalance >= requiredAmount;
   } catch (error) {
     logger.error('tokenService.hasSufficientBalance error', { userId, error: error.message });
@@ -41,19 +48,40 @@ async function hasSufficientBalance(userId, requiredAmount) {
  *
  * @param {string|number} userId The user's ID.
  * @param {number} amount The number of tokens to deduct. Must be a positive number.
+ * @param {string} [reason] Optional reason for deduction.
  * @returns {Promise<{success: boolean, newBalance: number}>}
  */
-async function deductTokens(userId, amount) {
+async function deductTokens(userId, amount, reason = 'deduction') {
   if (amount <= 0) {
     logger.warn('tokenService.deductTokens: Amount must be positive.', { userId, amount });
     return { success: false, newBalance: 0 };
   }
 
-  logger.info(`Deducting ${amount} tokens from user ${userId}. (STUB)`);
-  // STUB: Replace with actual DB transaction.
-  // This should be an atomic operation.
-  const newBalance = 998; // Placeholder
-  return { success: true, newBalance };
+  try {
+    const result = await query(
+      `UPDATE user_token_wallets
+       SET balance_tokens = balance_tokens - $2,
+           updated_at = NOW()
+       WHERE user_id = $1 AND balance_tokens >= $2
+       RETURNING balance_tokens`,
+      [String(userId), amount]
+    );
+
+    if (result.rows.length === 0) {
+      return { success: false, newBalance: 0, error: 'Insufficient tokens' };
+    }
+
+    const newBalance = result.rows[0].balance_tokens;
+    
+    // Invalidate cache
+    await cache.del(`wallet:${userId}`).catch(() => {});
+    
+    logger.info(`Deducted ${amount} tokens from user ${userId} for ${reason}. New balance: ${newBalance}`);
+    return { success: true, newBalance };
+  } catch (error) {
+    logger.error('tokenService.deductTokens error', { userId, amount, error: error.message });
+    return { success: false, newBalance: 0, error: 'Database error' };
+  }
 }
 
 /**
@@ -61,18 +89,37 @@ async function deductTokens(userId, amount) {
  *
  * @param {string|number} userId The user's ID.
  * @param {number} amount The number of tokens to credit. Must be a positive number.
+ * @param {string} [reason] Optional reason for credit.
  * @returns {Promise<boolean>} True on success, false on failure.
  */
-async function creditTokens(userId, amount) {
+async function creditTokens(userId, amount, reason = 'credit') {
   if (amount <= 0) {
     logger.warn('tokenService.creditTokens: Amount must be positive.', { userId, amount });
     return false;
   }
 
-  logger.info(`Crediting ${amount} tokens to user ${userId}. (STUB)`);
-  // STUB: Replace with actual DB transaction.
-  // This should be an atomic operation.
-  return true;
+  try {
+    const result = await query(
+      `INSERT INTO user_token_wallets (user_id, balance_tokens)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id) DO UPDATE
+         SET balance_tokens = user_token_wallets.balance_tokens + $2,
+             updated_at = NOW()
+       RETURNING balance_tokens`,
+      [String(userId), amount]
+    );
+
+    const newBalance = result.rows[0].balance_tokens;
+    
+    // Invalidate cache
+    await cache.del(`wallet:${userId}`).catch(() => {});
+    
+    logger.info(`Credited ${amount} tokens to user ${userId} for ${reason}. New balance: ${newBalance}`);
+    return true;
+  } catch (error) {
+    logger.error('tokenService.creditTokens error', { userId, amount, error: error.message });
+    return false;
+  }
 }
 
 /**
@@ -91,25 +138,99 @@ async function processStreamHeartbeat(viewerId, channelRef) {
   if (streamer.creator_status !== 'active') {
     logger.warn('Heartbeat for non-active creator.', { viewerId, channelRef, streamerId: streamer.id });
     // Don't charge the viewer if the creator isn't active
-    return { success: true, newBalance: 999 }; // Return a dummy balance
+    return { success: true };
   }
 
-  const hasBalance = await hasSufficientBalance(viewerId, STREAM_HEARTBEAT_COST);
-  if (!hasBalance) {
-    return { success: false, error: 'INSUFFICIENT_FUNDS' };
+  // Don't charge the streamer for watching their own stream
+  if (String(viewerId) === String(streamer.id)) {
+    return { success: true };
   }
 
-  const debitResult = await deductTokens(viewerId, STREAM_HEARTBEAT_COST);
-  if (!debitResult.success) {
-    // This case should be rare if hasSufficientBalance is correct, but handle it.
-    return { success: false, error: 'DEDUCTION_FAILED' };
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Check and deduct from viewer
+    const debitResult = await client.query(
+      `UPDATE user_token_wallets
+       SET balance_tokens = balance_tokens - $2,
+           updated_at = NOW()
+       WHERE user_id = $1 AND balance_tokens >= $2
+       RETURNING balance_tokens`,
+      [String(viewerId), STREAM_HEARTBEAT_COST]
+    );
+
+    if (debitResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { success: false, error: 'INSUFFICIENT_FUNDS' };
+    }
+
+    const newBalance = debitResult.rows[0].balance_tokens;
+
+    // 2. Credit streamer
+    await client.query(
+      `INSERT INTO user_token_wallets (user_id, balance_tokens)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id) DO UPDATE
+         SET balance_tokens = user_token_wallets.balance_tokens + $2,
+             updated_at = NOW()`,
+      [String(streamer.id), STREAM_HEARTBEAT_REVENUE]
+    );
+
+    // 3. Log the earning record
+    // Using a simple earnings record for now. If a specific table for tip/heartbeat
+    // exists, it should be used here.
+    await client.query(
+      `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, period_month)
+       VALUES ($1, $2, $3, 0, 'available', date_trunc('month', CURRENT_DATE))`,
+      [String(streamer.id), STREAM_HEARTBEAT_REVENUE, STREAM_HEARTBEAT_REVENUE]
+    );
+
+    await client.query('COMMIT');
+
+    // Invalidate caches
+    await Promise.all([
+      cache.del(`wallet:${viewerId}`),
+      cache.del(`wallet:${streamer.id}`)
+    ]).catch(() => {});
+
+    // Emit real-time updates via Socket.IO
+    try {
+      const socketSingleton = require('./socketSingleton');
+      const io = socketSingleton.get();
+      if (io) {
+        // Update viewer's wallet balance
+        io.to(`user:${viewerId}`).emit('wallet:updated', { balance: newBalance });
+
+        // Fetch and update streamer's wallet balance
+        const streamerWallet = await query(
+          'SELECT balance_tokens FROM user_token_wallets WHERE user_id = $1',
+          [String(streamer.id)]
+        );
+        if (streamerWallet.rows.length > 0) {
+          const streamerBalance = streamerWallet.rows[0].balance_tokens;
+          io.to(`user:${streamer.id}`).emit('wallet:updated', { balance: streamerBalance });
+          
+          // Emit session earnings update for streamer's dashboard
+          io.to(`user:${streamer.id}`).emit('stream:earnings_update', {
+            amount: STREAM_HEARTBEAT_REVENUE,
+            reason: 'heartbeat',
+            viewerId
+          });
+        }
+      }
+    } catch (socketErr) {
+      logger.warn('Failed to emit socket updates after heartbeat', { error: socketErr.message });
+    }
+
+    return { success: true, newBalance };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    logger.error('processStreamHeartbeat error', { viewerId, channelRef, error: error.message });
+    return { success: false, error: 'INTERNAL_ERROR' };
+  } finally {
+    client.release();
   }
-
-  await creditTokens(streamer.id, STREAM_HEARTBEAT_REVENUE);
-
-  // TODO: Log the transaction in a dedicated ledger table.
-
-  return { success: true, newBalance: debitResult.newBalance };
 }
 
 

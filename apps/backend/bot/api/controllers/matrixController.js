@@ -73,15 +73,15 @@ const getOrCreateDmRoom = async (req, res) => {
   const sessionUser = authGuard(req, res);
   if (!sessionUser) return;
 
-  const partnerIdRaw = parseInt(req.params.userId, 10);
-  if (!partnerIdRaw || isNaN(partnerIdRaw)) {
+  const partnerId = String(req.params.userId || '').trim();
+  if (!partnerId) {
     return res.status(400).json({
       success: false,
-      error: { code: 'invalid_user_id', message: 'userId must be a valid integer' },
+      error: { code: 'invalid_user_id', message: 'userId is required' },
     });
   }
 
-  if (partnerIdRaw === sessionUser.id) {
+  if (partnerId === String(sessionUser.id)) {
     return res.status(400).json({
       success: false,
       error: { code: 'self_dm', message: 'Cannot create a DM room with yourself' },
@@ -90,15 +90,16 @@ const getOrCreateDmRoom = async (req, res) => {
 
   try {
     // Load both users' DB rows so matrixService has telegram IDs
+    const callerId = String(sessionUser.id);
     const { rows } = await query(
       `SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
        FROM users
-       WHERE id = ANY($1::int[]) AND is_deleted = false`,
-      [[sessionUser.id, partnerIdRaw]]
+       WHERE id = ANY($1::text[]) AND is_deleted = false`,
+      [[callerId, partnerId]]
     );
 
-    const callerUser  = rows.find(r => r.id === sessionUser.id);
-    const partnerUser = rows.find(r => r.id === partnerIdRaw);
+    const callerUser  = rows.find(r => String(r.id) === callerId);
+    const partnerUser = rows.find(r => String(r.id) === partnerId);
 
     if (!callerUser) {
       return res.status(401).json({

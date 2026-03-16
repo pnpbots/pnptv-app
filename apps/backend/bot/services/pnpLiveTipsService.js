@@ -109,6 +109,69 @@ class PNPLiveTipsService {
         logger.warn('Failed to invalidate wallet cache after token tip:', { userId, error: cacheErr.message });
       }
 
+      // Emit real-time updates via Socket.IO
+      try {
+        const socketSingleton = require('./socketSingleton');
+        const io = socketSingleton.get();
+        if (io) {
+          // 1. Update tipper's wallet balance
+          io.to(`user:${userId}`).emit('wallet:updated', { balance: newBalance });
+
+          // 2. Resolve performer details and update their wallet
+          const { rows: performerRows } = await client.query(
+            'SELECT user_id, display_name FROM performers WHERE id::text = $1 LIMIT 1',
+            [String(performerId)]
+          );
+          
+          if (performerRows.length > 0) {
+            const performerUserId = performerRows[0].user_id;
+            const performerName = performerRows[0].display_name;
+
+            // Fetch performer's new balance
+            const performerWallet = await client.query(
+              'SELECT balance_tokens FROM user_token_wallets WHERE user_id = $1',
+              [String(performerUserId)]
+            );
+            
+            if (performerWallet.rows.length > 0) {
+              const pBalance = performerWallet.rows[0].balance_tokens;
+              io.to(`user:${performerUserId}`).emit('wallet:updated', { balance: pBalance });
+              
+              // Emit session earnings update for streamer's dashboard
+              io.to(`user:${performerUserId}`).emit('stream:earnings_update', {
+                amount: amount,
+                reason: 'tip',
+                viewerId: userId,
+                message: message
+              });
+            }
+
+            // 3. Resolve streamId (channelRef) and tipper info for public broadcast
+            const [performerUserRes, tipperUserRes] = await Promise.all([
+              client.query('SELECT live_channel FROM users WHERE id = $1', [String(performerUserId)]),
+              client.query('SELECT username FROM users WHERE id = $1', [String(userId)])
+            ]);
+
+            const streamId = performerUserRes.rows[0]?.live_channel;
+            const tipperUsername = tipperUserRes.rows[0]?.username || 'Someone';
+
+            if (streamId) {
+              io.to(`live:${streamId}`).emit('live:tip', {
+                id: tip.id,
+                amount: amount,
+                username: tipperUsername,
+                performerName: performerName,
+                message: message,
+                createdAt: tip.created_at,
+                paymentMethod: 'tokens'
+              });
+            }
+          }
+        }
+      } catch (socketErr) {
+        logger.warn('Failed to emit socket updates after token tip', { error: socketErr.message });
+      }
+
       logger.info('Token tip processed atomically', { userId, performerId, amount, tipId: tip.id });
 
       return { tip, newBalance };

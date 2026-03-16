@@ -35,13 +35,14 @@ function getTokenService() {
   return _tokenService;
 }
 
-const LIVEKIT_URL = process.env.LIVEKIT_URL;
+const LIVEKIT_URL = process.env.LIVEKIT_URL || 'http://livekit-server:7880';
 const LIVEKIT_WS_URL = process.env.LIVEKIT_WS_URL || 'wss://pnptv.app/livekit-ws';
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
 
 const TOKEN_TTL_SECONDS = 6 * 60 * 60; // 6 hours for long streams
 const STREAM_JOIN_COST = 1; // Initial cost to join a stream
+const STREAM_MIN_BALANCE = 10; // Min tokens required to join (prevents immediate disconnect)
 
 let _roomService = null;
 function getRoomService() {
@@ -109,9 +110,11 @@ async function generateStreamerToken(channelRef, userId, displayName, photoUrl) 
 async function generateViewerToken(channelRef, userId, displayName) {
   // Check balance and deduct tokens at join time (not heartbeat)
   const tokenSvc = getTokenService();
-  const hasBalance = await tokenSvc.hasSufficientBalance(userId, STREAM_JOIN_COST);
-  if (!hasBalance) {
-    logger.warn('Insufficient balance for user to join stream.', { userId, channelRef });
+  
+  // Require at least STREAM_MIN_BALANCE to join (e.g. 10 tokens)
+  const hasMinBalance = await tokenSvc.hasSufficientBalance(userId, STREAM_MIN_BALANCE);
+  if (!hasMinBalance) {
+    logger.warn('Insufficient minimum balance for user to join stream.', { userId, channelRef, minRequired: STREAM_MIN_BALANCE });
     return null;
   }
 

@@ -59,6 +59,17 @@ const getStreamerConfig = async (req, res) => {
     // Ensure the room exists
     await livekitStreamService.ensureStreamRoom(channelRef);
 
+    // Signal streaming active in Redis (used by auto-chat controller)
+    try {
+      const { getRedis } = require('../../../config/redis');
+      const redis = getRedis();
+      if (redis) {
+        await redis.set(`streaming:active:${user.id}`, '1', 'EX', 86400);
+      }
+    } catch (redisErr) {
+      logger.warn('Failed to set streaming:active flag in Redis', { userId: user.id, error: redisErr.message });
+    }
+
     // Generate a publisher token
     const token = await livekitStreamService.generateStreamerToken(
       channelRef, user.id, displayName, photoUrl
@@ -101,7 +112,7 @@ const getViewerToken = async (req, res) => {
     if (!token) {
       return res.status(402).json({
         success: false,
-        error: 'Insufficient funds. Please top up your tokens to watch.',
+        error: 'Minimum 10 tokens required to join a stream. Please top up your tokens to watch.',
       });
     }
 
@@ -211,6 +222,18 @@ const endStream = async (req, res) => {
     }
 
     await livekitStreamService.endStream(channelRef);
+
+    // Signal streaming inactive in Redis
+    try {
+      const { getRedis } = require('../../../config/redis');
+      const redis = getRedis();
+      if (redis) {
+        await redis.set(`streaming:active:${user.id}`, '0', 'EX', 86400);
+      }
+    } catch (redisErr) {
+      logger.warn('Failed to clear streaming:active flag in Redis', { userId: user.id, error: redisErr.message });
+    }
+
     return res.json({ success: true });
   } catch (err) {
     logger.error('endStream error', err);

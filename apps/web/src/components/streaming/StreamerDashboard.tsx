@@ -662,6 +662,8 @@ export default function StreamerDashboard({
     fps: 30,
   });
 
+  const [sessionEarnings, setSessionEarnings] = useState(0);
+
   // ── Persistent settings (load on mount, debounced save on change) ──────
   const [filterSettings, setFilterSettings] = useState<{
     filterPreset: string;
@@ -967,6 +969,7 @@ export default function StreamerDashboard({
       dispatch({ type: "SET_CONNECTING", payload: false });
       dispatch({ type: "SET_STREAM_START", payload: now });
       setDurationSec(0);
+      setSessionEarnings(0);
       bytesWindowRef.current = [];
       bytesSentTotalRef.current = 0;
       frameCountRef.current = 0;
@@ -1026,16 +1029,22 @@ export default function StreamerDashboard({
       dispatch({ type: "SET_VIEWER_COUNT", payload: data.count });
     };
 
+    const onEarningsUpdate = (data: { amount: number }) => {
+      setSessionEarnings((prev) => prev + data.amount);
+    };
+
     socket.on("stream:started", onStarted);
     socket.on("stream:stopped", onStopped);
     socket.on("stream:error", onStreamError);
     socket.on("live:viewer_count", onViewerCount);
+    socket.on("stream:earnings_update", onEarningsUpdate);
 
     return () => {
       socket.off("stream:started", onStarted);
       socket.off("stream:stopped", onStopped);
       socket.off("stream:error", onStreamError);
       socket.off("live:viewer_count", onViewerCount);
+      socket.off("stream:earnings_update", onEarningsUpdate);
     };
   }, [socket]);
 
@@ -1705,6 +1714,11 @@ export default function StreamerDashboard({
         <StatRow
           label="Latency"
           value={state.isLive ? `${state.stats.latency} ms` : "—"}
+        />
+        <StatRow
+          label="Earnings"
+          value={state.isLive ? `${sessionEarnings} T` : "—"}
+          color={sessionEarnings > 0 ? "#5ED1C4" : undefined}
         />
         <StatRow
           label="Sent"

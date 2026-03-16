@@ -8,6 +8,7 @@ import { useI18n } from "@/lib/i18n";
 import { LivePlayer } from "@/components/LivePlayer";
 import { WebRTCPlayer } from "@/components/WebRTCPlayer";
 import { LiveRulesModal } from "@/components/LiveRulesModal";
+import { BuyTokensModal } from "@/components/BuyTokensModal";
 import { connectSocket } from "@/lib/socket";
 import {
   getLiveStreams,
@@ -24,6 +25,7 @@ import {
   type RecentTip,
   type StreamOverlay,
   getRecentTips,
+  getWalletBalance,
 } from "@/lib/api";
 
 function extractChannelRef(streamId: string): string | null {
@@ -59,6 +61,10 @@ export default function Stream() {
   const [recentTips, setRecentTips] = useState<RecentTip[]>([]);
   const [streamError, setStreamError] = useState(false);
 
+  // Dash token wallet
+  const [tokenBalance, setTokenBalance] = useState<number | null>(null);
+  const [showTopUp, setShowTopUp] = useState(false);
+
   const {
     messages: chatMessages,
     viewerCount: socketViewerCount,
@@ -66,8 +72,23 @@ export default function Stream() {
     reconnecting: chatReconnecting,
     sendMessage,
     latestTip,
+    walletBalance: socketBalance,
     socketError,
   } = useLiveSocket(streamId || null);
+
+  // Load initial balance
+  useEffect(() => {
+    if (isAuthenticated) {
+      getWalletBalance().then((data) => {
+        setTokenBalance(data.balance);
+      }).catch(() => {});
+    }
+  }, [isAuthenticated]);
+
+  // Sync socket-pushed balance
+  useEffect(() => {
+    if (socketBalance !== null) setTokenBalance(socketBalance);
+  }, [socketBalance]);
 
   // Viewer count: prefer the real-time socket value; fall back to a polled
   // value from the streams API when the socket is not connected.
@@ -528,7 +549,17 @@ export default function Stream() {
       {/* Video Player */}
       <div ref={videoContainerRef} className="relative -mx-4 sm:-mx-6">
         {useWebRTC ? (
-          <WebRTCPlayer channelRef={extractChannelRef(stream.id) || stream.id} title={stream.name} />
+          <WebRTCPlayer 
+            channelRef={extractChannelRef(stream.id) || stream.id} 
+            title={stream.name} 
+            onBalanceUpdate={(bal) => {
+              if (bal === -1) {
+                setShowTopUp(true);
+              } else {
+                setTokenBalance(bal);
+              }
+            }}
+          />
         ) : (
           <LivePlayer src={stream.hlsUrl} title={stream.name} overlay={overlay} />
         )}
@@ -596,6 +627,28 @@ export default function Stream() {
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-pnp-surface border border-pnp-border" aria-live="polite">
           <span className="w-3 h-3 border border-pnp-textSecondary border-t-transparent rounded-full animate-spin flex-shrink-0" />
           <span className="text-[10px] text-pnp-textSecondary">Reconnecting to live chat...</span>
+        </div>
+      )}
+
+      {/* Wallet Balance — Improvement #1 */}
+      {isAuthenticated && (
+        <div className="flex items-center justify-between px-1 py-1">
+          <div className="flex items-center gap-1.5">
+            <div className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>
+              <svg viewBox="0 0 24 24" className="w-2.5 h-2.5 fill-white">
+                <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
+              </svg>
+            </div>
+            <span className="text-[11px] font-semibold text-pnp-textPrimary">
+              {tokenBalance === null ? "—" : `${tokenBalance} ${t.live.tokens}`}
+            </span>
+          </div>
+          <button
+            onClick={() => setShowTopUp(true)}
+            className="text-[10px] font-bold text-pnp-accent hover:underline px-2 py-1"
+          >
+            + Top up
+          </button>
         </div>
       )}
 
@@ -740,6 +793,12 @@ export default function Stream() {
           </>
         )}
       </Card>
+
+      <BuyTokensModal
+        isOpen={showTopUp}
+        onClose={() => setShowTopUp(false)}
+        onSuccess={(newBalance) => setTokenBalance(newBalance)}
+      />
     </div>
   );
 }

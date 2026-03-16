@@ -294,8 +294,10 @@ async function getAdminToken() {
  * @returns {string} matrix_room_id
  */
 async function getOrCreateDmRoom(userA, userB) {
-  // Canonical ordering: smaller id is always user_a
-  const [small, large] = userA.id < userB.id ? [userA, userB] : [userB, userA];
+  // Canonical ordering: smaller id is always user_a (compare as strings for consistency)
+  const [small, large] = String(userA.id).localeCompare(String(userB.id)) <= 0
+    ? [userA, userB]
+    : [userB, userA];
 
   // Check for existing room
   const existing = await query(

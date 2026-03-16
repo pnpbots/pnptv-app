@@ -2,17 +2,18 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Room, RoomEvent, Track, RemoteTrackPublication, RemoteParticipant } from "livekit-client";
 import { Skeleton } from "@pnptv/ui-kit";
 import { useI18n } from "@/lib/i18n";
-import { getWebRTCViewerToken, streamHeartbeat } from "@/lib/api";
+import { getWebRTCViewerToken, streamHeartbeat, ApiError } from "@/lib/api";
 
 interface WebRTCPlayerProps {
   channelRef: string;
   title?: string;
   className?: string;
+  onBalanceUpdate?: (newBalance: number) => void;
 }
 
 type PlayerStatus = "loading" | "connecting" | "live" | "offline" | "error" | "outOfTokens";
 
-export function WebRTCPlayer({ channelRef, title, className = "" }: WebRTCPlayerProps) {
+export function WebRTCPlayer({ channelRef, title, className = "", onBalanceUpdate }: WebRTCPlayerProps) {
   const t = useI18n();
   const videoRef = useRef<HTMLVideoElement>(null);
   const roomRef = useRef<Room | null>(null);
@@ -37,7 +38,7 @@ export function WebRTCPlayer({ channelRef, title, className = "" }: WebRTCPlayer
 
     try {
       const data = await getWebRTCViewerToken(channelRef);
-      if (data.error && data.error.includes("Insufficient funds")) {
+      if (data.error && (data.error.includes("Insufficient funds") || data.error.includes("Minimum 10 tokens"))) {
         setStatus("outOfTokens");
         return;
       }
@@ -73,9 +74,12 @@ export function WebRTCPlayer({ channelRef, title, className = "" }: WebRTCPlayer
       // Start heartbeat
       heartbeatIntervalRef.current = setInterval(async () => {
         try {
-          await streamHeartbeat(channelRef);
+          const res = await streamHeartbeat(channelRef);
+          if (res.success && typeof res.newBalance === 'number' && onBalanceUpdate) {
+            onBalanceUpdate(res.newBalance);
+          }
         } catch (error: any) {
-          if (error.response?.status === 402) {
+          if (error.response?.status === 402 || (error instanceof ApiError && error.status === 402)) {
             cleanup();
             setStatus("outOfTokens");
           }
@@ -131,12 +135,26 @@ export function WebRTCPlayer({ channelRef, title, className = "" }: WebRTCPlayer
   if (status === "outOfTokens") {
     return (
       <div className={`relative aspect-video overflow-hidden rounded-xl bg-pnp-surface border border-pnp-border flex items-center justify-center ${className}`}>
-        <div className="text-center">
-          <p className="text-pnp-error font-medium mb-3">You've run out of tokens.</p>
-          <p className="text-sm text-pnp-textSecondary/60 mt-1 mb-4">Please top up to continue watching.</p>
-          <a href="/wallet" className="px-5 py-2.5 rounded-lg text-xs font-semibold text-white btn-gradient">
-            Go to Wallet
-          </a>
+        <div className="text-center px-6">
+          <p className="text-pnp-error font-bold mb-2">Insufficient Tokens</p>
+          <p className="text-sm text-pnp-textSecondary mb-6">You've run out of tokens to continue watching this live stream.</p>
+          {onBalanceUpdate ? (
+            <button 
+              onClick={() => {
+                // We rely on the parent to open the modal when they see tokens are 0
+                // or we can add a specific onTopUpRequested prop if needed.
+                // For now, let's assume if onBalanceUpdate exists, we can signal it.
+                onBalanceUpdate(-1); // Special signal for top-up requested
+              }}
+              className="px-6 py-2.5 rounded-lg text-xs font-bold text-white btn-gradient active:scale-95 transition-all"
+            >
+              Top Up Now
+            </button>
+          ) : (
+            <a href="/live" className="px-6 py-2.5 rounded-lg text-xs font-bold text-white btn-gradient inline-block">
+              Go to Wallet
+            </a>
+          )}
         </div>
       </div>
     );
