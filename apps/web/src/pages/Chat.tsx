@@ -520,74 +520,6 @@ export default function Chat() {
   // Reply-to state
   const [replyToMsg, setReplyToMsg] = useState<GroupMessage | null>(null);
 
-  // REST-based reactions for all messages (works regardless of Matrix)
-  const [restReactions, setRestReactions] = useState<Map<number, ReactionEntry[]>>(new Map());
-  const loadedReactionIds = useRef<Set<number>>(new Set());
-
-  // Load existing reactions for messages on initial load
-  useEffect(() => {
-    const messageIds = messages
-      .map(m => m.id)
-      .filter(id => Number.isFinite(id) && id > 0 && !loadedReactionIds.current.has(id));
-    if (messageIds.length === 0) return;
-
-    messageIds.forEach(id => loadedReactionIds.current.add(id));
-
-    // Fetch reactions for each message (batched concurrently, max 10 at a time)
-    const batch = messageIds.slice(0, 20);
-    Promise.allSettled(batch.map(id =>
-      getChatReactions(id).then(res => ({ id, reactions: res.reactions }))
-    )).then(results => {
-      setRestReactions(prev => {
-        const next = new Map(prev);
-        for (const r of results) {
-          if (r.status === 'fulfilled' && r.value.reactions.length > 0) {
-            next.set(r.value.id, r.value.reactions.map(rx => ({
-              emoji: rx.emoji,
-              count: rx.count,
-              users: rx.users.map(u => ({ userId: u.id, reactionEventId: '' })),
-            })));
-          }
-        }
-        return next;
-      });
-    });
-  }, [messages]);
-
-  // Handle reaction toggle — uses REST API for all messages
-  const handleReaction = useCallback(async (idOrEventId: string, emoji: string) => {
-    // Try REST API reaction (uses numeric message ID)
-    const numId = parseInt(idOrEventId, 10);
-    if (Number.isFinite(numId) && numId > 0) {
-      try {
-        const result = await reactToChatMessage(numId, emoji);
-        if (result.success) {
-          setRestReactions(prev => {
-            const next = new Map(prev);
-            next.set(numId, (result.reactions || []).map(r => ({
-              emoji: r.emoji,
-              count: r.count,
-              users: r.users.map(u => ({ userId: u.id, reactionEventId: '' })),
-            })));
-            return next;
-          });
-        }
-      } catch { /* silently fail */ }
-      return;
-    }
-
-    // Fallback: Matrix event ID reaction
-    if (!matrixRoomId) return;
-    const entries = matrixReactions.get(idOrEventId);
-    const myUserId = matrixMessages[0]?.senderId?.split(":")[0] || "";
-    const existing = entries?.find((e) => e.emoji === emoji);
-    const myEntry = existing?.users.find((u) => u.userId.includes(myUserId));
-    if (myEntry) {
-      redactEvent(matrixRoomId, myEntry.reactionEventId).catch(() => {});
-    } else {
-      sendReaction(matrixRoomId, idOrEventId, emoji).catch(() => {});
-    }
-  }, [matrixRoomId, matrixReactions, matrixMessages]);
 
   // Socket hook — kept for presence, typing, calls, and Socket.IO-delivered messages
   const {
@@ -632,6 +564,72 @@ export default function Chat() {
       (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     );
   }, [socketMessages, matrixAsGroupMessages, matrixRoomId, matrixMessages.length]);
+
+  // REST-based reactions for all messages (works regardless of Matrix)
+  const [restReactions, setRestReactions] = useState<Map<number, ReactionEntry[]>>(new Map());
+  const loadedReactionIds = useRef<Set<number>>(new Set());
+
+  // Load existing reactions for messages on initial load
+  useEffect(() => {
+    const messageIds = messages
+      .map(m => m.id)
+      .filter(id => Number.isFinite(id) && id > 0 && !loadedReactionIds.current.has(id));
+    if (messageIds.length === 0) return;
+
+    messageIds.forEach(id => loadedReactionIds.current.add(id));
+
+    const batch = messageIds.slice(0, 20);
+    Promise.allSettled(batch.map(id =>
+      getChatReactions(id).then(res => ({ id, reactions: res.reactions }))
+    )).then(results => {
+      setRestReactions(prev => {
+        const next = new Map(prev);
+        for (const r of results) {
+          if (r.status === 'fulfilled' && r.value.reactions.length > 0) {
+            next.set(r.value.id, r.value.reactions.map(rx => ({
+              emoji: rx.emoji,
+              count: rx.count,
+              users: rx.users.map(u => ({ userId: u.id, reactionEventId: '' })),
+            })));
+          }
+        }
+        return next;
+      });
+    });
+  }, [messages]);
+
+  // Handle reaction toggle — uses REST API for all messages
+  const handleReaction = useCallback(async (idOrEventId: string, emoji: string) => {
+    const numId = parseInt(idOrEventId, 10);
+    if (Number.isFinite(numId) && numId > 0) {
+      try {
+        const result = await reactToChatMessage(numId, emoji);
+        if (result.success) {
+          setRestReactions(prev => {
+            const next = new Map(prev);
+            next.set(numId, (result.reactions || []).map(r => ({
+              emoji: r.emoji,
+              count: r.count,
+              users: r.users.map(u => ({ userId: u.id, reactionEventId: '' })),
+            })));
+            return next;
+          });
+        }
+      } catch { /* silently fail */ }
+      return;
+    }
+
+    if (!matrixRoomId) return;
+    const entries = matrixReactions.get(idOrEventId);
+    const myUserId = matrixMessages[0]?.senderId?.split(":")[0] || "";
+    const existing = entries?.find((e) => e.emoji === emoji);
+    const myEntry = existing?.users.find((u) => u.userId.includes(myUserId));
+    if (myEntry) {
+      redactEvent(matrixRoomId, myEntry.reactionEventId).catch(() => {});
+    } else {
+      sendReaction(matrixRoomId, idOrEventId, emoji).catch(() => {});
+    }
+  }, [matrixRoomId, matrixReactions, matrixMessages]);
 
   // sendMessage: route text through Matrix when available, otherwise Socket.IO
   const sendMessage = useCallback(
