@@ -452,7 +452,19 @@ class XPostService {
         }
       }
       if (mediaId) {
+        // Alt text improves SEO + accessibility — use first 1000 chars of tweet text
+        const altText = (text || 'PNPtv! community content').slice(0, 1000);
         payload.media = { media_ids: [String(mediaId)] };
+        // Set alt text via metadata endpoint (fire-and-forget — non-critical)
+        try {
+          await axios.post(
+            'https://upload.twitter.com/1.1/media/metadata/create.json',
+            { media_id: String(mediaId), alt_text: { text: altText } },
+            { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+          );
+        } catch (altErr) {
+          logger.warn('Failed to set media alt_text', { mediaId, error: altErr.message });
+        }
       }
     }
 
@@ -529,7 +541,22 @@ class XPostService {
       logger.info('Uploading media for X post (OAuth1)', { accountId: account.account_id, handle: account.handle });
       try {
         const mediaId = await this.uploadMediaToXV1WithOAuth1({ credentials, mediaUrl });
-        if (mediaId) payload.media = { media_ids: [String(mediaId)] };
+        if (mediaId) {
+          payload.media = { media_ids: [String(mediaId)] };
+          // Set alt text for SEO + accessibility (fire-and-forget)
+          try {
+            const altText = (text || 'PNPtv! community content').slice(0, 1000);
+            const metaUrl = 'https://upload.twitter.com/1.1/media/metadata/create.json';
+            const metaBody = JSON.stringify({ media_id: String(mediaId), alt_text: { text: altText } });
+            const metaAuth = XOAuth1Service.buildAuthHeader('POST', metaUrl, {}, credentials);
+            await axios.post(metaUrl, metaBody, {
+              headers: { Authorization: metaAuth, 'Content-Type': 'application/json' },
+              timeout: 5000,
+            });
+          } catch (altErr) {
+            logger.warn('OAuth1: Failed to set media alt_text', { error: altErr.message });
+          }
+        }
       } catch (err) {
         logger.warn('OAuth1 media upload failed, posting without media', { error: err.message });
       }
