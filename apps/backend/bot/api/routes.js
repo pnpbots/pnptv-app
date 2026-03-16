@@ -13,6 +13,7 @@ const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
 const FileType = require('file-type');
+const geoip = require('geoip-lite');
 const { getRedis, cache } = require('../../config/redis');
 const { getPool } = require('../../config/postgres');
 const logger = require('../../utils/logger');
@@ -208,6 +209,18 @@ const pageLimiter = rateLimit({
   message: { error: 'Too many requests from this IP, please try again later.' },
   skip: (req) => req.path === '/pnp/webhook/telegram', // Skip webhook
 });
+
+// ── Geo-block middleware — blocks CO/VE from campaign content ────────────────
+const BLOCKED_COUNTRIES = new Set(['CO', 'VE']);
+
+function geoBlock(req, res, next) {
+  const ip = req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+  const geo = geoip.lookup(ip);
+  if (geo && BLOCKED_COUNTRIES.has(geo.country)) {
+    return res.status(451).json({ error: 'Content not available in your region' });
+  }
+  next();
+}
 
 const getActorId = (req) => String(req.user?.id || req.user?.userId || '');
 
@@ -575,6 +588,27 @@ app.get('/lifetime100', pageLimiter, (req, res) => {
     return res.status(404).send('Not found');
   }
   res.sendFile(path.join(__dirname, '../../../../public/lifetime-pass.html'));
+});
+
+// ── Geo-blocked CMS asset proxy — blocks CO/VE from campaign media ──────────
+// Campaign videos reference cms.pnptv.app/assets/<id>.  This route allows
+// tweets to link to pnptv.app/cms/assets/<id> which respects geo-blocking.
+app.get('/cms/assets/:assetId', geoBlock, async (req, res) => {
+  const assetId = req.params.assetId;
+  if (!/^[a-f0-9-]+$/i.test(assetId)) return res.status(400).send('Invalid asset ID');
+  try {
+    const directusUrl = process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055';
+    const upstream = await axios.get(`${directusUrl}/assets/${assetId}`, {
+      responseType: 'stream',
+      timeout: 30000,
+    });
+    res.set('Content-Type', upstream.headers['content-type'] || 'application/octet-stream');
+    if (upstream.headers['content-length']) res.set('Content-Length', upstream.headers['content-length']);
+    res.set('Cache-Control', 'public, max-age=86400');
+    upstream.data.pipe(res);
+  } catch (err) {
+    res.status(err.response?.status || 502).send('Asset unavailable');
+  }
 });
 
 // Serve static files from public directory with blocking
