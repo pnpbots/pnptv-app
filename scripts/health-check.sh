@@ -31,7 +31,7 @@ echo "================================"
 
 echo ""
 echo "--- Docker Containers ---"
-for c in docker-socket-proxy npm-proxy \
+for c in docker-socket-proxy turbo-cache npm-proxy \
          authentik-server authentik-worker pg-authentik redis-authentik \
          directus pg-directus ampache mariadb-ampache calcom pg-calcom redis-calcom \
          bluesky-pds synapse pg-synapse element-web restreamer \

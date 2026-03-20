@@ -98,6 +98,12 @@ volumes:
       type: none
       o: bind
       device: /opt/pnptvapp/infrastructure/data/synapse/postgres
+  vol_pg_pnptv_walg_backups:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/pnptvapp/infrastructure/data/pnptv/walg-backups
   vol_pg_btcpay:
     driver: local
     driver_opts:
@@ -152,6 +158,43 @@ services:
           memory: 128m
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://localhost:2375/version || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ===========================================
+  # BLOCK 0.5 - Turborepo Remote Cache
+  # Internal-only build artifact cache server.
+  # Docker builds reach it at http://turbo-cache:3000
+  # Host-side turbo commands reach it at http://127.0.0.1:3333
+  # Token auth enforced via TURBO_TOKEN env var.
+  # ===========================================
+
+  turbo-cache:
+    image: ducktors/turborepo-remote-cache:latest
+    container_name: turbo-cache
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3333:3000"  # Host-side turbo CLI access — localhost only
+    environment:
+      TURBO_TOKEN: ${TURBO_CACHE_TOKEN}
+      STORAGE_PROVIDER: local
+      STORAGE_PATH: /cache
+    volumes:
+      - ./infrastructure/data/turbo-cache:/cache
+    networks:
+      - app_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256m
+        reservations:
+          cpus: '0.05'
+          memory: 64m
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/v8/artifacts/status || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -720,8 +763,13 @@ services:
   # ===========================================
   # BLOCK J - Backend Bot + API (Node.js)
   # Dedicated PostgreSQL + Redis for bot/API
-  # pg-pnptv has WAL-G readiness (separate WAL
-  # volume + wal_level=replica + archive_mode).
+  # pg-pnptv has WAL-G continuous backup:
+  #   - wal_level=replica + archive_mode=on
+  #   - Separate WAL volume (vol_pg_pnptv_wal)
+  #   - WAL-G backup volume (vol_pg_pnptv_walg_backups)
+  #   - archive_command gracefully no-ops if wal-g
+  #     hasn't been bootstrapped yet (first run).
+  #     Run scripts/walg-backup.sh once to bootstrap.
   # ===========================================
 
   pg-pnptv:
@@ -731,16 +779,20 @@ services:
     volumes:
       - vol_pg_pnptv:/var/lib/postgresql/data
       - vol_pg_pnptv_wal:/var/lib/postgresql/wal
+      - vol_pg_pnptv_walg_backups:/var/lib/postgresql/walg-backups
     environment:
       POSTGRES_DB: ${POSTGRES_DATABASE}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_INITDB_WALDIR: /var/lib/postgresql/wal
+      # WAL-G environment — used by archive_command and wal-g backup-push
+      WALG_FILE_PREFIX: /var/lib/postgresql/walg-backups
+      WALG_COMPRESSION_METHOD: brotli
     command: >
       postgres
       -c wal_level=replica
       -c archive_mode=on
-      -c archive_command='/bin/true'
+      -c "archive_command=test -f /usr/local/bin/wal-g && WALG_FILE_PREFIX=/var/lib/postgresql/walg-backups /usr/local/bin/wal-g wal-push %p || true"
       -c max_wal_senders=3
       -c wal_keep_size=256MB
     networks:
