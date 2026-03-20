@@ -226,7 +226,7 @@ const LATAM_COUNTRIES = new Set([
 ]);
 
 // Paths exempt from geo-blocking (webhooks, health checks, etc.)
-const GEO_EXEMPT_PATHS = ['/pnp/webhook/', '/health', '/api/health'];
+const GEO_EXEMPT_PATHS = ['/pnp/webhook/', '/health', '/api/health', '/api/webapp/auth/', '/auth/oidc/', '/auth/', '/api/auth-status'];
 
 const GEO_BLOCKED_HTML = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -391,7 +391,7 @@ const sessionMiddleware = session({
 
 app.use(sessionMiddleware);
 app.use(ipTracker); // Log every authenticated request IP for security
-app.use(latamGeoBlock); // Global LATAM + Caribbean geo-block (exempts active users)
+// app.use(latamGeoBlock); // LATAM geo-block — DISABLED until further notice
 
 // express-session handles Set-Cookie automatically — no custom middleware needed
 
@@ -2429,11 +2429,7 @@ app.get('/api/webapp/auth/oidc/login', oidcLoginLimiter, asyncHandler(async (req
     ? req.query.return_to
     : '/';
   const pkceKey = `oidc:pkce:${state}`;
-  await redis.set(
-    pkceKey,
-    JSON.stringify({ codeVerifier, returnTo }),
-    { EX: 10 * 60 }
-  );
+  await redis.set(pkceKey, JSON.stringify({ codeVerifier, returnTo }), 'EX', 600);
 
   // Build Authentik authorization URL (PKCE S256, no client_secret in URL)
   let authUrl;

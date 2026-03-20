@@ -318,7 +318,7 @@ export function LoginPage() {
               <div className="flex-1 h-px bg-white/10" />
             </div>
             <button
-              onClick={() => { window.location.href = "/auth/oidc/login"; }}
+              onClick={() => { window.location.href = "/api/webapp/auth/oidc/login"; }}
               className="w-full py-3 px-6 rounded-xl font-semibold text-sm flex items-center justify-center gap-3 bg-pnp-accent text-white hover:opacity-90 active:opacity-80 transition-all"
             >
               <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

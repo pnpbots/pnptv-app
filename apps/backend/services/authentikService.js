@@ -14,7 +14,7 @@ const AUTHENTIK_TOKEN = process.env.AUTHENTIK_API_TOKEN;
 //                                Default: https://auth.pnptv.app/application/o/pnptv-app/
 const OIDC_CLIENT_ID = process.env.AUTHENTIK_OIDC_CLIENT_ID;
 const OIDC_CLIENT_SECRET = process.env.AUTHENTIK_OIDC_CLIENT_SECRET;
-const OIDC_REDIRECT_URI = process.env.AUTHENTIK_OIDC_REDIRECT_URI || 'https://app.pnptv.app/auth/oidc/callback';
+const OIDC_REDIRECT_URI = process.env.AUTHENTIK_OIDC_REDIRECT_URI || 'https://app.pnptv.app/api/webapp/auth/oidc/callback';
 const OIDC_ISSUER = process.env.AUTHENTIK_OIDC_ISSUER || 'https://auth.pnptv.app/application/o/pnptv-app/';
 
 // Derived OIDC endpoint URLs (standard OpenID Connect paths relative to issuer)
