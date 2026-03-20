@@ -322,6 +322,28 @@ async function ensureUserInRoom(roomId, userCreds) {
   // Fallback: admin force-join
   try {
     const adminToken = await getAdminToken();
+    const adminUserId = `@${process.env.MATRIX_ADMIN_USER || 'pnptv_admin'}:${MATRIX_SERVER_NAME}`;
+
+    // Synapse 1.147+: /_synapse/admin/v1/join requires the admin to be IN the room.
+    // Step 1: make_room_admin gives the admin an invite + room admin powers
+    // Step 2: admin joins the room via the standard client API
+    // Step 3: admin force-joins the target user
+    try {
+      await synapsePost(
+        `/_synapse/admin/v1/rooms/${encodeURIComponent(roomId)}/make_room_admin`,
+        { user_id: adminUserId },
+        adminToken
+      );
+      // Join the admin into the room (make_room_admin sends an invite)
+      await synapsePost(
+        `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
+        {},
+        adminToken
+      );
+    } catch (prepErr) {
+      logger.debug(`[Matrix] ensureUserInRoom: admin room prep note: ${prepErr.message}`);
+    }
+
     await synapsePost(
       `/_synapse/admin/v1/join/${encodeURIComponent(roomId)}`,
       { user_id: userCreds.matrixUserId },
