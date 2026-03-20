@@ -6,6 +6,7 @@ import {
   searchNearbyPlaces,
   getPublicProfile,
   getOrCreateDmRoom,
+  sendDirectMessage,
   getNearbyFeedPosters,
   getNearbyHangoutMembers,
   getNearbyStreamViewers,
@@ -111,11 +112,13 @@ function getCornerOffset(myOrder: number, myCorner: string): number {
 // ── DM chat sub-view ──────────────────────────────────────────────────────────
 function DmView({
   roomId,
+  partnerId,
   partnerName,
   myUserId,
   onBack,
 }: {
   roomId: string;
+  partnerId: string;
   partnerName: string;
   myUserId: string | null;
   onBack: () => void;
@@ -137,14 +140,21 @@ function DmView({
     setSendError(null);
     setText("");
     try {
-      await sendMatrixMessage(roomId, trimmed);
+      // Send through backend REST endpoint (auth/block/quota checks + Matrix + PG sync)
+      await sendDirectMessage(partnerId, trimmed);
+      // Message will appear via Matrix timeline listener
     } catch (err) {
-      setText(trimmed);
-      setSendError(err instanceof Error ? err.message : "Failed to send");
+      // Fallback: try direct Matrix send
+      try {
+        await sendMatrixMessage(roomId, trimmed);
+      } catch {
+        setText(trimmed);
+        setSendError(err instanceof Error ? err.message : "Failed to send");
+      }
     } finally {
       setSending(false);
     }
-  }, [text, sending, roomId]);
+  }, [text, sending, roomId, partnerId]);
 
   return (
     <div className="flex flex-col h-full" style={{ minHeight: 0 }}>
@@ -1203,6 +1213,7 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
             {view === "dm" && selectedUser && dmRoomId && (
               <DmView
                 roomId={dmRoomId}
+                partnerId={String(selectedUser.user_id)}
                 partnerName={
                   profile?.firstName ||
                   selectedUser.name ||

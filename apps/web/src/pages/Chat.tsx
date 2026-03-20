@@ -42,6 +42,7 @@ import {
 import {
   useRoomMessages,
   sendMatrixMessage,
+  sendMatrixReply,
   sendReadReceipt,
   sendReaction,
   redactEvent,
@@ -518,21 +519,27 @@ export default function Chat() {
       hash ^= m.eventId.charCodeAt(i);
       hash = (hash * 16777619) >>> 0;
     }
+    const senderName = m.senderId.split(":")[0].replace(/^@pnptv_/, "").replace(/^@/, "");
     return {
       id: hash,
       room: matrixRoomId ?? "",
       content: m.body,
       user_id: m.senderId,
-      username: m.senderId.split(":")[0].replace(/^@/, "") ?? "",
-      first_name: m.senderId.split(":")[0].replace(/^@/, "") ?? "",
+      username: senderName,
+      first_name: senderName,
       photo_url: null,
       created_at: new Date(m.timestamp).toISOString(),
-      media_url: null,
-      media_type: null,
-      media_mime: null,
+      media_url: m.mediaUrl ?? null,
+      media_type: m.mediaType === "file" ? null : (m.mediaType ?? null),
+      media_mime: m.mediaMime ?? null,
       media_thumb_url: null,
       media_width: null,
       media_height: null,
+      // Reply-to from Matrix event relations
+      reply_to: m.replyToEventId ? {
+        name: m.replyToSenderId?.split(":")[0].replace(/^@pnptv_/, "").replace(/^@/, "") || "User",
+        content: m.replyToBody || "[message]",
+      } : null,
     } satisfies GroupMessage;
   });
 
@@ -638,12 +645,17 @@ export default function Chat() {
     }
   }, [matrixRoomId, matrixReactions, matrixMessages]);
 
-  // sendMessage: route through backend REST endpoint (backend → Matrix → PG sync)
+  // sendMessage: send via Matrix (with optional reply-to via Matrix event relation)
   const sendMessage = useCallback(
-    async (text: string, replyToId?: number | null) => {
+    async (text: string, replyToEventId?: string | null) => {
       if (!activeGroup) return;
       try {
-        await sendHangoutMessage(activeGroup.id, text, replyToId);
+        if (replyToEventId && matrixRoomId) {
+          // Reply via Matrix event relation
+          await sendMatrixReply(matrixRoomId, text, replyToEventId);
+        } else {
+          await sendHangoutMessage(activeGroup.id, text);
+        }
         // Message will appear via Matrix timeline listener
       } catch {
         // Fallback: try direct Matrix send if REST fails
@@ -981,7 +993,8 @@ export default function Chat() {
 
     setSending(true);
     const text = msgInput.trim();
-    const currentReplyToId = replyToMsg?.id ?? null;
+    // Look up the Matrix eventId for the reply target
+    const replyToEventId = replyToMsg ? (matrixEventIdMap.get(replyToMsg.id) || null) : null;
     setMsgInput("");
 
     try {
@@ -998,8 +1011,8 @@ export default function Chat() {
         if (!data.success) throw new Error(t.chat.errorUploadFailed);
         clearMedia();
       } else {
-        // Text messages go via socket for instant delivery
-        sendMessage(text, currentReplyToId);
+        // Text messages go via Matrix (with optional reply-to)
+        sendMessage(text, replyToEventId);
       }
     } catch (err) {
       if (!hasMediaFile) setMsgInput(text);

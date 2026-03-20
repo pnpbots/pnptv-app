@@ -740,58 +740,26 @@ function initSocketIO(io) {
           return;
         }
 
-        const room = `hangout:${gid}`;
-        const firstName = user.firstName || user.first_name || null;
-        const photoUrl = user.photoUrl || user.photo_url || null;
-
-        // ── Matrix send (fire-and-forget-safe — PG insert happens regardless) ──
-        let matrixEventId = null;
-        try {
-          const userRow = await query(
-            `SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
-             FROM users WHERE id = $1 AND is_deleted = false`,
-            [user.id]
-          );
-          if (userRow.rows[0]) {
-            const userCreds = await matrixService.provisionMatrixUser(userRow.rows[0]);
-            // Load group info for room creation
-            const groupRow = await query('SELECT name FROM hangout_groups WHERE id = $1', [gid]);
-            const groupName = groupRow.rows[0]?.name || `Hangout ${gid}`;
-            const matrixRoomId = await matrixService.getOrCreateHangoutRoom(gid, userRow.rows[0], groupName);
-            await matrixService.ensureUserInRoom(matrixRoomId, userCreds);
-            const resp = await matrixService.sendRoomMessage(matrixRoomId, userCreds.accessToken, content.trim());
-            matrixEventId = resp.event_id || null;
-          }
-        } catch (matrixErr) {
-          logger.warn('hangout:message Matrix send failed (PG insert continues)', { userId: user.id, groupId: gid, error: matrixErr.message });
-        }
-
-        const { rows } = await query(
-          `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content, reply_to_id, matrix_event_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-           RETURNING ${MSG_RETURNING_COLS}`,
-          [room, user.id, user.username || null, firstName, photoUrl, content.trim(), parsedReplyToId, matrixEventId]
+        // ── Matrix-only send (no PG insert) ──
+        const userRow = await query(
+          `SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+           FROM users WHERE id = $1 AND is_deleted = false`,
+          [user.id]
         );
-
-        // If replying, attach the replied-to message snippet for clients
-        const msg = rows[0];
-        if (msg.reply_to_id) {
-          const { rows: replyRows } = await query(
-            'SELECT first_name, username, content FROM chat_messages WHERE id = $1',
-            [msg.reply_to_id]
-          );
-          if (replyRows[0]) {
-            msg.reply_to = {
-              name: replyRows[0].first_name || replyRows[0].username || 'User',
-              content: (replyRows[0].content || '[media]').slice(0, 100),
-            };
-          }
+        if (!userRow.rows[0]) {
+          socket.emit('hangout:error', { message: 'User not found' });
+          return;
         }
+
+        const userCreds = await matrixService.provisionMatrixUser(userRow.rows[0]);
+        const groupRow = await query('SELECT name FROM hangout_groups WHERE id = $1', [gid]);
+        const groupName = groupRow.rows[0]?.name || `Hangout ${gid}`;
+        const matrixRoomId = await matrixService.getOrCreateHangoutRoom(gid, userRow.rows[0], groupName);
+        await matrixService.ensureUserInRoom(matrixRoomId, userCreds);
+        await matrixService.sendRoomMessage(matrixRoomId, userCreds.accessToken, content.trim());
 
         // Touch activity timestamp for 72h inactivity cleanup
         await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [gid]);
-
-        io.to(room).emit('chat:message', msg);
 
         // ── Push notifications to offline hangout members ──
         // Fire-and-forget: don't block the message flow
@@ -1129,59 +1097,38 @@ function initSocketIO(io) {
       }
 
       try {
-        const senderRole = user.role || '';
-        const isAdminSender = senderRole === 'admin' || senderRole === 'superadmin';
-
-        const message = await DmService.sendMessage(
-          user.id,
-          recipientId,
-          { content },
-          { isAdmin: isAdminSender }
-        );
-
-        // ── Matrix send (fire-and-forget-safe) ──
-        try {
-          const [senderRow, recipientRow] = await Promise.all([
-            query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
-                   FROM users WHERE id = $1 AND is_deleted = false`, [user.id]),
-            query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
-                   FROM users WHERE id = $1 AND is_deleted = false`, [recipientId]),
-          ]);
-          if (senderRow.rows[0] && recipientRow.rows[0]) {
-            const senderCreds = await matrixService.provisionMatrixUser(senderRow.rows[0]);
-            const matrixRoomId = await matrixService.getOrCreateDmRoom(senderRow.rows[0], recipientRow.rows[0]);
-            await matrixService.ensureUserInRoom(matrixRoomId, senderCreds);
-            const resp = await matrixService.sendRoomMessage(matrixRoomId, senderCreds.accessToken, content.trim());
-            // Update PG row with matrix_event_id
-            if (resp.event_id) {
-              await query('UPDATE direct_messages SET matrix_event_id = $1 WHERE id = $2', [resp.event_id, message.id]);
-            }
-          }
-        } catch (matrixErr) {
-          logger.warn('dm:send Matrix send failed (PG message already saved)', { userId: user.id, recipientId, error: matrixErr.message });
+        // ── Matrix-only send (no PG insert) ──
+        const [senderRow, recipientRow] = await Promise.all([
+          query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+                 FROM users WHERE id = $1 AND is_deleted = false`, [user.id]),
+          query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+                 FROM users WHERE id = $1 AND is_deleted = false`, [recipientId]),
+        ]);
+        if (!senderRow.rows[0] || !recipientRow.rows[0]) {
+          socket.emit('dm:error', { message: 'User not found' });
+          return;
         }
 
-        // Deliver to sender and recipient
-        const payload = {
-          id: message.id,
-          senderId: message.sender_id,
-          recipientId: message.recipient_id,
-          content: message.content,
-          mediaUrl: message.media_url,
-          mediaType: message.media_type,
-          mediaMime: message.media_mime,
-          mediaThumbUrl: message.media_thumb_url,
-          isRead: message.is_read,
-          createdAt: message.created_at,
-          sender: {
-            id: user.id,
-            username: user.username,
-            firstName: user.firstName,
-            photoUrl: user.photoUrl,
-          },
-        };
-        socket.emit('dm:sent', payload);
-        io.to(`user:${message.recipient_id}`).emit('dm:received', payload);
+        const senderCreds = await matrixService.provisionMatrixUser(senderRow.rows[0]);
+        const matrixRoomId = await matrixService.getOrCreateDmRoom(senderRow.rows[0], recipientRow.rows[0]);
+        await matrixService.ensureUserInRoom(matrixRoomId, senderCreds);
+        await matrixService.sendRoomMessage(matrixRoomId, senderCreds.accessToken, content.trim());
+
+        // Update dm_threads metadata (no message row)
+        const [a, b] = [user.id, recipientId].sort();
+        const preview = content.trim().slice(0, 100);
+        await query(
+          `INSERT INTO dm_threads (user_a, user_b, last_message_at, last_message, unread_for_a, unread_for_b)
+           VALUES ($1, $2, NOW(), $3, $4, $5)
+           ON CONFLICT (user_a, user_b) DO UPDATE SET
+             last_message_at = NOW(),
+             last_message = EXCLUDED.last_message,
+             unread_for_a = CASE WHEN dm_threads.user_a = $6 THEN 0 ELSE dm_threads.unread_for_a + 1 END,
+             unread_for_b = CASE WHEN dm_threads.user_b = $6 THEN 0 ELSE dm_threads.unread_for_b + 1 END`,
+          [a, b, preview, user.id === a ? 0 : 1, user.id === b ? 0 : 1, user.id]
+        );
+
+        socket.emit('dm:sent', { success: true });
       } catch (err) {
         if (err.statusCode) {
           socket.emit('dm:error', { message: err.message, code: err.code });

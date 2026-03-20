@@ -8,8 +8,8 @@ const { buildJitsiHangoutsUrl } = require('../../utils/jitsiHangoutsWebApp');
 const jaasService = require('../../services/jaasService');
 const NotificationEmitter = require('../../services/notificationEmitter');
 const { hasAccess } = require('../../services/accessService');
-const BlockedUser = require('../../../models/blockedUser');
 const matrixService = require('../../services/matrixService');
+const BlockedUser = require('../../../models/blockedUser');
 // Check if a photo path is a valid web URL (not a Telegram file ID)
 const isValidPhotoUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
 
@@ -146,6 +146,20 @@ const createGroup = async (req, res) => {
        VALUES ($1, $2, 'owner')`,
       [group.id, user.id]
     );
+
+    // Eagerly create Matrix room so it's ready when the user opens chat
+    try {
+      const userRow = await query(
+        `SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+         FROM users WHERE id = $1 AND is_deleted = false`,
+        [user.id]
+      );
+      if (userRow.rows[0]) {
+        await matrixService.getOrCreateHangoutRoom(group.id, userRow.rows[0], group.name);
+      }
+    } catch (matrixErr) {
+      logger.warn('createGroup: Matrix room creation failed (will retry on first chat open)', { groupId: group.id, error: matrixErr.message });
+    }
 
     return res.json({
       success: true,

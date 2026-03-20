@@ -73,12 +73,38 @@ export interface MatrixMessage {
   mediaUrl?: string;
   mediaType?: "image" | "video" | "file";
   mediaMime?: string;
+  /** Reply-to info extracted from m.relates_to */
+  replyToEventId?: string;
+  replyToSenderId?: string;
+  replyToBody?: string;
 }
 
-function eventToMessage(event: MatrixEvent, myUserId: string): MatrixMessage | null {
+function eventToMessage(event: MatrixEvent, myUserId: string, roomTimeline?: MatrixEvent[]): MatrixMessage | null {
   if (event.getType() !== "m.room.message") return null;
   const content = event.getContent();
   const msgtype = content.msgtype;
+
+  // Extract reply-to info from m.relates_to
+  const relatesTo = content["m.relates_to"];
+  const replyToEventId = relatesTo?.["m.in_reply_to"]?.event_id as string | undefined;
+  let replyToSenderId: string | undefined;
+  let replyToBody: string | undefined;
+
+  if (replyToEventId && roomTimeline) {
+    const replyEvent = roomTimeline.find((e) => e.getId() === replyToEventId);
+    if (replyEvent) {
+      replyToSenderId = replyEvent.getSender() ?? undefined;
+      replyToBody = replyEvent.getContent()?.body ?? undefined;
+    }
+  }
+
+  // Strip Matrix reply fallback from body (lines starting with "> ")
+  let body = content.body ?? "";
+  if (replyToEventId && typeof body === "string" && body.startsWith("> ")) {
+    const lines = body.split("\n");
+    const endIdx = lines.findIndex((l: string) => !l.startsWith("> ") && l !== "");
+    if (endIdx > 0) body = lines.slice(endIdx).join("\n").trim();
+  }
 
   const base = {
     eventId: event.getId() ?? `${event.getSender()}-${event.getTs()}`,
@@ -86,10 +112,13 @@ function eventToMessage(event: MatrixEvent, myUserId: string): MatrixMessage | n
     senderId: event.getSender() ?? "",
     timestamp: event.getTs(),
     isMine: event.getSender() === myUserId,
+    replyToEventId,
+    replyToSenderId,
+    replyToBody,
   };
 
-  if (msgtype === "m.text" && typeof content.body === "string") {
-    return { ...base, body: content.body };
+  if (msgtype === "m.text" && typeof body === "string") {
+    return { ...base, body };
   }
 
   if (msgtype === "m.image" || msgtype === "m.video" || msgtype === "m.file") {
@@ -97,7 +126,7 @@ function eventToMessage(event: MatrixEvent, myUserId: string): MatrixMessage | n
     const url = content.url ?? content.external_url ?? "";
     return {
       ...base,
-      body: content.body ?? "",
+      body: body || "",
       mediaUrl: url,
       mediaType,
       mediaMime: content.info?.mimetype,
@@ -133,19 +162,62 @@ export function useRoomMessages(roomId: string | null): {
         clientRef.current = client;
         const myId = client.getUserId() ?? "";
 
-        // Load timeline from cached room or wait for sync
-        const hydrateFromRoom = () => {
+        // Load timeline from cached room
+        const hydrateFromRoom = (): boolean => {
           const room = client.getRoom(roomId);
-          if (!room) return;
+          if (!room) return false;
           const timeline = room.getLiveTimeline().getEvents();
           const msgs = timeline
-            .map((ev) => eventToMessage(ev, myId))
+            .map((ev) => eventToMessage(ev, myId, timeline))
             .filter((m): m is MatrixMessage => m !== null);
           if (!cancelled) setMessages(msgs);
+          return true;
         };
 
-        hydrateFromRoom();
-        setLoading(false);
+        let roomFound = hydrateFromRoom();
+
+        // If room is not in the client store yet (newly created / not yet synced),
+        // try to join it explicitly and wait for it to appear via sync.
+        if (!roomFound) {
+          try {
+            await client.joinRoom(roomId);
+          } catch {
+            // May already be joined — ignore
+          }
+
+          // Wait up to 10 seconds for the room to appear in sync
+          roomFound = await new Promise<boolean>((resolve) => {
+            if (cancelled) { resolve(false); return; }
+            let settled = false;
+            const settle = (val: boolean) => {
+              if (settled) return;
+              settled = true;
+              client.off(ClientEvent.Sync, onSync);
+              clearTimeout(timer);
+              resolve(val);
+            };
+
+            const onSync = () => {
+              if (client.getRoom(roomId)) {
+                hydrateFromRoom();
+                settle(true);
+              }
+            };
+
+            client.on(ClientEvent.Sync, onSync);
+
+            // Check immediately (may have appeared between joinRoom and listener)
+            if (client.getRoom(roomId)) {
+              hydrateFromRoom();
+              settle(true);
+              return;
+            }
+
+            const timer = setTimeout(() => settle(false), 10000);
+          });
+        }
+
+        if (!cancelled) setLoading(false);
 
         // Listen for new events in this room
         const onRoomTimeline = (
@@ -153,7 +225,8 @@ export function useRoomMessages(roomId: string | null): {
           room: ReturnType<MatrixClient["getRoom"]> | undefined | null
         ) => {
           if (!room || room.roomId !== roomId) return;
-          const msg = eventToMessage(event, myId);
+          const timeline = room.getLiveTimeline().getEvents();
+          const msg = eventToMessage(event, myId, timeline);
           if (msg) {
             setMessages((prev) => {
               // Deduplicate by eventId
@@ -208,6 +281,26 @@ export async function sendMatrixMessage(
     }
     throw err;
   }
+}
+
+// ── sendMatrixReply — send a reply to a specific event ────────────────────────
+
+export async function sendMatrixReply(
+  roomId: string,
+  text: string,
+  replyToEventId: string
+): Promise<ISendEventResponse> {
+  const client = await initMatrix();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return client.sendEvent(roomId, "m.room.message" as any, {
+    msgtype: "m.text",
+    body: text,
+    "m.relates_to": {
+      "m.in_reply_to": {
+        event_id: replyToEventId,
+      },
+    },
+  });
 }
 
 // ── sendMatrixMediaMessage — send a media message (external URL) to a room ────
@@ -413,10 +506,9 @@ export function getMatrixTimeline(roomId: string): MatrixMessage[] {
   const myId = matrixClient.getUserId() ?? "";
   const room = matrixClient.getRoom(roomId);
   if (!room) return [];
-  return room
-    .getLiveTimeline()
-    .getEvents()
-    .map((ev) => eventToMessage(ev, myId))
+  const timeline = room.getLiveTimeline().getEvents();
+  return timeline
+    .map((ev) => eventToMessage(ev, myId, timeline))
     .filter((m): m is MatrixMessage => m !== null);
 }
 

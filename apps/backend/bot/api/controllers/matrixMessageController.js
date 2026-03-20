@@ -3,10 +3,12 @@
 /**
  * matrixMessageController.js
  *
- * REST endpoints for Matrix-primary message sends.
- * All sends go through backend (auth/block/entitlement checks) → Matrix → PG sync.
+ * REST endpoints for Matrix-only message sends.
+ * All sends: backend (auth/block/entitlement checks) → Matrix.
+ * No PG message inserts. No Socket.IO message broadcasts.
+ * PG is only used for metadata (dm_threads, unread counters, push notifications).
  *
- * Routes (registered in routes.js):
+ * Routes:
  *   POST /api/webapp/matrix/hangout/:groupId/message
  *   POST /api/webapp/matrix/dm/:userId/message
  */
@@ -15,11 +17,8 @@ const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { getRedis } = require('../../../config/redis');
 const matrixService = require('../../services/matrixService');
-const DmService = require('../../services/dmService');
 const NotificationEmitter = require('../../services/notificationEmitter');
 const { resolveUserId } = require('../../utils/helpers');
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -30,21 +29,8 @@ const authGuard = (req, res) => {
   return user;
 };
 
-// MSG_RETURNING_COLS — keep in sync with socketHandlers.js
-const MSG_RETURNING_COLS = `
-  id, room, user_id, username, first_name, photo_url, content,
-  media_url, media_type, media_mime, media_thumb_url,
-  media_width, media_height, media_metadata, reply_to_id, matrix_event_id, created_at
-`;
-
 // ─── POST /api/webapp/matrix/hangout/:groupId/message ─────────────────────────
 
-/**
- * Send a text message to a hangout group via Matrix with PG sync.
- *
- * Body: { content: string, replyToId?: number }
- * Response: { success, message, matrixEventId }
- */
 const sendHangoutMessage = async (req, res) => {
   const user = authGuard(req, res);
   if (!user) return;
@@ -54,7 +40,7 @@ const sendHangoutMessage = async (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid group ID' });
   }
 
-  const { content, replyToId } = req.body || {};
+  const { content } = req.body || {};
   if (!content || typeof content !== 'string' || !content.trim()) {
     return res.status(400).json({ success: false, error: 'Content is required' });
   }
@@ -63,10 +49,9 @@ const sendHangoutMessage = async (req, res) => {
   }
 
   const trimmed = content.trim();
-  const parsedReplyToId = replyToId ? parseInt(replyToId, 10) : null;
 
   try {
-    // Entitlement check (non-admin)
+    // Entitlement check
     const userRole = (user.role || '').toLowerCase();
     const isAdminUser = userRole === 'admin' || userRole === 'superadmin';
     if (!isAdminUser) {
@@ -99,7 +84,7 @@ const sendHangoutMessage = async (req, res) => {
       return res.status(403).json({ success: false, error: 'Cannot send message', code: 'BLOCKED' });
     }
 
-    // Load user DB row for Matrix provisioning
+    // Load user for Matrix provisioning
     const userRow = await query(
       `SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
        FROM users WHERE id = $1 AND is_deleted = false`,
@@ -109,65 +94,28 @@ const sendHangoutMessage = async (req, res) => {
       return res.status(401).json({ success: false, error: 'User not found' });
     }
 
-    // Matrix send
-    let matrixEventId = null;
-    try {
-      const userCreds = await matrixService.provisionMatrixUser(userRow.rows[0]);
-      const groupRow = await query('SELECT name FROM hangout_groups WHERE id = $1', [groupId]);
-      const groupName = groupRow.rows[0]?.name || `Hangout ${groupId}`;
-      const matrixRoomId = await matrixService.getOrCreateHangoutRoom(groupId, userRow.rows[0], groupName);
-      await matrixService.ensureUserInRoom(matrixRoomId, userCreds);
-      const resp = await matrixService.sendRoomMessage(matrixRoomId, userCreds.accessToken, trimmed);
-      matrixEventId = resp.event_id || null;
-    } catch (matrixErr) {
-      logger.warn('sendHangoutMessage: Matrix send failed', { userId: user.id, groupId, error: matrixErr.message });
-    }
+    // ── Send to Matrix (the ONLY message store) ──
+    const userCreds = await matrixService.provisionMatrixUser(userRow.rows[0]);
+    const groupRow = await query('SELECT name FROM hangout_groups WHERE id = $1', [groupId]);
+    const groupName = groupRow.rows[0]?.name || `Hangout ${groupId}`;
+    const matrixRoomId = await matrixService.getOrCreateHangoutRoom(groupId, userRow.rows[0], groupName);
+    await matrixService.ensureUserInRoom(matrixRoomId, userCreds);
+    const resp = await matrixService.sendRoomMessage(matrixRoomId, userCreds.accessToken, trimmed);
+    const matrixEventId = resp.event_id || null;
 
-    // PG sync
-    const room = `hangout:${groupId}`;
-    const firstName = user.firstName || user.first_name || null;
-    const photoUrl = user.photoUrl || user.photo_url || null;
-
-    const { rows } = await query(
-      `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content, reply_to_id, matrix_event_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING ${MSG_RETURNING_COLS}`,
-      [room, user.id, user.username || null, firstName, photoUrl, trimmed, parsedReplyToId, matrixEventId]
-    );
-
-    const msg = rows[0];
-
-    // Attach reply-to snippet
-    if (msg.reply_to_id) {
-      const { rows: replyRows } = await query(
-        'SELECT first_name, username, content FROM chat_messages WHERE id = $1',
-        [msg.reply_to_id]
-      );
-      if (replyRows[0]) {
-        msg.reply_to = {
-          name: replyRows[0].first_name || replyRows[0].username || 'User',
-          content: (replyRows[0].content || '[media]').slice(0, 100),
-        };
-      }
-    }
-
-    // Touch activity timestamp
+    // Touch activity timestamp (metadata only)
     await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
 
-    // Socket.IO broadcast (during transition)
-    const io = req.app.get('io');
-    if (io) {
-      io.to(room).emit('chat:message', msg);
-    }
-
     // Push notifications (fire-and-forget)
+    const firstName = user.firstName || user.first_name || null;
+    const room = `hangout:${groupId}`;
+    const io = req.app.get('io');
     (async () => {
       try {
-        const [groupResult, membersResult] = await Promise.all([
-          query('SELECT name FROM hangout_groups WHERE id = $1', [groupId]),
-          query('SELECT user_id FROM hangout_group_members WHERE group_id = $1 AND user_id != $2', [groupId, user.id]),
-        ]);
-        const groupName = groupResult.rows[0]?.name || 'Hangout';
+        const membersResult = await query(
+          'SELECT user_id FROM hangout_group_members WHERE group_id = $1 AND user_id != $2',
+          [groupId, user.id]
+        );
         const memberIds = membersResult.rows.map(r => r.user_id);
         if (memberIds.length === 0) return;
 
@@ -199,15 +147,9 @@ const sendHangoutMessage = async (req, res) => {
             entityId: String(groupId),
             message: msgText,
             metadata: {
-              groupId,
-              groupName,
-              senderId: user.id,
-              senderName,
-              unreadCount: unread,
-              url: `/hangouts/${groupId}`,
-              pushTitle: groupName,
-              pushBody: msgText,
-              pushTag: `hangout-${groupId}`,
+              groupId, groupName, senderId: user.id, senderName,
+              unreadCount: unread, url: `/hangouts/${groupId}`,
+              pushTitle: groupName, pushBody: msgText, pushTag: `hangout-${groupId}`,
             },
           });
         }));
@@ -216,7 +158,7 @@ const sendHangoutMessage = async (req, res) => {
       }
     })();
 
-    return res.status(201).json({ success: true, message: msg, matrixEventId });
+    return res.status(201).json({ success: true, matrixEventId });
   } catch (err) {
     logger.error('sendHangoutMessage error', err);
     return res.status(500).json({ success: false, error: 'Failed to send message' });
@@ -225,12 +167,6 @@ const sendHangoutMessage = async (req, res) => {
 
 // ─── POST /api/webapp/matrix/dm/:userId/message ──────────────────────────────
 
-/**
- * Send a DM text message via Matrix with PG sync.
- *
- * Body: { content: string }
- * Response: { success, message, matrixEventId, remaining?, limit? }
- */
 const sendDmMessage = async (req, res) => {
   const user = authGuard(req, res);
   if (!user) return;
@@ -253,10 +189,69 @@ const sendDmMessage = async (req, res) => {
   }
 
   try {
+    // Block check
+    const blockCheck = await query(
+      `SELECT 1 FROM blocked_users
+       WHERE (user_id = $1 AND blocked_user_id = $2)
+          OR (user_id = $2 AND blocked_user_id = $1) LIMIT 1`,
+      [recipientId, user.id]
+    );
+    if (blockCheck.rows.length > 0) {
+      return res.status(403).json({ success: false, error: 'Cannot send message to this user', code: 'BLOCKED' });
+    }
+
+    // Privacy check
+    const role = (user.role || '').toLowerCase();
+    const isAdminSender = role === 'admin' || role === 'superadmin';
+    if (!isAdminSender) {
+      const recipientResult = await query(
+        'SELECT privacy, role, creator_status FROM users WHERE id = $1',
+        [recipientId]
+      );
+      const recipientRow = recipientResult.rows[0] || {};
+      const privacy = recipientRow.privacy || {};
+      const allowMessages = privacy.allowMessages !== undefined ? privacy.allowMessages : true;
+      if (!allowMessages) {
+        const followResult = await query(
+          'SELECT 1 FROM user_follows WHERE follower_id = $1 AND following_id = $2 LIMIT 1',
+          [user.id, recipientId]
+        );
+        if ((followResult.rowCount ?? followResult.rows.length) === 0) {
+          return res.status(403).json({ success: false, error: 'This user is not accepting messages', code: 'PRIVACY_RESTRICTED' });
+        }
+      }
+      // Creator DM policy
+      if (recipientRow.role === 'model' && recipientRow.creator_status === 'active') {
+        const dmPolicy = privacy.creatorDmPolicy || 'subscribers_and_mutuals';
+        if (dmPolicy === 'subscribers_and_mutuals') {
+          const [subscriberCheck, mutualCheck] = await Promise.all([
+            query(
+              `SELECT 1 FROM user_entitlements
+               WHERE user_id = $1 AND add_on_id = 'creator-subscription' AND creator_id = $2
+                 AND (is_lifetime = true OR expires_at > NOW()) LIMIT 1`,
+              [String(user.id), String(recipientId)]
+            ),
+            query(
+              `SELECT 1 FROM user_follows f1
+               JOIN user_follows f2 ON f1.follower_id = f2.following_id AND f1.following_id = f2.follower_id
+               WHERE f1.follower_id = $1 AND f1.following_id = $2 LIMIT 1`,
+              [user.id, recipientId]
+            ),
+          ]);
+          if (subscriberCheck.rows.length === 0 && mutualCheck.rows.length === 0) {
+            return res.status(403).json({
+              success: false,
+              error: 'Only subscribers and mutual follows can message this creator',
+              code: 'CREATOR_DM_RESTRICTED',
+            });
+          }
+        }
+      }
+    }
+
     // Free-tier daily DM limit
     const EntitlementAccessService = require('../../services/entitlementAccessService');
-    const role = (user.role || '').toLowerCase();
-    const hasDmMembership = role === 'admin' || role === 'superadmin' ||
+    const hasDmMembership = isAdminSender ||
       await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member');
     const isFreeUser = !hasDmMembership;
 
@@ -287,42 +282,65 @@ const sendDmMessage = async (req, res) => {
       limit = dmLimit;
     }
 
-    const isAdminSender = role === 'admin' || role === 'superadmin';
+    // ── Send to Matrix (the ONLY message store) ──
+    const [senderRow, recipientRow2] = await Promise.all([
+      query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+             FROM users WHERE id = $1 AND is_deleted = false`, [user.id]),
+      query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+             FROM users WHERE id = $1 AND is_deleted = false`, [recipientId]),
+    ]);
 
-    // Use DmService.sendMatrixDm which handles all checks + Matrix + PG
-    const { message, matrixEventId } = await DmService.sendMatrixDm(
-      user.id,
-      recipientId,
-      { content },
-      { isAdmin: isAdminSender }
-    );
-
-    const payload = {
-      id: message.id,
-      senderId: message.sender_id,
-      recipientId: message.recipient_id,
-      content: message.content,
-      isRead: message.is_read,
-      createdAt: message.created_at,
-      isMine: true,
-    };
-
-    // Socket.IO notification (during transition)
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user:${message.recipient_id}`).emit('dm:received', {
-        ...payload,
-        isMine: false,
-        sender: {
-          id: user.id,
-          username: user.username,
-          firstName: user.firstName || user.first_name,
-          photoUrl: user.photoUrl || user.photo_url,
-        },
-      });
+    if (!senderRow.rows[0] || !recipientRow2.rows[0]) {
+      return res.status(404).json({ success: false, error: 'User not found' });
     }
 
-    const result = { success: true, message: payload, matrixEventId };
+    const senderCreds = await matrixService.provisionMatrixUser(senderRow.rows[0]);
+    const matrixRoomId = await matrixService.getOrCreateDmRoom(senderRow.rows[0], recipientRow2.rows[0]);
+    await matrixService.ensureUserInRoom(matrixRoomId, senderCreds);
+    const resp = await matrixService.sendRoomMessage(matrixRoomId, senderCreds.accessToken, content.trim());
+    const matrixEventId = resp.event_id || null;
+
+    // Update dm_threads metadata (no message row — just thread metadata for list UI)
+    const trimmed = content.trim();
+    const [a, b] = [user.id, recipientId].sort();
+    const threadPreview = trimmed.slice(0, 100);
+    await query(
+      `INSERT INTO dm_threads (user_a, user_b, last_message_at, last_message, unread_for_a, unread_for_b)
+       VALUES ($1, $2, NOW(), $3, $4, $5)
+       ON CONFLICT (user_a, user_b) DO UPDATE SET
+         last_message_at = NOW(),
+         last_message = EXCLUDED.last_message,
+         unread_for_a = CASE WHEN dm_threads.user_a = $6 THEN 0 ELSE dm_threads.unread_for_a + 1 END,
+         unread_for_b = CASE WHEN dm_threads.user_b = $6 THEN 0 ELSE dm_threads.unread_for_b + 1 END`,
+      [a, b, threadPreview, user.id === a ? 0 : 1, user.id === b ? 0 : 1, user.id]
+    );
+
+    // Push notification (fire-and-forget)
+    (async () => {
+      try {
+        const senderName = user.firstName || user.first_name || user.username || 'Someone';
+        await NotificationEmitter.emit({
+          type: 'dm',
+          category: 'messaging',
+          priority: 'high',
+          actorId: user.id,
+          targetUserId: recipientId,
+          entityType: 'user',
+          entityId: String(user.id),
+          message: `${senderName} sent you a message`,
+          metadata: {
+            senderId: user.id,
+            senderName,
+            preview: threadPreview,
+            url: `/messages/${user.id}`,
+          },
+        });
+      } catch (notifErr) {
+        logger.warn('sendDmMessage push notification error', { error: notifErr.message, recipientId });
+      }
+    })();
+
+    const result = { success: true, matrixEventId };
     if (remaining !== null) result.remaining = remaining;
     if (limit !== null) result.limit = limit;
 

@@ -3,28 +3,20 @@
 /**
  * chatMediaController.js
  *
- * Handles media (image/video) uploads for:
+ * Handles media (image/video) uploads — Matrix-only (no PG message inserts).
  *   - Hangout group chat:  POST /api/webapp/hangouts/groups/:id/media
  *   - Direct messages:     POST /api/webapp/dm/media/:recipientId
  *
- * Community chat media (POST /api/webapp/chat/:room/media) is handled directly
- * by chatController.sendMediaMessage because it owns the chat_messages table for
- * that use case.
- *
- * All heavy processing (sharp resize/WebP conversion, ffmpeg thumbnail) is
- * delegated to chatMediaService so this controller stays thin.
- *
- * Files are served from /public/uploads/chat/ via the Express static middleware.
+ * Flow: process media → send to Matrix → return success.
+ * PG is only used for metadata (dm_threads for DMs).
  */
 
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { processChatMedia } = require('../../services/chatMediaService');
 const { resolveUserId } = require('../../utils/helpers');
-const DmService = require('../../services/dmService');
 const matrixService = require('../../services/matrixService');
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+const NotificationEmitter = require('../../services/notificationEmitter');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -35,28 +27,8 @@ const authGuard = (req, res) => {
   return user;
 };
 
-const isValidPhotoUrl = (p) =>
-  p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
+// ─── Hangout group chat media ────────────────────────────────────────────────
 
-// All media columns returned in every response so clients can render
-// images and videos without extra fetches.
-const CHAT_MSG_RETURNING = `
-  id, room, user_id, username, first_name, photo_url, content,
-  media_url, media_type, media_mime, media_thumb_url,
-  media_width, media_height, created_at
-`;
-
-// ─── Hangout group chat ──────────────────────────────────────────────────────
-
-/**
- * POST /api/webapp/hangouts/groups/:id/media
- *
- * Multipart body:
- *   - media   (File)   required  — image or video
- *   - content (string) optional  — caption text (max 500 chars)
- *
- * Returns: { success: true, message: ChatMessage }
- */
 const sendGroupMediaMessage = async (req, res) => {
   const user = authGuard(req, res);
   if (!user) return;
@@ -81,81 +53,45 @@ const sendGroupMediaMessage = async (req, res) => {
     }
 
     const mediaResult = await processChatMedia(req.file, user.id);
-
-    const room = `hangout:${groupId}`;
     const caption = (req.body?.content || '').trim().slice(0, 500) || null;
 
-    // Resolve author avatar (fresh DB value, fallback to session)
-    const photoResult = await query(
-      'SELECT photo_file_id FROM users WHERE id=$1',
+    // ── Send to Matrix (the ONLY message store) ──
+    const userRow = await query(
+      `SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+       FROM users WHERE id = $1 AND is_deleted = false`,
       [user.id]
     );
-    const rawPhoto = photoResult.rows[0]?.photo_file_id || user.photoUrl || null;
-    const photoUrl = isValidPhotoUrl(rawPhoto) ? rawPhoto : null;
-
-    const { rows } = await query(
-      `INSERT INTO chat_messages
-         (room, user_id, username, first_name, photo_url, content,
-          media_url, media_type, media_mime, media_thumb_url,
-          media_width, media_height)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-       RETURNING ${CHAT_MSG_RETURNING}`,
-      [
-        room,
-        user.id,
-        user.username || null,
-        user.firstName || user.first_name || null,
-        photoUrl,
-        caption,
-        mediaResult.mediaUrl,
-        mediaResult.mediaType,
-        mediaResult.mediaMime,
-        mediaResult.thumbUrl || null,
-        mediaResult.width || null,
-        mediaResult.height || null,
-      ]
-    );
-
-    const msg = {
-      ...rows[0],
-      photo_url: isValidPhotoUrl(rows[0].photo_url) ? rows[0].photo_url : null,
-    };
-
-    // Broadcast to group room via Socket.IO
-    const io = req.app.get('io');
-    if (io) {
-      io.to(room).emit('chat:message', msg);
+    if (!userRow.rows[0]) {
+      return res.status(401).json({ error: 'User not found' });
     }
 
-    // Bridge media to Matrix room (fire-and-forget)
-    (async () => {
-      try {
-        const userRow = await query(
-          `SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
-           FROM users WHERE id = $1 AND is_deleted = false`,
-          [user.id]
-        );
-        if (!userRow.rows[0]) return;
-        const userCreds = await matrixService.provisionMatrixUser(userRow.rows[0]);
-        const groupRow = await query('SELECT name FROM hangout_groups WHERE id = $1', [groupId]);
-        const groupName = groupRow.rows[0]?.name || `Hangout ${groupId}`;
-        const matrixRoomId = await matrixService.getOrCreateHangoutRoom(groupId, userRow.rows[0], groupName);
-        await matrixService.ensureUserInRoom(matrixRoomId, userCreds);
-        const msgtype = mediaResult.mediaType === 'video' ? 'm.video' : 'm.image';
-        const resp = await matrixService.sendRoomMediaMessage(matrixRoomId, userCreds.accessToken, {
-          url: mediaResult.mediaUrl,
-          msgtype,
-          body: caption || 'media',
-        });
-        if (resp.event_id) {
-          await query('UPDATE chat_messages SET matrix_event_id = $1 WHERE id = $2', [resp.event_id, msg.id]);
-        }
-      } catch (matrixErr) {
-        logger.warn('sendGroupMediaMessage Matrix bridge failed', { error: matrixErr.message, groupId });
-      }
-    })();
+    const userCreds = await matrixService.provisionMatrixUser(userRow.rows[0]);
+    const groupRow = await query('SELECT name FROM hangout_groups WHERE id = $1', [groupId]);
+    const groupName = groupRow.rows[0]?.name || `Hangout ${groupId}`;
+    const matrixRoomId = await matrixService.getOrCreateHangoutRoom(groupId, userRow.rows[0], groupName);
+    await matrixService.ensureUserInRoom(matrixRoomId, userCreds);
 
-    return res.status(201).json({ success: true, message: msg });
+    const msgtype = mediaResult.mediaType === 'video' ? 'm.video' : 'm.image';
+    const resp = await matrixService.sendRoomMediaMessage(matrixRoomId, userCreds.accessToken, {
+      url: mediaResult.mediaUrl,
+      msgtype,
+      body: caption || 'media',
+      info: {
+        mimetype: mediaResult.mediaMime,
+        w: mediaResult.width || undefined,
+        h: mediaResult.height || undefined,
+      },
+    });
+
+    // Touch activity timestamp
+    await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
+
+    return res.status(201).json({
+      success: true,
+      matrixEventId: resp.event_id || null,
+      media_url: mediaResult.mediaUrl,
+      media_type: mediaResult.mediaType,
+    });
   } catch (err) {
     if (err.statusCode) {
       return res.status(err.statusCode).json({ error: err.userMessage || err.message });
@@ -165,23 +101,13 @@ const sendGroupMediaMessage = async (req, res) => {
   }
 };
 
-// ─── Direct message media upload ─────────────────────────────────────────────
+// ─── DM media upload ─────────────────────────────────────────────────────────
 
-/**
- * POST /api/webapp/dm/media/:recipientId
- *
- * Multipart body:
- *   - media   (File)   required  — image or video
- *   - content (string) optional  — caption text (max 500 chars)
- *
- * Returns: { success: true, message: DirectMessage }
- */
 const sendDmMediaMessage = async (req, res) => {
   const user = authGuard(req, res);
   if (!user) return;
 
   const recipientId = await resolveUserId(req.params.recipientId || req.body?.recipientId);
-
   if (!recipientId) {
     return res.status(400).json({ error: 'recipientId is required' });
   }
@@ -193,82 +119,88 @@ const sendDmMediaMessage = async (req, res) => {
   }
 
   try {
+    // Block check
+    const blockCheck = await query(
+      `SELECT 1 FROM blocked_users
+       WHERE (user_id = $1 AND blocked_user_id = $2)
+          OR (user_id = $2 AND blocked_user_id = $1) LIMIT 1`,
+      [recipientId, user.id]
+    );
+    if (blockCheck.rows.length > 0) {
+      return res.status(403).json({ error: 'Cannot send message to this user', code: 'BLOCKED' });
+    }
+
     const mediaResult = await processChatMedia(req.file, user.id);
     const caption = (req.body?.content || '').trim().slice(0, 500) || null;
 
-    const senderRole = user.role || '';
-    const isAdminSender = senderRole === 'admin' || senderRole === 'superadmin';
+    // ── Send to Matrix (the ONLY message store) ──
+    const [senderRow, recipRow] = await Promise.all([
+      query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+             FROM users WHERE id = $1 AND is_deleted = false`, [user.id]),
+      query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+             FROM users WHERE id = $1 AND is_deleted = false`, [recipientId]),
+    ]);
 
-    const message = await DmService.sendMessage(
-      user.id,
-      recipientId,
-      {
-        content: caption,
-        mediaUrl: mediaResult.mediaUrl,
-        mediaType: mediaResult.mediaType,
-        mediaMime: mediaResult.mediaMime,
-        mediaThumbUrl: mediaResult.thumbUrl || null
-      },
-      { isAdmin: isAdminSender }
-    );
-
-    const responseMessage = {
-      id: message.id,
-      senderId: message.sender_id,
-      recipientId: message.recipient_id,
-      content: message.content,
-      mediaUrl: message.media_url,
-      mediaType: message.media_type,
-      mediaMime: message.media_mime,
-      mediaThumbUrl: message.media_thumb_url,
-      isRead: message.is_read,
-      createdAt: message.created_at,
-      isMine: true
-    };
-
-    // Notify recipient via Socket.IO
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user:${recipientId}`).emit('dm:received', {
-        ...responseMessage,
-        isMine: false,
-        sender: {
-          id: user.id,
-          username: user.username,
-          firstName: user.firstName || user.first_name,
-          photoUrl: user.photoUrl || user.photo_url,
-        },
-      });
+    if (!senderRow.rows[0] || !recipRow.rows[0]) {
+      return res.status(404).json({ error: 'User not found' });
     }
 
-    // Bridge media to Matrix DM room (fire-and-forget)
+    const senderCreds = await matrixService.provisionMatrixUser(senderRow.rows[0]);
+    const matrixRoomId = await matrixService.getOrCreateDmRoom(senderRow.rows[0], recipRow.rows[0]);
+    await matrixService.ensureUserInRoom(matrixRoomId, senderCreds);
+
+    const msgtype = mediaResult.mediaType === 'video' ? 'm.video' : 'm.image';
+    const resp = await matrixService.sendRoomMediaMessage(matrixRoomId, senderCreds.accessToken, {
+      url: mediaResult.mediaUrl,
+      msgtype,
+      body: caption || 'media',
+      info: {
+        mimetype: mediaResult.mediaMime,
+        w: mediaResult.width || undefined,
+        h: mediaResult.height || undefined,
+      },
+    });
+
+    // Update dm_threads metadata
+    const [a, b] = [user.id, recipientId].sort();
+    const threadPreview = caption || `[${mediaResult.mediaType}]`;
+    await query(
+      `INSERT INTO dm_threads (user_a, user_b, last_message_at, last_message, unread_for_a, unread_for_b)
+       VALUES ($1, $2, NOW(), $3, $4, $5)
+       ON CONFLICT (user_a, user_b) DO UPDATE SET
+         last_message_at = NOW(),
+         last_message = EXCLUDED.last_message,
+         unread_for_a = CASE WHEN dm_threads.user_a = $6 THEN 0 ELSE dm_threads.unread_for_a + 1 END,
+         unread_for_b = CASE WHEN dm_threads.user_b = $6 THEN 0 ELSE dm_threads.unread_for_b + 1 END`,
+      [a, b, threadPreview, user.id === a ? 0 : 1, user.id === b ? 0 : 1, user.id]
+    );
+
+    // Push notification (fire-and-forget)
     (async () => {
       try {
-        const [senderRow, recipRow] = await Promise.all([
-          query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
-                 FROM users WHERE id = $1 AND is_deleted = false`, [user.id]),
-          query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
-                 FROM users WHERE id = $1 AND is_deleted = false`, [recipientId]),
-        ]);
-        if (!senderRow.rows[0] || !recipRow.rows[0]) return;
-        const senderCreds = await matrixService.provisionMatrixUser(senderRow.rows[0]);
-        const matrixRoomId = await matrixService.getOrCreateDmRoom(senderRow.rows[0], recipRow.rows[0]);
-        await matrixService.ensureUserInRoom(matrixRoomId, senderCreds);
-        const msgtype = mediaResult.mediaType === 'video' ? 'm.video' : 'm.image';
-        const resp = await matrixService.sendRoomMediaMessage(matrixRoomId, senderCreds.accessToken, {
-          url: mediaResult.mediaUrl,
-          msgtype,
-          body: caption || 'media',
+        const senderName = user.firstName || user.first_name || user.username || 'Someone';
+        await NotificationEmitter.emit({
+          type: 'dm',
+          category: 'messaging',
+          priority: 'high',
+          actorId: user.id,
+          targetUserId: recipientId,
+          entityType: 'user',
+          entityId: String(user.id),
+          message: `${senderName} sent you ${mediaResult.mediaType === 'video' ? 'a video' : 'an image'}`,
+          metadata: { senderId: user.id, senderName, preview: threadPreview, url: `/messages/${user.id}` },
         });
-        if (resp.event_id) {
-          await query('UPDATE direct_messages SET matrix_event_id = $1 WHERE id = $2', [resp.event_id, message.id]);
-        }
-      } catch (matrixErr) {
-        logger.warn('sendDmMediaMessage Matrix bridge failed', { error: matrixErr.message, recipientId });
+      } catch (notifErr) {
+        logger.warn('sendDmMediaMessage push error', { error: notifErr.message });
       }
     })();
 
-    return res.status(201).json({ success: true, message: responseMessage });
+    return res.status(201).json({
+      success: true,
+      matrixEventId: resp.event_id || null,
+      media_url: mediaResult.mediaUrl,
+      media_type: mediaResult.mediaType,
+    });
   } catch (err) {
     if (err.statusCode) {
       return res.status(err.statusCode).json({ error: err.message, code: err.code });
@@ -277,7 +209,6 @@ const sendDmMediaMessage = async (req, res) => {
     return res.status(500).json({ error: 'Failed to send media message' });
   }
 };
-
 
 module.exports = {
   sendGroupMediaMessage,

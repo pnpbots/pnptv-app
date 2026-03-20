@@ -24,7 +24,7 @@ import {
   type DirectMessage,
 } from "@/lib/api";
 import EmojiReactionBar, { type Reaction } from "@/components/EmojiReactionBar";
-import { useRoomMessages, sendMatrixMessage } from "@/hooks/useMatrix";
+import { useRoomMessages, sendMatrixMessage, sendMatrixReply, sendReaction, redactEvent, useRoomReactions, type ReactionEntry } from "@/hooks/useMatrix";
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -175,7 +175,9 @@ interface DmBubbleProps {
   onExpandImage: (src: string) => void;
   reactions?: Reaction[];
   onReaction?: (messageId: number, emoji: string) => void;
+  onReply?: (msg: DirectMessage) => void;
   currentUserId?: string;
+  replyTo?: { name: string; content: string } | null;
 }
 
 const DmBubble = memo(function DmBubble({
@@ -187,7 +189,9 @@ const DmBubble = memo(function DmBubble({
   onExpandImage,
   reactions,
   onReaction,
+  onReply,
   currentUserId,
+  replyTo,
 }: DmBubbleProps) {
   const { dm: t } = useI18n();
   const isMe = msg.isMine;
@@ -238,10 +242,18 @@ const DmBubble = memo(function DmBubble({
           </span>
         </div>
 
+        {/* Reply-to reference */}
+        {replyTo && (
+          <div className="text-[10px] px-2.5 py-1 mb-0.5 rounded-lg" style={{ background: "rgba(212,0,122,0.08)", borderLeft: "2px solid #D4007A" }}>
+            <span className="font-semibold" style={{ color: "#D4007A" }}>{replyTo.name}</span>
+            <p className="truncate max-w-[200px]" style={{ color: "#8E8E93" }}>{replyTo.content}</p>
+          </div>
+        )}
+
         {/* Text bubble */}
         {hasText && (
           <div
-            className="rounded-2xl px-3 py-2 text-sm text-white whitespace-pre-wrap break-words"
+            className="rounded-2xl px-3 py-2 text-sm text-white whitespace-pre-wrap break-words group relative"
             style={{
               background: isMe
                 ? "linear-gradient(135deg, #D4007A, #E69138)"
@@ -249,6 +261,19 @@ const DmBubble = memo(function DmBubble({
             }}
           >
             {msg.content}
+            {/* Reply button */}
+            {onReply && (
+              <button
+                onClick={() => onReply(msg)}
+                className="absolute -top-2 opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
+                style={{ [isMe ? "left" : "right"]: -8 }}
+                aria-label="Reply"
+              >
+                <svg className="w-3 h-3 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                </svg>
+              </button>
+            )}
           </div>
         )}
 
@@ -610,11 +635,15 @@ function Conversation({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Reply-to state
+  const [replyToMsg, setReplyToMsg] = useState<DirectMessage | null>(null);
+
   // Lightbox
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   // Matrix live messages (only active when roomId is known)
   const { messages: matrixMessages, loading: matrixLoading } = useRoomMessages(matrixRoomId);
+  const { reactions: matrixReactionsMap } = useRoomReactions(matrixRoomId);
 
   // Convert Matrix messages to DirectMessage shape for the existing bubble components
   const matrixAsDmMessages: DirectMessage[] = matrixMessages.map((m) => {
@@ -636,40 +665,77 @@ function Conversation({
       isRead: true,
       isMine: m.isMine,
       createdAt: new Date(m.timestamp).toISOString(),
-    };
+      // Reply-to from Matrix
+      _replyTo: m.replyToEventId ? {
+        name: m.replyToSenderId?.split(":")[0].replace(/^@pnptv_/, "").replace(/^@/, "") || "User",
+        content: m.replyToBody || "[message]",
+      } : undefined,
+    } as DirectMessage & { _replyTo?: { name: string; content: string } };
   });
 
-  // Final message list: Matrix is the single source of truth when available
+  // Final message list: Matrix is the single source of truth when available.
+  // During Matrix sync, show REST messages as a bridge so the screen isn't empty.
   const messages: DirectMessage[] = matrixRoomId
-    ? matrixAsDmMessages
+    ? matrixAsDmMessages.length > 0
+      ? matrixAsDmMessages
+      : matrixLoading
+        ? restMessages  // show REST messages while Matrix is still syncing
+        : matrixAsDmMessages  // sync done — show Matrix (even if empty = new conversation)
     : restMessages;
+
+  // Map from DM message numeric id (FNV hash) → Matrix eventId (for reactions)
+  const dmEventIdMap = React.useMemo(() => {
+    const map = new Map<number, string>();
+    matrixMessages.forEach((m) => {
+      let hash = 2166136261;
+      for (let i = 0; i < m.eventId.length; i++) {
+        hash ^= m.eventId.charCodeAt(i);
+        hash = (hash * 16777619) >>> 0;
+      }
+      map.set(hash, m.eventId);
+    });
+    return map;
+  }, [matrixMessages]);
 
   const loadMessages = useCallback(async () => {
     try {
       const data = await getMessages(userId, 50);
       setRestMessages(data.messages || []);
-      // Also pick up partner name from thread data if available
       setLoadError(null);
     } catch {
       setLoadError(t.loadMessagesError);
     }
   }, [userId, t.loadMessagesError]);
 
-  // Bootstrap: load REST messages immediately, then silently try to get Matrix room
+  // Bootstrap: load REST messages AND establish Matrix room in parallel
   useEffect(() => {
     setIsLoading(true);
-    loadMessages().finally(() => setIsLoading(false));
-    markThreadAsRead(userId).catch(() => {});
+    setMatrixRoomId(null);
+    setMatrixInitError(null);
 
-    // Try to establish Matrix DM room (non-blocking — Matrix is real-time upgrade)
+    // Load REST messages (fast, for immediate display) + resolve partner name
+    const restPromise = loadMessages();
+
+    // Fetch partner name from thread list (lightweight)
+    getMessageThreads()
+      .then((res) => {
+        const thread = (res.threads || []).find((t: MessageThread) => String(t.userId) === String(userId));
+        if (thread) setPartnerName(thread.firstName || thread.username || "");
+      })
+      .catch(() => {});
+
+    // Establish Matrix DM room (may take a moment for provisioning)
     getOrCreateDmRoom(userId)
       .then((res) => {
         if (res.success) setMatrixRoomId(res.roomId);
       })
       .catch(() => {
-        // Matrix unavailable — REST polling fallback
         setMatrixInitError("real-time unavailable");
       });
+
+    // Loading is done when REST finishes (Matrix room setup is non-blocking)
+    restPromise.finally(() => setIsLoading(false));
+    markThreadAsRead(userId).catch(() => {});
   }, [userId, loadMessages]);
 
   // Load existing reactions for DM messages
@@ -784,7 +850,9 @@ function Conversation({
     setSending(true);
     setSendError(null);
     const text = msgInput.trim();
+    const currentReplyToEventId = replyToMsg ? dmEventIdMap.get(replyToMsg.id as number) : undefined;
     setMsgInput("");
+    setReplyToMsg(null);
 
     try {
       if (hasMedia && mediaFile) {
@@ -799,6 +867,9 @@ function Conversation({
         }
         // Backend bridges media to Matrix automatically
         clearMedia();
+      } else if (currentReplyToEventId && matrixRoomId) {
+        // Reply via Matrix event relation
+        await sendMatrixReply(matrixRoomId, text, currentReplyToEventId);
       } else {
         // Text: send via new Matrix-primary REST endpoint
         try {
@@ -857,6 +928,26 @@ function Conversation({
   }, []);
 
   const handleDmReaction = useCallback(async (messageId: number, emoji: string) => {
+    // If Matrix is active, use Matrix reactions
+    const matrixEventId = dmEventIdMap.get(messageId);
+    if (matrixRoomId && matrixEventId) {
+      try {
+        const entries = matrixReactionsMap.get(matrixEventId);
+        const myUserId = matrixMessages[0]?.senderId?.split(":")[0] || "";
+        const existing = entries?.find((e) => e.emoji === emoji);
+        const myEntry = existing?.users.find((u) => u.userId.includes(myUserId));
+        if (myEntry) {
+          await redactEvent(matrixRoomId, myEntry.reactionEventId);
+        } else {
+          await sendReaction(matrixRoomId, matrixEventId, emoji);
+        }
+      } catch {
+        // Silently fail
+      }
+      return;
+    }
+
+    // Fallback to REST reactions for non-Matrix messages
     try {
       const result = await reactToDm(messageId, emoji);
       if (result.success) {
@@ -961,14 +1052,43 @@ function Conversation({
               partnerName={partnerName}
               onNavigate={handleNavigate}
               onExpandImage={handleExpandImage}
-              reactions={typeof msg.id === "number" ? dmReactions.get(msg.id) : undefined}
+              reactions={(() => {
+                const matrixEvId = typeof msg.id === "number" ? dmEventIdMap.get(msg.id) : undefined;
+                if (matrixEvId && matrixReactionsMap.has(matrixEvId)) {
+                  return matrixReactionsMap.get(matrixEvId)!.map(e => ({
+                    emoji: e.emoji,
+                    count: e.count,
+                    users: e.users.map(u => ({ id: u.userId, username: u.userId.split(":")[0].replace(/^@/, "") })),
+                  }));
+                }
+                return typeof msg.id === "number" ? dmReactions.get(msg.id) : undefined;
+              })()}
               onReaction={handleDmReaction}
+              onReply={matrixRoomId ? setReplyToMsg : undefined}
+              replyTo={(msg as DirectMessage & { _replyTo?: { name: string; content: string } })._replyTo || null}
               currentUserId={currentUser?.dbId ?? undefined}
             />
           ))
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Reply-to bar */}
+      {replyToMsg && (
+        <div className="mx-4 mb-1 flex items-center gap-2 px-3 py-2 rounded-xl animate-fade-in-up" style={{ background: "rgba(212,0,122,0.08)", borderLeft: "3px solid #D4007A" }}>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-semibold" style={{ color: "#D4007A" }}>
+              {replyToMsg.isMine ? (currentUser?.firstName || "You") : (partnerName || "User")}
+            </p>
+            <p className="text-xs text-pnp-textSecondary truncate">{replyToMsg.content || "[media]"}</p>
+          </div>
+          <button onClick={() => setReplyToMsg(null)} className="text-pnp-textSecondary hover:text-white" aria-label="Cancel reply">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* Send error banner */}
       {sendError && (
