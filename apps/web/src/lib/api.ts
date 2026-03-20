@@ -1529,6 +1529,120 @@ export function markGroupAsRead(groupId: number): Promise<{ success: boolean }> 
   return request(`/api/webapp/hangouts/groups/${groupId}/read`, { method: "POST" });
 }
 
+// ── Hangout Group Management ────────────────────────────────────────────────
+
+export function kickHangoutMember(groupId: number, userId: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/kick`, {
+    method: "POST",
+    body: JSON.stringify({ userId }),
+  });
+}
+
+export function banHangoutMember(groupId: number, userId: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/ban`, {
+    method: "POST",
+    body: JSON.stringify({ userId }),
+  });
+}
+
+export function unbanHangoutMember(groupId: number, userId: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/unban`, {
+    method: "POST",
+    body: JSON.stringify({ userId }),
+  });
+}
+
+export function muteHangoutMember(groupId: number, userId: string, durationMinutes = 60): Promise<{ success: boolean; mutedUntil: string }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/mute`, {
+    method: "POST",
+    body: JSON.stringify({ userId, durationMinutes }),
+  });
+}
+
+export function unmuteHangoutMember(groupId: number, userId: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/unmute`, {
+    method: "POST",
+    body: JSON.stringify({ userId }),
+  });
+}
+
+export function promoteHangoutMember(groupId: number, userId: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/promote`, {
+    method: "POST",
+    body: JSON.stringify({ userId }),
+  });
+}
+
+export function demoteHangoutMember(groupId: number, userId: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/demote`, {
+    method: "POST",
+    body: JSON.stringify({ userId }),
+  });
+}
+
+export function pinHangoutMessage(groupId: number, eventId: string, body?: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/pin`, {
+    method: "POST",
+    body: JSON.stringify({ eventId, body }),
+  });
+}
+
+export function unpinHangoutMessage(groupId: number, eventId: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/pin/${encodeURIComponent(eventId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function getHangoutPins(groupId: number): Promise<{ success: boolean; pins: Array<{ id: number; matrix_event_id: string; message_body: string; pinned_by: string; pinned_by_name: string; pinned_at: string }> }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/pins`);
+}
+
+export function updateHangoutSettings(groupId: number, settings: {
+  slowModeSeconds?: number;
+  isReadOnly?: boolean;
+  allowMedia?: boolean;
+  allowMemberInvites?: boolean;
+  autoDeleteHours?: number;
+  tags?: string[];
+  isPublic?: boolean;
+  name?: string;
+  description?: string;
+}): Promise<{ success: boolean; settings: Record<string, unknown> }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/settings`, {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+}
+
+export function transferHangoutOwnership(groupId: number, userId: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/transfer`, {
+    method: "POST",
+    body: JSON.stringify({ userId }),
+  });
+}
+
+export function getHangoutInviteLink(groupId: number): Promise<{ success: boolean; inviteCode: string; inviteUrl: string }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/invite-link`);
+}
+
+export function joinHangoutByInvite(code: string): Promise<{ success: boolean; groupId: number }> {
+  return request(`/api/webapp/hangouts/groups/join-by-invite/${code}`, { method: "POST" });
+}
+
+export function updateHangoutNotification(groupId: number, mode: "all" | "mentions" | "muted"): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/notification`, {
+    method: "PUT",
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export function deleteHangoutMessage(groupId: number, eventId: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/delete-message`, {
+    method: "POST",
+    body: JSON.stringify({ eventId }),
+  });
+}
+
 export interface GetActiveCallResponse {
   success: boolean;
   call: ActiveCallInfo | null;

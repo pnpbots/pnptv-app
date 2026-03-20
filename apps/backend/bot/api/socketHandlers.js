@@ -280,273 +280,7 @@ function initSocketIO(io) {
       }
     });
 
-    // ── Group Chat ───────────────────────────────────────────────────────────
-
-    // Allowed community chat rooms (non-hangout)
-    const ALLOWED_COMMUNITY_ROOMS = new Set(['general', 'prime']);
-
-    socket.on('chat:join', async ({ room = 'general' } = {}) => {
-      // Authorization: hangout rooms require membership
-      const hangoutMatch = String(room).match(/^hangout:(\d+)$/);
-      if (hangoutMatch) {
-        const groupId = parseInt(hangoutMatch[1], 10);
-        try {
-          const { rows: memberRows } = await query(
-            'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
-            [groupId, user.id]
-          );
-          if (memberRows.length === 0) {
-            socket.emit('chat:error', { message: 'Not a member of this group' });
-            return;
-          }
-        } catch (err) {
-          logger.error('chat:join membership check error', err);
-          socket.emit('chat:error', { message: 'Failed to verify membership' });
-          return;
-        }
-      } else if (room === 'prime') {
-        // Prime room requires pnp-member entitlement (same as all community rooms)
-        try {
-          const EntitlementAccessService = require('./services/entitlementAccessService');
-          if (!await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member')) {
-            socket.emit('chat:error', { message: 'Member subscription required' });
-            return;
-          }
-        } catch (err) {
-          logger.error('chat:join prime room check error', err);
-          socket.emit('chat:error', { message: 'Access denied' });
-          return;
-        }
-      } else if (!ALLOWED_COMMUNITY_ROOMS.has(room)) {
-        socket.emit('chat:error', { message: 'Invalid room' });
-        return;
-      }
-
-      socket.join(`chat:${room}`);
-      try {
-        const { rows } = await query(
-          `SELECT m.id, m.room, m.user_id, m.username, m.first_name, m.photo_url, m.content,
-                  m.media_url, m.media_type, m.media_mime, m.media_thumb_url,
-                  m.media_width, m.media_height, m.media_metadata, m.reply_to_id, m.created_at,
-                  r.first_name AS reply_name, r.username AS reply_username, r.content AS reply_content
-           FROM chat_messages m
-           LEFT JOIN chat_messages r ON r.id = m.reply_to_id
-           WHERE m.room = $1 AND m.is_deleted = false
-           ORDER BY m.created_at DESC LIMIT 50`,
-          [room]
-        );
-        for (const msg of rows) {
-          if (msg.reply_to_id && (msg.reply_name || msg.reply_username)) {
-            msg.reply_to = { name: msg.reply_name || msg.reply_username || 'User', content: (msg.reply_content || '[media]').slice(0, 100) };
-          }
-          delete msg.reply_name; delete msg.reply_username; delete msg.reply_content;
-        }
-        socket.emit('chat:history', rows.reverse());
-      } catch (err) {
-        logger.error('chat:join history error', err);
-      }
-    });
-
-    // Text message
-    socket.on('chat:message', async ({ room = 'general', content, replyToId } = {}) => {
-      if (!content || !content.trim()) return;
-      if (content.length > 2000) return;
-      const parsedReplyToId = replyToId ? parseInt(replyToId, 10) : null;
-
-      // Hangout rooms require membership and no block relationship with the group creator
-      const hangoutMatch = String(room).match(/^hangout:(\d+)$/);
-      if (hangoutMatch) {
-        const gid = parseInt(hangoutMatch[1], 10);
-        const { rows } = await query(
-          `SELECT hgm.user_id, hg.creator_id
-           FROM hangout_group_members hgm
-           JOIN hangout_groups hg ON hg.id = hgm.group_id
-           WHERE hgm.group_id = $1 AND hgm.user_id = $2`,
-          [gid, user.id]
-        );
-        if (rows.length === 0) return;
-        const creatorId = rows[0].creator_id;
-        if (creatorId && String(creatorId) !== String(user.id)) {
-          try {
-            const [blockedByCreator, blockedByUser] = await Promise.all([
-              BlockedUser.isBlocked(creatorId, user.id),
-              BlockedUser.isBlocked(user.id, creatorId),
-            ]);
-            if (blockedByCreator || blockedByUser) {
-              socket.emit('chat:error', { message: 'Cannot send message in this group', code: 'BLOCKED' });
-              return;
-            }
-          } catch (err) {
-            logger.error('chat:message block check error', err);
-            socket.emit('chat:error', { message: 'Access check unavailable. Please try again.' });
-            return;
-          }
-        }
-      } else if (room === 'prime') {
-        try {
-          const EntitlementAccessService = require('./services/entitlementAccessService');
-          if (!await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member')) return;
-        } catch { return; }
-      } else if (!ALLOWED_COMMUNITY_ROOMS.has(room)) {
-        return;
-      }
-
-      if (!rateLimit(`chat:${user.id}`, 30, 60000)) {
-        socket.emit('chat:error', { message: 'Too many messages. Slow down.' });
-        return;
-      }
-      try {
-        const firstName = user.firstName || user.first_name || null;
-        const photoUrl = user.photoUrl || user.photo_url || null;
-
-        const { rows } = await query(
-          `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content, reply_to_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           RETURNING ${MSG_RETURNING_COLS}`,
-          [room, user.id, user.username || null, firstName, photoUrl, content.trim(), parsedReplyToId]
-        );
-        const msg = rows[0];
-        if (msg.reply_to_id) {
-          const { rows: replyRows } = await query(
-            'SELECT first_name, username, content FROM chat_messages WHERE id = $1',
-            [msg.reply_to_id]
-          );
-          if (replyRows[0]) {
-            msg.reply_to = { name: replyRows[0].first_name || replyRows[0].username || 'User', content: (replyRows[0].content || '[media]').slice(0, 100) };
-          }
-        }
-        io.to(`chat:${room}`).emit('chat:message', msg);
-      } catch (err) {
-        logger.error('chat:message error', err);
-        socket.emit('chat:error', { message: 'Failed to save message' });
-      }
-    });
-
-    // Media message sent over Socket.IO.
-    // Payload: { room, file: { buffer (base64 string), mimetype, size } }
-    // The client encodes the file buffer as a base64 string before emitting,
-    // because Socket.IO serialises payloads as JSON by default.
-    //
-    // Note: for large files (videos) the HTTP REST endpoint
-    // POST /api/webapp/chat/:room/media is strongly preferred because
-    // Socket.IO is not optimised for large binary payloads.
-    socket.on('chat:media', async ({ room = 'general', file, content } = {}) => {
-      if (!file || !file.buffer || !file.mimetype) {
-        socket.emit('chat:error', { message: 'Invalid media payload' });
-        return;
-      }
-
-      // ── Room validation (mirrors chat:message) ──────────────────────────────
-      const mediaHangoutMatch = String(room).match(/^hangout:(\d+)$/);
-      if (mediaHangoutMatch) {
-        const gid = parseInt(mediaHangoutMatch[1], 10);
-        try {
-          const { rows: memberRows } = await query(
-            `SELECT hgm.user_id, hg.creator_id
-             FROM hangout_group_members hgm
-             JOIN hangout_groups hg ON hg.id = hgm.group_id
-             WHERE hgm.group_id = $1 AND hgm.user_id = $2`,
-            [gid, user.id]
-          );
-          if (memberRows.length === 0) {
-            socket.emit('chat:error', { message: 'Access denied' });
-            return;
-          }
-          const mediaCreatorId = memberRows[0].creator_id;
-          if (mediaCreatorId && String(mediaCreatorId) !== String(user.id)) {
-            const [blockedByCreator, blockedByUser] = await Promise.all([
-              BlockedUser.isBlocked(mediaCreatorId, user.id),
-              BlockedUser.isBlocked(user.id, mediaCreatorId),
-            ]);
-            if (blockedByCreator || blockedByUser) {
-              socket.emit('chat:error', { message: 'Cannot upload media in this group', code: 'BLOCKED' });
-              return;
-            }
-          }
-        } catch (err) {
-          logger.error('chat:media membership check error', err);
-          socket.emit('chat:error', { message: 'Access denied' });
-          return;
-        }
-      } else if (room === 'prime') {
-        // Prime room requires pnp-member entitlement
-        try {
-          const EntitlementAccessService = require('./services/entitlementAccessService');
-          if (!await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member')) {
-            socket.emit('chat:error', { message: 'Access denied' });
-            return;
-          }
-        } catch (err) {
-          logger.error('chat:media prime room check error', err);
-          socket.emit('chat:error', { message: 'Access denied' });
-          return;
-        }
-      } else if (!ALLOWED_COMMUNITY_ROOMS.has(room)) {
-        socket.emit('chat:error', { message: 'Access denied' });
-        return;
-      }
-      // ── End room validation ─────────────────────────────────────────────────
-
-      // Enforce a 10 MB cap over Socket.IO (images only — videos should use REST).
-      // Check the base64 string length BEFORE decoding to prevent memory exhaustion
-      // attacks. Decoded size is approximately len * 0.75, so for 10 MB the base64
-      // string must be at most ceil(10 * 1024 * 1024 / 0.75) = 13_981_013 chars.
-      const MAX_SOCKET_MEDIA_BYTES = 10 * 1024 * 1024;
-      const MAX_BASE64_LENGTH = Math.ceil(MAX_SOCKET_MEDIA_BYTES / 0.75);
-      if (typeof file.buffer !== 'string' || file.buffer.length > MAX_BASE64_LENGTH) {
-        socket.emit('chat:error', { message: 'File too large. Use the upload button for videos.' });
-        return;
-      }
-      const buffer = Buffer.from(file.buffer, 'base64');
-      if (buffer.length > MAX_SOCKET_MEDIA_BYTES) {
-        socket.emit('chat:error', { message: 'File too large. Use the upload button for videos.' });
-        return;
-      }
-
-      if (!rateLimit(`chat:media:${user.id}`, 10, 60000)) {
-        socket.emit('chat:error', { message: 'Too many media uploads. Please slow down.' });
-        return;
-      }
-
-      const caption = typeof content === 'string' ? content.trim().slice(0, 500) : null;
-
-      try {
-        const multerLike = { buffer, mimetype: file.mimetype, size: buffer.length };
-        const mediaResult = await processChatMedia(multerLike, user.id);
-
-        const firstName = user.firstName || user.first_name || null;
-        const photoUrl = user.photoUrl || user.photo_url || null;
-
-        const { rows } = await query(
-          `INSERT INTO chat_messages
-             (room, user_id, username, first_name, photo_url, content,
-              media_url, media_type, media_mime, media_thumb_url,
-              media_width, media_height)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-           RETURNING ${MSG_RETURNING_COLS}`,
-          [
-            room,
-            user.id,
-            user.username || null,
-            firstName,
-            photoUrl,
-            caption || null,
-            mediaResult.mediaUrl,
-            mediaResult.mediaType,
-            mediaResult.mediaMime,
-            mediaResult.thumbUrl || null,
-            mediaResult.width || null,
-            mediaResult.height || null,
-          ]
-        );
-
-        io.to(`chat:${room}`).emit('chat:message', rows[0]);
-      } catch (err) {
-        logger.error('chat:media error', err);
-        const userMsg = err.userMessage || 'Failed to process media. Please try again.';
-        socket.emit('chat:error', { message: userMsg });
-      }
-    });
+    // ── Legacy community chat handlers removed — all messaging now via Matrix ──
 
     // ── Hangout Group Rooms ─────────────────────────────────────────────────
     // Clients join hangout rooms to receive chat messages AND call events.
@@ -709,14 +443,54 @@ function initSocketIO(io) {
       }
 
       try {
-        // Verify membership
-        const { rows: memberRows } = await query(
-          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+        // Mute check
+        const { rows: memberInfo } = await query(
+          'SELECT role, is_muted, muted_until, is_banned FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
           [gid, user.id]
         );
-        if (memberRows.length === 0) {
+        if (memberInfo.length === 0) {
           socket.emit('hangout:error', { message: 'Not a member of this group' });
           return;
+        }
+        if (memberInfo[0].is_banned) {
+          socket.emit('hangout:error', { message: 'You are banned from this group', code: 'BANNED' });
+          return;
+        }
+        if (memberInfo[0].is_muted) {
+          if (memberInfo[0].muted_until && new Date(memberInfo[0].muted_until) > new Date()) {
+            socket.emit('hangout:error', { message: 'You are muted in this group', code: 'MUTED' });
+            return;
+          }
+          // Mute expired, clear it
+          await query('UPDATE hangout_group_members SET is_muted = false, muted_until = NULL WHERE group_id=$1 AND user_id=$2', [gid, user.id]);
+        }
+
+        // Read-only mode check
+        const { rows: groupSettings } = await query(
+          'SELECT is_read_only, slow_mode_seconds FROM hangout_groups WHERE id = $1',
+          [gid]
+        );
+        if (groupSettings[0]?.is_read_only) {
+          const memberRole = memberInfo[0].role;
+          if (memberRole !== 'owner' && memberRole !== 'moderator') {
+            const isAdminRole = (user.role || '').toLowerCase() === 'admin' || (user.role || '').toLowerCase() === 'superadmin';
+            if (!isAdminRole) {
+              socket.emit('hangout:error', { message: 'This group is in read-only mode', code: 'READ_ONLY' });
+              return;
+            }
+          }
+        }
+
+        // Slow mode check (in addition to existing rate limit)
+        const slowMode = groupSettings[0]?.slow_mode_seconds || 0;
+        if (slowMode > 0) {
+          const memberRole = memberInfo[0].role;
+          if (memberRole !== 'owner' && memberRole !== 'moderator') {
+            if (!rateLimit(`hangout:slow:${user.id}:${gid}`, 1, slowMode * 1000)) {
+              socket.emit('hangout:error', { message: `Slow mode: wait ${slowMode}s between messages`, code: 'SLOW_MODE' });
+              return;
+            }
+          }
         }
 
         // N3: Block check — reject messages between mutually blocked users.

@@ -32,6 +32,22 @@ import {
   sendHangoutMessage,
   reactToChatMessage,
   getChatReactions,
+  getHangoutGroup,
+  kickHangoutMember,
+  banHangoutMember,
+  unbanHangoutMember,
+  muteHangoutMember,
+  unmuteHangoutMember,
+  promoteHangoutMember,
+  demoteHangoutMember,
+  pinHangoutMessage,
+  unpinHangoutMessage,
+  getHangoutPins,
+  updateHangoutSettings,
+  transferHangoutOwnership,
+  getHangoutInviteLink,
+  updateHangoutNotification,
+  deleteHangoutMessage,
   type HangoutGroup,
   type GroupMessage,
   type StartCallResponse,
@@ -136,6 +152,12 @@ interface MessageBubbleProps {
   onReply?: (msg: GroupMessage) => void;
   /** Quoted reply reference */
   replyTo?: { name: string; content: string } | null;
+  /** Called when owner/mod pins a message */
+  onPin?: (eventId: string, body: string) => void;
+  /** Called when owner/mod deletes a message */
+  onDelete?: (eventId: string) => void;
+  /** Whether the current viewer is owner or mod */
+  isOwnerOrMod?: boolean;
 }
 
 const MessageBubble = memo(function MessageBubble({
@@ -150,6 +172,9 @@ const MessageBubble = memo(function MessageBubble({
   onReaction,
   onReply,
   replyTo,
+  onPin,
+  onDelete,
+  isOwnerOrMod,
 }: MessageBubbleProps) {
   const profilePath = isMe ? "/profile" : `/profile/${msg.user_id}`;
   const hasMedia = !!(msg.media_url && msg.media_type);
@@ -337,6 +362,32 @@ const MessageBubble = memo(function MessageBubble({
               >
                 <svg className="w-3.5 h-3.5" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                </svg>
+              </button>
+            )}
+            {isOwnerOrMod && matrixEventId && onPin && (
+              <button
+                onTouchEnd={(e) => { e.stopPropagation(); onPin(matrixEventId, msg.content || ""); setShowActions(false); }}
+                onClick={() => { onPin(matrixEventId, msg.content || ""); setShowActions(false); }}
+                className="p-1 rounded hover:bg-white/10 active:bg-white/10 transition-colors ml-0.5"
+                aria-label="Pin message"
+                title="Pin"
+              >
+                <svg className="w-3.5 h-3.5" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                </svg>
+              </button>
+            )}
+            {isOwnerOrMod && matrixEventId && onDelete && (
+              <button
+                onTouchEnd={(e) => { e.stopPropagation(); onDelete(matrixEventId); setShowActions(false); }}
+                onClick={() => { onDelete(matrixEventId); setShowActions(false); }}
+                className="p-1 rounded hover:bg-white/10 active:bg-white/10 transition-colors ml-0.5"
+                aria-label="Delete message"
+                title="Delete"
+              >
+                <svg className="w-3.5 h-3.5" style={{ color: "#FF6B6B" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
               </button>
             )}
@@ -702,6 +753,23 @@ export default function Chat() {
   // Group overflow menu
   const [showGroupMenu, setShowGroupMenu] = useState(false);
 
+  // Group settings panel
+  const [showSettings, setShowSettings] = useState(false);
+  const [groupDetail, setGroupDetail] = useState<any>(null);
+  const [groupMembers, setGroupMembers] = useState<any[]>([]);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+
+  // Pinned messages
+  const [pinnedMessages, setPinnedMessages] = useState<any[]>([]);
+  const [showPins, setShowPins] = useState(false);
+
+  // Invite link
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
+
+  // Member action loading
+  const [memberActionLoading, setMemberActionLoading] = useState<string | null>(null);
+
   // Dedicated error states for non-upload errors
   const [discoverError, setDiscoverError] = useState<string | null>(null);
 
@@ -729,6 +797,23 @@ export default function Chat() {
     } catch {
       setError("Failed to load groups");
     }
+  }, []);
+
+  const loadGroupDetail = useCallback(async (groupId: number) => {
+    try {
+      const data = await getHangoutGroup(groupId);
+      if (data.success) {
+        setGroupDetail(data.group);
+        setGroupMembers(data.members || []);
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  const loadPins = useCallback(async (groupId: number) => {
+    try {
+      const data = await getHangoutPins(groupId);
+      if (data.success) setPinnedMessages(data.pins || []);
+    } catch { /* silent */ }
   }, []);
 
   const loadHangoutEvents = useCallback(() => {
@@ -1262,6 +1347,31 @@ export default function Chat() {
                     <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                     Members
                   </button>
+                  <button
+                    onClick={() => {
+                      setShowGroupMenu(false);
+                      setShowSettings(true);
+                      setSettingsLoading(true);
+                      loadGroupDetail(activeGroup.id);
+                      loadPins(activeGroup.id);
+                      setSettingsLoading(false);
+                    }}
+                    className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
+                  >
+                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    Settings
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowGroupMenu(false);
+                      setShowPins(!showPins);
+                      if (!showPins && activeGroup) loadPins(activeGroup.id);
+                    }}
+                    className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
+                  >
+                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
+                    Pinned Messages
+                  </button>
                   {!activeGroup.isMain && (
                     <button
                       onClick={() => { setShowGroupMenu(false); handleLeaveGroup(activeGroup.id); }}
@@ -1493,6 +1603,361 @@ export default function Chat() {
           </div>
         )}
 
+        {/* Group Settings Panel */}
+        {showSettings && activeGroup && (
+          <div
+            className="absolute inset-0 z-40 flex flex-col justify-end"
+            style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+            onClick={(e) => { if (e.target === e.currentTarget) setShowSettings(false); }}
+          >
+            <div
+              className="rounded-t-2xl w-full max-h-[80vh] flex flex-col"
+              style={{ background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}
+            >
+              <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
+                <div className="w-10 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.2)" }} />
+              </div>
+              <div className="flex items-center justify-between px-5 pt-2 pb-3 flex-shrink-0">
+                <p className="text-sm font-semibold text-white">Group Settings</p>
+                <button onClick={() => setShowSettings(false)} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10" style={{ color: "#8E8E93" }}>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+              <div className="overflow-y-auto flex-1 px-5 pb-6 space-y-4">
+                {settingsLoading ? (
+                  <div className="py-8 text-center text-pnp-textSecondary text-sm">Loading...</div>
+                ) : (
+                  <>
+                    {/* Invite Link */}
+                    <div>
+                      <p className="text-xs font-semibold text-pnp-textSecondary mb-2 uppercase tracking-wider">Invite Link</p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={async () => {
+                            try {
+                              const data = await getHangoutInviteLink(activeGroup.id);
+                              if (data.success) {
+                                setInviteUrl(data.inviteUrl);
+                                await navigator.clipboard.writeText(data.inviteUrl);
+                                setInviteCopied(true);
+                                setTimeout(() => setInviteCopied(false), 2000);
+                              }
+                            } catch { /* silent */ }
+                          }}
+                          className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all active:scale-95"
+                          style={{ background: "linear-gradient(135deg, #7B61FF, #D4007A)" }}
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                          {inviteCopied ? "Copied!" : "Copy Invite Link"}
+                        </button>
+                      </div>
+                      {inviteUrl && <p className="text-[10px] text-pnp-textSecondary mt-1 truncate">{inviteUrl}</p>}
+                    </div>
+
+                    {/* Notification Mode */}
+                    <div>
+                      <p className="text-xs font-semibold text-pnp-textSecondary mb-2 uppercase tracking-wider">Notifications</p>
+                      <div className="flex gap-2">
+                        {(["all", "mentions", "muted"] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            onClick={() => updateHangoutNotification(activeGroup.id, mode).catch(() => {})}
+                            className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
+                            style={{
+                              background: "rgba(255,255,255,0.05)",
+                              border: "1px solid rgba(255,255,255,0.1)",
+                              color: "#fff",
+                            }}
+                          >
+                            {mode === "all" ? "All" : mode === "mentions" ? "Mentions" : "Muted"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Owner/Mod settings */}
+                    {(String(activeGroup.creatorId) === String(user?.dbId) || isAdmin) && (
+                      <>
+                        <div className="border-t border-white/10 pt-4">
+                          <p className="text-xs font-semibold text-pnp-textSecondary mb-3 uppercase tracking-wider">Admin Controls</p>
+
+                          {/* Public/Private Toggle */}
+                          <button
+                            onClick={async () => {
+                              const newVal = !(groupDetail?.is_public ?? activeGroup.isPublic);
+                              await updateHangoutSettings(activeGroup.id, { isPublic: newVal });
+                              loadGroupDetail(activeGroup.id);
+                              loadGroups();
+                            }}
+                            className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-white/5 mb-2"
+                          >
+                            <span className="text-sm text-white">{(groupDetail?.is_public ?? activeGroup.isPublic) ? "Public" : "Private"}</span>
+                            <div className={`w-9 h-5 rounded-full transition-colors relative ${(groupDetail?.is_public ?? activeGroup.isPublic) ? "bg-pnp-accent" : "bg-white/20"}`}>
+                              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${(groupDetail?.is_public ?? activeGroup.isPublic) ? "left-[18px]" : "left-0.5"}`} />
+                            </div>
+                          </button>
+
+                          {/* Read-Only Toggle */}
+                          <button
+                            onClick={async () => {
+                              const newVal = !(groupDetail?.is_read_only ?? false);
+                              await updateHangoutSettings(activeGroup.id, { isReadOnly: newVal });
+                              loadGroupDetail(activeGroup.id);
+                            }}
+                            className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-white/5 mb-2"
+                          >
+                            <span className="text-sm text-white">Read-Only Mode</span>
+                            <div className={`w-9 h-5 rounded-full transition-colors relative ${(groupDetail?.is_read_only) ? "bg-pnp-accent" : "bg-white/20"}`}>
+                              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${(groupDetail?.is_read_only) ? "left-[18px]" : "left-0.5"}`} />
+                            </div>
+                          </button>
+
+                          {/* Slow Mode */}
+                          <div className="px-3 py-2.5 rounded-lg bg-white/5 mb-2">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-sm text-white">Slow Mode</span>
+                              <span className="text-xs text-pnp-textSecondary">{(groupDetail?.slow_mode_seconds ?? 0) === 0 ? "Off" : `${groupDetail?.slow_mode_seconds}s`}</span>
+                            </div>
+                            <div className="flex gap-1.5">
+                              {[0, 10, 30, 60, 300].map((sec) => (
+                                <button
+                                  key={sec}
+                                  onClick={async () => {
+                                    await updateHangoutSettings(activeGroup.id, { slowModeSeconds: sec });
+                                    loadGroupDetail(activeGroup.id);
+                                  }}
+                                  className="flex-1 py-1.5 rounded text-[10px] font-semibold transition-all"
+                                  style={{
+                                    background: (groupDetail?.slow_mode_seconds ?? 0) === sec ? "linear-gradient(135deg, #D4007A, #E69138)" : "rgba(255,255,255,0.05)",
+                                    color: "#fff",
+                                  }}
+                                >
+                                  {sec === 0 ? "Off" : sec < 60 ? `${sec}s` : `${sec / 60}m`}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Tags */}
+                          <div className="px-3 py-2.5 rounded-lg bg-white/5 mb-2">
+                            <span className="text-sm text-white block mb-1">Tags</span>
+                            <div className="flex flex-wrap gap-1">
+                              {["chill", "party", "dating", "music", "gaming", "art", "fitness", "travel"].map((tag) => {
+                                const current = groupDetail?.tags || [];
+                                const isActive = current.includes(tag);
+                                return (
+                                  <button
+                                    key={tag}
+                                    onClick={async () => {
+                                      const newTags = isActive ? current.filter((t: string) => t !== tag) : [...current, tag].slice(0, 5);
+                                      await updateHangoutSettings(activeGroup.id, { tags: newTags });
+                                      loadGroupDetail(activeGroup.id);
+                                    }}
+                                    className="px-2 py-1 rounded-full text-[10px] font-semibold transition-all"
+                                    style={{
+                                      background: isActive ? "linear-gradient(135deg, #D4007A, #E69138)" : "rgba(255,255,255,0.08)",
+                                      color: "#fff",
+                                    }}
+                                  >
+                                    {tag}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Transfer Ownership */}
+                          {String(activeGroup.creatorId) === String(user?.dbId) && (
+                            <button
+                              onClick={() => {
+                                setConfirmAction({
+                                  title: "Transfer Ownership",
+                                  message: "Select a member to transfer ownership to from the Members panel.",
+                                  onConfirm: async () => { setShowSettings(false); setShowOnline(true); },
+                                });
+                              }}
+                              className="w-full px-3 py-2.5 rounded-lg bg-white/5 text-sm text-left text-yellow-400 hover:bg-white/10 transition-colors"
+                            >
+                              Transfer Ownership
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Members Management */}
+                        <div className="border-t border-white/10 pt-4">
+                          <p className="text-xs font-semibold text-pnp-textSecondary mb-2 uppercase tracking-wider">Members ({groupMembers.length})</p>
+                          <div className="space-y-1 max-h-48 overflow-y-auto">
+                            {groupMembers.map((m: any) => {
+                              const isMe = String(m.user_id) === String(user?.dbId);
+                              const isOwner = m.role === "owner";
+                              const isMod = m.role === "moderator";
+                              const canManage = !isMe && !isOwner && (String(activeGroup.creatorId) === String(user?.dbId) || isAdmin);
+                              return (
+                                <div key={m.user_id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5">
+                                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+                                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
+                                    {m.photo_url ? <img src={m.photo_url} alt="" className="w-7 h-7 rounded-full object-cover" /> : (m.first_name || m.username || "?")[0].toUpperCase()}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-medium text-white truncate">
+                                      {m.first_name || m.username}{isMe ? " (You)" : ""}
+                                    </p>
+                                    <p className="text-[10px] text-pnp-textSecondary">
+                                      {isOwner ? "Owner" : isMod ? "Mod" : "Member"}
+                                      {m.is_muted ? " · Muted" : ""}
+                                      {m.is_banned ? " · Banned" : ""}
+                                    </p>
+                                  </div>
+                                  {canManage && (
+                                    <div className="flex gap-1 flex-shrink-0">
+                                      {!isMod && !m.is_banned && (
+                                        <button
+                                          onClick={async () => {
+                                            setMemberActionLoading(m.user_id);
+                                            await promoteHangoutMember(activeGroup.id, m.user_id).catch(() => {});
+                                            loadGroupDetail(activeGroup.id);
+                                            setMemberActionLoading(null);
+                                          }}
+                                          className="px-1.5 py-1 rounded text-[9px] font-semibold bg-blue-500/20 text-blue-400"
+                                          title="Promote to Mod"
+                                        >Mod</button>
+                                      )}
+                                      {isMod && (
+                                        <button
+                                          onClick={async () => {
+                                            setMemberActionLoading(m.user_id);
+                                            await demoteHangoutMember(activeGroup.id, m.user_id).catch(() => {});
+                                            loadGroupDetail(activeGroup.id);
+                                            setMemberActionLoading(null);
+                                          }}
+                                          className="px-1.5 py-1 rounded text-[9px] font-semibold bg-yellow-500/20 text-yellow-400"
+                                          title="Demote"
+                                        >Demote</button>
+                                      )}
+                                      {!m.is_muted && !m.is_banned && (
+                                        <button
+                                          onClick={async () => {
+                                            setMemberActionLoading(m.user_id);
+                                            await muteHangoutMember(activeGroup.id, m.user_id, 60).catch(() => {});
+                                            loadGroupDetail(activeGroup.id);
+                                            setMemberActionLoading(null);
+                                          }}
+                                          className="px-1.5 py-1 rounded text-[9px] font-semibold bg-orange-500/20 text-orange-400"
+                                          title="Mute 1h"
+                                        >Mute</button>
+                                      )}
+                                      {m.is_muted && (
+                                        <button
+                                          onClick={async () => {
+                                            setMemberActionLoading(m.user_id);
+                                            await unmuteHangoutMember(activeGroup.id, m.user_id).catch(() => {});
+                                            loadGroupDetail(activeGroup.id);
+                                            setMemberActionLoading(null);
+                                          }}
+                                          className="px-1.5 py-1 rounded text-[9px] font-semibold bg-green-500/20 text-green-400"
+                                          title="Unmute"
+                                        >Unmute</button>
+                                      )}
+                                      <button
+                                        onClick={async () => {
+                                          setConfirmAction({
+                                            title: "Kick Member",
+                                            message: `Remove ${m.first_name || m.username} from the group?`,
+                                            isDanger: true,
+                                            onConfirm: async () => {
+                                              await kickHangoutMember(activeGroup.id, m.user_id);
+                                              loadGroupDetail(activeGroup.id);
+                                              loadGroups();
+                                            },
+                                          });
+                                        }}
+                                        className="px-1.5 py-1 rounded text-[9px] font-semibold bg-red-500/20 text-red-400"
+                                        title="Kick"
+                                      >Kick</button>
+                                      {!m.is_banned ? (
+                                        <button
+                                          onClick={async () => {
+                                            setConfirmAction({
+                                              title: "Ban Member",
+                                              message: `Ban ${m.first_name || m.username}? They won't be able to rejoin.`,
+                                              isDanger: true,
+                                              onConfirm: async () => {
+                                                await banHangoutMember(activeGroup.id, m.user_id);
+                                                loadGroupDetail(activeGroup.id);
+                                              },
+                                            });
+                                          }}
+                                          className="px-1.5 py-1 rounded text-[9px] font-semibold bg-red-700/30 text-red-500"
+                                          title="Ban"
+                                        >Ban</button>
+                                      ) : (
+                                        <button
+                                          onClick={async () => {
+                                            setMemberActionLoading(m.user_id);
+                                            await unbanHangoutMember(activeGroup.id, m.user_id).catch(() => {});
+                                            loadGroupDetail(activeGroup.id);
+                                            setMemberActionLoading(null);
+                                          }}
+                                          className="px-1.5 py-1 rounded text-[9px] font-semibold bg-green-500/20 text-green-400"
+                                          title="Unban"
+                                        >Unban</button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Pinned Messages Bar */}
+        {pinnedMessages.length > 0 && !showPins && (
+          <button
+            onClick={() => setShowPins(true)}
+            className="w-full px-4 py-2 flex items-center gap-2 text-xs border-b border-pnp-border hover:bg-white/5 transition-colors"
+            style={{ background: "rgba(123,97,255,0.08)" }}
+          >
+            <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+            </svg>
+            <span className="font-semibold" style={{ color: "#7B61FF" }}>{pinnedMessages.length} pinned</span>
+            <span className="text-pnp-textSecondary truncate flex-1 text-left">{pinnedMessages[0]?.message_body || "View pinned messages"}</span>
+          </button>
+        )}
+        {showPins && (
+          <div className="w-full px-4 py-2 border-b border-pnp-border space-y-1 max-h-32 overflow-y-auto" style={{ background: "rgba(123,97,255,0.05)" }}>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-semibold" style={{ color: "#7B61FF" }}>Pinned Messages</span>
+              <button onClick={() => setShowPins(false)} className="text-[10px] text-pnp-textSecondary">Hide</button>
+            </div>
+            {pinnedMessages.map((pin: any) => (
+              <div key={pin.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/5">
+                <p className="text-xs text-white flex-1 truncate">{pin.message_body || "[message]"}</p>
+                <span className="text-[10px] text-pnp-textSecondary flex-shrink-0">by {pin.pinned_by_name || "admin"}</span>
+                {(String(activeGroup?.creatorId) === String(user?.dbId) || isAdmin) && (
+                  <button
+                    onClick={async () => {
+                      if (activeGroup) {
+                        await unpinHangoutMessage(activeGroup.id, pin.matrix_event_id).catch(() => {});
+                        loadPins(activeGroup.id);
+                      }
+                    }}
+                    className="text-[10px] text-red-400 flex-shrink-0"
+                  >Unpin</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Hangout event reminder — shown for non-main groups that have upcoming events */}
         {!activeGroup.isMain && !activeGroup.isWallOfFame && (
           <HangoutEventReminder groupId={activeGroup.id} />
@@ -1551,6 +2016,22 @@ export default function Chat() {
                   onReaction={handleReaction}
                   onReply={setReplyToMsg}
                   replyTo={msg.reply_to || null}
+                  isOwnerOrMod={String(activeGroup?.creatorId) === String(user?.dbId) || isAdmin}
+                  onPin={(String(activeGroup?.creatorId) === String(user?.dbId) || isAdmin) ? (eventId, body) => {
+                    if (activeGroup) pinHangoutMessage(activeGroup.id, eventId, body).then(() => loadPins(activeGroup.id)).catch(() => {});
+                  } : undefined}
+                  onDelete={(String(activeGroup?.creatorId) === String(user?.dbId) || isAdmin) ? (eventId) => {
+                    if (activeGroup) {
+                      setConfirmAction({
+                        title: "Delete Message",
+                        message: "Delete this message for everyone?",
+                        isDanger: true,
+                        onConfirm: async () => {
+                          await deleteHangoutMessage(activeGroup.id, eventId);
+                        },
+                      });
+                    }
+                  } : undefined}
                 />
               </React.Fragment>
             ))

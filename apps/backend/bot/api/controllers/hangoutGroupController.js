@@ -193,6 +193,8 @@ const getGroup = async (req, res) => {
   try {
     const { rows: groupRows } = await query(
       `SELECT g.*,
+              g.slow_mode_seconds, g.is_read_only, g.allow_media, g.allow_member_invites,
+              g.auto_delete_hours, g.tags, g.invite_code,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
               (
                 (SELECT COUNT(*)::int FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true) > 0
@@ -218,12 +220,12 @@ const getGroup = async (req, res) => {
     }
 
     const { rows: members } = await query(
-      `SELECT gm.user_id, gm.role, gm.joined_at,
+      `SELECT gm.user_id, gm.role, gm.joined_at, gm.is_muted, gm.muted_until, gm.is_banned, gm.notification_mode,
               u.username, u.first_name, u.photo_file_id as photo_url
        FROM hangout_group_members gm
        JOIN users u ON u.id = gm.user_id
        WHERE gm.group_id = $1
-       ORDER BY gm.role = 'owner' DESC, gm.joined_at ASC
+       ORDER BY gm.role = 'owner' DESC, gm.role = 'moderator' DESC, gm.joined_at ASC
        LIMIT 100`,
       [groupId]
     );
@@ -243,6 +245,13 @@ const getGroup = async (req, res) => {
         createdAt: g.created_at,
         hasActiveCall: g.has_active_call,
         activeCallId: g.active_call_id,
+        slowModeSeconds: g.slow_mode_seconds,
+        isReadOnly: g.is_read_only,
+        allowMedia: g.allow_media,
+        allowMemberInvites: g.allow_member_invites,
+        autoDeleteHours: g.auto_delete_hours,
+        tags: g.tags || [],
+        inviteCode: g.invite_code,
       },
       members: members.map(m => ({ ...m, photo_url: isValidPhotoUrl(m.photo_url) ? m.photo_url : null })),
     });
@@ -262,6 +271,13 @@ const joinGroup = async (req, res) => {
     const { rows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
     if (!rows[0].is_public) return res.status(403).json({ error: 'This group is invite-only' });
+
+    // Ban check
+    const { rows: banCheck } = await query(
+      'SELECT is_banned FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND is_banned = true',
+      [groupId, user.id]
+    );
+    if (banCheck.length > 0) return res.status(403).json({ error: 'You are banned from this group' });
 
     // Block check: creator blocked joiner OR joiner blocked creator
     const group = rows[0];
@@ -819,6 +835,461 @@ const handleJoinRequest = async (req, res) => {
   }
 };
 
+// Helper: check if user is owner or moderator
+const isOwnerOrMod = async (groupId, userId) => {
+  const { rows } = await query(
+    "SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role IN ('owner','moderator')",
+    [groupId, userId]
+  );
+  return rows.length > 0;
+};
+
+// POST /api/webapp/hangouts/groups/:id/kick
+const kickMember = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const { userId: targetId } = req.body;
+  if (!Number.isFinite(groupId) || !targetId) return res.status(400).json({ error: 'Missing fields' });
+
+  try {
+    if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
+    // Can't kick owner
+    const { rows: targetRows } = await query(
+      'SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+      [groupId, targetId]
+    );
+    if (targetRows.length === 0) return res.status(404).json({ error: 'User not in group' });
+    if (targetRows[0].role === 'owner') return res.status(403).json({ error: 'Cannot kick the owner' });
+    // Moderators can only be kicked by owner
+    if (targetRows[0].role === 'moderator') {
+      const { rows: callerRows } = await query(
+        'SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+        [groupId, user.id]
+      );
+      if (callerRows[0]?.role !== 'owner') return res.status(403).json({ error: 'Only the owner can remove moderators' });
+    }
+
+    await query('DELETE FROM hangout_group_members WHERE group_id=$1 AND user_id=$2', [groupId, targetId]);
+    matrixService.removeFromHangoutRoom(groupId, { id: targetId, matrix_user_id: null }).catch(() => {});
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('kickMember error', err);
+    return res.status(500).json({ error: 'Failed to kick member' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/ban
+const banMember = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const { userId: targetId } = req.body;
+  if (!Number.isFinite(groupId) || !targetId) return res.status(400).json({ error: 'Missing fields' });
+
+  try {
+    if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
+    const { rows: targetRows } = await query(
+      'SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+      [groupId, targetId]
+    );
+    if (targetRows.length === 0) return res.status(404).json({ error: 'User not in group' });
+    if (targetRows[0].role === 'owner') return res.status(403).json({ error: 'Cannot ban the owner' });
+
+    await query(
+      'UPDATE hangout_group_members SET is_banned = true WHERE group_id=$1 AND user_id=$2',
+      [groupId, targetId]
+    );
+    matrixService.removeFromHangoutRoom(groupId, { id: targetId, matrix_user_id: null }).catch(() => {});
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('banMember error', err);
+    return res.status(500).json({ error: 'Failed to ban member' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/unban
+const unbanMember = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const { userId: targetId } = req.body;
+  if (!Number.isFinite(groupId) || !targetId) return res.status(400).json({ error: 'Missing fields' });
+
+  try {
+    if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
+    await query(
+      'UPDATE hangout_group_members SET is_banned = false WHERE group_id=$1 AND user_id=$2',
+      [groupId, targetId]
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('unbanMember error', err);
+    return res.status(500).json({ error: 'Failed to unban member' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/mute
+const muteMember = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const { userId: targetId, durationMinutes = 60 } = req.body;
+  if (!Number.isFinite(groupId) || !targetId) return res.status(400).json({ error: 'Missing fields' });
+
+  try {
+    if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
+    const { rows: targetRows } = await query(
+      'SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+      [groupId, targetId]
+    );
+    if (targetRows.length === 0) return res.status(404).json({ error: 'User not in group' });
+    if (targetRows[0].role === 'owner') return res.status(403).json({ error: 'Cannot mute the owner' });
+
+    const mutedUntil = new Date(Date.now() + Math.min(durationMinutes, 10080) * 60000); // max 7 days
+    await query(
+      'UPDATE hangout_group_members SET is_muted = true, muted_until = $3 WHERE group_id=$1 AND user_id=$2',
+      [groupId, targetId, mutedUntil]
+    );
+    return res.json({ success: true, mutedUntil });
+  } catch (err) {
+    logger.error('muteMember error', err);
+    return res.status(500).json({ error: 'Failed to mute member' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/unmute
+const unmuteMember = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const { userId: targetId } = req.body;
+  if (!Number.isFinite(groupId) || !targetId) return res.status(400).json({ error: 'Missing fields' });
+
+  try {
+    if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
+    await query(
+      'UPDATE hangout_group_members SET is_muted = false, muted_until = NULL WHERE group_id=$1 AND user_id=$2',
+      [groupId, targetId]
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('unmuteMember error', err);
+    return res.status(500).json({ error: 'Failed to unmute member' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/promote
+const promoteMember = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const { userId: targetId } = req.body;
+  if (!Number.isFinite(groupId) || !targetId) return res.status(400).json({ error: 'Missing fields' });
+
+  try {
+    // Only owner can promote
+    const { rows: callerRows } = await query(
+      "SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role='owner'",
+      [groupId, user.id]
+    );
+    if (callerRows.length === 0) return res.status(403).json({ error: 'Only the owner can promote members' });
+
+    const { rowCount } = await query(
+      "UPDATE hangout_group_members SET role = 'moderator' WHERE group_id=$1 AND user_id=$2 AND role='member'",
+      [groupId, targetId]
+    );
+    if (rowCount === 0) return res.status(404).json({ error: 'Member not found or already a moderator' });
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('promoteMember error', err);
+    return res.status(500).json({ error: 'Failed to promote member' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/demote
+const demoteMember = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const { userId: targetId } = req.body;
+  if (!Number.isFinite(groupId) || !targetId) return res.status(400).json({ error: 'Missing fields' });
+
+  try {
+    const { rows: callerRows } = await query(
+      "SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role='owner'",
+      [groupId, user.id]
+    );
+    if (callerRows.length === 0) return res.status(403).json({ error: 'Only the owner can demote moderators' });
+
+    const { rowCount } = await query(
+      "UPDATE hangout_group_members SET role = 'member' WHERE group_id=$1 AND user_id=$2 AND role='moderator'",
+      [groupId, targetId]
+    );
+    if (rowCount === 0) return res.status(404).json({ error: 'Moderator not found' });
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('demoteMember error', err);
+    return res.status(500).json({ error: 'Failed to demote member' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/pin
+const pinMessage = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const { eventId, body } = req.body;
+  if (!Number.isFinite(groupId) || !eventId) return res.status(400).json({ error: 'Missing fields' });
+
+  try {
+    if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
+
+    const { rows } = await query(
+      `INSERT INTO hangout_pinned_messages (group_id, matrix_event_id, message_body, pinned_by)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (group_id, matrix_event_id) DO NOTHING
+       RETURNING *`,
+      [groupId, eventId, (body || '').slice(0, 500), user.id]
+    );
+    return res.json({ success: true, pin: rows[0] || null });
+  } catch (err) {
+    logger.error('pinMessage error', err);
+    return res.status(500).json({ error: 'Failed to pin message' });
+  }
+};
+
+// DELETE /api/webapp/hangouts/groups/:id/pin/:eventId
+const unpinMessage = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const { eventId } = req.params;
+  if (!Number.isFinite(groupId) || !eventId) return res.status(400).json({ error: 'Missing fields' });
+
+  try {
+    if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
+    await query('DELETE FROM hangout_pinned_messages WHERE group_id=$1 AND matrix_event_id=$2', [groupId, eventId]);
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('unpinMessage error', err);
+    return res.status(500).json({ error: 'Failed to unpin message' });
+  }
+};
+
+// GET /api/webapp/hangouts/groups/:id/pins
+const getPinnedMessages = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    if (!(await isMember(groupId, user.id))) return res.status(403).json({ error: 'Not a member' });
+    const { rows } = await query(
+      `SELECT p.*, u.first_name AS pinned_by_name
+       FROM hangout_pinned_messages p
+       LEFT JOIN users u ON u.id = p.pinned_by
+       WHERE p.group_id = $1
+       ORDER BY p.pinned_at DESC
+       LIMIT 20`,
+      [groupId]
+    );
+    return res.json({ success: true, pins: rows });
+  } catch (err) {
+    logger.error('getPinnedMessages error', err);
+    return res.status(500).json({ error: 'Failed to load pins' });
+  }
+};
+
+// PUT /api/webapp/hangouts/groups/:id/settings
+const updateGroupSettings = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
+
+    const { slowModeSeconds, isReadOnly, allowMedia, allowMemberInvites, autoDeleteHours, tags, isPublic, name, description } = req.body;
+
+    const sets = [];
+    const vals = [];
+    let idx = 1;
+
+    if (slowModeSeconds !== undefined) { sets.push(`slow_mode_seconds = $${idx++}`); vals.push(Math.max(0, Math.min(slowModeSeconds, 3600))); }
+    if (isReadOnly !== undefined) { sets.push(`is_read_only = $${idx++}`); vals.push(!!isReadOnly); }
+    if (allowMedia !== undefined) { sets.push(`allow_media = $${idx++}`); vals.push(!!allowMedia); }
+    if (allowMemberInvites !== undefined) { sets.push(`allow_member_invites = $${idx++}`); vals.push(!!allowMemberInvites); }
+    if (autoDeleteHours !== undefined) { sets.push(`auto_delete_hours = $${idx++}`); vals.push(Math.max(0, Math.min(autoDeleteHours, 8760))); }
+    if (tags !== undefined && Array.isArray(tags)) { sets.push(`tags = $${idx++}`); vals.push(tags.slice(0, 5).map(t => String(t).slice(0, 30))); }
+    if (isPublic !== undefined) { sets.push(`is_public = $${idx++}`); vals.push(!!isPublic); }
+    if (name !== undefined && name.trim()) { sets.push(`name = $${idx++}`); vals.push(name.trim().slice(0, 100)); }
+    if (description !== undefined) { sets.push(`description = $${idx++}`); vals.push((description || '').trim().slice(0, 500)); }
+
+    if (sets.length === 0) return res.status(400).json({ error: 'No settings to update' });
+
+    vals.push(groupId);
+    const { rows } = await query(
+      `UPDATE hangout_groups SET ${sets.join(', ')} WHERE id = $${idx} AND is_main = false
+       RETURNING id, name, description, is_public, slow_mode_seconds, is_read_only, allow_media, allow_member_invites, auto_delete_hours, tags`,
+      vals
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Group not found or is main' });
+    return res.json({ success: true, settings: rows[0] });
+  } catch (err) {
+    logger.error('updateGroupSettings error', err);
+    return res.status(500).json({ error: 'Failed to update settings' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/transfer
+const transferOwnership = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const { userId: newOwnerId } = req.body;
+  if (!Number.isFinite(groupId) || !newOwnerId) return res.status(400).json({ error: 'Missing fields' });
+
+  try {
+    // Only current owner
+    const { rows: groupRows } = await query('SELECT creator_id, is_main FROM hangout_groups WHERE id=$1', [groupId]);
+    if (groupRows.length === 0) return res.status(404).json({ error: 'Group not found' });
+    if (groupRows[0].is_main) return res.status(400).json({ error: 'Cannot transfer main group' });
+    if (String(groupRows[0].creator_id) !== String(user.id)) return res.status(403).json({ error: 'Only the owner can transfer' });
+
+    // Verify target is a member
+    if (!(await isMember(groupId, newOwnerId))) return res.status(404).json({ error: 'Target user is not a member' });
+
+    // Transfer
+    await query('UPDATE hangout_groups SET creator_id = $1 WHERE id = $2', [newOwnerId, groupId]);
+    await query("UPDATE hangout_group_members SET role = 'member' WHERE group_id=$1 AND user_id=$2", [groupId, user.id]);
+    await query("UPDATE hangout_group_members SET role = 'owner' WHERE group_id=$1 AND user_id=$2", [groupId, newOwnerId]);
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('transferOwnership error', err);
+    return res.status(500).json({ error: 'Failed to transfer ownership' });
+  }
+};
+
+// GET /api/webapp/hangouts/groups/:id/invite-link
+const getInviteLink = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    if (!(await isOwnerOrMod(groupId, user.id))) {
+      // Check if non-owner invites are allowed
+      const { rows: gs } = await query('SELECT allow_member_invites FROM hangout_groups WHERE id=$1', [groupId]);
+      if (!gs[0]?.allow_member_invites) return res.status(403).json({ error: 'Not authorized' });
+      if (!(await isMember(groupId, user.id))) return res.status(403).json({ error: 'Not a member' });
+    }
+
+    // Get or generate invite code
+    let { rows } = await query('SELECT invite_code FROM hangout_groups WHERE id=$1', [groupId]);
+    if (!rows[0]?.invite_code) {
+      const code = require('crypto').randomBytes(6).toString('hex');
+      const result = await query(
+        'UPDATE hangout_groups SET invite_code = $1 WHERE id = $2 RETURNING invite_code',
+        [code, groupId]
+      );
+      rows = result.rows;
+    }
+    return res.json({ success: true, inviteCode: rows[0].invite_code, inviteUrl: `https://app.pnptv.app/hangouts/invite/${rows[0].invite_code}` });
+  } catch (err) {
+    logger.error('getInviteLink error', err);
+    return res.status(500).json({ error: 'Failed to generate invite link' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/join-by-invite/:code
+const joinByInvite = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const { code } = req.params;
+  if (!code) return res.status(400).json({ error: 'Missing invite code' });
+
+  try {
+    const { rows: groupRows } = await query('SELECT * FROM hangout_groups WHERE invite_code = $1', [code]);
+    if (groupRows.length === 0) return res.status(404).json({ error: 'Invalid invite link' });
+    const group = groupRows[0];
+
+    // Block check
+    if (group.creator_id && String(group.creator_id) !== String(user.id)) {
+      const [b1, b2] = await Promise.all([
+        BlockedUser.isBlocked(group.creator_id, user.id),
+        BlockedUser.isBlocked(user.id, group.creator_id),
+      ]);
+      if (b1 || b2) return res.status(403).json({ error: 'Cannot join this group' });
+    }
+
+    // Ban check
+    const { rows: memberCheck } = await query(
+      'SELECT is_banned FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+      [group.id, user.id]
+    );
+    if (memberCheck.length > 0 && memberCheck[0].is_banned) return res.status(403).json({ error: 'You are banned from this group' });
+    if (memberCheck.length > 0) return res.json({ success: true, groupId: group.id }); // already member
+
+    // Capacity check + insert
+    const { rowCount } = await query(
+      `INSERT INTO hangout_group_members (group_id, user_id, role)
+       SELECT $1, $2, 'member'
+       WHERE (SELECT COUNT(*) FROM hangout_group_members WHERE group_id=$1) < $3
+       ON CONFLICT DO NOTHING`,
+      [group.id, user.id, group.max_members]
+    );
+    if (rowCount === 0) return res.status(409).json({ error: 'Group is full' });
+
+    matrixService.inviteToHangoutRoom(group.id, {
+      id: user.id, telegram: user.telegram || String(user.id),
+      username: user.username || null, first_name: user.firstName || user.first_name || null,
+      matrix_user_id: null, matrix_access_token: null, matrix_device_id: null,
+    }).catch(() => {});
+
+    return res.json({ success: true, groupId: group.id });
+  } catch (err) {
+    logger.error('joinByInvite error', err);
+    return res.status(500).json({ error: 'Failed to join group' });
+  }
+};
+
+// PUT /api/webapp/hangouts/groups/:id/notification
+const updateNotificationMode = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const { mode } = req.body;
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  const validModes = ['all', 'mentions', 'muted'];
+  if (!validModes.includes(mode)) return res.status(400).json({ error: 'Invalid mode. Use: all, mentions, muted' });
+
+  try {
+    if (!(await isMember(groupId, user.id))) return res.status(403).json({ error: 'Not a member' });
+    await query(
+      'UPDATE hangout_group_members SET notification_mode = $3 WHERE group_id=$1 AND user_id=$2',
+      [groupId, user.id, mode]
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('updateNotificationMode error', err);
+    return res.status(500).json({ error: 'Failed to update notification mode' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/delete-message
+const adminDeleteMessage = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const { eventId } = req.body;
+  if (!Number.isFinite(groupId) || !eventId) return res.status(400).json({ error: 'Missing fields' });
+
+  try {
+    if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
+    // Look up the Matrix room for this group
+    const { rows: roomRows } = await query(
+      'SELECT matrix_room_id FROM hangout_matrix_rooms WHERE hangout_group_id = $1',
+      [groupId]
+    );
+    if (roomRows.length === 0) return res.status(404).json({ error: 'Matrix room not found' });
+
+    await matrixService.redactRoomEvent(roomRows[0].matrix_room_id, eventId, 'Deleted by moderator');
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('adminDeleteMessage error', err);
+    return res.status(500).json({ error: 'Failed to delete message' });
+  }
+};
+
 module.exports = {
   listGroups,
   createGroup,
@@ -834,4 +1305,20 @@ module.exports = {
   requestJoinGroup,
   getJoinRequests,
   handleJoinRequest,
+  kickMember,
+  banMember,
+  unbanMember,
+  muteMember,
+  unmuteMember,
+  promoteMember,
+  demoteMember,
+  pinMessage,
+  unpinMessage,
+  getPinnedMessages,
+  updateGroupSettings,
+  transferOwnership,
+  getInviteLink,
+  joinByInvite,
+  updateNotificationMode,
+  adminDeleteMessage,
 };

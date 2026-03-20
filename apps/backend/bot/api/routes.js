@@ -4151,6 +4151,8 @@ app.get('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutG
 app.post('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutGroupController.createGroup));
 // Discover must be before /:id to avoid route collision
 app.get('/api/webapp/hangouts/groups/discover', requireSessionAuth, asyncHandler(hangoutGroupController.discoverGroups));
+// join-by-invite must be before /:id to avoid :code being captured as :id
+app.post('/api/webapp/hangouts/groups/join-by-invite/:code', requireSessionAuth, asyncHandler(hangoutGroupController.joinByInvite));
 app.get('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.getGroup));
 app.post('/api/webapp/hangouts/groups/:id/join', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.joinGroup));
 app.post('/api/webapp/hangouts/groups/:id/leave', requireSessionAuth, asyncHandler(hangoutGroupController.leaveGroup));
@@ -4174,6 +4176,22 @@ app.post(
 );
 // Mark group messages as read
 app.post('/api/webapp/hangouts/groups/:id/read', requireSessionAuth, asyncHandler(hangoutGroupController.markAsRead));
+// Hangout group management
+app.post('/api/webapp/hangouts/groups/:id/kick', requireSessionAuth, asyncHandler(hangoutGroupController.kickMember));
+app.post('/api/webapp/hangouts/groups/:id/ban', requireSessionAuth, asyncHandler(hangoutGroupController.banMember));
+app.post('/api/webapp/hangouts/groups/:id/unban', requireSessionAuth, asyncHandler(hangoutGroupController.unbanMember));
+app.post('/api/webapp/hangouts/groups/:id/mute', requireSessionAuth, asyncHandler(hangoutGroupController.muteMember));
+app.post('/api/webapp/hangouts/groups/:id/unmute', requireSessionAuth, asyncHandler(hangoutGroupController.unmuteMember));
+app.post('/api/webapp/hangouts/groups/:id/promote', requireSessionAuth, asyncHandler(hangoutGroupController.promoteMember));
+app.post('/api/webapp/hangouts/groups/:id/demote', requireSessionAuth, asyncHandler(hangoutGroupController.demoteMember));
+app.post('/api/webapp/hangouts/groups/:id/pin', requireSessionAuth, asyncHandler(hangoutGroupController.pinMessage));
+app.delete('/api/webapp/hangouts/groups/:id/pin/:eventId', requireSessionAuth, asyncHandler(hangoutGroupController.unpinMessage));
+app.get('/api/webapp/hangouts/groups/:id/pins', requireSessionAuth, asyncHandler(hangoutGroupController.getPinnedMessages));
+app.put('/api/webapp/hangouts/groups/:id/settings', requireSessionAuth, asyncHandler(hangoutGroupController.updateGroupSettings));
+app.post('/api/webapp/hangouts/groups/:id/transfer', requireSessionAuth, asyncHandler(hangoutGroupController.transferOwnership));
+app.get('/api/webapp/hangouts/groups/:id/invite-link', requireSessionAuth, asyncHandler(hangoutGroupController.getInviteLink));
+app.put('/api/webapp/hangouts/groups/:id/notification', requireSessionAuth, asyncHandler(hangoutGroupController.updateNotificationMode));
+app.post('/api/webapp/hangouts/groups/:id/delete-message', requireSessionAuth, asyncHandler(hangoutGroupController.adminDeleteMessage));
 // Legacy single-call endpoint (kept for backward compatibility)
 app.post('/api/webapp/hangouts/groups/:id/call', requireSessionAuth, asyncHandler(hangoutGroupController.startCall));
 

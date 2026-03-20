@@ -621,6 +621,19 @@ async function getMatrixToken(userId) {
   return provisionMatrixUser(user);
 }
 
+/**
+ * Redact (delete) a message in a Matrix room using admin token.
+ */
+async function redactRoomEvent(roomId, eventId, reason = 'Deleted by admin') {
+  const adminToken = await getAdminToken();
+  const txnId = `redact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  await synapsePost(
+    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/redact/${encodeURIComponent(eventId)}/${txnId}`,
+    { reason },
+    adminToken
+  );
+}
+
 module.exports = {
   provisionMatrixUser,
   getOrCreateDmRoom,
@@ -631,4 +644,5 @@ module.exports = {
   ensureUserInRoom,
   sendRoomMessage,
   sendRoomMediaMessage,
+  redactRoomEvent,
 };
