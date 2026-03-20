@@ -408,6 +408,16 @@ export function LandingPage() {
                       Continue with Email
                     </button>
 
+                    <button
+                      onClick={() => { window.location.href = "/api/webapp/auth/oidc/login"; }}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white border border-pnp-accent/50 hover:border-pnp-accent hover:bg-pnp-accent/10 transition-colors"
+                    >
+                      <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                      </svg>
+                      Sign in with PNPtv SSO
+                    </button>
+
                     <button onClick={() => { setLoginView("recover"); setRecoverSent(false); setRecoverError(null); setRecoverEmail(""); }} className="w-full text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-2">
                       Had an X (Twitter) account? Recover it here
                     </button>
