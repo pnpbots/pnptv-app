@@ -738,12 +738,14 @@ function Conversation({
     markThreadAsRead(userId).catch(() => {});
   }, [userId, loadMessages]);
 
-  // Load existing reactions for DM messages
+  // Load existing reactions for legacy (non-Matrix) DM messages.
+  // Matrix messages use Matrix reactions — skip REST loading for FNV hash IDs
+  // to avoid integer overflow errors in PostgreSQL.
   useEffect(() => {
     const ids = messages
       .filter(m => typeof m.id === "number")
       .map(m => m.id as number)
-      .filter(id => id > 0 && !loadedDmReactionIds.current.has(id));
+      .filter(id => id > 0 && !loadedDmReactionIds.current.has(id) && !dmEventIdMap.has(id));
     if (ids.length === 0) return;
     ids.forEach(id => loadedDmReactionIds.current.add(id));
 
@@ -760,7 +762,7 @@ function Conversation({
         return next;
       });
     });
-  }, [messages]);
+  }, [messages, dmEventIdMap]);
 
   // REST polling fallback when Matrix is not available (reduced frequency)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);

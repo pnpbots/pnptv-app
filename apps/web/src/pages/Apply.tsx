@@ -518,7 +518,7 @@ export default function Apply() {
             label={t.stageNameLabel}
             placeholder={t.stageNamePlaceholder}
             value={data.stageName}
-            onChange={(e) => update({ stageName: e.target.value })}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => update({ stageName: e.target.value })}
           />
           <div className="space-y-1">
             <label className="block text-sm text-pnp-textSecondary">{t.bioLabel}</label>
@@ -526,26 +526,26 @@ export default function Apply() {
               className="w-full rounded-lg bg-pnp-surface border border-pnp-border px-3 py-2 text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent focus:border-transparent transition-colors min-h-[80px] resize-y"
               placeholder={t.bioPLaceholder}
               value={data.bio}
-              onChange={(e) => update({ bio: e.target.value })}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => update({ bio: e.target.value })}
             />
           </div>
           <Input
             label={t.instagramLabel}
             placeholder={t.handlePlaceholder}
             value={data.instagramHandle}
-            onChange={(e) => update({ instagramHandle: e.target.value })}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => update({ instagramHandle: e.target.value })}
           />
           <Input
             label={t.twitterLabel}
             placeholder={t.handlePlaceholder}
             value={data.twitterHandle}
-            onChange={(e) => update({ twitterHandle: e.target.value })}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => update({ twitterHandle: e.target.value })}
           />
           <Input
             label={t.onlyfansLabel}
             placeholder={t.onlyfansPlaceholder}
             value={data.onlyfansUrl}
-            onChange={(e) => update({ onlyfansUrl: e.target.value })}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => update({ onlyfansUrl: e.target.value })}
           />
           <div>
             <label className="block text-sm text-pnp-textSecondary mb-1">{t.profilePhotoLabel}</label>
@@ -580,25 +580,25 @@ export default function Apply() {
             label={t.legalNameLabel}
             placeholder={t.legalNamePlaceholder}
             value={data.legalFullName}
-            onChange={(e) => update({ legalFullName: e.target.value })}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => update({ legalFullName: e.target.value })}
           />
           <Input
             label={t.dobLabel}
             type="date"
             value={data.dateOfBirth}
-            onChange={(e) => update({ dateOfBirth: e.target.value })}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => update({ dateOfBirth: e.target.value })}
           />
           <Input
             label={t.countryLabel}
             placeholder={t.countryPlaceholder}
             value={data.country}
-            onChange={(e) => update({ country: e.target.value })}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => update({ country: e.target.value })}
           />
           <Input
             label={t.cityStateLabel}
             placeholder={t.cityStatePlaceholder}
             value={data.cityState}
-            onChange={(e) => update({ cityState: e.target.value })}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => update({ cityState: e.target.value })}
           />
           <div className="grid grid-cols-2 gap-3">
             <div>

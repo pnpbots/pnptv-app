@@ -98,6 +98,11 @@ function isValidPhotoUrl(photo: string | null | undefined): photo is string {
   return !!photo && (photo.startsWith("/") || photo.startsWith("http"));
 }
 
+/** Extract the telegram/db ID from a Matrix user ID like @pnptv_1234567:matrix.pnptv.app → "1234567" */
+function telegramIdFromMatrixId(matrixId: string): string {
+  return matrixId.split(":")[0].replace(/^@pnptv_/, "").replace(/^@/, "");
+}
+
 function timeAgo(dateStr: string): string {
   if (!dateStr) return "";
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -570,15 +575,18 @@ export default function Chat() {
       hash ^= m.eventId.charCodeAt(i);
       hash = (hash * 16777619) >>> 0;
     }
-    const senderName = m.senderId.split(":")[0].replace(/^@pnptv_/, "").replace(/^@/, "");
+    const senderTelegramId = telegramIdFromMatrixId(m.senderId);
+    const senderInfo = memberLookup.get(senderTelegramId);
+    const replyTelegramId = m.replyToSenderId ? telegramIdFromMatrixId(m.replyToSenderId) : undefined;
+    const replyInfo = replyTelegramId ? memberLookup.get(replyTelegramId) : undefined;
     return {
       id: hash,
       room: matrixRoomId ?? "",
       content: m.body,
-      user_id: m.senderId,
-      username: senderName,
-      first_name: senderName,
-      photo_url: null,
+      user_id: senderTelegramId,
+      username: senderInfo?.name || senderTelegramId,
+      first_name: senderInfo?.name || senderTelegramId,
+      photo_url: senderInfo?.photoUrl || null,
       created_at: new Date(m.timestamp).toISOString(),
       media_url: m.mediaUrl ?? null,
       media_type: m.mediaType === "file" ? null : (m.mediaType ?? null),
@@ -588,7 +596,7 @@ export default function Chat() {
       media_height: null,
       // Reply-to from Matrix event relations
       reply_to: m.replyToEventId ? {
-        name: m.replyToSenderId?.split(":")[0].replace(/^@pnptv_/, "").replace(/^@/, "") || "User",
+        name: replyInfo?.name || replyTelegramId || "User",
         content: m.replyToBody || "[message]",
       } : null,
     } satisfies GroupMessage;
@@ -634,11 +642,15 @@ export default function Chat() {
   const [restReactions, setRestReactions] = useState<Map<number, ReactionEntry[]>>(new Map());
   const loadedReactionIds = useRef<Set<number>>(new Set());
 
-  // Load existing reactions for messages on initial load
+  // Load existing reactions for legacy (non-Matrix) messages on initial load.
+  // Matrix messages use Matrix reactions (useRoomReactions) — skip REST loading
+  // for them to avoid integer overflow errors from FNV hash IDs.
   useEffect(() => {
     const messageIds = messages
       .map(m => m.id)
-      .filter(id => Number.isFinite(id) && id > 0 && !loadedReactionIds.current.has(id));
+      .filter(id => Number.isFinite(id) && id > 0
+        && !loadedReactionIds.current.has(id)
+        && !matrixEventIdMap.has(id));
     if (messageIds.length === 0) return;
 
     messageIds.forEach(id => loadedReactionIds.current.add(id));
@@ -661,10 +673,25 @@ export default function Chat() {
         return next;
       });
     });
-  }, [messages]);
+  }, [messages, matrixEventIdMap]);
 
-  // Handle reaction toggle — uses REST API for all messages
+  // Handle reaction toggle — Matrix reactions for Matrix messages, REST for legacy
   const handleReaction = useCallback(async (idOrEventId: string, emoji: string) => {
+    // Matrix event IDs start with "$" — route to Matrix reaction logic
+    if (idOrEventId.startsWith("$") && matrixRoomId) {
+      const entries = matrixReactions.get(idOrEventId);
+      const myPrefix = user?.dbId ? `@pnptv_${user.dbId}:` : "";
+      const existing = entries?.find((e) => e.emoji === emoji);
+      const myEntry = myPrefix ? existing?.users.find((u) => u.userId.startsWith(myPrefix)) : undefined;
+      if (myEntry) {
+        redactEvent(matrixRoomId, myEntry.reactionEventId).catch(() => {});
+      } else {
+        sendReaction(matrixRoomId, idOrEventId, emoji).catch(() => {});
+      }
+      return;
+    }
+
+    // Legacy REST-based reactions
     const numId = parseInt(idOrEventId, 10);
     if (Number.isFinite(numId) && numId > 0) {
       try {
@@ -681,20 +708,8 @@ export default function Chat() {
           });
         }
       } catch { /* silently fail */ }
-      return;
     }
-
-    if (!matrixRoomId) return;
-    const entries = matrixReactions.get(idOrEventId);
-    const myUserId = matrixMessages[0]?.senderId?.split(":")[0] || "";
-    const existing = entries?.find((e) => e.emoji === emoji);
-    const myEntry = existing?.users.find((u) => u.userId.includes(myUserId));
-    if (myEntry) {
-      redactEvent(matrixRoomId, myEntry.reactionEventId).catch(() => {});
-    } else {
-      sendReaction(matrixRoomId, idOrEventId, emoji).catch(() => {});
-    }
-  }, [matrixRoomId, matrixReactions, matrixMessages]);
+  }, [matrixRoomId, matrixReactions, user?.dbId]);
 
   // sendMessage: send via Matrix (with optional reply-to via Matrix event relation)
   const sendMessage = useCallback(
@@ -758,6 +773,25 @@ export default function Chat() {
   const [groupDetail, setGroupDetail] = useState<any>(null);
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
   const [settingsLoading, setSettingsLoading] = useState(false);
+
+  // Member lookup: telegram ID → { name, photoUrl } for resolving Matrix sender IDs
+  const memberLookup = React.useMemo(() => {
+    const map = new Map<string, { name: string; photoUrl: string | null }>();
+    for (const m of groupMembers) {
+      map.set(String(m.user_id), {
+        name: m.first_name || m.username || "User",
+        photoUrl: m.photo_url || null,
+      });
+    }
+    // Also include the current user (in case they sent a message before members loaded)
+    if (user) {
+      map.set(String(user.dbId), {
+        name: user.firstName || user.displayName || "You",
+        photoUrl: user.photoUrl || null,
+      });
+    }
+    return map;
+  }, [groupMembers, user]);
 
   // Pinned messages
   const [pinnedMessages, setPinnedMessages] = useState<any[]>([]);
@@ -1022,6 +1056,9 @@ export default function Chat() {
 
     // Mark as read
     markGroupAsRead(group.id).catch(() => {});
+
+    // Load group members for display name/avatar lookup in Matrix messages
+    loadGroupDetail(group.id);
 
     // Silently try to provision a Matrix room for this group (non-blocking upgrade)
     setMatrixRoomId(null);
@@ -2006,7 +2043,7 @@ export default function Chat() {
                   userLang={user?.language || "en"}
                   onNavigate={handleNavigate}
                   onExpandImage={handleExpandImage}
-                  currentUserId={user?.dbId != null ? String(user.dbId) : user?.id ? String(user.id) : undefined}
+                  currentUserId={user?.dbId != null ? `@pnptv_${user.dbId}:` : undefined}
                   matrixEventId={matrixEventIdMap.get(msg.id) || String(msg.id)}
                   reactions={
                     matrixEventIdMap.get(msg.id)

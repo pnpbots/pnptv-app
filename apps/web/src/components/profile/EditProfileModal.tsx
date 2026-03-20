@@ -114,7 +114,7 @@ export default function EditProfileModal({
             <label className="block text-xs text-pnp-textSecondary mb-1">{p.firstName}</label>
             <Input
               value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFirstName(e.target.value)}
               placeholder={p.firstNamePlaceholder}
             />
           </div>
@@ -122,7 +122,7 @@ export default function EditProfileModal({
             <label className="block text-xs text-pnp-textSecondary mb-1">{p.lastName}</label>
             <Input
               value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLastName(e.target.value)}
               placeholder={p.lastNamePlaceholder}
             />
           </div>
@@ -142,7 +142,7 @@ export default function EditProfileModal({
           <label className="block text-xs text-pnp-textSecondary mb-1">{p.locationDisplay}</label>
           <Input
             value={locationText}
-            onChange={(e) => setLocationText(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLocationText(e.target.value)}
             placeholder={p.locationPlaceholder}
           />
         </div>
