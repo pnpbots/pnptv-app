@@ -72,6 +72,7 @@ class UserLocation {
          u.first_name,
          u.username,
          u.photo_file_id,
+         u.privacy,
          (6371 * acos(
            LEAST(1, cos(radians($1)) * cos(radians(ul.latitude))
            * cos(radians(ul.longitude) - radians($2))

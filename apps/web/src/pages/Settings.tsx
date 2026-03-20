@@ -11,10 +11,12 @@ import {
   updateProfile,
   updateLanguage,
   deleteAccount,
+  eraseMyAccount,
   getBlockedUsers,
   unblockUser,
   type ReferralStats,
   type BlockedUser,
+  type EraseAccountReceipt,
 } from "@/lib/api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -79,7 +81,7 @@ function Section({
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { user, isAuthenticated, refreshUser } = useAuth();
+  const { user, isAuthenticated, refreshUser, logout } = useAuth();
   const { tier, isPrime } = useTier();
   const t = useI18n();
   const p = t.profile;
@@ -116,6 +118,15 @@ export default function Settings() {
   const deleteInputRef = useRef<HTMLInputElement>(null);
   const deleteModalRef = useRef<HTMLDivElement>(null); // backdrop element for focus trap root
 
+  // ── GDPR erase state ──────────────────────────────────────────────────────
+  const [showEraseModal, setShowEraseModal] = useState(false);
+  const [eraseConfirmText, setEraseConfirmText] = useState("");
+  const [erasing, setErasing] = useState(false);
+  const [eraseError, setEraseError] = useState<string | null>(null);
+  const [eraseReceipt, setEraseReceipt] = useState<EraseAccountReceipt | null>(null);
+  const eraseInputRef = useRef<HTMLInputElement>(null);
+  const eraseModalRef = useRef<HTMLDivElement>(null);
+
   // ── Focus management: move focus into modal when it opens ─────────────────
   useEffect(() => {
     if (showDeleteModal) {
@@ -124,6 +135,12 @@ export default function Settings() {
       deleteInputRef.current?.focus();
     }
   }, [showDeleteModal]);
+
+  useEffect(() => {
+    if (showEraseModal) {
+      eraseInputRef.current?.focus();
+    }
+  }, [showEraseModal]);
 
   // ── Referral state ────────────────────────────────────────────────────────
   const [referralStats, setReferralStats] = useState<ReferralStats | null>(null);
@@ -226,6 +243,28 @@ export default function Settings() {
       setDeleting(false);
     }
   }, [deleting, navigate]);
+
+  const handleEraseAccount = useCallback(async () => {
+    if (erasing) return;
+    setErasing(true);
+    setEraseError(null);
+    try {
+      const receipt = await eraseMyAccount();
+      setEraseReceipt(receipt);
+      // Give the user 3 seconds to read the receipt, then log out and redirect
+      setTimeout(async () => {
+        try {
+          await logout();
+        } catch {
+          // Ignore logout errors — session was destroyed server-side
+        }
+        navigate("/login");
+      }, 3000);
+    } catch (err) {
+      setEraseError(err instanceof Error ? err.message : "Data erasure failed. Please try again.");
+      setErasing(false);
+    }
+  }, [erasing, logout, navigate]);
 
   const handleWofConsentToggle = useCallback(async () => {
     const newValue = !wofConsent;
@@ -749,6 +788,57 @@ export default function Settings() {
             {p.deleteAccount}
           </button>
         </div>
+
+        {/* ── GDPR Full Erasure ── */}
+        <div
+          className="rounded-xl p-4 mt-4"
+          style={{
+            background: "rgba(255,59,48,0.08)",
+            border: "1px solid rgba(255,59,48,0.3)",
+          }}
+        >
+          <div className="flex items-start gap-3 mb-3">
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
+              style={{ background: "rgba(255,59,48,0.2)" }}
+            >
+              <svg
+                className="w-4 h-4"
+                style={{ color: "#FF3B30" }}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.5}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-white mb-1">
+                Erase All My Data (GDPR Article 17)
+              </p>
+              <p className="text-xs leading-relaxed" style={{ color: "rgba(255,255,255,0.55)" }}>
+                This permanently deletes ALL your data from our servers, including messages, payment history, and chat history. This action cannot be undone.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setEraseConfirmText("");
+              setEraseError(null);
+              setEraseReceipt(null);
+              setShowEraseModal(true);
+            }}
+            className="px-4 py-2 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
+            style={{
+              background: "rgba(255,59,48,0.25)",
+              color: "#FF3B30",
+              border: "1px solid rgba(255,59,48,0.5)",
+            }}
+          >
+            Request Full Data Erasure
+          </button>
+        </div>
       </Section>
 
       {/* ── Delete Account Modal ──────────────────────────────────────────── */}
@@ -829,6 +919,141 @@ export default function Settings() {
                 {deleting ? p.deletingAccount : p.deleteAccount}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── GDPR Erase Modal ──────────────────────────────────────────────── */}
+      {showEraseModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="erase-modal-title"
+          aria-describedby="erase-modal-desc"
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && !erasing && !eraseReceipt) setShowEraseModal(false);
+          }}
+          tabIndex={-1}
+          ref={eraseModalRef}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-6"
+            style={{ background: "#13131a", border: "1px solid rgba(255,59,48,0.4)" }}
+          >
+            {eraseReceipt ? (
+              /* ── Receipt view ── */
+              <>
+                <div className="flex items-center gap-2 mb-3">
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                    style={{ background: "rgba(94,209,196,0.15)" }}
+                  >
+                    <svg className="w-4 h-4" style={{ color: "#5ED1C4" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                  </div>
+                  <h2 id="erase-modal-title" className="text-base font-bold text-white">
+                    Erasure Requested
+                  </h2>
+                </div>
+                <p className="text-xs leading-relaxed mb-4" style={{ color: "rgba(255,255,255,0.6)" }}>
+                  Your data erasure request has been logged. You will be signed out in a moment.
+                </p>
+                <div
+                  className="rounded-lg p-3 space-y-1.5"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                >
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "#8E8E93" }}>Erasure ID</p>
+                    <p className="text-xs font-mono text-white break-all">{eraseReceipt.erasure_id}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "#8E8E93" }}>Timestamp</p>
+                    <p className="text-xs text-white">
+                      {new Date(eraseReceipt.timestamp).toLocaleString()}
+                    </p>
+                  </div>
+                  {eraseReceipt.scope && eraseReceipt.scope.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "#8E8E93" }}>Scope</p>
+                      <p className="text-xs text-white">{eraseReceipt.scope.join(", ")}</p>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              /* ── Confirmation form ── */
+              <>
+                <div className="flex items-start gap-3 mb-4">
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
+                    style={{ background: "rgba(255,59,48,0.2)" }}
+                  >
+                    <svg className="w-4 h-4" style={{ color: "#FF3B30" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 id="erase-modal-title" className="text-base font-bold text-white mb-1">
+                      Erase All My Data (GDPR Article 17)
+                    </h2>
+                    <p id="erase-modal-desc" className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+                      This permanently deletes ALL your data from our servers, including messages, payment history, and chat history. This action cannot be undone.
+                    </p>
+                  </div>
+                </div>
+
+                <p className="text-xs mb-2" style={{ color: "rgba(255,255,255,0.5)" }}>
+                  Type <span className="font-mono font-semibold" style={{ color: "#FF3B30" }}>DELETE MY ACCOUNT</span> to confirm
+                </p>
+                <input
+                  ref={eraseInputRef}
+                  type="text"
+                  value={eraseConfirmText}
+                  onChange={(e) => setEraseConfirmText(e.target.value)}
+                  disabled={erasing}
+                  autoFocus
+                  className="w-full rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-500/50 disabled:opacity-50"
+                  style={{
+                    background: "rgba(255,255,255,0.05)",
+                    border: "1px solid rgba(255,59,48,0.4)",
+                    color: "#fff",
+                  }}
+                  placeholder="DELETE MY ACCOUNT"
+                  aria-label="Type DELETE MY ACCOUNT to confirm erasure"
+                />
+                {eraseError && (
+                  <p className="text-xs mb-3" style={{ color: "#FF6B6B" }}>{eraseError}</p>
+                )}
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => !erasing && setShowEraseModal(false)}
+                    disabled={erasing}
+                    className="flex-1 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-40"
+                    style={{
+                      background: "rgba(255,255,255,0.08)",
+                      color: "#fff",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                    }}
+                  >
+                    {p.cancel}
+                  </button>
+                  <button
+                    onClick={handleEraseAccount}
+                    disabled={erasing || eraseConfirmText !== "DELETE MY ACCOUNT"}
+                    className="flex-1 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-80 disabled:opacity-30 disabled:cursor-not-allowed"
+                    style={{
+                      background: "rgba(255,59,48,0.3)",
+                      color: "#FF3B30",
+                      border: "1px solid rgba(255,59,48,0.5)",
+                    }}
+                  >
+                    {erasing ? "Erasing..." : "Erase All Data"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

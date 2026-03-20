@@ -113,7 +113,7 @@ const CristinaOnboardingReminders = safeRequire('../services/cristinaOnboardingR
 const SupportTopicModel = safeRequire('../../models/supportTopicModel', _noopObj);
 const BroadcastButtonModel = safeRequire('../../models/broadcastButtonModel', _noopObj);
 const { initializeAsyncBroadcastQueue } = safeRequire('../services/initializeQueue', { initializeAsyncBroadcastQueue: _noop });
-const { startCronJobs } = safeRequire('../../../../scripts/cron', { startCronJobs: _noop });
+const { startCronJobs } = safeRequire('../../scripts/cron', { startCronJobs: _noop });
 
 // ─── Schedulers (non-critical) ──────────────────────────────────────────────
 const CommunityPostScheduler = safeRequire('./schedulers/communityPostScheduler', null);

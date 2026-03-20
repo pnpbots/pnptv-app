@@ -12,8 +12,9 @@ const config: Partial<Config> = {
         mono: ["Roboto Mono", "monospace"],
         display: ["Ethnocentric Rg", "Roboto Mono", "monospace"],
       },
-      animation: {
-        "pulse-slow": "pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+      boxShadow: {
+        none: "none",
+        DEFAULT: "none",
       },
     },
   },

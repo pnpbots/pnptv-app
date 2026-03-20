@@ -19,8 +19,8 @@
 'use strict';
 
 // Load .env.production first (has Daimo keys), then .env as fallback
-require('dotenv').config({ path: require('path').resolve(__dirname, '../.env.production') });
-require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+require('dotenv').config({ path: require('path').resolve(__dirname, '../../../.env.production') });
+require('dotenv').config({ path: require('path').resolve(__dirname, '../../../.env') });
 
 const DAIMO_API_BASE      = 'https://api.daimo.com/v1';
 const WEBHOOK_URL         = 'https://pnptv.app/api/webhooks/daimo';

@@ -1,6 +1,6 @@
-require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
+require('dotenv').config({ path: require('path').resolve(__dirname, '../../../.env') });
 const crypto = require('crypto');
-const { query, closePool } = require('../apps/backend/config/postgres');
+const { query, closePool } = require('../config/postgres');
 
 const APP_URL = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
 

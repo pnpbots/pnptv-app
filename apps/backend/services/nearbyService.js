@@ -8,6 +8,7 @@
  * - Redis GEO integration
  */
 
+const crypto = require('crypto');
 const redisGeoService = require('./redisGeoService');
 const UserLocation = require('../models/userLocation');
 const BlockedUser = require('../models/blockedUser');
@@ -17,29 +18,99 @@ const logger = require('../utils/logger');
 const RATE_LIMIT_SECONDS = 5;
 const PRIVACY_DECIMAL_PLACES = 3; // 40.750° = ~111m accuracy
 
+// GEO_HMAC_SECRET — dedicated secret for coordinate offset derivation.
+// Falls back to SESSION_SECRET if not set. Set this var in .env for
+// best security hygiene (rotating it will shift all user offsets at once).
+const GEO_HMAC_SECRET = process.env.GEO_HMAC_SECRET || process.env.SESSION_SECRET || 'pnptv-geo-fallback';
+
+/**
+ * Generates a deterministic coordinate offset using HMAC-SHA256.
+ * Same user gets the same offset for the entire UTC day — prevents
+ * triangulation attacks from multiple requests while keeping a user's
+ * apparent position stable within a session.
+ *
+ * Offset is keyed on the TARGET user's ID (not the viewer), so every
+ * caller sees the same displaced position for a given user on a given day.
+ *
+ * @param {string|number} userId     - ID of the user whose location is being obfuscated
+ * @param {number}        radiusMeters - Maximum offset radius (100–500m, default 100m)
+ * @returns {{ latOffset: number, lngOffset: number }}
+ */
+function getDeterministicOffset(userId, radiusMeters = 100) {
+  // Clamp radius: minimum 100m, maximum 500m
+  const clampedRadius = Math.min(500, Math.max(100, radiusMeters));
+
+  // Daily salt rotates at midnight UTC — YYYY-MM-DD
+  const daySalt = new Date().toISOString().slice(0, 10);
+
+  const hmac = crypto.createHmac('sha256', GEO_HMAC_SECRET);
+  hmac.update(`${userId}:${daySalt}`);
+  const hash = hmac.digest();
+
+  // Use bytes 0–3 for the directional angle and bytes 4–7 for the radius magnitude.
+  // UInt32BE normalised to [0, 1) gives uniform distribution without modulo bias.
+  const angle = (hash.readUInt32BE(0) / 0xFFFFFFFF) * 2 * Math.PI;
+  const radiusFraction = hash.readUInt32BE(4) / 0xFFFFFFFF; // [0, 1)
+  const radius = radiusFraction * clampedRadius;
+
+  // Convert meters to approximate degree offsets.
+  // For longitude, we use cos(0) = 1 as a global approximation — good enough
+  // for the 100–500m distances involved here (max ~0.0045°).
+  const latOffset = (radius * Math.cos(angle)) / 111320;
+  const lngOffset = (radius * Math.sin(angle)) / 111320;
+
+  return { latOffset, lngOffset };
+}
+
 class NearbyService {
   constructor() {
     this.userUpdateTimes = new Map(); // Track last update per user
   }
 
   /**
-   * Obfuscate coordinates for privacy
-   * Rounds to 3 decimal places (~111m) and adds random noise
+   * Obfuscate coordinates for privacy using a deterministic HMAC-based offset.
+   * The offset is stable for a given (userId, UTC day) pair, preventing
+   * triangulation attacks from multiple simultaneous API calls.
+   *
+   * NEVER call this on coordinates destined for the DB or Redis — apply only
+   * at the response layer.
+   *
+   * @param {string|number} userId       - Target user's ID (offset is keyed on this)
+   * @param {number}        latitude     - Raw latitude
+   * @param {number}        longitude    - Raw longitude
+   * @param {number}        privacyRadius - Max offset radius in metres (100–500, default 100)
+   * @returns {{ latitude: number, longitude: number }}
    */
-  obfuscateCoordinates(latitude, longitude, accuracy) {
-    // Round to 3 decimals (~111m)
-    let lat = Math.round(latitude * 1000) / 1000;
-    let lon = Math.round(longitude * 1000) / 1000;
+  obfuscateCoordinates(userId, latitude, longitude, privacyRadius = 100) {
+    // Round to 3 decimal places (~111m grid) first to remove sub-grid precision
+    const lat = Math.round(latitude * 1000) / 1000;
+    const lon = Math.round(longitude * 1000) / 1000;
 
-    // Add noise: ±50-900m based on accuracy
-    const noiseRange = Math.min(900, Math.max(50, accuracy * 1.5));
-    const noiseLat = (Math.random() - 0.5) * (noiseRange / 111000);
-    const noiseLon = (Math.random() - 0.5) * (noiseRange / 111000);
+    const { latOffset, lngOffset } = getDeterministicOffset(userId, privacyRadius);
 
-    lat += noiseLat;
-    lon += noiseLon;
+    return {
+      latitude: lat + latOffset,
+      longitude: lon + lngOffset,
+    };
+  }
 
-    return { latitude: lat, longitude: lon };
+  /**
+   * Extract privacy_radius from a user's privacy JSONB field.
+   * Returns a value clamped to [100, 500] metres.
+   *
+   * @param {object|string|null} privacyJson - The raw privacy column value
+   * @returns {number} radius in metres
+   */
+  resolvePrivacyRadius(privacyJson) {
+    try {
+      const parsed = typeof privacyJson === 'string' ? JSON.parse(privacyJson) : privacyJson;
+      if (parsed && typeof parsed.privacy_radius === 'number') {
+        return Math.min(500, Math.max(100, parsed.privacy_radius));
+      }
+    } catch (_) {
+      // Malformed JSON — fall through to default
+    }
+    return 100;
   }
 
   /**
@@ -189,22 +260,22 @@ class NearbyService {
 
       const onlineIds = new Set(redisUsers.map(u => String(u.user_id)));
 
-      const privacyFiltered = redisUsers.map(user => {
-        const { latitude: obfLat, longitude: obfLon } = this.obfuscateCoordinates(
-          user.latitude, user.longitude, user.accuracy
-        );
-        return {
-          user_id: user.user_id,
-          latitude: obfLat,
-          longitude: obfLon,
-          accuracy_estimate: this.getAccuracyEstimate(user.accuracy),
-          distance_km: includeDistance ? user.distance_km : undefined,
-          distance_m: includeDistance ? user.distance_m : undefined,
-          status: 'online',
-          last_update: user.last_update,
-          last_seen: null,
-        };
-      });
+      // For online users, store raw coords temporarily — obfuscation with the
+      // correct per-user privacy_radius is applied after profile enrichment below.
+      const privacyFiltered = redisUsers.map(user => ({
+        user_id: user.user_id,
+        _raw_lat: user.latitude,
+        _raw_lng: user.longitude,
+        latitude: null,   // filled in after enrichment
+        longitude: null,  // filled in after enrichment
+        _privacy_radius: 100, // updated after enrichment
+        accuracy_estimate: this.getAccuracyEstimate(user.accuracy),
+        distance_km: includeDistance ? user.distance_km : undefined,
+        distance_m: includeDistance ? user.distance_m : undefined,
+        status: 'online',
+        last_update: user.last_update,
+        last_seen: null,
+      }));
 
       // ── Step 2: recently-offline users from PostgreSQL (last 72 h) ───────
       // This ensures the map is never empty just because no one has the app open
@@ -215,8 +286,9 @@ class NearbyService {
         );
         for (const row of offlineRows) {
           if (excludeSet.has(String(row.user_id)) || onlineIds.has(String(row.user_id))) continue;
+          const privacyRadius = this.resolvePrivacyRadius(row.privacy || null);
           const { latitude: obfLat, longitude: obfLon } = this.obfuscateCoordinates(
-            parseFloat(row.latitude), parseFloat(row.longitude), row.accuracy || 100
+            row.user_id, parseFloat(row.latitude), parseFloat(row.longitude), privacyRadius
           );
           privacyFiltered.push({
             user_id: row.user_id,
@@ -239,12 +311,13 @@ class NearbyService {
       }
 
       // ── Step 3: Enrich online users with profile data from PostgreSQL ────
+      // Also fetch `privacy` so we can apply the correct privacy_radius offset.
       const onlineFiltered = privacyFiltered.filter(u => u.status === 'online' && !u.username);
       if (onlineFiltered.length > 0) {
         const userIds = onlineFiltered.map(u => u.user_id);
         try {
           const profileResult = await query(
-            `SELECT id, username, first_name, photo_file_id FROM users WHERE id = ANY($1)`,
+            `SELECT id, username, first_name, photo_file_id, privacy FROM users WHERE id = ANY($1)`,
             [userIds]
           );
           const profileMap = {};
@@ -256,12 +329,29 @@ class NearbyService {
               u.name = p.first_name || null;
               const photo = p.photo_file_id || null;
               u.photo_url = (photo && (photo.startsWith('/') || photo.startsWith('http'))) ? photo : null;
+              u._privacy_radius = this.resolvePrivacyRadius(p.privacy);
             }
           });
         } catch (err) {
           logger.warn(`Failed to enrich nearby users with profiles: ${err.message}`);
         }
       }
+
+      // ── Apply HMAC obfuscation to all online users (after enrichment) ────
+      // This runs after enrichment so we have the correct privacy_radius per user.
+      privacyFiltered.forEach(u => {
+        if (u._raw_lat !== undefined && u._raw_lng !== undefined) {
+          const { latitude: obfLat, longitude: obfLon } = this.obfuscateCoordinates(
+            u.user_id, u._raw_lat, u._raw_lng, u._privacy_radius || 100
+          );
+          u.latitude = obfLat;
+          u.longitude = obfLon;
+          // Remove internal staging fields — never expose them to the frontend
+          delete u._raw_lat;
+          delete u._raw_lng;
+          delete u._privacy_radius;
+        }
+      });
 
       // Followers-first ordering: show followed users at the top
       try {

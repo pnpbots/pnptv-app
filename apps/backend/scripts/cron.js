@@ -4,7 +4,7 @@ const cron = require('node-cron');
 
 // Use absolute paths based on script location
 const basePath = __dirname;
-const backendPath = path.join(basePath, '../apps/backend');
+const backendPath = path.join(basePath, '..');
 
 const { initializeRedis } = require(path.join(backendPath, 'config/redis'));
 const { initializePostgres } = require(path.join(backendPath, 'config/postgres'));

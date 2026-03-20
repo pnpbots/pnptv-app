@@ -12,6 +12,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
+const { cache } = require('./redis');
 
 // Internal URL for server-to-server API calls (not browser-accessible)
 const BTCPAY_URL = process.env.BTCPAY_URL || 'http://btcpay-server:23000';
@@ -84,13 +85,175 @@ async function createDashInvoice({ usdAmount, userId, orderId, description = 'PN
 }
 
 /**
+ * Create a generic invoice in BTCPay Server via the Greenfield API.
+ * Stores planId and userId in metadata so the webhook handler can grant
+ * entitlements even when no dash_subscription_orders row exists (e.g. invoices
+ * initiated outside the legacy Dash flow).
+ *
+ * @param {object} opts
+ * @param {number}  opts.amount       — Amount in the specified currency
+ * @param {string}  opts.currency     — ISO currency code, e.g. 'USD'
+ * @param {string}  opts.orderId      — Unique order reference (idempotency key)
+ * @param {string}  opts.userId       — PNPtv user ID (stored in invoice metadata)
+ * @param {string}  opts.planId       — Plan ID to grant entitlements for on settlement
+ * @param {object}  [opts.metadata]   — Additional metadata merged into the invoice
+ * @param {string}  [opts.redirectUrl]— URL to redirect user after payment
+ * @param {string[]} [opts.paymentMethods] — Allowed payment methods (default: ['DASH'])
+ * @returns {Promise<{invoiceId: string, checkoutLink: string, status: string}>}
+ */
+async function createInvoice({ amount, currency = 'USD', orderId, userId, planId, metadata = {}, redirectUrl, paymentMethods = ['DASH'] }) {
+  if (!BTCPAY_API_KEY || !BTCPAY_STORE_ID) {
+    throw new Error('BTCPay Server not configured (missing BTCPAY_API_KEY or BTCPAY_STORE_ID)');
+  }
+  if (!amount || amount <= 0) throw new Error('amount must be a positive number');
+  if (!orderId) throw new Error('orderId is required');
+  if (!userId) throw new Error('userId is required');
+  if (!planId) throw new Error('planId is required');
+
+  const payload = {
+    currency,
+    amount,
+    orderId,
+    metadata: {
+      ...metadata,
+      userId,
+      planId,
+      platform: 'pnptv',
+    },
+    checkout: {
+      paymentMethods,
+      redirectURL: redirectUrl || `${process.env.WEBAPP_URL || 'https://app.pnptv.app'}/subscribe`,
+      redirectAutomatically: true,
+      requiresRefundEmail: false,
+    },
+    receipt: { enabled: false },
+  };
+
+  try {
+    const response = await btcpayClient.post(`/stores/${BTCPAY_STORE_ID}/invoices`, payload);
+    const invoice = response.data;
+    logger.info('BTCPay createInvoice: invoice created', {
+      invoiceId: invoice.id,
+      orderId,
+      userId,
+      planId,
+      amount,
+      currency,
+    });
+    return {
+      invoiceId: invoice.id,
+      checkoutLink: `${BTCPAY_PUBLIC_URL}/i/${invoice.id}`,
+      status: invoice.status,
+    };
+  } catch (err) {
+    logger.error('BTCPay createInvoice failed:', {
+      status: err.response?.status,
+      data: err.response?.data,
+      message: err.message,
+      orderId,
+      userId,
+      planId,
+    });
+    throw err;
+  }
+}
+
+/**
  * Get invoice details from BTCPay Server
  * @param {string} invoiceId
  * @returns {Promise<object>}
  */
 async function getInvoice(invoiceId) {
-  const response = await btcpayClient.get(`/stores/${BTCPAY_STORE_ID}/invoices/${invoiceId}`);
-  return response.data;
+  try {
+    const response = await btcpayClient.get(`/stores/${BTCPAY_STORE_ID}/invoices/${invoiceId}`);
+    return response.data;
+  } catch (err) {
+    logger.error('BTCPay getInvoice failed:', {
+      invoiceId,
+      status: err.response?.status,
+      message: err.message,
+    });
+    throw err;
+  }
+}
+
+/**
+ * Get available payment methods for an invoice, including crypto addresses and amounts.
+ * Returns an array of payment method objects from BTCPay Greenfield API.
+ *
+ * Each element contains:
+ *   - paymentMethod: string  (e.g. 'DASH', 'BTC')
+ *   - destination: string    (crypto address)
+ *   - amount: string         (exact crypto amount required)
+ *   - networkFee: string     (estimated network fee)
+ *   - rate: string           (exchange rate at time of invoice creation)
+ *   - due: string            (remaining amount due in crypto)
+ *   - totalDue: string       (total including network fee)
+ *
+ * @param {string} invoiceId
+ * @returns {Promise<Array<object>>}
+ */
+async function getInvoicePaymentMethods(invoiceId) {
+  if (!BTCPAY_API_KEY || !BTCPAY_STORE_ID) {
+    throw new Error('BTCPay Server not configured (missing BTCPAY_API_KEY or BTCPAY_STORE_ID)');
+  }
+  try {
+    const response = await btcpayClient.get(
+      `/stores/${BTCPAY_STORE_ID}/invoices/${invoiceId}/payment-methods`
+    );
+    return response.data;
+  } catch (err) {
+    logger.error('BTCPay getInvoicePaymentMethods failed:', {
+      invoiceId,
+      status: err.response?.status,
+      message: err.message,
+    });
+    throw err;
+  }
+}
+
+/**
+ * Check whether an invoice has already been processed (replay protection).
+ * Uses Redis with a 48-hour TTL — long enough to outlive all reasonable
+ * BTCPay retry windows.
+ *
+ * @param {string} invoiceId
+ * @returns {Promise<boolean>} true if already processed
+ */
+async function checkInvoiceProcessed(invoiceId) {
+  try {
+    const key = `btcpay:processed:${invoiceId}`;
+    const value = await cache.get(key);
+    return value !== null;
+  } catch (err) {
+    // Redis failure must never block payment processing — log and allow through.
+    logger.warn('BTCPay checkInvoiceProcessed: Redis error (allowing through)', {
+      invoiceId,
+      error: err.message,
+    });
+    return false;
+  }
+}
+
+/**
+ * Mark an invoice as processed in Redis (replay protection).
+ * TTL: 48 hours (172800 seconds).
+ *
+ * @param {string} invoiceId
+ * @param {object} [meta] — Optional metadata stored with the marker (userId, planId, etc.)
+ * @returns {Promise<void>}
+ */
+async function markInvoiceProcessed(invoiceId, meta = {}) {
+  try {
+    const key = `btcpay:processed:${invoiceId}`;
+    await cache.set(key, { processedAt: new Date().toISOString(), ...meta }, 172800);
+  } catch (err) {
+    // Non-critical — idempotency is also enforced at the DB layer.
+    logger.warn('BTCPay markInvoiceProcessed: Redis error (non-critical)', {
+      invoiceId,
+      error: err.message,
+    });
+  }
 }
 
 /**
@@ -138,7 +301,11 @@ async function checkBtcpayHealth() {
 
 module.exports = {
   createDashInvoice,
+  createInvoice,
   getInvoice,
+  getInvoicePaymentMethods,
+  checkInvoiceProcessed,
+  markInvoiceProcessed,
   validateWebhookSignature,
   checkBtcpayHealth,
   BTCPAY_WEBHOOK_SECRET,

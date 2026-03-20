@@ -188,6 +188,10 @@ export function apiLogout(): Promise<{ success: boolean }> {
   return request("/api/logout", { method: "POST" });
 }
 
+export function oidcLogout(): Promise<{ success: boolean }> {
+  return request("/auth/oidc/logout", { method: "POST" });
+}
+
 export function unlinkAtproto(): Promise<{ success: boolean; message: string }> {
   return request("/api/webapp/auth/atproto/unlink", { method: "POST" });
 }
@@ -943,6 +947,20 @@ export function resendVerificationEmail(email: string): Promise<{ success: boole
 
 export function deleteAccount(): Promise<{ success: boolean }> {
   return request("/api/webapp/account", { method: "DELETE" });
+}
+
+export interface EraseAccountReceipt {
+  success: boolean;
+  erasure_id: string;
+  timestamp: string;
+  scope: string[];
+}
+
+export function eraseMyAccount(): Promise<EraseAccountReceipt> {
+  return request("/api/users/me/erase", {
+    method: "DELETE",
+    body: { confirm: "DELETE MY ACCOUNT" },
+  });
 }
 
 export async function uploadAvatar(file: File): Promise<{ success: boolean; photoUrl: string }> {

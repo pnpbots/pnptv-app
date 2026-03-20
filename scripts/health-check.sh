@@ -31,9 +31,12 @@ echo "================================"
 
 echo ""
 echo "--- Docker Containers ---"
-for c in npm-proxy authentik-server authentik-worker pg-authentik redis-authentik \
+for c in docker-socket-proxy npm-proxy \
+         authentik-server authentik-worker pg-authentik redis-authentik \
          directus pg-directus ampache mariadb-ampache calcom pg-calcom redis-calcom \
-         bluesky-pds synapse pg-synapse element-web restreamer pnptv-web; do
+         bluesky-pds synapse pg-synapse element-web restreamer \
+         pnptv-bot pnptv-web pg-pnptv redis-pnptv \
+         btcpay-server btcpay-nbxplorer pg-btcpay dashd livekit-server; do
     check_container $c
 done
 
@@ -56,14 +59,17 @@ check_url "Live API" "https://app.pnptv.app/api/proxy/live/streams"
 check_url "Social API" "https://app.pnptv.app/api/proxy/social/feed"
 
 echo ""
-echo "--- PM2 Process ---"
-PM2_STATUS=$(pm2 jlist 2>/dev/null | python3 -c "import json,sys; procs=json.load(sys.stdin); print(procs[0]['pm2_env']['status'] if procs else 'unknown')" 2>/dev/null)
-if [ "$PM2_STATUS" = "online" ]; then
-    echo "  OK: pnptv-bot -> online"
-else
-    echo "  FAIL: pnptv-bot -> $PM2_STATUS"
-    ERRORS=$((ERRORS + 1))
-fi
+echo "--- Network Isolation ---"
+# Verify databases are NOT on proxy_net (zero-trust check)
+for db in pg-pnptv redis-pnptv pg-authentik redis-authentik pg-directus pg-calcom redis-calcom pg-synapse pg-btcpay mariadb-ampache; do
+    NETS=$(docker inspect --format='{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$db" 2>/dev/null)
+    if echo "$NETS" | grep -q "proxy_net"; then
+        echo "  FAIL: $db is on proxy_net (should be db_net only)"
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "  OK: $db isolated from proxy_net"
+    fi
+done
 
 echo ""
 echo "--- Disk Usage ---"

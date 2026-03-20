@@ -43,12 +43,16 @@ WORKDIR /app
 COPY --from=deps --chown=pnptv:pnptv /app/node_modules ./node_modules
 COPY --from=deps --chown=pnptv:pnptv /app/apps/backend/node_modules ./apps/backend/node_modules
 
-COPY --chown=pnptv:pnptv apps/backend/ ./apps/backend/
-COPY --chown=pnptv:pnptv apps/public/ ./apps/public/
-COPY --chown=pnptv:pnptv scripts/ ./scripts/
-COPY --chown=pnptv:pnptv public/ ./public/
+# Rarely-changed layers first (better cache hits)
 COPY --chown=pnptv:pnptv packages/ ./packages/
 COPY --chown=pnptv:pnptv package.json ./
+
+# Static assets
+COPY --chown=pnptv:pnptv apps/public/ ./apps/public/
+COPY --chown=pnptv:pnptv public/ ./public/
+
+# Backend code (most frequently changed — last for best cache)
+COPY --chown=pnptv:pnptv apps/backend/ ./apps/backend/
 
 RUN mkdir -p /app/logs /app/public/uploads/avatars /app/public/uploads/posts /app/public/uploads/chat \
     && chown pnptv:pnptv /app/logs \

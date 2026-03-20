@@ -25,7 +25,17 @@ export default defineConfig({
           vendor: ["react", "react-dom", "react-router-dom"],
           auth: ["oidc-client-ts"],
           media: ["hls.js"],
-          livekit: ["livekit-client", "@livekit/components-react"],
+          livekit: [
+            "livekit-client",
+            "@livekit/components-react",
+            "@livekit/components-core",
+            "@livekit/krisp-noise-filter",
+            "@livekit/track-processors",
+          ],
+          matrix: ["matrix-js-sdk"],
+          maps: ["leaflet", "react-leaflet"],
+          realtime: ["socket.io-client"],
+          // @daimo/sdk excluded — missing "." export in its package.json
         },
       },
     },

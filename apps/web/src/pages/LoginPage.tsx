@@ -313,6 +313,21 @@ export function LoginPage() {
         {!showRecovery && !showEmailForm && (
           <div className="mt-6 space-y-3">
             <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-white/10" />
+              <span className="text-[10px] text-pnp-textSecondary uppercase tracking-widest">or</span>
+              <div className="flex-1 h-px bg-white/10" />
+            </div>
+            <button
+              onClick={() => { window.location.href = "/auth/oidc/login"; }}
+              className="w-full py-3 px-6 rounded-xl font-semibold text-sm flex items-center justify-center gap-3 bg-pnp-accent text-white hover:opacity-90 active:opacity-80 transition-all"
+            >
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+              Sign in with PNPtv SSO
+            </button>
+
+            <div className="flex items-center gap-3 pt-2">
               <div className="flex-1 h-px bg-white/5" />
               <span className="text-[10px] text-pnp-textSecondary uppercase tracking-widest">Legacy Access</span>
               <div className="flex-1 h-px bg-white/5" />

@@ -16,5 +16,9 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "vite-env.d.ts"]
+  "include": ["src", "vite-env.d.ts"],
+  "references": [
+    { "path": "../../packages/types" },
+    { "path": "../../packages/ui-kit" }
+  ]
 }

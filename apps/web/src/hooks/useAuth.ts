@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 import { isTelegramContext, getTelegramWebApp, waitForTelegramSdk } from "@/lib/telegram";
-import { telegramAuth, checkAuthStatus, apiLogout, ApiError, NetworkError, type TelegramAuthResponse } from "@/lib/api";
+import { telegramAuth, checkAuthStatus, apiLogout, oidcLogout, ApiError, NetworkError, type TelegramAuthResponse } from "@/lib/api";
 import { disconnectSocket } from "@/lib/socket";
 import React from "react";
 
@@ -132,9 +132,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const handleLogout = useCallback(async () => {
     disconnectSocket();
+    // Revoke OIDC session on the backend before clearing local state
+    if (user?.lastLoginMethod === "oidc") {
+      await oidcLogout().catch(() => {});
+    }
     await apiLogout();
     setUser(null);
-  }, []);
+  }, [user]);
 
   const refreshUser = useCallback(async () => {
     try {

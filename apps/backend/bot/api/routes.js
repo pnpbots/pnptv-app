@@ -78,6 +78,7 @@ const jaasController = require('./controllers/jaasController');
 // ATProto controller for profile fetching, unlinking, and cross-posting
 const atprotoController = require('./controllers/atprotoController');
 const SoundCloudService = require('../../services/soundCloudService');
+const AuthentikService = require('../../services/authentikService');
 
 /**
  * Page-level authentication middleware
@@ -2376,6 +2377,419 @@ app.post('/api/webapp/auth/logout', asyncHandler(webAppController.logout));
 app.post('/api/webapp/auth/forgot-password', authLimiter, asyncHandler(webAppController.forgotPassword));
 app.post('/api/webapp/auth/reset-password', authLimiter, asyncHandler(webAppController.resetPassword));
 
+// ── Authentik OIDC Routes ─────────────────────────────────────────────────────
+// Privacy-first: no third-party cookies.  PKCE (S256) eliminates the need to
+// send the client_secret from the browser.  State + verifier are stored in
+// Redis with a 10-minute TTL.  Session is httpOnly, sameSite=lax, secure.
+//
+// Required env vars:
+//   AUTHENTIK_OIDC_CLIENT_ID      — Client ID from the Authentik application config
+//   AUTHENTIK_OIDC_CLIENT_SECRET  — Client secret (server-side only, never sent to browser)
+//   AUTHENTIK_OIDC_REDIRECT_URI   — Must match exactly in Authentik (default: https://app.pnptv.app/auth/oidc/callback)
+//   AUTHENTIK_OIDC_ISSUER         — Issuer slug URL (default: https://auth.pnptv.app/application/o/pnptv-app/)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Rate limiter — 10 OIDC login initiations per 15 min per IP
+const oidcLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  handler: (req, res) => res.status(429).json({ error: 'Too many login attempts. Try again later.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Rate limiter — 20 callback attempts per 15 min per IP (allows for browser retries)
+const oidcCallbackLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  handler: (req, res) => res.status(429).json({ error: 'Too many callback attempts. Try again later.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
+ * GET /api/webapp/auth/oidc/login
+ * Initiate Authentik OIDC login. Generates a PKCE verifier + state, stores them
+ * in Redis for 10 minutes, then redirects the user to Authentik's authorization
+ * endpoint. The browser never sees the verifier.
+ */
+app.get('/api/webapp/auth/oidc/login', oidcLoginLimiter, asyncHandler(async (req, res) => {
+  if (!process.env.AUTHENTIK_OIDC_CLIENT_ID) {
+    logger.error('[OIDC] AUTHENTIK_OIDC_CLIENT_ID is not configured');
+    return res.status(503).json({ error: 'OIDC login is not configured on this server' });
+  }
+
+  // Generate cryptographically-secure state + PKCE verifier
+  const state = crypto.randomBytes(24).toString('hex'); // 48 hex chars
+  const codeVerifier = crypto.randomBytes(48).toString('base64url'); // 64 URL-safe chars
+
+  // Store verifier + optional return URL in Redis (single-use, 10 min TTL)
+  const redis = getRedis();
+  const returnTo = typeof req.query.return_to === 'string' && /^\/[a-z0-9/_-]*/i.test(req.query.return_to)
+    ? req.query.return_to
+    : '/';
+  const pkceKey = `oidc:pkce:${state}`;
+  await redis.set(
+    pkceKey,
+    JSON.stringify({ codeVerifier, returnTo }),
+    { EX: 10 * 60 }
+  );
+
+  // Build Authentik authorization URL (PKCE S256, no client_secret in URL)
+  let authUrl;
+  try {
+    authUrl = AuthentikService.generateAuthUrl(state, codeVerifier);
+  } catch (err) {
+    logger.error('[OIDC] Failed to generate auth URL:', err.message);
+    await redis.del(pkceKey);
+    return res.status(500).json({ error: 'Failed to initiate OIDC login' });
+  }
+
+  logger.info('[OIDC] Redirecting to Authentik', { state: state.slice(0, 8) + '...' });
+  res.redirect(authUrl);
+}));
+
+/**
+ * GET /api/webapp/auth/oidc/callback
+ * Authentik redirects back here after the user authenticates.
+ * Exchanges the authorization code for tokens, validates the id_token,
+ * and upserts the PNPtv user account before establishing the session.
+ */
+app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(async (req, res) => {
+  const APP_URL = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
+
+  // ── 1. Guard: error from Authentik ──────────────────────────────────────────
+  if (req.query.error) {
+    // Never reflect error_description from the auth server to the browser
+    logger.warn('[OIDC] Callback received error from Authentik', {
+      error: req.query.error,
+      description: req.query.error_description, // logged server-side only
+    });
+    const safeErrors = new Set(['access_denied', 'server_error', 'temporarily_unavailable']);
+    const safeCode = safeErrors.has(req.query.error) ? req.query.error : 'login_failed';
+    return res.redirect(`${APP_URL}?oidc_error=${safeCode}`);
+  }
+
+  const { code, state } = req.query;
+  if (!code || !state || typeof code !== 'string' || typeof state !== 'string') {
+    logger.warn('[OIDC] Callback missing code or state params');
+    return res.redirect(`${APP_URL}?oidc_error=invalid_callback`);
+  }
+
+  // ── 2. Consume PKCE state from Redis (single-use) ───────────────────────────
+  const redis = getRedis();
+  const pkceKey = `oidc:pkce:${state}`;
+  const pkceRaw = await redis.get(pkceKey);
+
+  if (!pkceRaw) {
+    logger.warn('[OIDC] PKCE state not found or expired', { state: state.slice(0, 8) + '...' });
+    return res.redirect(`${APP_URL}?oidc_error=state_mismatch`);
+  }
+
+  // Delete immediately — single-use token prevents replay attacks
+  await redis.del(pkceKey);
+
+  let pkceData;
+  try {
+    pkceData = JSON.parse(pkceRaw);
+  } catch {
+    logger.error('[OIDC] PKCE Redis value is not valid JSON');
+    return res.redirect(`${APP_URL}?oidc_error=state_mismatch`);
+  }
+
+  const { codeVerifier, returnTo } = pkceData;
+
+  // ── 3. Exchange authorization code for tokens ────────────────────────────────
+  let tokens;
+  try {
+    tokens = await AuthentikService.exchangeCode(code, codeVerifier);
+  } catch (err) {
+    logger.error('[OIDC] Code exchange failed:', err.message);
+    const errorCode = err.message.includes('expired') ? 'session_expired'
+      : err.message.includes('issuer') ? 'invalid_issuer'
+      : 'token_exchange_failed';
+    return res.redirect(`${APP_URL}?oidc_error=${errorCode}`);
+  }
+
+  const { refreshToken, userInfo } = tokens;
+  const { sub, email, name, preferred_username, picture, email_verified } = userInfo;
+
+  if (!sub) {
+    logger.error('[OIDC] userInfo missing sub claim — cannot link account');
+    return res.redirect(`${APP_URL}?oidc_error=invalid_userinfo`);
+  }
+
+  logger.info('[OIDC] Callback successful', {
+    sub,
+    username: preferred_username,
+    email: email ? email.replace(/(.{2}).*@/, '$1***@') : null,
+  });
+
+  // ── 4. Upsert PNPtv user — link via authentik_sub (stable across renames) ───
+  const pool = getPool();
+
+  // Try to find existing user by authentik_sub first (most reliable identity anchor)
+  // Fall back to email match so existing email-registered users get linked on first OIDC login
+  let userRow;
+
+  const subLookup = await pool.query(
+    `SELECT id, pnptv_id, username, first_name, last_name, subscription_status,
+            tier, terms_accepted, photo_file_id, bio, language, role,
+            creator_status, content_disclaimer, telegram, atproto_did,
+            atproto_handle, atproto_pds_url, twitter, x_user_id, x_id,
+            authentik_sub, email, last_login_method
+     FROM users
+     WHERE authentik_sub = $1 AND is_deleted = false
+     LIMIT 1`,
+    [sub]
+  );
+
+  if (subLookup.rows.length > 0) {
+    userRow = subLookup.rows[0];
+    // Refresh mutable profile fields from Authentik's latest userinfo
+    const displayName = name || preferred_username || userRow.first_name || null;
+    await pool.query(
+      `UPDATE users
+       SET last_login_method = 'oidc',
+           last_login_at = NOW(),
+           first_name = COALESCE(NULLIF($1, ''), first_name),
+           photo_file_id = COALESCE(NULLIF($2, ''), photo_file_id)
+       WHERE id = $3`,
+      [displayName, picture || null, userRow.id]
+    );
+    userRow.first_name = displayName || userRow.first_name;
+    userRow.last_login_method = 'oidc';
+  } else if (email) {
+    // No existing OIDC link — check if an account with this email already exists
+    const emailLookup = await pool.query(
+      `SELECT id, pnptv_id, username, first_name, last_name, subscription_status,
+              tier, terms_accepted, photo_file_id, bio, language, role,
+              creator_status, content_disclaimer, telegram, atproto_did,
+              atproto_handle, atproto_pds_url, twitter, x_user_id, x_id,
+              authentik_sub, email, last_login_method
+       FROM users
+       WHERE email = $1 AND is_deleted = false
+       LIMIT 1`,
+      [email.toLowerCase()]
+    );
+    if (emailLookup.rows.length > 0) {
+      userRow = emailLookup.rows[0];
+      // Link authentik_sub to the found user (first OIDC login for an existing account)
+      const displayName = name || preferred_username || userRow.first_name || null;
+      await pool.query(
+        `UPDATE users
+         SET authentik_sub = $1,
+             last_login_method = 'oidc',
+             last_login_at = NOW(),
+             first_name = COALESCE(NULLIF($2, ''), first_name),
+             photo_file_id = COALESCE(NULLIF($3, ''), photo_file_id)
+         WHERE id = $4`,
+        [sub, displayName, picture || null, userRow.id]
+      );
+      userRow.authentik_sub = sub;
+      userRow.first_name = displayName || userRow.first_name;
+      userRow.last_login_method = 'oidc';
+      logger.info('[OIDC] Linked authentik_sub to existing email account', { userId: userRow.id, sub });
+    }
+  }
+
+  if (!userRow) {
+    // No existing user — create a new PNPtv account linked to this Authentik identity
+    const baseUsername = (preferred_username || (email ? email.split('@')[0] : null) || `user_${crypto.randomBytes(4).toString('hex')}`)
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '')
+      .slice(0, 30);
+
+    // Ensure username uniqueness by appending a random hex suffix if needed
+    let finalUsername = baseUsername || `user_${crypto.randomBytes(4).toString('hex')}`;
+    const usernameCheck = await pool.query(
+      'SELECT 1 FROM users WHERE username = $1 LIMIT 1',
+      [finalUsername]
+    );
+    if (usernameCheck.rows.length > 0) {
+      finalUsername = `${finalUsername}_${crypto.randomBytes(3).toString('hex')}`;
+    }
+
+    const insertResult = await pool.query(
+      `INSERT INTO users
+         (username, first_name, email, email_verified, authentik_sub,
+          photo_file_id, tier, subscription_status, terms_accepted,
+          role, last_login_method, last_login_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'free', 'free', false,
+               'user', 'oidc', NOW(), NOW(), NOW())
+       RETURNING id, pnptv_id, username, first_name, last_name, subscription_status,
+                 tier, terms_accepted, photo_file_id, bio, language, role,
+                 creator_status, content_disclaimer, telegram, atproto_did,
+                 atproto_handle, atproto_pds_url, twitter, x_user_id, x_id,
+                 authentik_sub, email, last_login_method`,
+      [
+        finalUsername,
+        name || preferred_username || finalUsername,
+        email ? email.toLowerCase() : null,
+        email_verified === true,
+        sub,
+        picture || null,
+      ]
+    );
+    userRow = insertResult.rows[0];
+    logger.info('[OIDC] Created new PNPtv user via Authentik OIDC', {
+      userId: userRow.id,
+      username: userRow.username,
+      sub,
+    });
+  }
+
+  // ── 5. Regenerate session to prevent session fixation ────────────────────────
+  await new Promise((resolve, reject) => {
+    req.session.regenerate((err) => (err ? reject(err) : resolve()));
+  });
+
+  // Build session object matching the shape of buildSession() in webAppController.js
+  req.session.user = {
+    id: userRow.id,
+    pnptvId: userRow.pnptv_id,
+    username: userRow.username,
+    displayName: userRow.first_name || userRow.username || 'Member',
+    firstName: userRow.first_name,
+    lastName: userRow.last_name,
+    subscriptionStatus: userRow.subscription_status,
+    tier: userRow.tier || 'free',
+    acceptedTerms: userRow.terms_accepted,
+    photoUrl: userRow.photo_file_id,
+    bio: userRow.bio,
+    language: userRow.language,
+    role: userRow.role || 'user',
+    creator_status: userRow.creator_status || 'none',
+    contentDisclaimer: userRow.content_disclaimer || false,
+    // ATProto identity (preserved for hybrid session)
+    atproto_did: userRow.atproto_did || null,
+    atproto_handle: userRow.atproto_handle || null,
+    atproto_pds_url: userRow.atproto_pds_url || null,
+    // X identity
+    xHandle: userRow.twitter || userRow.x_username || null,
+    // Authentik OIDC identity — refresh_token stored server-side in session only
+    authentik_sub: userRow.authentik_sub,
+    oidc_refresh_token: refreshToken || null,
+    // Hybrid auth method flags
+    auth_methods: {
+      telegram: !!(userRow.telegram),
+      atproto: !!(userRow.atproto_did),
+      x: !!(userRow.twitter || userRow.x_user_id || userRow.x_id),
+      oidc: true,
+    },
+    last_login_method: 'oidc',
+  };
+
+  // Persist session before redirect
+  await new Promise((resolve, reject) => {
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
+
+  logger.info('[OIDC] Session established', { userId: userRow.id, sub });
+
+  // Redirect to the app (return_to must start with / to prevent open redirect)
+  const safeReturnTo = typeof returnTo === 'string' && /^\/[a-z0-9/_-]*/i.test(returnTo) ? returnTo : '/';
+  res.redirect(`${APP_URL}${safeReturnTo === '/' ? '' : safeReturnTo}?oidc_linked=1`);
+}));
+
+/**
+ * POST /api/webapp/auth/oidc/refresh
+ * Refreshes the session's OIDC tokens using the stored refresh_token.
+ * Requires an active session. The new refresh token is stored back in the session.
+ * The access_token is NOT returned to the client — it is used server-side only.
+ */
+app.post('/api/webapp/auth/oidc/refresh', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session.user;
+
+  if (!user.oidc_refresh_token) {
+    return res.status(400).json({
+      error: 'NO_REFRESH_TOKEN',
+      message: 'No OIDC refresh token in session. Please log in again.',
+    });
+  }
+
+  let newTokens;
+  try {
+    newTokens = await AuthentikService.refreshTokens(user.oidc_refresh_token);
+  } catch (err) {
+    logger.warn('[OIDC] Token refresh failed', { userId: user.id, error: err.message });
+    // Refresh token is invalid or expired — clear it and signal re-authentication
+    req.session.user.oidc_refresh_token = null;
+    await new Promise((resolve, reject) => {
+      req.session.save((err2) => (err2 ? reject(err2) : resolve()));
+    });
+    return res.status(401).json({
+      error: 'REFRESH_FAILED',
+      message: 'Session refresh failed. Please log in again.',
+    });
+  }
+
+  // Store the new refresh token (access token is NOT persisted to session)
+  if (newTokens.refreshToken) {
+    req.session.user.oidc_refresh_token = newTokens.refreshToken;
+  }
+
+  await new Promise((resolve, reject) => {
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
+
+  logger.info('[OIDC] Tokens refreshed', { userId: user.id });
+  res.json({ success: true, message: 'Session refreshed' });
+}));
+
+/**
+ * POST /api/webapp/auth/oidc/logout
+ * Revokes the OIDC refresh token at Authentik's revocation endpoint,
+ * then destroys the local session (or clears only the OIDC fields if the
+ * user still has another auth method active — Telegram, X, or ATProto).
+ */
+app.post('/api/webapp/auth/oidc/logout', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const storedRefreshToken = user.oidc_refresh_token;
+
+  // Revoke refresh token at Authentik (best-effort — non-blocking)
+  if (storedRefreshToken) {
+    AuthentikService.revokeToken(storedRefreshToken).catch((err) => {
+      logger.warn('[OIDC] Token revocation during logout failed (non-fatal):', err.message);
+    });
+  }
+
+  const hasOtherAuth = user.auth_methods?.telegram
+    || user.auth_methods?.x
+    || user.auth_methods?.atproto;
+
+  if (!hasOtherAuth) {
+    // Full logout — no other auth method linked
+    const userId = user.id;
+    await new Promise((resolve) => {
+      req.session.destroy(() => resolve());
+    });
+    res.clearCookie('__pnptv_sid');
+    logger.info('[OIDC] Full session destroyed after OIDC logout', { userId });
+    return res.json({ success: true, message: 'Logged out' });
+  }
+
+  // Partial logout — clear only OIDC fields, retain other auth methods
+  req.session.user.authentik_sub = null;
+  req.session.user.oidc_refresh_token = null;
+  if (req.session.user.auth_methods) {
+    req.session.user.auth_methods.oidc = false;
+  }
+
+  await new Promise((resolve, reject) => {
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
+
+  logger.info('[OIDC] OIDC session unlinked, other methods retained', {
+    userId: user.id,
+    remainingMethods: req.session.user.auth_methods,
+  });
+
+  res.json({ success: true, message: 'OIDC session revoked, other sessions retained' });
+}));
+
+// ── End Authentik OIDC Routes ─────────────────────────────────────────────────
+
 // Web App Profile
 app.get('/api/webapp/profile', requireSessionAuth, asyncHandler(webAppController.getProfile));
 app.put('/api/webapp/profile', requireSessionAuth, asyncHandler(webAppController.updateProfile));
@@ -4001,7 +4415,7 @@ app.delete('/api/webapp/admin/media-packs/:id', adminGuard, asyncHandler(mediaPa
 app.post('/api/webapp/admin/media-packs/:packId/items', adminGuard, asyncHandler(mediaPackController.adminAddItem));
 app.delete('/api/webapp/admin/media-packs/items/:id', adminGuard, asyncHandler(mediaPackController.adminDeleteItem));
 
-// Account self-deletion
+// Account self-deletion (soft — anonymises the record)
 const deleteAccountLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 1,
@@ -4011,6 +4425,10 @@ const deleteAccountLimiter = rateLimit({
   handler: (_req, res) => res.status(429).json({ error: 'Too many requests' }),
 });
 app.delete('/api/webapp/account', requireSessionAuth, deleteAccountLimiter, asyncHandler(usersController.deleteMyAccount));
+
+// Hard-delete — Right to be Forgotten (GDPR erasure). Body: { confirm: "DELETE MY ACCOUNT" }
+// Rate-limited to 1 request per minute (same limiter reused) — erasure is irreversible.
+app.delete('/api/users/me/erase', requireSessionAuth, deleteAccountLimiter, asyncHandler(usersController.selfEraseAccount));
 
 // ==========================================
 // SERVICE PROXY ENDPOINTS (Media, Live, Social)
@@ -5370,7 +5788,15 @@ app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (re
 // DASH TOKEN WALLET ROUTES
 // ==========================================
 const DashTokenService = require('../services/dashTokenService');
-const { createDashInvoice, validateWebhookSignature, checkBtcpayHealth, isConfigured: btcpayConfigured } = require('../../config/btcpay');
+const {
+  createDashInvoice,
+  createInvoice: createBtcpayInvoice,
+  validateWebhookSignature,
+  checkBtcpayHealth,
+  checkInvoiceProcessed,
+  markInvoiceProcessed,
+  isConfigured: btcpayConfigured,
+} = require('../../config/btcpay');
 
 // GET /api/webapp/dash/btcpay-status — check if BTCPay is configured and reachable
 app.get('/api/webapp/dash/btcpay-status', requireSessionAuth, asyncHandler(async (req, res) => {
@@ -5710,15 +6136,61 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       return res.json({ success: true, type: 'marked_invalid', rowsUpdated: markedResult.rowCount || 0 });
     }
 
-    // Only process successful invoice settlements beyond this point
-    if (event.type !== 'InvoiceSettled') {
+    // Only process successful invoice settlements beyond this point.
+    // InvoicePaymentSettled fires per crypto payment received; InvoiceSettled fires when
+    // the invoice reaches the Settled state. We handle both but gate entitlement grants on
+    // confirmed Settled status so partial payments cannot trigger access grants.
+    const isSettledEvent = event.type === 'InvoiceSettled';
+    const isPaymentSettledEvent = event.type === 'InvoicePaymentSettled';
+
+    if (!isSettledEvent && !isPaymentSettledEvent) {
       return res.json({ success: true, ignored: true });
+    }
+
+    // For InvoicePaymentSettled: verify the invoice is fully settled via API before granting.
+    // This event fires on every individual crypto payment, including partial payments.
+    if (isPaymentSettledEvent) {
+      try {
+        const { getInvoice } = require('../../config/btcpay');
+        const invoiceDetails = await getInvoice(invoiceId);
+        if (invoiceDetails.status !== 'Settled') {
+          logger.info('BTCPay InvoicePaymentSettled: invoice not yet fully settled — skipping entitlement grant', {
+            invoiceId,
+            invoiceStatus: invoiceDetails.status,
+            paymentMethod: event.paymentMethod,
+          });
+          return res.json({ success: true, ignored: true, reason: 'not_yet_settled' });
+        }
+        logger.info('BTCPay InvoicePaymentSettled: invoice confirmed Settled — proceeding with grant', {
+          invoiceId,
+          paymentMethod: event.paymentMethod,
+        });
+      } catch (paymentSettledCheckErr) {
+        // If BTCPay API is unreachable, do not grant — wait for InvoiceSettled which carries
+        // stronger confirmation and will retry via BTCPay's own webhook delivery mechanism.
+        logger.warn('BTCPay InvoicePaymentSettled: could not verify invoice status — skipping (will retry on InvoiceSettled)', {
+          invoiceId,
+          error: paymentSettledCheckErr.message,
+        });
+        return res.json({ success: true, ignored: true, reason: 'api_unreachable' });
+      }
+    }
+
+    // Replay protection: check if this exact invoice has already been fully processed.
+    // checkInvoiceProcessed uses a 48-hour Redis TTL — separate from the per-request lock below.
+    const alreadyProcessedReplay = await checkInvoiceProcessed(invoiceId);
+    if (alreadyProcessedReplay) {
+      logger.info('BTCPay webhook: invoice already processed (replay protection)', {
+        invoiceId,
+        eventType: event.type,
+      });
+      return res.json({ success: true, duplicate: true });
     }
 
     // Idempotency: acquire a Redis lock to prevent duplicate delivery race conditions.
     const settleLock = await cache.acquireLock(`btcpay:settled:${invoiceId}`, 120).catch(() => false);
     if (!settleLock) {
-      logger.info('BTCPay InvoiceSettled duplicate delivery blocked', { invoiceId });
+      logger.info('BTCPay settlement duplicate delivery blocked', { invoiceId, eventType: event.type });
       return res.json({ success: true, duplicate: true });
     }
 
@@ -5728,32 +6200,33 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
 
     // Fix 1.1: Verify paid amount against invoice before granting access.
     // Prevents attackers from underpaying (e.g., $0.01) and receiving full entitlements.
-    try {
-      const { getInvoice } = require('../../config/btcpay');
-      const invoiceDetails = await getInvoice(invoiceId);
-      const paidAmount = parseFloat(invoiceDetails.amount || invoiceDetails.paidAmount || '0');
-      const invoicedAmount = parseFloat(invoiceDetails.amount || '0');
-      // BTCPay's settled invoice has `amount` (original) and `paidAmount` (actual crypto paid in currency-equivalent)
-      // Use paidAmount if available, else fall back to amount (already-settled invoices may match)
-      const actualPaid = parseFloat(invoiceDetails.paidAmount ?? invoiceDetails.amount ?? '0');
-      const expectedAmount = parseFloat(invoiceDetails.amount ?? '0');
-      if (actualPaid > 0 && expectedAmount > 0 && actualPaid < expectedAmount - 0.01) {
-        logger.error('BTCPay InvoiceSettled: underpayment detected — aborting entitlement grant', {
-          invoiceId,
-          expectedAmount,
-          actualPaid,
-          shortfall: expectedAmount - actualPaid,
+    // Skip for InvoicePaymentSettled — we already confirmed Settled status above.
+    if (isSettledEvent) {
+      try {
+        const { getInvoice } = require('../../config/btcpay');
+        const invoiceDetails = await getInvoice(invoiceId);
+        // BTCPay's settled invoice has `amount` (original) and `paidAmount` (actual crypto paid in currency-equivalent)
+        // Use paidAmount if available, else fall back to amount (already-settled invoices may match)
+        const actualPaid = parseFloat(invoiceDetails.paidAmount ?? invoiceDetails.amount ?? '0');
+        const expectedAmount = parseFloat(invoiceDetails.amount ?? '0');
+        if (actualPaid > 0 && expectedAmount > 0 && actualPaid < expectedAmount - 0.01) {
+          logger.error('BTCPay InvoiceSettled: underpayment detected — aborting entitlement grant', {
+            invoiceId,
+            expectedAmount,
+            actualPaid,
+            shortfall: expectedAmount - actualPaid,
+          });
+          return res.status(200).json({ success: false, error: 'underpayment', invoiceId });
+        }
+      } catch (invoiceCheckErr) {
+        // Log but do NOT block — if BTCPay API is unreachable we still trust the webhook signature
+        logger.warn('BTCPay InvoiceSettled: could not fetch invoice for amount verification (proceeding)', {
+          invoiceId, error: invoiceCheckErr.message,
         });
-        return res.status(200).json({ success: false, error: 'underpayment', invoiceId });
       }
-    } catch (invoiceCheckErr) {
-      // Log but do NOT block — if BTCPay API is unreachable we still trust the webhook signature
-      logger.warn('BTCPay InvoiceSettled: could not fetch invoice for amount verification (proceeding)', {
-        invoiceId, error: invoiceCheckErr.message,
-      });
     }
 
-    // --- 1. Check if this is a subscription order ---
+    // --- 1. Check if this is a subscription order (legacy Dash flow) ---
     const subResult = await dbQuery(
       `SELECT id, user_id, plan_id, status FROM dash_subscription_orders
        WHERE btcpay_invoice_id = $1`,
@@ -5916,10 +6389,119 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
         logger.warn('BTCPay post-purchase notification block failed', { error: notifErr.message });
       }
 
+      // Mark invoice as processed in Redis to prevent replay delivery from re-granting.
+      await markInvoiceProcessed(invoiceId, { userId: order.user_id, planId: order.plan_id, source: 'subscription' });
+
       return res.json({ success: true, type: 'subscription', planId: order.plan_id });
     }
 
-    // --- 2. Fall through to token purchase ---
+    // --- 2. Metadata fallback: invoice created via createInvoice (Greenfield API) ---
+    // Invoices created with the new createInvoice() embed userId + planId directly in
+    // invoice.metadata. If no dash_subscription_orders row exists, extract those fields
+    // from the webhook event payload and grant entitlements directly.
+    const metaUserId = event.metadata?.userId || null;
+    const metaPlanId = event.metadata?.planId || null;
+
+    if (metaUserId && metaPlanId) {
+      logger.info('BTCPay settlement: processing via invoice metadata (Greenfield flow)', {
+        invoiceId,
+        eventType: event.type,
+        userId: metaUserId,
+        planId: metaPlanId,
+        amount: event.amount,
+        currency: event.currency,
+      });
+
+      const PlanModelGf = require('../../models/planModel');
+      const metaPlan = await PlanModelGf.getById(metaPlanId);
+      if (!metaPlan) {
+        logger.error('BTCPay metadata flow: plan not found — entitlements NOT granted', {
+          invoiceId,
+          planId: metaPlanId,
+          userId: metaUserId,
+        });
+        // Return 200 so BTCPay does not endlessly retry a permanently missing plan.
+        return res.status(200).json({ success: false, error: 'plan_not_found', invoiceId });
+      }
+
+      // Grant entitlements — idempotent via ON CONFLICT in grantEntitlementsForPlan.
+      let metaGrantResult;
+      try {
+        const PaymentServiceGf = require('../services/paymentService');
+        metaGrantResult = await PaymentServiceGf.grantEntitlementsForPlan(metaUserId, metaPlanId, 'btcpay');
+        logger.info('BTCPay metadata flow: entitlements granted', {
+          invoiceId,
+          userId: metaUserId,
+          planId: metaPlanId,
+          granted: metaGrantResult.granted,
+          errors: metaGrantResult.errors,
+          amount: event.amount,
+          currency: event.currency,
+        });
+
+        if (metaGrantResult.granted === 0 && metaGrantResult.warning !== 'NO_PLAN_ADDONS') {
+          // Zero grants without a known warning — signal BTCPay to retry.
+          logger.error('BTCPay metadata flow: grantEntitlementsForPlan returned zero grants', {
+            invoiceId, userId: metaUserId, planId: metaPlanId,
+          });
+          return res.status(500).json({ success: false, error: 'entitlement_grant_zero', invoiceId });
+        }
+      } catch (metaEntErr) {
+        logger.error('BTCPay metadata flow: entitlement grant threw unexpectedly', {
+          invoiceId,
+          userId: metaUserId,
+          planId: metaPlanId,
+          error: metaEntErr.message,
+        });
+        // Return 500 so BTCPay retries delivery.
+        return res.status(500).json({ success: false, error: 'entitlement_grant_failed', invoiceId });
+      }
+
+      // Sync users.tier for admin display (non-critical).
+      try {
+        const metaDurationDays = metaPlan.duration_days || 30;
+        const metaIsLifetime = metaDurationDays >= 36500;
+        const metaExpiryDate = metaIsLifetime ? null : new Date(Date.now() + metaDurationDays * 86400000);
+        const metaNewTier = (metaPlan.tier === 'member' || metaPlanId.startsWith('member_')) ? 'member' : 'PRIME';
+        await dbQuery(
+          `UPDATE users
+           SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW()
+           WHERE id = $1 OR telegram = $1`,
+          [metaUserId, metaNewTier, metaPlanId, metaExpiryDate]
+        );
+      } catch (metaTierErr) {
+        logger.warn('BTCPay metadata flow: tier sync failed (non-critical)', {
+          userId: metaUserId,
+          planId: metaPlanId,
+          error: metaTierErr.message,
+        });
+      }
+
+      // Invalidate user Redis cache (non-critical).
+      cache.del(`user:${metaUserId}`).catch(() => {});
+
+      // Socket notification (non-critical).
+      try {
+        const socketSingleton = require('../services/socketSingleton');
+        const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+        if (io) {
+          io.to(`user:${metaUserId}`).emit('subscription:activated', {
+            planId: metaPlanId,
+            planName: metaPlan.display_name || metaPlan.name,
+            invoiceId,
+          });
+        }
+      } catch (metaEmitErr) {
+        logger.warn(`BTCPay metadata flow socket emit failed: ${metaEmitErr.message}`);
+      }
+
+      // Mark processed in Redis.
+      await markInvoiceProcessed(invoiceId, { userId: metaUserId, planId: metaPlanId, source: 'metadata' });
+
+      return res.json({ success: true, type: 'metadata_subscription', planId: metaPlanId, invoiceId });
+    }
+
+    // --- 3. Fall through to token purchase ---
     const purchaseResult = await dbQuery(
       `SELECT user_id, tokens_credited, usd_amount FROM token_purchases
        WHERE btcpay_invoice_id = $1`,
@@ -5927,7 +6509,11 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
     );
 
     if (purchaseResult.rows.length === 0) {
-      logger.warn('BTCPay webhook: unknown invoice', { invoiceId });
+      logger.warn('BTCPay webhook: unknown invoice — no subscription order, no metadata planId, no token purchase', {
+        invoiceId,
+        eventType: event.type,
+        metadataKeys: Object.keys(event.metadata || {}),
+      });
       return res.status(404).json({ success: false, error: 'Purchase not found' });
     }
 
@@ -5948,6 +6534,9 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       } catch (emitErr) {
         logger.warn(`BTCPay wallet socket emit failed: ${emitErr.message}`);
       }
+
+      // Mark processed in Redis after token credit.
+      await markInvoiceProcessed(invoiceId, { userId, source: 'token_purchase' });
     }
 
     res.json({ success: true, alreadyProcessed });
