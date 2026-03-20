@@ -404,7 +404,7 @@ services:
       AUTH_AUTHENTIK_CLIENT_SECRET: ${DIRECTUS_OIDC_CLIENT_SECRET}
       AUTH_AUTHENTIK_ISSUER_URL: "https://auth.${DOMAIN_ROOT}/application/o/directus/.well-known/openid-configuration"
       AUTH_AUTHENTIK_IDENTIFIER_KEY: "sub"
-      AUTH_AUTHENTIK_ALLOW_PUBLIC_REGISTRATION: "true"
+      AUTH_AUTHENTIK_ALLOW_PUBLIC_REGISTRATION: "false"
       AUTH_AUTHENTIK_ICON: "lock"
       AUTH_AUTHENTIK_LABEL: "Sign in with PNPTV"
       CORS_ENABLED: "true"
