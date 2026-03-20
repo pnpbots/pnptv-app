@@ -17,11 +17,12 @@ const OIDC_CLIENT_SECRET = process.env.AUTHENTIK_OIDC_CLIENT_SECRET;
 const OIDC_REDIRECT_URI = process.env.AUTHENTIK_OIDC_REDIRECT_URI || 'https://app.pnptv.app/api/webapp/auth/oidc/callback';
 const OIDC_ISSUER = process.env.AUTHENTIK_OIDC_ISSUER || 'https://auth.pnptv.app/application/o/pnptv-app/';
 
-// Derived OIDC endpoint URLs (standard OpenID Connect paths relative to issuer)
-const OIDC_AUTH_ENDPOINT = `${OIDC_ISSUER}authorize/`;
-const OIDC_TOKEN_ENDPOINT = `${OIDC_ISSUER}token/`;
-const OIDC_USERINFO_ENDPOINT = `${OIDC_ISSUER}userinfo/`;
-const OIDC_REVOCATION_ENDPOINT = `${OIDC_ISSUER}revoke/`;
+// Authentik OIDC endpoints — NOT relative to issuer slug, but to /application/o/ root
+const OIDC_BASE = OIDC_ISSUER.replace(/\/[^/]+\/$/, '/'); // "https://auth.pnptv.app/application/o/"
+const OIDC_AUTH_ENDPOINT = `${OIDC_BASE}authorize/`;
+const OIDC_TOKEN_ENDPOINT = `${OIDC_BASE}token/`;
+const OIDC_USERINFO_ENDPOINT = `${OIDC_BASE}userinfo/`;
+const OIDC_REVOCATION_ENDPOINT = `${OIDC_BASE}revoke/`;
 const OIDC_JWKS_ENDPOINT = `${OIDC_ISSUER}jwks/`;
 
 // Scopes requested — openid + profile (name, preferred_username) + email
