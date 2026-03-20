@@ -109,6 +109,7 @@ export interface TelegramAuthResponse {
     last_login_method?: string | null;
     city?: string | null;
     country?: string | null;
+    email?: string | null;
   };
   requiresTerms?: boolean;
   error?: string;
@@ -305,6 +306,8 @@ export interface LiveStream {
   isLive: boolean;
   /** Viewer count from Redis — included in GET /api/proxy/live/streams responses */
   viewerCount?: number;
+  title?: string;
+  performerName?: string;
 }
 
 export function getLiveStreams(): Promise<{
@@ -627,7 +630,7 @@ export interface WebRTCStreamConfig {
   channelRef: string;
 }
 
-export function getWebRTCStreamerConfig(): Promise<{ success: boolean } & WebRTCStreamConfig> {
+export function getWebRTCStreamerConfig(): Promise<{ success: boolean; error?: string } & WebRTCStreamConfig> {
   return request("/api/webapp/live/webrtc/config");
 }
 
@@ -636,6 +639,7 @@ export function getWebRTCViewerToken(channelRef: string): Promise<{
   token: string;
   wsUrl: string;
   roomName: string;
+  error?: string;
 }> {
   return request(`/api/webapp/live/webrtc/viewer-token/${encodeURIComponent(channelRef)}`);
 }
@@ -1201,6 +1205,33 @@ export function getOrCreateHangoutRoom(groupId: number): Promise<{
   roomId: string;
 }> {
   return request(`/api/webapp/matrix/hangout-room/${groupId}`, { method: "POST" });
+}
+
+export function sendHangoutMessage(
+  groupId: number,
+  content: string,
+  replyToId?: number | null
+): Promise<{ success: boolean; message: GroupMessage; matrixEventId?: string }> {
+  return request(`/api/webapp/matrix/hangout/${groupId}/message`, {
+    method: "POST",
+    body: { content, replyToId: replyToId || undefined },
+  });
+}
+
+export function sendDirectMessage(
+  userId: string,
+  content: string
+): Promise<{
+  success: boolean;
+  message: { id: number; senderId: string; recipientId: string; content: string; isRead: boolean; createdAt: string; isMine: boolean };
+  matrixEventId?: string;
+  remaining?: number;
+  limit?: number;
+}> {
+  return request(`/api/webapp/matrix/dm/${userId}/message`, {
+    method: "POST",
+    body: { content },
+  });
 }
 
 export function getWofStats(): Promise<{ total_posts: number; total_likes: number; unique_contributors: number }> {
@@ -2178,6 +2209,7 @@ export interface FeaturedPerformer {
   userId: string | null;
   slug: string | null;
   displayName: string;
+  name?: string;
   bio: string | null;
   photoUrl: string | null;
   isFeatured: boolean;
@@ -2189,6 +2221,7 @@ export interface FeaturedPerformer {
   isLive?: boolean;
   /** Direct HLS playback URL, populated when isLive is true. */
   hlsUrl?: string | null;
+  live_channel?: string | null;
 }
 
 export function getFeaturedPerformers(): Promise<{
@@ -3185,7 +3218,7 @@ export function banAdminUser(
 
 export function bulkUpdateMemberships(
   userIds: string[],
-  action: "upgrade" | "downgrade" | "ban" | "unban",
+  action: "upgrade" | "downgrade" | "ban" | "unban" | "delete",
   planId?: string,
   expiry?: string
 ): Promise<{ success: boolean; updated: number; failed: number; errors: string[] }> {

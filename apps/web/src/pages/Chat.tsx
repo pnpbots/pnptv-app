@@ -29,6 +29,7 @@ import {
   getJoinRequests,
   handleJoinRequest,
   getOrCreateHangoutRoom,
+  sendHangoutMessage,
   reactToChatMessage,
   getChatReactions,
   type HangoutGroup,
@@ -41,7 +42,6 @@ import {
 import {
   useRoomMessages,
   sendMatrixMessage,
-  sendMatrixMediaMessage,
   sendReadReceipt,
   sendReaction,
   redactEvent,
@@ -557,49 +557,20 @@ export default function Chat() {
   const [replyToMsg, setReplyToMsg] = useState<GroupMessage | null>(null);
 
 
-  // Socket hook — kept for presence, typing, calls, and Socket.IO-delivered messages
+  // Socket hook — kept for presence, typing, calls only (messages come from Matrix)
   const {
-    messages: socketMessages,
-    sendMessage: socketSendMessage,
     emitTyping,
     typingUsers,
     callState,
     isConnected,
-    loadOlderMessages,
-    hasMore,
-    isLoadingMore,
     onlineMembers,
     inviteToCall,
   } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId, matrixRoomId);
 
-  // Merge messages: when Matrix is active use it as primary; Socket.IO messages fill the initial
-  // load and media messages (which are never sent via Matrix in this implementation).
-  // Deduplicate by id to avoid showing the same message twice.
+  // Messages: Matrix is the single source of truth
   const messages: GroupMessage[] = React.useMemo(() => {
-    if (!matrixRoomId || matrixMessages.length === 0) return socketMessages;
-
-    const seen = new Set<string>();
-    const merged: GroupMessage[] = [];
-
-    // Socket.IO messages first (they include media + older history)
-    for (const m of socketMessages) {
-      seen.add(String(m.id));
-      merged.push(m);
-    }
-
-    // Matrix messages appended — skip any that duplicate a socket message id
-    for (const m of matrixAsGroupMessages) {
-      if (!seen.has(String(m.id))) {
-        seen.add(String(m.id));
-        merged.push(m);
-      }
-    }
-
-    // Sort by created_at ascending
-    return merged.sort(
-      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    );
-  }, [socketMessages, matrixAsGroupMessages, matrixRoomId, matrixMessages.length]);
+    return matrixAsGroupMessages;
+  }, [matrixAsGroupMessages]);
 
   // REST-based reactions for all messages (works regardless of Matrix)
   const [restReactions, setRestReactions] = useState<Map<number, ReactionEntry[]>>(new Map());
@@ -667,21 +638,21 @@ export default function Chat() {
     }
   }, [matrixRoomId, matrixReactions, matrixMessages]);
 
-  // sendMessage: route text through Matrix when available, otherwise Socket.IO
+  // sendMessage: route through backend REST endpoint (backend → Matrix → PG sync)
   const sendMessage = useCallback(
-    async (text: string) => {
-      if (matrixRoomId) {
-        try {
-          await sendMatrixMessage(matrixRoomId, text);
-        } catch {
-          // Matrix send failed — fall back to Socket.IO
-          socketSendMessage(text);
+    async (text: string, replyToId?: number | null) => {
+      if (!activeGroup) return;
+      try {
+        await sendHangoutMessage(activeGroup.id, text, replyToId);
+        // Message will appear via Matrix timeline listener
+      } catch {
+        // Fallback: try direct Matrix send if REST fails
+        if (matrixRoomId) {
+          await sendMatrixMessage(matrixRoomId, text).catch(() => {});
         }
-      } else {
-        socketSendMessage(text);
       }
     },
-    [matrixRoomId, socketSendMessage]
+    [activeGroup, matrixRoomId]
   );
 
   // Media upload state
@@ -877,10 +848,12 @@ export default function Chat() {
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     isNearBottom.current = distFromBottom < 150;
 
-    // Infinite scroll: load older messages when near top
-    if (el.scrollTop < 100 && hasMore && !isLoadingMore) {
+    // Infinite scroll: paginate Matrix room when near top
+    if (el.scrollTop < 100 && matrixRoomId) {
       prevScrollHeight.current = el.scrollHeight;
-      loadOlderMessages();
+      import("@/hooks/useMatrix").then(({ paginateRoom }) => {
+        paginateRoom(matrixRoomId).catch(() => {});
+      });
     }
 
     // Send Matrix read receipt when near bottom
@@ -891,7 +864,7 @@ export default function Chat() {
         sendReadReceipt(matrixRoomId, lastMsg.eventId);
       }
     }
-  }, [hasMore, isLoadingMore, loadOlderMessages, matrixRoomId, matrixMessages]);
+  }, [matrixRoomId, matrixMessages]);
 
   // Start (and cancel) the messagesLoading fallback timer whenever the active group changes.
   // Using a useEffect here ensures the previous timer is always cancelled before a new one
@@ -909,14 +882,14 @@ export default function Chat() {
 
   // Preserve scroll position after loading older messages
   useEffect(() => {
-    if (!isLoadingMore && prevScrollHeight.current > 0) {
+    if (prevScrollHeight.current > 0) {
       const el = messagesContainerRef.current;
       if (el) {
         el.scrollTop = el.scrollHeight - prevScrollHeight.current;
       }
       prevScrollHeight.current = 0;
     }
-  }, [isLoadingMore]);
+  }, [matrixMessages.length]);
 
   // Auto-scroll on new messages (only when near bottom)
   useEffect(() => {
@@ -1021,18 +994,8 @@ export default function Chat() {
           text || undefined
         );
         setUploadProgress(100);
-        // Message will arrive via socket broadcast, no need to manually append
+        // Message will arrive via Matrix timeline (backend bridges media to Matrix)
         if (!data.success) throw new Error(t.chat.errorUploadFailed);
-        // Bridge media to Matrix room (fire-and-forget)
-        if (matrixRoomId && data.message?.media_url) {
-          const isVideo = data.message.media_type === "video";
-          sendMatrixMediaMessage(
-            matrixRoomId,
-            data.message.media_url,
-            isVideo ? "m.video" : "m.image",
-            text || "media"
-          ).catch(() => {});
-        }
         clearMedia();
       } else {
         // Text messages go via socket for instant delivery
@@ -1528,15 +1491,7 @@ export default function Chat() {
           onScroll={handleScroll}
           className="flex-1 overflow-y-auto px-4 py-3 pb-20 space-y-3 min-h-0"
         >
-          {/* Loading more indicator */}
-          {isLoadingMore && (
-            <div className="flex justify-center py-2">
-              <svg className="w-5 h-5 text-pnp-textSecondary animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            </div>
-          )}
+          {/* Loading indicator placeholder — pagination is handled by Matrix scrollback */}
 
           {messagesLoading ? (
             <div className="space-y-3" aria-label="Loading messages" aria-busy="true">

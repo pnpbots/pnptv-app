@@ -48,7 +48,7 @@ type Orientation = "portrait" | "landscape";
 const QUALITY_PRESETS = QUALITY_PRESETS_PORTRAIT;
 
 type PresetId = typeof QUALITY_PRESETS[number]["id"];
-type QualityPreset = typeof QUALITY_PRESETS[number];
+type QualityPreset = (typeof QUALITY_PRESETS_PORTRAIT)[number] | (typeof QUALITY_PRESETS_LANDSCAPE)[number];
 
 // ─── PiP position cycling ─────────────────────────────────────────────────────
 
@@ -263,6 +263,13 @@ export default function BrowserStreamer() {
   const [channel, setChannel] = useState<ChannelInfo | null>(null);
   const [channelLoading, setChannelLoading] = useState(false);
 
+  // Orientation + fullscreen
+  const [orientation, setOrientation] = useState<Orientation>("portrait");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+
+  const activePresets = orientation === "portrait" ? QUALITY_PRESETS_PORTRAIT : QUALITY_PRESETS_LANDSCAPE;
+
   // Quality preset
   const [selectedPresetId, setSelectedPresetId] = useState<PresetId>("720p");
   const selectedPreset = useMemo(
@@ -270,13 +277,6 @@ export default function BrowserStreamer() {
       activePresets.find((p) => p.id === selectedPresetId) ?? activePresets[0],
     [selectedPresetId, activePresets]
   );
-
-  // Orientation + fullscreen
-  const [orientation, setOrientation] = useState<Orientation>("portrait");
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const previewContainerRef = useRef<HTMLDivElement>(null);
-
-  const activePresets = orientation === "portrait" ? QUALITY_PRESETS_PORTRAIT : QUALITY_PRESETS_LANDSCAPE;
 
   // Screen sharing + PiP state
   const [isScreenSharing, setIsScreenSharing] = useState(false);

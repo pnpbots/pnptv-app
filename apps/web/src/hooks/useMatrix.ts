@@ -39,7 +39,8 @@ async function initMatrix(): Promise<MatrixClient> {
     });
 
     // Auto-reset on auth failure so next call fetches a fresh token
-    client.on(ClientEvent.Sync, (state: SyncState, _prev: SyncState | null, data?: { error?: { httpStatus?: number; errcode?: string } }) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    client.on(ClientEvent.Sync, (state: SyncState, _prev: SyncState | null, data?: any) => {
       if (state === SyncState.Error && (data?.error?.httpStatus === 401 || data?.error?.errcode === "M_UNKNOWN_TOKEN")) {
         console.warn("[Matrix] Token expired (401), resetting client for re-auth");
         resetMatrixClient();
@@ -191,7 +192,22 @@ export async function sendMatrixMessage(
   text: string
 ): Promise<ISendEventResponse> {
   const client = await initMatrix();
-  return client.sendTextMessage(roomId, text);
+  try {
+    return await client.sendTextMessage(roomId, text);
+  } catch (err: unknown) {
+    // Auto-rejoin on 403 "not in room" errors
+    const errObj = err as { httpStatus?: number; errcode?: string };
+    if (errObj.httpStatus === 403 || errObj.errcode === "M_FORBIDDEN") {
+      console.warn("[Matrix] 403 on send, attempting rejoin...");
+      try {
+        await client.joinRoom(roomId);
+        return await client.sendTextMessage(roomId, text);
+      } catch {
+        // rejoin failed — rethrow original
+      }
+    }
+    throw err;
+  }
 }
 
 // ── sendMatrixMediaMessage — send a media message (external URL) to a room ────
@@ -203,7 +219,8 @@ export async function sendMatrixMediaMessage(
   body: string
 ): Promise<ISendEventResponse> {
   const client = await initMatrix();
-  return client.sendEvent(roomId, "m.room.message", {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return client.sendEvent(roomId, "m.room.message" as any, {
     msgtype,
     body: body || "media",
     url,
@@ -287,7 +304,8 @@ export async function sendReaction(
   emoji: string
 ): Promise<ISendEventResponse> {
   const client = await initMatrix();
-  return client.sendEvent(roomId, "m.reaction", {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return client.sendEvent(roomId, "m.reaction" as any, {
     "m.relates_to": {
       rel_type: "m.annotation",
       event_id: eventId,
@@ -400,6 +418,19 @@ export function getMatrixTimeline(roomId: string): MatrixMessage[] {
     .getEvents()
     .map((ev) => eventToMessage(ev, myId))
     .filter((m): m is MatrixMessage => m !== null);
+}
+
+// ── paginateRoom — load older messages via scrollback ─────────────────────────
+
+export async function paginateRoom(
+  roomId: string,
+  limit = 50
+): Promise<number> {
+  const client = await initMatrix();
+  const room = client.getRoom(roomId);
+  if (!room) return 0;
+  const res = await client.scrollback(room, limit);
+  return res?.getLiveTimeline().getEvents().length ?? 0;
 }
 
 // ── Primary hook ──────────────────────────────────────────────────────────────

@@ -454,7 +454,7 @@ services:
     container_name: pnptv-bot
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"  # Bind to localhost only — no direct external access
     volumes:
       - ./public/uploads:/app/public/uploads
       - /var/www/pnptvbot-sandbox/public/media:/media

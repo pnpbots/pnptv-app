@@ -281,6 +281,93 @@ async function getAdminToken() {
   return _adminToken;
 }
 
+// ─── room membership ──────────────────────────────────────────────────────────
+
+/**
+ * Ensure a user is joined to a Matrix room.
+ * 1. Check joined_rooms with user's token
+ * 2. Try join with user's token (works if invited or room is joinable)
+ * 3. Fallback: admin force-join via Synapse admin API
+ *
+ * @param {string} roomId
+ * @param {{ matrixUserId: string, accessToken: string }} userCreds
+ * @returns {Promise<void>}
+ */
+async function ensureUserInRoom(roomId, userCreds) {
+  try {
+    const joined = await synapseGet('/_matrix/client/v3/joined_rooms', userCreds.accessToken);
+    if (joined.joined_rooms && joined.joined_rooms.includes(roomId)) {
+      return; // already in room
+    }
+  } catch (err) {
+    logger.debug(`[Matrix] ensureUserInRoom: joined_rooms check failed for ${userCreds.matrixUserId}: ${err.message}`);
+  }
+
+  // Try direct join (works if user has a pending invite or room allows joining)
+  try {
+    await synapsePost(
+      `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
+      {},
+      userCreds.accessToken
+    );
+    logger.debug(`[Matrix] ensureUserInRoom: ${userCreds.matrixUserId} joined ${roomId} directly`);
+    return;
+  } catch (joinErr) {
+    if (joinErr.errcode === 'M_FORBIDDEN' && joinErr.message?.includes('already in the room')) {
+      return; // already joined
+    }
+    logger.debug(`[Matrix] ensureUserInRoom: direct join failed for ${userCreds.matrixUserId}: ${joinErr.message}`);
+  }
+
+  // Fallback: admin force-join
+  try {
+    const adminToken = await getAdminToken();
+    await synapsePost(
+      `/_synapse/admin/v1/join/${encodeURIComponent(roomId)}`,
+      { user_id: userCreds.matrixUserId },
+      adminToken
+    );
+    logger.info(`[Matrix] ensureUserInRoom: admin force-joined ${userCreds.matrixUserId} into ${roomId}`);
+  } catch (adminErr) {
+    logger.warn(`[Matrix] ensureUserInRoom: admin force-join failed for ${userCreds.matrixUserId} into ${roomId}: ${adminErr.message}`);
+    throw adminErr;
+  }
+}
+
+// ─── message sending ──────────────────────────────────────────────────────────
+
+/**
+ * Send a text message to a Matrix room.
+ * @param {string} roomId
+ * @param {string} accessToken - user's Matrix access token
+ * @param {string} content - text content
+ * @returns {Promise<{ event_id: string }>}
+ */
+async function sendRoomMessage(roomId, accessToken, content) {
+  const txnId = `m${Date.now()}.${Math.random().toString(36).slice(2)}`;
+  return synapsePut(
+    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${txnId}`,
+    { msgtype: 'm.text', body: content },
+    accessToken
+  );
+}
+
+/**
+ * Send a media message to a Matrix room.
+ * @param {string} roomId
+ * @param {string} accessToken
+ * @param {{ url: string, msgtype: string, body?: string, info?: object }} media
+ * @returns {Promise<{ event_id: string }>}
+ */
+async function sendRoomMediaMessage(roomId, accessToken, { url, msgtype, body, info }) {
+  const txnId = `m${Date.now()}.${Math.random().toString(36).slice(2)}`;
+  return synapsePut(
+    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${txnId}`,
+    { msgtype, body: body || 'media', url, info },
+    accessToken
+  );
+}
+
 // ─── DM rooms ─────────────────────────────────────────────────────────────────
 
 /**
@@ -330,26 +417,13 @@ async function getOrCreateDmRoom(userA, userB) {
 
   const roomId = roomResp.room_id;
 
-  // Auto-join userB — try using their own token first (they were invited above),
-  // fall back to Synapse admin join endpoint
+  // Auto-join userB via ensureUserInRoom (invite was sent at room creation)
   try {
-    await synapsePost(
-      `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
-      {},
-      credB.accessToken
-    );
-  } catch (directJoinErr) {
-    logger.debug(`[Matrix] Direct join failed for ${credB.matrixUserId}, trying admin join: ${directJoinErr.message}`);
-    try {
-      const adminToken = await getAdminToken();
-      await synapsePost(
-        `/_synapse/admin/v1/join/${encodeURIComponent(roomId)}`,
-        { user_id: credB.matrixUserId },
-        adminToken
-      );
-    } catch (adminJoinErr) {
-      logger.warn(`[Matrix] Admin join also failed for DM room ${roomId} / user ${credB.matrixUserId}: ${adminJoinErr.message}`);
-    }
+    await ensureUserInRoom(roomId, credB);
+  } catch (joinErr) {
+    logger.warn(`[Matrix] Failed to join userB ${credB.matrixUserId} into DM room ${roomId}: ${joinErr.message}`);
+    // Don't persist a broken room — next attempt will create a fresh one
+    return roomId; // still return the roomId; it may work on retry
   }
 
   // Persist mapping
@@ -412,6 +486,26 @@ async function getOrCreateHangoutRoom(hangoutGroupId, creatorUser, groupName) {
 
   const roomId = roomResp.room_id;
 
+  // Join the admin user so it can invite/kick members later
+  try {
+    const adminToken = await getAdminToken();
+    const adminUserId = `@${process.env.MATRIX_ADMIN_USER || 'pnptv_admin'}:${MATRIX_SERVER_NAME}`;
+    // Invite admin from creator, then join
+    await synapsePost(
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
+      { user_id: adminUserId },
+      creatorCreds.accessToken
+    );
+    await synapsePost(
+      `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
+      {},
+      adminToken
+    );
+    logger.debug(`[Matrix] Admin joined hangout room ${roomId}`);
+  } catch (adminJoinErr) {
+    logger.warn(`[Matrix] Admin auto-join failed for hangout room ${roomId}: ${adminJoinErr.message}`);
+  }
+
   await query(
     `INSERT INTO hangout_matrix_rooms (hangout_group_id, matrix_room_id)
      VALUES ($1, $2)
@@ -442,25 +536,12 @@ async function inviteToHangoutRoom(hangoutGroupId, user) {
     return;
   }
 
-  const roomId   = roomRow.rows[0].matrix_room_id;
+  const roomId    = roomRow.rows[0].matrix_room_id;
   const userCreds = await provisionMatrixUser(user);
-  const adminToken = await getAdminToken();
 
-  try {
-    await synapsePost(
-      `/_synapse/admin/v1/join/${encodeURIComponent(roomId)}`,
-      { user_id: userCreds.matrixUserId },
-      adminToken
-    );
-    logger.info(`[Matrix] Joined ${userCreds.matrixUserId} into hangout room ${roomId}`);
-  } catch (err) {
-    // M_FORBIDDEN can occur if user is already in room — treat as non-fatal
-    if (err.errcode !== 'M_FORBIDDEN') {
-      logger.error(`[Matrix] Failed to join ${userCreds.matrixUserId} into ${roomId}: ${err.message}`);
-      throw err;
-    }
-    logger.debug(`[Matrix] ${userCreds.matrixUserId} already in room ${roomId}`);
-  }
+  // Use ensureUserInRoom — it checks membership, tries user join, then admin force-join
+  await ensureUserInRoom(roomId, userCreds);
+  logger.info(`[Matrix] Ensured ${userCreds.matrixUserId} is in hangout room ${roomId}`);
 }
 
 /**
@@ -547,4 +628,7 @@ module.exports = {
   inviteToHangoutRoom,
   removeFromHangoutRoom,
   getMatrixToken,
+  ensureUserInRoom,
+  sendRoomMessage,
+  sendRoomMediaMessage,
 };

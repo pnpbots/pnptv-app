@@ -4,6 +4,7 @@ const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const NotificationEmitter = require('./notificationEmitter');
 const { resolveUserId } = require('../utils/helpers');
+const matrixService = require('./matrixService');
 
 /**
  * DM Service
@@ -200,6 +201,47 @@ class DmService {
       [messageId, userId]
     );
     return result.rowCount > 0;
+  }
+
+  /**
+   * Send a DM through Matrix and sync to PG.
+   * Wraps all checks (block, privacy, quota) via sendMessage, then sends to Matrix.
+   *
+   * @param {string} senderId
+   * @param {string} recipientId
+   * @param {{ content: string }} data
+   * @param {{ isAdmin?: boolean }} options
+   * @returns {Promise<{ message: object, matrixEventId?: string }>}
+   */
+  static async sendMatrixDm(senderId, recipientId, data, options = {}) {
+    // Use existing sendMessage for all auth/block/privacy checks + PG insert
+    const message = await DmService.sendMessage(senderId, recipientId, data, options);
+
+    let matrixEventId = null;
+    try {
+      const [senderRow, recipientRow] = await Promise.all([
+        query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+               FROM users WHERE id = $1 AND is_deleted = false`, [senderId]),
+        query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+               FROM users WHERE id = $1 AND is_deleted = false`, [recipientId]),
+      ]);
+
+      if (senderRow.rows[0] && recipientRow.rows[0]) {
+        const senderCreds = await matrixService.provisionMatrixUser(senderRow.rows[0]);
+        const matrixRoomId = await matrixService.getOrCreateDmRoom(senderRow.rows[0], recipientRow.rows[0]);
+        await matrixService.ensureUserInRoom(matrixRoomId, senderCreds);
+        const resp = await matrixService.sendRoomMessage(matrixRoomId, senderCreds.accessToken, data.content.trim());
+        matrixEventId = resp.event_id || null;
+
+        if (matrixEventId) {
+          await query('UPDATE direct_messages SET matrix_event_id = $1 WHERE id = $2', [matrixEventId, message.id]);
+        }
+      }
+    } catch (matrixErr) {
+      logger.warn('sendMatrixDm: Matrix send failed (PG message saved)', { senderId, recipientId, error: matrixErr.message });
+    }
+
+    return { message, matrixEventId };
   }
 }
 

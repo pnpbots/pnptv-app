@@ -142,6 +142,10 @@ class MeruLinkInitializer {
         { code: 'nDVlJs', url: 'https://pay.getmeru.com/nDVlJs' },
         { code: 'Xhrw5x', url: 'https://pay.getmeru.com/Xhrw5x' },
         { code: 'AwBwet', url: 'https://pay.getmeru.com/AwBwet' },
+        { code: 'kssYDk', url: 'https://pay.getmeru.com/kssYDk' },
+        { code: 'JdPPdS', url: 'https://pay.getmeru.com/JdPPdS' },
+        { code: 'Y-yqKP', url: 'https://pay.getmeru.com/Y-yqKP' },
+        { code: 'zIYUW2', url: 'https://pay.getmeru.com/zIYUW2' },
       ];
 
       let addedCount = 0;

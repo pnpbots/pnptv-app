@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { connectSocket } from "@/lib/socket";
-import { getGroupMessages, type GroupMessage } from "@/lib/api";
+import { type GroupMessage } from "@/lib/api";
 import { sendTyping as matrixSendTyping, useRoomTyping } from "@/hooks/useMatrix";
 
 interface OnlineMember {
@@ -32,7 +32,6 @@ export function useHangoutSocket(
   userId: string | undefined,
   matrixRoomId?: string | null
 ) {
-  const [messages, setMessages] = useState<GroupMessage[]>([]);
   // Internal map tracks typing state by userId to prevent collisions when two
   // users share the same first name.  The exported typingUsers is derived from
   // the map's values so the external interface stays as string[].
@@ -40,8 +39,6 @@ export function useHangoutSocket(
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [callState, setCallState] = useState<CallState>(EMPTY_CALL);
   const [isConnected, setIsConnected] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [onlineMembers, setOnlineMembers] = useState<OnlineMember[]>([]);
 
   // Matrix typing users (merged below)
@@ -50,41 +47,20 @@ export function useHangoutSocket(
   // Refs for debouncing and cleanup
   const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastTypingEmit = useRef(0);
-  const messagesRef = useRef<GroupMessage[]>([]);
-  const isLoadingMoreRef = useRef(false);
-
-  // Keep messagesRef in sync
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-
-  // Deduplicate messages by id
-  const dedupeMessages = useCallback((msgs: GroupMessage[]): GroupMessage[] => {
-    const seen = new Set<number>();
-    return msgs.filter((m) => {
-      if (seen.has(m.id)) return false;
-      seen.add(m.id);
-      return true;
-    });
-  }, []);
 
   useEffect(() => {
     if (!groupId) {
-      setMessages([]);
       typingMap.current.clear();
       setTypingUsers([]);
       setCallState(EMPTY_CALL);
-      setHasMore(true);
       setOnlineMembers([]);
       return;
     }
 
-    // Reset state before attaching to new group (prevents stale messages flash)
-    setMessages([]);
+    // Reset state before attaching to new group
     typingMap.current.clear();
     setTypingUsers([]);
     setCallState(EMPTY_CALL);
-    setHasMore(true);
     setOnlineMembers([]);
 
     const socket = connectSocket();
@@ -99,20 +75,6 @@ export function useHangoutSocket(
       }
     };
     const onDisconnect = () => setIsConnected(false);
-
-    const onHistory = (history: GroupMessage[]) => {
-      setMessages(dedupeMessages(history));
-      setHasMore(history.length >= 50);
-    };
-
-    const onMessage = (msg: GroupMessage) => {
-      // Accept messages for this room; also accept if room field is absent (server-side routing)
-      if (msg.room && msg.room !== `hangout:${groupId}`) return;
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        return [...prev, msg];
-      });
-    };
 
     const onTyping = (data: { userId: string; firstName: string }) => {
       if (data.userId === userId) return; // Ignore own typing
@@ -204,8 +166,6 @@ export function useHangoutSocket(
     // Register ALL listeners BEFORE emitting join
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
-    socket.on("hangout:history", onHistory);
-    socket.on("chat:message", onMessage);
     socket.on("hangout:typing", onTyping);
     socket.on("hangout:presence", onPresence);
     socket.on("hangout:call:active", onCallActive);
@@ -227,8 +187,6 @@ export function useHangoutSocket(
       socket.emit("hangout:leave", { groupId });
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
-      socket.off("hangout:history", onHistory);
-      socket.off("chat:message", onMessage);
       socket.off("hangout:typing", onTyping);
       socket.off("hangout:presence", onPresence);
       socket.off("hangout:call:active", onCallActive);
@@ -244,18 +202,7 @@ export function useHangoutSocket(
       setTypingUsers([]);
       setOnlineMembers([]);
     };
-  }, [groupId, userId, dedupeMessages]);
-
-  // Send message via socket (with optional reply-to)
-  const sendMessage = useCallback(
-    (content: string, replyToId?: number | null) => {
-      const trimmed = content.trim().slice(0, 2000);
-      if (!groupId || !trimmed) return;
-      const socket = connectSocket();
-      socket.emit("hangout:message", { groupId, content: trimmed, replyToId: replyToId || undefined });
-    },
-    [groupId]
-  );
+  }, [groupId, userId]);
 
   // Emit typing indicator (debounced 2s) — tries Matrix first, always emits via socket
   const emitTyping = useCallback(() => {
@@ -272,29 +219,6 @@ export function useHangoutSocket(
     const socket = connectSocket();
     socket.emit("hangout:typing", { groupId });
   }, [groupId, matrixRoomId]);
-
-  // Load older messages via HTTP (for infinite scroll)
-  // Uses refs to avoid stale closures and prevent multiple concurrent calls
-  const loadOlderMessages = useCallback(async () => {
-    if (!groupId || isLoadingMoreRef.current || !hasMore) return;
-    isLoadingMoreRef.current = true;
-    setIsLoadingMore(true);
-    try {
-      const oldest = messagesRef.current[0];
-      const cursor = oldest?.created_at;
-      const data = await getGroupMessages(groupId, cursor);
-      const older = data.messages || [];
-      if (older.length < 50) setHasMore(false);
-      if (older.length > 0) {
-        setMessages((prev) => dedupeMessages([...older, ...prev]));
-      }
-    } catch {
-      // silent
-    } finally {
-      isLoadingMoreRef.current = false;
-      setIsLoadingMore(false);
-    }
-  }, [groupId, hasMore, dedupeMessages]);
 
   const inviteToCall = useCallback(
     (targetUserId: string) => {
@@ -315,15 +239,10 @@ export function useHangoutSocket(
   }, [typingUsers, matrixTypingUsers]);
 
   return {
-    messages,
-    sendMessage,
     emitTyping,
     typingUsers: mergedTypingUsers,
     callState,
     isConnected,
-    loadOlderMessages,
-    hasMore,
-    isLoadingMore,
     onlineMembers,
     inviteToCall,
   };

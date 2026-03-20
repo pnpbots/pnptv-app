@@ -71,6 +71,7 @@ interface NearbyMember {
   is_online?: boolean;
   last_post_media?: string | null;
   last_post_caption?: string | null;
+  last_post_at?: string | null;
   // hangouts: direct DM shortcut
   allowDirectDm?: boolean;
   // live: is the model/streamer

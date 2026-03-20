@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
 import { STATUS_BADGE_VARIANTS } from "@/components/admin/shared";
 import { Badge } from "@pnptv/ui-kit";
@@ -57,6 +57,7 @@ interface EditForm {
 
 export default function UserDetail() {
   const { id: userId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
   const [user, setUser] = useState<AdminUser | null>(null);
   const [plans, setPlans] = useState<AdminPlan[]>([]);

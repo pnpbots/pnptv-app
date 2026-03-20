@@ -107,7 +107,7 @@ export function WebRTCPlayer({ channelRef, title, className = "", onBalanceUpdat
           if (roomRef.current) {
             let hasVideo = false;
             for (const [, p] of roomRef.current.remoteParticipants) {
-              if (p.getTrack(Track.Source.Camera)) hasVideo = true;
+              if (p.getTrackPublication(Track.Source.Camera)) hasVideo = true;
             }
             if (!hasVideo) setStatus("offline");
           }

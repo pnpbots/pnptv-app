@@ -8,7 +8,7 @@ import {
 } from "@/lib/api";
 import { translateText } from "@/lib/feedI18n";
 import { SharePostModal } from "@/components/SharePostModal";
-import { NearbyBadge } from "@/components/NearbyBadge";
+// NearbyBadge removed — PostCard shows city name inline instead
 import { MentionText } from "@/components/MentionText";
 import { MentionInput } from "@/components/MentionInput";
 
@@ -328,15 +328,9 @@ export default function PostCard({
               &middot; {timeAgo(post.created_at)}
             </span>
             {post.author_city && post.author_country && (
-              <NearbyBadge
-                userCity={post.author_city}
-                userCountry={post.author_country}
-                viewerCity={viewerCity}
-                viewerCountry={viewerCountry}
-                username={
-                  post.author_first_name || post.author_username || "User"
-                }
-              />
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-pnp-border/30 text-pnp-textSecondary">
+                {post.author_city}
+              </span>
             )}
             {post.is_exclusive && isOwnProfile && (
               <span

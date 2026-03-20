@@ -138,6 +138,10 @@ export default function Live() {
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
   const [dpnsHandle, setDpnsHandle] = useState<string | null>(null);
   const [showBuyModal, setShowBuyModal] = useState(false);
+  const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
+  const [buyingPackage, setBuyingPackage] = useState<string | null>(null);
+  const [buyError, setBuyError] = useState<string | null>(null);
+  const [buyMethod, setBuyMethod] = useState<"card" | "wallet" | "dash">("card");
   const [showDpnsInput, setShowDpnsInput] = useState(false);
   const [dpnsInput, setDpnsInput] = useState("");
   const [dpnsSaving, setDpnsSaving] = useState(false);

@@ -122,7 +122,7 @@ setInterval(() => {
 const MSG_RETURNING_COLS = `
   id, room, user_id, username, first_name, photo_url, content,
   media_url, media_type, media_mime, media_thumb_url,
-  media_width, media_height, media_metadata, reply_to_id, created_at
+  media_width, media_height, media_metadata, reply_to_id, matrix_event_id, created_at
 `;
 
 // ── Stream ID validation regex (module-scope so it is compiled once) ─────────
@@ -744,11 +744,33 @@ function initSocketIO(io) {
         const firstName = user.firstName || user.first_name || null;
         const photoUrl = user.photoUrl || user.photo_url || null;
 
+        // ── Matrix send (fire-and-forget-safe — PG insert happens regardless) ──
+        let matrixEventId = null;
+        try {
+          const userRow = await query(
+            `SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+             FROM users WHERE id = $1 AND is_deleted = false`,
+            [user.id]
+          );
+          if (userRow.rows[0]) {
+            const userCreds = await matrixService.provisionMatrixUser(userRow.rows[0]);
+            // Load group info for room creation
+            const groupRow = await query('SELECT name FROM hangout_groups WHERE id = $1', [gid]);
+            const groupName = groupRow.rows[0]?.name || `Hangout ${gid}`;
+            const matrixRoomId = await matrixService.getOrCreateHangoutRoom(gid, userRow.rows[0], groupName);
+            await matrixService.ensureUserInRoom(matrixRoomId, userCreds);
+            const resp = await matrixService.sendRoomMessage(matrixRoomId, userCreds.accessToken, content.trim());
+            matrixEventId = resp.event_id || null;
+          }
+        } catch (matrixErr) {
+          logger.warn('hangout:message Matrix send failed (PG insert continues)', { userId: user.id, groupId: gid, error: matrixErr.message });
+        }
+
         const { rows } = await query(
-          `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content, reply_to_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content, reply_to_id, matrix_event_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            RETURNING ${MSG_RETURNING_COLS}`,
-          [room, user.id, user.username || null, firstName, photoUrl, content.trim(), parsedReplyToId]
+          [room, user.id, user.username || null, firstName, photoUrl, content.trim(), parsedReplyToId, matrixEventId]
         );
 
         // If replying, attach the replied-to message snippet for clients
@@ -1116,6 +1138,28 @@ function initSocketIO(io) {
           { content },
           { isAdmin: isAdminSender }
         );
+
+        // ── Matrix send (fire-and-forget-safe) ──
+        try {
+          const [senderRow, recipientRow] = await Promise.all([
+            query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+                   FROM users WHERE id = $1 AND is_deleted = false`, [user.id]),
+            query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+                   FROM users WHERE id = $1 AND is_deleted = false`, [recipientId]),
+          ]);
+          if (senderRow.rows[0] && recipientRow.rows[0]) {
+            const senderCreds = await matrixService.provisionMatrixUser(senderRow.rows[0]);
+            const matrixRoomId = await matrixService.getOrCreateDmRoom(senderRow.rows[0], recipientRow.rows[0]);
+            await matrixService.ensureUserInRoom(matrixRoomId, senderCreds);
+            const resp = await matrixService.sendRoomMessage(matrixRoomId, senderCreds.accessToken, content.trim());
+            // Update PG row with matrix_event_id
+            if (resp.event_id) {
+              await query('UPDATE direct_messages SET matrix_event_id = $1 WHERE id = $2', [resp.event_id, message.id]);
+            }
+          }
+        } catch (matrixErr) {
+          logger.warn('dm:send Matrix send failed (PG message already saved)', { userId: user.id, recipientId, error: matrixErr.message });
+        }
 
         // Deliver to sender and recipient
         const payload = {

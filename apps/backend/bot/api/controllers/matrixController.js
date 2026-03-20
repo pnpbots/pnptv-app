@@ -119,7 +119,7 @@ const getOrCreateDmRoom = async (req, res) => {
 
     return res.json({ success: true, roomId });
   } catch (err) {
-    logger.error(`[Matrix API] getOrCreateDmRoom error (caller=${sessionUser.id}, partner=${partnerIdRaw}):`, err);
+    logger.error(`[Matrix API] getOrCreateDmRoom error (caller=${sessionUser.id}, partner=${partnerId}):`, err);
     return res.status(500).json({
       success: false,
       error: { code: 'room_creation_failed', message: err.message },

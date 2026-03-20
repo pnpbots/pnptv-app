@@ -14,8 +14,8 @@ import { useI18n } from "@/lib/i18n";
 import {
   getMessageThreads,
   getMessages,
-  sendMessage,
   sendDmMediaMessage,
+  sendDirectMessage,
   markThreadAsRead,
   getOrCreateDmRoom,
   reactToDm,
@@ -24,7 +24,7 @@ import {
   type DirectMessage,
 } from "@/lib/api";
 import EmojiReactionBar, { type Reaction } from "@/components/EmojiReactionBar";
-import { useRoomMessages, sendMatrixMessage, sendMatrixMediaMessage } from "@/hooks/useMatrix";
+import { useRoomMessages, sendMatrixMessage } from "@/hooks/useMatrix";
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -617,21 +617,31 @@ function Conversation({
   const { messages: matrixMessages, loading: matrixLoading } = useRoomMessages(matrixRoomId);
 
   // Convert Matrix messages to DirectMessage shape for the existing bubble components
-  const matrixAsDmMessages: DirectMessage[] = matrixMessages.map((m) => ({
-    id: m.eventId,
-    content: m.body,
-    isMine: m.isMine,
-    createdAt: new Date(m.timestamp).toISOString(),
-    mediaUrl: undefined,
-    mediaType: undefined,
-    mediaThumbUrl: undefined,
-  }));
+  const matrixAsDmMessages: DirectMessage[] = matrixMessages.map((m) => {
+    // FNV-1a 32-bit hash for stable numeric id
+    let hash = 2166136261;
+    for (let i = 0; i < m.eventId.length; i++) {
+      hash ^= m.eventId.charCodeAt(i);
+      hash = (hash * 16777619) >>> 0;
+    }
+    return {
+      id: hash,
+      senderId: m.senderId,
+      recipientId: "",
+      content: m.body,
+      mediaUrl: m.mediaUrl ?? null,
+      mediaType: m.mediaType === "image" ? "image" as const : m.mediaType === "video" ? "video" as const : null,
+      mediaMime: m.mediaMime ?? null,
+      mediaThumbUrl: null,
+      isRead: true,
+      isMine: m.isMine,
+      createdAt: new Date(m.timestamp).toISOString(),
+    };
+  });
 
-  // Final message list: prefer Matrix when available, fall back to REST
+  // Final message list: Matrix is the single source of truth when available
   const messages: DirectMessage[] = matrixRoomId
-    ? matrixAsDmMessages.length > 0
-      ? matrixAsDmMessages
-      : restMessages
+    ? matrixAsDmMessages
     : restMessages;
 
   const loadMessages = useCallback(async () => {
@@ -686,18 +696,20 @@ function Conversation({
     });
   }, [messages]);
 
-  // REST polling fallback when Matrix is not available
+  // REST polling fallback when Matrix is not available (reduced frequency)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
-    if (matrixRoomId || matrixInitError === null) {
-      // Matrix connected or still trying — no need to poll
+    if (matrixRoomId) {
+      // Matrix connected — no need to poll
       if (pollRef.current) clearInterval(pollRef.current);
       return;
     }
-    // Matrix failed — fall back to 4-second polling
-    pollRef.current = setInterval(() => {
-      loadMessages();
-    }, 4000);
+    if (matrixInitError !== null) {
+      // Matrix failed — fall back to 10-second polling
+      pollRef.current = setInterval(() => {
+        loadMessages();
+      }, 10000);
+    }
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
@@ -785,30 +797,32 @@ function Conversation({
           setDmRemaining(data.remaining);
           if (data.limit !== undefined) setDmLimit(data.limit);
         }
-        // Bridge media to Matrix room (fire-and-forget)
-        if (matrixRoomId && data.message?.mediaUrl) {
-          const isVideo = data.message.mediaType === "video";
-          sendMatrixMediaMessage(
-            matrixRoomId,
-            data.message.mediaUrl,
-            isVideo ? "m.video" : "m.image",
-            text || "media"
-          ).catch(() => {});
-        }
+        // Backend bridges media to Matrix automatically
         clearMedia();
-      } else if (matrixRoomId) {
-        // Text goes via Matrix when room is available (real-time delivery)
-        await sendMatrixMessage(matrixRoomId, text);
-        // Matrix Timeline listener will append the message automatically
       } else {
-        // Fallback to REST when Matrix is unavailable
-        const data = await sendMessage(userId, text);
-        if (data.success && data.message) {
-          setRestMessages((prev) => [...prev, data.message]);
-        }
-        if (data.remaining !== undefined) {
-          setDmRemaining(data.remaining);
-          if (data.limit !== undefined) setDmLimit(data.limit);
+        // Text: send via new Matrix-primary REST endpoint
+        try {
+          const data = await sendDirectMessage(userId, text);
+          // Message will appear via Matrix timeline listener when matrixRoomId is set
+          if (!matrixRoomId && data.success && data.message) {
+            setRestMessages((prev) => [...prev, {
+              id: data.message.id,
+              content: data.message.content,
+              isMine: true,
+              createdAt: data.message.createdAt,
+            } as DirectMessage]);
+          }
+          if (data.remaining !== undefined) {
+            setDmRemaining(data.remaining);
+            if (data.limit !== undefined) setDmLimit(data.limit);
+          }
+        } catch (restErr) {
+          // Fallback: try direct Matrix send if REST fails
+          if (matrixRoomId) {
+            await sendMatrixMessage(matrixRoomId, text);
+          } else {
+            throw restErr;
+          }
         }
       }
     } catch (err) {

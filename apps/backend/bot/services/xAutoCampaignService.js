@@ -274,7 +274,7 @@ class XAutoCampaignService {
     }
 
     // Create a social_posts record so the tweet link shows rich Twitter cards
-    let socialPostLink = 'pnptv.app';
+    let socialPostLink = 'https://pnptv.app';
     try {
       const socialResult = await db.query(
         `INSERT INTO social_posts (user_id, content, media_url, media_type, video_title, video_description, video_thumbnail_url, is_shareable)
@@ -290,7 +290,7 @@ class XAutoCampaignService {
         ]
       );
       const socialPostId = socialResult.rows[0].id;
-      socialPostLink = `app.pnptv.app/social/post/${socialPostId}`;
+      socialPostLink = `https://app.pnptv.app/social/post/${socialPostId}`;
     } catch (err) {
       logger.warn('Failed to create social_post for campaign tweet', {
         campaignId: campaign.campaign_id, error: err.message,
@@ -392,7 +392,7 @@ class XAutoCampaignService {
       let postText = options[i];
 
       // Create social_post for rich Twitter card
-      let socialPostLink = 'pnptv.app';
+      let socialPostLink = 'https://pnptv.app';
       try {
         const socialResult = await db.query(
           `INSERT INTO social_posts (user_id, content, media_url, media_type, video_title, video_description, video_thumbnail_url, is_shareable)
@@ -407,7 +407,7 @@ class XAutoCampaignService {
             media?.thumbnailUrl || null,
           ]
         );
-        socialPostLink = `app.pnptv.app/social/post/${socialResult.rows[0].id}`;
+        socialPostLink = `https://app.pnptv.app/social/post/${socialResult.rows[0].id}`;
       } catch (err) {
         logger.warn('Failed to create social_post for A/B variant', {
           campaignId: campaign.campaign_id, variant: i, error: err.message,

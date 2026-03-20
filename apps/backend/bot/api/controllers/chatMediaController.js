@@ -22,6 +22,7 @@ const logger = require('../../../utils/logger');
 const { processChatMedia } = require('../../services/chatMediaService');
 const { resolveUserId } = require('../../utils/helpers');
 const DmService = require('../../services/dmService');
+const matrixService = require('../../services/matrixService');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -126,6 +127,34 @@ const sendGroupMediaMessage = async (req, res) => {
       io.to(room).emit('chat:message', msg);
     }
 
+    // Bridge media to Matrix room (fire-and-forget)
+    (async () => {
+      try {
+        const userRow = await query(
+          `SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+           FROM users WHERE id = $1 AND is_deleted = false`,
+          [user.id]
+        );
+        if (!userRow.rows[0]) return;
+        const userCreds = await matrixService.provisionMatrixUser(userRow.rows[0]);
+        const groupRow = await query('SELECT name FROM hangout_groups WHERE id = $1', [groupId]);
+        const groupName = groupRow.rows[0]?.name || `Hangout ${groupId}`;
+        const matrixRoomId = await matrixService.getOrCreateHangoutRoom(groupId, userRow.rows[0], groupName);
+        await matrixService.ensureUserInRoom(matrixRoomId, userCreds);
+        const msgtype = mediaResult.mediaType === 'video' ? 'm.video' : 'm.image';
+        const resp = await matrixService.sendRoomMediaMessage(matrixRoomId, userCreds.accessToken, {
+          url: mediaResult.mediaUrl,
+          msgtype,
+          body: caption || 'media',
+        });
+        if (resp.event_id) {
+          await query('UPDATE chat_messages SET matrix_event_id = $1 WHERE id = $2', [resp.event_id, msg.id]);
+        }
+      } catch (matrixErr) {
+        logger.warn('sendGroupMediaMessage Matrix bridge failed', { error: matrixErr.message, groupId });
+      }
+    })();
+
     return res.status(201).json({ success: true, message: msg });
   } catch (err) {
     if (err.statusCode) {
@@ -211,6 +240,33 @@ const sendDmMediaMessage = async (req, res) => {
         },
       });
     }
+
+    // Bridge media to Matrix DM room (fire-and-forget)
+    (async () => {
+      try {
+        const [senderRow, recipRow] = await Promise.all([
+          query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+                 FROM users WHERE id = $1 AND is_deleted = false`, [user.id]),
+          query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+                 FROM users WHERE id = $1 AND is_deleted = false`, [recipientId]),
+        ]);
+        if (!senderRow.rows[0] || !recipRow.rows[0]) return;
+        const senderCreds = await matrixService.provisionMatrixUser(senderRow.rows[0]);
+        const matrixRoomId = await matrixService.getOrCreateDmRoom(senderRow.rows[0], recipRow.rows[0]);
+        await matrixService.ensureUserInRoom(matrixRoomId, senderCreds);
+        const msgtype = mediaResult.mediaType === 'video' ? 'm.video' : 'm.image';
+        const resp = await matrixService.sendRoomMediaMessage(matrixRoomId, senderCreds.accessToken, {
+          url: mediaResult.mediaUrl,
+          msgtype,
+          body: caption || 'media',
+        });
+        if (resp.event_id) {
+          await query('UPDATE direct_messages SET matrix_event_id = $1 WHERE id = $2', [resp.event_id, message.id]);
+        }
+      } catch (matrixErr) {
+        logger.warn('sendDmMediaMessage Matrix bridge failed', { error: matrixErr.message, recipientId });
+      }
+    })();
 
     return res.status(201).json({ success: true, message: responseMessage });
   } catch (err) {

@@ -43,11 +43,11 @@ function mapTelegramUser(u: NonNullable<TelegramAuthResponse["user"]>): PnptvUse
   // DB id is always the numeric row ID (telegram ID or legacy ID)
   // pnptv_id / pnptvId is the Authentik UUID
   const rawId = String(u.id || u.telegram_id);
-  const uuid = String(u.pnptv_id || u.pnptvId || rawId);
+  const uuid = String(u.pnptv_id || rawId);
   return {
     id: uuid,
     dbId: rawId,
-    telegramId: u.telegram_id || u.id,
+    telegramId: u.telegram_id || Number(u.id) || 0,
     username: u.username,
     firstName: u.first_name,
     displayName: u.display_name || u.first_name || u.username || "Member",

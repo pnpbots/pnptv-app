@@ -58,6 +58,7 @@ const pdsRoutes = require('./routes/pdsRoutes');
 const blueskyRoutes = require('./routes/blueskyRoutes');
 const elementRoutes = require('./routes/elementRoutes');
 const matrixController = require('./controllers/matrixController');
+const matrixMessageController = require('./controllers/matrixMessageController');
 const creatorRoutes = require('./routes/creatorRoutes');
 const gamificationRoutes = require('./routes/gamificationRoutes');
 const canvaRoutes = require('./routes/canvaRoutes');
@@ -210,16 +211,78 @@ const pageLimiter = rateLimit({
   skip: (req) => req.path === '/pnp/webhook/telegram', // Skip webhook
 });
 
-// ── Geo-block middleware — blocks CO/VE from campaign content ────────────────
-const BLOCKED_COUNTRIES = new Set(['CO', 'VE']);
+// ── Geo-block middleware — blocks LATAM + Caribbean from the entire site ─────
+// Existing active users (last_login_at within 30 days) are grandfathered in.
+const LATAM_COUNTRIES = new Set([
+  // South America
+  'AR', 'BO', 'BR', 'CL', 'CO', 'EC', 'GY', 'PY', 'PE', 'SR', 'UY', 'VE', 'GF',
+  // Central America + Mexico
+  'BZ', 'CR', 'SV', 'GT', 'HN', 'MX', 'NI', 'PA',
+  // Caribbean
+  'AG', 'AW', 'BS', 'BB', 'BQ', 'CU', 'CW', 'DM', 'DO', 'GD', 'GP', 'HT',
+  'JM', 'KN', 'KY', 'LC', 'MF', 'MQ', 'MS', 'PR', 'BL', 'SX', 'TC', 'TT',
+  'VC', 'VG', 'AI',
+]);
 
-function geoBlock(req, res, next) {
+// Paths exempt from geo-blocking (webhooks, health checks, etc.)
+const GEO_EXEMPT_PATHS = ['/pnp/webhook/', '/health', '/api/health'];
+
+const GEO_BLOCKED_HTML = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PNPtv - Not Available</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#0a0a0a;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:2rem}
+.c{max-width:480px}.t{font-size:2rem;margin-bottom:1rem;background:linear-gradient(135deg,#a855f7,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.m{color:#999;line-height:1.6;margin-bottom:1.5rem}.s{font-size:.85rem;color:#555}</style></head>
+<body><div class="c"><h1 class="t">PNPtv</h1><p class="m">PNPtv is not yet available in your country.<br>We're working on expanding access &mdash; please check back soon!</p><p class="s">Thank you for your patience.</p></div></body></html>`;
+
+async function latamGeoBlock(req, res, next) {
   const ip = req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
   const geo = geoip.lookup(ip);
-  if (geo && BLOCKED_COUNTRIES.has(geo.country)) {
-    return res.status(451).json({ error: 'Content not available in your region' });
+  if (!geo || !LATAM_COUNTRIES.has(geo.country)) return next();
+
+  // Exempt critical paths (webhooks, health, etc.)
+  if (GEO_EXEMPT_PATHS.some(p => req.path.startsWith(p))) return next();
+
+  // Check if user is an authenticated, active (last 30 days) grandfathered user
+  const userId = req.session?.user?.id;
+  if (userId) {
+    try {
+      const redis = getRedis();
+      const cacheKey = `geo:exempt:${userId}`;
+      const cached = await redis.get(cacheKey);
+
+      if (cached === '1') return next();       // Cached as exempt
+      if (cached === '0') return geoBlockResponse(req, res); // Cached as blocked
+
+      // Cache miss — check DB
+      const pool = getPool();
+      const { rows } = await pool.query(
+        `SELECT last_login_at FROM users WHERE id = $1`, [userId]
+      );
+      const lastLogin = rows[0]?.last_login_at;
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+      if (lastLogin && new Date(lastLogin) >= thirtyDaysAgo) {
+        await redis.set(cacheKey, '1', 'EX', 3600); // Cache 1 hour
+        return next();
+      }
+      await redis.set(cacheKey, '0', 'EX', 3600);
+    } catch (err) {
+      logger.error('[GeoBlock] Error checking exemption:', err.message);
+      // On error, fail open for authenticated users to avoid locking out legit users
+      return next();
+    }
   }
-  next();
+
+  return geoBlockResponse(req, res);
+}
+
+function geoBlockResponse(req, res) {
+  const isApi = req.path.startsWith('/api/') || req.headers.accept?.includes('application/json');
+  if (isApi) {
+    return res.status(451).json({ error: 'not_available_in_region', message: 'PNPtv is not yet available in your country. Please check back soon!' });
+  }
+  return res.status(451).send(GEO_BLOCKED_HTML);
 }
 
 const getActorId = (req) => String(req.user?.id || req.user?.userId || '');
@@ -327,6 +390,7 @@ const sessionMiddleware = session({
 
 app.use(sessionMiddleware);
 app.use(ipTracker); // Log every authenticated request IP for security
+app.use(latamGeoBlock); // Global LATAM + Caribbean geo-block (exempts active users)
 
 // express-session handles Set-Cookie automatically — no custom middleware needed
 
@@ -590,10 +654,10 @@ app.get('/lifetime100', pageLimiter, (req, res) => {
   res.sendFile(path.join(__dirname, '../../../../public/lifetime-pass.html'));
 });
 
-// ── Geo-blocked CMS asset proxy — blocks CO/VE from campaign media ──────────
+// ── CMS asset proxy — LATAM geo-block handled globally via latamGeoBlock ─────
 // Campaign videos reference cms.pnptv.app/assets/<id>.  This route allows
-// tweets to link to pnptv.app/cms/assets/<id> which respects geo-blocking.
-app.get('/cms/assets/:assetId', geoBlock, async (req, res) => {
+// tweets to link to pnptv.app/cms/assets/<id>.
+app.get('/cms/assets/:assetId', async (req, res) => {
   const assetId = req.params.assetId;
   if (!/^[a-f0-9-]+$/i.test(assetId)) return res.status(400).send('Invalid asset ID');
   try {
@@ -6007,6 +6071,8 @@ app.get('/api/webapp/matrix/token', requireSessionAuth, asyncHandler(matrixContr
 app.post('/api/webapp/matrix/dm/:userId', requireSessionAuth, asyncHandler(matrixController.getOrCreateDmRoom));
 app.post('/api/webapp/matrix/hangout-room/:groupId', requireSessionAuth, asyncHandler(matrixController.getOrCreateHangoutRoom));
 app.post('/api/webapp/matrix/hangout-room/:groupId/sync-members', requireSessionAuth, asyncHandler(matrixController.syncHangoutRoomMembers));
+app.post('/api/webapp/matrix/hangout/:groupId/message', requireSessionAuth, asyncHandler(matrixMessageController.sendHangoutMessage));
+app.post('/api/webapp/matrix/dm/:userId/message', requireSessionAuth, asyncHandler(matrixMessageController.sendDmMessage));
 
 // Creator monetization routes
 app.use('/api/webapp/creator', creatorRoutes);
