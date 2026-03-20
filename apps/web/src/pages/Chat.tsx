@@ -562,6 +562,27 @@ export default function Chat() {
   const isNearBottom = useRef(true);
   const prevScrollHeight = useRef(0);
 
+  // Group members (loaded on chat open for display name/avatar lookup)
+  const [groupMembers, setGroupMembers] = useState<any[]>([]);
+
+  // Member lookup: telegram ID → { name, photoUrl } for resolving Matrix sender IDs
+  const memberLookup = React.useMemo(() => {
+    const map = new Map<string, { name: string; photoUrl: string | null }>();
+    for (const m of groupMembers) {
+      map.set(String(m.user_id), {
+        name: m.first_name || m.username || "User",
+        photoUrl: m.photo_url || null,
+      });
+    }
+    if (user) {
+      map.set(String(user.dbId), {
+        name: user.firstName || user.displayName || "You",
+        photoUrl: user.photoUrl || null,
+      });
+    }
+    return map;
+  }, [groupMembers, user]);
+
   // Matrix room for hangout chat
   const [matrixRoomId, setMatrixRoomId] = useState<string | null>(null);
   const { messages: matrixMessages } = useRoomMessages(matrixRoomId);
@@ -771,27 +792,7 @@ export default function Chat() {
   // Group settings panel
   const [showSettings, setShowSettings] = useState(false);
   const [groupDetail, setGroupDetail] = useState<any>(null);
-  const [groupMembers, setGroupMembers] = useState<any[]>([]);
   const [settingsLoading, setSettingsLoading] = useState(false);
-
-  // Member lookup: telegram ID → { name, photoUrl } for resolving Matrix sender IDs
-  const memberLookup = React.useMemo(() => {
-    const map = new Map<string, { name: string; photoUrl: string | null }>();
-    for (const m of groupMembers) {
-      map.set(String(m.user_id), {
-        name: m.first_name || m.username || "User",
-        photoUrl: m.photo_url || null,
-      });
-    }
-    // Also include the current user (in case they sent a message before members loaded)
-    if (user) {
-      map.set(String(user.dbId), {
-        name: user.firstName || user.displayName || "You",
-        photoUrl: user.photoUrl || null,
-      });
-    }
-    return map;
-  }, [groupMembers, user]);
 
   // Pinned messages
   const [pinnedMessages, setPinnedMessages] = useState<any[]>([]);
