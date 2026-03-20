@@ -153,13 +153,14 @@ else
     exit 1
 fi
 
-# Ensure 9.conf uses 172.17.0.1:3001, not pnptv-bot:3001
-if grep -q "pnptv-bot:3001" "$PROXY_HOST_9"; then
-    warn "9.conf still references pnptv-bot:3001 — patching to 172.17.0.1:3001 ..."
+# Ensure 9.conf uses pnptv-bot:3001, not 172.17.0.1:3001
+# (containers are on proxy_net now, not the default bridge)
+if grep -q "172.17.0.1:3001" "$PROXY_HOST_9"; then
+    warn "9.conf still references 172.17.0.1:3001 — patching to pnptv-bot:3001 ..."
     BACKUP9="${PROXY_HOST_9}.bak.$(date +%s)"
     cp "$PROXY_HOST_9" "$BACKUP9"
     info "Backup saved to $BACKUP9"
-    sed -i 's|http://pnptv-bot:3001|http://172.17.0.1:3001|g' "$PROXY_HOST_9"
+    sed -i 's|http://172.17.0.1:3001|http://pnptv-bot:3001|g' "$PROXY_HOST_9"
     info "Upstream references corrected in 9.conf"
 fi
 
