@@ -41,6 +41,9 @@ dist
 *.md
 logo-final.png
 
+# User uploads (mounted as volume, not needed in image)
+public/uploads
+
 # Backups & misc
 backups
 *.backup*

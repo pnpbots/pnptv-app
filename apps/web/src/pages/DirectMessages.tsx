@@ -935,9 +935,9 @@ function Conversation({
     if (matrixRoomId && matrixEventId) {
       try {
         const entries = matrixReactionsMap.get(matrixEventId);
-        const myUserId = matrixMessages[0]?.senderId?.split(":")[0] || "";
+        const myMatrixId = currentUser?.dbId ? `@pnptv_${currentUser.dbId}:matrix.pnptv.app` : "";
         const existing = entries?.find((e) => e.emoji === emoji);
-        const myEntry = existing?.users.find((u) => u.userId.includes(myUserId));
+        const myEntry = myMatrixId ? existing?.users.find((u) => u.userId === myMatrixId) : undefined;
         if (myEntry) {
           await redactEvent(matrixRoomId, myEntry.reactionEventId);
         } else {
@@ -962,7 +962,7 @@ function Conversation({
     } catch {
       // Silently fail — reaction is non-critical
     }
-  }, []);
+  }, [dmEventIdMap, matrixRoomId, matrixReactionsMap, currentUser?.dbId]);
 
   const limitReached = isFree && dmRemaining !== null && dmRemaining <= 0;
   const canSend = !sending && !limitReached && (msgInput.trim().length > 0 || mediaFile !== null);
@@ -1068,7 +1068,7 @@ function Conversation({
               onReaction={handleDmReaction}
               onReply={matrixRoomId ? setReplyToMsg : undefined}
               replyTo={(msg as DirectMessage & { _replyTo?: { name: string; content: string } })._replyTo || null}
-              currentUserId={currentUser?.dbId ?? undefined}
+              currentUserId={currentUser?.dbId ? `@pnptv_${currentUser.dbId}:matrix.pnptv.app` : undefined}
             />
           ))
         )}

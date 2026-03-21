@@ -321,7 +321,7 @@ const MessageBubble = memo(function MessageBubble({
         {reactions && reactions.length > 0 && (
           <div className={`flex flex-wrap gap-1 mt-1 ${isMe ? "justify-end" : ""}`}>
             {reactions.map((r) => {
-              const myReaction = currentUserId && r.users.some((u) => u.userId === currentUserId || u.userId.includes(currentUserId));
+              const myReaction = currentUserId && r.users.some((u) => u.userId === currentUserId);
               return (
                 <button
                   key={r.emoji}
@@ -701,9 +701,9 @@ export default function Chat() {
     // Matrix event IDs start with "$" — route to Matrix reaction logic
     if (idOrEventId.startsWith("$") && matrixRoomId) {
       const entries = matrixReactions.get(idOrEventId);
-      const myPrefix = user?.dbId ? `@pnptv_${user.dbId}:` : "";
+      const myMatrixId = user?.dbId ? `@pnptv_${user.dbId}:matrix.pnptv.app` : "";
       const existing = entries?.find((e) => e.emoji === emoji);
-      const myEntry = myPrefix ? existing?.users.find((u) => u.userId.startsWith(myPrefix)) : undefined;
+      const myEntry = myMatrixId ? existing?.users.find((u) => u.userId === myMatrixId) : undefined;
       if (myEntry) {
         redactEvent(matrixRoomId, myEntry.reactionEventId).catch(() => {});
       } else {
@@ -1386,12 +1386,14 @@ export default function Chat() {
                     Members
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       setShowGroupMenu(false);
                       setShowSettings(true);
                       setSettingsLoading(true);
-                      loadGroupDetail(activeGroup.id);
-                      loadPins(activeGroup.id);
+                      await Promise.all([
+                        loadGroupDetail(activeGroup.id),
+                        loadPins(activeGroup.id),
+                      ]);
                       setSettingsLoading(false);
                     }}
                     className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
@@ -2044,7 +2046,7 @@ export default function Chat() {
                   userLang={user?.language || "en"}
                   onNavigate={handleNavigate}
                   onExpandImage={handleExpandImage}
-                  currentUserId={user?.dbId != null ? `@pnptv_${user.dbId}:` : undefined}
+                  currentUserId={user?.dbId != null ? `@pnptv_${user.dbId}:matrix.pnptv.app` : undefined}
                   matrixEventId={matrixEventIdMap.get(msg.id) || String(msg.id)}
                   reactions={
                     matrixEventIdMap.get(msg.id)

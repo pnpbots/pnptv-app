@@ -140,9 +140,8 @@ async function synapsePut(path, body, token) {
  * @returns {{ matrixUserId: string, accessToken: string, homeserverUrl: string }}
  */
 async function provisionMatrixUser(user) {
-  // Determine Matrix username from telegram ID (most stable unique identifier)
-  const telegramId  = user.telegram || String(user.id);
-  const matrixName  = `pnptv_${telegramId}`.toLowerCase();
+  // Determine Matrix username from PNPtv user ID (the canonical app identifier)
+  const matrixName  = `pnptv_${user.id}`.toLowerCase();
   const matrixUserId = `@${matrixName}:${MATRIX_SERVER_NAME}`;
 
   // Fast-path: credentials already stored
