@@ -101,7 +101,7 @@ export default function MainStage() {
 
   if (joined && iframeSrc) {
     return (
-      <div className="fixed inset-0 z-50 bg-black flex">
+      <div className="fixed inset-0 z-[34] bg-black flex">
         <Helmet>
           <title>Main Stage | PNPtv</title>
         </Helmet>

@@ -201,11 +201,27 @@ const MessageBubble = memo(function MessageBubble({
   }, [isTranslating, translatedContent, msg.content, userLang]);
 
   // Long-press to show action bar on mobile
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
   const onTouchStart = useCallback((e: React.TouchEvent) => {
-    // Don't start long-press if tapping on an action button
     const target = e.target as HTMLElement;
     if (target.closest('[data-action-bar]')) return;
-    longPressTimer.current = setTimeout(() => setShowActions(true), 400);
+    touchStartPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    longPressTimer.current = setTimeout(() => {
+      setShowActions(true);
+      // Haptic feedback if available
+      try { navigator.vibrate?.(30); } catch {}
+    }, 400);
+  }, []);
+  const onTouchMove = useCallback((e: React.TouchEvent) => {
+    // Cancel long-press if finger moved more than 10px (user is scrolling)
+    if (longPressTimer.current && touchStartPos.current) {
+      const dx = Math.abs(e.touches[0].clientX - touchStartPos.current.x);
+      const dy = Math.abs(e.touches[0].clientY - touchStartPos.current.y);
+      if (dx > 10 || dy > 10) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+    }
   }, []);
   const onTouchEnd = useCallback(() => {
     if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
@@ -240,7 +256,14 @@ const MessageBubble = memo(function MessageBubble({
       {/* Bubble */}
       <div
         className={`max-w-[75%] ${isMe ? "text-right items-end" : "items-start"} flex flex-col group`}
+        onClick={(e) => {
+          // Toggle action bar on tap (mobile-friendly)
+          const target = e.target as HTMLElement;
+          if (target.closest('[data-action-bar]')) return; // Don't toggle if tapping action buttons
+          setShowActions((prev) => !prev);
+        }}
         onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
       >
@@ -561,6 +584,7 @@ export default function Chat() {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottom = useRef(true);
   const prevScrollHeight = useRef(0);
+  const reactionInFlight = useRef(new Set<string>());
 
   // Group members (loaded on chat open for display name/avatar lookup)
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
@@ -587,6 +611,32 @@ export default function Chat() {
   const [matrixRoomId, setMatrixRoomId] = useState<string | null>(null);
   const { messages: matrixMessages } = useRoomMessages(matrixRoomId);
 
+  // Resolve a Matrix user ID to a display name using multiple fallback sources
+  const resolveDisplayName = useCallback((matrixId: string): { name: string; photoUrl: string | null } => {
+    const telegramId = telegramIdFromMatrixId(matrixId);
+
+    // 1. Try groupMembers lookup (PNPtv DB data)
+    const memberInfo = memberLookup.get(telegramId);
+    if (memberInfo && memberInfo.name !== "User") return memberInfo;
+
+    // 2. Try Matrix room member display name from the SDK
+    try {
+      const client = getMatrixClient();
+      if (client && matrixRoomId) {
+        const room = client.getRoom(matrixRoomId);
+        if (room) {
+          const member = room.getMember(matrixId);
+          if (member?.name && member.name !== matrixId) {
+            return { name: member.name, photoUrl: memberInfo?.photoUrl || null };
+          }
+        }
+      }
+    } catch { /* ignore */ }
+
+    // 3. Fallback to member info or telegram ID
+    return memberInfo || { name: telegramId, photoUrl: null };
+  }, [memberLookup, matrixRoomId]);
+
   // Convert Matrix messages to GroupMessage shape for existing MessageBubble components.
   // We use a stable hash of the eventId string as the numeric id field.
   const matrixAsGroupMessages: GroupMessage[] = matrixMessages.map((m) => {
@@ -597,17 +647,17 @@ export default function Chat() {
       hash = (hash * 16777619) >>> 0;
     }
     const senderTelegramId = telegramIdFromMatrixId(m.senderId);
-    const senderInfo = memberLookup.get(senderTelegramId);
+    const senderInfo = resolveDisplayName(m.senderId);
     const replyTelegramId = m.replyToSenderId ? telegramIdFromMatrixId(m.replyToSenderId) : undefined;
-    const replyInfo = replyTelegramId ? memberLookup.get(replyTelegramId) : undefined;
+    const replyInfo = replyTelegramId ? resolveDisplayName(m.replyToSenderId!) : undefined;
     return {
       id: hash,
       room: matrixRoomId ?? "",
       content: m.body,
       user_id: senderTelegramId,
-      username: senderInfo?.name || senderTelegramId,
-      first_name: senderInfo?.name || senderTelegramId,
-      photo_url: senderInfo?.photoUrl || null,
+      username: senderInfo.name,
+      first_name: senderInfo.name,
+      photo_url: senderInfo.photoUrl || null,
       created_at: new Date(m.timestamp).toISOString(),
       media_url: m.mediaUrl ?? null,
       media_type: m.mediaType === "file" ? null : (m.mediaType ?? null),
@@ -617,7 +667,7 @@ export default function Chat() {
       media_height: null,
       // Reply-to from Matrix event relations
       reply_to: m.replyToEventId ? {
-        name: replyInfo?.name || replyTelegramId || "User",
+        name: replyInfo?.name || "User",
         content: m.replyToBody || "[message]",
       } : null,
     } satisfies GroupMessage;
@@ -674,40 +724,48 @@ export default function Chat() {
       return;
     }
 
+    // Debounce: prevent double-sends for the same event+emoji while in flight
+    const flightKey = `${eventId}:${emoji}`;
+    if (reactionInFlight.current.has(flightKey)) return;
+    reactionInFlight.current.add(flightKey);
+
     const entries = matrixReactions.get(eventId);
     const myMatrixId = user?.dbId ? `@pnptv_${user.dbId}:matrix.pnptv.app` : "";
     const existing = entries?.find((e) => e.emoji === emoji);
     const myEntry = myMatrixId ? existing?.users.find((u) => u.userId === myMatrixId) : undefined;
     if (myEntry) {
       // Already reacted — remove (toggle off)
-      redactEvent(matrixRoomId, myEntry.reactionEventId).catch((err) =>
-        console.warn("[Reaction] redact failed:", err));
+      redactEvent(matrixRoomId, myEntry.reactionEventId)
+        .catch((err) => console.warn("[Reaction] redact failed:", err))
+        .finally(() => { reactionInFlight.current.delete(flightKey); });
     } else {
       // Send new reaction — handle duplicate gracefully (toggle off if server says duplicate)
-      sendReaction(matrixRoomId, eventId, emoji).catch((err) => {
-        const errObj = err as { errcode?: string };
-        if (errObj.errcode === "M_DUPLICATE_ANNOTATION") {
-          // Already reacted but local state didn't know — find and redact via timeline
-          console.info("[Reaction] Duplicate detected, toggling off");
-          try {
-            const client = getMatrixClient();
-            if (!client) return;
-            const room = client.getRoom(matrixRoomId);
-            if (!room) return;
-            const timeline = room.getLiveTimeline().getEvents();
-            for (const ev of timeline) {
-              if (ev.getType() !== "m.reaction" || ev.isRedacted()) continue;
-              const rel = ev.getContent()?.["m.relates_to"];
-              if (rel?.event_id === eventId && rel?.key === emoji && ev.getSender() === myMatrixId) {
-                redactEvent(matrixRoomId, ev.getId()!).catch(() => {});
-                break;
+      sendReaction(matrixRoomId, eventId, emoji)
+        .catch((err) => {
+          const errObj = err as { errcode?: string };
+          if (errObj.errcode === "M_DUPLICATE_ANNOTATION") {
+            // Already reacted but local state didn't know — find and redact via timeline
+            console.info("[Reaction] Duplicate detected, toggling off");
+            try {
+              const client = getMatrixClient();
+              if (!client) return;
+              const room = client.getRoom(matrixRoomId);
+              if (!room) return;
+              const timeline = room.getLiveTimeline().getEvents();
+              for (const ev of timeline) {
+                if (ev.getType() !== "m.reaction" || ev.isRedacted()) continue;
+                const rel = ev.getContent()?.["m.relates_to"];
+                if (rel?.event_id === eventId && rel?.key === emoji && ev.getSender() === myMatrixId) {
+                  redactEvent(matrixRoomId, ev.getId()!).catch(() => {});
+                  break;
+                }
               }
-            }
-          } catch { /* best effort */ }
-        } else {
-          console.warn("[Reaction] send failed:", err);
-        }
-      });
+            } catch { /* best effort */ }
+          } else {
+            console.warn("[Reaction] send failed:", err);
+          }
+        })
+        .finally(() => { reactionInFlight.current.delete(flightKey); });
     }
   }, [matrixRoomId, matrixReactions, matrixEventIdMap, user?.dbId]);
 
@@ -1115,7 +1173,7 @@ export default function Chat() {
         clearMedia();
       } else {
         // Text messages go via Matrix (with optional reply-to)
-        sendMessage(text, replyToEventId);
+        await sendMessage(text, replyToEventId);
       }
       // Apply slow mode cooldown for regular members (not creator/mod/admin)
       const slowSecs = groupDetail?.slowModeSeconds;
@@ -1139,7 +1197,7 @@ export default function Chat() {
       setSending(false);
       setReplyToMsg(null);
     }
-  }, [sending, activeGroup, msgInput, mediaFile, clearMedia, sendMessage, replyToMsg, groupDetail, groupMembers, user, t.chat]);
+  }, [sending, activeGroup, msgInput, mediaFile, clearMedia, sendMessage, replyToMsg, groupDetail, groupMembers, user, t.chat, matrixEventIdMap]);
 
   // ─── Slow mode countdown ─────────────────────────────────────────────
   useEffect(() => {
@@ -2117,7 +2175,7 @@ export default function Chat() {
                   onNavigate={handleNavigate}
                   onExpandImage={handleExpandImage}
                   currentUserId={user?.dbId != null ? `@pnptv_${user.dbId}:matrix.pnptv.app` : undefined}
-                  matrixEventId={matrixEventIdMap.get(msg.id) || String(msg.id)}
+                  matrixEventId={matrixEventIdMap.get(msg.id) || undefined}
                   reactions={
                     matrixEventIdMap.get(msg.id)
                       ? matrixReactions.get(matrixEventIdMap.get(msg.id)!) ?? undefined

@@ -538,7 +538,7 @@ export function useRoomReactions(roomId: string | null): {
 
         const buildReactionMap = () => {
           const room = client.getRoom(roomId);
-          if (!room) return;
+          if (!room) { if (!cancelled) setReactions(new Map()); return; }
 
           const map = new Map<string, ReactionEntry[]>();
           const timeline = room.getLiveTimeline().getEvents();

@@ -152,6 +152,14 @@ async function provisionMatrixUser(user) {
       // Verify the token is still valid with a lightweight whoami call
       await synapseGet('/_matrix/client/v3/account/whoami', accessToken);
 
+      // Sync display name (best-effort, non-blocking)
+      const displayName = user.first_name || user.username || matrixName;
+      synapsePut(
+        `/_matrix/client/v3/profile/${encodeURIComponent(matrixUserId)}/displayname`,
+        { displayname: displayName },
+        accessToken
+      ).catch(() => {}); // fire-and-forget
+
       logger.debug(`[Matrix] Reusing existing credentials for user ${user.id} (${matrixUserId})`);
       return { matrixUserId, accessToken, homeserverUrl: MATRIX_PUBLIC_URL };
     } catch (verifyErr) {
