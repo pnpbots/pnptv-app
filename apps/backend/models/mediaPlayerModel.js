@@ -61,33 +61,39 @@ class MediaPlayerModel {
    * @param {number} limit - Number of items to return
    * @returns {Promise<Array>} Media items
    */
-  static async getMediaLibrary(type = 'all', limit = 50) {
+  static async getMediaLibrary(type = 'all', limit = 50, offset = 0) {
     try {
-      const cacheKey = `media:library:${type}`;
+      // Cache only the first page (offset=0) to avoid unbounded cache growth while
+      // still speeding up the initial load which is the common path.
+      const cacheKey = offset === 0 ? `media:library:${type}` : null;
 
-      return await cache.getOrSet(
-        cacheKey,
-        async () => {
-          let query = `
-            SELECT * FROM media_library
-            WHERE is_public = true
-          `;
-          const params = [];
+      const fetch = async () => {
+        let query = `
+          SELECT * FROM media_library
+          WHERE is_public = true
+        `;
+        const params = [];
 
-          if (type !== 'all') {
-            params.push(type);
-            query += ` AND type = $${params.length}`;
-          }
+        if (type !== 'all') {
+          params.push(type);
+          query += ` AND type = $${params.length}`;
+        }
 
-          params.push(limit);
-          query += ` ORDER BY created_at DESC LIMIT $${params.length}`;
+        params.push(limit);
+        query += ` ORDER BY created_at DESC LIMIT $${params.length}`;
 
-          const result = await getPool().query(query, params);
-          logger.info(`Retrieved ${result.rows.length} media items (type: ${type})`);
-          return result.rows;
-        },
-        300, // Cache for 5 minutes
-      );
+        params.push(offset);
+        query += ` OFFSET $${params.length}`;
+
+        const result = await getPool().query(query, params);
+        logger.info(`Retrieved ${result.rows.length} media items (type: ${type}, offset: ${offset})`);
+        return result.rows;
+      };
+
+      if (cacheKey) {
+        return await cache.getOrSet(cacheKey, fetch, 300);
+      }
+      return await fetch();
     } catch (error) {
       logger.error('Error getting media library:', error);
       return [];

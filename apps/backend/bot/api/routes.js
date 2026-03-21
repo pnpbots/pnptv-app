@@ -4561,9 +4561,10 @@ app.post('/api/webapp/radio/request-soundcloud', requireSessionAuth, asyncHandle
 app.get('/api/proxy/media/tracks', requireSessionAuth, asyncHandler(async (req, res) => {
   try {
     const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 20), 100);
+    const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
 
     // Fetch from media_library (SoundCloud etc.)
-    const dbMedia = await MediaPlayerModel.getMediaLibrary('audio', limit);
+    const dbMedia = await MediaPlayerModel.getMediaLibrary('audio', limit, offset);
     const tracks = (dbMedia || []).map(m => ({
       id: `db_${m.id}`,
       title: m.title,

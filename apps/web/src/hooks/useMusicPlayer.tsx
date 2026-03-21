@@ -152,56 +152,52 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
       .finally(() => setIsLoadingTracks(false));
   }, []);
 
-  // Hidden SoundCloud iframe — must exist before Widget API initializes
-  useEffect(() => {
+  // Hidden SoundCloud iframe — created on first use only, not on mount.
+  // Eagerly creating it with a placeholder URL (tracks/1) causes an immediate
+  // 404 from api-widget.soundcloud.com on every page load.
+  // The iframe is instead injected the first time a SoundCloud track is played.
+  const ensureScIframe = useCallback((): HTMLIFrameElement => {
     let iframe = document.getElementById("soundcloud-player") as HTMLIFrameElement | null;
     if (!iframe) {
       iframe = document.createElement("iframe");
       iframe.id = "soundcloud-player";
       iframe.allow = "autoplay";
-      iframe.style.display = "none";
-      iframe.src = "https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/tracks/1";
+      iframe.style.cssText = "display:none;position:absolute;width:0;height:0;border:0;";
+      // Use a silent, generic embed URL with no track pre-loaded so the widget
+      // initializes without issuing any resolve request.
+      iframe.src = "https://w.soundcloud.com/player/?url=https%3A//soundcloud.com&auto_play=false&show_artwork=false";
       document.body.appendChild(iframe);
+      scIframeRef.current = iframe;
     }
-    scIframeRef.current = iframe;
-    return () => {
-      if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
-      scIframeRef.current = null;
-    };
+    return iframe;
   }, []);
 
-  // SoundCloud Widget API loading — initializes widget on the iframe
-  useEffect(() => {
-    const initWidget = () => {
-      if (!scIframeRef.current) return;
-      soundcloudPlayerRef.current = window.SC.Widget(scIframeRef.current);
-      soundcloudPlayerRef.current.bind(window.SC.Widget.Events.FINISH, () => {
-        handleTrackEnd();
-      });
-      soundcloudPlayerRef.current.bind(window.SC.Widget.Events.PLAY, () => setIsPlaying(true));
-      soundcloudPlayerRef.current.bind(window.SC.Widget.Events.PAUSE, () => setIsPlaying(false));
-      soundcloudPlayerRef.current.bind(window.SC.Widget.Events.READY, () => {
-        soundcloudPlayerRef.current.setVolume(volume * 100);
-      });
-    };
-
+  // Lazily load the SoundCloud Widget API script (no iframe yet — deferred until first play).
+  // The script is fetched once; subsequent calls reuse the existing <script> tag.
+  const ensureScApi = useCallback((onReady: () => void) => {
     if (window.SC) {
-      initWidget();
+      onReady();
       return;
     }
-
-    const existing = document.querySelector('script[src*="soundcloud.com/player/api.js"]');
+    const existing = document.querySelector('script[src*="soundcloud.com/player/api.js"]') as HTMLScriptElement | null;
     if (existing) {
-      existing.addEventListener("load", initWidget);
-      return () => existing.removeEventListener("load", initWidget);
+      // Script already in DOM but may still be loading
+      if ((existing as any)._scLoaded) {
+        onReady();
+      } else {
+        existing.addEventListener("load", onReady, { once: true });
+      }
+      return;
     }
-
     const script = document.createElement("script");
     script.src = "https://w.soundcloud.com/player/api.js";
     script.async = true;
-    script.onload = initWidget;
+    script.onload = () => {
+      (script as any)._scLoaded = true;
+      onReady();
+    };
     document.body.appendChild(script);
-  }, [handleTrackEnd, volume]);
+  }, []);
 
   // Poll SoundCloud position/duration
   useEffect(() => {
@@ -234,38 +230,43 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
       if (soundcloudPlayerRef.current) soundcloudPlayerRef.current.pause();
 
       if (track.provider === "soundcloud" && track.url) {
-        const scPlayer = soundcloudPlayerRef.current;
-        if (scPlayer) {
-          scPlayer.load(track.url, {
-            auto_play: true,
-            show_artwork: true,
-            callback: () => {
-              if (gen !== playGenRef.current) return;
-              setIsPlaying(true);
-              setIsLoading(false);
-              scPlayer.setVolume(volume * 100);
-            }
-          });
-        } else {
-          // Widget not ready yet — retry after a short delay
-          setTimeout(() => {
+        const trackUrl = track.url;
+        // Ensure the API script is loaded, then ensure the iframe exists and bind the widget.
+        ensureScApi(() => {
+          if (gen !== playGenRef.current) return;
+          const iframe = ensureScIframe();
+
+          const initAndPlay = () => {
             if (gen !== playGenRef.current) return;
-            const retryPlayer = soundcloudPlayerRef.current;
-            if (retryPlayer) {
-              retryPlayer.load(track.url!, {
-                auto_play: true,
-                callback: () => {
-                  if (gen !== playGenRef.current) return;
-                  setIsPlaying(true);
-                  setIsLoading(false);
-                  retryPlayer.setVolume(volume * 100);
-                }
+            // If widget not yet bound to this iframe, create it now.
+            if (!soundcloudPlayerRef.current) {
+              soundcloudPlayerRef.current = window.SC.Widget(iframe);
+              soundcloudPlayerRef.current.bind(window.SC.Widget.Events.FINISH, () => handleTrackEnd());
+              soundcloudPlayerRef.current.bind(window.SC.Widget.Events.PLAY, () => setIsPlaying(true));
+              soundcloudPlayerRef.current.bind(window.SC.Widget.Events.PAUSE, () => setIsPlaying(false));
+              soundcloudPlayerRef.current.bind(window.SC.Widget.Events.READY, () => {
+                soundcloudPlayerRef.current?.setVolume(volume * 100);
               });
-            } else {
-              setIsLoading(false);
             }
-          }, 1500);
-        }
+            soundcloudPlayerRef.current.load(trackUrl, {
+              auto_play: true,
+              show_artwork: true,
+              callback: () => {
+                if (gen !== playGenRef.current) return;
+                setIsPlaying(true);
+                setIsLoading(false);
+                soundcloudPlayerRef.current?.setVolume(volume * 100);
+              },
+            });
+          };
+
+          // The iframe needs a moment to load its own document before SC.Widget can bind to it.
+          if (iframe.contentWindow && iframe.contentDocument?.readyState === "complete") {
+            initAndPlay();
+          } else {
+            iframe.addEventListener("load", initAndPlay, { once: true });
+          }
+        });
       } else if (track.url && (track.url.startsWith("http") || track.url.startsWith("/"))) {
         // Direct URL playback (non-SoundCloud with a playable URL)
         audio.src = track.url;
@@ -278,7 +279,7 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
     } catch {
       if (gen === playGenRef.current) setIsLoading(false);
     }
-  }, [volume]);
+  }, [volume, ensureScApi, ensureScIframe, handleTrackEnd]);
 
   const play = useCallback((track?: MediaTrack, playlist?: MediaTrack[]) => {
     if (playlist) {
