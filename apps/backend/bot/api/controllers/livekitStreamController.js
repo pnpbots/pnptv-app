@@ -156,19 +156,51 @@ const listStreams = async (req, res) => {
       userMap[u.live_channel] = u;
     }
 
+    // Fetch stream metadata and thumbnails from Redis (best-effort)
+    const metaMap = {};
+    const thumbMap = {};
+    try {
+      const { getRedis } = require('../../../config/redis');
+      const redis = getRedis();
+      if (redis && channelRefs.length > 0) {
+        const metaKeys = channelRefs.map(ref => `stream:meta:${ref}`);
+        const thumbKeys = channelRefs.map(ref => `stream:thumb:${ref}`);
+        const [metaValues, thumbValues] = await Promise.all([
+          redis.mget(...metaKeys),
+          redis.mget(...thumbKeys),
+        ]);
+        channelRefs.forEach((ref, i) => {
+          if (metaValues[i]) {
+            try { metaMap[ref] = JSON.parse(metaValues[i]); } catch { /* ignore */ }
+          }
+          if (thumbValues[i]) {
+            thumbMap[ref] = thumbValues[i];
+          }
+        });
+      }
+    } catch (redisErr) {
+      logger.warn('listStreams: failed to fetch stream metadata from Redis (non-fatal)', { error: redisErr.message });
+    }
+
     const enriched = streams.map(s => {
       const u = userMap[s.channelRef];
+      const meta = metaMap[s.channelRef];
+      const displayName = u
+        ? ([u.first_name, u.last_name].filter(Boolean).join(' ') || u.username || 'Streamer')
+        : 'Live Stream';
       return {
         id: s.channelRef,
         channelRef: s.channelRef,
-        name: u
-          ? ([u.first_name, u.last_name].filter(Boolean).join(' ') || u.username || 'Streamer')
-          : 'Live Stream',
-        description: u?.bio || '',
+        // Stream title from Redis overrides performer display name when set
+        name: meta && meta.title ? meta.title : displayName,
+        description: (meta && meta.description) ? meta.description : (u && u.bio ? u.bio : ''),
+        tags: (meta && Array.isArray(meta.tags)) ? meta.tags : [],
+        thumbnailUrl: thumbMap[s.channelRef] || null,
         isLive: s.isLive,
         viewerCount: Math.max(0, s.participantCount - 1), // subtract the streamer
-        userId: u?.id || null,
-        photoUrl: u?.photo_file_id || null,
+        userId: u ? u.id : null,
+        photoUrl: u ? u.photo_file_id : null,
+        performerName: displayName,
         // No hlsUrl — WebRTC only (HLS fallback handled by LiveKit automatically)
       };
     });

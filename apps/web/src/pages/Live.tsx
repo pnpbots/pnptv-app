@@ -534,11 +534,20 @@ export default function Live() {
                   className="rounded-xl border border-red-500/50 ring-1 ring-red-500/20 bg-pnp-surface p-3 flex flex-col items-center text-center"
                 >
                   <div className="relative">
-                    <div className="w-20 h-20 rounded-full mb-2 border-2 border-red-500 bg-pnp-border flex items-center justify-center">
-                      <svg className="w-8 h-8 text-red-500/70" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z" />
-                      </svg>
-                    </div>
+                    {s.thumbnailUrl ? (
+                      <img
+                        src={s.thumbnailUrl}
+                        alt={s.name}
+                        className="w-20 h-20 rounded-full object-cover mb-2 border-2 border-red-500"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    ) : (
+                      <div className="w-20 h-20 rounded-full mb-2 border-2 border-red-500 bg-pnp-border flex items-center justify-center">
+                        <svg className="w-8 h-8 text-red-500/70" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z" />
+                        </svg>
+                      </div>
+                    )}
                     <span className="absolute -top-1 -right-1 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
                       <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                       LIVE
@@ -548,6 +557,15 @@ export default function Live() {
                   {s.description ? (
                     <span className="text-[10px] text-pnp-textSecondary mt-0.5 line-clamp-1">{s.description}</span>
                   ) : null}
+                  {s.tags && s.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 justify-center mt-1">
+                      {s.tags.slice(0, 2).map((tag) => (
+                        <span key={tag} className="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-pnp-surface border border-pnp-border text-pnp-textSecondary">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <button
                     onClick={() => navigate(`/live/${s.id}`)}
                     className="mt-2 w-full py-1.5 rounded-lg font-semibold text-xs active:scale-95 transition-all text-white bg-red-500 hover:bg-red-600"

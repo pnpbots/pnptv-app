@@ -2905,6 +2905,17 @@ app.post('/api/webapp/live/acknowledge-rules', requireSessionAuth, asyncHandler(
 const webappLiveController = require('./controllers/webappLiveController');
 app.get('/api/webapp/live/streams', requireSessionAuth, requireMemberTier, asyncHandler(webappLiveController.listStreams));
 app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLiveController.getRtmpKey));
+// Raid: creator sends all viewers to another live stream
+app.post('/api/webapp/live/raid', requireSessionAuth, asyncHandler(webappLiveController.initiateRaid));
+// Host mode: embed another channel's stream when offline
+app.get('/api/webapp/live/host', requireSessionAuth, asyncHandler(webappLiveController.getHostedChannel));
+app.post('/api/webapp/live/host', requireSessionAuth, asyncHandler(webappLiveController.setHostedChannel));
+// Stream schedule: upcoming broadcasts for the next 7 days (Redis-cached 5 min)
+app.get('/api/webapp/live/schedule', requireSessionAuth, asyncHandler(webappLiveController.getSchedule));
+// Stream schedule notifications: subscribe/unsubscribe/check for a slot
+app.post('/api/webapp/live/schedule/notify', requireSessionAuth, asyncHandler(webappLiveController.subscribeScheduleNotify));
+app.delete('/api/webapp/live/schedule/notify', requireSessionAuth, asyncHandler(webappLiveController.unsubscribeScheduleNotify));
+app.get('/api/webapp/live/schedule/notify/:slotId', requireSessionAuth, asyncHandler(webappLiveController.checkScheduleNotify));
 // Admin: manage Restreamer channel assignments
 app.get('/api/webapp/admin/live/channels', adminGuard, asyncHandler(webappLiveController.listChannels));
 app.post('/api/webapp/admin/live/assign-channel', adminGuard, asyncHandler(webappLiveController.assignChannel));

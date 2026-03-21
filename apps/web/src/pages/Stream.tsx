@@ -16,6 +16,10 @@ import {
   getAllPerformers,
   getWebRTCStreams,
   getWebRTCStreamStatus,
+  getWebAppLiveStreams,
+  initiateRaid,
+  setHostedChannel,
+  getHostedChannel,
   sendTip,
   TIP_AMOUNTS,
   getStreamOverlayPublic,
@@ -24,6 +28,7 @@ import {
   assertPaymentUrl,
   getDashPaymentDetails,
   type LiveStream,
+  type LiveStreamWithHost,
   type RecentTip,
   type StreamOverlay,
   getRecentTips,
@@ -41,7 +46,7 @@ export default function Stream() {
   const { streamId } = useParams<{ streamId: string }>();
   const navigate = useNavigate();
   const t = useI18n();
-  const { isAuthenticated, login } = useAuth();
+  const { isAuthenticated, login, user } = useAuth();
 
   const [stream, setStream] = useState<LiveStream | null>(null);
   const [useWebRTC, setUseWebRTC] = useState(false);
@@ -83,6 +88,21 @@ export default function Stream() {
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
   const [showTopUp, setShowTopUp] = useState(false);
 
+  // ── Raid state ──────────────────────────────────────────────────────────────
+  const [raidCountdown, setRaidCountdown] = useState<number | null>(null);
+  const [showRaidPicker, setShowRaidPicker] = useState(false);
+  const [raidTargetStreams, setRaidTargetStreams] = useState<LiveStreamWithHost[]>([]);
+  const [raidPickerLoading, setRaidPickerLoading] = useState(false);
+  const [raidError, setRaidError] = useState<string | null>(null);
+  const raidCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Host mode state ────────────────────────────────────────────────────────
+  const [hostedChannelRef, setHostedChannelRef] = useState<string | null>(null);
+  const [hostedStream, setHostedStream] = useState<LiveStreamWithHost | null>(null);
+  const [showHostPicker, setShowHostPicker] = useState(false);
+  const [hostPickerLoading, setHostPickerLoading] = useState(false);
+  const [hostError, setHostError] = useState<string | null>(null);
+
   const {
     messages: chatMessages,
     viewerCount: socketViewerCount,
@@ -92,6 +112,9 @@ export default function Stream() {
     latestTip,
     walletBalance: socketBalance,
     socketError,
+    raidEvent,
+    dismissRaid,
+    emitRaid,
   } = useLiveSocket(streamId || null);
 
   // Load initial balance
@@ -349,6 +372,154 @@ export default function Stream() {
     }
     setRulesAcknowledged(true);
   }, []);
+
+  // ── Raid: drive countdown and auto-navigate when a raid event arrives ────────
+  useEffect(() => {
+    if (!raidEvent) {
+      if (raidCountdownRef.current) {
+        clearInterval(raidCountdownRef.current);
+        raidCountdownRef.current = null;
+      }
+      setRaidCountdown(null);
+      return;
+    }
+    setRaidCountdown(5);
+    if (raidCountdownRef.current) clearInterval(raidCountdownRef.current);
+    raidCountdownRef.current = setInterval(() => {
+      setRaidCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          if (raidCountdownRef.current) {
+            clearInterval(raidCountdownRef.current);
+            raidCountdownRef.current = null;
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => {
+      if (raidCountdownRef.current) {
+        clearInterval(raidCountdownRef.current);
+        raidCountdownRef.current = null;
+      }
+    };
+  }, [raidEvent]);
+
+  // Auto-navigate when countdown reaches 0
+  useEffect(() => {
+    if (raidCountdown !== 0 || !raidEvent) return;
+    navigate(`/stream/${encodeURIComponent(raidEvent.targetChannelRef)}`);
+    dismissRaid();
+  }, [raidCountdown, raidEvent, navigate, dismissRaid]);
+
+  // Whether the current user is a creator/admin (controls raid + host UI visibility)
+  const isStreamOwner = !!(user && ['model', 'creator', 'admin', 'superadmin'].includes(user.role));
+
+  // ── Host mode: load current hosted channel on mount (creator only) ─────────
+  useEffect(() => {
+    if (!isStreamOwner) return;
+    getHostedChannel()
+      .then((data) => {
+        if (data.success) setHostedChannelRef(data.hosting);
+      })
+      .catch(() => {});
+  }, [isStreamOwner]);
+
+  // ── Host mode: resolve hosted stream info when hostedChannelRef changes ─────
+  useEffect(() => {
+    if (!hostedChannelRef) {
+      setHostedStream(null);
+      return;
+    }
+    getWebAppLiveStreams()
+      .then((data) => {
+        const target = (data.streams || []).find((s: LiveStreamWithHost) => s.id === hostedChannelRef);
+        if (target) {
+          setHostedStream(target);
+        } else {
+          const publicBase = (import.meta.env.VITE_RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
+          setHostedStream({
+            id: hostedChannelRef,
+            name: hostedChannelRef.replace(/^pnptv-/, '').replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+            description: '',
+            hlsUrl: `${publicBase}/memfs/${hostedChannelRef}.m3u8`,
+            isLive: false,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [hostedChannelRef]);
+
+  const handleOpenRaidPicker = useCallback(async () => {
+    setShowRaidPicker(true);
+    setRaidPickerLoading(true);
+    setRaidError(null);
+    try {
+      const data = await getWebAppLiveStreams();
+      const currentRef = streamId ? extractChannelRef(streamId) : null;
+      const others = (data.streams || []).filter(
+        (s: LiveStreamWithHost) => s.isLive && s.id !== streamId && s.id !== currentRef
+      );
+      setRaidTargetStreams(others);
+    } catch {
+      setRaidError('Failed to load live streams');
+    } finally {
+      setRaidPickerLoading(false);
+    }
+  }, [streamId]);
+
+  const handleRaid = useCallback(
+    async (targetRef: string) => {
+      setShowRaidPicker(false);
+      setRaidError(null);
+      try {
+        const result = await initiateRaid(targetRef);
+        if (!result.success) {
+          setRaidError(result.error || 'Raid failed');
+        }
+        // Also emit via socket for instant delivery
+        if (streamId) emitRaid(streamId, targetRef);
+      } catch (err) {
+        setRaidError(err instanceof Error ? err.message : 'Raid failed');
+      }
+    },
+    [streamId, emitRaid]
+  );
+
+  const handleOpenHostPicker = useCallback(async () => {
+    setShowHostPicker(true);
+    setHostPickerLoading(true);
+    setHostError(null);
+    try {
+      const data = await getWebAppLiveStreams();
+      const currentRef = streamId ? extractChannelRef(streamId) : null;
+      setRaidTargetStreams((data.streams || []).filter(
+        (s: LiveStreamWithHost) => s.id !== streamId && s.id !== currentRef
+      ));
+    } catch {
+      setHostError('Failed to load streams');
+    } finally {
+      setHostPickerLoading(false);
+    }
+  }, [streamId]);
+
+  const handleSetHost = useCallback(
+    async (targetRef: string | null) => {
+      setShowHostPicker(false);
+      setHostError(null);
+      try {
+        const result = await setHostedChannel(targetRef);
+        if (result.success) {
+          setHostedChannelRef(result.hosting);
+        } else {
+          setHostError(result.error || 'Failed to set hosted channel');
+        }
+      } catch (err) {
+        setHostError(err instanceof Error ? err.message : 'Failed to set hosted channel');
+      }
+    },
+    []
+  );
 
   // Load recent tips
   const loadTips = useCallback(() => {
@@ -617,6 +788,53 @@ export default function Stream() {
         <LiveRulesModal onAcknowledge={handleAcknowledgeRules} />
       )}
 
+      {/* ── Raid notification overlay ─────────────────────────────────────────
+           Shown to all viewers when the streamer initiates a raid.
+           Counts down 5s then auto-redirects; viewer can dismiss to stay. */}
+      {raidEvent && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          role="alertdialog"
+          aria-live="assertive"
+          aria-label="Raid in progress"
+        >
+          <div className="relative w-full max-w-sm mx-4 rounded-2xl bg-pnp-surface border border-pnp-border shadow-2xl overflow-hidden">
+            <div className="h-1 w-full bg-gradient-to-r from-pnp-accent via-purple-500 to-pink-500 animate-pulse" />
+            <div className="px-6 py-8 flex flex-col items-center gap-4 text-center">
+              <div className="text-4xl" aria-hidden="true">🎉</div>
+              <div>
+                <p className="text-base font-bold text-pnp-textPrimary">Raiding!</p>
+                <p className="text-sm text-pnp-textSecondary mt-1">
+                  Redirecting to{" "}
+                  <span className="text-pnp-accent font-semibold">{raidEvent.targetName}</span>
+                </p>
+              </div>
+              <div className="relative flex items-center justify-center w-16 h-16">
+                <svg className="absolute inset-0 -rotate-90" viewBox="0 0 64 64" aria-hidden="true">
+                  <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" strokeWidth="4" className="text-pnp-border" />
+                  <circle
+                    cx="32" cy="32" r="28"
+                    fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round"
+                    className="text-pnp-accent transition-all duration-1000"
+                    strokeDasharray={`${2 * Math.PI * 28}`}
+                    strokeDashoffset={`${2 * Math.PI * 28 * (1 - (raidCountdown ?? 5) / 5)}`}
+                  />
+                </svg>
+                <span className="text-2xl font-bold text-pnp-textPrimary tabular-nums">
+                  {raidCountdown ?? 5}
+                </span>
+              </div>
+              <button
+                onClick={dismissRaid}
+                className="px-5 py-2 rounded-lg bg-pnp-surface border border-pnp-border text-xs font-semibold text-pnp-textSecondary hover:text-pnp-textPrimary hover:border-pnp-accent/40 transition-colors active:scale-95"
+              >
+                Stay here
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Back link + share */}
       <div className="flex items-center justify-between">
         <button onClick={() => navigate("/live")} className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors">
@@ -641,6 +859,49 @@ export default function Stream() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
             </svg>
           </button>
+          {/* Raid button — only visible to the stream owner while live */}
+          {isStreamOwner && stream.isLive && (
+            <div className="relative">
+              <button
+                onClick={handleOpenRaidPicker}
+                className="flex items-center gap-1 h-8 px-2.5 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-400 hover:bg-purple-500/30 transition-colors active:scale-95 text-[10px] font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
+                aria-label="Raid another stream"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                </svg>
+                Raid
+              </button>
+              {showRaidPicker && (
+                <div className="absolute right-0 top-10 z-50 w-56 rounded-xl bg-pnp-surface border border-pnp-border shadow-2xl overflow-hidden">
+                  <div className="px-3 py-2 border-b border-pnp-border flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-pnp-textPrimary">Raid a live stream</span>
+                    <button onClick={() => setShowRaidPicker(false)} className="text-pnp-textSecondary hover:text-pnp-textPrimary text-xs" aria-label="Close">✕</button>
+                  </div>
+                  {raidPickerLoading ? (
+                    <div className="flex items-center justify-center py-6">
+                      <span className="w-5 h-5 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  ) : raidTargetStreams.length === 0 ? (
+                    <p className="text-[11px] text-pnp-textSecondary text-center py-5 px-3">No other streams are live right now.</p>
+                  ) : (
+                    <ul className="max-h-48 overflow-y-auto divide-y divide-pnp-border">
+                      {raidTargetStreams.map((s) => (
+                        <li key={s.id}>
+                          <button onClick={() => handleRaid(s.id)} className="w-full text-left px-3 py-2.5 hover:bg-pnp-surfaceHover transition-colors group">
+                            <div className="flex items-center gap-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+                              <span className="text-xs font-medium text-pnp-textPrimary group-hover:text-pnp-accent truncate">{s.name}</span>
+                            </div>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -717,8 +978,113 @@ export default function Stream() {
           {stream.description && (
             <p className="text-xs text-white/60 mt-1">{stream.description}</p>
           )}
+          {stream.tags && stream.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {stream.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="px-1.5 py-0.5 rounded-full text-[9px] font-medium text-white/70 border border-white/20"
+                  style={{ background: "rgba(255,255,255,0.08)" }}
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* ── Host mode banner — shown when offline but hosting another channel ── */}
+      {!stream.isLive && hostedStream && (
+        <div className="rounded-xl border border-pnp-accent/30 bg-pnp-accent/5 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <svg className="w-4 h-4 text-pnp-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
+            </svg>
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold text-pnp-textPrimary">
+                Hosting <span className="text-pnp-accent">{hostedStream.name}</span>
+              </p>
+              {!hostedStream.isLive && (
+                <p className="text-[10px] text-pnp-textSecondary">Hosted stream is currently offline</p>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => navigate(`/stream/${encodeURIComponent(hostedStream.id)}`)}
+            className="flex-shrink-0 px-3 py-1.5 rounded-lg btn-gradient text-white text-[10px] font-semibold active:scale-95"
+          >
+            Watch
+          </button>
+        </div>
+      )}
+
+      {/* ── Offline streamer controls — Host mode selector ─────────────────── */}
+      {isStreamOwner && stream && !stream.isLive && (
+        <div className="rounded-xl border border-pnp-border bg-pnp-surface px-4 py-3 space-y-3">
+          <p className="text-[11px] font-semibold text-pnp-textPrimary">Streamer Controls</p>
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-pnp-textPrimary">Host Mode</p>
+              <p className="text-[10px] text-pnp-textSecondary">
+                {hostedChannelRef
+                  ? `Hosting: ${hostedStream?.name || hostedChannelRef}`
+                  : 'Show another stream while offline'}
+              </p>
+            </div>
+            <div className="flex gap-1.5 flex-shrink-0">
+              {hostedChannelRef && (
+                <button
+                  onClick={() => handleSetHost(null)}
+                  className="px-2.5 py-1.5 rounded-lg text-[10px] font-semibold border border-pnp-border text-pnp-textSecondary hover:text-red-400 hover:border-red-400/40 transition-colors active:scale-95"
+                >
+                  Clear
+                </button>
+              )}
+              <div className="relative">
+                <button
+                  onClick={handleOpenHostPicker}
+                  className="px-3 py-1.5 rounded-lg text-[10px] font-semibold bg-pnp-accent/20 border border-pnp-accent/40 text-pnp-accent hover:bg-pnp-accent/30 transition-colors active:scale-95"
+                >
+                  {hostedChannelRef ? 'Change' : 'Set Host'}
+                </button>
+                {showHostPicker && (
+                  <div className="absolute right-0 top-9 z-50 w-56 rounded-xl bg-pnp-surface border border-pnp-border shadow-2xl overflow-hidden">
+                    <div className="px-3 py-2 border-b border-pnp-border flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-pnp-textPrimary">Select stream to host</span>
+                      <button onClick={() => setShowHostPicker(false)} className="text-pnp-textSecondary hover:text-pnp-textPrimary text-xs" aria-label="Close">✕</button>
+                    </div>
+                    {hostPickerLoading ? (
+                      <div className="flex items-center justify-center py-6">
+                        <span className="w-5 h-5 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    ) : raidTargetStreams.length === 0 ? (
+                      <p className="text-[11px] text-pnp-textSecondary text-center py-5 px-3">No other streams available.</p>
+                    ) : (
+                      <ul className="max-h-48 overflow-y-auto divide-y divide-pnp-border">
+                        {raidTargetStreams.map((s) => (
+                          <li key={s.id}>
+                            <button onClick={() => handleSetHost(s.id)} className="w-full text-left px-3 py-2.5 hover:bg-pnp-surfaceHover transition-colors group">
+                              <div className="flex items-center gap-2">
+                                {s.isLive && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />}
+                                <span className="text-xs font-medium text-pnp-textPrimary group-hover:text-pnp-accent truncate">{s.name}</span>
+                                {s.isLive && <span className="ml-auto flex-shrink-0 text-[9px] font-bold text-red-400">LIVE</span>}
+                              </div>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          {(raidError || hostError) && (
+            <p className="text-[10px] text-red-400">{raidError || hostError}</p>
+          )}
+        </div>
+      )}
 
       {/* Reconnecting indicator — shown when socket drops and is attempting to reconnect */}
       {chatReconnecting && !chatConnected && (

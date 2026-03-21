@@ -544,6 +544,7 @@ export default function Chat() {
   const [discoverList, setDiscoverList] = useState<DiscoverGroup[]>([]);
   const [showDiscover, setShowDiscover] = useState(false);
   const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverTagFilter, setDiscoverTagFilter] = useState<string | null>(null);
 
   // Join requests management (for creators)
   const [joinRequests, setJoinRequests] = useState<Record<number, JoinRequest[]>>({});
@@ -774,6 +775,9 @@ export default function Chat() {
   const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
   const [eventKey, setEventKey] = useState(0);
+
+  // Slow mode cooldown (seconds remaining after sending a message)
+  const [slowModeCooldown, setSlowModeCooldown] = useState(0);
 
   // ─── Group list loading ─────────────────────────────────────────────
 
@@ -1088,6 +1092,18 @@ export default function Chat() {
         // Text messages go via Matrix (with optional reply-to)
         sendMessage(text, replyToEventId);
       }
+      // Apply slow mode cooldown for regular members (not creator/mod/admin)
+      const slowSecs = groupDetail?.slowModeSeconds;
+      if (slowSecs && slowSecs > 0) {
+        const senderMember = groupMembers.find((m: any) => String(m.user_id) === String(user?.dbId));
+        const isPrivileged =
+          String(activeGroup.creatorId) === String(user?.dbId) ||
+          senderMember?.role === "moderator" ||
+          senderMember?.role === "owner";
+        if (!isPrivileged) {
+          setSlowModeCooldown(slowSecs);
+        }
+      }
     } catch (err) {
       if (!hasMediaFile) setMsgInput(text);
       setUploadError(
@@ -1098,7 +1114,22 @@ export default function Chat() {
       setSending(false);
       setReplyToMsg(null);
     }
-  }, [sending, activeGroup, msgInput, mediaFile, clearMedia, sendMessage, replyToMsg, t.chat]);
+  }, [sending, activeGroup, msgInput, mediaFile, clearMedia, sendMessage, replyToMsg, groupDetail, groupMembers, user, t.chat]);
+
+  // ─── Slow mode countdown ─────────────────────────────────────────────
+  useEffect(() => {
+    if (slowModeCooldown <= 0) return;
+    const interval = setInterval(() => {
+      setSlowModeCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [slowModeCooldown]);
 
   // ─── Video call ─────────────────────────────────────────────────────
 
@@ -1230,7 +1261,18 @@ export default function Chat() {
   // ─── Chat View ────────────────────────────────────────────────────────
 
   if (view === "chat" && activeGroup) {
-    const canSend = !sending && (msgInput.trim().length > 0 || mediaFile !== null);
+    // Derive current user's member record and enforce group settings
+    const myMember = groupMembers.find((m: any) => String(m.user_id) === String(user?.dbId));
+    const isOwnerOrMod =
+      String(activeGroup.creatorId) === String(user?.dbId) ||
+      myMember?.role === "moderator" ||
+      myMember?.role === "owner" ||
+      isAdmin;
+    const isMuted = myMember?.is_muted === true;
+    const mutedUntil: string | null = myMember?.muted_until ?? null;
+    const isReadOnly = groupDetail?.isReadOnly === true && !isOwnerOrMod;
+    const isSlowModeActive = slowModeCooldown > 0 && !isOwnerOrMod;
+    const canSend = !sending && !isSlowModeActive && (msgInput.trim().length > 0 || mediaFile !== null);
     const showCallBanner = !callMeetingUrl && callState.isActive;
 
     return (
@@ -2087,50 +2129,90 @@ export default function Chat() {
         {/* Input bar — relative + z-50 ensures it stacks above any fixed
             floating widgets (e.g. CristinaWidget FAB) that share the same
             bottom region of the viewport on mobile. */}
-        <div className="relative z-50 px-4 py-3 border-t border-pnp-border flex-shrink-0 bg-pnp-background">
-          <div className="flex items-center gap-2">
-            {/* Media upload button */}
-            <MediaUploadButton
-              onFileSelect={handleFileSelect}
-              onError={handleFileError}
-              disabled={sending}
-            />
-
-            {/* Text input */}
-            <input
-              value={msgInput}
-              onChange={(e) => {
-                setMsgInput(e.target.value);
-                emitTyping();
-              }}
-              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-              placeholder={mediaFile ? t.chat.addACaption : t.chat.typeAMessage}
-              className="flex-1 bg-white/5 rounded-full px-4 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 min-w-0 transition-colors"
-              maxLength={2000}
-              disabled={sending}
-              aria-label="Message input"
-            />
-
-            {/* Send button */}
-            <button
-              onClick={handleSend}
-              disabled={!canSend}
-              className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
-              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-              aria-label={t.chat.sendMessage}
-            >
-              {sending ? (
-                <svg className="w-4 h-4 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        <div className="relative z-50 border-t border-pnp-border flex-shrink-0 bg-pnp-background">
+          {isReadOnly ? (
+            /* Read-only mode: group is read-only and current user is not owner/mod */
+            <div className="px-4 py-3 flex items-center justify-center">
+              <div className="w-full rounded-full bg-white/5 px-4 py-2.5 flex items-center justify-center gap-2">
+                <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                 </svg>
-              ) : (
-                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                <span className="text-sm text-pnp-textSecondary">This group is read-only</span>
+              </div>
+            </div>
+          ) : isMuted ? (
+            /* Muted: current user is muted in this group */
+            <div className="px-4 py-3 flex items-center justify-center">
+              <div className="w-full rounded-full bg-white/5 px-4 py-2.5 flex items-center justify-center gap-2">
+                <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
                 </svg>
-              )}
-            </button>
-          </div>
+                <span className="text-sm text-pnp-textSecondary">
+                  You are muted
+                  {mutedUntil
+                    ? ` until ${new Date(mutedUntil).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
+                    : ""}
+                </span>
+              </div>
+            </div>
+          ) : (
+            /* Normal input area */
+            <div className="px-4 py-3">
+              <div className="flex items-center gap-2">
+                {/* Media upload button — hidden when group has allowMedia set to false */}
+                {groupDetail?.allowMedia !== false && (
+                  <MediaUploadButton
+                    onFileSelect={handleFileSelect}
+                    onError={handleFileError}
+                    disabled={sending}
+                  />
+                )}
+
+                {/* Text input */}
+                <input
+                  value={msgInput}
+                  onChange={(e) => {
+                    setMsgInput(e.target.value);
+                    emitTyping();
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+                  placeholder={
+                    isSlowModeActive
+                      ? `Slow mode \u2014 wait ${slowModeCooldown}s`
+                      : mediaFile
+                      ? t.chat.addACaption
+                      : t.chat.typeAMessage
+                  }
+                  className="flex-1 bg-white/5 rounded-full px-4 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 min-w-0 transition-colors"
+                  maxLength={2000}
+                  disabled={sending || isSlowModeActive}
+                  aria-label="Message input"
+                />
+
+                {/* Send button */}
+                <button
+                  onClick={handleSend}
+                  disabled={!canSend}
+                  className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                  aria-label={t.chat.sendMessage}
+                >
+                  {sending ? (
+                    <svg className="w-4 h-4 text-white animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  ) : isSlowModeActive ? (
+                    <span className="text-white text-xs font-bold tabular-nums">{slowModeCooldown}s</span>
+                  ) : (
+                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* In-app confirmation modal */}
@@ -2438,6 +2520,16 @@ export default function Chat() {
                       </span>
                     )}
                   </div>
+                  {!group.isMain && !group.isWallOfFame && group.description && (
+                    <p className="text-[10px] text-pnp-textSecondary truncate mt-0.5">{group.description}</p>
+                  )}
+                  {!group.isMain && !group.isWallOfFame && (group.tags || []).length > 0 && (
+                    <div className="flex flex-wrap gap-0.5 mt-0.5">
+                      {(group.tags || []).slice(0, 3).map((tag: string) => (
+                        <span key={tag} className="px-1.5 py-0.5 rounded-full text-[9px] bg-white/10 text-pnp-textSecondary">{tag}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -2497,50 +2589,80 @@ export default function Chat() {
             ) : discoverList.length === 0 ? (
               <p className="text-sm text-pnp-textSecondary text-center py-4">No public groups to join yet.</p>
             ) : (
-              discoverList.map((group) => (
-                <div key={group.id} className="glass-card-sm p-4">
-                  <div className="flex gap-3 items-center">
-                    <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                      style={{ background: "rgba(212, 0, 122, 0.2)", color: "#D4007A" }}
+              <>
+                {/* Tag filter row */}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {["chill", "party", "dating", "music", "gaming", "art", "fitness", "travel"].map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => setDiscoverTagFilter(discoverTagFilter === tag ? null : tag)}
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-medium transition-all active:scale-95 ${
+                        discoverTagFilter === tag
+                          ? "bg-pnp-accent text-white"
+                          : "bg-white/10 text-pnp-textSecondary hover:bg-white/20"
+                      }`}
                     >
-                      {(group.name?.[0] || "?").toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-pnp-textPrimary text-sm truncate">{group.name}</span>
-                        {!group.isPublic && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary flex-shrink-0">
-                            {t.chat.labelPrivate}
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+                {discoverList
+                  .filter((g) => !discoverTagFilter || (g.tags || []).includes(discoverTagFilter))
+                  .map((group) => (
+                    <div key={group.id} className="glass-card-sm p-4">
+                      <div className="flex gap-3 items-center">
+                        <div
+                          className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                          style={{ background: "rgba(212, 0, 122, 0.2)", color: "#D4007A" }}
+                        >
+                          {(group.name?.[0] || "?").toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-pnp-textPrimary text-sm truncate">{group.name}</span>
+                            {!group.isPublic && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary flex-shrink-0">
+                                {t.chat.labelPrivate}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-pnp-textSecondary truncate mt-0.5">
+                            {group.memberCount} {group.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}
+                          </p>
+                          {group.description && (
+                            <p className="text-[10px] text-pnp-textSecondary truncate mt-0.5">{group.description}</p>
+                          )}
+                          {(group.tags || []).length > 0 && (
+                            <div className="flex flex-wrap gap-0.5 mt-1">
+                              {(group.tags || []).slice(0, 3).map((tag: string) => (
+                                <span key={tag} className="px-1.5 py-0.5 rounded-full text-[9px] bg-white/10 text-pnp-textSecondary">{tag}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {group.isPublic ? (
+                          <button
+                            onClick={() => handleDiscoverJoin(group)}
+                            className="btn-gradient px-3 py-1.5 rounded-lg text-white text-xs font-semibold flex-shrink-0 active:scale-95 transition-transform"
+                          >
+                            {t.chat.joinButton}
+                          </button>
+                        ) : group.myRequestStatus === "pending" ? (
+                          <span className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-pnp-textSecondary flex-shrink-0">
+                            {t.chat.requestedStatus}
                           </span>
+                        ) : (
+                          <button
+                            onClick={() => handleDiscoverJoin(group)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 border border-pnp-accent text-pnp-accent hover:bg-pnp-accent/10 active:scale-95 transition-all"
+                          >
+                            {t.chat.requestButton}
+                          </button>
                         )}
                       </div>
-                      <p className="text-xs text-pnp-textSecondary truncate">
-                        {group.memberCount} {group.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}{group.description ? ` \u00b7 ${group.description}` : ""}
-                      </p>
                     </div>
-                    {group.isPublic ? (
-                      <button
-                        onClick={() => handleDiscoverJoin(group)}
-                        className="btn-gradient px-3 py-1.5 rounded-lg text-white text-xs font-semibold flex-shrink-0 active:scale-95 transition-transform"
-                      >
-                        {t.chat.joinButton}
-                      </button>
-                    ) : group.myRequestStatus === "pending" ? (
-                      <span className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-pnp-textSecondary flex-shrink-0">
-                        {t.chat.requestedStatus}
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => handleDiscoverJoin(group)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 border border-pnp-accent text-pnp-accent hover:bg-pnp-accent/10 active:scale-95 transition-all"
-                      >
-                        {t.chat.requestButton}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))
+                  ))}
+              </>
             )}
           </div>
         )}

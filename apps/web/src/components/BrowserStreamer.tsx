@@ -60,6 +60,11 @@ const PIP_POSITIONS: PipPosition[] = ["bottom-right", "bottom-left", "top-right"
 type StreamStatus = "idle" | "connecting" | "live" | "stopping" | "error";
 type PermissionState = "unknown" | "granted" | "denied" | "not_found";
 type ConnectionQuality = "good" | "fair" | "poor";
+type SetupPhase = "setup" | "preview" | "countdown";
+type BandwidthRating = "excellent" | "good" | "fair" | "poor";
+
+const CATEGORY_TAGS = ["Chat", "Music", "Gaming", "Cooking", "Fitness", "Art", "Other"] as const;
+type CategoryTag = typeof CATEGORY_TAGS[number];
 
 interface MediaDeviceInfo {
   deviceId: string;
@@ -258,6 +263,18 @@ export default function BrowserStreamer() {
   const [viewerCount, setViewerCount] = useState(0);
   const [durationSec, setDurationSec] = useState(0);
   const [quality, setQuality] = useState<ConnectionQuality>("good");
+
+  // Setup phase state
+  const [setupPhase, setSetupPhase] = useState<SetupPhase>("setup");
+  const [streamTitle, setStreamTitle] = useState("");
+  const [streamDescription, setStreamDescription] = useState("");
+  const [selectedTags, setSelectedTags] = useState<CategoryTag[]>([]);
+  const [titleError, setTitleError] = useState<string | null>(null);
+  const [thumbnailDataUrl, setThumbnailDataUrl] = useState<string | null>(null);
+  const [bandwidthRating, setBandwidthRating] = useState<BandwidthRating | null>(null);
+  const [bandwidthTesting, setBandwidthTesting] = useState(false);
+  const [countdownValue, setCountdownValue] = useState<number | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Channel
   const [channel, setChannel] = useState<ChannelInfo | null>(null);
@@ -827,12 +844,16 @@ export default function BrowserStreamer() {
     socket.on("live:viewer_count", onViewerCount);
     socket.on("disconnect", onDisconnect);
 
-    // 4. Emit stream:start with quality params
+    // 4. Emit stream:start with quality params and stream metadata
     socket.emit("stream:start", {
       channelRef: chan.ref,
       videoBitrate: selectedPreset.videoBitrate,
       audioBitrate: selectedPreset.audioBitrate,
       fps: selectedPreset.fps,
+      title: streamTitle.trim() || undefined,
+      description: streamDescription.trim() || undefined,
+      tags: selectedTags.length > 0 ? selectedTags : undefined,
+      thumbnailDataUrl: thumbnailDataUrl || undefined,
     });
 
     // 5. Determine which stream to record:
@@ -911,7 +932,72 @@ export default function BrowserStreamer() {
 
     // Store the safety timer so stopMediaRecorder can clear it
     (recorder as any)._safetyTimer = safetyTimer;
-  }, [t, loadChannel, recordChunkSize, selectedPreset, isScreenSharing]);
+  }, [t, loadChannel, recordChunkSize, selectedPreset, isScreenSharing, streamTitle, streamDescription, selectedTags, thumbnailDataUrl]);
+
+  // ── Bandwidth test ────────────────────────────────────────────────────────
+  const handleTestBandwidth = useCallback(async () => {
+    setBandwidthTesting(true);
+    setBandwidthRating(null);
+    try {
+      const testSize = 500 * 1024;
+      const testBlob = new Blob([new Uint8Array(testSize)], { type: "application/octet-stream" });
+      const start = performance.now();
+      await fetch("/api/webapp/ping", {
+        method: "POST",
+        body: testBlob,
+        headers: { "Content-Type": "application/octet-stream" },
+      }).catch(() => {});
+      const elapsed = (performance.now() - start) / 1000;
+      const mbps = (testSize * 8) / elapsed / 1_000_000;
+      if (mbps >= 5) setBandwidthRating("excellent");
+      else if (mbps >= 2) setBandwidthRating("good");
+      else if (mbps >= 1) setBandwidthRating("fair");
+      else setBandwidthRating("poor");
+    } catch {
+      setBandwidthRating("poor");
+    } finally {
+      setBandwidthTesting(false);
+    }
+  }, []);
+
+  // ── Capture thumbnail from preview ────────────────────────────────────────
+  const handleCaptureThumbnail = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || video.videoWidth === 0) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    setThumbnailDataUrl(canvas.toDataURL("image/jpeg", 0.85));
+  }, []);
+
+  // ── Countdown → Go Live ───────────────────────────────────────────────────
+  const handleStartCountdown = useCallback(() => {
+    const titleTrimmed = streamTitle.trim();
+    if (!titleTrimmed) {
+      setTitleError(t.streamTitleRequired);
+      return;
+    }
+    setTitleError(null);
+    setSetupPhase("countdown");
+    setCountdownValue(3);
+
+    let count = 3;
+    const tick = () => {
+      count -= 1;
+      if (count <= 0) {
+        setCountdownValue(null);
+        setSetupPhase("preview");
+        handleGoLive();
+      } else {
+        setCountdownValue(count);
+        countdownRef.current = setTimeout(tick, 1000);
+      }
+    };
+    countdownRef.current = setTimeout(tick, 1000);
+  }, [streamTitle, t, handleGoLive]);
 
   // ── Stop Streaming ────────────────────────────────────────────────────────
   const handleStop = useCallback(() => {
@@ -970,6 +1056,10 @@ export default function BrowserStreamer() {
   // ── Unmount cleanup ───────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
+      if (countdownRef.current) {
+        clearTimeout(countdownRef.current);
+        countdownRef.current = null;
+      }
       stopMediaRecorder();
       clearDurationTimer();
       stopCanvasComposite();
@@ -1070,14 +1160,201 @@ export default function BrowserStreamer() {
     );
   }
 
+  // ── Setup phase render ────────────────────────────────────────────────────
+  if (setupPhase === "setup") {
+    const bwColor =
+      bandwidthRating === "excellent" || bandwidthRating === "good" ? "#5ED1C4"
+      : bandwidthRating === "fair" ? "#FFD60A"
+      : bandwidthRating === "poor" ? "#FF453A"
+      : undefined;
+    const bwLabel =
+      bandwidthRating === "excellent" ? t.connectionExcellent
+      : bandwidthRating === "good" ? t.connectionGood
+      : bandwidthRating === "fair" ? t.connectionFair
+      : bandwidthRating === "poor" ? t.connectionPoor
+      : null;
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-base font-bold text-white">{t.setupTitle}</h2>
+          <p className="text-xs text-pnp-textSecondary mt-0.5">{t.setupSubtitle}</p>
+        </div>
+        {/* Compact camera preview with thumbnail capture */}
+        <div
+          className="relative w-full overflow-hidden rounded-2xl bg-pnp-surface border border-pnp-border"
+          style={{ aspectRatio: orientation === "portrait" ? "9/16" : "16/9", maxHeight: "220px" }}
+        >
+          <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
+          <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" aria-label="Camera preview" />
+          {permission === "unknown" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-pnp-surface">
+              <div className="w-8 h-8 rounded-full border-2 border-pnp-border border-t-pnp-accent animate-spin" />
+              <p className="text-xs text-pnp-textSecondary">{t.previewLoading}</p>
+            </div>
+          )}
+          {thumbnailDataUrl && (
+            <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-semibold text-white" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}>
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+              {t.thumbnailCaptured}
+            </div>
+          )}
+          {permission === "granted" && (
+            <button onClick={handleCaptureThumbnail} className="absolute bottom-2 right-2 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold text-white transition-all active:scale-95" style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)" }}>
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+              {thumbnailDataUrl ? t.recapture : t.captureThumbnail}
+            </button>
+          )}
+        </div>
+        {/* Stream Title */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-pnp-textSecondary">
+            {t.streamTitleLabel}<span className="text-red-400 ml-0.5">*</span>
+          </label>
+          <input
+            type="text"
+            maxLength={100}
+            value={streamTitle}
+            onChange={(e) => { setStreamTitle(e.target.value); if (titleError && e.target.value.trim()) setTitleError(null); }}
+            placeholder={t.streamTitlePlaceholder}
+            className={["w-full rounded-xl px-3 py-2.5 text-sm bg-pnp-surface border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent transition-colors", titleError ? "border-red-500/60" : "border-pnp-border"].join(" ")}
+          />
+          <div className="flex items-center justify-between">
+            {titleError ? <p className="text-[10px] text-red-400">{titleError}</p> : <span />}
+            <span className="text-[10px] text-pnp-textSecondary tabular-nums">{streamTitle.length}/100</span>
+          </div>
+        </div>
+        {/* Stream Description */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-pnp-textSecondary">{t.streamDescLabel}</label>
+          <textarea
+            maxLength={500}
+            value={streamDescription}
+            onChange={(e) => setStreamDescription(e.target.value)}
+            placeholder={t.streamDescPlaceholder}
+            rows={3}
+            className="w-full rounded-xl px-3 py-2.5 text-sm bg-pnp-surface border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent transition-colors resize-none"
+          />
+          <span className="text-[10px] text-pnp-textSecondary tabular-nums text-right">{streamDescription.length}/500</span>
+        </div>
+        {/* Category Tags */}
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-medium text-pnp-textSecondary">{t.categoryLabel}</span>
+          <div className="flex flex-wrap gap-2" role="group" aria-label={t.categoryLabel}>
+            {CATEGORY_TAGS.map((tag) => {
+              const isSelected = selectedTags.includes(tag);
+              const tagLabel = (t as Record<string, unknown>)[`tag${tag}`] as string ?? tag;
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => setSelectedTags((prev) => isSelected ? prev.filter((tg) => tg !== tag) : [...prev, tag])}
+                  className={["px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-150 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent", isSelected ? "btn-gradient text-white shadow-sm" : "bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent hover:text-pnp-textPrimary"].join(" ")}
+                  aria-pressed={isSelected}
+                >
+                  {tagLabel}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {/* Connection Test */}
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-medium text-pnp-textSecondary">{t.connectionTestLabel}</span>
+          <div className="flex items-center gap-3 p-3 rounded-xl bg-pnp-surface border border-pnp-border">
+            <div className="flex-1">
+              {bwLabel ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold" style={{ color: bwColor }}>{bwLabel}</span>
+                  <span className="text-xs text-pnp-textSecondary">upload speed</span>
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: bwColor }} aria-hidden="true" />
+                </div>
+              ) : (
+                <p className="text-xs text-pnp-textSecondary">{t.connectionTestHint}</p>
+              )}
+            </div>
+            <button
+              onClick={handleTestBandwidth}
+              disabled={bandwidthTesting}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg bg-pnp-surface border border-pnp-border text-xs font-medium text-pnp-textSecondary hover:border-pnp-accent hover:text-pnp-textPrimary transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {bandwidthTesting ? (
+                <><span className="w-3 h-3 border border-pnp-textSecondary border-t-transparent rounded-full animate-spin" aria-hidden="true" />{t.testingConnection}</>
+              ) : (
+                <><Wifi className="w-3.5 h-3.5" aria-hidden="true" />{t.testConnection}</>
+              )}
+            </button>
+          </div>
+        </div>
+        {/* Device selectors */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <DeviceSelect id="camera-select" label={t.cameraLabel} value={selectedCamera} options={cameras} disabled={false} onChange={handleCameraChange} icon={<Video className="w-3.5 h-3.5" aria-hidden="true" />} placeholder={t.selectCamera} />
+          <DeviceSelect id="microphone-select" label={t.microphoneLabel} value={selectedMic} options={microphones} disabled={false} onChange={handleMicChange} icon={<Mic className="w-3.5 h-3.5" aria-hidden="true" />} placeholder={t.selectMicrophone} />
+        </div>
+        {/* Go Live button */}
+        <button
+          onClick={handleStartCountdown}
+          disabled={!canGoLive || isConnecting}
+          className="w-full flex items-center justify-center gap-2.5 min-h-[52px] px-6 rounded-2xl text-sm font-bold text-white btn-gradient transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+        >
+          {isConnecting ? (
+            <><span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" aria-hidden="true" />{t.connecting}</>
+          ) : (
+            <><Radio className="w-5 h-5" aria-hidden="true" />{t.startStreaming}</>
+          )}
+        </button>
+        {streamError && (
+          <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl text-sm" style={{ background: "rgba(255,69,58,0.1)", border: "1px solid rgba(255,69,58,0.25)" }} role="alert" aria-live="assertive">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#FF453A" }} aria-hidden="true" />
+            <span className="text-white/80 min-w-0 break-words">{streamError}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Countdown overlay (mounted on top of the preview when counting down) ───
+  const countdownOverlay = setupPhase === "countdown" && countdownValue !== null ? (
+    <div
+      className="absolute inset-0 z-30 flex flex-col items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(2px)" }}
+      aria-live="assertive"
+      aria-label={`${t.countdownLabel} ${countdownValue}`}
+    >
+      <p className="text-xs font-semibold text-white/60 mb-3 uppercase tracking-widest">{t.countdownLabel}</p>
+      <span
+        key={countdownValue}
+        className="text-9xl font-black text-white leading-none animate-pulse"
+        style={{ textShadow: "0 0 40px rgba(212,0,122,0.9), 0 0 80px rgba(212,0,122,0.5)" }}
+      >
+        {countdownValue}
+      </span>
+    </div>
+  ) : null;
+
   // ── Main render ───────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-base font-bold text-white">{t.browserStreamerTitle}</h2>
-          <p className="text-xs text-pnp-textSecondary mt-0.5">{t.browserStreamerSubtitle}</p>
+        <div className="flex items-center gap-2">
+          {!isStreaming && status !== "connecting" && (
+            <button
+              onClick={() => {
+                if (countdownRef.current) { clearTimeout(countdownRef.current); countdownRef.current = null; }
+                setCountdownValue(null);
+                setSetupPhase("setup");
+              }}
+              className="flex items-center justify-center w-7 h-7 rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:text-pnp-textPrimary hover:border-pnp-accent/40 transition-all"
+              title={t.backToSetup}
+              aria-label={t.backToSetup}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
+            </button>
+          )}
+          <div>
+            <h2 className="text-base font-bold text-white">{t.browserStreamerTitle}</h2>
+            <p className="text-xs text-pnp-textSecondary mt-0.5">{t.browserStreamerSubtitle}</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {/* Orientation toggle */}
@@ -1148,6 +1425,9 @@ export default function BrowserStreamer() {
           className="absolute inset-0 w-full h-full object-cover"
           aria-label={isScreenSharing ? "Screen share preview" : "Camera preview"}
         />
+
+        {/* Countdown overlay */}
+        {countdownOverlay}
 
         {/* Preview loading overlay */}
         {permission === "unknown" && (
@@ -1492,6 +1772,22 @@ export default function BrowserStreamer() {
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Stream metadata pill row — shown when live */}
+      {status === "live" && (streamTitle || selectedTags.length > 0) && (
+        <div className="flex items-start gap-2 flex-wrap">
+          {streamTitle && <span className="text-sm font-semibold text-pnp-textPrimary truncate max-w-full">{streamTitle}</span>}
+          {selectedTags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {selectedTags.map((tag) => (
+                <span key={tag} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-pnp-surface border border-pnp-border text-pnp-textSecondary">
+                  {(t as Record<string, unknown>)[`tag${tag}`] as string ?? tag}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

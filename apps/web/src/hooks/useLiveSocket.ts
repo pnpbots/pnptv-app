@@ -20,6 +20,15 @@ export interface LiveTip {
   paymentMethod?: string;
 }
 
+export interface LiveRaidEvent {
+  sourceChannelRef: string;
+  targetChannelRef: string;
+  targetName: string;
+  targetHlsUrl: string;
+  viewerCount: number;
+  raidedBy: string | number;
+}
+
 interface UseLiveSocketResult {
   messages: LiveChatMessage[];
   viewerCount: number;
@@ -33,6 +42,12 @@ interface UseLiveSocketResult {
   socketBalanceReceived: boolean;
   setWalletBalance: (b: number) => void;
   socketError: string | null;
+  /** Raid event received from the server — non-null while a raid is in progress. */
+  raidEvent: LiveRaidEvent | null;
+  /** Dismiss the active raid overlay (viewer clicked Cancel). */
+  dismissRaid: () => void;
+  /** Emit a live:raid:initiate event as the stream owner. */
+  emitRaid: (streamId: string, targetChannelRef: string) => void;
 }
 
 export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
@@ -43,6 +58,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
   const [latestTip, setLatestTip] = useState<LiveTip | null>(null);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [socketError, setSocketError] = useState<string | null>(null);
+  const [raidEvent, setRaidEvent] = useState<LiveRaidEvent | null>(null);
 
   // Tracks the currently joined streamId so we can emit live:leave on change/unmount
   const joinedStreamRef = useRef<string | null>(null);
@@ -119,6 +135,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       hasJoinedRef.current = false;
       setMessages([]);
       setViewerCount(0);
+      setRaidEvent(null);
       return;
     }
 
@@ -135,6 +152,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     // from the previous stream are never visible on the incoming stream
     setMessages([]);
     setViewerCount(0);
+    setRaidEvent(null);
 
     const joinStream = () => {
       // SOCK-H6: guard against double join when effect re-runs (e.g. StrictMode
@@ -174,11 +192,17 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       setLatestTip(tip);
     };
 
+    // Raid handler — broadcast to all viewers in the source stream room
+    const onRaid = (data: LiveRaidEvent) => {
+      setRaidEvent(data);
+    };
+
     socket.on("connect", onConnectForStream);
     socket.on("live:history", onHistory);
     socket.on("live:message", onMessage);
     socket.on("live:viewer_count", onViewerCount);
     socket.on("live:tip", onTip);
+    socket.on("live:raid", onRaid);
 
     // Join immediately if already connected
     if (socket.connected) {
@@ -197,6 +221,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       socket.off("live:message", onMessage);
       socket.off("live:viewer_count", onViewerCount);
       socket.off("live:tip", onTip);
+      socket.off("live:raid", onRaid);
     };
   }, [streamId]);
 
@@ -215,6 +240,16 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     [streamId]
   );
 
+  const dismissRaid = useCallback(() => {
+    setRaidEvent(null);
+  }, []);
+
+  const emitRaid = useCallback((sid: string, targetChannelRef: string) => {
+    const socket = connectSocket();
+    if (!socket.connected) return;
+    socket.emit("live:raid:initiate", { streamId: sid, targetChannelRef });
+  }, []);
+
   return {
     messages,
     viewerCount,
@@ -226,5 +261,8 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     socketBalanceReceived: socketBalanceReceivedRef.current,
     setWalletBalance,
     socketError,
+    raidEvent,
+    dismissRaid,
+    emitRaid,
   };
 }

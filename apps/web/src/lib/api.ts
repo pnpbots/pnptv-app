@@ -312,6 +312,10 @@ export interface LiveStream {
   viewerCount?: number;
   title?: string;
   performerName?: string;
+  /** Category tags set by the streamer at go-live time */
+  tags?: string[];
+  /** Base64 JPEG thumbnail data URL captured from the streamer's preview */
+  thumbnailUrl?: string | null;
 }
 
 export function getLiveStreams(): Promise<{
@@ -319,6 +323,55 @@ export function getLiveStreams(): Promise<{
   streams: LiveStream[];
 }> {
   return request("/api/proxy/live/streams");
+}
+
+export interface LiveStreamWithHost extends LiveStream {
+  hostedChannelRef?: string;
+  hostedChannelName?: string;
+  hostedHlsUrl?: string;
+}
+
+export function getWebAppLiveStreams(): Promise<{
+  success: boolean;
+  streams: LiveStreamWithHost[];
+}> {
+  return request("/api/webapp/live/streams");
+}
+
+export function initiateRaid(targetChannelRef: string): Promise<{
+  success: boolean;
+  sourceChannelRef?: string;
+  targetChannelRef?: string;
+  targetName?: string;
+  viewerCount?: number;
+  error?: string;
+}> {
+  return request("/api/webapp/live/raid", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetChannelRef }),
+  });
+}
+
+export function setHostedChannel(targetChannelRef: string | null): Promise<{
+  success: boolean;
+  hosting: string | null;
+  error?: string;
+}> {
+  return request("/api/webapp/live/host", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetChannelRef }),
+  });
+}
+
+export function getHostedChannel(): Promise<{
+  success: boolean;
+  sourceChannelRef?: string;
+  hosting: string | null;
+  error?: string;
+}> {
+  return request("/api/webapp/live/host");
 }
 
 // Social proxy (Bluesky)
@@ -1330,6 +1383,7 @@ export interface HangoutGroup {
   activeCallId: string | null;
   lastMessage: string | null;
   unreadCount?: number;
+  tags?: string[];
 }
 
 export interface GroupMessage {
@@ -1385,6 +1439,7 @@ export interface DiscoverGroup {
   memberCount: number;
   createdAt: string;
   myRequestStatus: "pending" | "accepted" | "rejected" | null;
+  tags?: string[];
 }
 
 export function discoverHangoutGroups(): Promise<{ success: boolean; groups: DiscoverGroup[] }> {

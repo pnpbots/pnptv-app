@@ -1168,6 +1168,76 @@ function initSocketIO(io) {
       }
     });
 
+    // ── Live Raid ────────────────────────────────────────────────────────────
+    // Creator emits live:raid:initiate to send all viewers in their stream room
+    // to another live stream. The server validates channel ownership, then
+    // broadcasts live:raid to the source room so all viewers see the overlay.
+    //
+    // Payload: { streamId: string, targetChannelRef: string }
+    //   streamId         — creator's current channel ref (must match live_channel)
+    //   targetChannelRef — target channel ref to redirect viewers to
+
+    socket.on('live:raid:initiate', async ({ streamId, targetChannelRef } = {}) => {
+      if (!streamId || !STREAM_ID_RE.test(String(streamId))) {
+        socket.emit('live:error', { message: 'Invalid streamId for raid' });
+        return;
+      }
+      if (!targetChannelRef || typeof targetChannelRef !== 'string' || !/^[a-zA-Z0-9\-_.]+$/.test(targetChannelRef)) {
+        socket.emit('live:error', { message: 'Invalid targetChannelRef for raid' });
+        return;
+      }
+      if (String(streamId) === String(targetChannelRef)) {
+        socket.emit('live:error', { message: 'Cannot raid your own stream' });
+        return;
+      }
+      // Rate-limit: 1 raid per 5 minutes per user
+      if (!rateLimit(`live:raid:${user.id}`, 1, 5 * 60 * 1000)) {
+        socket.emit('live:error', { message: 'Raid on cooldown. Wait before raiding again.' });
+        return;
+      }
+      try {
+        // Verify the requesting user owns the source channel
+        const { rows: channelRows } = await query(
+          'SELECT live_channel FROM users WHERE id = $1',
+          [user.id]
+        );
+        const ownedChannel = channelRows[0]?.live_channel;
+        if (!ownedChannel) {
+          socket.emit('live:error', { message: 'No streaming channel assigned to your account' });
+          return;
+        }
+        if (String(streamId) !== String(ownedChannel)) {
+          socket.emit('live:error', { message: 'You can only raid from your own stream' });
+          return;
+        }
+
+        const redis = getRedis();
+        const viewerCountRaw = await redis.get(`live:viewers:${streamId}`).catch(() => '0');
+        const viewerCount = parseInt(viewerCountRaw, 10) || 0;
+
+        const publicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
+        const targetName = targetChannelRef
+          .replace(/^pnptv-/, '')
+          .replace(/-/g, ' ')
+          .replace(/\b\w/g, (c) => c.toUpperCase());
+
+        io.to(`live:${streamId}`).emit('live:raid', {
+          sourceChannelRef: streamId,
+          targetChannelRef,
+          targetName,
+          targetHlsUrl: `${publicUrl}/memfs/${targetChannelRef}.m3u8`,
+          viewerCount,
+          raidedBy: user.id,
+        });
+
+        logger.info(`Socket raid: ${streamId} → ${targetChannelRef} by user ${user.id}, viewers: ${viewerCount}`);
+        socket.emit('live:raid:ack', { success: true, targetChannelRef });
+      } catch (err) {
+        logger.error('live:raid:initiate error', { userId: user.id, error: err.message });
+        socket.emit('live:error', { message: 'Failed to initiate raid' });
+      }
+    });
+
     // ── Browser → RTMP Stream Bridge ────────────────────────────────────────
     //
     // Allows creators to stream directly from their browser using MediaRecorder.
@@ -1180,7 +1250,7 @@ function initSocketIO(io) {
     // The user's assigned live_channel is verified against channelRef before
     // spawning FFmpeg.
 
-    socket.on('stream:start', async ({ channelRef, videoBitrate, audioBitrate, fps } = {}) => {
+    socket.on('stream:start', async ({ channelRef, videoBitrate, audioBitrate, fps, title, description, tags, thumbnailDataUrl } = {}) => {
       // Reject if already streaming — one stream per connection
       if (socket.data.ffmpegProcess) {
         socket.emit('stream:error', { message: 'Already streaming. Stop the current stream first.' });
@@ -1319,6 +1389,30 @@ function initSocketIO(io) {
         socket.data.streamDataChunks = 0;
         socket.data.streamDataBytes = 0;
         logger.info(`Browser stream started: user ${user.id} → channel '${channelRef}' → ${rtmpTarget}`);
+
+        // Store stream metadata in Redis (TTL 12h — auto-expires if stream ends uncleanly)
+        try {
+          const { getRedis } = require('../../config/redis');
+          const redis = getRedis();
+          if (redis) {
+            const safeTitle = (typeof title === 'string' ? title : '').slice(0, 100).trim();
+            const safeDesc = (typeof description === 'string' ? description : '').slice(0, 500).trim();
+            const safeTags = Array.isArray(tags)
+              ? tags.filter(tg => typeof tg === 'string').slice(0, 7).map(tg => tg.slice(0, 32))
+              : [];
+            await redis.set(`stream:meta:${channelRef}`, JSON.stringify({ title: safeTitle, description: safeDesc, tags: safeTags }), 'EX', 43200);
+            if (
+              typeof thumbnailDataUrl === 'string' &&
+              thumbnailDataUrl.startsWith('data:image/jpeg;base64,') &&
+              thumbnailDataUrl.length < 200 * 1024
+            ) {
+              await redis.set(`stream:thumb:${channelRef}`, thumbnailDataUrl, 'EX', 43200);
+            }
+          }
+        } catch (metaErr) {
+          logger.warn('stream:start: failed to store metadata in Redis (non-fatal)', { channelRef, error: metaErr.message });
+        }
+
         // SOCK-H4: Do not send rtmpTarget to the client — it exposes the internal
         // RTMP server address and stream key which are server-side concerns only.
         socket.emit('stream:started', { channelRef });

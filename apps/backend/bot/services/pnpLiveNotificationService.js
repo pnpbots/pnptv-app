@@ -525,6 +525,102 @@ class PNPLiveNotificationService {
   }
 
   /**
+   * Notify all users who subscribed to a stream-start notification for a slot.
+   * Reads the Redis SET pnp:live:notify:{slotId}, sends Telegram messages to
+   * each subscriber's telegram ID (looked up from the users table), then
+   * deletes the SET so notifications are not re-sent.
+   *
+   * Called from the live stream start worker/cron when a scheduled stream begins
+   * (or 5 minutes before start).
+   *
+   * @param {string} slotId - The live_streams UUID
+   * @param {string} streamerName - Display name of the streamer going live
+   * @param {string|null} channelRef - Restreamer channel ref for watch URL (e.g. 'pnptv-frank')
+   * @returns {Promise<number>} Number of notifications sent
+   */
+  static async notifyStreamSubscribers(slotId, streamerName, channelRef = null) {
+    if (!slotId || typeof slotId !== 'string') {
+      logger.warn('notifyStreamSubscribers: invalid slotId', { slotId });
+      return 0;
+    }
+
+    let redis;
+    try {
+      const { getRedis } = require('../../config/redis');
+      redis = getRedis();
+    } catch (err) {
+      logger.error('notifyStreamSubscribers: failed to get Redis client', { error: err.message });
+      return 0;
+    }
+
+    const redisKey = `pnp:live:notify:${slotId}`;
+
+    try {
+      const subscriberIds = await redis.smembers(redisKey);
+      if (!subscriberIds || subscriberIds.length === 0) {
+        logger.info('notifyStreamSubscribers: no subscribers for slot', { slotId });
+        return 0;
+      }
+
+      // Look up Telegram IDs for all subscriber user IDs in a single query.
+      // Users without a Telegram account linked will be silently skipped.
+      const placeholders = subscriberIds.map((_, i) => `$${i + 1}`).join(', ');
+      const { rows } = await query(
+        `SELECT id, telegram FROM users WHERE id IN (${placeholders}) AND telegram IS NOT NULL`,
+        subscriberIds
+      );
+
+      if (rows.length === 0) {
+        // No Telegram-linked subscribers; delete the key and exit
+        await redis.del(redisKey);
+        return 0;
+      }
+
+      const watchPath = channelRef ? `/live/${channelRef}` : '/live';
+      const appUrl = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
+      const watchUrl = `${appUrl}${watchPath}`;
+      const safeName = (streamerName || 'A creator').replace(/[*_[\]()~`>#+=|{}.!-]/g, '\\$&');
+      const message =
+        `🔴 *${safeName} is going live now\\!*\n\n` +
+        `Tap below to watch before the room fills up\\.`;
+
+      const keyboard = Markup.inlineKeyboard([
+        [Markup.button.url('Watch Now', watchUrl)],
+      ]);
+
+      const RATE_LIMIT_DELAY_MS = 50;
+      let sent = 0;
+      for (const row of rows) {
+        if (!row.telegram) continue;
+        const success = await this.sendMessage(row.telegram, message, {
+          ...keyboard,
+          parse_mode: 'MarkdownV2',
+        });
+        if (success) sent++;
+        await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_DELAY_MS));
+      }
+
+      // Clean up the SET so subscribers are not notified again
+      await redis.del(redisKey);
+
+      logger.info('notifyStreamSubscribers: notifications dispatched', {
+        slotId,
+        subscriberCount: subscriberIds.length,
+        telegramLinked: rows.length,
+        sent,
+      });
+
+      return sent;
+    } catch (err) {
+      logger.error('notifyStreamSubscribers: error dispatching notifications', {
+        slotId,
+        error: err.message,
+      });
+      return 0;
+    }
+  }
+
+  /**
    * Send broadcast to all active models
    */
   static async broadcastToModels(message, lang = 'es') {

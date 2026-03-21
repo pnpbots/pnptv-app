@@ -1,5 +1,6 @@
 const logger = require('../../../utils/logger');
 const { getPool } = require('../../../config/postgres');
+const { getRedis } = require('../../../config/redis');
 const axios = require('axios');
 
 /**
@@ -129,7 +130,7 @@ const listStreams = async (req, res) => {
     const token = await getRestreamerToken(restreamerUrl);
     const processes = await fetchRestreamerProcesses(restreamerUrl, token);
 
-    const streams = processes
+    const baseStreams = processes
       .map((p) => {
         const rawRefId = p.reference || p.id;
         const refId = sanitizeRefId(rawRefId);
@@ -146,6 +147,29 @@ const listStreams = async (req, res) => {
         };
       })
       .filter(Boolean);
+
+    // Augment offline streams with host info from Redis (24h TTL key live:host:<ref>)
+    const redis = getRedis();
+    const streams = await Promise.all(
+      baseStreams.map(async (s) => {
+        if (s.isLive) return s;
+        try {
+          const hostedRef = await redis.get(`live:host:${s.id}`);
+          if (!hostedRef) return s;
+          const safeHostedRef = sanitizeRefId(hostedRef);
+          if (!safeHostedRef) return s;
+          const target = baseStreams.find((t) => t.id === safeHostedRef);
+          return {
+            ...s,
+            hostedChannelRef: safeHostedRef,
+            hostedChannelName: target?.name || safeHostedRef,
+            hostedHlsUrl: target?.hlsUrl || `${publicUrl}/memfs/${safeHostedRef}.m3u8`,
+          };
+        } catch {
+          return s;
+        }
+      })
+    );
 
     return res.json({ success: true, streams });
   } catch (err) {
@@ -393,4 +417,390 @@ const listChannels = async (req, res) => {
   }
 };
 
-module.exports = { listStreams, getRtmpKey, assignChannel, listChannels };
+// ---------------------------------------------------------------------------
+// GET /api/webapp/live/schedule
+// Returns upcoming scheduled live streams for the next 7 days.
+// Sources: live_streams table (status = 'scheduled') joined with users for
+// streamer info. Redis-cached for 5 minutes (key: pnp:live:schedule:weekly).
+// ---------------------------------------------------------------------------
+const SCHEDULE_CACHE_KEY = 'pnp:live:schedule:weekly';
+const SCHEDULE_CACHE_TTL = 300; // 5 minutes
+
+const getSchedule = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+
+  const redis = getRedis();
+
+  try {
+    // Return cached schedule if available
+    const cached = await redis.get(SCHEDULE_CACHE_KEY).catch(() => null);
+    if (cached) {
+      return res.json({ success: true, slots: JSON.parse(cached), fromCache: true });
+    }
+
+    const now = new Date();
+    const sevenDaysOut = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    // Query live_streams with host user info for streams scheduled in next 7 days
+    const { rows } = await getPool().query(
+      `SELECT
+         ls.id::text             AS slot_id,
+         ls.title,
+         ls.description,
+         ls.scheduled_at,
+         ls.scheduled_for,
+         ls.duration,
+         ls.thumbnail_url,
+         ls.channel_name,
+         ls.host_id,
+         ls.host_name,
+         u.username              AS host_username,
+         u.first_name            AS host_first_name,
+         u.last_name             AS host_last_name,
+         u.photo_file_id         AS host_photo
+       FROM live_streams ls
+       LEFT JOIN users u ON u.id = ls.host_id
+       WHERE ls.status = 'scheduled'
+         AND COALESCE(ls.scheduled_at, ls.scheduled_for) >= $1
+         AND COALESCE(ls.scheduled_at, ls.scheduled_for) <= $2
+       ORDER BY COALESCE(ls.scheduled_at, ls.scheduled_for) ASC
+       LIMIT 50`,
+      [now.toISOString(), sevenDaysOut.toISOString()]
+    );
+
+    const slots = rows.map((r) => {
+      const startTime = r.scheduled_at || r.scheduled_for;
+      // Duration stored as minutes integer; default 60 if not set
+      const durationMinutes = r.duration || 60;
+      const displayName =
+        r.host_name ||
+        [r.host_first_name, r.host_last_name].filter(Boolean).join(' ') ||
+        r.host_username ||
+        'PNPtv Creator';
+      const photoUrl = r.host_photo
+        ? r.host_photo.startsWith('/') ? r.host_photo : `/${r.host_photo}`
+        : null;
+
+      return {
+        slotId: r.slot_id,
+        title: r.title || null,
+        description: r.description || null,
+        startTime: new Date(startTime).toISOString(),
+        durationMinutes,
+        streamerName: displayName,
+        streamerAvatar: photoUrl,
+        streamerId: r.host_id || null,
+        channelName: r.channel_name || null,
+      };
+    });
+
+    // Cache the result for 5 minutes
+    await redis.setex(SCHEDULE_CACHE_KEY, SCHEDULE_CACHE_TTL, JSON.stringify(slots)).catch(() => {});
+
+    return res.json({ success: true, slots });
+  } catch (err) {
+    logger.error('getSchedule error', err);
+    return res.status(500).json({ success: false, error: 'Failed to load schedule' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// POST /api/webapp/live/schedule/notify
+// Subscribe the authenticated user to a stream-start notification for a slot.
+// Body: { slotId: string }
+// Stores userId in Redis SET: pnp:live:notify:{slotId}, TTL = 8 days.
+// ---------------------------------------------------------------------------
+const subscribeScheduleNotify = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  const userId = String(req.session.user.id);
+  const { slotId } = req.body;
+
+  if (!slotId || typeof slotId !== 'string' || !/^[a-zA-Z0-9\-_]+$/.test(slotId)) {
+    return res.status(400).json({ success: false, error: 'Invalid slotId' });
+  }
+
+  const redis = getRedis();
+  try {
+    const key = `pnp:live:notify:${slotId}`;
+    await redis.sadd(key, userId);
+    // TTL = 8 days (slot is at most 7 days away; give a day of buffer for cleanup)
+    await redis.expire(key, 8 * 24 * 60 * 60);
+    return res.json({ success: true, subscribed: true });
+  } catch (err) {
+    logger.error('subscribeScheduleNotify error', err);
+    return res.status(500).json({ success: false, error: 'Failed to subscribe to notification' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// DELETE /api/webapp/live/schedule/notify
+// Unsubscribe the authenticated user from a stream-start notification.
+// Body: { slotId: string }
+// ---------------------------------------------------------------------------
+const unsubscribeScheduleNotify = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  const userId = String(req.session.user.id);
+  const { slotId } = req.body;
+
+  if (!slotId || typeof slotId !== 'string' || !/^[a-zA-Z0-9\-_]+$/.test(slotId)) {
+    return res.status(400).json({ success: false, error: 'Invalid slotId' });
+  }
+
+  const redis = getRedis();
+  try {
+    await redis.srem(`pnp:live:notify:${slotId}`, userId);
+    return res.json({ success: true, subscribed: false });
+  } catch (err) {
+    logger.error('unsubscribeScheduleNotify error', err);
+    return res.status(500).json({ success: false, error: 'Failed to unsubscribe from notification' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// GET /api/webapp/live/schedule/notify/:slotId
+// Returns whether the authenticated user is subscribed to a slot notification.
+// ---------------------------------------------------------------------------
+const checkScheduleNotify = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  const userId = String(req.session.user.id);
+  const { slotId } = req.params;
+
+  if (!slotId || !/^[a-zA-Z0-9\-_]+$/.test(slotId)) {
+    return res.status(400).json({ success: false, error: 'Invalid slotId' });
+  }
+
+  const redis = getRedis();
+  try {
+    const isMember = await redis.sismember(`pnp:live:notify:${slotId}`, userId);
+    return res.json({ success: true, subscribed: isMember === 1 });
+  } catch (err) {
+    logger.error('checkScheduleNotify error', err);
+    return res.status(500).json({ success: false, error: 'Failed to check notification status' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// POST /api/webapp/live/raid
+// Creator-only: send all viewers in the source stream room to another live stream.
+//
+// Body: { targetChannelRef: string }
+//   Validates the source stream is live and the user owns it.
+//   Emits `live:raid` to the source Socket.IO room via io attached to req.app.
+// ---------------------------------------------------------------------------
+const RAID_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes between raids
+const raidCooldowns = new Map(); // userId -> lastRaidTs
+
+const initiateRaid = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  const user = req.session.user;
+  if (!['model', 'creator', 'admin', 'superadmin'].includes(user.role)) {
+    return res.status(403).json({ success: false, error: 'Creator access required' });
+  }
+
+  const { targetChannelRef } = req.body;
+  if (!targetChannelRef || typeof targetChannelRef !== 'string') {
+    return res.status(400).json({ success: false, error: 'targetChannelRef is required' });
+  }
+  if (!sanitizeRefId(targetChannelRef)) {
+    return res.status(400).json({ success: false, error: 'Invalid targetChannelRef' });
+  }
+
+  // Cooldown check (in-process — prevents rapid-fire raids from REST endpoint)
+  const now = Date.now();
+  const lastRaid = raidCooldowns.get(String(user.id)) || 0;
+  if (now - lastRaid < RAID_COOLDOWN_MS) {
+    const remaining = Math.ceil((RAID_COOLDOWN_MS - (now - lastRaid)) / 1000);
+    return res.status(429).json({ success: false, error: `Raid on cooldown. Try again in ${remaining}s.` });
+  }
+
+  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
+
+  try {
+    // Look up the raider's assigned channel
+    const { rows } = await getPool().query(
+      'SELECT live_channel FROM users WHERE id = $1',
+      [user.id]
+    );
+    const sourceChannelRef = rows[0]?.live_channel;
+    if (!sourceChannelRef) {
+      return res.status(404).json({ success: false, error: 'No streaming channel assigned to your account' });
+    }
+    if (sourceChannelRef === targetChannelRef) {
+      return res.status(400).json({ success: false, error: 'Cannot raid your own channel' });
+    }
+
+    // Fetch processes to validate liveness
+    let processes;
+    try {
+      const token = await getRestreamerToken(restreamerUrl);
+      processes = await fetchRestreamerProcesses(restreamerUrl, token);
+    } catch (fetchErr) {
+      return res.status(503).json({ success: false, error: 'Streaming service temporarily unavailable' });
+    }
+
+    const sourceProc = processes.find(p => p.reference === sourceChannelRef);
+    if (!sourceProc || sourceProc.state?.exec !== 'running') {
+      return res.status(400).json({ success: false, error: 'Your stream must be live to initiate a raid' });
+    }
+
+    const targetProc = processes.find(p => p.reference === targetChannelRef);
+    if (!targetProc || targetProc.state?.exec !== 'running') {
+      return res.status(400).json({ success: false, error: 'Target stream is not currently live' });
+    }
+
+    const publicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
+    const targetName = targetProc.metadata?.['restreamer-ui']?.meta?.name || targetChannelRef;
+    const sourceName = sourceProc.metadata?.['restreamer-ui']?.meta?.name || sourceChannelRef;
+
+    const redis = getRedis();
+    const viewerCountRaw = await redis.get(`live:viewers:${sourceChannelRef}`).catch(() => '0');
+    const viewerCount = parseInt(viewerCountRaw, 10) || 0;
+
+    raidCooldowns.set(String(user.id), now);
+
+    // Emit raid event to everyone in the source stream room
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`live:${sourceChannelRef}`).emit('live:raid', {
+        sourceChannelRef,
+        sourceName,
+        targetChannelRef,
+        targetName,
+        targetHlsUrl: `${publicUrl}/memfs/${targetChannelRef}.m3u8`,
+        viewerCount,
+        raidedBy: user.id,
+      });
+    }
+
+    logger.info(`Raid: ${sourceChannelRef} → ${targetChannelRef} by user ${user.id}, viewers: ${viewerCount}`);
+    return res.json({ success: true, sourceChannelRef, targetChannelRef, targetName, viewerCount });
+  } catch (err) {
+    logger.error('initiateRaid error', err);
+    return res.status(500).json({ success: false, error: 'Failed to initiate raid' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// POST /api/webapp/live/host
+// Creator-only: set or clear the hosted channel for their stream.
+//
+// Body: { targetChannelRef: string|null }
+//   null → clear host mode; string → set it (stored in Redis with 24h TTL).
+// ---------------------------------------------------------------------------
+const HOST_TTL_SECONDS = 86400;
+
+const setHostedChannel = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  const user = req.session.user;
+  if (!['model', 'creator', 'admin', 'superadmin'].includes(user.role)) {
+    return res.status(403).json({ success: false, error: 'Creator access required' });
+  }
+
+  const { targetChannelRef } = req.body;
+  if (targetChannelRef !== null && targetChannelRef !== undefined && typeof targetChannelRef !== 'string') {
+    return res.status(400).json({ success: false, error: 'targetChannelRef must be a string or null' });
+  }
+  if (targetChannelRef && !sanitizeRefId(targetChannelRef)) {
+    return res.status(400).json({ success: false, error: 'Invalid targetChannelRef' });
+  }
+
+  try {
+    const { rows } = await getPool().query(
+      'SELECT live_channel FROM users WHERE id = $1',
+      [user.id]
+    );
+    const sourceChannelRef = rows[0]?.live_channel;
+    if (!sourceChannelRef) {
+      return res.status(404).json({ success: false, error: 'No streaming channel assigned' });
+    }
+    if (targetChannelRef && sourceChannelRef === targetChannelRef) {
+      return res.status(400).json({ success: false, error: 'Cannot host your own channel' });
+    }
+
+    const redis = getRedis();
+    const key = `live:host:${sourceChannelRef}`;
+
+    if (!targetChannelRef) {
+      await redis.del(key);
+      logger.info(`Host mode cleared for ${sourceChannelRef} by user ${user.id}`);
+      return res.json({ success: true, hosting: null });
+    }
+
+    // Validate target channel exists in Restreamer (non-fatal if unavailable)
+    const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
+    try {
+      const token = await getRestreamerToken(restreamerUrl);
+      const processes = await fetchRestreamerProcesses(restreamerUrl, token);
+      if (!processes.some(p => p.reference === targetChannelRef)) {
+        return res.status(404).json({ success: false, error: 'Target channel not found' });
+      }
+    } catch {
+      logger.warn('setHostedChannel: Restreamer unavailable, skipping validation');
+    }
+
+    await redis.set(key, targetChannelRef, 'EX', HOST_TTL_SECONDS);
+    logger.info(`Host mode set: ${sourceChannelRef} → ${targetChannelRef} by user ${user.id}`);
+    return res.json({ success: true, hosting: targetChannelRef });
+  } catch (err) {
+    logger.error('setHostedChannel error', err);
+    return res.status(500).json({ success: false, error: 'Failed to set hosted channel' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// GET /api/webapp/live/host
+// Creator-only: return the current hosted channel for their stream (or null).
+// ---------------------------------------------------------------------------
+const getHostedChannel = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  const user = req.session.user;
+  if (!['model', 'creator', 'admin', 'superadmin'].includes(user.role)) {
+    return res.status(403).json({ success: false, error: 'Creator access required' });
+  }
+
+  try {
+    const { rows } = await getPool().query(
+      'SELECT live_channel FROM users WHERE id = $1',
+      [user.id]
+    );
+    const sourceChannelRef = rows[0]?.live_channel;
+    if (!sourceChannelRef) {
+      return res.status(404).json({ success: false, error: 'No channel assigned' });
+    }
+
+    const redis = getRedis();
+    const hosting = await redis.get(`live:host:${sourceChannelRef}`);
+    return res.json({ success: true, sourceChannelRef, hosting: hosting || null });
+  } catch (err) {
+    logger.error('getHostedChannel error', err);
+    return res.status(500).json({ success: false, error: 'Failed to get hosted channel' });
+  }
+};
+
+module.exports = {
+  listStreams,
+  getRtmpKey,
+  assignChannel,
+  listChannels,
+  getSchedule,
+  subscribeScheduleNotify,
+  unsubscribeScheduleNotify,
+  checkScheduleNotify,
+  initiateRaid,
+  setHostedChannel,
+  getHostedChannel,
+};
