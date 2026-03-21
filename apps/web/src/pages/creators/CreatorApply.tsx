@@ -213,7 +213,7 @@ export default function CreatorApply() {
               </div>
             )}
 
-            {/* ── Not Yet Eligible — Progress ── */}
+            {/* ── Not Yet Eligible — Must Share Content First ── */}
             {!loading && !isEligible && !isPending && isAuthenticated && eligibility && (() => {
               const criteria = [
                 { label: t.criteriaMediaPosts, ...eligibility.criteria.mediaPosts },
@@ -229,25 +229,59 @@ export default function CreatorApply() {
                 .filter((c) => !c.met)
                 .sort((a, b) => b.current / b.required - a.current / a.required)[0];
               return (
-                <div className="glass-card-sm p-5 mb-4">
-                  <div className="flex items-start justify-between mb-1">
-                    <p className="text-lg font-bold text-white">{t.becomeCreatorTitle}</p>
-                    <span className="text-sm font-bold" style={{ color: totalPct >= 75 ? "#5ED1C4" : "#E69138" }}>{totalPct}%</span>
+                <>
+                  {/* Gate notice */}
+                  <div
+                    className="rounded-xl p-4 mb-4 flex items-start gap-3"
+                    style={{ background: "rgba(230,145,56,0.08)", border: "1px solid rgba(230,145,56,0.25)" }}
+                  >
+                    <svg className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: "#E69138" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-semibold text-white mb-1">Share content to unlock the Creator Program</p>
+                      <p className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+                        Before you can apply, you need to be an active community member. Post photos and videos,
+                        engage with others, and build your following. Meet all 4 criteria below to unlock your application.
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-sm mb-1" style={{ color: "#8E8E93" }}>
-                    {metCount === 0 ? t.noCriteriaMet : metCount < criteria.length ? t.someCriteriaMet(metCount, criteria.length) : ""}
-                  </p>
-                  {closest && !closest.met && (
-                    <p className="text-xs mb-4 font-medium" style={{ color: "#E69138" }}>
-                      {t.closestHint(closest.label, closest.required - closest.current)}
+
+                  {/* Progress card */}
+                  <div className="glass-card-sm p-5 mb-4">
+                    <div className="flex items-start justify-between mb-1">
+                      <p className="text-lg font-bold text-white">{t.becomeCreatorTitle}</p>
+                      <span className="text-sm font-bold" style={{ color: totalPct >= 75 ? "#5ED1C4" : "#E69138" }}>{totalPct}%</span>
+                    </div>
+                    <p className="text-sm mb-1" style={{ color: "#8E8E93" }}>
+                      {metCount === 0 ? t.noCriteriaMet : metCount < criteria.length ? t.someCriteriaMet(metCount, criteria.length) : ""}
                     </p>
-                  )}
-                  <CriterionBar label={t.criteriaMediaPosts} {...eligibility.criteria.mediaPosts} />
-                  <CriterionBar label={t.criteriaTotalLikes} {...eligibility.criteria.totalLikes} />
-                  <CriterionBar label={t.criteriaFollowers} {...eligibility.criteria.followers} />
-                  <CriterionBar label={t.criteriaWeekly} {...eligibility.criteria.weeklyConsistency} />
-                  <p className="text-xs mt-4 text-center" style={{ color: "#8E8E93" }}>{t.progressFootnote}</p>
-                </div>
+                    {closest && !closest.met && (
+                      <p className="text-xs mb-4 font-medium" style={{ color: "#E69138" }}>
+                        {t.closestHint(closest.label, closest.required - closest.current)}
+                      </p>
+                    )}
+                    <CriterionBar label={t.criteriaMediaPosts} {...eligibility.criteria.mediaPosts} />
+                    <CriterionBar label={t.criteriaTotalLikes} {...eligibility.criteria.totalLikes} />
+                    <CriterionBar label={t.criteriaFollowers} {...eligibility.criteria.followers} />
+                    <CriterionBar label={t.criteriaWeekly} {...eligibility.criteria.weeklyConsistency} />
+                    <p className="text-xs mt-4 text-center" style={{ color: "#8E8E93" }}>{t.progressFootnote}</p>
+                  </div>
+
+                  {/* CTA to start sharing */}
+                  <div className="text-center">
+                    <button
+                      onClick={() => navigate("/social")}
+                      className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white"
+                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                      </svg>
+                      Start Sharing Content
+                    </button>
+                  </div>
+                </>
               );
             })()}
 
