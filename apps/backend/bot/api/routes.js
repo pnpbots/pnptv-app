@@ -6094,17 +6094,36 @@ app.get('/api/webapp/payments/dash/details/:invoiceId', requireSessionAuth, asyn
       return res.status(404).json({ success: false, error: 'No Dash payment method found for this invoice' });
     }
 
+    let amount = dashMethod.amount || dashMethod.cryptoAmount || '0';
+    let invoiceAmount = invoice?.amount ? parseFloat(invoice.amount) : null;
+
+    // For TopUp invoices (token purchases), amount may be "0" — compute from DB record
+    if ((!amount || amount === '0') && dashMethod.rate) {
+      const tokenRow = await pool.query(
+        'SELECT usd_amount FROM token_purchases WHERE btcpay_invoice_id = $1 LIMIT 1',
+        [invoiceId]
+      );
+      if (tokenRow.rows.length > 0 && tokenRow.rows[0].usd_amount) {
+        const usd = parseFloat(tokenRow.rows[0].usd_amount);
+        const rate = parseFloat(dashMethod.rate);
+        if (rate > 0) {
+          amount = (usd / rate).toFixed(8);
+          invoiceAmount = usd;
+        }
+      }
+    }
+
     res.json({
       success: true,
       destination: dashMethod.destination || dashMethod.address,
-      amount: dashMethod.amount || dashMethod.cryptoAmount,
-      due: dashMethod.due || dashMethod.amount,
-      totalDue: dashMethod.totalDue || dashMethod.amount,
+      amount,
+      due: dashMethod.due || amount,
+      totalDue: dashMethod.totalDue || amount,
       rate: dashMethod.rate || null,
       networkFee: dashMethod.networkFee || '0',
       status: invoice?.status || 'New',
       currency: invoice?.currency || 'USD',
-      invoiceAmount: invoice?.amount || null,
+      invoiceAmount,
     });
   } catch (err) {
     console.error('[Dash] Failed to get payment details:', err.message);
