@@ -1352,10 +1352,20 @@ class PaymentController {
           currentStatus,
         });
 
+        // Distributed lock to prevent race condition between 3DS completion and webhook
+        const activationLockKey = `subscription_activation:${paymentId}`;
+        const activationLockAcquired = await cache.acquireLock(activationLockKey, 60);
+        if (!activationLockAcquired) {
+          logger.info('3DS2: subscription activation already in progress (likely webhook)', { paymentId });
+          return res.json({ success: true, status: 'processing', message: 'Payment is being finalized.' });
+        }
+
+        try {
         // Re-read payment to check if webhook already processed it (race condition guard)
         const freshPayment = await PaymentModel.getById(paymentId);
         if (freshPayment && freshPayment.status === 'completed') {
           logger.info('3DS2: payment already completed by webhook, skipping activation', { paymentId });
+          await cache.releaseLock(activationLockKey);
           return res.json({ success: true, message: 'Payment already processed' });
         }
 
@@ -1530,12 +1540,17 @@ class PaymentController {
           webhook_processed_at: new Date().toISOString(),
         });
 
+        await cache.releaseLock(activationLockKey);
         return res.json({
           success: true,
           status: 'authenticated',
           message: 'Payment authenticated and approved',
           paymentId,
         });
+        } finally {
+          // Ensure lock is released even if activation throws
+          await cache.releaseLock(activationLockKey).catch(() => {});
+        }
       } else if (
         currentStatus === 'Rechazada'
         || currentStatus === 'Fallida'

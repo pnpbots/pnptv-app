@@ -3127,6 +3127,7 @@ class PaymentService {
         expected_epayco_currency: 'COP',
         token_card_prefix: tokenId.substring(0, 8),
         browser_info: normalizedBrowserInfo,
+        customer_email: customer.email,
       });
 
       // 4. Make single charge (NOT recurring/subscription)
@@ -3161,8 +3162,6 @@ class PaymentService {
         dues: String(dues),
         ip,
         browser_info: normalizedBrowserInfo,
-        user_agent: normalizedBrowserInfo.user_agent,
-        accept_header: normalizedBrowserInfo.accept_header,
         url_response: `${webhookDomain}/api/payment-response?x_extra3=${encodeURIComponent(paymentId)}`,
         url_confirmation: `${epaycoWebhookDomain}${confirmationPath}`,
         method_confirmation: 'POST',
@@ -3348,9 +3347,11 @@ class PaymentService {
           expected_epayco_amount: String(amountCOP),
           expected_epayco_currency: 'COP',
           three_ds_requested: true,
+          three_ds_requested_at: new Date().toISOString(),
           three_ds_version: is3ds2 ? '2.0' : '1.0',
           bank_url_available: !!redirectUrl,
           browser_info: normalizedBrowserInfo,
+          customer_email: customer.email,
           epayco_response_timestamp: new Date().toISOString(),
         };
 

@@ -726,10 +726,12 @@
                 if (tokenCard) {
                     chargeBody.tokenCard = tokenCard;
                 } else {
-                    chargeBody.cardNumber = cardNumber;
-                    chargeBody.expYear = expYear;
-                    chargeBody.expMonth = expMonth;
-                    chargeBody.cvc = cvc;
+                    // PCI-DSS: never send raw card data to the server
+                    showState('error');
+                    document.getElementById('error-detail').textContent =
+                        'Card tokenization failed. Please refresh and try again, or use a different payment method.';
+                    document.getElementById('btn-pay').disabled = false;
+                    return;
                 }
                 const chargeRes = await fetch('/api/payment/tokenized-charge', {
                     method: 'POST',
@@ -737,7 +739,23 @@
                     body: JSON.stringify(chargeBody),
                 });
 
-                const result = await chargeRes.json();
+                let result;
+                try {
+                    result = await chargeRes.json();
+                } catch (parseErr) {
+                    showState('error');
+                    document.getElementById('error-detail').textContent =
+                        'Server error (' + chargeRes.status + '). Please try again later.';
+                    document.getElementById('btn-pay').disabled = false;
+                    return;
+                }
+                if (!chargeRes.ok && !result.status) {
+                    showState('error');
+                    document.getElementById('error-detail').textContent =
+                        result.error || 'Payment processing error. Please try again.';
+                    document.getElementById('btn-pay').disabled = false;
+                    return;
+                }
                 if (result.retryable) {
                     showState('error');
                     document.getElementById('error-detail').textContent =
@@ -763,6 +781,11 @@
                     return;
                 }
 
+                // Safety timeout: if ePayco SDK hangs, reject after 30 seconds
+                var tokenTimeout = setTimeout(function() {
+                    reject(new Error('Card tokenization timed out. Please try again.'));
+                }, 30000);
+
                 try {
                     var handler = ePayco.checkout.configure({
                         key: paymentData.epaycoPublicKey,
@@ -776,6 +799,7 @@
                         'card[cvc]': cvc,
                         'hasCvv': true,
                     }, function(tokenData) {
+                        clearTimeout(tokenTimeout);
                         if (tokenData && tokenData.status && tokenData.id) {
                             resolve(tokenData.id);
                         } else if (tokenData && tokenData.token) {
@@ -794,6 +818,7 @@
                         }
                     });
                 } catch (err) {
+                    clearTimeout(tokenTimeout);
                     reject(err);
                 }
             });
@@ -837,7 +862,23 @@
                 return;
             }
 
-            // Rejected or failed
+            if (result.status === 'rejected') {
+                showState('error');
+                document.getElementById('error-detail').textContent =
+                    result.error || 'Your card was declined. Please try a different card or payment method.';
+                document.getElementById('btn-pay').disabled = false;
+                return;
+            }
+
+            if (result.status === 'failed') {
+                showState('error');
+                document.getElementById('error-detail').textContent =
+                    result.error || 'Payment failed. Please try again or use a different payment method.';
+                document.getElementById('btn-pay').disabled = false;
+                return;
+            }
+
+            // Unknown status fallback
             showState('error');
             document.getElementById('error-detail').textContent =
                 result.error || 'Your payment was declined. Please try a different card or payment method.';
