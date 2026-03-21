@@ -153,19 +153,18 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
   }, []);
 
   // Hidden SoundCloud iframe — created on first use only, not on mount.
-  // Eagerly creating it with a placeholder URL (tracks/1) causes an immediate
-  // 404 from api-widget.soundcloud.com on every page load.
-  // The iframe is instead injected the first time a SoundCloud track is played.
-  const ensureScIframe = useCallback((): HTMLIFrameElement => {
+  // The iframe is injected the first time a SoundCloud track is played,
+  // using that track's URL so the widget initializes with valid content.
+  const ensureScIframe = useCallback((trackUrl: string): HTMLIFrameElement => {
     let iframe = document.getElementById("soundcloud-player") as HTMLIFrameElement | null;
     if (!iframe) {
       iframe = document.createElement("iframe");
       iframe.id = "soundcloud-player";
       iframe.allow = "autoplay";
       iframe.style.cssText = "display:none;position:absolute;width:0;height:0;border:0;";
-      // Use a silent, generic embed URL with no track pre-loaded so the widget
-      // initializes without issuing any resolve request.
-      iframe.src = "https://w.soundcloud.com/player/?url=https%3A//soundcloud.com&auto_play=false&show_artwork=false";
+      // Initialize with the actual track URL so SC.Widget can bind properly.
+      const encoded = encodeURIComponent(trackUrl);
+      iframe.src = `https://w.soundcloud.com/player/?url=${encoded}&auto_play=false&show_artwork=false`;
       document.body.appendChild(iframe);
       scIframeRef.current = iframe;
     }
@@ -234,7 +233,8 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
         // Ensure the API script is loaded, then ensure the iframe exists and bind the widget.
         ensureScApi(() => {
           if (gen !== playGenRef.current) return;
-          const iframe = ensureScIframe();
+          // Pass the actual track URL so the iframe initializes with valid SC content.
+          const iframe = ensureScIframe(trackUrl);
 
           const initAndPlay = () => {
             if (gen !== playGenRef.current) return;
@@ -246,8 +246,14 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
               soundcloudPlayerRef.current.bind(window.SC.Widget.Events.PAUSE, () => setIsPlaying(false));
               soundcloudPlayerRef.current.bind(window.SC.Widget.Events.READY, () => {
                 soundcloudPlayerRef.current?.setVolume(volume * 100);
+                // The first track was loaded via the iframe src, so just play it.
+                soundcloudPlayerRef.current?.play();
+                setIsPlaying(true);
+                setIsLoading(false);
               });
+              return; // READY event will handle first play
             }
+            // Widget already exists — load the new track
             soundcloudPlayerRef.current.load(trackUrl, {
               auto_play: true,
               show_artwork: true,
