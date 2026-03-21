@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { Card, Skeleton } from "@pnptv/ui-kit";
+import { QRCodeSVG } from "qrcode.react";
 import {
   getSubscriptionPlans,
   createPayment,
@@ -9,6 +10,7 @@ import {
   createDashSubscription,
   getDashSubscriptionStatus,
   getDashAvailable,
+  getDashPaymentDetails,
   activateMeruCode,
   getLabelColor,
   assertPaymentUrl,
@@ -120,8 +122,21 @@ export default function Subscribe() {
   const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
 
   // Dash invoice state
-  const [dashInvoice, setDashInvoice] = useState<{ invoiceId: string; checkoutUrl: string; planName: string } | null>(null);
+  const [dashInvoice, setDashInvoice] = useState<{
+    invoiceId: string;
+    checkoutUrl: string;
+    planName: string;
+    destination?: string;
+    amount?: string;
+    due?: string;
+    totalDue?: string;
+    rate?: string | null;
+    loadingDetails?: boolean;
+    detailsError?: string;
+    invoiceAmount?: number | null;
+  } | null>(null);
   const [dashPolling, setDashPolling] = useState(false);
+  const [dashCopied, setDashCopied] = useState(false);
 
   // Meru code activation
   const [meruCode, setMeruCode] = useState("");
@@ -242,12 +257,35 @@ export default function Subscribe() {
       if (provider === "dash") {
         const result = await createDashSubscription(selectedPlan);
         if (result.success && result.checkoutUrl) {
-          setDashInvoice({
+          const invoice = {
             invoiceId: result.invoiceId,
             checkoutUrl: assertPaymentUrl(result.checkoutUrl),
             planName: result.planName || "subscription",
-          });
+            loadingDetails: true,
+          };
+          setDashInvoice(invoice);
           setDashPolling(true);
+          // Fetch payment details for in-app widget
+          getDashPaymentDetails(result.invoiceId)
+            .then((details) => {
+              if (details.success) {
+                setDashInvoice((prev) => prev ? {
+                  ...prev,
+                  destination: details.destination,
+                  amount: details.amount,
+                  due: details.due,
+                  totalDue: details.totalDue,
+                  rate: details.rate,
+                  invoiceAmount: details.invoiceAmount,
+                  loadingDetails: false,
+                } : prev);
+              } else {
+                setDashInvoice((prev) => prev ? { ...prev, loadingDetails: false, detailsError: "Could not load payment details" } : prev);
+              }
+            })
+            .catch(() => {
+              setDashInvoice((prev) => prev ? { ...prev, loadingDetails: false, detailsError: "Could not load payment details" } : prev);
+            });
         } else {
           const code = (result as { code?: string }).code;
           if (code === "BTCPAY_NOT_CONFIGURED") {
@@ -627,7 +665,7 @@ export default function Subscribe() {
         )}
       </div>
 
-      {/* Dash invoice modal */}
+      {/* Dash in-app payment widget */}
       {dashInvoice && (
         <div className="mb-6 rounded-xl border border-[#008DE4]/40 bg-[#008DE4]/5 p-4">
           <div className="flex items-center gap-2 mb-3">
@@ -636,20 +674,97 @@ export default function Subscribe() {
               {s.waitingForDashPayment} {dashInvoice.planName}
             </span>
           </div>
-          <p className="text-xs text-pnp-textSecondary mb-3">
-            {s.dashInvoiceDesc}
-          </p>
-          <a
-            href={dashInvoice.checkoutUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block w-full text-center py-2.5 rounded-xl bg-[#008DE4] text-white text-sm font-semibold hover:bg-[#0070b8] transition-colors mb-2"
-          >
-            {s.openDashCheckout}
-          </a>
+
+          {dashInvoice.loadingDetails ? (
+            <div className="flex flex-col items-center py-6 gap-3">
+              <svg className="animate-spin h-6 w-6 text-[#008DE4]" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <p className="text-xs text-pnp-textSecondary">{s.dashLoadingDetails}</p>
+            </div>
+          ) : dashInvoice.destination && dashInvoice.amount ? (
+            <div className="flex flex-col items-center gap-4">
+              {/* QR Code */}
+              <div className="bg-white p-3 rounded-xl">
+                <QRCodeSVG
+                  value={`dash:${dashInvoice.destination}?amount=${dashInvoice.amount}`}
+                  size={180}
+                  level="M"
+                />
+              </div>
+              <p className="text-[10px] text-pnp-textSecondary">{s.dashScanQr}</p>
+
+              {/* Amount */}
+              <div className="text-center">
+                <p className="text-xs text-pnp-textSecondary mb-1">{s.dashAmountDue}</p>
+                <p className="text-xl font-bold text-white">{dashInvoice.amount} DASH</p>
+                {dashInvoice.invoiceAmount != null && (
+                  <p className="text-xs text-pnp-textSecondary mt-0.5">
+                    ~${dashInvoice.invoiceAmount.toFixed(2)} USD
+                  </p>
+                )}
+              </div>
+
+              {/* Address + Copy */}
+              <div className="w-full">
+                <p className="text-[10px] text-pnp-textSecondary mb-1">{s.dashToAddress}</p>
+                <div
+                  className="flex items-center gap-2 rounded-lg px-3 py-2"
+                  style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
+                >
+                  <code className="flex-1 text-xs text-white/80 break-all font-mono">
+                    {dashInvoice.destination}
+                  </code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(dashInvoice.destination!).catch(() => {});
+                      setDashCopied(true);
+                      setTimeout(() => setDashCopied(false), 2000);
+                    }}
+                    className="flex-shrink-0 text-xs font-semibold px-2 py-1 rounded transition-colors"
+                    style={{ color: dashCopied ? "#34C759" : "#008DE4" }}
+                  >
+                    {dashCopied ? s.dashCopied : s.dashCopyAddress}
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-xs text-pnp-textSecondary text-center">
+                {s.dashInvoiceDesc}
+              </p>
+
+              {/* Fallback external link */}
+              <a
+                href={dashInvoice.checkoutUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs hover:underline transition-colors"
+                style={{ color: "#008DE4" }}
+              >
+                {s.dashOpenExternal}
+              </a>
+            </div>
+          ) : (
+            /* Fallback if details failed to load — show original external link */
+            <>
+              <p className="text-xs text-pnp-textSecondary mb-3">
+                {dashInvoice.detailsError || s.dashInvoiceDesc}
+              </p>
+              <a
+                href={dashInvoice.checkoutUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-full text-center py-2.5 rounded-xl bg-[#008DE4] text-white text-sm font-semibold hover:bg-[#0070b8] transition-colors mb-2"
+              >
+                {s.openDashCheckout}
+              </a>
+            </>
+          )}
+
           <button
-            onClick={() => { setDashInvoice(null); setDashPolling(false); }}
-            className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1"
+            onClick={() => { setDashInvoice(null); setDashPolling(false); setDashCopied(false); }}
+            className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1 mt-2"
           >
             {s.cancel}
           </button>

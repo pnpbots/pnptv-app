@@ -6053,6 +6053,65 @@ app.get('/api/webapp/payments/dash/status/:invoiceId', asyncHandler(async (req, 
   return res.json({ success: true, status: result.rows[0].status });
 }));
 
+// GET /api/webapp/payments/dash/details/:invoiceId — fetch Dash payment address + amount for a pending invoice
+app.get('/api/webapp/payments/dash/details/:invoiceId', requireSessionAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const { invoiceId } = req.params;
+
+    if (!invoiceId) {
+      return res.status(400).json({ success: false, error: 'Missing invoiceId' });
+    }
+
+    // Verify ownership — check both subscription orders and token purchases
+    const ownerCheck = await pool.query(
+      `SELECT user_id FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 AND user_id = $2
+       UNION ALL
+       SELECT user_id FROM token_purchases WHERE btcpay_invoice_id = $1 AND user_id = $2
+       LIMIT 1`,
+      [invoiceId, userId]
+    );
+
+    if (ownerCheck.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Invoice not found' });
+    }
+
+    const { getInvoicePaymentMethods, getInvoice } = require('../../config/btcpay');
+
+    const [methods, invoice] = await Promise.all([
+      getInvoicePaymentMethods(invoiceId),
+      getInvoice(invoiceId),
+    ]);
+
+    // Find the DASH payment method (could be "DASH", "DASH-CHAIN", or similar)
+    const dashMethod = methods.find(m =>
+      m.paymentMethodId?.toUpperCase().includes('DASH') ||
+      m.cryptoCode?.toUpperCase() === 'DASH' ||
+      m.paymentMethod?.toUpperCase().includes('DASH')
+    );
+
+    if (!dashMethod) {
+      return res.status(404).json({ success: false, error: 'No Dash payment method found for this invoice' });
+    }
+
+    res.json({
+      success: true,
+      destination: dashMethod.destination || dashMethod.address,
+      amount: dashMethod.amount || dashMethod.cryptoAmount,
+      due: dashMethod.due || dashMethod.amount,
+      totalDue: dashMethod.totalDue || dashMethod.amount,
+      rate: dashMethod.rate || null,
+      networkFee: dashMethod.networkFee || '0',
+      status: invoice?.status || 'New',
+      currency: invoice?.currency || 'USD',
+      invoiceAmount: invoice?.amount || null,
+    });
+  } catch (err) {
+    console.error('[Dash] Failed to get payment details:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch payment details' });
+  }
+});
+
 // POST /api/webhooks/btcpay — BTCPay Server webhook (Dash payment confirmed)
 app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) => {
     const signature = req.headers['btcpay-sig'];

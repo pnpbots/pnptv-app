@@ -14,6 +14,8 @@ import {
   eraseMyAccount,
   getBlockedUsers,
   unblockUser,
+  getWalletBalance,
+  linkDPNS,
   type ReferralStats,
   type BlockedUser,
   type EraseAccountReceipt,
@@ -151,6 +153,15 @@ export default function Settings() {
   const [blockedLoading, setBlockedLoading] = useState(true);
   const [unblockingId, setUnblockingId] = useState<string | null>(null);
 
+  // ── Wallet & DPNS state ─────────────────────────────────────────────────
+  const [dpnsHandle, setDpnsHandle] = useState<string | null>(null);
+  const [dpnsInput, setDpnsInput] = useState("");
+  const [dpnsSaving, setDpnsSaving] = useState(false);
+  const [dpnsError, setDpnsError] = useState<string | null>(null);
+  const [showDpnsInput, setShowDpnsInput] = useState(false);
+  const [dpnsSuccess, setDpnsSuccess] = useState(false);
+  const [tokenBalance, setTokenBalance] = useState<number>(0);
+
   // ── Load data ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -161,12 +172,13 @@ export default function Settings() {
       setProfileLoading(true);
       setBlockedLoading(true);
       try {
-        const [profileRes, referralRes, notifRes, blockedRes] = await Promise.all([
+        const [profileRes, referralRes, notifRes, blockedRes, walletRes] = await Promise.all([
           getProfile(),
           getMyReferral().catch(() => null),
           fetch(`${import.meta.env.VITE_API_URL || "https://pnptv.app"}/api/webapp/notifications/preferences`, { credentials: "include" })
             .then(r => r.ok ? r.json() : null).catch(() => null),
           getBlockedUsers().catch(() => null),
+          getWalletBalance().catch(() => null),
         ]);
 
         if (cancelled) return;
@@ -188,6 +200,10 @@ export default function Settings() {
           setBlockedUsers(blockedRes.blockedUsers);
         }
         setBlockedLoading(false);
+        if (walletRes) {
+          setDpnsHandle(walletRes.dpnsHandle ?? null);
+          setTokenBalance(walletRes.balance ?? 0);
+        }
       } catch {
         // Silent — individual sections degrade gracefully
       } finally {
@@ -278,6 +294,29 @@ export default function Settings() {
       setWofConsentSaving(false);
     }
   }, [wofConsent]);
+
+  const handleSaveDpns = useCallback(async () => {
+    const handle = dpnsInput.trim();
+    if (!handle || dpnsSaving) return;
+    if (!/^[a-z0-9_-]{3,63}(\.dash)?$/i.test(handle)) {
+      setDpnsError(p.dpnsInvalidFormat);
+      return;
+    }
+    setDpnsSaving(true);
+    setDpnsError(null);
+    try {
+      const result = await linkDPNS(handle);
+      setDpnsHandle(result.dpnsHandle);
+      setShowDpnsInput(false);
+      setDpnsInput("");
+      setDpnsSuccess(true);
+      setTimeout(() => setDpnsSuccess(false), 3000);
+    } catch (err) {
+      setDpnsError(err instanceof Error ? err.message : "Failed to link DPNS");
+    } finally {
+      setDpnsSaving(false);
+    }
+  }, [dpnsInput, dpnsSaving, p]);
 
   const handleContentDisclaimerToggle = useCallback(async () => {
     if (contentDisclaimer) return; // once accepted, cannot revert
@@ -508,6 +547,98 @@ export default function Settings() {
             disabled={contentDisclaimerSaving || contentDisclaimer}
             accentColor="#D4007A"
           />
+        </div>
+      </Section>
+
+      {/* ── Wallet & Dash Identity ────────────────────────────────────────── */}
+      <Section title={p.walletDashSection}>
+        <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+          {p.walletDashDesc}
+        </p>
+
+        {/* Token balance */}
+        <div
+          className="flex items-center justify-between rounded-lg px-3 py-3 mb-3"
+          style={{ background: "rgba(0,141,228,0.06)", border: "1px solid rgba(0,141,228,0.2)" }}
+        >
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#008DE4" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
+            </svg>
+            <span className="text-sm font-medium text-white">{p.dpnsTokenBalance}</span>
+          </div>
+          <span className="text-sm font-bold" style={{ color: "#008DE4" }}>{tokenBalance}</span>
+        </div>
+
+        {/* DPNS handle display / link */}
+        <div
+          className="rounded-lg px-3 py-3"
+          style={{ background: "rgba(0,141,228,0.06)", border: "1px solid rgba(0,141,228,0.2)" }}
+        >
+          {dpnsHandle ? (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-white">{p.dpnsLinked}</span>
+                <span
+                  className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                  style={{ background: "rgba(0,141,228,0.2)", color: "#008DE4" }}
+                >
+                  @{dpnsHandle}
+                </span>
+              </div>
+              <button
+                onClick={() => { setShowDpnsInput(!showDpnsInput); setDpnsInput(dpnsHandle); setDpnsError(null); }}
+                className="text-xs hover:underline transition-colors"
+                style={{ color: "#008DE4" }}
+              >
+                {p.editProfileTitle?.includes("Edit") ? "Edit" : "Editar"}
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-white">{p.dpnsLinked}</span>
+              <button
+                onClick={() => { setShowDpnsInput(true); setDpnsError(null); }}
+                className="text-xs font-semibold px-3 py-1 rounded-lg transition-colors"
+                style={{ background: "rgba(0,141,228,0.2)", color: "#008DE4" }}
+              >
+                {p.linkDpnsIdentity}
+              </button>
+            </div>
+          )}
+
+          {showDpnsInput && (
+            <div className="mt-3 flex gap-2">
+              <input
+                type="text"
+                value={dpnsInput}
+                onChange={(e) => { setDpnsInput(e.target.value); setDpnsError(null); }}
+                placeholder={p.dpnsPlaceholder}
+                disabled={dpnsSaving}
+                className="flex-1 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#008DE4]/40 disabled:opacity-50"
+                style={{
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  color: "#fff",
+                }}
+              />
+              <button
+                onClick={handleSaveDpns}
+                disabled={!dpnsInput.trim() || dpnsSaving}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: "#008DE4" }}
+              >
+                {dpnsSaving ? p.dpnsSaving : p.dpnsSave}
+              </button>
+            </div>
+          )}
+
+          {dpnsError && (
+            <p className="mt-2 text-xs" style={{ color: "#FF6B6B" }}>{dpnsError}</p>
+          )}
+          {dpnsSuccess && (
+            <p className="mt-2 text-xs" style={{ color: "#34C759" }}>{p.dpnsSaved}</p>
+          )}
         </div>
       </Section>
 

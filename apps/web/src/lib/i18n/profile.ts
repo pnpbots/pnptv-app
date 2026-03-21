@@ -151,6 +151,18 @@ const strings = {
     contentDisclaimer: "Content Disclaimer",
     contentDisclaimerDesc: "I confirm that all items, substances, or materials depicted in my videos are props, simulated, or used solely for entertainment purposes",
 
+    // ── Wallet & Dash identity ──────────────────────────────────────────────
+    walletDashSection: "Wallet & Dash Identity",
+    walletDashDesc: "Link your Dash Platform identity (DPNS) to your PNPtv account",
+    dpnsLinked: "Dash Identity",
+    linkDpnsIdentity: "Link DPNS Identity",
+    dpnsPlaceholder: "yourname.dash",
+    dpnsSave: "Save",
+    dpnsSaving: "Saving...",
+    dpnsSaved: "DPNS handle linked!",
+    dpnsInvalidFormat: "Invalid DPNS handle (3-63 chars, letters, numbers, hyphens, underscores)",
+    dpnsTokenBalance: "Token Balance",
+
     // ── Privacy toggles ───────────────────────────────────────────────────────
     public: "Public",
     private: "Private",
@@ -478,6 +490,18 @@ const strings = {
     wallOfFameConsentDesc: "Permite que tus fotos del Muro de la Fama aparezcan en el Feed Social de la app web",
     contentDisclaimer: "Aviso de contenido",
     contentDisclaimerDesc: "Confirmo que todos los objetos, sustancias o materiales que aparecen en mis videos son accesorios, simulados o utilizados únicamente con fines de entretenimiento",
+
+    // ── Wallet & Dash identity ──────────────────────────────────────────────
+    walletDashSection: "Billetera e Identidad Dash",
+    walletDashDesc: "Vincula tu identidad Dash Platform (DPNS) a tu cuenta PNPtv",
+    dpnsLinked: "Identidad Dash",
+    linkDpnsIdentity: "Vincular Identidad DPNS",
+    dpnsPlaceholder: "tunombre.dash",
+    dpnsSave: "Guardar",
+    dpnsSaving: "Guardando...",
+    dpnsSaved: "Identidad DPNS vinculada!",
+    dpnsInvalidFormat: "Formato DPNS inválido (3-63 caracteres, letras, números, guiones)",
+    dpnsTokenBalance: "Saldo de Tokens",
 
     // ── Privacy toggles ───────────────────────────────────────────────────────
     public: "Público",

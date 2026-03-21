@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useI18n } from "@/lib/i18n";
+import { QRCodeSVG } from "qrcode.react";
 import {
   getWalletBalance,
   getTokenPackages,
   buyTokens,
   buyTokensCard,
   buyTokensWallet,
+  getDashPaymentDetails,
   assertPaymentUrl,
   type TokenPackage,
 } from "@/lib/api";
@@ -25,6 +27,19 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
   const [buyError, setBuyError] = useState<string | null>(null);
   const [loadingPackages, setLoadingPackages] = useState(false);
 
+  // Dash in-app payment state
+  const [dashPayment, setDashPayment] = useState<{
+    invoiceId: string;
+    checkoutUrl: string;
+    destination?: string;
+    amount?: string;
+    invoiceAmount?: number;
+    loading: boolean;
+    error?: string;
+  } | null>(null);
+  const [dashCopied, setDashCopied] = useState(false);
+  const dashPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     if (isOpen) {
       setLoadingPackages(true);
@@ -37,6 +52,9 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
       setBuyMethod('select');
       setBuyError(null);
       setBuyingPackage(null);
+      setDashPayment(null);
+      setDashCopied(false);
+      if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
     }
   }, [isOpen]);
 
@@ -56,15 +74,50 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
         checkoutUrl = assertPaymentUrl(result.checkoutUrl);
         openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
       } else {
-        // Dash — BTCPay has its own checkout page
+        // Dash — show in-app payment widget instead of popup
         const result = await buyTokens(pkg.id);
-        checkoutUrl = assertPaymentUrl(result.checkoutUrl);
-        openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
+        const safeUrl = assertPaymentUrl(result.checkoutUrl);
+        setDashPayment({ invoiceId: result.invoiceId, checkoutUrl: safeUrl, loading: true });
+        setBuyingPackage(null);
+
+        // Fetch payment details for in-app widget
+        getDashPaymentDetails(result.invoiceId)
+          .then((details) => {
+            if (details.success) {
+              setDashPayment((prev) => prev ? {
+                ...prev,
+                destination: details.destination,
+                amount: details.amount,
+                invoiceAmount: details.invoiceAmount ?? undefined,
+                loading: false,
+              } : prev);
+            } else {
+              setDashPayment((prev) => prev ? { ...prev, loading: false, error: "Could not load payment details" } : prev);
+            }
+          })
+          .catch(() => {
+            setDashPayment((prev) => prev ? { ...prev, loading: false, error: "Could not load payment details" } : prev);
+          });
+
+        // Poll for payment confirmation
+        dashPollRef.current = setInterval(async () => {
+          try {
+            const balRes = await getWalletBalance();
+            if (typeof balRes.balance === 'number' && balRes.balance > 0 && onSuccess) {
+              onSuccess(balRes.balance);
+              if (dashPollRef.current) clearInterval(dashPollRef.current);
+              dashPollRef.current = null;
+              setTimeout(() => onClose(), 1500);
+            }
+          } catch { /* ignore */ }
+        }, 5000);
+
+        return; // Skip the popup logic below
       }
 
       if (!openedPopup) {
         setBuyError("Your browser blocked the payment popup. Please allow popups for this site and try again.");
-        return; 
+        return;
       }
 
       onClose();
@@ -198,8 +251,103 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
           </div>
         )}
 
+        {/* Dash in-app payment widget */}
+        {dashPayment && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2 h-2 rounded-full bg-[#008DE4] animate-pulse" />
+              <span className="text-sm font-medium text-pnp-textPrimary">Waiting for Dash payment...</span>
+            </div>
+
+            {dashPayment.loading ? (
+              <div className="flex flex-col items-center py-6 gap-3">
+                <svg className="animate-spin h-6 w-6 text-[#008DE4]" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <p className="text-xs text-pnp-textSecondary">Loading payment details...</p>
+              </div>
+            ) : dashPayment.destination && dashPayment.amount ? (
+              <div className="flex flex-col items-center gap-3">
+                <div className="bg-white p-3 rounded-xl">
+                  <QRCodeSVG
+                    value={`dash:${dashPayment.destination}?amount=${dashPayment.amount}`}
+                    size={160}
+                    level="M"
+                  />
+                </div>
+                <p className="text-[10px] text-pnp-textSecondary">Scan with your Dash wallet</p>
+
+                <div className="text-center">
+                  <p className="text-lg font-bold text-white">{dashPayment.amount} DASH</p>
+                  {dashPayment.invoiceAmount != null && (
+                    <p className="text-xs text-pnp-textSecondary">~${dashPayment.invoiceAmount.toFixed(2)} USD</p>
+                  )}
+                </div>
+
+                <div className="w-full">
+                  <div
+                    className="flex items-center gap-2 rounded-lg px-3 py-2"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
+                  >
+                    <code className="flex-1 text-[10px] text-white/80 break-all font-mono">{dashPayment.destination}</code>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(dashPayment.destination!).catch(() => {});
+                        setDashCopied(true);
+                        setTimeout(() => setDashCopied(false), 2000);
+                      }}
+                      className="flex-shrink-0 text-xs font-semibold px-2 py-1 rounded transition-colors"
+                      style={{ color: dashCopied ? "#34C759" : "#008DE4" }}
+                    >
+                      {dashCopied ? "Copied!" : "Copy"}
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-xs text-pnp-textSecondary text-center">
+                  Send the exact amount to the address above. This page updates automatically.
+                </p>
+
+                <a
+                  href={dashPayment.checkoutUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs hover:underline"
+                  style={{ color: "#008DE4" }}
+                >
+                  Open in BTCPay
+                </a>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-pnp-textSecondary mb-3">{dashPayment.error || "Could not load payment details."}</p>
+                <a
+                  href={dashPayment.checkoutUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block w-full text-center py-2.5 rounded-xl bg-[#008DE4] text-white text-sm font-semibold hover:bg-[#0070b8] transition-colors"
+                >
+                  Open Dash Checkout
+                </a>
+              </>
+            )}
+
+            <button
+              onClick={() => {
+                setDashPayment(null);
+                setDashCopied(false);
+                if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+              }}
+              className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
         {/* Step 2: Package grid after method selected */}
-        {buyMethod !== 'select' && (
+        {buyMethod !== 'select' && !dashPayment && (
           <>
             {/* Method explanation */}
             <p className="text-xs text-pnp-textSecondary mb-4 leading-relaxed">

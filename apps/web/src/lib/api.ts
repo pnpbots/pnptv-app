@@ -2220,6 +2220,23 @@ export function getDashAvailable(): Promise<{
   return request("/api/webapp/payments/dash/available");
 }
 
+export function getDashPaymentDetails(
+  invoiceId: string
+): Promise<{
+  success: boolean;
+  destination: string;
+  amount: string;
+  due: string;
+  totalDue: string;
+  rate: string | null;
+  networkFee: string;
+  status: string;
+  currency: string;
+  invoiceAmount: number | null;
+}> {
+  return request(`/api/webapp/payments/dash/details/${encodeURIComponent(invoiceId)}`);
+}
+
 export function activateMeruCode(
   code: string,
   email: string

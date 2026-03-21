@@ -36,6 +36,7 @@ const CareersPage = lazy(() => import("@/pages/CareersPage"));
 const CommunityResourcesPage = lazy(() => import("@/pages/CommunityResourcesPage"));
 const ShopPage = lazy(() => import("@/pages/ShopPage"));
 const DownloadPage = lazy(() => import("@/pages/DownloadPage"));
+const DashBankPage = lazy(() => import("@/pages/DashBankPage"));
 const MainStage = lazy(() => import("@/pages/MainStage"));
 const DaHaus = lazy(() => import("@/pages/DaHaus"));
 const PostDetail = lazy(() => import("@/pages/PostDetail"));
@@ -565,6 +566,14 @@ export const router = createBrowserRouter([
     element: (
       <ModuleLoader>
         <DownloadPage />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/bank",
+    element: (
+      <ModuleLoader>
+        <DashBankPage />
       </ModuleLoader>
     ),
   },

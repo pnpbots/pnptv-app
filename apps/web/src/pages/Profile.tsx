@@ -28,6 +28,7 @@ import {
   getUserLabel,
   getLabelColor,
   assertPaymentUrl,
+  getWalletBalance,
   blockUser,
   unblockUser,
   isUserBlocked,
@@ -97,6 +98,9 @@ export default function Profile() {
   const [lang, setLang] = useState<"en" | "es">("en");
   const [langSaving, setLangSaving] = useState(false);
   const [langError, setLangError] = useState<string | null>(null);
+
+  // Dash identity
+  const [dpnsHandle, setDpnsHandle] = useState<string | null>(null);
 
   // Nearby distance (for other users' profiles)
   const [profileDistanceKm, setProfileDistanceKm] = useState<number | null>(null);
@@ -236,6 +240,10 @@ export default function Profile() {
             setFollowersCount(s.followerCount);
             setFollowingCount(s.followingCount);
           }).catch(() => {});
+          // Load own DPNS handle
+          getWalletBalance()
+            .then((w) => { if (w.dpnsHandle) setDpnsHandle(w.dpnsHandle); })
+            .catch(() => {});
           // Load own events
           setMyEventsLoading(true);
           getMyEvents()
@@ -956,6 +964,17 @@ export default function Profile() {
             </div>
             {profile.username && (
               <p className="text-sm" style={{ color: "#8E8E93" }}>@{profile.username}</p>
+            )}
+            {isOwnProfile && dpnsHandle && (
+              <span
+                className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full mt-1"
+                style={{ background: "rgba(0,141,228,0.15)", color: "#008DE4", border: "1px solid rgba(0,141,228,0.3)" }}
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.745 3.745 0 011.043 3.296A3.745 3.745 0 0121 12z" />
+                </svg>
+                @{dpnsHandle}
+              </span>
             )}
             {!isOwnProfile && profileDistanceKm != null && (
               <NearbyBadge distanceKm={profileDistanceKm} variant="detailed" />
