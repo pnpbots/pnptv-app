@@ -147,6 +147,17 @@ class CreatorService {
       [userId, tier, price]
     );
 
+    // Sync Authentik Creators group — non-fatal
+    try {
+      const subRes = await query('SELECT authentik_sub FROM users WHERE id = $1', [userId]);
+      if (subRes.rows[0]?.authentik_sub) {
+        const AuthentikService = require('../../services/authentikService');
+        await AuthentikService.addUserToCreatorsGroup(subRes.rows[0].authentik_sub);
+      }
+    } catch (authErr) {
+      logger.warn('activateCreator: Authentik group sync failed (non-fatal)', { userId, error: authErr.message });
+    }
+
     return { success: true, type: tier, price };
   }
 
@@ -195,6 +206,17 @@ class CreatorService {
         userId: app.user_id,
         error: activationErr.message,
       });
+    }
+
+    // Sync Authentik Creators group — non-fatal
+    try {
+      const subRes = await query('SELECT authentik_sub FROM users WHERE id = $1', [app.user_id]);
+      if (subRes.rows[0]?.authentik_sub) {
+        const AuthentikService = require('../../services/authentikService');
+        await AuthentikService.addUserToCreatorsGroup(subRes.rows[0].authentik_sub);
+      }
+    } catch (authErr) {
+      logger.warn('approveApplication: Authentik group sync failed (non-fatal)', { userId: app.user_id, error: authErr.message });
     }
 
     NotificationEmitter.emit({
@@ -672,6 +694,19 @@ class CreatorService {
       [newStrikeCount, newStatus, creatorId]
     );
 
+    // Remove from Authentik Creators group on suspension — non-fatal
+    if (newStrikeCount >= 3) {
+      try {
+        const subRes = await query('SELECT authentik_sub FROM users WHERE id = $1', [creatorId]);
+        if (subRes.rows[0]?.authentik_sub) {
+          const AuthentikService = require('../../services/authentikService');
+          await AuthentikService.removeUserFromCreatorsGroup(subRes.rows[0].authentik_sub);
+        }
+      } catch (authErr) {
+        logger.warn('issueStrike: Authentik group removal failed (non-fatal)', { creatorId, error: authErr.message });
+      }
+    }
+
     const messages = {
       1: `Strike 1/3: ${reason}. You have 14 days to restore activity.`,
       2: `Strike 2/3: ${reason}. Final warning — 7 days to restore activity.`,
@@ -1071,6 +1106,17 @@ class CreatorService {
         userId: enrollment.user_id,
         error: activationErr.message,
       });
+    }
+
+    // Sync Authentik Creators group — non-fatal
+    try {
+      const subRes = await query('SELECT authentik_sub FROM users WHERE id = $1', [enrollment.user_id]);
+      if (subRes.rows[0]?.authentik_sub) {
+        const AuthentikService = require('../../services/authentikService');
+        await AuthentikService.addUserToCreatorsGroup(subRes.rows[0].authentik_sub);
+      }
+    } catch (authErr) {
+      logger.warn('approveEnrollment: Authentik group sync failed (non-fatal)', { userId: enrollment.user_id, error: authErr.message });
     }
 
     try {

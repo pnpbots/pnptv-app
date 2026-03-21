@@ -63,7 +63,7 @@ export function Layout() {
     { to: "/live", label: t.nav.live },
     { to: "/dm", label: t.nav.messages },
     { to: "/main-stage", label: t.nav.mainStage },
-    { to: "/become-a-model", label: t.nav.becomeModel },
+    { to: "/creators/apply", label: t.nav.becomeModel },
   ];
 
   const secondaryLinks = [

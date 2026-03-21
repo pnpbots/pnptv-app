@@ -385,6 +385,177 @@ class AuthentikService {
     return response.data;
   }
 
+  // ── Group Management ──────────────────────────────────────────────────────
+
+  /**
+   * Resolve the PK (UUID) of the Creators group by name.
+   * Cached result is not stored — callers should not rely on tight loops.
+   * @returns {string|null} group PK or null if not found / API not configured
+   */
+  static async _getCreatorsGroupPk() {
+    if (!AUTHENTIK_TOKEN) {
+      logger.error('[Authentik] AUTHENTIK_API_TOKEN is not configured — cannot manage groups');
+      return null;
+    }
+
+    const groupName = process.env.AUTHENTIK_CREATORS_GROUP_NAME || 'Creators';
+
+    const res = await axios.get(`${AUTHENTIK_URL}/api/v3/core/groups/`, {
+      params: { name: groupName },
+      headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+      timeout: 10000,
+    });
+
+    const group = res.data.results.find(g => g.name === groupName);
+    if (!group) {
+      logger.warn(`[Authentik] Creators group "${groupName}" not found — run setupCreatorAuthentikApp.js`);
+      return null;
+    }
+
+    return group.pk;
+  }
+
+  /**
+   * Resolve the integer PK of an Authentik user by their OIDC sub (UUID).
+   * Authentik's /core/users/ UUID search uses the `uuid` filter param.
+   * @param {string} authentikSub — UUID from the id_token `sub` claim
+   * @returns {number|null} user PK or null if not found
+   */
+  static async _getUserPkBySub(authentikSub) {
+    if (!AUTHENTIK_TOKEN || !authentikSub) return null;
+
+    const res = await axios.get(`${AUTHENTIK_URL}/api/v3/core/users/`, {
+      params: { uuid: authentikSub },
+      headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+      timeout: 10000,
+    });
+
+    const user = res.data.results.find(u => u.uuid === authentikSub);
+    return user ? user.pk : null;
+  }
+
+  /**
+   * Add an Authentik user to the Creators group.
+   * Non-fatal — logs on failure but does not throw.
+   * @param {string} authentikSub — OIDC sub UUID stored in users.authentik_sub
+   * @returns {{ success: boolean }}
+   */
+  static async addUserToCreatorsGroup(authentikSub) {
+    if (!AUTHENTIK_TOKEN) {
+      logger.error('[Authentik] AUTHENTIK_API_TOKEN is not configured');
+      return { success: false };
+    }
+
+    try {
+      const [groupPk, userPk] = await Promise.all([
+        AuthentikService._getCreatorsGroupPk(),
+        AuthentikService._getUserPkBySub(authentikSub),
+      ]);
+
+      if (!groupPk) {
+        logger.warn('[Authentik] addUserToCreatorsGroup: Creators group not found', { authentikSub });
+        return { success: false };
+      }
+
+      if (!userPk) {
+        logger.warn('[Authentik] addUserToCreatorsGroup: user not found', { authentikSub });
+        return { success: false };
+      }
+
+      await axios.post(
+        `${AUTHENTIK_URL}/api/v3/core/groups/${groupPk}/add_user/`,
+        { pk: userPk },
+        { headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` }, timeout: 10000 }
+      );
+
+      logger.info('[Authentik] User added to Creators group', { authentikSub, userPk, groupPk });
+      return { success: true };
+    } catch (err) {
+      const status = err.response?.status;
+      const detail = err.response?.data?.detail || err.message;
+      logger.error('[Authentik] addUserToCreatorsGroup failed', { authentikSub, status, detail });
+      return { success: false };
+    }
+  }
+
+  /**
+   * Remove an Authentik user from the Creators group.
+   * Non-fatal — logs on failure but does not throw.
+   * @param {string} authentikSub — OIDC sub UUID stored in users.authentik_sub
+   * @returns {{ success: boolean }}
+   */
+  static async removeUserFromCreatorsGroup(authentikSub) {
+    if (!AUTHENTIK_TOKEN) {
+      logger.error('[Authentik] AUTHENTIK_API_TOKEN is not configured');
+      return { success: false };
+    }
+
+    try {
+      const [groupPk, userPk] = await Promise.all([
+        AuthentikService._getCreatorsGroupPk(),
+        AuthentikService._getUserPkBySub(authentikSub),
+      ]);
+
+      if (!groupPk) {
+        logger.warn('[Authentik] removeUserFromCreatorsGroup: Creators group not found', { authentikSub });
+        return { success: false };
+      }
+
+      if (!userPk) {
+        logger.warn('[Authentik] removeUserFromCreatorsGroup: user not found', { authentikSub });
+        return { success: false };
+      }
+
+      await axios.post(
+        `${AUTHENTIK_URL}/api/v3/core/groups/${groupPk}/remove_user/`,
+        { pk: userPk },
+        { headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` }, timeout: 10000 }
+      );
+
+      logger.info('[Authentik] User removed from Creators group', { authentikSub, userPk, groupPk });
+      return { success: true };
+    } catch (err) {
+      const status = err.response?.status;
+      const detail = err.response?.data?.detail || err.message;
+      logger.error('[Authentik] removeUserFromCreatorsGroup failed', { authentikSub, status, detail });
+      return { success: false };
+    }
+  }
+
+  /**
+   * Check whether an Authentik user is currently a member of the Creators group.
+   * @param {string} authentikSub — OIDC sub UUID stored in users.authentik_sub
+   * @returns {boolean} true if the user is in the group, false otherwise (including on error)
+   */
+  static async isUserInCreatorsGroup(authentikSub) {
+    if (!AUTHENTIK_TOKEN || !authentikSub) return false;
+
+    try {
+      const groupName = process.env.AUTHENTIK_CREATORS_GROUP_NAME || 'Creators';
+
+      const res = await axios.get(`${AUTHENTIK_URL}/api/v3/core/users/`, {
+        params: { uuid: authentikSub },
+        headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+        timeout: 10000,
+      });
+
+      const user = res.data.results.find(u => u.uuid === authentikSub);
+      if (!user) {
+        logger.warn('[Authentik] isUserInCreatorsGroup: user not found', { authentikSub });
+        return false;
+      }
+
+      const inGroup = (user.groups_obj || []).some(g => g.name === groupName);
+      logger.debug('[Authentik] isUserInCreatorsGroup result', { authentikSub, inGroup, groupName });
+      return inGroup;
+    } catch (err) {
+      const status = err.response?.status;
+      const detail = err.response?.data?.detail || err.message;
+      logger.error('[Authentik] isUserInCreatorsGroup failed', { authentikSub, status, detail });
+      return false;
+    }
+  }
+
   /**
    * Trigger a password reset flow in Authentik for the given email.
    * This sends an email to the user with a recovery link.

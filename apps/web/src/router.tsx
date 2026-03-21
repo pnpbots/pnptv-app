@@ -65,6 +65,18 @@ const AccessMatrix = lazy(() => import("@/pages/admin/AccessMatrix"));
 const CreatorSubscriptions = lazy(() => import("@/pages/admin/CreatorSubscriptions"));
 const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
 
+// Creator Studio pages
+const CreatorLayout = lazy(() => import("@/components/creators/CreatorLayout"));
+const CreatorOverview = lazy(() => import("@/pages/creators/CreatorOverview"));
+const CreatorContent = lazy(() => import("@/pages/creators/CreatorContent"));
+const CreatorEarnings = lazy(() => import("@/pages/creators/CreatorEarnings"));
+const CreatorPayouts = lazy(() => import("@/pages/creators/CreatorPayouts"));
+const CreatorLive = lazy(() => import("@/pages/creators/CreatorLive"));
+const CreatorAvailability = lazy(() => import("@/pages/creators/CreatorAvailability"));
+const CreatorAnalytics = lazy(() => import("@/pages/creators/CreatorAnalytics"));
+const CreatorSettings = lazy(() => import("@/pages/creators/CreatorSettings"));
+const CreatorApply = lazy(() => import("@/pages/creators/CreatorApply"));
+
 export const router = createBrowserRouter([
   {
     path: "/",
@@ -286,24 +298,8 @@ export const router = createBrowserRouter([
           </ModuleLoader>
         ),
       },
-      {
-        path: "become-a-model",
-        element: (
-          <ModuleLoader>
-            <BecomeModel />
-          </ModuleLoader>
-        ),
-      },
-      {
-        path: "creator",
-        element: (
-          <ModuleLoader>
-            <VerificationGate>
-              <CreatorDashboard />
-            </VerificationGate>
-          </ModuleLoader>
-        ),
-      },
+      { path: "become-a-model", element: <Navigate to="/creators/apply" replace /> },
+      { path: "creator", element: <Navigate to="/creators" replace /> },
       { path: "hangouts", element: <Navigate to="/chat" replace /> },
       { path: "pnplive", element: <Navigate to="/live" replace /> },
       { path: "pnptv-haus", element: <Navigate to="/da-haus" replace /> },
@@ -475,6 +471,26 @@ export const router = createBrowserRouter([
           </ModuleLoader>
         ),
       },
+    ],
+  },
+  // Creator Studio section
+  {
+    path: "/creators",
+    element: (
+      <ModuleLoader>
+        <CreatorLayout />
+      </ModuleLoader>
+    ),
+    children: [
+      { index: true, element: <ModuleLoader><CreatorOverview /></ModuleLoader> },
+      { path: "content", element: <ModuleLoader><CreatorContent /></ModuleLoader> },
+      { path: "earnings", element: <ModuleLoader><CreatorEarnings /></ModuleLoader> },
+      { path: "payouts", element: <ModuleLoader><CreatorPayouts /></ModuleLoader> },
+      { path: "live", element: <ModuleLoader><CreatorLive /></ModuleLoader> },
+      { path: "availability", element: <ModuleLoader><CreatorAvailability /></ModuleLoader> },
+      { path: "analytics", element: <ModuleLoader><CreatorAnalytics /></ModuleLoader> },
+      { path: "settings", element: <ModuleLoader><CreatorSettings /></ModuleLoader> },
+      { path: "apply", element: <ModuleLoader><CreatorApply /></ModuleLoader> },
     ],
   },
   {
