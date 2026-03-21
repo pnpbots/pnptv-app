@@ -10,6 +10,7 @@ import { WebRTCPlayer } from "@/components/WebRTCPlayer";
 import { LiveRulesModal } from "@/components/LiveRulesModal";
 import { BuyTokensModal } from "@/components/BuyTokensModal";
 import { connectSocket } from "@/lib/socket";
+import { QRCodeSVG } from "qrcode.react";
 import {
   getLiveStreams,
   getAllPerformers,
@@ -21,6 +22,7 @@ import {
   getLiveRulesStatus,
   acknowledgeLiveRules,
   assertPaymentUrl,
+  getDashPaymentDetails,
   type LiveStream,
   type RecentTip,
   type StreamOverlay,
@@ -53,12 +55,24 @@ export default function Stream() {
 
   // Chat & tips
   const [chatInput, setChatInput] = useState("");
-  const [tipPaymentTab, setTipPaymentTab] = useState<"tokens" | "daimo">("tokens");
+  const [tipPaymentTab, setTipPaymentTab] = useState<"tokens" | "daimo" | "dash">("tokens");
   const [tipping, setTipping] = useState(false);
   const [tipSubmitting, setTipSubmitting] = useState(false);
   const [tipError, setTipError] = useState<string | null>(null);
   const [tipSuccess, setTipSuccess] = useState<string | null>(null);
   const [recentTips, setRecentTips] = useState<RecentTip[]>([]);
+
+  // Dash tip payment state
+  const [dashTip, setDashTip] = useState<{
+    invoiceId: string;
+    checkoutUrl: string;
+    destination?: string;
+    amount?: string;
+    invoiceAmount?: number;
+    loading: boolean;
+  } | null>(null);
+  const [dashTipCopied, setDashTipCopied] = useState(false);
+  const dashTipPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const [streamError, setStreamError] = useState(false);
 
   // Dash token wallet
@@ -390,6 +404,51 @@ export default function Stream() {
       return;
     }
 
+    // Dash tip — create BTCPay invoice, show in-app QR
+    if (tipPaymentTab === "dash") {
+      setTipping(true);
+      setTipSubmitting(true);
+      setTipError(null);
+      setTipSuccess(null);
+      try {
+        const result = await sendTip(streamId || "", amount, undefined, "dash");
+        if (result.invoiceId) {
+          setDashTip({ invoiceId: result.invoiceId, checkoutUrl: result.checkoutUrl || "", loading: true, invoiceAmount: amount });
+          // Fetch payment details
+          getDashPaymentDetails(result.invoiceId)
+            .then((d) => {
+              if (d.success) {
+                setDashTip((prev) => prev ? { ...prev, destination: d.destination, amount: d.amount, loading: false } : prev);
+              } else {
+                setDashTip((prev) => prev ? { ...prev, loading: false } : prev);
+              }
+            })
+            .catch(() => {
+              setDashTip((prev) => prev ? { ...prev, loading: false } : prev);
+            });
+          // Poll for payment confirmation
+          dashTipPollRef.current = setInterval(async () => {
+            try {
+              const details = await getDashPaymentDetails(result.invoiceId!);
+              if (details.status === "Settled" || details.status === "Complete") {
+                if (dashTipPollRef.current) clearInterval(dashTipPollRef.current);
+                dashTipPollRef.current = null;
+                setDashTip(null);
+                setTipSuccess(t.live.tipSuccess);
+                setTimeout(() => setTipSuccess(null), 3000);
+              }
+            } catch { /* ignore */ }
+          }, 5000);
+        }
+      } catch (err) {
+        setTipError(err instanceof Error ? err.message : t.live.tipFailed);
+      } finally {
+        setTipping(false);
+        setTipSubmitting(false);
+      }
+      return;
+    }
+
     // Token tip — fire directly.
     setTipping(true);
     setTipSubmitting(true);
@@ -670,16 +729,109 @@ export default function Stream() {
           ))}
         </div>
         {isAuthenticated && (
-          <button
-            onClick={() => setTipPaymentTab(tipPaymentTab === "tokens" ? "daimo" : "tokens")}
-            className="flex-shrink-0 px-2 py-1.5 rounded-lg text-[10px] font-medium bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/40 transition-colors"
-          >
-            {tipPaymentTab === "tokens" ? "T" : "$"}
-          </button>
+          <div className="flex flex-shrink-0 gap-0.5">
+            <button
+              onClick={() => setTipPaymentTab("tokens")}
+              className={`px-2 py-1.5 rounded-l-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "tokens" ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
+            >
+              T
+            </button>
+            <button
+              onClick={() => setTipPaymentTab("daimo")}
+              className={`px-2 py-1.5 text-[10px] font-medium border-y transition-colors ${tipPaymentTab === "daimo" ? "bg-pnp-accent/20 border-y-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-y-pnp-border text-pnp-textSecondary"}`}
+            >
+              $
+            </button>
+            <button
+              onClick={() => setTipPaymentTab("dash")}
+              className={`px-2 py-1.5 rounded-r-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "dash" ? "bg-[#008DE4]/20 border-[#008DE4]/40 text-[#008DE4]" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
+            >
+              D
+            </button>
+          </div>
         )}
       </div>
       {tipError && <p className="text-[10px] text-pnp-error">{tipError}</p>}
       {tipSuccess && <p className="text-[10px] text-gradient">{tipSuccess}</p>}
+
+      {/* Dash tip payment widget */}
+      {dashTip && (
+        <div className="rounded-xl border border-[#008DE4]/40 bg-[#008DE4]/5 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full bg-[#008DE4] animate-pulse" />
+              <span className="text-[11px] font-medium text-pnp-textPrimary">
+                Dash tip — ${dashTip.invoiceAmount}
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                setDashTip(null);
+                setDashTipCopied(false);
+                if (dashTipPollRef.current) { clearInterval(dashTipPollRef.current); dashTipPollRef.current = null; }
+              }}
+              className="text-[10px] text-pnp-textSecondary hover:text-pnp-textPrimary"
+            >
+              Cancel
+            </button>
+          </div>
+
+          {dashTip.loading ? (
+            <div className="flex items-center justify-center py-4">
+              <svg className="animate-spin h-5 w-5 text-[#008DE4]" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            </div>
+          ) : dashTip.destination && dashTip.amount ? (
+            <div className="flex flex-col items-center gap-2">
+              <div className="bg-white p-2 rounded-lg">
+                <QRCodeSVG
+                  value={`dash:${dashTip.destination}?amount=${dashTip.amount}`}
+                  size={120}
+                  level="M"
+                />
+              </div>
+              <p className="text-sm font-bold text-white">{dashTip.amount} DASH</p>
+              <div
+                className="w-full flex items-center gap-1.5 rounded-lg px-2 py-1.5"
+                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
+              >
+                <code className="flex-1 text-[9px] text-white/70 break-all font-mono">{dashTip.destination}</code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(dashTip.destination!).catch(() => {});
+                    setDashTipCopied(true);
+                    setTimeout(() => setDashTipCopied(false), 2000);
+                  }}
+                  className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                  style={{ color: dashTipCopied ? "#34C759" : "#008DE4" }}
+                >
+                  {dashTipCopied ? "Copied!" : "Copy"}
+                </button>
+              </div>
+              <a
+                href={dashTip.checkoutUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] hover:underline"
+                style={{ color: "#008DE4" }}
+              >
+                Open in BTCPay
+              </a>
+            </div>
+          ) : (
+            <a
+              href={dashTip.checkoutUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full text-center py-2 rounded-lg bg-[#008DE4] text-white text-xs font-semibold"
+            >
+              Open Dash Checkout
+            </a>
+          )}
+        </div>
+      )}
 
       {/* Recent tips */}
       {recentTips.length > 0 && (

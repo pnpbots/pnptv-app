@@ -5565,6 +5565,51 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
       });
     }
 
+    // --- Dash direct tip (BTCPay invoice) ---
+    if (paymentMethod === 'dash') {
+      const { createDashInvoice } = require('../../config/btcpay');
+
+      // Create tip record first (pending)
+      const tip = await PNPLiveTipsService.createTip(
+        userId, null, null,
+        numAmount,
+        (message || '').slice(0, 200),
+        String(resolvedPerformerId)
+      );
+
+      if (!tip) {
+        return res.status(500).json({ success: false, error: 'Failed to create tip' });
+      }
+
+      // Create BTCPay invoice with tip metadata
+      const inv = await createDashInvoice({
+        amount: numAmount,
+        currency: 'USD',
+        metadata: {
+          type: 'tip',
+          tipId: tip.id,
+          userId,
+          performerId: String(resolvedPerformerId),
+        },
+      });
+
+      // Store invoice ID on the tip record
+      await getPool().query(
+        `UPDATE pnp_tips SET transaction_id = $2, payment_method = 'dash' WHERE id = $1`,
+        [tip.id, inv.invoiceId]
+      );
+
+      return res.json({
+        success: true,
+        tipId: tip.id,
+        invoiceId: inv.invoiceId,
+        checkoutUrl: inv.checkoutUrl,
+        paymentUrl: null,
+        amount: numAmount,
+        paymentMethod: 'dash',
+      });
+    }
+
     // --- Daimo payment flow (existing) ---
     const tip = await PNPLiveTipsService.createTip(
       userId,
@@ -6599,6 +6644,41 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
        WHERE btcpay_invoice_id = $1`,
       [invoiceId]
     );
+
+    // --- 3a. Check if this is a Dash tip invoice ---
+    if (event.metadata?.type === 'tip' && event.metadata?.tipId) {
+      const tipId = event.metadata.tipId;
+      const tipUserId = event.metadata.userId;
+      const tipPerformerId = event.metadata.performerId;
+
+      // Confirm the tip payment
+      try {
+        await PNPLiveTipsService.confirmTipPayment(tipId, invoiceId);
+        logger.info('BTCPay: Dash tip confirmed', { tipId, invoiceId, userId: tipUserId, performerId: tipPerformerId });
+
+        // Emit real-time tip event
+        const tipInfo = await PNPLiveTipsService.getTipById(tipId);
+        const socketSingleton = require('../services/socketSingleton');
+        const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+        if (io && tipInfo) {
+          const tipPayload = {
+            id: tipInfo.id,
+            amount: parseFloat(tipInfo.amount),
+            username: tipInfo.user_username || 'Anonymous',
+            performerName: tipInfo.model_name || 'Performer',
+            message: tipInfo.message || '',
+            createdAt: tipInfo.created_at,
+            paymentMethod: 'dash',
+          };
+          io.to(`live:${tipPerformerId}`).emit('live:tip', tipPayload);
+        }
+      } catch (tipErr) {
+        logger.error('BTCPay: Dash tip confirmation failed', { tipId, invoiceId, error: tipErr.message });
+      }
+
+      await markInvoiceProcessed(invoiceId, { tipId, userId: tipUserId, source: 'dash_tip' });
+      return res.json({ success: true, type: 'dash_tip', tipId });
+    }
 
     if (purchaseResult.rows.length === 0) {
       logger.warn('BTCPay webhook: unknown invoice — no subscription order, no metadata planId, no token purchase', {

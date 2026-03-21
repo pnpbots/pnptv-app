@@ -518,8 +518,8 @@ export function sendTip(
   performerId: string,
   amount: number,
   message?: string,
-  paymentMethod: "daimo" | "tokens" = "daimo"
-): Promise<{ success: boolean; tipId: number; paymentUrl: string | null; amount: number; paymentMethod: string; newBalance?: number }> {
+  paymentMethod: "daimo" | "tokens" | "dash" = "daimo"
+): Promise<{ success: boolean; tipId: number; paymentUrl: string | null; invoiceId?: string; checkoutUrl?: string; amount: number; paymentMethod: string; newBalance?: number }> {
   return request("/api/proxy/live/tips", {
     method: "POST",
     body: { performerId, amount, message, paymentMethod },
