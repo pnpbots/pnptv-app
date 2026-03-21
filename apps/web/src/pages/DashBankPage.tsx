@@ -3,15 +3,6 @@ import { Helmet } from "react-helmet-async";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 
-const PLANS = [
-  { name: "Member Monthly", price: "$9.99/mo", tier: "BASIC" },
-  { name: "PRIME Trial", price: "$14.99 / 7 days", tier: "PRIME" },
-  { name: "Monthly PRIME", price: "$24.99/mo", tier: "PRIME" },
-  { name: "Crystal PRIME", price: "$49.99 / 6 months", tier: "PRIME" },
-  { name: "Diamond PRIME", price: "$99.99 / 1 year", tier: "PRIME", recommended: true },
-  { name: "Lifetime PRIME", price: "$249.99 one-time", tier: "PRIME" },
-];
-
 const STEPS = [
   {
     num: 1,
@@ -384,50 +375,82 @@ export default function DashBankPage() {
             </div>
           </section>
 
-          {/* Available Plans */}
+          {/* PNP Live Tokens */}
           <section>
-            <h2 className="text-xl font-bold text-white mb-2">Available Plans</h2>
+            <h2 className="text-xl font-bold text-white mb-2">PNP Live Tokens — Tip Creators Anonymously</h2>
             <p className="text-sm text-white/50 mb-4">
-              All plans can be purchased with Dash. Pick your tier:
+              Dash makes it incredibly easy to get tokens for PNP Live. Here's why:
             </p>
-            <div className="space-y-2">
-              {PLANS.map((plan) => (
-                <div
-                  key={plan.name}
-                  className="flex items-center justify-between rounded-xl px-4 py-3 border transition-colors"
-                  style={{
-                    background: plan.recommended ? "rgba(0,141,228,0.08)" : "rgba(255,255,255,0.03)",
-                    borderColor: plan.recommended ? "rgba(0,141,228,0.3)" : "rgba(255,255,255,0.08)",
-                  }}
-                >
-                  <div className="flex items-center gap-3">
-                    <span
-                      className="text-[10px] font-bold px-2 py-0.5 rounded"
-                      style={{
-                        background:
-                          plan.tier === "PRIME"
-                            ? "linear-gradient(135deg, #D4007A, #E69138)"
-                            : "rgba(255,255,255,0.1)",
-                        color: "#fff",
-                      }}
-                    >
-                      {plan.tier}
-                    </span>
-                    <span className="text-sm font-medium text-white">{plan.name}</span>
-                    {plan.recommended && (
-                      <span
-                        className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                        style={{ background: "rgba(34,197,94,0.15)", color: "#22c55e" }}
-                      >
-                        BEST VALUE
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-sm font-bold" style={{ color: "#008DE4" }}>
-                    {plan.price}
-                  </span>
+            <div
+              className="rounded-2xl p-6 border mb-4"
+              style={{
+                background: "linear-gradient(135deg, rgba(212,0,122,0.08), rgba(0,141,228,0.06))",
+                borderColor: "rgba(212,0,122,0.25)",
+              }}
+            >
+              <div className="flex items-start gap-3 mb-4">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-lg" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+                  </svg>
                 </div>
-              ))}
+                <div>
+                  <h3 className="text-sm font-bold text-white mb-1">Instant Top-Up, Zero Hassle</h3>
+                  <p className="text-xs text-white/55 leading-relaxed">
+                    Buy tokens with Dash and they hit your account in minutes. No waiting for bank approvals, no card declines, no payment processor blocking your transaction. Just scan, send, done.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 mb-4">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-lg" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white mb-1">No Paper Trail</h3>
+                  <p className="text-xs text-white/55 leading-relaxed">
+                    Your tips stay between you and the creator. Dash payments don't appear on any bank statement or credit card bill. Nobody knows what you spent, where, or on whom.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 mb-4">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-lg" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white mb-1">More Tokens for Your Money</h3>
+                  <p className="text-xs text-white/55 leading-relaxed">
+                    Dash network fees are fractions of a cent — way less than credit card processing fees. That means more of your money goes to tokens, not to middlemen.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-lg" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white mb-1">Support Your Favorite Creators Live</h3>
+                  <p className="text-xs text-white/55 leading-relaxed">
+                    Use your tokens during PNP Live streams to tip performers in real time. Show your appreciation, unlock special interactions, and keep the energy going — all completely anonymously.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div
+              className="rounded-xl p-4 border text-center"
+              style={{
+                background: "rgba(0,141,228,0.06)",
+                borderColor: "rgba(0,141,228,0.2)",
+              }}
+            >
+              <p className="text-sm text-white/70 leading-relaxed">
+                <strong className="text-white">3 simple steps:</strong> Get Dash from any exchange or wallet, send it to PNPtv! Bank, and your tokens are ready to use on PNP Live instantly. That's it.
+              </p>
             </div>
           </section>
 

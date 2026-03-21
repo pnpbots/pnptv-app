@@ -401,7 +401,7 @@ export default function DirectMessages() {
   const { userId } = useParams<{ userId: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { showTutorial, dismissTutorial } = useTutorial("dm");
+  const { showTutorial, dismissTutorial, dismissForever } = useTutorial("dm");
   const { dm: t } = useI18n();
 
   if (userId) {
@@ -421,7 +421,7 @@ export default function DirectMessages() {
         <title>{t.pageTitle}</title>
         <meta name="description" content={t.pageDescription} />
       </Helmet>
-      {showTutorial && <TutorialOverlay section="dm" onDismiss={dismissTutorial} />}
+      {showTutorial && <TutorialOverlay section="dm" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
       <ThreadList currentUser={user} navigate={navigate} />
     </>
   );

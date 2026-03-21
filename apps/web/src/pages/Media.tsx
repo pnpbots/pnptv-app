@@ -61,7 +61,7 @@ export default function Media() {
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [videoReactions, setVideoReactions] = useState<ContentReaction[]>([]);
   const [reactionsLoading, setReactionsLoading] = useState(false);
-  const { showTutorial, dismissTutorial } = useTutorial("prime");
+  const { showTutorial, dismissTutorial, dismissForever } = useTutorial("prime");
 
   // Content type categories (primary filter)
   const CATEGORIES = useMemo(() => {
@@ -152,7 +152,7 @@ export default function Media() {
         <title>{t.pageTitle}</title>
         <meta name="description" content={t.pageDescription} />
       </Helmet>
-      {showTutorial && <TutorialOverlay section="prime" onDismiss={dismissTutorial} />}
+      {showTutorial && <TutorialOverlay section="prime" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
 
       {/* ── Upsell Hero (non-PRIME users) ── */}
       {!isPrime && (

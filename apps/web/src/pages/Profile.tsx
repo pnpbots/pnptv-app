@@ -80,7 +80,7 @@ export default function Profile() {
   const p = t.profile;
   const isOwnProfile = !paramUserId || paramUserId === String(user?.id);
   const targetUserId = paramUserId || String(user?.id || "");
-  const { showTutorial, dismissTutorial } = useTutorial("profile");
+  const { showTutorial, dismissTutorial, dismissForever } = useTutorial("profile");
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [posts, setPosts] = useState<SocialPostItem[]>([]);
@@ -735,7 +735,7 @@ export default function Profile() {
         <title>{profile ? `${profile.display_name || profile.username} — PNPtv!` : "Profile — PNPtv!"}</title>
         <meta name="description" content={profile ? `${profile.display_name || profile.username}'s profile on PNPtv.` : "User profile on PNPtv."} />
       </Helmet>
-      {isOwnProfile && showTutorial && <TutorialOverlay section="profile" onDismiss={dismissTutorial} />}
+      {isOwnProfile && showTutorial && <TutorialOverlay section="profile" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
       {/* ── Back button for public profiles ── */}
       {paramUserId && (
         <button

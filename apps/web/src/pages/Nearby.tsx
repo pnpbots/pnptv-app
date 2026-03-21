@@ -676,7 +676,7 @@ export default function Nearby() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const t = useI18n();
-  const { showTutorial, dismissTutorial } = useTutorial("nearby");
+  const { showTutorial, dismissTutorial, dismissForever } = useTutorial("nearby");
 
   const [pageState, setPageState] = useState<PageState>("loading");
   const [locationStatus, setLocationStatus] = useState<"online" | "offline">("offline");
@@ -993,7 +993,7 @@ export default function Nearby() {
         <title>{t.booking.pageTitle}</title>
         <meta name="description" content={t.booking.pageDescription} />
       </Helmet>
-      {showTutorial && <TutorialOverlay section="nearby" onDismiss={dismissTutorial} />}
+      {showTutorial && <TutorialOverlay section="nearby" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
       {/* Map */}
       {myPos && (
         <div className="absolute inset-0">

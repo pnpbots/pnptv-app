@@ -53,7 +53,7 @@ function getPlanLabel(plan: SubscriptionPlan, isMemberPlan: boolean): 'PRIME' | 
 export default function Subscribe() {
   const navigate = useNavigate();
   const { refreshUser } = useAuth();
-  const { showTutorial, dismissTutorial } = useTutorial("subscribe");
+  const { showTutorial, dismissTutorial, dismissForever } = useTutorial("subscribe");
   const t = useI18n();
   const s = t.subscribe;
 
@@ -416,7 +416,7 @@ export default function Subscribe() {
 
   return (
     <div className="page-container py-6 px-4 max-w-2xl mx-auto">
-      {showTutorial && <TutorialOverlay section="subscribe" onDismiss={dismissTutorial} />}
+      {showTutorial && <TutorialOverlay section="subscribe" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
       <Helmet>
         <title>{s.pageTitle}</title>
         <meta name="description" content={s.pageDescription} />

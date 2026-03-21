@@ -20,7 +20,7 @@ export default function Social() {
   const { user, isAuthenticated, isAdmin } = useAuth();
   const navigate = useNavigate();
   const currentUserId = String(user?.id || "");
-  const { showTutorial, dismissTutorial } = useTutorial("social");
+  const { showTutorial, dismissTutorial, dismissForever } = useTutorial("social");
   const { feed: t } = useI18n();
 
   // Featured performers
@@ -47,7 +47,7 @@ export default function Social() {
         <title>{t.socialFeedTitle} — PNPtv!</title>
         <meta name="description" content={t.socialFeedSubtitle} />
       </Helmet>
-      {showTutorial && <TutorialOverlay section="social" onDismiss={dismissTutorial} />}
+      {showTutorial && <TutorialOverlay section="social" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
 
       {/* Header */}
       <div className="flex items-center justify-between mb-6">

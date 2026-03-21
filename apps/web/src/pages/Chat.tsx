@@ -528,7 +528,7 @@ export default function Chat() {
   const navigate = useNavigate();
   const { groupId: urlGroupId } = useParams<{ groupId?: string }>();
   const t = useI18n();
-  const { showTutorial, dismissTutorial } = useTutorial("hangouts");
+  const { showTutorial, dismissTutorial, dismissForever } = useTutorial("hangouts");
 
   // Group list state
   const [groups, setGroups] = useState<HangoutGroup[]>([]);
@@ -2229,7 +2229,7 @@ export default function Chat() {
         <title>{t.chat.pageTitle}</title>
         <meta name="description" content={t.chat.pageDescription} />
       </Helmet>
-      {showTutorial && <TutorialOverlay section="hangouts" onDismiss={dismissTutorial} />}
+      {showTutorial && <TutorialOverlay section="hangouts" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
 
       {/* Incoming call invite toast */}
       <CallInviteToast notif={inviteNotif} groups={groups} onOpen={openChat} onDismiss={() => setInviteNotif(null)} navigate={navigate} t={t} />

@@ -7,9 +7,10 @@ import { TutorialProgress } from "./TutorialProgress";
 interface TutorialOverlayProps {
   section: string;
   onDismiss: () => void;
+  onDismissForever?: () => void;
 }
 
-export function TutorialOverlay({ section, onDismiss }: TutorialOverlayProps) {
+export function TutorialOverlay({ section, onDismiss, onDismissForever }: TutorialOverlayProps) {
   const { user } = useAuth();
   const lang = user?.language === "es" ? "es" : "en";
 
@@ -83,6 +84,17 @@ export function TutorialOverlay({ section, onDismiss }: TutorialOverlayProps) {
             onSkip={close}
             lang={lang as "en" | "es"}
           />
+          {onDismissForever && (
+            <button
+              onClick={() => {
+                setExiting(true);
+                setTimeout(onDismissForever, 300);
+              }}
+              className="w-full mt-3 py-2 text-xs text-white/40 hover:text-white/70 transition-colors text-center"
+            >
+              {lang === "es" ? "No mostrar de nuevo" : "Don't show again"}
+            </button>
+          )}
         </div>
       </div>
     </div>

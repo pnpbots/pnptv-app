@@ -121,7 +121,7 @@ export default function Live() {
   const { isFree } = useTier();
   const t = useI18n();
   const navigate = useNavigate();
-  const { showTutorial, dismissTutorial } = useTutorial("live");
+  const { showTutorial, dismissTutorial, dismissForever } = useTutorial("live");
   const canCreateLive = isAuthenticated && (user?.role === "model" || user?.role === "creator" || user?.role === "admin" || user?.role === "superadmin");
   const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [liveEventsKey, setLiveEventsKey] = useState(0);
@@ -380,7 +380,7 @@ export default function Live() {
         <title>{t.live.pageTitle}</title>
         <meta name="description" content={t.live.pageDescription} />
       </Helmet>
-      {showTutorial && <TutorialOverlay section="live" onDismiss={dismissTutorial} />}
+      {showTutorial && <TutorialOverlay section="live" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between mb-4">

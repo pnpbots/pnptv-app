@@ -13,7 +13,6 @@ import { useNearbyToggle } from "@/components/NearbyBadge";
 import { getMessageThreads } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { LandingPage } from "@/pages/LandingPage";
-import { SidebarPlayer } from "@/components/SidebarPlayer";
 import { RadioWidget } from "@/components/RadioWidget";
 import { NearbyWidget } from "@/components/NearbyWidget";
 
@@ -148,7 +147,7 @@ export function Layout() {
   return (
     <div className="app-shell bg-pnp-background">
       {/* ── Desktop sidebar ─────────────────────────────────────────────────── */}
-      <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-60 lg:flex-col border-r border-pnp-border glass-nav">
+      <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-72 lg:flex-col border-r border-pnp-border glass-nav">
         {/* Sidebar header */}
         <div className="flex items-center justify-between px-6 h-16 border-b border-pnp-border">
           <img src="/logo-header.png" alt="PNPtv!" className="h-9 w-auto" />
@@ -250,9 +249,6 @@ export function Layout() {
             </NavLink>
           ))}
         </nav>
-
-        {/* Music player */}
-        <SidebarPlayer />
 
         {/* User profile card + language */}
         <div className="p-4 border-t border-pnp-border">
@@ -475,7 +471,7 @@ export function Layout() {
       )}
 
       {/* ── Main content ─────────────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto overscroll-contain lg:pl-60 lg:overflow-visible lg:pb-0 pb-16">
+      <main className="flex-1 overflow-y-auto overscroll-contain lg:pl-72 lg:overflow-visible lg:pb-0 pb-16">
         <Outlet />
       </main>
 

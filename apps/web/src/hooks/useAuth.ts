@@ -22,6 +22,7 @@ interface PnptvUser {
   creator_status?: string;
   creator_type?: string | null;
   contentDisclaimer?: boolean;
+  hasSeenTutorial?: boolean;
   lastLoginMethod?: string | null;
   city?: string | null;
   country?: string | null;
@@ -61,6 +62,7 @@ function mapTelegramUser(u: NonNullable<TelegramAuthResponse["user"]>): PnptvUse
     creator_status: u.creator_status,
     creator_type: u.creator_type,
     contentDisclaimer: u.contentDisclaimer || false,
+    hasSeenTutorial: u.hasSeenTutorial || false,
     lastLoginMethod: u.last_login_method ?? null,
     city: u.city ?? null,
     country: u.country ?? null,

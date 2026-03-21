@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { EventCard, type EventItem } from "./EventCard";
 
 export interface AnnouncementItem {
@@ -38,13 +39,19 @@ export function HighlightCard({ item, onRsvp, onCancel, canCancel, onViewDetails
   }
 
   const ann = item.data;
+  const navigate = useNavigate();
   const hasImage = !!ann.image && (ann.image.startsWith("/") || ann.image.startsWith("http"));
+  const isInternal = ann.link && ann.link.startsWith("/") && !ann.link.startsWith("//");
 
   return (
     <div
       className="glass-card-sm flex-shrink-0 overflow-hidden cursor-pointer hover:border-white/15 transition-colors flex flex-col"
       style={{ width: 240, borderLeft: ann.is_pinned ? "3px solid rgba(212,0,122,0.4)" : undefined }}
-      onClick={() => ann.link && window.open(ann.link, "_blank")}
+      onClick={() => {
+        if (!ann.link) return;
+        if (isInternal) navigate(ann.link);
+        else window.open(ann.link, "_blank");
+      }}
     >
       {hasImage && (
         <div style={{ height: 110 }}>
