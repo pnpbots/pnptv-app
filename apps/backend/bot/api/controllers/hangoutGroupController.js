@@ -480,6 +480,48 @@ const sendMessage = async (req, res) => {
       return res.status(403).json({ error: 'Not a member of this group' });
     }
 
+    // Enforce read-only, mute, and slow mode
+    const { rows: groupSettingsRows } = await query(
+      'SELECT is_read_only, slow_mode_seconds FROM hangout_groups WHERE id = $1', [groupId]
+    );
+    const gs = groupSettingsRows[0];
+    if (gs) {
+      const mp = await getModPerms(groupId, user.id);
+      const isModOrOwner = !!mp;
+
+      // Read-only: only mods/owner can send
+      if (gs.is_read_only && !isModOrOwner) {
+        return res.status(403).json({ error: 'This group is read-only' });
+      }
+
+      // Muted user check
+      const { rows: memberRows } = await query(
+        'SELECT is_muted, muted_until FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+        [groupId, user.id]
+      );
+      if (memberRows[0]?.is_muted) {
+        if (!memberRows[0].muted_until || new Date(memberRows[0].muted_until) > new Date()) {
+          return res.status(403).json({ error: 'You are muted in this group' });
+        }
+        // Mute expired — clear it
+        await query('UPDATE hangout_group_members SET is_muted = false, muted_until = NULL WHERE group_id=$1 AND user_id=$2', [groupId, user.id]);
+      }
+
+      // Slow mode: enforce for non-mods
+      if (gs.slow_mode_seconds > 0 && !isModOrOwner) {
+        const { rows: lastMsgRows } = await query(
+          `SELECT created_at FROM chat_messages WHERE room = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 1`,
+          [`hangout:${groupId}`, user.id]
+        );
+        if (lastMsgRows.length > 0) {
+          const elapsed = (Date.now() - new Date(lastMsgRows[0].created_at).getTime()) / 1000;
+          if (elapsed < gs.slow_mode_seconds) {
+            return res.status(429).json({ error: `Slow mode: wait ${Math.ceil(gs.slow_mode_seconds - elapsed)}s` });
+          }
+        }
+      }
+    }
+
     // Block check: group creator blocked sender OR sender blocked group creator
     const { rows: groupCreatorRows } = await query(
       'SELECT creator_id FROM hangout_groups WHERE id = $1',
@@ -994,6 +1036,11 @@ const promoteMember = async (req, res) => {
       [groupId, targetId]
     );
     if (rowCount === 0) return res.status(404).json({ error: 'Member not found or already a moderator' });
+
+    // Set Matrix power level to 50 (moderator)
+    const matrixUserId = `@pnptv_${targetId}:${process.env.MATRIX_SERVER_NAME || 'matrix.pnptv.app'}`;
+    matrixService.setUserPowerLevel(groupId, matrixUserId, 50).catch(() => {});
+
     return res.json({ success: true });
   } catch (err) {
     logger.error('promoteMember error', err);
@@ -1020,6 +1067,11 @@ const demoteMember = async (req, res) => {
       [groupId, targetId]
     );
     if (rowCount === 0) return res.status(404).json({ error: 'Moderator not found' });
+
+    // Set Matrix power level back to 0 (regular member)
+    const matrixUserId = `@pnptv_${targetId}:${process.env.MATRIX_SERVER_NAME || 'matrix.pnptv.app'}`;
+    matrixService.setUserPowerLevel(groupId, matrixUserId, 0).catch(() => {});
+
     return res.json({ success: true });
   } catch (err) {
     logger.error('demoteMember error', err);
@@ -1126,6 +1178,16 @@ const updateGroupSettings = async (req, res) => {
       vals
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found or is main' });
+
+    // Sync relevant settings to Matrix room (non-blocking)
+    matrixService.syncRoomSettings(groupId, {
+      isReadOnly: isReadOnly !== undefined ? !!isReadOnly : undefined,
+      allowMedia: allowMedia !== undefined ? !!allowMedia : undefined,
+      allowMemberInvites: allowMemberInvites !== undefined ? !!allowMemberInvites : undefined,
+      name: name !== undefined ? name.trim().slice(0, 100) : undefined,
+      description: description !== undefined ? (description || '').trim().slice(0, 500) : undefined,
+    }).catch(err => logger.warn('syncRoomSettings failed (non-critical):', err.message));
+
     return res.json({ success: true, settings: rows[0] });
   } catch (err) {
     logger.error('updateGroupSettings error', err);

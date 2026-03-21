@@ -655,6 +655,125 @@ async function redactRoomEvent(roomId, eventId, reason = 'Deleted by admin') {
   );
 }
 
+/**
+ * Sync hangout group settings to the Matrix room state.
+ * Updates power levels, room name, topic, and invite permissions.
+ *
+ * @param {number} hangoutGroupId
+ * @param {{ isReadOnly?: boolean, allowMedia?: boolean, allowMemberInvites?: boolean, name?: string, description?: string }} settings
+ */
+async function syncRoomSettings(hangoutGroupId, settings) {
+  const { rows } = await query(
+    'SELECT matrix_room_id FROM hangout_matrix_rooms WHERE hangout_group_id = $1',
+    [hangoutGroupId]
+  );
+  if (rows.length === 0) {
+    logger.debug(`[Matrix] syncRoomSettings: no Matrix room for group ${hangoutGroupId}`);
+    return;
+  }
+
+  const roomId = rows[0].matrix_room_id;
+  const adminToken = await getAdminToken();
+
+  // Update power levels for read-only / media / invite settings
+  if (settings.isReadOnly !== undefined || settings.allowMedia !== undefined || settings.allowMemberInvites !== undefined) {
+    try {
+      // Get current power levels
+      const currentPL = await synapseGet(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.power_levels`,
+        adminToken
+      );
+
+      // Read-only: set events_default to 50 (only mods can send) or 0 (everyone)
+      if (settings.isReadOnly !== undefined) {
+        currentPL.events_default = settings.isReadOnly ? 50 : 0;
+      }
+
+      // Allow media: restrict m.room.message with msgtype checks via events override
+      // Matrix doesn't have per-msgtype power levels, so we use events_default for read-only
+      // and let the webapp enforce media restrictions client-side + in sendMessage endpoint
+
+      // Invite permissions: set invite power level
+      if (settings.allowMemberInvites !== undefined) {
+        currentPL.invite = settings.allowMemberInvites ? 0 : 50;
+      }
+
+      await synapsePut(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.power_levels`,
+        currentPL,
+        adminToken
+      );
+      logger.info(`[Matrix] Updated power levels for group ${hangoutGroupId} room ${roomId}`);
+    } catch (err) {
+      logger.warn(`[Matrix] Failed to update power levels for group ${hangoutGroupId}: ${err.message}`);
+    }
+  }
+
+  // Update room name
+  if (settings.name) {
+    try {
+      await synapsePut(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.name`,
+        { name: settings.name },
+        adminToken
+      );
+    } catch (err) {
+      logger.warn(`[Matrix] Failed to update room name for group ${hangoutGroupId}: ${err.message}`);
+    }
+  }
+
+  // Update room topic (description)
+  if (settings.description !== undefined) {
+    try {
+      await synapsePut(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.topic`,
+        { topic: settings.description || '' },
+        adminToken
+      );
+    } catch (err) {
+      logger.warn(`[Matrix] Failed to update room topic for group ${hangoutGroupId}: ${err.message}`);
+    }
+  }
+}
+
+/**
+ * Set a user's power level in a hangout's Matrix room.
+ * Used when promoting/demoting moderators.
+ *
+ * @param {number} hangoutGroupId
+ * @param {string} matrixUserId  e.g. @pnptv_123:matrix.pnptv.app
+ * @param {number} powerLevel    0=member, 50=moderator, 100=admin
+ */
+async function setUserPowerLevel(hangoutGroupId, matrixUserId, powerLevel) {
+  const { rows } = await query(
+    'SELECT matrix_room_id FROM hangout_matrix_rooms WHERE hangout_group_id = $1',
+    [hangoutGroupId]
+  );
+  if (rows.length === 0) return;
+
+  const roomId = rows[0].matrix_room_id;
+  const adminToken = await getAdminToken();
+
+  try {
+    const currentPL = await synapseGet(
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.power_levels`,
+      adminToken
+    );
+
+    currentPL.users = currentPL.users || {};
+    currentPL.users[matrixUserId] = powerLevel;
+
+    await synapsePut(
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.power_levels`,
+      currentPL,
+      adminToken
+    );
+    logger.info(`[Matrix] Set power level ${powerLevel} for ${matrixUserId} in room ${roomId}`);
+  } catch (err) {
+    logger.warn(`[Matrix] Failed to set power level for ${matrixUserId}: ${err.message}`);
+  }
+}
+
 module.exports = {
   provisionMatrixUser,
   getOrCreateDmRoom,
@@ -666,4 +785,6 @@ module.exports = {
   sendRoomMessage,
   sendRoomMediaMessage,
   redactRoomEvent,
+  syncRoomSettings,
+  setUserPowerLevel,
 };

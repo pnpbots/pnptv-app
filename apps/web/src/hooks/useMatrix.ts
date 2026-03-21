@@ -16,19 +16,42 @@ import { getMatrixToken } from "@/lib/api";
 
 let matrixClient: MatrixClient | null = null;
 let initPromise: Promise<MatrixClient> | null = null;
+let authFailCount = 0;
+let lastResetTime = 0;
 
 /** Reset the singleton so the next initMatrix() call fetches a fresh token. */
 function resetMatrixClient() {
-  if (matrixClient) {
-    try { matrixClient.stopClient(); } catch { /* ignore */ }
-  }
+  const now = Date.now();
+  // Debounce resets to max once per 5 seconds
+  if (now - lastResetTime < 5000) return;
+  lastResetTime = now;
+  authFailCount++;
+
+  const old = matrixClient;
   matrixClient = null;
   initPromise = null;
+
+  if (old) {
+    try { old.removeAllListeners(); old.stopClient(); } catch { /* ignore */ }
+  }
+
+  if (authFailCount >= 2) {
+    console.warn(`[Matrix] ${authFailCount} auth failures, pausing 30s before retry`);
+  }
 }
 
 async function initMatrix(): Promise<MatrixClient> {
   if (matrixClient) return matrixClient;
   if (initPromise) return initPromise;
+
+  // Cooldown after repeated auth failures
+  if (authFailCount >= 2) {
+    const elapsed = Date.now() - lastResetTime;
+    if (elapsed < 30000) {
+      throw new Error("[Matrix] Auth cooldown active");
+    }
+    authFailCount = 0; // Cooldown expired, retry
+  }
 
   initPromise = (async () => {
     const { matrixUserId, accessToken, homeserverUrl } = await getMatrixToken();
@@ -42,9 +65,14 @@ async function initMatrix(): Promise<MatrixClient> {
     // Auto-reset on auth failure so next call fetches a fresh token
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     client.on(ClientEvent.Sync, (state: SyncState, _prev: SyncState | null, data?: any) => {
+      if (state === SyncState.Prepared || state === SyncState.Syncing) {
+        authFailCount = 0; // Successful sync — reset failure counter
+      }
       if (state === SyncState.Error && (data?.error?.httpStatus === 401 || data?.error?.errcode === "M_UNKNOWN_TOKEN")) {
-        console.warn("[Matrix] Token expired (401), resetting client for re-auth");
-        resetMatrixClient();
+        if (matrixClient === client) {
+          console.warn("[Matrix] Token expired (401), resetting client for re-auth");
+          resetMatrixClient();
+        }
       }
     });
 
@@ -566,6 +594,11 @@ export function useRoomReactions(roomId: string | null): {
   }, [roomId]);
 
   return { reactions };
+}
+
+/** Get the current Matrix client instance (or null if not initialized). */
+export function getMatrixClient(): MatrixClient | null {
+  return matrixClient;
 }
 
 // ── getMatrixTimeline — synchronous snapshot of timeline events ───────────────
