@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   createClient,
+  EventType,
   type MatrixClient,
   type MatrixEvent,
   RoomEvent,
@@ -264,20 +265,31 @@ export async function sendMatrixMessage(
   roomId: string,
   text: string
 ): Promise<ISendEventResponse> {
-  const client = await initMatrix();
-  try {
-    return await client.sendTextMessage(roomId, text);
-  } catch (err: unknown) {
-    // Auto-rejoin on 403 "not in room" errors
-    const errObj = err as { httpStatus?: number; errcode?: string };
-    if (errObj.httpStatus === 403 || errObj.errcode === "M_FORBIDDEN") {
-      console.warn("[Matrix] 403 on send, attempting rejoin...");
-      try {
-        await client.joinRoom(roomId);
-        return await client.sendTextMessage(roomId, text);
-      } catch {
-        // rejoin failed — rethrow original
+  const attempt = async (): Promise<ISendEventResponse> => {
+    const client = await initMatrix();
+    try {
+      return await client.sendTextMessage(roomId, text);
+    } catch (err: unknown) {
+      const errObj = err as { httpStatus?: number; errcode?: string };
+      if (errObj.httpStatus === 403 || errObj.errcode === "M_FORBIDDEN") {
+        console.warn("[Matrix] 403 on send, attempting rejoin...");
+        try {
+          await client.joinRoom(roomId);
+          return await client.sendTextMessage(roomId, text);
+        } catch { /* rejoin failed */ }
       }
+      throw err;
+    }
+  };
+
+  try {
+    return await attempt();
+  } catch (err: unknown) {
+    const errObj = err as { httpStatus?: number; errcode?: string };
+    if (errObj.httpStatus === 401 || errObj.errcode === "M_UNKNOWN_TOKEN") {
+      console.warn("[Matrix] Token expired on sendMessage, re-authing...");
+      resetMatrixClient();
+      return await attempt();
     }
     throw err;
   }
@@ -396,15 +408,42 @@ export async function sendReaction(
   eventId: string,
   emoji: string
 ): Promise<ISendEventResponse> {
-  const client = await initMatrix();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return client.sendEvent(roomId, "m.reaction" as any, {
+  const content = {
     "m.relates_to": {
       rel_type: "m.annotation",
       event_id: eventId,
       key: emoji,
     },
-  });
+  };
+
+  const attempt = async (): Promise<ISendEventResponse> => {
+    const client = await initMatrix();
+    try {
+      return await client.sendEvent(roomId, EventType.Reaction, content);
+    } catch (err: unknown) {
+      const errObj = err as { httpStatus?: number; errcode?: string };
+      if (errObj.httpStatus === 403 || errObj.errcode === "M_FORBIDDEN") {
+        console.warn("[Matrix] 403 on sendReaction, attempting rejoin...");
+        try {
+          await client.joinRoom(roomId);
+          return await client.sendEvent(roomId, EventType.Reaction, content);
+        } catch { /* rejoin failed */ }
+      }
+      throw err;
+    }
+  };
+
+  try {
+    return await attempt();
+  } catch (err: unknown) {
+    const errObj = err as { httpStatus?: number; errcode?: string };
+    if (errObj.httpStatus === 401 || errObj.errcode === "M_UNKNOWN_TOKEN") {
+      console.warn("[Matrix] Token expired on sendReaction, re-authing...");
+      resetMatrixClient();
+      return await attempt();
+    }
+    throw err;
+  }
 }
 
 // ── redactEvent — remove a reaction (or any event) ───────────────────────────
@@ -413,8 +452,36 @@ export async function redactEvent(
   roomId: string,
   eventId: string
 ): Promise<void> {
-  const client = await initMatrix();
-  await client.redactEvent(roomId, eventId);
+  const attempt = async (): Promise<void> => {
+    const client = await initMatrix();
+    try {
+      await client.redactEvent(roomId, eventId);
+    } catch (err: unknown) {
+      const errObj = err as { httpStatus?: number; errcode?: string };
+      if (errObj.httpStatus === 403 || errObj.errcode === "M_FORBIDDEN") {
+        console.warn("[Matrix] 403 on redactEvent, attempting rejoin...");
+        try {
+          await client.joinRoom(roomId);
+          await client.redactEvent(roomId, eventId);
+          return;
+        } catch { /* rejoin failed */ }
+      }
+      throw err;
+    }
+  };
+
+  try {
+    await attempt();
+  } catch (err: unknown) {
+    const errObj = err as { httpStatus?: number; errcode?: string };
+    if (errObj.httpStatus === 401 || errObj.errcode === "M_UNKNOWN_TOKEN") {
+      console.warn("[Matrix] Token expired on redactEvent, re-authing...");
+      resetMatrixClient();
+      await attempt();
+      return;
+    }
+    throw err;
+  }
 }
 
 // ── useRoomReactions — live reaction map for a room ──────────────────────────
@@ -450,11 +517,13 @@ export function useRoomReactions(roomId: string | null): {
 
           for (const ev of timeline) {
             if (ev.getType() !== "m.reaction") continue;
+            if (ev.isRedacted()) continue;
             const rel = ev.getContent()?.["m.relates_to"];
             if (!rel || rel.rel_type !== "m.annotation") continue;
 
             const targetId = rel.event_id as string;
             const emoji = rel.key as string;
+            if (!targetId || !emoji) continue;
             const senderId = ev.getSender() ?? "";
             const reactionEventId = ev.getId() ?? "";
 
