@@ -360,6 +360,15 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: true }));
 
+// Guard: unwrap double-stringified JSON bodies (e.g. `"{\"mode\":\"mentions\"}"`)
+// Some clients or proxies may stringify the body twice; detect and fix silently.
+app.use((req, _res, next) => {
+  if (req.body && typeof req.body === 'string') {
+    try { req.body = JSON.parse(req.body); } catch { /* leave as-is */ }
+  }
+  next();
+});
+
 // Session middleware for Telegram auth with Redis store
 const redisClient = getRedis();
 const resolvedSessionSecret = process.env.SESSION_SECRET;

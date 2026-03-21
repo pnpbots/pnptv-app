@@ -15,7 +15,7 @@ async function resolveUsernames(usernames) {
   const { rows } = await query(
     `SELECT id, username
      FROM users
-     WHERE LOWER(username) = ANY($1) AND status = 'active'`,
+     WHERE LOWER(username) = ANY($1) AND subscription_status != 'banned'`,
     [usernames]
   );
   return rows;
@@ -108,7 +108,7 @@ async function searchUsersForMention(searchQuery, limit = 8) {
   const { rows } = await query(
     `SELECT id, username, photo_file_id AS avatar_url, creator_status
      FROM users
-     WHERE LOWER(username) LIKE $1 AND status = 'active'
+     WHERE LOWER(username) LIKE $1 AND subscription_status != 'banned'
      ORDER BY COALESCE(followers_count, 0) DESC, username
      LIMIT $2`,
     [`${searchQuery.toLowerCase()}%`, limit]
