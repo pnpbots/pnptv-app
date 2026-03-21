@@ -541,6 +541,7 @@ export interface TokenPurchase {
   dash_amount: number | null;
   btcpay_invoice_id: string;
   status: string;
+  payment_method: string | null;
   created_at: string;
   settled_at: string | null;
 }

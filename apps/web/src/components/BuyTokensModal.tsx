@@ -36,9 +36,13 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
     invoiceAmount?: number;
     loading: boolean;
     error?: string;
+    createdAt: number;
   } | null>(null);
   const [dashCopied, setDashCopied] = useState(false);
+  const [dashSecondsLeft, setDashSecondsLeft] = useState(900);
+  const [dashPaymentSuccess, setDashPaymentSuccess] = useState(false);
   const dashPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dashCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -54,9 +58,43 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
       setBuyingPackage(null);
       setDashPayment(null);
       setDashCopied(false);
+      setDashSecondsLeft(900);
+      setDashPaymentSuccess(false);
       if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+      if (dashCountdownRef.current) { clearInterval(dashCountdownRef.current); dashCountdownRef.current = null; }
     }
   }, [isOpen]);
+
+  // Countdown timer for Dash invoice (15-minute expiry)
+  useEffect(() => {
+    if (!dashPayment) {
+      if (dashCountdownRef.current) {
+        clearInterval(dashCountdownRef.current);
+        dashCountdownRef.current = null;
+      }
+      return;
+    }
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - dashPayment.createdAt) / 1000);
+      const remaining = Math.max(0, 900 - elapsed);
+      setDashSecondsLeft(remaining);
+      if (remaining === 0) {
+        if (dashCountdownRef.current) {
+          clearInterval(dashCountdownRef.current);
+          dashCountdownRef.current = null;
+        }
+        if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+      }
+    };
+    tick();
+    dashCountdownRef.current = setInterval(tick, 1000);
+    return () => {
+      if (dashCountdownRef.current) {
+        clearInterval(dashCountdownRef.current);
+        dashCountdownRef.current = null;
+      }
+    };
+  }, [dashPayment]);
 
   const handleBuyTokens = async (pkg: TokenPackage) => {
     setBuyingPackage(pkg.id);
@@ -77,7 +115,8 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
         // Dash — show in-app payment widget instead of popup
         const result = await buyTokens(pkg.id);
         const safeUrl = assertPaymentUrl(result.checkoutUrl);
-        setDashPayment({ invoiceId: result.invoiceId, checkoutUrl: safeUrl, loading: true });
+        setDashPayment({ invoiceId: result.invoiceId, checkoutUrl: safeUrl, loading: true, createdAt: Date.now() });
+        setDashSecondsLeft(900);
         setBuyingPackage(null);
 
         // Fetch payment details for in-app widget
@@ -103,11 +142,13 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
         dashPollRef.current = setInterval(async () => {
           try {
             const balRes = await getWalletBalance();
-            if (typeof balRes.balance === 'number' && balRes.balance > 0 && onSuccess) {
-              onSuccess(balRes.balance);
-              if (dashPollRef.current) clearInterval(dashPollRef.current);
-              dashPollRef.current = null;
-              setTimeout(() => onClose(), 1500);
+            if (typeof balRes.balance === 'number' && balRes.balance > 0) {
+              if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+              setDashPaymentSuccess(true);
+              setTimeout(() => {
+                if (onSuccess) onSuccess(balRes.balance);
+                onClose();
+              }, 1500);
             }
           } catch { /* ignore */ }
         }, 5000);
@@ -259,7 +300,28 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               <span className="text-sm font-medium text-pnp-textPrimary">Waiting for Dash payment...</span>
             </div>
 
-            {dashPayment.loading ? (
+            {dashPaymentSuccess ? (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <div className="w-14 h-14 rounded-full bg-green-500/20 flex items-center justify-center">
+                  <svg className="w-7 h-7 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <p className="text-base font-semibold text-green-400">Tokens added!</p>
+                <p className="text-xs text-pnp-textSecondary">Your balance has been updated.</p>
+              </div>
+            ) : dashSecondsLeft === 0 ? (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <p className="text-sm font-medium text-red-400">Invoice expired</p>
+                <p className="text-xs text-pnp-textSecondary text-center">The 15-minute payment window has closed.</p>
+                <button
+                  onClick={() => { setDashPayment(null); setDashCopied(false); setDashSecondsLeft(900); }}
+                  className="mt-1 px-4 py-2 rounded-lg bg-[#008DE4] text-white text-xs font-semibold hover:bg-[#0070b8] transition-colors"
+                >
+                  Try Again
+                </button>
+              </div>
+            ) : dashPayment.loading ? (
               <div className="flex flex-col items-center py-6 gap-3">
                 <svg className="animate-spin h-6 w-6 text-[#008DE4]" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
@@ -284,6 +346,17 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     <p className="text-xs text-pnp-textSecondary">~${dashPayment.invoiceAmount.toFixed(2)} USD</p>
                   )}
                 </div>
+
+                {/* Countdown timer */}
+                <p className={`text-xs font-mono tabular-nums ${
+                  dashSecondsLeft <= 60
+                    ? "text-red-400"
+                    : dashSecondsLeft <= 300
+                    ? "text-orange-400"
+                    : "text-pnp-textSecondary"
+                }`}>
+                  {String(Math.floor(dashSecondsLeft / 60)).padStart(2, "0")}:{String(dashSecondsLeft % 60).padStart(2, "0")} remaining
+                </p>
 
                 <div className="w-full">
                   <div
@@ -333,16 +406,19 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               </>
             )}
 
+            {!dashPaymentSuccess && dashSecondsLeft > 0 && (
             <button
               onClick={() => {
                 setDashPayment(null);
                 setDashCopied(false);
+                setDashSecondsLeft(900);
                 if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
               }}
               className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1"
             >
               Cancel
             </button>
+            )}
           </div>
         )}
 

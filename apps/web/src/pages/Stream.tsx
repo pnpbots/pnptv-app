@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Card, Skeleton } from "@pnptv/ui-kit";
@@ -70,9 +70,13 @@ export default function Stream() {
     amount?: string;
     invoiceAmount?: number;
     loading: boolean;
+    createdAt: number;
   } | null>(null);
   const [dashTipCopied, setDashTipCopied] = useState(false);
-  const dashTipPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const [dashTipSecondsLeft, setDashTipSecondsLeft] = useState(900);
+  const [dashTipSuccess, setDashTipSuccess] = useState(false);
+  const dashTipPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dashTipCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [streamError, setStreamError] = useState(false);
 
   // Dash token wallet
@@ -373,6 +377,37 @@ export default function Stream() {
     setRecentTips((prev) => [mapped, ...prev.filter((t) => t.id !== mapped.id)].slice(0, 5));
   }, [latestTip]);
 
+  // Countdown timer for Dash tip invoice (15-minute expiry)
+  useEffect(() => {
+    if (!dashTip) {
+      if (dashTipCountdownRef.current) {
+        clearInterval(dashTipCountdownRef.current);
+        dashTipCountdownRef.current = null;
+      }
+      return;
+    }
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - dashTip.createdAt) / 1000);
+      const remaining = Math.max(0, 900 - elapsed);
+      setDashTipSecondsLeft(remaining);
+      if (remaining === 0) {
+        if (dashTipCountdownRef.current) {
+          clearInterval(dashTipCountdownRef.current);
+          dashTipCountdownRef.current = null;
+        }
+        if (dashTipPollRef.current) { clearInterval(dashTipPollRef.current); dashTipPollRef.current = null; }
+      }
+    };
+    tick();
+    dashTipCountdownRef.current = setInterval(tick, 1000);
+    return () => {
+      if (dashTipCountdownRef.current) {
+        clearInterval(dashTipCountdownRef.current);
+        dashTipCountdownRef.current = null;
+      }
+    };
+  }, [dashTip]);
+
   const handleTip = async (amount: number) => {
     if (!isAuthenticated) { login(); return; }
 
@@ -413,7 +448,8 @@ export default function Stream() {
       try {
         const result = await sendTip(streamId || "", amount, undefined, "dash");
         if (result.invoiceId) {
-          setDashTip({ invoiceId: result.invoiceId, checkoutUrl: result.checkoutUrl || "", loading: true, invoiceAmount: amount });
+          setDashTip({ invoiceId: result.invoiceId, checkoutUrl: result.checkoutUrl || "", loading: true, invoiceAmount: amount, createdAt: Date.now() });
+          setDashTipSecondsLeft(900);
           // Fetch payment details
           getDashPaymentDetails(result.invoiceId)
             .then((d) => {
@@ -431,11 +467,14 @@ export default function Stream() {
             try {
               const details = await getDashPaymentDetails(result.invoiceId!);
               if (details.status === "Settled" || details.status === "Complete") {
-                if (dashTipPollRef.current) clearInterval(dashTipPollRef.current);
-                dashTipPollRef.current = null;
-                setDashTip(null);
-                setTipSuccess(t.live.tipSuccess);
-                setTimeout(() => setTipSuccess(null), 3000);
+                if (dashTipPollRef.current) { clearInterval(dashTipPollRef.current); dashTipPollRef.current = null; }
+                setDashTipSuccess(true);
+                setTimeout(() => {
+                  setDashTip(null);
+                  setDashTipSuccess(false);
+                  setTipSuccess(t.live.tipSuccess);
+                  setTimeout(() => setTipSuccess(null), 3000);
+                }, 1500);
               }
             } catch { /* ignore */ }
           }, 5000);
@@ -764,19 +803,41 @@ export default function Stream() {
                 Dash tip — ${dashTip.invoiceAmount}
               </span>
             </div>
+            {!dashTipSuccess && (
             <button
               onClick={() => {
                 setDashTip(null);
                 setDashTipCopied(false);
+                setDashTipSecondsLeft(900);
                 if (dashTipPollRef.current) { clearInterval(dashTipPollRef.current); dashTipPollRef.current = null; }
               }}
               className="text-[10px] text-pnp-textSecondary hover:text-pnp-textPrimary"
             >
               Cancel
             </button>
+            )}
           </div>
 
-          {dashTip.loading ? (
+          {dashTipSuccess ? (
+            <div className="flex flex-col items-center gap-2 py-3">
+              <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <p className="text-xs font-semibold text-green-400">Tip sent!</p>
+            </div>
+          ) : dashTipSecondsLeft === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-3">
+              <p className="text-[11px] font-medium text-red-400">Invoice expired</p>
+              <button
+                onClick={() => { setDashTip(null); setDashTipCopied(false); setDashTipSecondsLeft(900); }}
+                className="px-3 py-1 rounded-lg bg-[#008DE4] text-white text-[10px] font-semibold hover:bg-[#0070b8] transition-colors"
+              >
+                Try Again
+              </button>
+            </div>
+          ) : dashTip.loading ? (
             <div className="flex items-center justify-center py-4">
               <svg className="animate-spin h-5 w-5 text-[#008DE4]" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
@@ -793,6 +854,18 @@ export default function Stream() {
                 />
               </div>
               <p className="text-sm font-bold text-white">{dashTip.amount} DASH</p>
+
+              {/* Compact countdown */}
+              <p className={`text-[10px] font-mono tabular-nums ${
+                dashTipSecondsLeft <= 60
+                  ? "text-red-400"
+                  : dashTipSecondsLeft <= 300
+                  ? "text-orange-400"
+                  : "text-pnp-textSecondary"
+              }`}>
+                {String(Math.floor(dashTipSecondsLeft / 60)).padStart(2, "0")}:{String(dashTipSecondsLeft % 60).padStart(2, "0")} remaining
+              </p>
+
               <div
                 className="w-full flex items-center gap-1.5 rounded-lg px-2 py-1.5"
                 style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { Card, Skeleton } from "@pnptv/ui-kit";
@@ -134,9 +134,13 @@ export default function Subscribe() {
     loadingDetails?: boolean;
     detailsError?: string;
     invoiceAmount?: number | null;
+    createdAt: number;
   } | null>(null);
   const [dashPolling, setDashPolling] = useState(false);
   const [dashCopied, setDashCopied] = useState(false);
+  const [dashSecondsLeft, setDashSecondsLeft] = useState(900);
+  const [dashPaymentSuccess, setDashPaymentSuccess] = useState(false);
+  const dashCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Meru code activation
   const [meruCode, setMeruCode] = useState("");
@@ -228,9 +232,13 @@ export default function Subscribe() {
         if (cancelled) return;
         if (data.status === "completed") {
           setDashPolling(false);
-          setDashInvoice(null);
-          setPaymentSuccess(true);
+          setDashPaymentSuccess(true);
           await refreshUser();
+          setTimeout(() => {
+            setDashInvoice(null);
+            setDashPaymentSuccess(false);
+            setPaymentSuccess(true);
+          }, 2000);
           return;
         }
         if (data.status === "expired" || data.status === "invalid") {
@@ -247,6 +255,37 @@ export default function Subscribe() {
     return () => { cancelled = true; };
   }, [dashInvoice, dashPolling, refreshUser]);
 
+  // Countdown timer for Dash invoice (15-minute expiry)
+  useEffect(() => {
+    if (!dashInvoice || !dashPolling) {
+      if (dashCountdownRef.current) {
+        clearInterval(dashCountdownRef.current);
+        dashCountdownRef.current = null;
+      }
+      return;
+    }
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - dashInvoice.createdAt) / 1000);
+      const remaining = Math.max(0, 900 - elapsed);
+      setDashSecondsLeft(remaining);
+      if (remaining === 0) {
+        if (dashCountdownRef.current) {
+          clearInterval(dashCountdownRef.current);
+          dashCountdownRef.current = null;
+        }
+        setDashPolling(false);
+      }
+    };
+    tick();
+    dashCountdownRef.current = setInterval(tick, 1000);
+    return () => {
+      if (dashCountdownRef.current) {
+        clearInterval(dashCountdownRef.current);
+        dashCountdownRef.current = null;
+      }
+    };
+  }, [dashInvoice, dashPolling]);
+
   async function handleSubscribe() {
     if (!selectedPlan || submitting) return;
 
@@ -262,8 +301,10 @@ export default function Subscribe() {
             checkoutUrl: assertPaymentUrl(result.checkoutUrl),
             planName: result.planName || "subscription",
             loadingDetails: true,
+            createdAt: Date.now(),
           };
           setDashInvoice(invoice);
+          setDashSecondsLeft(900);
           setDashPolling(true);
           // Fetch payment details for in-app widget
           getDashPaymentDetails(result.invoiceId)
@@ -683,6 +724,27 @@ export default function Subscribe() {
               </svg>
               <p className="text-xs text-pnp-textSecondary">{s.dashLoadingDetails}</p>
             </div>
+          ) : dashPaymentSuccess ? (
+            <div className="flex flex-col items-center gap-3 py-6">
+              <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
+                <svg className="w-8 h-8 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <p className="text-base font-semibold text-green-400">Payment confirmed!</p>
+              <p className="text-xs text-pnp-textSecondary">Activating your subscription...</p>
+            </div>
+          ) : dashSecondsLeft === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-6">
+              <p className="text-sm font-medium text-red-400">Invoice expired</p>
+              <p className="text-xs text-pnp-textSecondary text-center">The 15-minute payment window has closed.</p>
+              <button
+                onClick={() => { setDashInvoice(null); setDashPolling(false); setDashCopied(false); setDashSecondsLeft(900); }}
+                className="mt-1 px-4 py-2 rounded-lg bg-[#008DE4] text-white text-xs font-semibold hover:bg-[#0070b8] transition-colors"
+              >
+                Try Again
+              </button>
+            </div>
           ) : dashInvoice.destination && dashInvoice.amount ? (
             <div className="flex flex-col items-center gap-4">
               {/* QR Code */}
@@ -705,6 +767,17 @@ export default function Subscribe() {
                   </p>
                 )}
               </div>
+
+              {/* Countdown timer */}
+              <p className={`text-xs font-mono tabular-nums ${
+                dashSecondsLeft <= 60
+                  ? "text-red-400"
+                  : dashSecondsLeft <= 300
+                  ? "text-orange-400"
+                  : "text-pnp-textSecondary"
+              }`}>
+                {String(Math.floor(dashSecondsLeft / 60)).padStart(2, "0")}:{String(dashSecondsLeft % 60).padStart(2, "0")} remaining
+              </p>
 
               {/* Address + Copy */}
               <div className="w-full">
@@ -763,7 +836,7 @@ export default function Subscribe() {
           )}
 
           <button
-            onClick={() => { setDashInvoice(null); setDashPolling(false); setDashCopied(false); }}
+            onClick={() => { setDashInvoice(null); setDashPolling(false); setDashCopied(false); setDashSecondsLeft(900); setDashPaymentSuccess(false); }}
             className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1 mt-2"
           >
             {s.cancel}
