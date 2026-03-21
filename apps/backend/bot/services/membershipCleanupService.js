@@ -586,6 +586,10 @@ Type /subscribe to view membership plans and reactivate your access!`;
         WHERE plan_id = 'lifetime100'
           AND (plan_expiry IS NULL OR plan_expiry <= NOW())
           AND (subscription_status != 'active' OR tier != 'member')
+          AND id NOT IN (
+            SELECT DISTINCT user_id FROM user_entitlements
+            WHERE is_lifetime = true AND is_consumed = false
+          )
         RETURNING id, username
       `);
       results.toActive += lifetime100MemberResult.rowCount;
@@ -602,6 +606,10 @@ Type /subscribe to view membership plans and reactivate your access!`;
         WHERE (plan_id ILIKE '%lifetime%' OR plan_id ILIKE '%life-time%')
           AND plan_id != 'lifetime100'
           AND (subscription_status != 'active' OR tier != 'PRIME')
+          AND id NOT IN (
+            SELECT DISTINCT user_id FROM user_entitlements
+            WHERE is_lifetime = true AND is_consumed = false
+          )
         RETURNING id, username
       `);
       results.toActive += lifetimeResult.rowCount;
