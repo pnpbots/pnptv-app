@@ -144,7 +144,7 @@ const deleteMyAccount = async (req, res) => {
       // Remove from geo ZSET and per-user geo hash so the account disappears
       // from the Nearby feature immediately.
       cache.del(`geo:user:${user.id}`),
-      cache.zrem('geo:users:online', user.id),
+      getRedis().zrem(`${process.env.REDIS_KEY_PREFIX || 'pnptv:'}geo:users:online`, user.id),
     ]);
 
     // Send confirmation email (fire-and-forget, before session destruction)

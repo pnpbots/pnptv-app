@@ -2615,12 +2615,14 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
       finalUsername = `${finalUsername}_${crypto.randomBytes(3).toString('hex')}`;
     }
 
+    const newUserId = crypto.randomUUID();
+    const newPnptvId = crypto.randomUUID();
     const insertResult = await pool.query(
       `INSERT INTO users
-         (username, first_name, email, email_verified, authentik_sub,
+         (id, pnptv_id, username, first_name, email, email_verified, authentik_sub,
           photo_file_id, tier, subscription_status, terms_accepted,
           role, last_login_method, last_login_at, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'free', 'free', false,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'free', 'free', false,
                'user', 'oidc', NOW(), NOW(), NOW())
        RETURNING id, pnptv_id, username, first_name, last_name, subscription_status,
                  tier, terms_accepted, photo_file_id, bio, language, role,
@@ -2628,6 +2630,8 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
                  atproto_handle, atproto_pds_url, twitter, x_user_id, x_id,
                  authentik_sub, email, last_login_method`,
       [
+        newUserId,
+        newPnptvId,
         finalUsername,
         name || preferred_username || finalUsername,
         email ? email.toLowerCase() : null,

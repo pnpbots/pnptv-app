@@ -106,6 +106,7 @@ export interface TelegramAuthResponse {
     creator_status?: string;
     creator_type?: string | null;
     contentDisclaimer?: boolean;
+    hasSeenTutorial?: boolean;
     last_login_method?: string | null;
     city?: string | null;
     country?: string | null;
@@ -949,6 +950,7 @@ export function updateProfile(
     youtubeHandle: string;
     wofPhotoConsent: boolean;
     contentDisclaimer: boolean;
+    hasSeenTutorial: boolean;
     language: string;
   }>
 ): Promise<{ success: boolean }> {

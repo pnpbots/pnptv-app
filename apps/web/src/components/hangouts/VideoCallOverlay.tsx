@@ -42,6 +42,8 @@ export function VideoCallOverlay({
   const [permsGranted, setPermsGranted] = useState(false);
   // Jitsi External API object — provided by JitsiMeetComponent via onApiReady
   const [jitsiApi, setJitsiApi] = useState<any>(null);
+  // Mobile mod-bot drawer toggle (fullscreen and embedded modes)
+  const [showModBotMobile, setShowModBotMobile] = useState(false);
 
   // Prevent body scroll in fullscreen mode
   useEffect(() => {
@@ -168,11 +170,54 @@ export function VideoCallOverlay({
           </div>
         </div>
 
-        {/* Mod Bot (right, admin only) */}
+        {/* Mod Bot — desktop: inline panel, mobile: floating toggle button + drawer */}
         {isAdmin && (
-          <div className="hidden sm:flex flex-shrink-0 p-2">
-            <VideoCallModBot room={jitsiApi} isAdmin={isAdmin} />
-          </div>
+          <>
+            {/* Desktop (sm+): inline side panel */}
+            <div className="hidden sm:flex flex-shrink-0 p-2">
+              <VideoCallModBot room={jitsiApi} isAdmin={isAdmin} />
+            </div>
+
+            {/* Mobile (<sm): floating shield button bottom-right */}
+            <button
+              onClick={() => setShowModBotMobile((v) => !v)}
+              className="sm:hidden absolute bottom-20 right-3 z-30 w-11 h-11 flex items-center justify-center rounded-full bg-pnp-surface border border-white/10 shadow-lg active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              aria-label="Toggle mod controls"
+            >
+              <svg className="w-5 h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+              </svg>
+            </button>
+
+            {/* Mobile mod-bot drawer — slides in from the right */}
+            {showModBotMobile && (
+              <>
+                {/* Backdrop */}
+                <div
+                  className="sm:hidden fixed inset-0 z-30 bg-black/40"
+                  onClick={() => setShowModBotMobile(false)}
+                />
+                {/* Panel */}
+                <div className="sm:hidden fixed right-0 top-0 bottom-0 z-40 w-72 max-w-[85vw] bg-pnp-surface border-l border-white/10 shadow-2xl flex flex-col overflow-y-auto">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+                    <span className="text-sm font-semibold text-pnp-textPrimary">Mod Controls</span>
+                    <button
+                      onClick={() => setShowModBotMobile(false)}
+                      className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+                      aria-label="Close mod controls"
+                    >
+                      <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="flex-1 p-2">
+                    <VideoCallModBot room={jitsiApi} isAdmin={isAdmin} />
+                  </div>
+                </div>
+              </>
+            )}
+          </>
         )}
 
       </div>
@@ -244,7 +289,7 @@ export function VideoCallOverlay({
       </div>
 
       {/* Video — widgets (Nearby, Cristina, Radio) float on top via Layout.tsx */}
-      <div className="flex">
+      <div className="flex relative">
         <div className="flex-1 min-w-0">
           <JitsiMeetComponent
             meetingUrl={meetingUrl}
@@ -257,11 +302,54 @@ export function VideoCallOverlay({
           />
         </div>
 
-        {/* Mod Bot (desktop, admin only) */}
+        {/* Mod Bot — desktop (lg+): inline side panel, mobile/tablet: drawer toggle */}
         {isAdmin && (
-          <div className="hidden lg:flex flex-shrink-0 p-2 border-l border-white/5">
-            <VideoCallModBot room={jitsiApi} isAdmin={isAdmin} />
-          </div>
+          <>
+            {/* Desktop (lg+): inline side panel */}
+            <div className="hidden lg:flex flex-shrink-0 p-2 border-l border-white/5">
+              <VideoCallModBot room={jitsiApi} isAdmin={isAdmin} />
+            </div>
+
+            {/* Mobile/tablet (<lg): floating shield button */}
+            <button
+              onClick={() => setShowModBotMobile((v) => !v)}
+              className="lg:hidden absolute bottom-3 right-3 z-20 w-11 h-11 flex items-center justify-center rounded-full bg-pnp-surface border border-white/10 shadow-lg active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              aria-label="Toggle mod controls"
+            >
+              <svg className="w-5 h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+              </svg>
+            </button>
+
+            {/* Mobile/tablet mod-bot drawer */}
+            {showModBotMobile && (
+              <>
+                {/* Backdrop */}
+                <div
+                  className="lg:hidden fixed inset-0 z-30 bg-black/40"
+                  onClick={() => setShowModBotMobile(false)}
+                />
+                {/* Panel */}
+                <div className="lg:hidden fixed right-0 top-0 bottom-0 z-40 w-72 max-w-[85vw] bg-pnp-surface border-l border-white/10 shadow-2xl flex flex-col overflow-y-auto">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+                    <span className="text-sm font-semibold text-pnp-textPrimary">Mod Controls</span>
+                    <button
+                      onClick={() => setShowModBotMobile(false)}
+                      className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+                      aria-label="Close mod controls"
+                    >
+                      <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="flex-1 p-2">
+                    <VideoCallModBot room={jitsiApi} isAdmin={isAdmin} />
+                  </div>
+                </div>
+              </>
+            )}
+          </>
         )}
       </div>
     </div>

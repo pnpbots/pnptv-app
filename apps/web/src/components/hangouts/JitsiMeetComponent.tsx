@@ -195,7 +195,7 @@ export function JitsiMeetComponent({
               }
             : {
                 toolbarButtons: isMobile
-                  ? ['microphone', 'tileview', 'fullscreen']
+                  ? ['microphone', 'tileview', 'fullscreen', 'settings', 'participants-pane']
                   : [
                       'microphone', 'participants-pane',
                       'closedcaptions', 'noisesuppression',

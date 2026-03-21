@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   createClient,
   EventType,
+  RelationType,
   type MatrixClient,
   type MatrixEvent,
   RoomEvent,
@@ -438,7 +439,7 @@ export async function sendReaction(
 ): Promise<ISendEventResponse> {
   const content = {
     "m.relates_to": {
-      rel_type: "m.annotation",
+      rel_type: RelationType.Annotation as typeof RelationType.Annotation,
       event_id: eventId,
       key: emoji,
     },
