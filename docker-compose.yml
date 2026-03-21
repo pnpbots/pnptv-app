@@ -350,6 +350,38 @@ services:
           cpus: '1.0'
           memory: 1g
 
+  # Authentik proxy outpost (forward auth for NPM admin + Ampache)
+  authentik-outpost:
+    image: ghcr.io/goauthentik/proxy:2025.2.4
+    container_name: authentik-outpost
+    restart: unless-stopped
+    ports:
+      - "9100:9000"
+      - "9444:9443"
+    environment:
+      AUTHENTIK_HOST: http://authentik-server:9000
+      AUTHENTIK_INSECURE: "true"
+      AUTHENTIK_TOKEN: "a7JnX0DJbP7vE6ci2xwHRKMZKFO81Z8AHfao4KgoxAfz3ROG6bUJqo1JPKJO"
+      AUTHENTIK_REDIS__HOST: redis-authentik
+    networks:
+      - proxy_net
+      - app_net
+      - db_net
+    depends_on:
+      authentik-server:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256m
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9000/outpost.goauthentik.io/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   # ===========================================
   # BLOCK C - Data & CRM (Directus)
   # Separate PostgreSQL for security isolation
@@ -985,6 +1017,10 @@ services:
       BTCPAY_BIND: 0.0.0.0:23000
       BTCPAY_CHAINS: "DASH"
       BTCPAY_NBXPLORERDEFAULTCOOKIEFILE: /root/.nbxplorer/Main/.cookie
+      BTCPAY_OIDC__ENABLED: "true"
+      BTCPAY_OIDC__PROVIDERURL: https://auth.pnptv.app/application/o/btcpay/
+      BTCPAY_OIDC__CLIENTID: btcpay
+      BTCPAY_OIDC__CLIENTSECRET: "${BTCPAY_OIDC_CLIENT_SECRET}"
     networks:
       - proxy_net
       - app_net

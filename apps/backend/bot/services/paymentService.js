@@ -4409,29 +4409,70 @@ class PaymentService {
         } catch (_) { /* non-critical */ }
       }
 
-      // After granting all add-ons: invalidate entitlement caches and sync
-      // users.tier to the derived label for backward-compatible admin views.
+      // After granting all add-ons: auto-grant pnp-member if prime was granted,
+      // invalidate entitlement caches and sync users.tier.
       // This is non-critical — payment is already committed above.
       if (result.granted > 0) {
+        const grantedAddOnIds = addOnsResult.rows.map(r => r.add_on_id);
+
+        // Auto-grant pnp-member when prime is granted (cascade)
+        if (grantedAddOnIds.includes('prime') && !grantedAddOnIds.includes('pnp-member')) {
+          try {
+            const primeRow = addOnsResult.rows.find(r => r.add_on_id === 'prime');
+            const memberLifetime = primeRow?.is_lifetime || false;
+            const memberDays = primeRow?.addon_duration_days || primeRow?.plan_duration_days || 30;
+            if (memberLifetime) {
+              await query(`
+                INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, source_plan_id)
+                VALUES ($1, 'pnp-member', true, $2)
+                ON CONFLICT (user_id, add_on_id, creator_id)
+                DO UPDATE SET is_lifetime = true, is_consumed = false, updated_at = NOW()
+              `, [userId, planId]);
+            } else {
+              await query(`
+                INSERT INTO user_entitlements (user_id, add_on_id, expires_at, source_plan_id)
+                VALUES ($1, 'pnp-member', NOW() + ($2::integer * INTERVAL '1 day'), $3)
+                ON CONFLICT (user_id, add_on_id, creator_id)
+                DO UPDATE SET
+                  expires_at = CASE
+                    WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
+                    WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
+                      THEN user_entitlements.expires_at + ($2::integer * INTERVAL '1 day')
+                    ELSE NOW() + ($2::integer * INTERVAL '1 day')
+                  END,
+                  is_consumed = false, updated_at = NOW()
+                WHERE NOT user_entitlements.is_lifetime
+              `, [userId, memberDays, planId]);
+            }
+            logger.info('Auto-granted pnp-member alongside prime via plan payment', { userId, planId });
+          } catch (memberErr) {
+            logger.warn('Auto-grant pnp-member failed (non-fatal)', { userId, error: memberErr.message });
+          }
+        }
+
         try {
           const EntitlementAccessService = require('./entitlementAccessService');
           await EntitlementAccessService.invalidateCache(userId);
 
-          // Derive the backward-compat display tier from the user's new entitlements
-          const label = await EntitlementAccessService.getUserLabel(userId);
-          const displayTier = EntitlementAccessService.labelToDisplayTier(label);
+          // Force tier based on what was granted
+          let forcedTier;
+          if (grantedAddOnIds.includes('prime')) {
+            forcedTier = 'PRIME';
+          } else if (grantedAddOnIds.includes('pnp-member')) {
+            forcedTier = 'member';
+          } else {
+            // Fallback: derive from entitlements
+            const label = await EntitlementAccessService.getUserLabel(userId);
+            forcedTier = EntitlementAccessService.labelToDisplayTier(label);
+          }
 
-          // Update users.tier for admin visibility only — not used for access control.
-          // The lifetime-protection trigger will block this for lifetime-holders;
-          // wrap in try/catch so a trigger raise does not abort the payment flow.
           try {
             await query(
               `UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2`,
-              [displayTier, userId]
+              [forcedTier, userId]
             );
-            logger.info('Display tier synced after entitlement grant', { userId, displayTier, label });
+            logger.info('Display tier synced after entitlement grant', { userId, displayTier: forcedTier });
           } catch (tierUpdateErr) {
-            // Lifetime-protection trigger raises for lifetime users — this is expected.
             if (tierUpdateErr.message && tierUpdateErr.message.includes('Lifetime entitlements')) {
               logger.debug('Display tier sync skipped for lifetime user', { userId });
             } else {

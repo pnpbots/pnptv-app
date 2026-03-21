@@ -18,13 +18,11 @@ import {
   sendDirectMessage,
   markThreadAsRead,
   getOrCreateDmRoom,
-  reactToDm,
-  getDmReactions,
   type MessageThread,
   type DirectMessage,
 } from "@/lib/api";
 import EmojiReactionBar, { type Reaction } from "@/components/EmojiReactionBar";
-import { useRoomMessages, sendMatrixMessage, sendMatrixReply, sendReaction, redactEvent, useRoomReactions, type ReactionEntry } from "@/hooks/useMatrix";
+import { useRoomMessages, sendMatrixMessage, sendMatrixReply, sendReaction, redactEvent, useRoomReactions } from "@/hooks/useMatrix";
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -619,9 +617,6 @@ function Conversation({
   const [matrixRoomId, setMatrixRoomId] = useState<string | null>(null);
   const [matrixInitError, setMatrixInitError] = useState<string | null>(null);
 
-  // DM reactions: messageId -> Reaction[]
-  const [dmReactions, setDmReactions] = useState<Map<number, Reaction[]>>(new Map());
-  const loadedDmReactionIds = useRef<Set<number>>(new Set());
 
   // Free-tier DM quota tracking
   const [dmRemaining, setDmRemaining] = useState<number | null>(null);
@@ -737,32 +732,6 @@ function Conversation({
     restPromise.finally(() => setIsLoading(false));
     markThreadAsRead(userId).catch(() => {});
   }, [userId, loadMessages]);
-
-  // Load existing reactions for legacy (non-Matrix) DM messages.
-  // Matrix messages use Matrix reactions — skip REST loading for FNV hash IDs
-  // to avoid integer overflow errors in PostgreSQL.
-  useEffect(() => {
-    const ids = messages
-      .filter(m => typeof m.id === "number")
-      .map(m => m.id as number)
-      .filter(id => id > 0 && !loadedDmReactionIds.current.has(id) && !dmEventIdMap.has(id));
-    if (ids.length === 0) return;
-    ids.forEach(id => loadedDmReactionIds.current.add(id));
-
-    Promise.allSettled(ids.slice(0, 20).map(id =>
-      getDmReactions(id).then(res => ({ id, reactions: res.reactions }))
-    )).then(results => {
-      setDmReactions(prev => {
-        const next = new Map(prev);
-        for (const r of results) {
-          if (r.status === "fulfilled" && r.value.reactions.length > 0) {
-            next.set(r.value.id, r.value.reactions);
-          }
-        }
-        return next;
-      });
-    });
-  }, [messages, dmEventIdMap]);
 
   // REST polling fallback when Matrix is not available (reduced frequency)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -930,37 +899,24 @@ function Conversation({
   }, []);
 
   const handleDmReaction = useCallback(async (messageId: number, emoji: string) => {
-    // If Matrix is active, use Matrix reactions
     const matrixEventId = dmEventIdMap.get(messageId);
-    if (matrixRoomId && matrixEventId) {
-      try {
-        const entries = matrixReactionsMap.get(matrixEventId);
-        const myMatrixId = currentUser?.dbId ? `@pnptv_${currentUser.dbId}:matrix.pnptv.app` : "";
-        const existing = entries?.find((e) => e.emoji === emoji);
-        const myEntry = myMatrixId ? existing?.users.find((u) => u.userId === myMatrixId) : undefined;
-        if (myEntry) {
-          await redactEvent(matrixRoomId, myEntry.reactionEventId);
-        } else {
-          await sendReaction(matrixRoomId, matrixEventId, emoji);
-        }
-      } catch {
-        // Silently fail
-      }
+    if (!matrixRoomId || !matrixEventId) {
+      console.warn("[DM Reaction] No matrixRoomId or eventId for messageId", messageId);
       return;
     }
 
-    // Fallback to REST reactions for non-Matrix messages
     try {
-      const result = await reactToDm(messageId, emoji);
-      if (result.success) {
-        setDmReactions(prev => {
-          const next = new Map(prev);
-          next.set(messageId, result.reactions);
-          return next;
-        });
+      const entries = matrixReactionsMap.get(matrixEventId);
+      const myMatrixId = currentUser?.dbId ? `@pnptv_${currentUser.dbId}:matrix.pnptv.app` : "";
+      const existing = entries?.find((e) => e.emoji === emoji);
+      const myEntry = myMatrixId ? existing?.users.find((u) => u.userId === myMatrixId) : undefined;
+      if (myEntry) {
+        await redactEvent(matrixRoomId, myEntry.reactionEventId);
+      } else {
+        await sendReaction(matrixRoomId, matrixEventId, emoji);
       }
-    } catch {
-      // Silently fail — reaction is non-critical
+    } catch (err) {
+      console.warn("[DM Reaction] failed:", err);
     }
   }, [dmEventIdMap, matrixRoomId, matrixReactionsMap, currentUser?.dbId]);
 
@@ -1063,7 +1019,7 @@ function Conversation({
                     users: e.users.map(u => ({ id: u.userId, username: u.userId.split(":")[0].replace(/^@/, "") })),
                   }));
                 }
-                return typeof msg.id === "number" ? dmReactions.get(msg.id) : undefined;
+                return undefined;
               })()}
               onReaction={handleDmReaction}
               onReply={matrixRoomId ? setReplyToMsg : undefined}

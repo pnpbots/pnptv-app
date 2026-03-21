@@ -298,6 +298,59 @@ class EntitlementModel {
     }
 
     logger.info('Entitlement granted', { userId, addOnId, isLifetime, durationDays, actorId });
+
+    // ── Auto-cascade: granting 'prime' also grants 'pnp-member' and forces tier ──
+    if (addOnId === 'prime') {
+      // 1. Auto-grant 'pnp-member' (BASIC) if not already active
+      try {
+        const hasMember = await query(
+          `SELECT 1 FROM user_entitlements
+           WHERE user_id = $1 AND add_on_id = 'pnp-member'
+             AND creator_id IS NULL AND is_consumed = false
+             AND (is_lifetime = true OR (expires_at IS NOT NULL AND expires_at > NOW()))
+           LIMIT 1`,
+          [userId]
+        );
+        if (hasMember.rows.length === 0) {
+          await query(
+            `INSERT INTO user_entitlements
+               (user_id, add_on_id, is_lifetime, source_plan_id, granted_at)
+             VALUES ($1, 'pnp-member', $2, $3, NOW())
+             ON CONFLICT (user_id, add_on_id, creator_id)
+             DO UPDATE SET
+               is_lifetime = CASE WHEN EXCLUDED.is_lifetime THEN true ELSE user_entitlements.is_lifetime END,
+               is_consumed = false, updated_at = NOW()`,
+            [userId, isLifetime, sourcePlanId]
+          );
+          logger.info('Auto-granted pnp-member alongside prime', { userId });
+        }
+      } catch (memberErr) {
+        logger.warn('Auto-grant pnp-member failed (non-fatal)', { userId, error: memberErr.message });
+      }
+
+      // 2. Force users.tier = 'PRIME'
+      try {
+        await query(`UPDATE users SET tier = 'PRIME', updated_at = NOW() WHERE id = $1`, [userId]);
+        logger.info('Tier forced to PRIME after prime entitlement grant', { userId });
+      } catch (tierErr) {
+        logger.warn('Tier update to PRIME failed (non-fatal)', { userId, error: tierErr.message });
+      }
+    }
+
+    // ── Auto-cascade: granting 'pnp-member' forces tier to at least 'member' ──
+    if (addOnId === 'pnp-member') {
+      try {
+        // Only upgrade tier if currently 'free' — don't downgrade PRIME users
+        await query(
+          `UPDATE users SET tier = 'member', updated_at = NOW()
+           WHERE id = $1 AND (tier IS NULL OR tier = 'free')`,
+          [userId]
+        );
+      } catch (tierErr) {
+        logger.warn('Tier update to member failed (non-fatal)', { userId, error: tierErr.message });
+      }
+    }
+
     return entitlementRow;
   }
 

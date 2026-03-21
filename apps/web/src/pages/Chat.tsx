@@ -30,8 +30,6 @@ import {
   handleJoinRequest,
   getOrCreateHangoutRoom,
   sendHangoutMessage,
-  reactToChatMessage,
-  getChatReactions,
   getHangoutGroup,
   kickHangoutMember,
   banHangoutMember,
@@ -659,78 +657,33 @@ export default function Chat() {
     return matrixAsGroupMessages;
   }, [matrixAsGroupMessages]);
 
-  // REST-based reactions for all messages (works regardless of Matrix)
-  const [restReactions, setRestReactions] = useState<Map<number, ReactionEntry[]>>(new Map());
-  const loadedReactionIds = useRef<Set<number>>(new Set());
-
-  // Load existing reactions for legacy (non-Matrix) messages on initial load.
-  // Matrix messages use Matrix reactions (useRoomReactions) — skip REST loading
-  // for them to avoid integer overflow errors from FNV hash IDs.
-  useEffect(() => {
-    const messageIds = messages
-      .map(m => m.id)
-      .filter(id => Number.isFinite(id) && id > 0
-        && !loadedReactionIds.current.has(id)
-        && !matrixEventIdMap.has(id));
-    if (messageIds.length === 0) return;
-
-    messageIds.forEach(id => loadedReactionIds.current.add(id));
-
-    const batch = messageIds.slice(0, 20);
-    Promise.allSettled(batch.map(id =>
-      getChatReactions(id).then(res => ({ id, reactions: res.reactions }))
-    )).then(results => {
-      setRestReactions(prev => {
-        const next = new Map(prev);
-        for (const r of results) {
-          if (r.status === 'fulfilled' && r.value.reactions.length > 0) {
-            next.set(r.value.id, r.value.reactions.map(rx => ({
-              emoji: rx.emoji,
-              count: rx.count,
-              users: rx.users.map(u => ({ userId: u.id, reactionEventId: '' })),
-            })));
-          }
-        }
-        return next;
-      });
-    });
-  }, [messages, matrixEventIdMap]);
-
-  // Handle reaction toggle — Matrix reactions for Matrix messages, REST for legacy
+  // Handle reaction toggle — always via Matrix
   const handleReaction = useCallback(async (idOrEventId: string, emoji: string) => {
-    // Matrix event IDs start with "$" — route to Matrix reaction logic
-    if (idOrEventId.startsWith("$") && matrixRoomId) {
-      const entries = matrixReactions.get(idOrEventId);
-      const myMatrixId = user?.dbId ? `@pnptv_${user.dbId}:matrix.pnptv.app` : "";
-      const existing = entries?.find((e) => e.emoji === emoji);
-      const myEntry = myMatrixId ? existing?.users.find((u) => u.userId === myMatrixId) : undefined;
-      if (myEntry) {
-        redactEvent(matrixRoomId, myEntry.reactionEventId).catch(() => {});
-      } else {
-        sendReaction(matrixRoomId, idOrEventId, emoji).catch(() => {});
-      }
+    if (!matrixRoomId) {
+      console.warn("[Reaction] No matrixRoomId, cannot react");
+      return;
+    }
+    // Resolve to Matrix event ID
+    const eventId = idOrEventId.startsWith("$")
+      ? idOrEventId
+      : matrixEventIdMap.get(parseInt(idOrEventId, 10)) ?? null;
+    if (!eventId) {
+      console.warn("[Reaction] Could not resolve eventId for", idOrEventId);
       return;
     }
 
-    // Legacy REST-based reactions
-    const numId = parseInt(idOrEventId, 10);
-    if (Number.isFinite(numId) && numId > 0) {
-      try {
-        const result = await reactToChatMessage(numId, emoji);
-        if (result.success) {
-          setRestReactions(prev => {
-            const next = new Map(prev);
-            next.set(numId, (result.reactions || []).map(r => ({
-              emoji: r.emoji,
-              count: r.count,
-              users: r.users.map(u => ({ userId: u.id, reactionEventId: '' })),
-            })));
-            return next;
-          });
-        }
-      } catch { /* silently fail */ }
+    const entries = matrixReactions.get(eventId);
+    const myMatrixId = user?.dbId ? `@pnptv_${user.dbId}:matrix.pnptv.app` : "";
+    const existing = entries?.find((e) => e.emoji === emoji);
+    const myEntry = myMatrixId ? existing?.users.find((u) => u.userId === myMatrixId) : undefined;
+    if (myEntry) {
+      redactEvent(matrixRoomId, myEntry.reactionEventId).catch((err) =>
+        console.warn("[Reaction] redact failed:", err));
+    } else {
+      sendReaction(matrixRoomId, eventId, emoji).catch((err) =>
+        console.warn("[Reaction] send failed:", err));
     }
-  }, [matrixRoomId, matrixReactions, user?.dbId]);
+  }, [matrixRoomId, matrixReactions, matrixEventIdMap, user?.dbId]);
 
   // sendMessage: send via Matrix (with optional reply-to via Matrix event relation)
   const sendMessage = useCallback(
@@ -1051,8 +1004,6 @@ export default function Chat() {
     setMsgInput("");
     setUploadError(null);
     clearMedia();
-    setRestReactions(new Map());
-    loadedReactionIds.current.clear();
     isNearBottom.current = true;
 
     // Mark as read
@@ -2050,8 +2001,8 @@ export default function Chat() {
                   matrixEventId={matrixEventIdMap.get(msg.id) || String(msg.id)}
                   reactions={
                     matrixEventIdMap.get(msg.id)
-                      ? matrixReactions.get(matrixEventIdMap.get(msg.id)!) ?? restReactions.get(msg.id) ?? undefined
-                      : restReactions.get(msg.id) ?? undefined
+                      ? matrixReactions.get(matrixEventIdMap.get(msg.id)!) ?? undefined
+                      : undefined
                   }
                   onReaction={handleReaction}
                   onReply={setReplyToMsg}
