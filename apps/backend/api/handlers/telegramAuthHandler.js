@@ -271,7 +271,16 @@ const handleTelegramAuth = async (req, res) => {
         logger.warn(`[Auth] Matrix provisioning failed (non-blocking): ${err.message}`);
       }
 
-      // 2. Default follows (idempotent)
+      // 2. PDS / Bluesky — ATProto identity
+      try {
+        const PDSProvisioningService = require('../../bot/services/PDSProvisioningService');
+        await PDSProvisioningService.createOrLinkPDS(user);
+        logger.info(`[Auth] PDS provisioned for user ${user.id}`);
+      } catch (err) {
+        logger.warn(`[Auth] PDS provisioning failed (non-blocking): ${err.message}`);
+      }
+
+      // 3. Default follows (idempotent)
       enforceDefaultFollows(user.id).catch(() => {});
     });
 

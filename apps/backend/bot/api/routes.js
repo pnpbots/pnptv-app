@@ -342,8 +342,9 @@ if (process.env.SENTRY_DSN) {
 }
 
 // Trust proxy - required for secure cookies and rate limiting behind reverse proxy
-// Setting to 2: Traefik (SSL termination) → nginx (SPA/routing) → Express
-app.set('trust proxy', 2);
+// Traefik (host mode, SSL termination) → nginx (sets X-Forwarded-Proto: https) → Express
+// nginx is the only proxy that sets forwarded headers, so trust 1 hop.
+app.set('trust proxy', true);
 
 // CRITICAL: Apply body parsing FIRST for ALL routes
 // This must be before any route registration
@@ -5064,6 +5065,168 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
   } catch (error) {
     logger.error(`Performers featured error: ${error.message}`);
     res.json({ success: true, performers: [] });
+  }
+}));
+
+app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  try {
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : null;
+    const type = typeof req.query.type === 'string' ? req.query.type : null;
+    const featured = req.query.featured === 'true';
+    const liveOnly = req.query.live === 'true';
+    const sort = ['popular', 'newest', 'az'].includes(req.query.sort) ? req.query.sort : 'popular';
+    const page = Math.max(0, parseInt(req.query.page, 10) || 0);
+    const limit = Math.min(48, Math.max(1, parseInt(req.query.limit, 10) || 24));
+    const offset = page * limit;
+
+    const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
+    const restreamerPublicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
+
+    // Build dynamic query
+    const conditions = ["u.creator_status = 'active'"];
+    const params = [];
+    let paramIdx = 1;
+
+    if (search) {
+      conditions.push(`(u.first_name ILIKE $${paramIdx} OR u.username ILIKE $${paramIdx} OR u.last_name ILIKE $${paramIdx})`);
+      params.push(`%${search}%`);
+      paramIdx++;
+    }
+    if (type) {
+      conditions.push(`u.creator_type = $${paramIdx}`);
+      params.push(type);
+      paramIdx++;
+    }
+    if (featured) {
+      conditions.push(`u.creator_featured = true`);
+    }
+
+    let orderBy;
+    switch (sort) {
+      case 'newest': orderBy = 'u.creator_enabled_at DESC NULLS LAST'; break;
+      case 'az': orderBy = "LOWER(COALESCE(u.first_name, u.username, '')) ASC"; break;
+      default: orderBy = 'u.creator_subscriber_count DESC NULLS LAST'; break;
+    }
+
+    // Count total
+    const countQuery = `SELECT COUNT(*)::int AS total FROM users u WHERE ${conditions.join(' AND ')}`;
+
+    // Fetch channels + live processes in parallel
+    const [countResult, channelsResult, streamsResult] = await Promise.allSettled([
+      getPool().query(countQuery, params),
+      getPool().query(
+        `SELECT u.id, u.username, u.first_name, u.last_name, u.photo_file_id, u.bio,
+                u.creator_type, u.creator_status, u.creator_price_usd,
+                u.creator_subscriber_count, u.creator_verified, u.creator_featured,
+                u.live_channel, u.creator_enabled_at,
+                (SELECT COUNT(*)::int FROM social_posts WHERE user_id = u.id AND is_deleted = false AND reply_to_id IS NULL) AS post_count
+         FROM users u
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY ${orderBy}
+         LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
+        [...params, limit, offset]
+      ),
+      (async () => {
+        if (!process.env.RESTREAMER_USER || !process.env.RESTREAMER_PASSWORD) return [];
+        try {
+          let token = null;
+          try {
+            const loginResp = await axios.post(`${restreamerUrl}/api/login`, {
+              username: process.env.RESTREAMER_USER,
+              password: process.env.RESTREAMER_PASSWORD,
+            }, { timeout: 5000 });
+            token = loginResp.data?.access_token ?? null;
+          } catch (loginErr) {
+            logger.warn(`channels: Restreamer login failed (non-fatal): ${loginErr.message}`);
+          }
+          const headers = token ? { Authorization: `Bearer ${token}` } : {};
+          const procResp = await axios.get(`${restreamerUrl}/api/v3/process`, { headers, timeout: 8000 });
+          return (procResp.data || []).filter(p =>
+            p.id?.startsWith('restreamer-ui:ingest:') && p.state?.exec === 'running'
+          );
+        } catch (e) {
+          logger.warn(`channels: Restreamer fetch failed (non-fatal): ${e.message}`);
+          return [];
+        }
+      })(),
+    ]);
+
+    const total = countResult.status === 'fulfilled' ? (countResult.value.rows[0]?.total || 0) : 0;
+    const rows = channelsResult.status === 'fulfilled' ? (channelsResult.value.rows || []) : [];
+    const liveProcesses = streamsResult.status === 'fulfilled' ? (streamsResult.value || []) : [];
+
+    // Build live refs set
+    const liveRefs = new Set(
+      liveProcesses
+        .map(p => (typeof p.reference === 'string' && p.reference) ? p.reference : null)
+        .filter(Boolean)
+    );
+
+    // Map live channels to user IDs
+    let liveUserIds = new Set();
+    if (liveRefs.size > 0) {
+      try {
+        const placeholders = [...liveRefs].map((_, i) => `$${i + 1}`).join(',');
+        const { rows: channelUsers } = await getPool().query(
+          `SELECT id, live_channel FROM users WHERE live_channel IN (${placeholders})`,
+          [...liveRefs]
+        );
+        for (const u of channelUsers) liveUserIds.add(String(u.id));
+      } catch (e) {
+        logger.warn(`channels: live user lookup failed (non-fatal): ${e.message}`);
+      }
+    }
+
+    // Map rows to response
+    let channels = rows.map(c => {
+      const uid = String(c.id);
+      const isLive = liveUserIds.has(uid);
+      const safeChannel = typeof c.live_channel === 'string'
+        ? c.live_channel.replace(/[^a-zA-Z0-9\-_.]/g, '')
+        : null;
+      const hlsUrl = isLive && safeChannel && !safeChannel.includes('..')
+        ? `${restreamerPublicUrl}/memfs/${safeChannel}.m3u8`
+        : null;
+      const photo = c.photo_file_id
+        ? (c.photo_file_id.startsWith('/') || c.photo_file_id.startsWith('http') ? c.photo_file_id : `/${c.photo_file_id}`)
+        : null;
+
+      return {
+        id: uid,
+        username: c.username || null,
+        displayName: [c.first_name, c.last_name].filter(Boolean).join(' ') || c.username || `Creator`,
+        photoUrl: photo,
+        bio: c.bio || null,
+        creatorType: c.creator_type || 'ice',
+        priceUsd: parseFloat(c.creator_price_usd) || 15,
+        subscriberCount: c.creator_subscriber_count || 0,
+        verified: c.creator_verified === true,
+        featured: c.creator_featured === true,
+        postCount: c.post_count || 0,
+        isLive,
+        hlsUrl,
+      };
+    });
+
+    // Filter live-only after injection
+    if (liveOnly) {
+      channels = channels.filter(c => c.isLive);
+    }
+
+    // Sort: live first, then preserve original DB order
+    channels.sort((a, b) => {
+      if (a.isLive && !b.isLive) return -1;
+      if (!a.isLive && b.isLive) return 1;
+      return 0;
+    });
+
+    const nextPage = offset + limit < total ? page + 1 : null;
+
+    res.json({ success: true, channels, nextPage, total });
+  } catch (error) {
+    logger.error(`Channels list error: ${error.message}`);
+    res.json({ success: true, channels: [], nextPage: null, total: 0 });
   }
 }));
 
