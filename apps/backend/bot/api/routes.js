@@ -1454,7 +1454,13 @@ const authStatusLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
-app.get('/api/auth-status', authStatusLimiter, checkAuthStatus);
+app.get('/api/auth-status', authStatusLimiter, (req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.removeHeader('ETag');
+  next();
+}, checkAuthStatus);
 
 // Admin check endpoint (for frontend role gate)
 // Uses adminGuard which queries DB — never trusts the stale session role.
