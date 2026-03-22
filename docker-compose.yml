@@ -289,6 +289,13 @@ services:
       AUTHENTIK_REDIS__HOST: redis-authentik
     networks:
       - pnptvapp_net
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "pnptvapp_pnptvapp_net"
+      traefik.http.routers.authentik.rule: "Host(`auth.pnptv.app`)"
+      traefik.http.routers.authentik.entrypoints: "websecure"
+      traefik.http.routers.authentik.tls.certresolver: "letsencrypt"
+      traefik.http.services.authentik.loadbalancer.server.port: "9000"
     depends_on:
       pg-authentik:
         condition: service_healthy
