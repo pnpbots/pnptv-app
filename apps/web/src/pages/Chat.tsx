@@ -1585,7 +1585,7 @@ export default function Chat() {
                       { label: "Upgrade to Prime", icon: "⭐", color: "#D4007A" },
                       { label: "Invite Friends", icon: "🔗", color: "#7B61FF" },
                       { label: "Earn Rewards", icon: "🎁", color: "#00D4E8" },
-                      { label: "Go Live", icon: "📡", color: "#FF6B6B" },
+                      { label: "PNPtv! Studio", icon: "🎬", color: "#FF6B6B" },
                       { label: "Create Hangout", icon: "🏠", color: "#48c774" },
                       { label: "Explore Nearby", icon: "📍", color: "#FBFF00" },
                       { label: "Get Verified", icon: "✅", color: "#1DA1F2" },
