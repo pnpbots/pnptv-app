@@ -684,6 +684,107 @@ function initSocketIO(io) {
       }
     });
 
+    // ── Hangout Mark-Read (broadcasts read receipt to group) ─────────────────
+
+    socket.on('hangout:mark-read', async ({ groupId } = {}) => {
+      if (!groupId) return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+
+      // Rate limit: 1 read receipt per 5s per user per group
+      if (!rateLimit(`hangout:read:${user.id}:${gid}`, 1, 5000)) return;
+
+      try {
+        // Verify membership
+        const { rows: memberRows } = await query(
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+          [gid, user.id]
+        );
+        if (memberRows.length === 0) return;
+
+        // Update last_read_at in DB
+        await query(
+          'UPDATE hangout_group_members SET last_read_at = NOW() WHERE group_id=$1 AND user_id=$2',
+          [gid, user.id]
+        );
+
+        // Clear Redis unread counter
+        const unreadKey = `hangout:unread:${gid}:${user.id}`;
+        try { const r = getRedis(); if (r) await r.del(unreadKey); } catch { /* silent */ }
+
+        // Broadcast read receipt to other members
+        const userName = user.firstName || user.first_name || user.username || 'User';
+        socket.to(`hangout:${gid}`).emit('hangout:read', {
+          userId: user.id,
+          name: userName,
+          photoUrl: user.photoUrl || user.photo_url || null,
+          lastReadAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        logger.error('hangout:mark-read error', { userId: user.id, groupId: gid, error: err.message });
+      }
+    });
+
+    // ── Hangout Call Screen Share (relay from Jitsi to group) ──────────────────
+
+    socket.on('hangout:call:screenshare', async ({ groupId, sharing } = {}) => {
+      if (!groupId || typeof sharing !== 'boolean') return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+
+      // Rate limit: 5 per 30s per user
+      if (!rateLimit(`hangout:screenshare:${user.id}:${gid}`, 5, 30000)) return;
+
+      try {
+        const { rows: memberRows } = await query(
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+          [gid, user.id]
+        );
+        if (memberRows.length === 0) return;
+
+        // Broadcast to all in the hangout room
+        io.to(`hangout:${gid}`).emit('hangout:call:screenshare', {
+          userId: user.id,
+          sharing,
+        });
+      } catch (err) {
+        logger.error('hangout:call:screenshare error', { userId: user.id, groupId: gid, error: err.message });
+      }
+    });
+
+    // ── Hangout Call Participants (snapshot on join/leave) ─────────────────────
+
+    socket.on('hangout:call:request-participants', async ({ groupId } = {}) => {
+      if (!groupId) return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+
+      // Rate limit: 5 per 10s
+      if (!rateLimit(`hangout:participants:${user.id}:${gid}`, 5, 10000)) return;
+
+      try {
+        const { rows: memberRows } = await query(
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+          [gid, user.id]
+        );
+        if (memberRows.length === 0) return;
+
+        // Get active call participants from DB
+        const { rows: participants } = await query(
+          `SELECT cp.user_id AS "userId", u.first_name AS name, u.photo_url AS "photoUrl"
+           FROM hangout_call_participants cp
+           JOIN hangout_video_calls vc ON vc.id = cp.call_id
+           JOIN users u ON u.id = cp.user_id
+           WHERE vc.group_id = $1 AND vc.status = 'active' AND cp.left_at IS NULL`,
+          [gid]
+        );
+
+        socket.emit('hangout:call:participants', { participants });
+      } catch (err) {
+        logger.error('hangout:call:request-participants error', { userId: user.id, groupId: gid, error: err.message });
+      }
+    });
+
     // ── Hangout Music Sync ───────────────────────────────────────────────────
 
     async function isHangoutMod(userId, gid) {
