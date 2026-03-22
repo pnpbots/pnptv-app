@@ -250,7 +250,17 @@ export function LandingPage() {
 
   const [loginOpen, setLoginOpen] = useState(false);
   const [loginView, setLoginView] = useState<"options" | "telegram" | "email" | "recover">("options");
-  // SSO login uses server-side redirect — no client state needed
+
+  // Surface OIDC errors from backend redirect (?oidc_error=...) and open login panel
+  const [oidcError, setOidcError] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("oidc_error");
+  });
+  useEffect(() => {
+    if (oidcError) {
+      setLoginOpen(true);
+    }
+  }, [oidcError]);
 
   const [widgetStatus, setWidgetStatus] = useState<"idle" | "verifying" | "error">("idle");
   const [widgetBlocked, setWidgetBlocked] = useState(false);
@@ -397,6 +407,23 @@ export function LandingPage() {
 
                 {loginView === "options" && (
                   <>
+                    {oidcError && (
+                      <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
+                        <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                        </svg>
+                        <p className="text-xs text-red-300">
+                          {oidcError === "access_denied" ? "Access was denied. Please try again." :
+                           oidcError === "session_expired" ? "Session expired. Please try again." :
+                           "Sign-in failed. Please try again."}
+                        </p>
+                        <button onClick={() => setOidcError(null)} className="ml-auto text-red-400 hover:text-red-300">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
                     <button
                       onClick={() => { window.location.href = "/api/webapp/auth/oidc/login"; }}
                       className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-sm font-bold text-white transition-all hover:brightness-110 active:scale-[0.98]"

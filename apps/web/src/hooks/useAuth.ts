@@ -85,11 +85,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(mapTelegramUser(res.user));
           }
         } else {
-          // Browser or Telegram without initData: check existing session
-          // Retry up to 2 extra times on transient failures to avoid flashing
-          // the landing page when the session is actually valid
-          const SESSION_RETRIES = 2;
-          const SESSION_RETRY_DELAY = 1000;
+          // Detect post-OIDC landing: backend redirects here with ?oidc_linked=1
+          // after establishing the server-side session. Clean the URL immediately
+          // so the param doesn't persist in browser history.
+          const searchParams = new URLSearchParams(window.location.search);
+          const isOidcReturn = searchParams.has("oidc_linked");
+          const oidcError = searchParams.get("oidc_error");
+          if (isOidcReturn || oidcError) {
+            const cleanUrl = window.location.pathname +
+              (searchParams.toString().replace(/oidc_linked=1?&?|oidc_error=[^&]*&?/g, "").replace(/&$|\?$/, "") || "");
+            window.history.replaceState(null, "", cleanUrl);
+          }
+
+          // Browser or Telegram without initData: check existing session.
+          // After OIDC return, retry more aggressively — the session cookie
+          // from the 302 redirect may take one extra round-trip to be sent.
+          const SESSION_RETRIES = isOidcReturn ? 4 : 2;
+          const SESSION_RETRY_DELAY = isOidcReturn ? 500 : 1000;
           let lastErr: unknown;
           for (let attempt = 0; attempt <= SESSION_RETRIES; attempt++) {
             try {
