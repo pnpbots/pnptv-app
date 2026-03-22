@@ -156,6 +156,14 @@ const resolveOgData = async (strippedPath) => {
     };
   }
 
+  // /channels (directory page)
+  if (/^\/channels\/?$/.test(strippedPath)) {
+    return {
+      ogData: ogService.getChannelsOG(),
+      canonicalPath: '/channels',
+    };
+  }
+
   // Known top-level CMS slugs: /terms, /privacy, /cookies, etc.
   const slug = strippedPath.replace(/^\//, '').replace(/\/$/, '');
   if (CMS_SLUGS.has(slug)) {

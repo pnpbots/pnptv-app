@@ -61,6 +61,7 @@ export function Layout() {
     { to: "/chat", label: t.nav.hangouts },
     { to: "/media", label: t.nav.prime },
     { to: "/live", label: t.nav.live },
+    { to: "/channels", label: "Channels" },
     { to: "/dm", label: t.nav.messages },
     { to: "/main-stage", label: t.nav.mainStage },
     { to: "/creators/apply", label: t.nav.becomeModel },

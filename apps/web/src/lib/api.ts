@@ -2546,6 +2546,51 @@ export interface CreatorApplication {
   updated_at: string;
 }
 
+// ── Channels ─────────────────────────────────────────────────────────────────
+
+export interface Channel {
+  id: string;
+  username: string | null;
+  displayName: string;
+  photoUrl: string | null;
+  bio: string | null;
+  creatorType: string;
+  priceUsd: number;
+  subscriberCount: number;
+  verified: boolean;
+  featured: boolean;
+  postCount: number;
+  latestMediaUrl: string | null;
+  isLive: boolean;
+  hlsUrl: string | null;
+}
+
+export function getChannels(params?: {
+  search?: string;
+  type?: string;
+  featured?: boolean;
+  live?: boolean;
+  sort?: "popular" | "newest" | "az";
+  page?: number;
+  limit?: number;
+}): Promise<{
+  success: boolean;
+  channels: Channel[];
+  nextPage: number | null;
+  total: number;
+}> {
+  const qp = new URLSearchParams();
+  if (params?.search) qp.set("search", params.search);
+  if (params?.type) qp.set("type", params.type);
+  if (params?.featured) qp.set("featured", "true");
+  if (params?.live) qp.set("live", "true");
+  if (params?.sort) qp.set("sort", params.sort);
+  if (params?.page !== undefined) qp.set("page", String(params.page));
+  if (params?.limit) qp.set("limit", String(params.limit));
+  const qs = qp.toString();
+  return request(`/api/webapp/channels${qs ? `?${qs}` : ""}`);
+}
+
 export function getCreatorEligibility(): Promise<{
   success: boolean;
 } & CreatorEligibility> {

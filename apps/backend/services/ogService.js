@@ -432,10 +432,29 @@ const getCmsPageOG = async (slug) => {
   }
 };
 
+// ─── Channels OG ──────────────────────────────────────────────────────────────
+
+const getChannelsOG = () => ({
+  title: 'PNP Channels — PNPtv!',
+  description: 'Browse creator channels on PNPtv! Discover exclusive content, live streams, and your favorite creators.',
+  image: `${APP_BASE_URL}/og-default.png`,
+  imageWidth: 1200,
+  imageHeight: 630,
+  url: `${APP_BASE_URL}/channels`,
+  type: 'website',
+  video: null,
+  videoType: null,
+  videoWidth: null,
+  videoHeight: null,
+  twitterCard: 'summary_large_image',
+  playerUrl: null,
+});
+
 module.exports = {
   getPostOG,
   getProfileOG,
   getStreamOG,
   getCmsPageOG,
   getDefaultOG,
+  getChannelsOG,
 };
