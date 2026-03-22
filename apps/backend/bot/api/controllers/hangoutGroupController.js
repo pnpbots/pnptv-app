@@ -10,6 +10,9 @@ const NotificationEmitter = require('../../services/notificationEmitter');
 const { hasAccess } = require('../../services/accessService');
 const matrixService = require('../../services/matrixService');
 const BlockedUser = require('../../../models/blockedUser');
+const sharp = require('sharp');
+const path = require('path');
+const fs = require('fs').promises;
 // Check if a photo path is a valid web URL (not a Telegram file ID)
 const isValidPhotoUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
 
@@ -411,6 +414,264 @@ const deleteGroup = async (req, res) => {
   } catch (err) {
     logger.error('deleteGroup error', err);
     return res.status(500).json({ error: 'Failed to delete group' });
+  }
+};
+
+// PATCH /api/webapp/hangouts/groups/:id
+const updateGroup = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    const { rows: groupRows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
+    if (groupRows.length === 0) return res.status(404).json({ error: 'Group not found' });
+    const group = groupRows[0];
+
+    if (group.is_main) return res.status(400).json({ error: 'Cannot modify the main community group' });
+
+    // Only creator/owner can update group details
+    const { rows: memberRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
+      [groupId, user.id]
+    );
+    if (memberRows.length === 0) return res.status(403).json({ error: 'Not a member of this group' });
+    const role = memberRows[0].role;
+    if (role !== 'owner' && String(group.creator_id) !== String(user.id)) {
+      return res.status(403).json({ error: 'Only the group owner can update group details' });
+    }
+
+    const { name, description, is_public } = req.body;
+
+    // Build update dynamically — only touch provided fields
+    const updates = [];
+    const values = [];
+    let idx = 1;
+
+    if (name !== undefined) {
+      const trimmed = String(name).trim();
+      if (!trimmed) return res.status(400).json({ error: 'Group name cannot be empty' });
+      if (trimmed.length > 100) return res.status(400).json({ error: 'Name must be 100 characters or fewer' });
+      updates.push(`name = $${idx++}`);
+      values.push(trimmed);
+    }
+
+    if (description !== undefined) {
+      const trimmed = String(description).trim().slice(0, 500);
+      updates.push(`description = $${idx++}`);
+      values.push(trimmed);
+    }
+
+    if (is_public !== undefined) {
+      updates.push(`is_public = $${idx++}`);
+      values.push(is_public === true || is_public === 'true');
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No valid fields provided for update' });
+    }
+
+    updates.push(`updated_at = NOW()`);
+    values.push(groupId);
+
+    const { rows } = await query(
+      `UPDATE hangout_groups SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`,
+      values
+    );
+
+    const g = rows[0];
+    return res.json({
+      success: true,
+      group: {
+        id: g.id,
+        name: g.name,
+        description: g.description,
+        avatarUrl: g.avatar_url,
+        creatorId: g.creator_id,
+        isMain: g.is_main,
+        isPublic: g.is_public,
+        maxMembers: g.max_members,
+        createdAt: g.created_at,
+        updatedAt: g.updated_at,
+      },
+    });
+  } catch (err) {
+    logger.error('updateGroup error', err);
+    return res.status(500).json({ error: 'Failed to update group' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/avatar
+const updateGroupAvatar = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  if (!req.file) return res.status(400).json({ error: 'No image file uploaded' });
+
+  try {
+    const { rows: groupRows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
+    if (groupRows.length === 0) return res.status(404).json({ error: 'Group not found' });
+    const group = groupRows[0];
+
+    if (group.is_main) return res.status(400).json({ error: 'Cannot modify the main community group' });
+
+    // Only creator/owner can update avatar
+    const { rows: memberRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
+      [groupId, user.id]
+    );
+    if (memberRows.length === 0) return res.status(403).json({ error: 'Not a member of this group' });
+    const role = memberRows[0].role;
+    if (role !== 'owner' && String(group.creator_id) !== String(user.id)) {
+      return res.status(403).json({ error: 'Only the group owner can update the group avatar' });
+    }
+
+    const filename = `group-${groupId}-${Date.now()}.webp`;
+    const uploadDir = path.join(__dirname, '../../../../../public/uploads/hangouts/avatars');
+    const filePath = path.join(uploadDir, filename);
+    const relativeUrl = `/uploads/hangouts/avatars/${filename}`;
+
+    await fs.mkdir(uploadDir, { recursive: true });
+
+    // Process with sharp: resize to 400x400, convert to WebP
+    await sharp(req.file.buffer)
+      .resize(400, 400, { fit: 'cover', position: 'centre' })
+      .webp({ quality: 85 })
+      .toFile(filePath);
+
+    await query(
+      'UPDATE hangout_groups SET avatar_url=$1, updated_at=NOW() WHERE id=$2',
+      [relativeUrl, groupId]
+    );
+
+    return res.json({ success: true, avatarUrl: relativeUrl });
+  } catch (err) {
+    logger.error('updateGroupAvatar error', err);
+    return res.status(500).json({ error: 'Failed to update group avatar' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/kick
+const kickMember = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  const { userId: targetUserId } = req.body;
+  if (!targetUserId) return res.status(400).json({ error: 'userId is required' });
+
+  try {
+    const { rows: groupRows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
+    if (groupRows.length === 0) return res.status(404).json({ error: 'Group not found' });
+    const group = groupRows[0];
+
+    if (group.is_main) return res.status(400).json({ error: 'Cannot kick members from the main community group' });
+
+    // Only creator/owner can kick
+    const { rows: actorRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
+      [groupId, user.id]
+    );
+    if (actorRows.length === 0) return res.status(403).json({ error: 'Not a member of this group' });
+    const actorRole = actorRows[0].role;
+    if (actorRole !== 'owner' && String(group.creator_id) !== String(user.id)) {
+      return res.status(403).json({ error: 'Only the group owner can kick members' });
+    }
+
+    // Cannot kick yourself
+    if (String(targetUserId) === String(user.id)) {
+      return res.status(400).json({ error: 'You cannot kick yourself — use leave instead' });
+    }
+
+    // Confirm target is actually a member
+    const { rows: targetRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
+      [groupId, targetUserId]
+    );
+    if (targetRows.length === 0) return res.status(404).json({ error: 'User is not a member of this group' });
+
+    // Cannot kick another owner
+    if (targetRows[0].role === 'owner') {
+      return res.status(403).json({ error: 'Cannot kick the group owner' });
+    }
+
+    await query(
+      'DELETE FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+      [groupId, targetUserId]
+    );
+
+    // Sync Matrix room membership — fire-and-forget (non-blocking, non-fatal)
+    matrixService.removeFromHangoutRoom(groupId, {
+      id: targetUserId,
+      matrix_user_id: null,
+    }).catch((matrixErr) => {
+      logger.warn(`[Matrix] kickMember sync failed for user ${targetUserId} / group ${groupId}: ${matrixErr.message}`);
+    });
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('kickMember error', err);
+    return res.status(500).json({ error: 'Failed to kick member' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/members/:userId/role
+const updateMemberRole = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id);
+  const targetUserId = req.params.userId;
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!targetUserId) return res.status(400).json({ error: 'Invalid target user ID' });
+
+  const { role: newRole } = req.body;
+  const ALLOWED_ROLES = ['admin', 'moderator', 'member'];
+  if (!ALLOWED_ROLES.includes(newRole)) {
+    return res.status(400).json({ error: `Role must be one of: ${ALLOWED_ROLES.join(', ')}` });
+  }
+
+  try {
+    const { rows: groupRows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
+    if (groupRows.length === 0) return res.status(404).json({ error: 'Group not found' });
+    const group = groupRows[0];
+
+    // Only creator/owner can change roles
+    const { rows: actorRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
+      [groupId, user.id]
+    );
+    if (actorRows.length === 0) return res.status(403).json({ error: 'Not a member of this group' });
+    const actorRole = actorRows[0].role;
+    if (actorRole !== 'owner' && String(group.creator_id) !== String(user.id)) {
+      return res.status(403).json({ error: 'Only the group owner can change member roles' });
+    }
+
+    // Cannot change your own role
+    if (String(targetUserId) === String(user.id)) {
+      return res.status(400).json({ error: 'You cannot change your own role' });
+    }
+
+    // Confirm target is a member
+    const { rows: targetRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
+      [groupId, targetUserId]
+    );
+    if (targetRows.length === 0) return res.status(404).json({ error: 'User is not a member of this group' });
+
+    // Cannot demote the owner role
+    if (targetRows[0].role === 'owner') {
+      return res.status(403).json({ error: 'Cannot change the role of the group owner' });
+    }
+
+    await query(
+      `UPDATE hangout_group_members SET role=$1 WHERE group_id=$2 AND user_id=$3`,
+      [newRole, groupId, targetUserId]
+    );
+
+    return res.json({ success: true, userId: targetUserId, role: newRole });
+  } catch (err) {
+    logger.error('updateMemberRole error', err);
+    return res.status(500).json({ error: 'Failed to update member role' });
   }
 };
 
@@ -1359,6 +1620,10 @@ module.exports = {
   joinGroup,
   leaveGroup,
   deleteGroup,
+  updateGroup,
+  updateGroupAvatar,
+  kickMember,
+  updateMemberRole,
   getMessages,
   sendMessage,
   startCall,

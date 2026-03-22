@@ -996,6 +996,17 @@ const avatarUpload = multer({
   }
 });
 
+// Hangout group avatar upload - 5MB max, images only
+const hangoutAvatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const isImage = /^image\/(jpeg|jpg|png|webp|gif)$/i.test(file.mimetype || '');
+    if (isImage) return cb(null, true);
+    cb(new Error('Only image files are allowed'));
+  }
+});
+
 // Event cover upload - 5 MB max, images only
 const eventCoverUpload = multer({
   storage: multer.memoryStorage(),
@@ -4183,6 +4194,10 @@ app.get('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hang
 app.post('/api/webapp/hangouts/groups/:id/join', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.joinGroup));
 app.post('/api/webapp/hangouts/groups/:id/leave', requireSessionAuth, asyncHandler(hangoutGroupController.leaveGroup));
 app.delete('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.deleteGroup));
+app.patch('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.updateGroup));
+app.post('/api/webapp/hangouts/groups/:id/avatar', requireSessionAuth, uploadLimiter, hangoutAvatarUpload.single('avatar'), verifyMagicBytes(IMAGE_MIMES), asyncHandler(hangoutGroupController.updateGroupAvatar));
+app.post('/api/webapp/hangouts/groups/:id/kick', requireSessionAuth, asyncHandler(hangoutGroupController.kickMember));
+app.post('/api/webapp/hangouts/groups/:id/members/:userId/role', requireSessionAuth, asyncHandler(hangoutGroupController.updateMemberRole));
 // Join requests for private groups
 app.post('/api/webapp/hangouts/groups/:id/request-join', requireSessionAuth, asyncHandler(hangoutGroupController.requestJoinGroup));
 app.get('/api/webapp/hangouts/groups/:id/requests', requireSessionAuth, asyncHandler(hangoutGroupController.getJoinRequests));

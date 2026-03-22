@@ -683,6 +683,7 @@ export function getWebRTCStreamerConfig(): Promise<{ success: boolean; error?: s
   return request("/api/webapp/live/webrtc/config");
 }
 
+
 export function getWebRTCViewerToken(channelRef: string): Promise<{
   success: boolean;
   token: string;
@@ -723,38 +724,6 @@ export function getWebRTCStreamStatus(channelRef: string): Promise<{
   streamerConnected: boolean;
 }> {
   return request(`/api/webapp/live/webrtc/status/${encodeURIComponent(channelRef)}`);
-}
-
-export function endWebRTCStream(): Promise<{ success: boolean }> {
-  return request("/api/webapp/live/webrtc/end", { method: "POST" });
-}
-
-// Streamer settings
-export interface StreamerSettings {
-  qualityPreset: string;
-  fps: number;
-  autoReconnect: boolean;
-  lowLatency: boolean;
-  hardwareAccel: boolean;
-  localRecord: boolean;
-  filterPreset: string;
-  filterBrightness: number;
-  filterContrast: number;
-  filterSaturation: number;
-  filterWarmth: number;
-  filterSharpness: number;
-  beautyMode: boolean;
-}
-
-export function getStreamerSettings(): Promise<{ success: boolean; settings: StreamerSettings }> {
-  return request("/api/webapp/live/settings");
-}
-
-export function updateStreamerSettings(settings: Partial<StreamerSettings>): Promise<{ success: boolean; settings: StreamerSettings }> {
-  return request("/api/webapp/live/settings", {
-    method: "PUT",
-    body: settings,
-  });
 }
 
 // Profile
@@ -1441,6 +1410,41 @@ export function leaveHangoutGroup(id: number): Promise<{ success: boolean }> {
 
 export function deleteHangoutGroup(id: number): Promise<{ success: boolean }> {
   return request(`/api/webapp/hangouts/groups/${id}`, { method: "DELETE" });
+}
+
+export function updateHangoutGroup(
+  groupId: number,
+  data: { name?: string; description?: string; isPublic?: boolean }
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}`, { method: "PATCH", body: data });
+}
+
+export function uploadGroupAvatar(
+  groupId: number,
+  file: File
+): Promise<{ success: boolean; avatarUrl?: string }> {
+  const form = new FormData();
+  form.append("avatar", file);
+  return fetch(`${API_BASE}/api/webapp/hangouts/groups/${groupId}/avatar`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  }).then((r) => r.json());
+}
+
+export function kickGroupMember(
+  groupId: number,
+  userId: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/kick`, { method: "POST", body: { userId } });
+}
+
+export function updateMemberRole(
+  groupId: number,
+  userId: string,
+  role: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/members/${userId}/role`, { method: "POST", body: { role } });
 }
 
 export function getGroupMessages(
@@ -4068,40 +4072,6 @@ export function getLiveRulesStatus(): Promise<{
 
 export function acknowledgeLiveRules(): Promise<{ success: boolean }> {
   return request("/api/webapp/live/acknowledge-rules", { method: "POST" });
-}
-
-// Stream Profile + Grok Auto-Chat
-
-export function getStreamProfile(): Promise<{
-  success: boolean;
-  profile?: {
-    boundaries: string;
-    turnOns: string;
-    streamGoal: string;
-    messages: string[];
-    isActive?: boolean;
-  } | null;
-}> {
-  return request("/api/webapp/live/stream-profile");
-}
-
-export function saveStreamProfile(data: {
-  boundaries: string;
-  turnOns: string;
-  streamGoal: string;
-}): Promise<{ success: boolean; messages: string[] }> {
-  return request("/api/webapp/live/stream-profile", {
-    method: "POST",
-    body: data,
-  });
-}
-
-export function startStreamAutoMessages(): Promise<{ success: boolean }> {
-  return request("/api/webapp/live/stream-auto-start", { method: "POST" });
-}
-
-export function stopStreamAutoMessages(): Promise<{ success: boolean }> {
-  return request("/api/webapp/live/stream-auto-stop", { method: "POST" });
 }
 
 // ---------------------------------------------------------------------------

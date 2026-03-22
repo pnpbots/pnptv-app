@@ -46,8 +46,15 @@ import {
   getHangoutInviteLink,
   updateHangoutNotification,
   deleteHangoutMessage,
+  reactToChatMessage,
+  getChatReactions,
+  updateHangoutGroup,
+  uploadGroupAvatar,
+  kickGroupMember,
+  updateMemberRole,
   type HangoutGroup,
   type GroupMessage,
+  type GroupMember,
   type StartCallResponse,
   type GetActiveCallResponse,
   type DiscoverGroup,
@@ -842,6 +849,18 @@ export default function Chat() {
   // Member action loading
   const [memberActionLoading, setMemberActionLoading] = useState<string | null>(null);
 
+  const [showGroupSettings, setShowGroupSettings] = useState(false);
+  const [settingsMembers, setSettingsMembers] = useState<GroupMember[]>([]);
+  const [settingsMembersLoading, setSettingsMembersLoading] = useState(false);
+  const [settingsName, setSettingsName] = useState("");
+  const [settingsDesc, setSettingsDesc] = useState("");
+  const [settingsIsPublic, setSettingsIsPublic] = useState(true);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsSuccess, setSettingsSuccess] = useState(false);
+  const [settingsAvatarUploading, setSettingsAvatarUploading] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
   // Dedicated error states for non-upload errors
   const [discoverError, setDiscoverError] = useState<string | null>(null);
 
@@ -1131,11 +1150,91 @@ export default function Chat() {
     setCallId(null);
     setCallIsModerator(false);
     setShowOnline(false);
+    setShowGroupSettings(false);
     setMsgInput("");
     setUploadError(null);
     clearMedia();
     loadGroups();
   };
+
+  const openGroupSettings = useCallback(async (group: HangoutGroup) => {
+    setSettingsName(group.name);
+    setSettingsDesc(group.description || "");
+    setSettingsIsPublic(group.isPublic);
+    setSettingsError(null);
+    setSettingsSuccess(false);
+    setShowGroupMenu(false);
+    setShowGroupSettings(true);
+    setSettingsMembersLoading(true);
+    try {
+      const data = await getHangoutGroup(group.id);
+      setSettingsMembers(data.members || []);
+    } catch {
+      setSettingsMembers([]);
+    } finally {
+      setSettingsMembersLoading(false);
+    }
+  }, []);
+
+  const handleSaveGroupSettings = useCallback(async () => {
+    if (!activeGroup || settingsSaving) return;
+    setSettingsSaving(true);
+    setSettingsError(null);
+    setSettingsSuccess(false);
+    try {
+      await updateHangoutGroup(activeGroup.id, {
+        name: settingsName.trim(),
+        description: settingsDesc.trim(),
+        isPublic: settingsIsPublic,
+      });
+      setActiveGroup((prev) => prev ? { ...prev, name: settingsName.trim(), description: settingsDesc.trim(), isPublic: settingsIsPublic } : prev);
+      setGroups((prev) => prev.map((g) => g.id === activeGroup.id ? { ...g, name: settingsName.trim(), description: settingsDesc.trim(), isPublic: settingsIsPublic } : g));
+      setSettingsSuccess(true);
+      setTimeout(() => setSettingsSuccess(false), 2500);
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : "Failed to save settings");
+    } finally {
+      setSettingsSaving(false);
+    }
+  }, [activeGroup, settingsName, settingsDesc, settingsIsPublic, settingsSaving]);
+
+  const handleGroupAvatarUpload = useCallback(async (file: File) => {
+    if (!activeGroup || settingsAvatarUploading) return;
+    setSettingsAvatarUploading(true);
+    setSettingsError(null);
+    try {
+      const result = await uploadGroupAvatar(activeGroup.id, file);
+      if (result.avatarUrl) {
+        setActiveGroup((prev) => prev ? { ...prev, avatarUrl: result.avatarUrl! } : prev);
+        setGroups((prev) => prev.map((g) => g.id === activeGroup.id ? { ...g, avatarUrl: result.avatarUrl! } : g));
+      }
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : "Failed to upload avatar");
+    } finally {
+      setSettingsAvatarUploading(false);
+    }
+  }, [activeGroup, settingsAvatarUploading]);
+
+  const handleKickMember = useCallback(async (userId: string) => {
+    if (!activeGroup) return;
+    try {
+      await kickGroupMember(activeGroup.id, userId);
+      setSettingsMembers((prev) => prev.filter((m) => m.user_id !== userId));
+      setActiveGroup((prev) => prev ? { ...prev, memberCount: Math.max(0, prev.memberCount - 1) } : prev);
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : "Failed to kick member");
+    }
+  }, [activeGroup]);
+
+  const handleChangeRole = useCallback(async (userId: string, role: string) => {
+    if (!activeGroup) return;
+    try {
+      await updateMemberRole(activeGroup.id, userId, role);
+      setSettingsMembers((prev) => prev.map((m) => m.user_id === userId ? { ...m, role } : m));
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : "Failed to update role");
+    }
+  }, [activeGroup]);
 
   // Clear messagesLoading once socket delivers messages
   useEffect(() => {
@@ -1489,6 +1588,15 @@ export default function Chat() {
                     <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
                     Pinned Messages
                   </button>
+                  {!activeGroup.isMain && !activeGroup.isWallOfFame && (isAdmin || String(activeGroup.creatorId) === String(user?.dbId)) && (
+                    <button
+                      onClick={() => openGroupSettings(activeGroup)}
+                      className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
+                    >
+                      <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      Group Settings
+                    </button>
+                  )}
                   {!activeGroup.isMain && (
                     <button
                       onClick={() => { setShowGroupMenu(false); handleLeaveGroup(activeGroup.id); }}
