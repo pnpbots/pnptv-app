@@ -503,11 +503,17 @@ export const router = createBrowserRouter([
   },
   {
     path: "/login",
-    element: (
-      <ModuleLoader>
-        <LoginPage />
-      </ModuleLoader>
-    ),
+    element: <Layout />,
+    children: [
+      {
+        index: true,
+        element: (
+          <ModuleLoader>
+            <Home />
+          </ModuleLoader>
+        ),
+      },
+    ],
   },
   {
     path: "/join",
