@@ -2544,10 +2544,10 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     email: email ? email.replace(/(.{2}).*@/, '$1***@') : null,
   });
 
-  // ── 4. Upsert PNPtv user — link via authentik_sub (stable across renames) ───
+  // ── 4. Upsert PNPtv user — link via pnptv_id (stable across renames) ───
   const pool = getPool();
 
-  // Try to find existing user by authentik_sub first (most reliable identity anchor)
+  // Try to find existing user by pnptv_id first (most reliable identity anchor)
   // Fall back to email match so existing email-registered users get linked on first OIDC login
   let userRow;
 
@@ -2556,9 +2556,9 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
             tier, terms_accepted, photo_file_id, bio, language, role,
             creator_status, content_disclaimer, telegram, atproto_did,
             atproto_handle, atproto_pds_url, twitter, x_user_id, x_id,
-            authentik_sub, email, last_login_method
+            email, last_login_method
      FROM users
-     WHERE authentik_sub = $1 AND is_deleted = false
+     WHERE pnptv_id = $1 AND is_deleted = false
      LIMIT 1`,
     [sub]
   );
@@ -2585,7 +2585,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
               tier, terms_accepted, photo_file_id, bio, language, role,
               creator_status, content_disclaimer, telegram, atproto_did,
               atproto_handle, atproto_pds_url, twitter, x_user_id, x_id,
-              authentik_sub, email, last_login_method
+              email, last_login_method
        FROM users
        WHERE email = $1 AND is_deleted = false
        LIMIT 1`,
@@ -2593,11 +2593,11 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     );
     if (emailLookup.rows.length > 0) {
       userRow = emailLookup.rows[0];
-      // Link authentik_sub to the found user (first OIDC login for an existing account)
+      // Link pnptv_id to the found user (first OIDC login for an existing account)
       const displayName = name || preferred_username || userRow.first_name || null;
       await pool.query(
         `UPDATE users
-         SET authentik_sub = $1,
+         SET pnptv_id = $1,
              last_login_method = 'oidc',
              last_login_at = NOW(),
              first_name = COALESCE(NULLIF($2, ''), first_name),
@@ -2605,10 +2605,10 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
          WHERE id = $4`,
         [sub, displayName, picture || null, userRow.id]
       );
-      userRow.authentik_sub = sub;
+      userRow.pnptv_id = sub;
       userRow.first_name = displayName || userRow.first_name;
       userRow.last_login_method = 'oidc';
-      logger.info('[OIDC] Linked authentik_sub to existing email account', { userId: userRow.id, sub });
+      logger.info('[OIDC] Linked pnptv_id to existing email account', { userId: userRow.id, sub });
     }
   }
 
@@ -2633,24 +2633,23 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     const newPnptvId = crypto.randomUUID();
     const insertResult = await pool.query(
       `INSERT INTO users
-         (id, pnptv_id, username, first_name, email, email_verified, authentik_sub,
+         (id, pnptv_id, username, first_name, email, email_verified,
           photo_file_id, tier, subscription_status, terms_accepted,
           role, last_login_method, last_login_at, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'free', 'free', false,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'free', 'free', false,
                'user', 'oidc', NOW(), NOW(), NOW())
        RETURNING id, pnptv_id, username, first_name, last_name, subscription_status,
                  tier, terms_accepted, photo_file_id, bio, language, role,
                  creator_status, content_disclaimer, telegram, atproto_did,
                  atproto_handle, atproto_pds_url, twitter, x_user_id, x_id,
-                 authentik_sub, email, last_login_method`,
+                 email, last_login_method`,
       [
         newUserId,
-        newPnptvId,
+        sub,  // pnptv_id = Authentik sub (source of truth)
         finalUsername,
         name || preferred_username || finalUsername,
         email ? email.toLowerCase() : null,
         email_verified === true,
-        sub,
         picture || null,
       ]
     );
@@ -2691,7 +2690,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     // X identity
     xHandle: userRow.twitter || userRow.x_username || null,
     // Authentik OIDC identity — refresh_token stored server-side in session only
-    authentik_sub: userRow.authentik_sub,
+    pnptv_id: userRow.pnptv_id,
     oidc_refresh_token: refreshToken || null,
     // Hybrid auth method flags
     auth_methods: {
@@ -2793,7 +2792,7 @@ app.post('/api/webapp/auth/oidc/logout', requireSessionAuth, asyncHandler(async 
   }
 
   // Partial logout — clear only OIDC fields, retain other auth methods
-  req.session.user.authentik_sub = null;
+  req.session.user.pnptv_id = null;
   req.session.user.oidc_refresh_token = null;
   if (req.session.user.auth_methods) {
     req.session.user.auth_methods.oidc = false;
