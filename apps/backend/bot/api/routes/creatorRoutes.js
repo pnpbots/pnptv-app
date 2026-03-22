@@ -72,6 +72,10 @@ router.post('/channels', authGuard, creatorController.createChannel);
 router.patch('/channels/:id', authGuard, creatorController.updateChannel);
 router.delete('/channels/:id', authGuard, creatorController.deleteChannel);
 
+// ── Channel collaborators (owner-only mutation) ───────────────────────────────
+router.post('/channels/:id/collaborators', authGuard, creatorController.addCollaborator);
+router.delete('/channels/:id/collaborators', authGuard, creatorController.removeCollaborator);
+
 // ── Milestone routes (auth required) ─────────────────────────────────────────
 // IMPORTANT: must come BEFORE /:creatorId/* param routes
 router.get('/milestones', authGuard, creatorController.getMilestones);

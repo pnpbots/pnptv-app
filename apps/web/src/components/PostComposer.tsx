@@ -22,7 +22,7 @@ import React, {
 } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
-import { checkAuthStatus, getXStatus, sharePostToX, type SocialPostItem } from "@/lib/api";
+import { checkAuthStatus, getXStatus, sharePostToX, getOwnChannels, type SocialPostItem, type CreatorChannel } from "@/lib/api";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -261,6 +261,8 @@ export function PostComposer({
   const [crossPostX, setCrossPostX] = useState(false);
   const [videoTitle, setVideoTitle] = useState("");
   const [videoDescription, setVideoDescription] = useState("");
+  const [channels, setChannels] = useState<CreatorChannel[]>([]);
+  const [selectedChannelId, setSelectedChannelId] = useState<number | null>(null);
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -293,6 +295,18 @@ export function PostComposer({
         setXHasWriteScope(false);
       });
   }, [isAuthenticated]);
+
+  // ── Fetch own channels for active creators ─────────────────────────────────
+  useEffect(() => {
+    if (!isAuthenticated || user?.creator_status !== "active") return;
+    getOwnChannels()
+      .then((res) => {
+        if (res.success) setChannels(res.channels);
+      })
+      .catch(() => {
+        // Non-critical — channel dropdown simply won't appear
+      });
+  }, [isAuthenticated, user?.creator_status]);
 
   // ── Textarea auto-resize ───────────────────────────────────────────────────
   useEffect(() => {
@@ -459,6 +473,7 @@ export function PostComposer({
     setCrossPostX(false);
     setVideoTitle("");
     setVideoDescription("");
+    setSelectedChannelId(null);
     if (compact) setIsExpanded(false);
   }, [compact]);
 
@@ -483,6 +498,7 @@ export function PostComposer({
             files.forEach((f) => formData.append("media", f.file));
             if (isExclusive) formData.append("isExclusive", "true");
             if (!isShareable) formData.append("isShareable", "false");
+            if (selectedChannelId !== null) formData.append("channelId", String(selectedChannelId));
 
             const xhr = new XMLHttpRequest();
             xhr.open("POST", `${API_BASE}/api/webapp/social/posts/with-multi-media`);
@@ -527,6 +543,7 @@ export function PostComposer({
             if (!isShareable) formData.append("isShareable", "false");
             if (videoTitle.trim()) formData.append("videoTitle", videoTitle.trim());
             if (videoDescription.trim()) formData.append("videoDescription", videoDescription.trim());
+            if (selectedChannelId !== null) formData.append("channelId", String(selectedChannelId));
 
             const xhr = new XMLHttpRequest();
             xhr.open("POST", `${API_BASE}/api/webapp/social/posts/with-media`);
@@ -570,6 +587,7 @@ export function PostComposer({
             content: trimmed,
             isExclusive: isExclusive,
             isShareable: isShareable,
+            ...(selectedChannelId !== null ? { channelId: selectedChannelId } : {}),
           }),
         });
         if (!res.ok) {
@@ -595,7 +613,7 @@ export function PostComposer({
     } finally {
       setIsPosting(false);
     }
-  }, [text, files, isPosting, isExclusive, isShareable, crossPostX, videoTitle, videoDescription, onPostCreated, clearForm]);
+  }, [text, files, isPosting, isExclusive, isShareable, crossPostX, videoTitle, videoDescription, selectedChannelId, onPostCreated, clearForm]);
 
   // ── Keyboard submit (Ctrl/Cmd + Enter) ────────────────────────────────────
   const handleKeyDown = useCallback(
@@ -896,6 +914,46 @@ export function PostComposer({
                   </svg>
                 }
               />
+            </div>
+          )}
+
+          {/* Channel selector — active creators with channels only */}
+          {isActiveCreator && channels.length > 0 && (
+            <div
+              className="mt-2 flex items-center justify-between rounded-lg px-3 py-2.5"
+              style={{
+                background: selectedChannelId !== null ? "rgba(212,0,122,0.06)" : "rgba(255,255,255,0.03)",
+                border: `1px solid ${selectedChannelId !== null ? "rgba(212,0,122,0.2)" : "rgba(255,255,255,0.1)"}`,
+              }}
+            >
+              <label
+                htmlFor={`${baseId}-channel`}
+                className="flex items-center gap-2 flex-shrink-0"
+              >
+                <span className="w-4 h-4 flex-shrink-0" style={{ color: selectedChannelId !== null ? "#D4007A" : "#8E8E93" }}>
+                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 8.25h16.5" />
+                  </svg>
+                </span>
+                <span className="text-xs font-medium" style={{ color: selectedChannelId !== null ? "#D4007A" : "#8E8E93" }}>
+                  Channel
+                </span>
+              </label>
+              <select
+                id={`${baseId}-channel`}
+                value={selectedChannelId ?? ""}
+                onChange={(e) => setSelectedChannelId(e.target.value === "" ? null : Number(e.target.value))}
+                disabled={isPosting}
+                className="ml-3 flex-1 min-w-0 bg-transparent text-xs outline-none text-right disabled:opacity-40 cursor-pointer"
+                style={{ color: selectedChannelId !== null ? "#D4007A" : "#8E8E93" }}
+              >
+                <option value="">No channel</option>
+                {channels.map((ch) => (
+                  <option key={ch.id} value={ch.id} style={{ background: "#1C1C1E", color: "#fff" }}>
+                    {ch.name}
+                  </option>
+                ))}
+              </select>
             </div>
           )}
 

@@ -2609,6 +2609,7 @@ export interface CreatorChannel {
   creatorUsername?: string;
   creatorPhotoUrl?: string | null;
   creatorVerified?: boolean;
+  collaborators?: string[];
 }
 
 export function getOwnChannels(): Promise<{ success: boolean; channels: CreatorChannel[] }> {
@@ -2664,6 +2665,29 @@ export function assignPostToChannel(postId: number, channelId: number): Promise<
 
 export function unassignPostFromChannel(postId: number): Promise<{ success: boolean }> {
   return request(`/api/webapp/social/posts/${postId}/assign-channel`, { method: "DELETE" });
+}
+
+export async function uploadChannelCover(channelId: number, file: File): Promise<{ success: boolean; coverImageUrl: string }> {
+  const formData = new FormData();
+  formData.append("cover", file);
+  const res = await fetch(`${API_BASE}/api/webapp/creator/channels/${channelId}/cover`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error || `API error ${res.status}`);
+  }
+  return res.json();
+}
+
+export function addChannelCollaborator(channelId: number, userId: string): Promise<{ success: boolean; channel: CreatorChannel }> {
+  return request(`/api/webapp/creator/channels/${channelId}/collaborators`, { method: "POST", body: { userId } });
+}
+
+export function removeChannelCollaborator(channelId: number, userId: string): Promise<{ success: boolean; channel: CreatorChannel }> {
+  return request(`/api/webapp/creator/channels/${channelId}/collaborators`, { method: "DELETE", body: { userId } });
 }
 
 export function getCreatorEligibility(): Promise<{

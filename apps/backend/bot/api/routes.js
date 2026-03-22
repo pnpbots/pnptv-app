@@ -1019,6 +1019,19 @@ const eventCoverUpload = multer({
   }
 });
 
+// Channel cover upload - 5 MB max, images only
+const channelCoverUploadDir = path.join(__dirname, '../../../../public/uploads/channels');
+if (!fs.existsSync(channelCoverUploadDir)) fs.mkdirSync(channelCoverUploadDir, { recursive: true });
+const channelCoverUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const isImage = /^image\/(jpeg|jpg|png|webp|gif)$/i.test(file.mimetype || '');
+    if (isImage) return cb(null, true);
+    cb(new Error('Only image files are allowed'));
+  }
+});
+
 // ── Magic bytes verification for in-memory uploads (avatars, event covers, etc.) ──
 // Multer only checks the Content-Type header which is trivially spoofable.
 // This middleware verifies the file's actual magic bytes using file-type.
@@ -7084,6 +7097,41 @@ app.post('/api/webapp/matrix/dm/:userId/message', requireSessionAuth, asyncHandl
 
 // Creator monetization routes
 app.use('/api/webapp/creator', creatorRoutes);
+
+// Channel cover image upload — separate from creatorRoutes because it needs its own multer middleware
+app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLimiter, channelCoverUpload.single('cover'), verifyMagicBytes(IMAGE_MIMES), asyncHandler(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const channelId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
+
+  const userId = req.session?.user?.id || req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+  // Verify ownership or collaborator access
+  const chRes = await getPool().query(
+    'SELECT creator_id, collaborators FROM creator_channels WHERE id = $1 AND is_active = true',
+    [channelId]
+  );
+  if (!chRes.rows.length) return res.status(404).json({ error: 'Channel not found' });
+  const ch = chRes.rows[0];
+  const isOwner = ch.creator_id === userId;
+  const isCollaborator = Array.isArray(ch.collaborators) && ch.collaborators.includes(String(userId));
+  if (!isOwner && !isCollaborator) return res.status(403).json({ error: 'Channel not found or not yours' });
+
+  const sharp = require('sharp');
+  const filename = `channel-${channelId}-${Date.now()}.webp`;
+  const filePath = path.join(channelCoverUploadDir, filename);
+  await sharp(req.file.buffer)
+    .rotate()
+    .withMetadata(false)
+    .resize(1200, 630, { fit: 'cover', position: 'center' })
+    .webp({ quality: 80 })
+    .toFile(filePath);
+
+  const coverUrl = `/uploads/channels/${filename}`;
+  await getPool().query('UPDATE creator_channels SET cover_image_url = $1, updated_at = NOW() WHERE id = $2', [coverUrl, channelId]);
+  return res.json({ success: true, coverImageUrl: coverUrl });
+}));
 
 // Gamification routes
 app.use('/api/webapp/gamification', gamificationRoutes);

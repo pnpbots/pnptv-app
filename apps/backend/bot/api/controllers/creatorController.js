@@ -415,7 +415,7 @@ const issueStrike = async (req, res) => {
 const listOwnChannels = async (req, res) => {
   try {
     const result = await query(
-      `SELECT * FROM creator_channels WHERE creator_id = $1 AND is_active = true ORDER BY sort_order, created_at`,
+      `SELECT * FROM creator_channels WHERE is_active = true AND (creator_id = $1 OR $1 = ANY(collaborators)) ORDER BY sort_order, created_at`,
       [req.user.id]
     );
     return res.json({ success: true, channels: result.rows });
@@ -433,7 +433,7 @@ const createChannel = async (req, res) => {
       return res.status(403).json({ error: 'Active creator status required' });
     }
 
-    const { name, description, tags, isPremium } = req.body;
+    const { name, description, tags, isPremium, collaborators } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'Channel name is required' });
     }
@@ -453,11 +453,24 @@ const createChannel = async (req, res) => {
 
     const safeTags = Array.isArray(tags) ? tags.filter(t => typeof t === 'string').map(t => t.trim().slice(0, 50)).slice(0, 10) : [];
 
+    // Validate collaborators: must be active creators, no more than 10
+    let safeCollaborators = [];
+    if (Array.isArray(collaborators) && collaborators.length > 0) {
+      const collabIds = collaborators.map(id => String(id)).filter(Boolean).slice(0, 10);
+      if (collabIds.length > 0) {
+        const collabRes = await query(
+          `SELECT id::text FROM users WHERE id::text = ANY($1) AND creator_status = 'active'`,
+          [collabIds]
+        );
+        safeCollaborators = collabRes.rows.map(r => r.id);
+      }
+    }
+
     const result = await query(
-      `INSERT INTO creator_channels (creator_id, name, slug, description, tags, is_premium)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO creator_channels (creator_id, name, slug, description, tags, is_premium, collaborators)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [req.user.id, trimmedName, slug, (description || '').slice(0, 2000), safeTags, isPremium === true]
+      [req.user.id, trimmedName, slug, (description || '').slice(0, 2000), safeTags, isPremium === true, safeCollaborators]
     );
     return res.json({ success: true, channel: result.rows[0] });
   } catch (err) {
@@ -481,7 +494,7 @@ const updateChannel = async (req, res) => {
     const params = [];
     let idx = 1;
 
-    const { name, slug, description, coverImageUrl, tags, isPremium, sortOrder } = req.body;
+    const { name, slug, description, coverImageUrl, tags, isPremium, sortOrder, collaborators } = req.body;
     if (name !== undefined) { updates.push(`name = $${idx++}`); params.push(String(name).trim().slice(0, 100)); }
     if (slug !== undefined) {
       const cleanSlug = String(slug).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 100);
@@ -497,6 +510,24 @@ const updateChannel = async (req, res) => {
     }
     if (isPremium !== undefined) { updates.push(`is_premium = $${idx++}`); params.push(isPremium === true); }
     if (sortOrder !== undefined) { updates.push(`sort_order = $${idx++}`); params.push(parseInt(sortOrder, 10) || 0); }
+    if (collaborators !== undefined) {
+      // Only channel owner can update the full collaborators list; validate each is an active creator
+      if (chRes.rows[0].creator_id !== req.user.id) {
+        return res.status(403).json({ error: 'Only the channel owner can update collaborators' });
+      }
+      let safeCollaborators = [];
+      if (Array.isArray(collaborators) && collaborators.length > 0) {
+        const collabIds = collaborators.map(id => String(id)).filter(Boolean).slice(0, 10);
+        if (collabIds.length > 0) {
+          const collabRes = await query(
+            `SELECT id::text FROM users WHERE id::text = ANY($1) AND creator_status = 'active'`,
+            [collabIds]
+          );
+          safeCollaborators = collabRes.rows.map(r => r.id);
+        }
+      }
+      updates.push(`collaborators = $${idx++}`); params.push(safeCollaborators);
+    }
 
     if (!updates.length) return res.status(400).json({ error: 'No fields to update' });
 
@@ -534,6 +565,66 @@ const deleteChannel = async (req, res) => {
   }
 };
 
+const addCollaborator = async (req, res) => {
+  const channelId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+  try {
+    // Only the channel owner can add collaborators
+    const chRes = await query('SELECT creator_id, collaborators FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
+    if (!chRes.rows.length || chRes.rows[0].creator_id !== req.user.id) {
+      return res.status(404).json({ error: 'Channel not found or not yours' });
+    }
+
+    // Verify the target user is an active creator
+    const userRes = await query('SELECT creator_status FROM users WHERE id::text = $1 OR id = $2', [String(userId), parseInt(userId, 10) || -1]);
+    if (!userRes.rows.length || userRes.rows[0].creator_status !== 'active') {
+      return res.status(400).json({ error: 'User is not an active creator' });
+    }
+
+    await query(
+      `UPDATE creator_channels
+       SET collaborators = array_append(collaborators, $1), updated_at = NOW()
+       WHERE id = $2 AND NOT ($1 = ANY(collaborators))`,
+      [String(userId), channelId]
+    );
+    const updated = await query('SELECT * FROM creator_channels WHERE id = $1', [channelId]);
+    return res.json({ success: true, channel: updated.rows[0] });
+  } catch (err) {
+    logger.error('addCollaborator error', err);
+    return res.status(500).json({ error: 'Failed to add collaborator' });
+  }
+};
+
+const removeCollaborator = async (req, res) => {
+  const channelId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+  try {
+    // Only the channel owner can remove collaborators
+    const chRes = await query('SELECT creator_id FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
+    if (!chRes.rows.length || chRes.rows[0].creator_id !== req.user.id) {
+      return res.status(404).json({ error: 'Channel not found or not yours' });
+    }
+
+    await query(
+      `UPDATE creator_channels
+       SET collaborators = array_remove(collaborators, $1), updated_at = NOW()
+       WHERE id = $2`,
+      [String(userId), channelId]
+    );
+    const updated = await query('SELECT * FROM creator_channels WHERE id = $1', [channelId]);
+    return res.json({ success: true, channel: updated.rows[0] });
+  } catch (err) {
+    logger.error('removeCollaborator error', err);
+    return res.status(500).json({ error: 'Failed to remove collaborator' });
+  }
+};
+
 module.exports = {
   getEligibility,
   activateCreator,
@@ -561,4 +652,6 @@ module.exports = {
   createChannel,
   updateChannel,
   deleteChannel,
+  addCollaborator,
+  removeCollaborator,
 };

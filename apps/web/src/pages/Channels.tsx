@@ -87,6 +87,12 @@ function CreatorChannelCard({
             Free
           </span>
         )}
+        {channel.collaborators && channel.collaborators.length > 0 && (
+          <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
+            style={{ background: "rgba(230,145,56,0.85)", color: "#fff" }}>
+            Joint
+          </span>
+        )}
       </div>
 
       <div className="p-3 flex-1 flex flex-col gap-2">
@@ -304,7 +310,35 @@ function ChannelDetailView({
                 <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
               </svg>
             )}
+            {channel.collaborators && channel.collaborators.length > 0 && (
+              <span
+                className="ml-auto flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
+                style={{ background: "rgba(230,145,56,0.15)", color: "#E69138", border: "1px solid rgba(230,145,56,0.3)" }}
+              >
+                Joint Channel
+              </span>
+            )}
           </div>
+
+          {/* Collaborators list */}
+          {channel.collaborators && channel.collaborators.length > 0 && (
+            <div className="pt-2 border-t border-pnp-border/50">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary mb-1.5">
+                Collaborators
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {channel.collaborators.map((uid) => (
+                  <span
+                    key={uid}
+                    className="px-2 py-0.5 rounded-full text-xs text-pnp-textSecondary"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+                  >
+                    {uid}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

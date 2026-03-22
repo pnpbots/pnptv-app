@@ -196,7 +196,30 @@ const createPost = async (req, res) => {
 
     const exclusive = !!isExclusive;
     const shareable = isShareable !== false;
+
+    // Validate channel ownership if provided (only for non-reply posts)
+    let channelId = null;
+    if (!replyToId && req.body.channelId) {
+      channelId = parseInt(req.body.channelId, 10);
+      if (!Number.isFinite(channelId) || channelId <= 0) {
+        return res.status(400).json({ error: 'Invalid channelId' });
+      }
+      const chRes = await dbQuery('SELECT creator_id, collaborators FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
+      if (!chRes.rows.length) return res.status(404).json({ error: 'Channel not found' });
+      const ch = chRes.rows[0];
+      const isOwner = ch.creator_id === user.id;
+      const isCollaborator = Array.isArray(ch.collaborators) && ch.collaborators.includes(String(user.id));
+      if (!isOwner && !isCollaborator) return res.status(403).json({ error: 'Channel not found or not yours' });
+    }
+
     const post = await SocialPostService.createPost(user.id, content.trim(), null, null, replyToId, repostOfId, false, exclusive, shareable);
+
+    // Assign to channel and update post_count
+    if (channelId) {
+      await dbQuery('UPDATE social_posts SET channel_id = $1 WHERE id = $2', [channelId, post.id]);
+      await dbQuery('UPDATE creator_channels SET post_count = (SELECT COUNT(*) FROM social_posts WHERE channel_id = $1 AND is_deleted = false) WHERE id = $1', [channelId]);
+      post.channel_id = channelId;
+    }
 
     if (!replyToId && !repostOfId && !exclusive) {
       SocialPostService.mirrorToMastodon(content.trim(), post.id);
@@ -547,9 +570,39 @@ const createPostWithMedia = async (req, res) => {
     const shareable = isShareable !== 'false' && isShareable !== false;
     const vTitle = (mediaType === 'video' && videoTitle) ? videoTitle.toString().trim().slice(0, 150) : null;
     const vDesc = (mediaType === 'video' && videoDescription) ? videoDescription.toString().trim().slice(0, 2000) : null;
+
+    // Validate channel ownership if provided (only for non-reply posts)
+    let channelId = null;
+    if (!replyToId && req.body.channelId) {
+      channelId = parseInt(req.body.channelId, 10);
+      if (!Number.isFinite(channelId) || channelId <= 0) {
+        if (finalFilePath) await fs.unlink(finalFilePath).catch(() => {});
+        return res.status(400).json({ error: 'Invalid channelId' });
+      }
+      const chRes = await dbQuery('SELECT creator_id, collaborators FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
+      if (!chRes.rows.length) {
+        if (finalFilePath) await fs.unlink(finalFilePath).catch(() => {});
+        return res.status(404).json({ error: 'Channel not found' });
+      }
+      const ch = chRes.rows[0];
+      const isOwner = ch.creator_id === user.id;
+      const isCollaborator = Array.isArray(ch.collaborators) && ch.collaborators.includes(String(user.id));
+      if (!isOwner && !isCollaborator) {
+        if (finalFilePath) await fs.unlink(finalFilePath).catch(() => {});
+        return res.status(403).json({ error: 'Channel not found or not yours' });
+      }
+    }
+
     const post = await SocialPostService.createPost(
       user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable, null, vTitle, vDesc
     );
+
+    // Assign to channel and update post_count
+    if (channelId) {
+      await dbQuery('UPDATE social_posts SET channel_id = $1 WHERE id = $2', [channelId, post.id]);
+      await dbQuery('UPDATE creator_channels SET post_count = (SELECT COUNT(*) FROM social_posts WHERE channel_id = $1 AND is_deleted = false) WHERE id = $1', [channelId]);
+      post.channel_id = channelId;
+    }
 
     if (!replyToId && !repostOfId && !exclusive) {
       SocialPostService.mirrorToMastodon(content.toString().trim(), post.id);
@@ -753,13 +806,35 @@ const createPostWithMultiMedia = async (req, res) => {
     const shareable = isShareable !== 'false' && isShareable !== false;
     const contentTier = exclusive ? 'PRIME' : 'free';
 
+    // Validate channel ownership if provided (only for non-reply posts)
+    let channelId = null;
+    if (!replyToId && req.body.channelId) {
+      channelId = parseInt(req.body.channelId, 10);
+      if (!Number.isFinite(channelId) || channelId <= 0) {
+        await Promise.all(writtenFilePaths.map(p => fs.unlink(p).catch(() => {})));
+        return res.status(400).json({ error: 'Invalid channelId' });
+      }
+      const chRes = await dbQuery('SELECT creator_id, collaborators FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
+      if (!chRes.rows.length) {
+        await Promise.all(writtenFilePaths.map(p => fs.unlink(p).catch(() => {})));
+        return res.status(404).json({ error: 'Channel not found' });
+      }
+      const ch = chRes.rows[0];
+      const isOwner = ch.creator_id === user.id;
+      const isCollaborator = Array.isArray(ch.collaborators) && ch.collaborators.includes(String(user.id));
+      if (!isOwner && !isCollaborator) {
+        await Promise.all(writtenFilePaths.map(p => fs.unlink(p).catch(() => {})));
+        return res.status(403).json({ error: 'Channel not found or not yours' });
+      }
+    }
+
     const result = await dbQuery(
       `INSERT INTO social_posts
          (user_id, content, media_url, media_type, media_urls, reply_to_id, repost_of_id,
-          is_wof, is_exclusive, is_shareable, content_tier)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9, $10)
+          is_wof, is_exclusive, is_shareable, content_tier, channel_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9, $10, $11)
        RETURNING id, content, media_url, media_type, media_urls, video_thumbnail_url,
-                 reply_to_id, repost_of_id,
+                 reply_to_id, repost_of_id, channel_id,
                  likes_count, reposts_count, replies_count, is_wof, is_exclusive, is_shareable, content_tier, created_at`,
       [
         user.id,
@@ -772,6 +847,7 @@ const createPostWithMultiMedia = async (req, res) => {
         exclusive,
         shareable,
         contentTier,
+        channelId || null,
       ]
     );
 
@@ -782,6 +858,11 @@ const createPostWithMultiMedia = async (req, res) => {
     }
     if (repostOfId) {
       await dbQuery('UPDATE social_posts SET reposts_count = reposts_count + 1 WHERE id = $1 AND is_deleted = false', [repostOfId]);
+    }
+
+    // Update channel post_count after insert
+    if (channelId) {
+      await dbQuery('UPDATE creator_channels SET post_count = (SELECT COUNT(*) FROM social_posts WHERE channel_id = $1 AND is_deleted = false) WHERE id = $1', [channelId]);
     }
 
     if (!replyToId && !repostOfId && !exclusive) {
@@ -1257,9 +1338,13 @@ const assignPostToChannel = async (req, res) => {
     if (!postRes.rows.length || postRes.rows[0].user_id !== user.id) {
       return res.status(404).json({ error: 'Post not found or not yours' });
     }
-    // Verify channel ownership
-    const chRes = await dbQuery('SELECT creator_id FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
-    if (!chRes.rows.length || chRes.rows[0].creator_id !== user.id) {
+    // Verify channel ownership or collaborator access
+    const chRes = await dbQuery('SELECT creator_id, collaborators FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
+    if (!chRes.rows.length) return res.status(404).json({ error: 'Channel not found or not yours' });
+    const ch = chRes.rows[0];
+    const isOwner = ch.creator_id === user.id;
+    const isCollaborator = Array.isArray(ch.collaborators) && ch.collaborators.includes(String(user.id));
+    if (!isOwner && !isCollaborator) {
       return res.status(404).json({ error: 'Channel not found or not yours' });
     }
     const oldChannelId = postRes.rows[0].channel_id;

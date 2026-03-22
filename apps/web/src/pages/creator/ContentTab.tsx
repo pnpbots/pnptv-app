@@ -20,6 +20,9 @@ import {
   assignPostToChannel,
   unassignPostFromChannel,
   getSocialFeedPosts,
+  uploadChannelCover,
+  addChannelCollaborator,
+  removeChannelCollaborator,
   type CmsPerformer,
   type CmsContent,
   type CmsShow,
@@ -61,6 +64,15 @@ export function ContentTab({ t }: ContentTabProps) {
   const [assignPosts, setAssignPosts] = useState<SocialPostItem[]>([]);
   const [assignPostsLoading, setAssignPostsLoading] = useState(false);
   const [assigningPostId, setAssigningPostId] = useState<number | null>(null);
+
+  // Cover upload state
+  const [uploadingCoverId, setUploadingCoverId] = useState<number | null>(null);
+  const [coverUploadError, setCoverUploadError] = useState<string | null>(null);
+
+  // Collaborator state
+  const [collaboratorInput, setCollaboratorInput] = useState<Record<number, string>>({});
+  const [collaboratorActionId, setCollaboratorActionId] = useState<number | null>(null);
+  const [collaboratorError, setCollaboratorError] = useState<Record<number, string>>({});
 
   // Profile edit
   const [cmsProfileForm, setCmsProfileForm] = useState<Partial<CmsPerformer>>({});
@@ -372,6 +384,68 @@ export function ContentTab({ t }: ContentTabProps) {
       // non-critical
     } finally {
       setAssigningPostId(null);
+    }
+  };
+
+  // ── Cover upload handler ──
+  const handleCoverUpload = async (channelId: number, file: File) => {
+    setUploadingCoverId(channelId);
+    setCoverUploadError(null);
+    try {
+      const res = await uploadChannelCover(channelId, file);
+      if (res.success) {
+        setOwnChannels((prev) =>
+          prev.map((c) => c.id === channelId ? { ...c, coverImageUrl: res.coverImageUrl } : c)
+        );
+      }
+    } catch (err) {
+      setCoverUploadError(err instanceof Error ? err.message : "Cover upload failed");
+    } finally {
+      setUploadingCoverId(null);
+    }
+  };
+
+  // ── Collaborator handlers ──
+  const handleAddCollaborator = async (channelId: number) => {
+    const userId = (collaboratorInput[channelId] || "").trim();
+    if (!userId) return;
+    setCollaboratorActionId(channelId);
+    setCollaboratorError((prev) => ({ ...prev, [channelId]: "" }));
+    try {
+      const res = await addChannelCollaborator(channelId, userId);
+      if (res.success) {
+        setOwnChannels((prev) =>
+          prev.map((c) => c.id === channelId ? res.channel : c)
+        );
+        setCollaboratorInput((prev) => ({ ...prev, [channelId]: "" }));
+      }
+    } catch (err) {
+      setCollaboratorError((prev) => ({
+        ...prev,
+        [channelId]: err instanceof Error ? err.message : "Failed to add collaborator",
+      }));
+    } finally {
+      setCollaboratorActionId(null);
+    }
+  };
+
+  const handleRemoveCollaborator = async (channelId: number, userId: string) => {
+    setCollaboratorActionId(channelId);
+    setCollaboratorError((prev) => ({ ...prev, [channelId]: "" }));
+    try {
+      const res = await removeChannelCollaborator(channelId, userId);
+      if (res.success) {
+        setOwnChannels((prev) =>
+          prev.map((c) => c.id === channelId ? res.channel : c)
+        );
+      }
+    } catch (err) {
+      setCollaboratorError((prev) => ({
+        ...prev,
+        [channelId]: err instanceof Error ? err.message : "Failed to remove collaborator",
+      }));
+    } finally {
+      setCollaboratorActionId(null);
     }
   };
 
@@ -984,6 +1058,94 @@ export function ContentTab({ t }: ContentTabProps) {
                       Delete
                     </button>
                   </div>
+                </div>
+
+                {/* Cover image + collaborators row */}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {/* Cover upload */}
+                  <label
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: uploadingCoverId === ch.id ? "#8E8E93" : "#fff" }}
+                    title="Upload channel cover image"
+                  >
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      disabled={uploadingCoverId === ch.id}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleCoverUpload(ch.id, file);
+                        e.target.value = "";
+                      }}
+                    />
+                    {uploadingCoverId === ch.id ? (
+                      "Uploading..."
+                    ) : (
+                      <>
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
+                        </svg>
+                        {ch.coverImageUrl ? "Replace Cover" : "Upload Cover"}
+                      </>
+                    )}
+                  </label>
+                  {/* Cover preview thumbnail */}
+                  {ch.coverImageUrl && (
+                    <img
+                      src={ch.coverImageUrl}
+                      alt="Cover"
+                      className="w-8 h-8 rounded object-cover flex-shrink-0"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  )}
+                </div>
+                {coverUploadError && uploadingCoverId === null && (
+                  <p className="text-[11px] mt-1" style={{ color: "#FF453A" }}>{coverUploadError}</p>
+                )}
+
+                {/* Collaborators section */}
+                <div className="mt-3 space-y-2">
+                  {ch.collaborators && ch.collaborators.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#8E8E93" }}>
+                        Collaborators
+                      </p>
+                      {ch.collaborators.map((uid) => (
+                        <div key={uid} className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg"
+                          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                          <span className="text-xs text-white/70 truncate">{uid}</span>
+                          <button
+                            onClick={() => handleRemoveCollaborator(ch.id, uid)}
+                            disabled={collaboratorActionId === ch.id}
+                            className="text-[11px] text-red-400 hover:text-red-300 disabled:opacity-50 flex-shrink-0"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={collaboratorInput[ch.id] ?? ""}
+                      onChange={(e) => setCollaboratorInput((prev) => ({ ...prev, [ch.id]: e.target.value }))}
+                      placeholder="User ID or username"
+                      className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                    />
+                    <button
+                      onClick={() => handleAddCollaborator(ch.id)}
+                      disabled={collaboratorActionId === ch.id || !(collaboratorInput[ch.id] || "").trim()}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50 transition-colors flex-shrink-0"
+                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                    >
+                      {collaboratorActionId === ch.id ? "..." : "Add"}
+                    </button>
+                  </div>
+                  {collaboratorError[ch.id] && (
+                    <p className="text-[11px]" style={{ color: "#FF453A" }}>{collaboratorError[ch.id]}</p>
+                  )}
                 </div>
 
                 {/* Manage Posts button */}
