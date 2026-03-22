@@ -214,6 +214,30 @@ export default function CreatorDashboard() {
         );
       })()}
 
+      {/* ── Launch Studio Banner (active creators only) ── */}
+      {isActive && (
+        <a
+          href="https://studio.pnptv.app"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 mb-4 px-4 py-3 rounded-2xl transition-opacity hover:opacity-90"
+          style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(230,145,56,0.12))", border: "1px solid rgba(212,0,122,0.25)" }}
+        >
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-white">Launch PNPtv! Studio</p>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>Go live from your browser or OBS</p>
+          </div>
+          <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+          </svg>
+        </a>
+      )}
+
       {error && (
         <div className="mb-4 px-4 py-3 rounded-lg text-sm text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
           {error}

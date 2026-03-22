@@ -1107,13 +1107,27 @@ export default function Profile() {
                 {profile.creatorStatus === "active" && (() => {
                   const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
                   return (
-                    <button
-                      onClick={() => navigate("/creator")}
-                      className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors"
-                      style={{ background: `rgba(${tc.rgb},0.15)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.3)` }}
-                    >
-                      {tc.emoji} {p.creatorDashboard}
-                    </button>
+                    <>
+                      <button
+                        onClick={() => navigate("/creator")}
+                        className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors"
+                        style={{ background: `rgba(${tc.rgb},0.15)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.3)` }}
+                      >
+                        {tc.emoji} {p.creatorDashboard}
+                      </button>
+                      <a
+                        href="https://studio.pnptv.app"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-80"
+                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                        </svg>
+                        Studio
+                      </a>
+                    </>
                   );
                 })()}
               </div>
