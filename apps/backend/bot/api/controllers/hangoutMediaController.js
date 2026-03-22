@@ -94,27 +94,42 @@ const uploadHangoutMedia = async (req, res) => {
     const matrixRoomId = await matrixService.getOrCreateHangoutRoom(groupId, userRow.rows[0], groupName);
     await matrixService.ensureUserInRoom(matrixRoomId, userCreds);
 
-    // Build absolute media URL for Matrix
-    const mediaAbsUrl = mediaResult.mediaUrl.startsWith('http')
-      ? mediaResult.mediaUrl
-      : `${APP_PUBLIC_URL}${mediaResult.mediaUrl}`;
+    // Upload media to Matrix content repository (mxc:// URL)
+    const fs = require('fs').promises;
+    const path = require('path');
+    const PUBLIC_ROOT = path.join(__dirname, '../../../../../public');
+    const localPath = path.join(PUBLIC_ROOT, mediaResult.mediaUrl);
+    const fileBuffer = await fs.readFile(localPath);
 
-    const thumbAbsUrl = mediaResult.thumbUrl
-      ? (mediaResult.thumbUrl.startsWith('http') ? mediaResult.thumbUrl : `${APP_PUBLIC_URL}${mediaResult.thumbUrl}`)
-      : undefined;
+    const filename = caption || (mediaResult.mediaType === 'video' ? 'video.mp4' : mediaResult.mediaType === 'audio' ? 'voice-message.webm' : 'image.webp');
+    const mimetype = mediaResult.mediaMime || (mediaResult.mediaType === 'video' ? 'video/mp4' : mediaResult.mediaType === 'audio' ? 'audio/webm' : 'image/webp');
+
+    const mxcUrl = await matrixService.uploadMedia(fileBuffer, filename, mimetype, userCreds.accessToken);
+
+    // Upload thumbnail if available
+    let thumbMxcUrl;
+    if (mediaResult.thumbUrl) {
+      const thumbLocalPath = path.join(PUBLIC_ROOT, mediaResult.thumbUrl);
+      try {
+        const thumbBuffer = await fs.readFile(thumbLocalPath);
+        thumbMxcUrl = await matrixService.uploadMedia(thumbBuffer, 'thumbnail.webp', 'image/webp', userCreds.accessToken);
+      } catch (thumbErr) {
+        logger.warn('Failed to upload thumbnail to Matrix', { error: thumbErr.message });
+      }
+    }
 
     const msgtype = mediaResult.mediaType === 'video' ? 'm.video' : mediaResult.mediaType === 'audio' ? 'm.audio' : 'm.image';
-    const body = caption || (mediaResult.mediaType === 'video' ? 'video.mp4' : mediaResult.mediaType === 'audio' ? 'voice-message.webm' : 'image.webp');
 
     const resp = await matrixService.sendRoomMediaMessage(matrixRoomId, userCreds.accessToken, {
-      url: mediaAbsUrl,
+      url: mxcUrl,
       msgtype,
-      body,
+      body: filename,
       info: {
-        mimetype: mediaResult.mediaMime || (mediaResult.mediaType === 'video' ? 'video/mp4' : 'image/webp'),
+        mimetype,
         w: mediaResult.width || undefined,
         h: mediaResult.height || undefined,
-        thumbnail_url: thumbAbsUrl,
+        duration: mediaResult.metadata?.duration ? Math.round(mediaResult.metadata.duration * 1000) : undefined,
+        thumbnail_url: thumbMxcUrl,
       },
     });
 

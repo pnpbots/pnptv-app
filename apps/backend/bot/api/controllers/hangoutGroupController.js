@@ -48,6 +48,8 @@ const normalizeMessage = (m) => ({
 });
 
 // GET /api/webapp/hangouts/groups
+// Unread counts are tracked via Redis (set by matrixMessageController + hangoutMediaController).
+// Messages live in Matrix — no chat_messages dependency.
 const listGroups = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   try {
@@ -58,7 +60,6 @@ const listGroups = async (req, res) => {
       `SELECT g.id, g.name, g.description, g.avatar_url, g.creator_id,
               g.is_main, g.is_wall_of_fame, g.is_public, g.max_members, g.created_at,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
-              -- Check both legacy video_calls and new hangout_video_calls for active calls
               (
                 (SELECT COUNT(*)::int FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true) > 0
                 OR
@@ -67,20 +68,21 @@ const listGroups = async (req, res) => {
               COALESCE(
                 (SELECT hvc.id::text FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active' ORDER BY hvc.created_at DESC LIMIT 1),
                 (SELECT v.id::text FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true ORDER BY v.created_at DESC LIMIT 1)
-              ) as active_call_id,
-              (SELECT cm.content FROM chat_messages cm WHERE cm.room = 'hangout:' || g.id::text ORDER BY cm.created_at DESC LIMIT 1) as last_message,
-              (SELECT COUNT(*)::int FROM chat_messages cm
-               WHERE cm.room = 'hangout:' || g.id::text
-                 AND cm.is_deleted = false
-                 AND cm.created_at > COALESCE(gm.last_read_at, gm.joined_at)
-                 AND cm.user_id != $1::text) as unread_count
+              ) as active_call_id
        FROM hangout_groups g
        JOIN hangout_group_members gm ON gm.group_id = g.id AND gm.user_id = $1
        ORDER BY g.is_main DESC, g.created_at DESC`,
       [user.id]
     );
 
-    const groups = rows.map(r => ({
+    // Fetch unread counts from Redis (set by message send endpoints)
+    const { getRedis } = require('../../../config/redis');
+    const redis = getRedis();
+    const unreadCounts = await Promise.all(
+      rows.map(r => redis.get(`hangout:unread:${r.id}:${user.id}`).catch(() => null))
+    );
+
+    const groups = rows.map((r, i) => ({
       id: r.id,
       name: r.name,
       description: r.description,
@@ -94,8 +96,8 @@ const listGroups = async (req, res) => {
       createdAt: r.created_at,
       hasActiveCall: r.has_active_call,
       activeCallId: r.active_call_id,
-      lastMessage: r.last_message,
-      unreadCount: r.unread_count || 0,
+      lastMessage: null, // Messages live in Matrix; frontend renders from Matrix SDK
+      unreadCount: parseInt(unreadCounts[i], 10) || 0,
     }));
 
     return res.json({ success: true, groups });

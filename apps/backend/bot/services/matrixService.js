@@ -338,6 +338,37 @@ async function sendRoomMessage(roomId, accessToken, content) {
 }
 
 /**
+ * Upload a file to the Synapse content repository.
+ * Returns an mxc:// URI that can be used in media messages.
+ *
+ * @param {Buffer} buffer     File contents
+ * @param {string} filename   Original filename
+ * @param {string} contentType  MIME type (e.g. 'audio/webm', 'image/webp')
+ * @param {string} accessToken  User's Matrix access token
+ * @returns {Promise<string>}  mxc:// content URI
+ */
+async function uploadMedia(buffer, filename, contentType, accessToken) {
+  const url = `${SYNAPSE_INTERNAL_URL}/_matrix/media/v3/upload?filename=${encodeURIComponent(filename)}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': contentType,
+      'Authorization': `Bearer ${accessToken}`,
+    },
+    body: buffer,
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    const err = new Error(data.error || `Synapse upload error ${response.status}`);
+    err.statusCode = response.status;
+    throw err;
+  }
+
+  return data.content_uri; // mxc://matrix.pnptv.app/xxxxx
+}
+
+/**
  * Send a media message to a Matrix room.
  * @param {string} roomId
  * @param {string} accessToken
@@ -398,7 +429,7 @@ async function getOrCreateDmRoom(userA, userB) {
     {
       is_direct:     true,
       invite:        [credB.matrixUserId],
-      preset:        'trusted_private_chat',
+      preset:        'private_chat',
       room_version:  '11',
       name:          `${nameA} \u2194 ${nameB}`,
       topic:         'PNPtv Direct Message',
@@ -417,20 +448,20 @@ async function getOrCreateDmRoom(userA, userB) {
       ],
       power_level_content_override: {
         users: {
-          [credA.matrixUserId]: 50,
-          [credB.matrixUserId]: 50,
+          [credA.matrixUserId]: 100,
+          [credB.matrixUserId]: 100,
         },
         users_default: 0,
         events_default: 0,
-        state_default: 50,
-        ban: 50,
-        kick: 50,
-        redact: 50,
-        invite: 50,
+        state_default: 100,
+        ban: 100,
+        kick: 100,
+        redact: 100,
+        invite: 100,
         events: {
-          'm.room.name':         50,
-          'm.room.topic':        50,
-          'm.room.avatar':       50,
+          'm.room.name':         100,
+          'm.room.topic':        100,
+          'm.room.avatar':       100,
           'm.room.power_levels': 100,
           'm.room.encryption':   100,
         },
@@ -810,6 +841,7 @@ module.exports = {
   ensureUserInRoom,
   sendRoomMessage,
   sendRoomMediaMessage,
+  uploadMedia,
   redactRoomEvent,
   syncRoomSettings,
   setUserPowerLevel,

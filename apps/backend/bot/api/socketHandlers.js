@@ -304,26 +304,8 @@ function initSocketIO(io) {
         const room = `hangout:${gid}`;
         socket.join(room);
 
-        // Send recent message history (with reply-to snippets)
-        const { rows: history } = await query(
-          `SELECT m.id, m.room, m.user_id, m.username, m.first_name, m.photo_url, m.content,
-                  m.media_url, m.media_type, m.media_mime, m.media_thumb_url,
-                  m.media_width, m.media_height, m.media_metadata, m.reply_to_id, m.created_at,
-                  r.first_name AS reply_name, r.username AS reply_username, r.content AS reply_content
-           FROM chat_messages m
-           LEFT JOIN chat_messages r ON r.id = m.reply_to_id
-           WHERE m.room = $1 AND m.is_deleted = false
-           ORDER BY m.created_at DESC LIMIT 50`,
-          [room]
-        );
-        // Attach reply_to object for clients
-        for (const msg of history) {
-          if (msg.reply_to_id && (msg.reply_name || msg.reply_username)) {
-            msg.reply_to = { name: msg.reply_name || msg.reply_username || 'User', content: (msg.reply_content || '[media]').slice(0, 100) };
-          }
-          delete msg.reply_name; delete msg.reply_username; delete msg.reply_content;
-        }
-        socket.emit('hangout:history', history.reverse());
+        // Messages live in Matrix — frontend fetches via useRoomMessages() hook.
+        // No PG history push needed.
 
         // Send active call info if any
         const { rows: activeCall } = await query(

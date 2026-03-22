@@ -718,6 +718,33 @@ async function migrateDmConversations(adminToken, senderTokenCache) {
       } else {
         matrixRoomId = await matrixService.getOrCreateDmRoom(uA, uB);
         log(tag, `Matrix DM room: ${matrixRoomId}`);
+
+        // Fix power levels: Synapse preset overrides events_default.
+        // Use admin API to set events_default=0 so users (power 50) can send.
+        try {
+          const adminMatrixId = `@${process.env.MATRIX_ADMIN_USER || 'pnptv_admin'}:${MATRIX_SERVER_NAME}`;
+          // Make admin a room admin first
+          await synapsePost(
+            `/_synapse/admin/v1/rooms/${encodeURIComponent(matrixRoomId)}/make_room_admin`,
+            { user_id: adminMatrixId },
+            adminToken
+          );
+          // Get current power levels
+          const plState = await synapseGet(
+            `/_matrix/client/v3/rooms/${encodeURIComponent(matrixRoomId)}/state/m.room.power_levels`,
+            adminToken
+          );
+          // Fix events_default to 0 so regular users can send messages
+          plState.events_default = 0;
+          await synapsePut(
+            `/_matrix/client/v3/rooms/${encodeURIComponent(matrixRoomId)}/state/m.room.power_levels`,
+            plState,
+            adminToken
+          );
+          log(tag, `  Fixed power levels (events_default=0)`);
+        } catch (plErr) {
+          warn(tag, `  Could not fix power levels: ${plErr.message}`);
+        }
       }
 
       // Idempotency check
