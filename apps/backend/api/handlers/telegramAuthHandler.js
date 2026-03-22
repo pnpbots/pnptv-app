@@ -271,11 +271,15 @@ const handleTelegramAuth = async (req, res) => {
         logger.warn(`[Auth] Matrix provisioning failed (non-blocking): ${err.message}`);
       }
 
-      // 2. PDS / Bluesky — ATProto identity
+      // 2. PDS / Bluesky — ATProto identity (optional service, non-blocking)
       try {
-        const PDSProvisioningService = require('../../bot/services/PDSProvisioningService');
-        await PDSProvisioningService.createOrLinkPDS(user);
-        logger.info(`[Auth] PDS provisioned for user ${user.id}`);
+        let pdsPath;
+        try { pdsPath = require.resolve('../../bot/services/PDSProvisioningService'); } catch { pdsPath = null; }
+        if (pdsPath) {
+          const PDSProvisioningService = require(pdsPath);
+          await PDSProvisioningService.createOrLinkPDS(user);
+          logger.info(`[Auth] PDS provisioned for user ${user.id}`);
+        }
       } catch (err) {
         logger.warn(`[Auth] PDS provisioning failed (non-blocking): ${err.message}`);
       }

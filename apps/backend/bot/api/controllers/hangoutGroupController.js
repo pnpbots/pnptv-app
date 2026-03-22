@@ -747,8 +747,7 @@ const sendMessage = async (req, res) => {
     );
     const gs = groupSettingsRows[0];
     if (gs) {
-      const mp = await getModPerms(groupId, user.id);
-      const isModOrOwner = !!mp;
+      const isModOrOwner = await isOwnerOrMod(groupId, user.id);
 
       // Read-only: only mods/owner can send
       if (gs.is_read_only && !isModOrOwner) {
