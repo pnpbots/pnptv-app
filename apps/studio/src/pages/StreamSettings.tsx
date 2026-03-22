@@ -6,7 +6,10 @@ import {
   saveStreamProfile,
   getStreamerSettings,
   updateStreamerSettings,
+  getStreamHistory,
   type StreamerSettings,
+  type StreamHistoryItem,
+  type StreamHistorySummary,
 } from "@/lib/api";
 
 const QUALITY_PRESETS = [
@@ -34,6 +37,11 @@ export default function StreamSettings() {
   const [settings, setSettings] = useState<StreamerSettings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
 
+  // Stream history
+  const [historyStreams, setHistoryStreams] = useState<StreamHistoryItem[]>([]);
+  const [historySummary, setHistorySummary] = useState<StreamHistorySummary | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+
   useEffect(() => {
     getStreamProfile()
       .then((res) => {
@@ -52,6 +60,16 @@ export default function StreamSettings() {
       })
       .catch(() => {})
       .finally(() => setSettingsLoading(false));
+
+    getStreamHistory()
+      .then((res) => {
+        if (res.success) {
+          setHistoryStreams(res.streams);
+          setHistorySummary(res.summary);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setHistoryLoading(false));
   }, []);
 
   const handleSaveProfile = async () => {
@@ -66,6 +84,26 @@ export default function StreamSettings() {
     } finally {
       setProfileSaving(false);
     }
+  };
+
+  const formatDuration = (minutes: number): string => {
+    if (minutes < 60) return `${minutes}m`;
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  };
+
+  const formatDate = (iso: string | null): string => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  };
+
+  const statusBadgeClass = (status: string): string => {
+    if (status === "live" || status === "active") return "bg-red-500/20 text-red-400 border border-red-500/30";
+    if (status === "ended" || status === "completed") return "bg-pnp-surface text-pnp-textSecondary border border-pnp-border";
+    if (status === "scheduled") return "bg-pnp-accent/10 text-pnp-accent border border-pnp-accent/20";
+    return "bg-pnp-surface text-pnp-textSecondary border border-pnp-border";
   };
 
   const handleUpdateSetting = async (key: keyof StreamerSettings, value: unknown) => {
@@ -217,6 +255,75 @@ export default function StreamSettings() {
                 </button>
               </div>
             ))}
+          </>
+        )}
+      </div>
+
+      {/* Stream History */}
+      <div className="glass-card-sm p-5 space-y-4">
+        <h2 className="text-sm font-bold text-white">Stream History</h2>
+
+        {historyLoading ? (
+          <div className="flex justify-center py-8">
+            <div className="w-6 h-6 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : (
+          <>
+            {/* Summary stat cards */}
+            {historySummary && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-pnp-surface rounded-xl p-3 border border-pnp-border text-center">
+                  <p className="text-xl font-bold text-white">{historySummary.totalStreams}</p>
+                  <p className="text-xs text-pnp-textSecondary mt-0.5">Total Streams</p>
+                </div>
+                <div className="bg-pnp-surface rounded-xl p-3 border border-pnp-border text-center">
+                  <p className="text-xl font-bold text-white">
+                    {formatDuration(Math.round(historySummary.totalDuration / 60))}
+                  </p>
+                  <p className="text-xs text-pnp-textSecondary mt-0.5">Total Hours</p>
+                </div>
+                <div className="bg-pnp-surface rounded-xl p-3 border border-pnp-border text-center">
+                  <p className="text-xl font-bold text-white">{historySummary.avgViewers}</p>
+                  <p className="text-xs text-pnp-textSecondary mt-0.5">Avg Viewers</p>
+                </div>
+                <div className="bg-pnp-surface rounded-xl p-3 border border-pnp-border text-center">
+                  <p className="text-xl font-bold text-white">{historySummary.totalLikes}</p>
+                  <p className="text-xs text-pnp-textSecondary mt-0.5">Total Likes</p>
+                </div>
+              </div>
+            )}
+
+            {/* Stream list */}
+            {historyStreams.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-pnp-textSecondary text-sm">No streams yet. Start your first broadcast!</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {historyStreams.map((stream) => (
+                  <div
+                    key={stream.id}
+                    className="flex items-center justify-between bg-pnp-surface rounded-xl px-3 py-2.5 border border-pnp-border"
+                  >
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <span className="text-xs text-white font-medium">{formatDate(stream.startedAt)}</span>
+                      <div className="flex items-center gap-2 text-xs text-pnp-textSecondary">
+                        <span>{formatDuration(stream.duration)}</span>
+                        <span className="text-pnp-border">·</span>
+                        <span>{stream.peakViewers} peak</span>
+                        <span className="text-pnp-border">·</span>
+                        <span>{stream.likes} likes</span>
+                      </div>
+                    </div>
+                    <span
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize flex-shrink-0 ${statusBadgeClass(stream.status)}`}
+                    >
+                      {stream.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>

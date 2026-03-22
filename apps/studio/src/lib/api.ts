@@ -233,3 +233,31 @@ export function startStreamAutoMessages(): Promise<{ success: boolean }> {
 export function stopStreamAutoMessages(): Promise<{ success: boolean }> {
   return request("/api/webapp/live/stream-auto-stop", { method: "POST" });
 }
+
+// ── Stream Analytics ──────────────────────────────────────────────────────────
+
+export interface StreamHistoryItem {
+  id: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  duration: number;
+  peakViewers: number;
+  totalViews: number;
+  likes: number;
+  status: string;
+}
+
+export interface StreamHistorySummary {
+  totalStreams: number;
+  totalDuration: number;
+  avgViewers: number;
+  totalLikes: number;
+}
+
+export function getStreamHistory(): Promise<{
+  success: boolean;
+  streams: StreamHistoryItem[];
+  summary: StreamHistorySummary;
+}> {
+  return request("/api/webapp/live/stream-history");
+}

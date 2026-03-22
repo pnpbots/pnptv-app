@@ -1,0 +1,19 @@
+{
+  "name": "PNPtv! Studio",
+  "short_name": "Studio",
+  "description": "Stream live on PNPtv! — browser streaming, scenes, filters, and RTMP support.",
+  "start_url": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "orientation": "any",
+  "icons": [
+    { "src": "/favicon-32.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "/app-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/app-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  }
+}

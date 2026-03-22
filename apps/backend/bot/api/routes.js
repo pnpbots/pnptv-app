@@ -3012,6 +3012,46 @@ app.post('/api/webapp/live/stream-profile', requireSessionAuth, grokStreamChatLi
 app.post('/api/webapp/live/stream-auto-start', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamAutoController.startAutoMessages));
 app.post('/api/webapp/live/stream-auto-stop', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamAutoController.stopAutoMessages));
 
+// Connection quality test — measures round-trip latency and upload throughput
+app.post('/api/webapp/live/connection-test', requireSessionAuth, asyncHandler(async (req, res) => {
+  const start = Date.now();
+  const payloadSize = req.body?.payload?.length || 0;
+  const latencyMs = Date.now() - start;
+  const payloadBytes = payloadSize * 0.75; // base64 to bytes
+  const uploadKbps = payloadBytes > 0 ? Math.round((payloadBytes * 8) / (latencyMs || 1)) : 0;
+  const quality = uploadKbps >= 5000 ? 'excellent' : uploadKbps >= 2500 ? 'good' : uploadKbps >= 1000 ? 'fair' : 'poor';
+  res.json({ success: true, uploadKbps, latencyMs, quality });
+}));
+
+// Stream history — returns past streams and aggregate stats for the authenticated creator
+app.get('/api/webapp/live/stream-history', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+  const LiveStreamModel = require('../../models/liveStreamModel');
+  const userId = req.session.userId || req.session.user?.id;
+  const streams = await LiveStreamModel.getByHostId(String(userId), 20);
+
+  const totalStreams = streams.length;
+  const totalDuration = streams.reduce((sum, s) => sum + (s.duration || 0), 0);
+  const avgViewers = totalStreams > 0
+    ? Math.round(streams.reduce((sum, s) => sum + (s.peakViewers || 0), 0) / totalStreams)
+    : 0;
+  const totalLikes = streams.reduce((sum, s) => sum + (s.likes || 0), 0);
+
+  res.json({
+    success: true,
+    streams: streams.map((s) => ({
+      id: s.streamId || s.dbId,
+      startedAt: s.startedAt,
+      endedAt: s.endedAt,
+      duration: s.duration || 0,
+      peakViewers: s.peakViewers || 0,
+      totalViews: s.totalViews || 0,
+      likes: s.likes || 0,
+      status: s.status,
+    })),
+    summary: { totalStreams, totalDuration, avgViewers, totalLikes },
+  });
+}));
+
 // Stream Overlay Management (admin CRUD + public viewer endpoint)
 // Socket.IO access uses socketSingleton.get() directly inside the controller —
 // no wiring step needed here.
