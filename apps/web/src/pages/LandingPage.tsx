@@ -250,8 +250,7 @@ export function LandingPage() {
 
   const [loginOpen, setLoginOpen] = useState(false);
   const [loginView, setLoginView] = useState<"options" | "telegram" | "email" | "recover">("options");
-  const [oidcLoading, setOidcLoading] = useState(false);
-  const [oidcError, setOidcError] = useState<string | null>(null);
+  // SSO login uses server-side redirect — no client state needed
 
   const [widgetStatus, setWidgetStatus] = useState<"idle" | "verifying" | "error">("idle");
   const [widgetBlocked, setWidgetBlocked] = useState(false);
