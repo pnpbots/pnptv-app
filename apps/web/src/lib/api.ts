@@ -2591,6 +2591,81 @@ export function getChannels(params?: {
   return request(`/api/webapp/channels${qs ? `?${qs}` : ""}`);
 }
 
+// ── Creator Channels (named channel entities) ────────────────────────────────
+
+export interface CreatorChannel {
+  id: number;
+  creatorId: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  coverImageUrl: string | null;
+  tags: string[];
+  isPremium: boolean;
+  postCount: number;
+  sortOrder: number;
+  createdAt: string;
+  creatorName?: string;
+  creatorUsername?: string;
+  creatorPhotoUrl?: string | null;
+  creatorVerified?: boolean;
+}
+
+export function getOwnChannels(): Promise<{ success: boolean; channels: CreatorChannel[] }> {
+  return request("/api/webapp/creator/channels");
+}
+
+export function createCreatorChannel(data: {
+  name: string;
+  slug?: string;
+  description?: string;
+  tags?: string[];
+  isPremium?: boolean;
+}): Promise<{ success: boolean; channel: CreatorChannel }> {
+  return request("/api/webapp/creator/channels", { method: "POST", body: data });
+}
+
+export function updateCreatorChannel(
+  id: number,
+  data: Partial<{ name: string; slug: string; description: string; tags: string[]; isPremium: boolean; sortOrder: number; coverImageUrl: string }>
+): Promise<{ success: boolean; channel: CreatorChannel }> {
+  return request(`/api/webapp/creator/channels/${id}`, { method: "PATCH", body: data });
+}
+
+export function deleteCreatorChannel(id: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/channels/${id}`, { method: "DELETE" });
+}
+
+export function getChannelDetail(channelId: number): Promise<{
+  success: boolean;
+  channel: CreatorChannel;
+  posts: SocialPostItem[];
+  locked: boolean;
+}> {
+  return request(`/api/webapp/channels/${channelId}`);
+}
+
+export function browseCreatorChannels(params?: {
+  search?: string;
+  page?: number;
+  limit?: number;
+}): Promise<{ success: boolean; channels: CreatorChannel[]; total: number; nextPage: number | null }> {
+  const qp = new URLSearchParams();
+  qp.set("view", "channels");
+  if (params?.search) qp.set("search", params.search);
+  if (params?.page !== undefined) qp.set("page", String(params.page));
+  if (params?.limit) qp.set("limit", String(params.limit));
+  return request(`/api/webapp/channels?${qp.toString()}`);
+}
+
+export function assignPostToChannel(postId: number, channelId: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/social/posts/${postId}/assign-channel`, { method: "POST", body: { channelId } });
+}
+
+export function unassignPostFromChannel(postId: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/social/posts/${postId}/assign-channel`, { method: "DELETE" });
+}
+
 export function getCreatorEligibility(): Promise<{
   success: boolean;
 } & CreatorEligibility> {

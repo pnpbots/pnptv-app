@@ -4419,6 +4419,8 @@ app.post('/api/webapp/social/posts/bulk-videos', requireSessionAuth, bulkVideoLi
 app.post('/api/webapp/social/posts/:postId/like', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.toggleLike));
 app.delete('/api/webapp/social/posts/:postId', requireSessionAuth, asyncHandler(socialController.deletePost));
 app.patch('/api/webapp/social/posts/:postId', requireSessionAuth, asyncHandler(socialController.editPost));
+app.post('/api/webapp/social/posts/:postId/assign-channel', requireSessionAuth, asyncHandler(socialController.assignPostToChannel));
+app.delete('/api/webapp/social/posts/:postId/assign-channel', requireSessionAuth, asyncHandler(socialController.unassignPostFromChannel));
 app.get('/api/webapp/social/posts/:postId', asyncHandler(socialController.getPost));
 app.get('/api/webapp/social/posts/:postId/replies', requireSessionAuth, asyncHandler(socialController.getReplies));
 app.get('/api/webapp/social/mentions/search', requireSessionAuth, asyncHandler(socialController.searchMentions));
@@ -5069,6 +5071,67 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
 
 app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+  // Channel entities view
+  if (req.query.view === 'channels') {
+    try {
+      const search = typeof req.query.search === 'string' ? req.query.search.trim() : null;
+      const page = Math.max(0, parseInt(req.query.page, 10) || 0);
+      const limit = Math.min(48, Math.max(1, parseInt(req.query.limit, 10) || 24));
+      const offset = page * limit;
+
+      const conditions = ['cc.is_active = true'];
+      const params = [];
+      let paramIdx = 1;
+      if (search) {
+        conditions.push(`(cc.name ILIKE $${paramIdx} OR cc.tags::text ILIKE $${paramIdx})`);
+        params.push(`%${search}%`);
+        paramIdx++;
+      }
+
+      const countRes = await getPool().query(`SELECT COUNT(*)::int AS total FROM creator_channels cc WHERE ${conditions.join(' AND ')}`, params);
+      const total = countRes.rows[0]?.total || 0;
+
+      const result = await getPool().query(
+        `SELECT cc.*, u.username, u.first_name, u.last_name, u.photo_file_id, u.creator_verified
+         FROM creator_channels cc
+         JOIN users u ON u.id = cc.creator_id
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY cc.post_count DESC, cc.created_at DESC
+         LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
+        [...params, limit, offset]
+      );
+
+      const channels = result.rows.map(ch => {
+        const photo = ch.photo_file_id
+          ? (ch.photo_file_id.startsWith('/') || ch.photo_file_id.startsWith('http') ? ch.photo_file_id : `/${ch.photo_file_id}`)
+          : null;
+        return {
+          id: ch.id,
+          creatorId: ch.creator_id,
+          name: ch.name,
+          slug: ch.slug,
+          description: ch.description,
+          coverImageUrl: ch.cover_image_url,
+          tags: ch.tags || [],
+          isPremium: ch.is_premium,
+          postCount: ch.post_count,
+          createdAt: ch.created_at,
+          creatorName: [ch.first_name, ch.last_name].filter(Boolean).join(' ') || ch.username || 'Creator',
+          creatorUsername: ch.username,
+          creatorPhotoUrl: photo,
+          creatorVerified: ch.creator_verified === true,
+        };
+      });
+
+      const nextPage = offset + limit < total ? page + 1 : null;
+      return res.json({ success: true, channels, nextPage, total });
+    } catch (err) {
+      logger.error('Channel entities list error:', err);
+      return res.json({ success: true, channels: [], nextPage: null, total: 0 });
+    }
+  }
+
   try {
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : null;
     const type = typeof req.query.type === 'string' ? req.query.type : null;
@@ -5226,6 +5289,84 @@ app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
   } catch (error) {
     logger.error(`Channels list error: ${error.message}`);
     res.json({ success: true, channels: [], nextPage: null, total: 0 });
+  }
+}));
+
+app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, res) => {
+  const channelId = parseInt(req.params.channelId, 10);
+  if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
+
+  try {
+    // Fetch channel with creator info
+    const chRes = await getPool().query(
+      `SELECT cc.*, u.username, u.first_name, u.last_name, u.photo_file_id, u.creator_verified
+       FROM creator_channels cc
+       JOIN users u ON u.id = cc.creator_id
+       WHERE cc.id = $1 AND cc.is_active = true`,
+      [channelId]
+    );
+    if (!chRes.rows.length) return res.status(404).json({ error: 'Channel not found' });
+
+    const ch = chRes.rows[0];
+    const photo = ch.photo_file_id
+      ? (ch.photo_file_id.startsWith('/') || ch.photo_file_id.startsWith('http') ? ch.photo_file_id : `/${ch.photo_file_id}`)
+      : null;
+
+    const channel = {
+      id: ch.id,
+      creatorId: ch.creator_id,
+      name: ch.name,
+      slug: ch.slug,
+      description: ch.description,
+      coverImageUrl: ch.cover_image_url,
+      tags: ch.tags || [],
+      isPremium: ch.is_premium,
+      postCount: ch.post_count,
+      createdAt: ch.created_at,
+      creatorName: [ch.first_name, ch.last_name].filter(Boolean).join(' ') || ch.username || 'Creator',
+      creatorUsername: ch.username,
+      creatorPhotoUrl: photo,
+      creatorVerified: ch.creator_verified === true,
+    };
+
+    // Check premium access
+    let locked = false;
+    if (ch.is_premium) {
+      const viewerId = req.user?.id || req.session?.user?.id;
+      if (!viewerId || viewerId !== ch.creator_id) {
+        if (viewerId) {
+          const subRes = await getPool().query(
+            `SELECT id FROM creator_subscriptions WHERE creator_id = $1 AND subscriber_id = $2 AND expires_at > NOW()`,
+            [ch.creator_id, viewerId]
+          );
+          if (!subRes.rows.length) locked = true;
+        } else {
+          locked = true;
+        }
+      }
+    }
+
+    // Fetch posts (if not locked)
+    let posts = [];
+    if (!locked) {
+      const postsRes = await getPool().query(
+        `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls,
+                sp.video_thumbnail_url, sp.likes_count, sp.replies_count, sp.created_at,
+                u.username AS author_username, u.first_name AS author_first_name, u.photo_file_id AS author_photo
+         FROM social_posts sp
+         JOIN users u ON sp.user_id = u.id
+         WHERE sp.channel_id = $1 AND sp.is_deleted = false
+         ORDER BY sp.id DESC
+         LIMIT 50`,
+        [channelId]
+      );
+      posts = postsRes.rows;
+    }
+
+    res.json({ success: true, channel, posts, locked });
+  } catch (err) {
+    logger.error('Channel detail error:', err);
+    res.status(500).json({ error: 'Failed to load channel' });
   }
 }));
 

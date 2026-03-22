@@ -66,6 +66,12 @@ router.delete('/cms/shows/:id', authGuard, cmsCreatorController.deleteShow);
 
 router.post('/cms/upload', authGuard, ...cmsCreatorController.uploadMedia);
 
+// ── Channel management (active creators) ─────────────────────────────────────
+router.get('/channels', authGuard, creatorController.listOwnChannels);
+router.post('/channels', authGuard, creatorController.createChannel);
+router.patch('/channels/:id', authGuard, creatorController.updateChannel);
+router.delete('/channels/:id', authGuard, creatorController.deleteChannel);
+
 // ── Milestone routes (auth required) ─────────────────────────────────────────
 // IMPORTANT: must come BEFORE /:creatorId/* param routes
 router.get('/milestones', authGuard, creatorController.getMilestones);

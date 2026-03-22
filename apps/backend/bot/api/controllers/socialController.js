@@ -1245,4 +1245,56 @@ const searchMentions = async (req, res) => {
   }
 };
 
-module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, editPost, getReplies, postToMastodon, createPostWithMedia, createPostWithMultiMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof, getPost, getPublicPost, searchMentions };
+const assignPostToChannel = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const postId = parsePostId(req, res); if (!postId) return;
+  const channelId = parseInt(req.body.channelId, 10);
+  if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Valid channelId is required' });
+
+  try {
+    // Verify post ownership
+    const postRes = await dbQuery('SELECT user_id, channel_id FROM social_posts WHERE id = $1 AND is_deleted = false', [postId]);
+    if (!postRes.rows.length || postRes.rows[0].user_id !== user.id) {
+      return res.status(404).json({ error: 'Post not found or not yours' });
+    }
+    // Verify channel ownership
+    const chRes = await dbQuery('SELECT creator_id FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
+    if (!chRes.rows.length || chRes.rows[0].creator_id !== user.id) {
+      return res.status(404).json({ error: 'Channel not found or not yours' });
+    }
+    const oldChannelId = postRes.rows[0].channel_id;
+    await dbQuery('UPDATE social_posts SET channel_id = $1 WHERE id = $2', [channelId, postId]);
+    // Recalculate post_count
+    await dbQuery('UPDATE creator_channels SET post_count = (SELECT COUNT(*) FROM social_posts WHERE channel_id = $1 AND is_deleted = false) WHERE id = $1', [channelId]);
+    if (oldChannelId && oldChannelId !== channelId) {
+      await dbQuery('UPDATE creator_channels SET post_count = (SELECT COUNT(*) FROM social_posts WHERE channel_id = $1 AND is_deleted = false) WHERE id = $1', [oldChannelId]);
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('assignPostToChannel error', err);
+    return res.status(500).json({ error: 'Failed to assign post to channel' });
+  }
+};
+
+const unassignPostFromChannel = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const postId = parsePostId(req, res); if (!postId) return;
+
+  try {
+    const postRes = await dbQuery('SELECT user_id, channel_id FROM social_posts WHERE id = $1 AND is_deleted = false', [postId]);
+    if (!postRes.rows.length || postRes.rows[0].user_id !== user.id) {
+      return res.status(404).json({ error: 'Post not found or not yours' });
+    }
+    const oldChannelId = postRes.rows[0].channel_id;
+    if (!oldChannelId) return res.json({ success: true }); // already unassigned
+
+    await dbQuery('UPDATE social_posts SET channel_id = NULL WHERE id = $1', [postId]);
+    await dbQuery('UPDATE creator_channels SET post_count = (SELECT COUNT(*) FROM social_posts WHERE channel_id = $1 AND is_deleted = false) WHERE id = $1', [oldChannelId]);
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('unassignPostFromChannel error', err);
+    return res.status(500).json({ error: 'Failed to unassign post from channel' });
+  }
+};
+
+module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, editPost, getReplies, postToMastodon, createPostWithMedia, createPostWithMultiMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof, getPost, getPublicPost, searchMentions, assignPostToChannel, unassignPostFromChannel };

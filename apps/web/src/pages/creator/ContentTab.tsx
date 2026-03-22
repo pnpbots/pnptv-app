@@ -13,9 +13,18 @@ import {
   deleteCmsShow,
   uploadCmsMedia,
   createSocialPost,
+  getOwnChannels,
+  createCreatorChannel,
+  updateCreatorChannel,
+  deleteCreatorChannel,
+  assignPostToChannel,
+  unassignPostFromChannel,
+  getSocialFeedPosts,
   type CmsPerformer,
   type CmsContent,
   type CmsShow,
+  type CreatorChannel,
+  type SocialPostItem,
 } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
 
@@ -30,7 +39,28 @@ export function ContentTab({ t }: ContentTabProps) {
   const [cmsShows, setCmsShows] = useState<CmsShow[]>([]);
   const [cmsLoading, setCmsLoading] = useState(true);
   const [cmsError, setCmsError] = useState<string | null>(null);
-  const [cmsContentSection, setCmsContentSection] = useState<"profile" | "content" | "shows">("profile");
+  const [cmsContentSection, setCmsContentSection] = useState<"profile" | "content" | "shows" | "channels">("profile");
+
+  // ── Channels state ──
+  const [ownChannels, setOwnChannels] = useState<CreatorChannel[]>([]);
+  const [channelsLoading, setChannelsLoading] = useState(false);
+  const [channelsError, setChannelsError] = useState<string | null>(null);
+  const [showChannelForm, setShowChannelForm] = useState(false);
+  const [channelForm, setChannelForm] = useState<{
+    name: string;
+    description: string;
+    tags: string;
+    isPremium: boolean;
+  }>({ name: "", description: "", tags: "", isPremium: false });
+  const [channelFormSaving, setChannelFormSaving] = useState(false);
+  const [channelFormError, setChannelFormError] = useState<string | null>(null);
+  const [editingChannelId, setEditingChannelId] = useState<number | null>(null);
+  const [deleteChannelTarget, setDeleteChannelTarget] = useState<number | null>(null);
+  // Post assignment state
+  const [managingChannelId, setManagingChannelId] = useState<number | null>(null);
+  const [assignPosts, setAssignPosts] = useState<SocialPostItem[]>([]);
+  const [assignPostsLoading, setAssignPostsLoading] = useState(false);
+  const [assigningPostId, setAssigningPostId] = useState<number | null>(null);
 
   // Profile edit
   const [cmsProfileForm, setCmsProfileForm] = useState<Partial<CmsPerformer>>({});
@@ -213,6 +243,138 @@ export function ContentTab({ t }: ContentTabProps) {
     }
   };
 
+  // ── Channel handlers ──
+  const loadOwnChannels = () => {
+    setChannelsLoading(true);
+    setChannelsError(null);
+    getOwnChannels()
+      .then((res) => {
+        if (res.success) setOwnChannels(res.channels);
+      })
+      .catch((err) => setChannelsError(err.message || "Failed to load channels"))
+      .finally(() => setChannelsLoading(false));
+  };
+
+  useEffect(() => {
+    if (cmsContentSection === "channels" && ownChannels.length === 0 && !channelsLoading) {
+      loadOwnChannels();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cmsContentSection]);
+
+  const openChannelCreate = () => {
+    setEditingChannelId(null);
+    setChannelForm({ name: "", description: "", tags: "", isPremium: false });
+    setChannelFormError(null);
+    setShowChannelForm(true);
+  };
+
+  const openChannelEdit = (ch: CreatorChannel) => {
+    setEditingChannelId(ch.id);
+    setChannelForm({
+      name: ch.name,
+      description: ch.description || "",
+      tags: (ch.tags || []).join(", "),
+      isPremium: ch.isPremium,
+    });
+    setChannelFormError(null);
+    setShowChannelForm(true);
+  };
+
+  const handleChannelSave = async () => {
+    if (!channelForm.name.trim()) {
+      setChannelFormError("Channel name is required");
+      return;
+    }
+    setChannelFormSaving(true);
+    setChannelFormError(null);
+    const tags = channelForm.tags
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    try {
+      if (editingChannelId !== null) {
+        const res = await updateCreatorChannel(editingChannelId, {
+          name: channelForm.name.trim(),
+          description: channelForm.description.trim() || undefined,
+          tags,
+          isPremium: channelForm.isPremium,
+        });
+        if (res.success) {
+          setOwnChannels((prev) =>
+            prev.map((c) => (c.id === editingChannelId ? res.channel : c))
+          );
+        }
+      } else {
+        const res = await createCreatorChannel({
+          name: channelForm.name.trim(),
+          description: channelForm.description.trim() || undefined,
+          tags,
+          isPremium: channelForm.isPremium,
+        });
+        if (res.success) {
+          setOwnChannels((prev) => [res.channel, ...prev]);
+        }
+      }
+      setShowChannelForm(false);
+      setEditingChannelId(null);
+    } catch (err) {
+      setChannelFormError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setChannelFormSaving(false);
+    }
+  };
+
+  const handleChannelDelete = async (id: number) => {
+    setDeleteChannelTarget(null);
+    try {
+      await deleteCreatorChannel(id);
+      setOwnChannels((prev) => prev.filter((c) => c.id !== id));
+      if (managingChannelId === id) setManagingChannelId(null);
+    } catch {
+      // non-critical; user can retry
+    }
+  };
+
+  const openManagePosts = async (channelId: number) => {
+    setManagingChannelId(channelId);
+    setAssignPostsLoading(true);
+    try {
+      const res = await getSocialFeedPosts(undefined, 50);
+      if (res.success) setAssignPosts(res.posts);
+    } catch {
+      setAssignPosts([]);
+    } finally {
+      setAssignPostsLoading(false);
+    }
+  };
+
+  const handleTogglePostAssignment = async (post: SocialPostItem, channelId: number) => {
+    const isAssigned = (post as SocialPostItem & { channel_id?: number }).channel_id === channelId;
+    setAssigningPostId(post.id);
+    try {
+      if (isAssigned) {
+        await unassignPostFromChannel(post.id);
+        setAssignPosts((prev) =>
+          prev.map((p) =>
+            p.id === post.id ? { ...p, channel_id: undefined } as typeof p : p
+          )
+        );
+      } else {
+        await assignPostToChannel(post.id, channelId);
+        setAssignPosts((prev) =>
+          prev.map((p) =>
+            p.id === post.id ? { ...p, channel_id: channelId } as typeof p : p
+          )
+        );
+      }
+    } catch {
+      // non-critical
+    } finally {
+      setAssigningPostId(null);
+    }
+  };
+
   // ── Render ──
   if (cmsLoading) {
     return <div className="text-center py-10 text-white/40 text-sm">{t.loadingCmsData}</div>;
@@ -229,8 +391,8 @@ export function ContentTab({ t }: ContentTabProps) {
   return (
     <div className="space-y-4">
       {/* Sub-nav */}
-      <div className="flex gap-2">
-        {(["profile", "content", "shows"] as const).map((s) => (
+      <div className="flex gap-2 flex-wrap">
+        {(["profile", "content", "shows", "channels"] as const).map((s) => (
           <button
             key={s}
             onClick={() => setCmsContentSection(s)}
@@ -240,7 +402,7 @@ export function ContentTab({ t }: ContentTabProps) {
               : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.1)" }
             }
           >
-            {s === "profile" ? t.subNavProfile : s === "content" ? t.subNavContent : t.subNavShows}
+            {s === "profile" ? t.subNavProfile : s === "content" ? t.subNavContent : s === "shows" ? t.subNavShows : "Channels"}
           </button>
         ))}
       </div>
@@ -654,6 +816,276 @@ export function ContentTab({ t }: ContentTabProps) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Channels Section ── */}
+      {cmsContentSection === "channels" && (
+        <div className="space-y-4">
+          {/* Header row */}
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-white">My Channels</p>
+            {!showChannelForm && (
+              <button
+                onClick={openChannelCreate}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                Create Channel
+              </button>
+            )}
+          </div>
+
+          {/* Inline create/edit form */}
+          {showChannelForm && (
+            <div className="rounded-xl p-4 space-y-3" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(212,0,122,0.25)" }}>
+              <p className="text-sm font-semibold text-white">
+                {editingChannelId !== null ? "Edit Channel" : "New Channel"}
+              </p>
+
+              <div>
+                <label className="block text-xs text-white/50 mb-1">Channel Name *</label>
+                <input
+                  value={channelForm.name}
+                  onChange={(e) => setChannelForm((p) => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. Behind the Scenes"
+                  className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-white/50 mb-1">Description</label>
+                <textarea
+                  rows={2}
+                  value={channelForm.description}
+                  onChange={(e) => setChannelForm((p) => ({ ...p, description: e.target.value }))}
+                  placeholder="What's this channel about?"
+                  className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-white/50 mb-1">Tags (comma-separated)</label>
+                <input
+                  value={channelForm.tags}
+                  onChange={(e) => setChannelForm((p) => ({ ...p, tags: e.target.value }))}
+                  placeholder="e.g. exclusive, photos, bts"
+                  className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                />
+              </div>
+
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={channelForm.isPremium}
+                  onChange={(e) => setChannelForm((p) => ({ ...p, isPremium: e.target.checked }))}
+                  className="w-4 h-4 rounded accent-[#D4007A]"
+                />
+                <span className="text-sm text-white/80">Premium channel (subscribers only)</span>
+              </label>
+
+              {channelFormError && (
+                <div className="px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+                  {channelFormError}
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={handleChannelSave}
+                  disabled={channelFormSaving || !channelForm.name.trim()}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  {channelFormSaving ? "Saving..." : editingChannelId !== null ? "Save Changes" : "Create Channel"}
+                </button>
+                <button
+                  onClick={() => { setShowChannelForm(false); setEditingChannelId(null); setChannelFormError(null); }}
+                  className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Loading / error */}
+          {channelsLoading && (
+            <div className="text-center py-8 text-white/40 text-sm">Loading channels...</div>
+          )}
+          {channelsError && (
+            <div className="px-4 py-3 rounded-lg text-sm text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+              {channelsError}
+              <button onClick={loadOwnChannels} className="ml-2 underline text-red-300 text-xs">Retry</button>
+            </div>
+          )}
+
+          {/* Channel list */}
+          {!channelsLoading && ownChannels.length === 0 && !channelsError && (
+            <div className="text-center py-10 text-white/40 text-sm">
+              You haven't created any channels yet. Channels let you group your posts into curated collections.
+            </div>
+          )}
+
+          {ownChannels.map((ch) => (
+            <div key={ch.id} className="rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <span className="text-sm font-semibold text-white truncate">{ch.name}</span>
+                      <span
+                        className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase flex-shrink-0"
+                        style={ch.isPremium
+                          ? { background: "rgba(212,0,122,0.15)", color: "#D4007A" }
+                          : { background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }
+                        }
+                      >
+                        {ch.isPremium ? "Premium" : "Free"}
+                      </span>
+                    </div>
+                    {ch.description && (
+                      <p className="text-xs leading-relaxed line-clamp-2" style={{ color: "#8E8E93" }}>
+                        {ch.description}
+                      </p>
+                    )}
+                    {ch.tags && ch.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {ch.tags.map((tag) => (
+                          <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded"
+                            style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-[11px] mt-2" style={{ color: "#8E8E93" }}>
+                      {ch.postCount} post{ch.postCount !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => openChannelEdit(ch)}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white/70 hover:text-white transition-colors"
+                      style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => setDeleteChannelTarget(ch.id)}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-red-400 hover:text-red-300 transition-colors"
+                      style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.15)" }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+
+                {/* Manage Posts button */}
+                <button
+                  onClick={() =>
+                    managingChannelId === ch.id
+                      ? setManagingChannelId(null)
+                      : openManagePosts(ch.id)
+                  }
+                  className="mt-3 w-full py-2 rounded-lg text-xs font-semibold text-white/70 hover:text-white transition-colors flex items-center justify-center gap-1.5"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+                  </svg>
+                  {managingChannelId === ch.id ? "Hide Posts" : "Manage Posts"}
+                </button>
+              </div>
+
+              {/* Post assignment panel */}
+              {managingChannelId === ch.id && (
+                <div className="border-t border-white/8 p-4 space-y-3" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+                  <p className="text-xs font-semibold text-white/60 uppercase tracking-wider">Assign Posts to Channel</p>
+                  {assignPostsLoading ? (
+                    <div className="text-center py-6 text-white/40 text-sm">Loading your posts...</div>
+                  ) : assignPosts.length === 0 ? (
+                    <div className="text-center py-6 text-white/40 text-sm">No posts found. Share something to your feed first.</div>
+                  ) : (
+                    <div className="space-y-2 max-h-72 overflow-y-auto">
+                      {assignPosts.map((post) => {
+                        const postWithChannel = post as SocialPostItem & { channel_id?: number };
+                        const isAssigned = postWithChannel.channel_id === ch.id;
+                        const isLoading = assigningPostId === post.id;
+                        return (
+                          <div
+                            key={post.id}
+                            className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors"
+                            style={{ background: isAssigned ? "rgba(212,0,122,0.08)" : "rgba(255,255,255,0.03)", border: `1px solid ${isAssigned ? "rgba(212,0,122,0.25)" : "rgba(255,255,255,0.06)"}` }}
+                          >
+                            {/* Media thumbnail */}
+                            {post.media_url && (post.media_url.startsWith("/") || post.media_url.startsWith("http")) ? (
+                              <img
+                                src={post.media_url}
+                                alt=""
+                                className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-lg flex-shrink-0 flex items-center justify-center"
+                                style={{ background: "rgba(255,255,255,0.06)" }}>
+                                <svg className="w-4 h-4 text-white/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                                </svg>
+                              </div>
+                            )}
+
+                            {/* Post preview */}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs text-white/80 line-clamp-2 leading-relaxed">
+                                {post.content || (post.media_type === "video" ? "Video post" : "Image post")}
+                              </p>
+                              <p className="text-[10px] mt-0.5" style={{ color: "#8E8E93" }}>
+                                {new Date(post.created_at).toLocaleDateString()}
+                                {isAssigned && (
+                                  <span className="ml-2 font-semibold" style={{ color: "#D4007A" }}>In this channel</span>
+                                )}
+                              </p>
+                            </div>
+
+                            {/* Toggle button */}
+                            <button
+                              onClick={() => handleTogglePostAssignment(post, ch.id)}
+                              disabled={isLoading}
+                              className="flex-shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-50"
+                              style={isAssigned
+                                ? { background: "rgba(239,68,68,0.12)", color: "#f87171", border: "1px solid rgba(239,68,68,0.2)" }
+                                : { background: "rgba(212,0,122,0.12)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.25)" }
+                              }
+                            >
+                              {isLoading ? "..." : isAssigned ? "Remove" : "Add"}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* Channel delete confirm */}
+          <ConfirmDialog
+            open={deleteChannelTarget !== null}
+            title="Delete Channel"
+            message="This will delete the channel and unassign all posts from it. This cannot be undone."
+            confirmLabel="Delete"
+            cancelLabel="Cancel"
+            onConfirm={() => deleteChannelTarget !== null && handleChannelDelete(deleteChannelTarget)}
+            onCancel={() => setDeleteChannelTarget(null)}
+            variant="danger"
+          />
         </div>
       )}
 

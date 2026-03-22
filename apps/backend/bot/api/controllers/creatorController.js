@@ -412,6 +412,128 @@ const issueStrike = async (req, res) => {
   }
 };
 
+const listOwnChannels = async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT * FROM creator_channels WHERE creator_id = $1 AND is_active = true ORDER BY sort_order, created_at`,
+      [req.user.id]
+    );
+    return res.json({ success: true, channels: result.rows });
+  } catch (err) {
+    logger.error('listOwnChannels error', err);
+    return res.status(500).json({ error: 'Failed to list channels' });
+  }
+};
+
+const createChannel = async (req, res) => {
+  try {
+    // Verify active creator
+    const userRes = await query('SELECT creator_status FROM users WHERE id = $1', [req.user.id]);
+    if (!userRes.rows.length || userRes.rows[0].creator_status !== 'active') {
+      return res.status(403).json({ error: 'Active creator status required' });
+    }
+
+    const { name, description, tags, isPremium } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Channel name is required' });
+    }
+    const trimmedName = name.trim().slice(0, 100);
+
+    // Generate slug
+    let slug = req.body.slug
+      ? String(req.body.slug).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+      : trimmedName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    slug = slug.slice(0, 100);
+
+    // Check slug uniqueness, append suffix if taken
+    const slugCheck = await query('SELECT id FROM creator_channels WHERE slug = $1', [slug]);
+    if (slugCheck.rows.length) {
+      slug = `${slug}-${Date.now().toString(36)}`;
+    }
+
+    const safeTags = Array.isArray(tags) ? tags.filter(t => typeof t === 'string').map(t => t.trim().slice(0, 50)).slice(0, 10) : [];
+
+    const result = await query(
+      `INSERT INTO creator_channels (creator_id, name, slug, description, tags, is_premium)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [req.user.id, trimmedName, slug, (description || '').slice(0, 2000), safeTags, isPremium === true]
+    );
+    return res.json({ success: true, channel: result.rows[0] });
+  } catch (err) {
+    logger.error('createChannel error', err);
+    return res.status(500).json({ error: 'Failed to create channel' });
+  }
+};
+
+const updateChannel = async (req, res) => {
+  const channelId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
+
+  try {
+    // Verify ownership
+    const chRes = await query('SELECT * FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
+    if (!chRes.rows.length || chRes.rows[0].creator_id !== req.user.id) {
+      return res.status(404).json({ error: 'Channel not found or not yours' });
+    }
+
+    const updates = [];
+    const params = [];
+    let idx = 1;
+
+    const { name, slug, description, coverImageUrl, tags, isPremium, sortOrder } = req.body;
+    if (name !== undefined) { updates.push(`name = $${idx++}`); params.push(String(name).trim().slice(0, 100)); }
+    if (slug !== undefined) {
+      const cleanSlug = String(slug).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 100);
+      const slugCheck = await query('SELECT id FROM creator_channels WHERE slug = $1 AND id != $2', [cleanSlug, channelId]);
+      if (slugCheck.rows.length) return res.status(400).json({ error: 'Slug already taken' });
+      updates.push(`slug = $${idx++}`); params.push(cleanSlug);
+    }
+    if (description !== undefined) { updates.push(`description = $${idx++}`); params.push(String(description).slice(0, 2000)); }
+    if (coverImageUrl !== undefined) { updates.push(`cover_image_url = $${idx++}`); params.push(coverImageUrl); }
+    if (tags !== undefined) {
+      const safeTags = Array.isArray(tags) ? tags.filter(t => typeof t === 'string').map(t => t.trim().slice(0, 50)).slice(0, 10) : [];
+      updates.push(`tags = $${idx++}`); params.push(safeTags);
+    }
+    if (isPremium !== undefined) { updates.push(`is_premium = $${idx++}`); params.push(isPremium === true); }
+    if (sortOrder !== undefined) { updates.push(`sort_order = $${idx++}`); params.push(parseInt(sortOrder, 10) || 0); }
+
+    if (!updates.length) return res.status(400).json({ error: 'No fields to update' });
+
+    updates.push(`updated_at = NOW()`);
+    params.push(channelId);
+    const result = await query(
+      `UPDATE creator_channels SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`,
+      params
+    );
+    return res.json({ success: true, channel: result.rows[0] });
+  } catch (err) {
+    logger.error('updateChannel error', err);
+    return res.status(500).json({ error: 'Failed to update channel' });
+  }
+};
+
+const deleteChannel = async (req, res) => {
+  const channelId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
+
+  try {
+    const result = await query(
+      'UPDATE creator_channels SET is_active = false, updated_at = NOW() WHERE id = $1 AND creator_id = $2 AND is_active = true RETURNING id',
+      [channelId, req.user.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Channel not found or not yours' });
+
+    // Unassign posts from this channel
+    await query('UPDATE social_posts SET channel_id = NULL WHERE channel_id = $1', [channelId]);
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('deleteChannel error', err);
+    return res.status(500).json({ error: 'Failed to delete channel' });
+  }
+};
+
 module.exports = {
   getEligibility,
   activateCreator,
@@ -435,4 +557,8 @@ module.exports = {
   rejectEnrollment,
   getMilestones,
   respondToMilestone,
+  listOwnChannels,
+  createChannel,
+  updateChannel,
+  deleteChannel,
 };
