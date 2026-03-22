@@ -4,20 +4,22 @@
  * hangoutMediaController.js
  *
  * Handles media uploads for hangout group chats with per-hangout subdirectories.
+ * Media is processed locally (thumbnails, compression) and then sent to the
+ * hangout's Matrix room as the single source of truth.
  *
  *   POST /api/webapp/hangouts/groups/:id/media
  *     multipart body:
  *       - media   (File)   required  -- image (max 10 MB) or video (max 50 MB)
  *       - content (string) optional  -- caption text (max 500 chars)
- *
- * Returns the saved chat_messages row with all media columns populated,
- * and broadcasts the message over Socket.IO to the hangout room.
  */
 
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { processHangoutMedia } = require('../../services/hangoutMediaService');
 const BlockedUser = require('../../../models/blockedUser');
+const matrixService = require('../../services/matrixService');
+const NotificationEmitter = require('../../services/notificationEmitter');
+const { getRedis } = require('../../../config/redis');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -30,14 +32,7 @@ const authGuard = (req, res) => {
   return user;
 };
 
-const isValidPhotoUrl = (p) =>
-  p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
-
-const CHAT_MSG_RETURNING = `
-  id, room, user_id, username, first_name, photo_url, content,
-  media_url, media_type, media_mime, media_thumb_url,
-  media_width, media_height, media_metadata, created_at
-`;
+const APP_PUBLIC_URL = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
 
 // ── POST /api/webapp/hangouts/groups/:id/media ──────────────────────────────
 
@@ -66,10 +61,11 @@ const uploadHangoutMedia = async (req, res) => {
 
     // Block check: group creator blocked uploader OR uploader blocked group creator
     const { rows: groupCreatorRows } = await query(
-      'SELECT creator_id FROM hangout_groups WHERE id = $1',
+      'SELECT creator_id, name FROM hangout_groups WHERE id = $1',
       [groupId]
     );
     const creatorId = groupCreatorRows[0]?.creator_id;
+    const groupName = groupCreatorRows[0]?.name || `Hangout ${groupId}`;
     if (creatorId && String(creatorId) !== String(user.id)) {
       const [blockedByCreator, blockedByUser] = await Promise.all([
         BlockedUser.isBlocked(creatorId, user.id),
@@ -80,61 +76,108 @@ const uploadHangoutMedia = async (req, res) => {
       }
     }
 
-    // Process the media into per-hangout directory
+    // Process the media into per-hangout directory (thumbnails, compression)
     const mediaResult = await processHangoutMedia(req.file, groupId, user.id);
-
-    const room = `hangout:${groupId}`;
     const caption = (req.body?.content || '').trim().slice(0, 500) || null;
 
-    // Resolve author avatar
-    const photoResult = await query(
-      'SELECT photo_file_id FROM users WHERE id=$1',
+    // ── Send to Matrix (the ONLY message store) ──
+    const userRow = await query(
+      `SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
+       FROM users WHERE id = $1 AND is_deleted = false`,
       [user.id]
     );
-    const rawPhoto = photoResult.rows[0]?.photo_file_id || user.photoUrl || null;
-    const photoUrl = isValidPhotoUrl(rawPhoto) ? rawPhoto : null;
+    if (!userRow.rows[0]) {
+      return res.status(401).json({ error: 'User not found' });
+    }
 
-    const { rows } = await query(
-      `INSERT INTO chat_messages
-         (room, user_id, username, first_name, photo_url, content,
-          media_url, media_type, media_mime, media_thumb_url,
-          media_width, media_height, media_metadata)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-       RETURNING ${CHAT_MSG_RETURNING}`,
-      [
-        room,
-        user.id,
-        user.username || null,
-        user.firstName || user.first_name || null,
-        photoUrl,
-        caption,
-        mediaResult.mediaUrl,
-        mediaResult.mediaType,
-        mediaResult.mediaMime,
-        mediaResult.thumbUrl || null,
-        mediaResult.width || null,
-        mediaResult.height || null,
-        mediaResult.metadata ? JSON.stringify(mediaResult.metadata) : null,
-      ]
-    );
+    const userCreds = await matrixService.provisionMatrixUser(userRow.rows[0]);
+    const matrixRoomId = await matrixService.getOrCreateHangoutRoom(groupId, userRow.rows[0], groupName);
+    await matrixService.ensureUserInRoom(matrixRoomId, userCreds);
 
-    const msg = {
-      ...rows[0],
-      photo_url: isValidPhotoUrl(rows[0].photo_url) ? rows[0].photo_url : null,
-    };
+    // Build absolute media URL for Matrix
+    const mediaAbsUrl = mediaResult.mediaUrl.startsWith('http')
+      ? mediaResult.mediaUrl
+      : `${APP_PUBLIC_URL}${mediaResult.mediaUrl}`;
 
-    // Touch activity timestamp for 72h inactivity cleanup
+    const thumbAbsUrl = mediaResult.thumbUrl
+      ? (mediaResult.thumbUrl.startsWith('http') ? mediaResult.thumbUrl : `${APP_PUBLIC_URL}${mediaResult.thumbUrl}`)
+      : undefined;
+
+    const msgtype = mediaResult.mediaType === 'video' ? 'm.video' : mediaResult.mediaType === 'audio' ? 'm.audio' : 'm.image';
+    const body = caption || (mediaResult.mediaType === 'video' ? 'video.mp4' : mediaResult.mediaType === 'audio' ? 'voice-message.webm' : 'image.webp');
+
+    const resp = await matrixService.sendRoomMediaMessage(matrixRoomId, userCreds.accessToken, {
+      url: mediaAbsUrl,
+      msgtype,
+      body,
+      info: {
+        mimetype: mediaResult.mediaMime || (mediaResult.mediaType === 'video' ? 'video/mp4' : 'image/webp'),
+        w: mediaResult.width || undefined,
+        h: mediaResult.height || undefined,
+        thumbnail_url: thumbAbsUrl,
+      },
+    });
+
+    const matrixEventId = resp.event_id || null;
+
+    // Touch activity timestamp
     await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
 
-    // Broadcast to hangout room
+    // Push notifications to offline members (fire-and-forget)
+    const firstName = user.firstName || user.first_name || null;
+    const room = `hangout:${groupId}`;
     const io = req.app.get('io');
-    if (io) {
-      io.to(room).emit('chat:message', msg);
-    }
+    (async () => {
+      try {
+        const membersResult = await query(
+          'SELECT user_id FROM hangout_group_members WHERE group_id = $1 AND user_id != $2',
+          [groupId, user.id]
+        );
+        const memberIds = membersResult.rows.map(r => r.user_id);
+        if (memberIds.length === 0) return;
+
+        const roomSockets = io ? await io.in(room).fetchSockets() : [];
+        const onlineUserIds = new Set(roomSockets.map(s => String(s.data?.user?.id)).filter(Boolean));
+        const offlineIds = memberIds.filter(id => !onlineUserIds.has(String(id)));
+        if (offlineIds.length === 0) return;
+
+        const redis = getRedis();
+        const senderName = user.username || firstName || 'Someone';
+        const preview = mediaResult.mediaType === 'video' ? 'sent a video' : mediaResult.mediaType === 'audio' ? 'sent a voice message' : 'sent a photo';
+
+        await Promise.allSettled(offlineIds.map(async (targetId) => {
+          const countKey = `hangout:unread:${groupId}:${targetId}`;
+          const unread = await redis.incr(countKey);
+          if (unread === 1) await redis.expire(countKey, 86400);
+
+          const msgText = unread === 1
+            ? `${senderName} ${preview}`
+            : `${unread} new messages — ${senderName} ${preview}`;
+
+          await NotificationEmitter.emit({
+            type: 'group_message',
+            category: 'hangouts',
+            priority: 'normal',
+            actorId: user.id,
+            targetUserId: targetId,
+            entityType: 'hangout',
+            entityId: String(groupId),
+            message: msgText,
+            metadata: {
+              groupId, groupName, senderId: user.id, senderName,
+              unreadCount: unread, url: `/hangouts/${groupId}`,
+              pushTitle: groupName, pushBody: msgText, pushTag: `hangout-${groupId}`,
+            },
+          });
+        }));
+      } catch (notifErr) {
+        logger.warn('uploadHangoutMedia push notification error', { error: notifErr.message, groupId });
+      }
+    })();
 
     return res.status(201).json({
       success: true,
-      message: msg,
+      matrixEventId,
     });
   } catch (err) {
     if (err.statusCode) {

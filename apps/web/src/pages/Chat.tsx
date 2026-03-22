@@ -584,6 +584,8 @@ export default function Chat() {
   const [newDesc, setNewDesc] = useState("");
   const [newIsPublic, setNewIsPublic] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [newTags, setNewTags] = useState<string[]>([]);
+  const [createSuccess, setCreateSuccess] = useState<{ id: number; name: string } | null>(null);
 
   // Discover groups
   const [discoverList, setDiscoverList] = useState<DiscoverGroup[]>([]);
@@ -982,11 +984,20 @@ export default function Chat() {
     setCreating(true);
     setCreateError(null);
     try {
-      await createHangoutGroup(newName.trim(), newDesc.trim(), newIsPublic);
+      const result = await createHangoutGroup(newName.trim(), newDesc.trim(), newIsPublic);
+      const createdGroup = result?.group;
+      // If tags were selected, apply them after creation
+      if (newTags.length > 0 && createdGroup?.id) {
+        try {
+          await updateHangoutSettings(createdGroup.id, { tags: newTags });
+        } catch { /* non-blocking */ }
+      }
+      // Show success state
+      setCreateSuccess({ id: createdGroup?.id, name: newName.trim() });
       setNewName("");
       setNewDesc("");
       setNewIsPublic(true);
-      setShowCreate(false);
+      setNewTags([]);
       loadGroups();
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : t.chat.errorFailedToCreate);
@@ -1583,26 +1594,64 @@ export default function Chat() {
         )}
 
         {/* Chat header */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-pnp-border flex-shrink-0">
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
           <button
             onClick={closeChat}
-            className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent flex-shrink-0"
             aria-label={t.chat.backToGroupList}
           >
             <svg className="w-5 h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
+
+          {/* Group avatar in header */}
+          <div className="relative flex-shrink-0">
+            {activeGroup.avatarUrl && !activeGroup.isMain && !activeGroup.isWallOfFame ? (
+              <img
+                src={activeGroup.avatarUrl}
+                alt=""
+                className="w-9 h-9 rounded-full object-cover ring-1 ring-white/10"
+              />
+            ) : (
+              <div
+                className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold"
+                style={{
+                  background: activeGroup.isMain
+                    ? "linear-gradient(135deg, #D4007A, #E69138)"
+                    : activeGroup.isWallOfFame
+                      ? "linear-gradient(135deg, #FFD700, #E69138)"
+                      : "linear-gradient(135deg, rgba(212,0,122,0.3), rgba(123,97,255,0.3))",
+                  color: activeGroup.isMain || activeGroup.isWallOfFame ? "#fff" : "#D4007A",
+                }}
+              >
+                {activeGroup.isMain ? "P" : activeGroup.isWallOfFame ? "\u{1F3C6}" : (activeGroup.name?.[0] || "?").toUpperCase()}
+              </div>
+            )}
+            {/* Connection indicator dot */}
+            <span
+              className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-pnp-background"
+              style={{ background: isConnected ? "#34C759" : "#8E8E93" }}
+            />
+          </div>
+
           <div className="flex-1 min-w-0">
             <h2 className="text-sm font-bold text-pnp-textPrimary truncate">{activeGroup.name}</h2>
-            <p className="text-xs text-pnp-textSecondary">
-              {activeGroup.memberCount} {activeGroup.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}
-              {isConnected && (
-                <span className="ml-1.5 inline-flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                </span>
+            <div className="flex items-center gap-1.5 text-xs text-pnp-textSecondary">
+              <span>{activeGroup.memberCount} {activeGroup.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}</span>
+              {onlineMembers.length > 0 && (
+                <>
+                  <span className="text-pnp-textSecondary/40">&middot;</span>
+                  <span className="text-green-400 font-medium">{onlineMembers.length} online</span>
+                </>
               )}
-            </p>
+              {matrixRoomId && (
+                <>
+                  <span className="text-pnp-textSecondary/40">&middot;</span>
+                  <span className="text-pnp-accent text-[10px]">E2E</span>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Search button */}
@@ -1779,6 +1828,7 @@ export default function Chat() {
             onJoin={handleStartCall}
             isJoining={callLoading}
             participantCount={callState.participantCount}
+            participants={callParticipants}
             callId={callState.callId}
             callStartedAt={callStartedAt}
             isSomeoneSharing={!!screenShareUser}
@@ -2416,39 +2466,67 @@ export default function Chat() {
           )}
 
           {messagesLoading ? (
-            <div className="space-y-3" aria-label="Loading messages" aria-busy="true">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="animate-pulse flex gap-2">
-                  <div className="w-8 h-8 rounded-full bg-pnp-surface flex-shrink-0" />
-                  <div className="flex-1 space-y-1.5">
-                    <div className="h-3 bg-pnp-surface rounded w-24" />
-                    <div className="h-8 bg-pnp-surface rounded-2xl w-48" />
+            <div className="space-y-4 py-4" aria-label="Loading messages" aria-busy="true">
+              {/* Alternating left/right skeleton bubbles for realistic feel */}
+              {[false, false, true, false, true].map((isRight, i) => (
+                <div key={i} className={`animate-pulse flex gap-2.5 ${isRight ? "flex-row-reverse" : ""}`}>
+                  <div className="w-9 h-9 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.06)" }} />
+                  <div className={`space-y-1.5 ${isRight ? "items-end" : "items-start"} flex flex-col`}>
+                    <div className="h-3 rounded w-20" style={{ background: "rgba(255,255,255,0.06)" }} />
+                    <div
+                      className="rounded-2xl"
+                      style={{
+                        background: isRight
+                          ? "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(230,145,56,0.15))"
+                          : "rgba(255,255,255,0.04)",
+                        width: [180, 140, 200, 120, 160][i],
+                        height: [36, 52, 32, 44, 36][i],
+                      }}
+                    />
                   </div>
                 </div>
               ))}
+              <div className="text-center pt-2">
+                <p className="text-[11px] text-pnp-textSecondary/50 flex items-center justify-center gap-1.5">
+                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Syncing with Matrix...
+                </p>
+              </div>
             </div>
           ) : messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center py-12">
-              <svg className="w-16 h-16 mx-auto mb-4 text-pnp-textSecondary/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
-              <p className="text-pnp-textPrimary font-semibold text-base mb-1">{t.chat.noMessagesYet}</p>
-              <p className="text-sm text-pnp-textSecondary mt-1 max-w-[240px]">
+              {/* Visual hangout explainer as empty state */}
+              <div className="w-20 h-20 mx-auto mb-5 rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(123,97,255,0.12))" }}>
+                <svg className="w-10 h-10" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+              </div>
+              <p className="text-pnp-textPrimary font-bold text-lg mb-1">{t.chat.noMessagesYet}</p>
+              <p className="text-sm text-pnp-textSecondary mt-1 max-w-[260px] leading-relaxed">
                 {t.chat.beFirstToSay}
               </p>
-              <div className="flex items-center gap-3 mt-4 text-[11px] text-pnp-textSecondary/60">
-                <span className="flex items-center gap-1">
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25a2.25 2.25 0 00-2.25-2.25H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" /></svg>
-                  Share media
-                </span>
-                <span className="flex items-center gap-1">
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /></svg>
-                  Voice notes
-                </span>
-                <span className="flex items-center gap-1">
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" /></svg>
-                  Video call
-                </span>
+
+              {/* Feature pills */}
+              <div className="flex flex-wrap justify-center gap-2 mt-5">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-pnp-textSecondary" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <svg className="w-3.5 h-3.5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25a2.25 2.25 0 00-2.25-2.25H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" /></svg>
+                  Photos & Videos
+                </div>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-pnp-textSecondary" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <svg className="w-3.5 h-3.5" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /></svg>
+                  Voice Messages
+                </div>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-pnp-textSecondary" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <svg className="w-3.5 h-3.5" style={{ color: "#E69138" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" /></svg>
+                  Video Calls
+                </div>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-pnp-textSecondary" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <svg className="w-3.5 h-3.5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.182 15.182a4.5 4.5 0 01-6.364 0M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75zm-.375 0h.008v.015h-.008V9.75zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75zm-.375 0h.008v.015h-.008V9.75z" /></svg>
+                  Reactions
+                </div>
               </div>
             </div>
           ) : (
@@ -2774,74 +2852,202 @@ export default function Chat() {
         emptyAction={isPrime ? () => setShowCreateEvent(true) : undefined}
       />
 
+      {/* Create hangout — success state */}
+      {createSuccess && (
+        <div className="glass-card-sm p-5 mb-4 animate-fade-in-up text-center space-y-4">
+          <div className="w-16 h-16 mx-auto rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(94,209,196,0.2), rgba(0,212,232,0.2))" }}>
+            <svg className="w-8 h-8 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-pnp-textPrimary">Hangout Created!</h3>
+            <p className="text-sm text-pnp-textSecondary mt-1">
+              <span className="font-semibold text-pnp-textPrimary">{createSuccess.name}</span> is ready. Your group chat and video room are set up.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setCreateSuccess(null)}
+              className="flex-1 py-2.5 rounded-lg text-sm text-pnp-textSecondary border border-white/10 hover:bg-white/5 active:scale-[0.98] transition-all"
+            >
+              Later
+            </button>
+            <button
+              onClick={() => {
+                const g = groups.find((g) => g.id === createSuccess.id);
+                setCreateSuccess(null);
+                setShowCreate(false);
+                if (g) openChat(g);
+              }}
+              className="flex-1 btn-gradient py-2.5 rounded-lg text-sm text-white font-semibold active:scale-[0.98] transition-all"
+            >
+              Open Hangout
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Create group form */}
-      {showCreate && (
-        <div className="glass-card-sm p-4 mb-4 animate-fade-in-up">
-          <h3 className="text-sm font-semibold text-pnp-textPrimary mb-1">{t.chat.createSubgroupTitle}</h3>
-          <p className="text-xs text-pnp-textSecondary mb-3">{t.chat.createSubgroupHint}</p>
-          <div className="flex items-center justify-between mb-1">
-            <label className="text-xs text-pnp-textSecondary" htmlFor="new-group-name">{t.chat.groupNameLabel}</label>
-            <span className={`text-[10px] ${newName.length > 90 ? "text-red-400" : "text-pnp-textSecondary"}`}>{newName.length}/100</span>
+      {showCreate && !createSuccess && (
+        <div className="glass-card-sm p-4 mb-4 animate-fade-in-up space-y-4">
+          {/* What is a Hangout — visual explainer */}
+          <div className="rounded-xl p-3 space-y-2" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.08), rgba(123,97,255,0.08))" }}>
+            <h3 className="text-sm font-bold text-pnp-textPrimary">Create a Hangout</h3>
+            <p className="text-xs text-pnp-textSecondary leading-relaxed">
+              A hangout is your private space — a <span className="text-pnp-textPrimary font-medium">group chat</span> + <span className="text-pnp-textPrimary font-medium">video room</span> for your crew. Only members can join the call.
+            </p>
+            <div className="flex gap-3 pt-1">
+              <div className="flex items-center gap-1.5 text-[11px] text-pnp-textSecondary">
+                <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: "rgba(94,209,196,0.15)" }}>
+                  <svg className="w-3.5 h-3.5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                </div>
+                Matrix Chat
+              </div>
+              <div className="flex items-center gap-1.5 text-[11px] text-pnp-textSecondary">
+                <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: "rgba(123,97,255,0.15)" }}>
+                  <svg className="w-3.5 h-3.5" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                Video Call
+              </div>
+              <div className="flex items-center gap-1.5 text-[11px] text-pnp-textSecondary">
+                <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: "rgba(212,0,122,0.15)" }}>
+                  <svg className="w-3.5 h-3.5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+                  </svg>
+                </div>
+                Up to 25
+              </div>
+            </div>
           </div>
-          <input
-            id="new-group-name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder={t.chat.groupNamePlaceholder}
-            className="w-full bg-white/5 rounded-lg px-3 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 mb-2 transition-colors"
-            maxLength={100}
-          />
-          <div className="flex items-center justify-between mb-1">
-            <label className="text-xs text-pnp-textSecondary" htmlFor="new-group-desc">{t.chat.groupDescriptionLabel}</label>
-            <span className={`text-[10px] ${newDesc.length > 450 ? "text-red-400" : "text-pnp-textSecondary"}`}>{newDesc.length}/500</span>
+
+          {/* Name */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-pnp-textSecondary" htmlFor="new-group-name">{t.chat.groupNameLabel}</label>
+              <span className={`text-[10px] ${newName.length > 90 ? "text-red-400" : "text-pnp-textSecondary"}`}>{newName.length}/100</span>
+            </div>
+            <input
+              id="new-group-name"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder={t.chat.groupNamePlaceholder}
+              className="w-full bg-white/5 rounded-xl px-3 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 transition-colors"
+              maxLength={100}
+            />
           </div>
-          <textarea
-            id="new-group-desc"
-            value={newDesc}
-            onChange={(e) => setNewDesc(e.target.value)}
-            placeholder={t.chat.groupDescriptionPlaceholder}
-            className="w-full bg-white/5 rounded-lg px-3 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 mb-3 resize-none transition-colors"
-            rows={2}
-            maxLength={500}
-          />
+
+          {/* Description */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-pnp-textSecondary" htmlFor="new-group-desc">{t.chat.groupDescriptionLabel}</label>
+              <span className={`text-[10px] ${newDesc.length > 450 ? "text-red-400" : "text-pnp-textSecondary"}`}>{newDesc.length}/500</span>
+            </div>
+            <textarea
+              id="new-group-desc"
+              value={newDesc}
+              onChange={(e) => setNewDesc(e.target.value)}
+              placeholder={t.chat.groupDescriptionPlaceholder}
+              className="w-full bg-white/5 rounded-xl px-3 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 resize-none transition-colors"
+              rows={2}
+              maxLength={500}
+            />
+          </div>
+
+          {/* Tags — pick during creation */}
+          <div>
+            <p className="text-xs font-medium text-pnp-textSecondary mb-1.5">Vibe tags <span className="text-pnp-textSecondary/60 font-normal">(optional, up to 5)</span></p>
+            <div className="flex flex-wrap gap-1.5">
+              {["chill", "party", "dating", "music", "gaming", "art", "fitness", "travel"].map((tag) => {
+                const isActive = newTags.includes(tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => {
+                      if (isActive) setNewTags(newTags.filter((t) => t !== tag));
+                      else if (newTags.length < 5) setNewTags([...newTags, tag]);
+                    }}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all active:scale-95 ${
+                      isActive
+                        ? "text-white"
+                        : "bg-white/8 text-pnp-textSecondary hover:bg-white/15"
+                    }`}
+                    style={isActive ? { background: "linear-gradient(135deg, #D4007A, #7B61FF)" } : undefined}
+                  >
+                    {tag}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Public/Private toggle */}
           <button
             type="button"
             onClick={() => setNewIsPublic(!newIsPublic)}
-            className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-white/5 mb-3 transition-colors hover:bg-white/10"
+            className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl bg-white/5 transition-colors hover:bg-white/10"
           >
-            <div className="flex items-center gap-2">
-              <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                {newIsPublic ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5a17.92 17.92 0 01-8.716-2.247m0 0A9.015 9.015 0 003 12c0-1.605.42-3.113 1.157-4.418" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                )}
-              </svg>
-              <span className="text-sm text-pnp-textPrimary">
-                {newIsPublic ? t.chat.anyoneCanJoin : t.chat.approvalRequired}
-              </span>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: newIsPublic ? "rgba(94,209,196,0.15)" : "rgba(255,255,255,0.08)" }}>
+                <svg className="w-4 h-4" style={{ color: newIsPublic ? "#5ED1C4" : "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  {newIsPublic ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5a17.92 17.92 0 01-8.716-2.247m0 0A9.015 9.015 0 003 12c0-1.605.42-3.113 1.157-4.418" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                  )}
+                </svg>
+              </div>
+              <div className="text-left">
+                <span className="text-sm text-pnp-textPrimary font-medium block">
+                  {newIsPublic ? "Public Hangout" : "Private Hangout"}
+                </span>
+                <span className="text-[11px] text-pnp-textSecondary">
+                  {newIsPublic ? t.chat.anyoneCanJoin : t.chat.approvalRequired}
+                </span>
+              </div>
             </div>
-            <div className={`w-9 h-5 rounded-full transition-colors relative ${newIsPublic ? "bg-pnp-accent" : "bg-white/20"}`}>
-              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${newIsPublic ? "left-[18px]" : "left-0.5"}`} />
+            <div className={`w-10 h-5.5 rounded-full transition-colors relative ${newIsPublic ? "bg-pnp-accent" : "bg-white/20"}`} style={{ width: 40, height: 22 }}>
+              <div className={`absolute top-0.5 w-[18px] h-[18px] rounded-full bg-white transition-transform shadow-sm ${newIsPublic ? "translate-x-[19px]" : "translate-x-[2px]"}`} />
             </div>
           </button>
+
           {createError && (
-            <p className="text-xs text-pnp-error mb-2">{createError}</p>
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
+              <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+              </svg>
+              <p className="text-xs text-red-300">{createError}</p>
+            </div>
           )}
+
+          {/* Action buttons */}
           <div className="flex gap-2">
             <button
-              onClick={() => { setShowCreate(false); setCreateError(null); }}
-              className="flex-1 py-2.5 rounded-lg text-sm text-pnp-textSecondary border border-white/10 hover:bg-white/5 active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              onClick={() => { setShowCreate(false); setCreateError(null); setNewTags([]); }}
+              className="flex-1 py-2.5 rounded-xl text-sm text-pnp-textSecondary border border-white/10 hover:bg-white/5 active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             >
               {t.chat.cancel}
             </button>
             <button
               onClick={handleCreate}
               disabled={!newName.trim() || creating}
-              className="flex-1 btn-gradient py-2.5 rounded-lg text-sm text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              className="flex-1 py-2.5 rounded-xl text-sm text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)" }}
             >
-              {creating ? t.chat.creating : t.chat.create}
+              {creating ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Creating...
+                </span>
+              ) : "Create Hangout"}
             </button>
           </div>
         </div>
@@ -2888,21 +3094,40 @@ export default function Chat() {
         </div>
       ) : groups.length === 0 ? (
         /* Empty state */
-        <div className="glass-card-sm p-8 text-center">
-          <svg className="w-16 h-16 mx-auto mb-3 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          <p className="text-pnp-textPrimary font-medium mb-1">{t.chat.noGroupsYet}</p>
-          <p className="text-sm text-pnp-textSecondary">
-            {t.chat.noGroupsLoginHint}
-          </p>
+        <div className="glass-card-sm p-8 text-center space-y-4">
+          <div className="w-20 h-20 mx-auto rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(123,97,255,0.12))" }}>
+            <svg className="w-10 h-10" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-pnp-textPrimary font-bold text-lg mb-1">{t.chat.noGroupsYet}</p>
+            <p className="text-sm text-pnp-textSecondary leading-relaxed max-w-[280px] mx-auto">
+              {t.chat.noGroupsLoginHint}
+            </p>
+          </div>
+          {/* What's a hangout explainer */}
+          <div className="flex justify-center gap-4 text-[11px] text-pnp-textSecondary/70">
+            <span className="flex items-center gap-1">
+              <svg className="w-3.5 h-3.5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+              Group Chat
+            </span>
+            <span className="flex items-center gap-1">
+              <svg className="w-3.5 h-3.5" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" /></svg>
+              Video Calls
+            </span>
+            <span className="flex items-center gap-1">
+              <svg className="w-3.5 h-3.5" style={{ color: "#E69138" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+              Members Only
+            </span>
+          </div>
           {isPrime && (
             <button
               onClick={() => setShowCreate(true)}
-              className="mt-4 px-6 py-2.5 rounded-xl text-sm font-semibold text-white active:scale-95 transition-transform"
-              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white active:scale-95 transition-transform"
+              style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)" }}
             >
-              Create a Group
+              Create Your First Hangout
             </button>
           )}
         </div>
@@ -2917,18 +3142,41 @@ export default function Chat() {
             >
               <div className="flex gap-3 items-center">
                 {/* Group avatar */}
-                <div
-                  className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold flex-shrink-0"
-                  style={{
-                    background: group.isMain
-                      ? "linear-gradient(135deg, #D4007A, #E69138)"
-                      : group.isWallOfFame
-                        ? "linear-gradient(135deg, #FFD700, #E69138)"
-                        : "rgba(212, 0, 122, 0.2)",
-                    color: group.isMain || group.isWallOfFame ? "#fff" : "#D4007A",
-                  }}
-                >
-                  {group.isMain ? "P" : group.isWallOfFame ? "\u{1F3C6}" : (group.name?.[0] || "?").toUpperCase()}
+                <div className="relative w-12 h-12 flex-shrink-0">
+                  {group.avatarUrl && !group.isMain && !group.isWallOfFame ? (
+                    <img
+                      src={group.avatarUrl}
+                      alt=""
+                      className="w-12 h-12 rounded-full object-cover ring-2 ring-white/10"
+                      onError={(e) => {
+                        const img = e.target as HTMLImageElement;
+                        img.style.display = "none";
+                        const fb = img.nextElementSibling as HTMLElement | null;
+                        if (fb) fb.style.removeProperty("display");
+                      }}
+                    />
+                  ) : null}
+                  <div
+                    className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold"
+                    style={{
+                      display: group.avatarUrl && !group.isMain && !group.isWallOfFame ? "none" : undefined,
+                      background: group.isMain
+                        ? "linear-gradient(135deg, #D4007A, #E69138)"
+                        : group.isWallOfFame
+                          ? "linear-gradient(135deg, #FFD700, #E69138)"
+                          : "linear-gradient(135deg, rgba(212,0,122,0.3), rgba(123,97,255,0.3))",
+                      color: group.isMain || group.isWallOfFame ? "#fff" : "#D4007A",
+                    }}
+                  >
+                    {group.isMain ? "P" : group.isWallOfFame ? "\u{1F3C6}" : (group.name?.[0] || "?").toUpperCase()}
+                  </div>
+                  {/* Active call pulse dot */}
+                  {group.hasActiveCall && (
+                    <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-60" />
+                      <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-green-400 ring-2 ring-pnp-background" />
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex-1 min-w-0">
@@ -3087,11 +3335,18 @@ export default function Chat() {
                   .map((group) => (
                     <div key={group.id} className="glass-card-sm p-4">
                       <div className="flex gap-3 items-center">
-                        <div
-                          className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                          style={{ background: "rgba(212, 0, 122, 0.2)", color: "#D4007A" }}
-                        >
-                          {(group.name?.[0] || "?").toUpperCase()}
+                        {/* Discover group avatar */}
+                        <div className="w-10 h-10 flex-shrink-0 relative">
+                          {(group as any).avatarUrl ? (
+                            <img src={(group as any).avatarUrl} alt="" className="w-10 h-10 rounded-full object-cover ring-1 ring-white/10" />
+                          ) : (
+                            <div
+                              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+                              style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.25), rgba(123,97,255,0.25))", color: "#D4007A" }}
+                            >
+                              {(group.name?.[0] || "?").toUpperCase()}
+                            </div>
+                          )}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">

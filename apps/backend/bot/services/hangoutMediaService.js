@@ -42,6 +42,7 @@ const THUMB_QUALITY = 72;
 // Max file sizes enforced at the multer level, but we double-check here
 const IMAGE_MAX_BYTES = 10 * 1024 * 1024;  // 10 MB
 const VIDEO_MAX_BYTES = 50 * 1024 * 1024;  // 50 MB
+const AUDIO_MAX_BYTES = 10 * 1024 * 1024;  // 10 MB
 
 // Base uploads directory relative to monorepo root
 // __dirname = /app/apps/backend/bot/services  =>  ../../../../public
@@ -181,6 +182,26 @@ async function processVideo(buffer, hangoutId, userId, mimetype) {
   };
 }
 
+// ── Audio processing (voice notes — saved as-is, no transcoding) ────────────
+
+async function processAudio(buffer, hangoutId, userId, mimetype) {
+  const dir = await ensureDir(hangoutId);
+  const ts = Date.now();
+  const ext = mimetype.includes('ogg') ? 'ogg' : mimetype.includes('mp4') || mimetype.includes('m4a') ? 'm4a' : 'webm';
+  const filename = `voice-${userId}-${ts}.${ext}`;
+  const filePath = path.join(dir, filename);
+
+  await fs.writeFile(filePath, buffer);
+
+  return {
+    mediaUrl: publicUrl(hangoutId, filename),
+    thumbUrl: null,
+    width: null,
+    height: null,
+    metadata: { duration: null },
+  };
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -212,6 +233,7 @@ async function processHangoutMedia(file, hangoutId, userId) {
   const MAGIC_ALLOWED = new Set([
     'image/jpeg', 'image/png', 'image/webp', 'image/gif',
     'video/mp4', 'video/webm',
+    'audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg',
   ]);
   if (!detected || !MAGIC_ALLOWED.has(detected.mime)) {
     const err = new Error(`Rejected file: detected ${detected?.mime || 'unknown'} type`);
@@ -222,7 +244,7 @@ async function processHangoutMedia(file, hangoutId, userId) {
   const mediaType = resolveMediaType(file.mimetype);
   if (!mediaType) {
     const err = new Error(`Disallowed mime type: ${file.mimetype}`);
-    err.userMessage = 'Only images (jpg, png, webp, gif) and videos (mp4, webm) are allowed.';
+    err.userMessage = 'Only images, videos, and voice messages are allowed.';
     err.statusCode = 400;
     throw err;
   }
@@ -240,6 +262,12 @@ async function processHangoutMedia(file, hangoutId, userId) {
     err.statusCode = 400;
     throw err;
   }
+  if (mediaType === 'audio' && file.buffer.length > AUDIO_MAX_BYTES) {
+    const err = new Error('Audio exceeds 10 MB limit');
+    err.userMessage = 'Voice messages must be under 10 MB.';
+    err.statusCode = 400;
+    throw err;
+  }
 
   try {
     if (mediaType === 'image') {
@@ -251,6 +279,19 @@ async function processHangoutMedia(file, hangoutId, userId) {
         thumbUrl: result.thumbUrl,
         width: result.width,
         height: result.height,
+        metadata: result.metadata,
+      };
+    }
+
+    if (mediaType === 'audio') {
+      const result = await processAudio(file.buffer, hangoutId, userId, file.mimetype.toLowerCase());
+      return {
+        mediaType: 'audio',
+        mediaMime: file.mimetype.toLowerCase(),
+        mediaUrl: result.mediaUrl,
+        thumbUrl: null,
+        width: null,
+        height: null,
         metadata: result.metadata,
       };
     }

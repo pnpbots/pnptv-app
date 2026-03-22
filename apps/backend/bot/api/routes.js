@@ -1220,9 +1220,9 @@ const hangoutMediaUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const isAllowed = /^(image\/(jpeg|jpg|png|webp|gif)|video\/(mp4|webm))$/i.test(file.mimetype || '');
+    const isAllowed = /^(image\/(jpeg|jpg|png|webp|gif)|video\/(mp4|webm)|audio\/(webm|ogg|mp4|mpeg))$/i.test(file.mimetype || '');
     if (isAllowed) return cb(null, true);
-    cb(new Error('Only image (jpg/png/webp/gif) and video (mp4/webm) files are allowed'));
+    cb(new Error('Only image, video, and voice message files are allowed'));
   },
 });
 

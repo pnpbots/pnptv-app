@@ -34,6 +34,13 @@ const ALLOWED_VIDEO_MIMES = new Set([
   'video/webm',
 ]);
 
+const ALLOWED_AUDIO_MIMES = new Set([
+  'audio/webm',
+  'audio/ogg',
+  'audio/mp4',
+  'audio/mpeg',
+]);
+
 const IMAGE_MAX_DIMENSION = 1280; // px, longest edge
 const IMAGE_THUMB_DIMENSION = 400; // px, longest edge for thumbnail
 const IMAGE_QUALITY = 78;
@@ -59,6 +66,7 @@ function resolveMediaType(mimetype) {
   const normalized = (mimetype || '').toLowerCase().trim();
   if (ALLOWED_IMAGE_MIMES.has(normalized)) return 'image';
   if (ALLOWED_VIDEO_MIMES.has(normalized)) return 'video';
+  if (ALLOWED_AUDIO_MIMES.has(normalized)) return 'audio';
   return null;
 }
 
@@ -268,4 +276,5 @@ module.exports = {
   resolveMediaType,
   ALLOWED_IMAGE_MIMES,
   ALLOWED_VIDEO_MIMES,
+  ALLOWED_AUDIO_MIMES,
 };

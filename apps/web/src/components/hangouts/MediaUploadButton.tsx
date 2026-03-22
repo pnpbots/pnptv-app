@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 
-const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/webm", "video/quicktime", "video/3gpp"];
+const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/webm", "video/quicktime", "video/3gpp", "audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg"];
 const MAX_IMAGE_BYTES = 10 * 1_048_576;  // 10 MB
 const MAX_VIDEO_BYTES = 50 * 1_048_576;  // 50 MB
 const MAX_RECORDING_SECONDS = 60;
@@ -228,7 +228,7 @@ export function MediaUploadButton({
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime,video/3gpp"
+        accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime,video/3gpp,audio/webm,audio/ogg,audio/mp4,audio/mpeg"
         className="hidden"
         onChange={handleChange}
         aria-hidden="true"
