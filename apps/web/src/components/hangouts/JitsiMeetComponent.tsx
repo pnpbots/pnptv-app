@@ -2,6 +2,11 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+export interface JitsiParticipant {
+  id: string;
+  displayName: string;
+}
+
 interface JitsiMeetComponentProps {
   /** The full Jitsi meeting URL — domain and room are extracted from this */
   meetingUrl: string;
@@ -9,10 +14,14 @@ interface JitsiMeetComponentProps {
   roomName?: string;
   /** Called when the user leaves/ends the call */
   onCallEnd?: () => void;
-  /** Called when a participant joins */
+  /** Called when a participant joins (legacy — count only) */
   onParticipantJoined?: (count: number) => void;
-  /** Called when a participant leaves */
+  /** Called when a participant leaves (legacy — count only) */
   onParticipantLeft?: (count: number) => void;
+  /** Called with the full participant list when it changes */
+  onParticipantsChange?: (participants: JitsiParticipant[]) => void;
+  /** Called when screen sharing status changes for any participant */
+  onScreenShareChange?: (sharing: boolean, participantId: string) => void;
   /** Whether to display in full-screen mode */
   fullScreen?: boolean;
   /** Admin/superadmin gets full toolbar access */
@@ -25,6 +34,10 @@ interface JitsiMeetComponentProps {
   onApiReady?: (api: any) => void;
   /** Optional className for the container */
   className?: string;
+  /** Start with audio muted (from pre-call preview selection) */
+  startWithAudioMuted?: boolean;
+  /** Start with video muted (from pre-call preview selection) */
+  startWithVideoMuted?: boolean;
 }
 
 /** Parse domain, room, and JWT from a meeting URL.
@@ -96,12 +109,16 @@ export function JitsiMeetComponent({
   onCallEnd,
   onParticipantJoined,
   onParticipantLeft,
+  onParticipantsChange,
+  onScreenShareChange,
   fullScreen = false,
   isAdmin = false,
   isModerator = false,
   disableChat = false,
   onApiReady,
   className,
+  startWithAudioMuted,
+  startWithVideoMuted,
 }: JitsiMeetComponentProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<any>(null);
@@ -112,9 +129,13 @@ export function JitsiMeetComponent({
   const onCallEndRef = useRef(onCallEnd);
   const onParticipantJoinedRef = useRef(onParticipantJoined);
   const onParticipantLeftRef = useRef(onParticipantLeft);
+  const onParticipantsChangeRef = useRef(onParticipantsChange);
+  const onScreenShareChangeRef = useRef(onScreenShareChange);
   useEffect(() => { onCallEndRef.current = onCallEnd; }, [onCallEnd]);
   useEffect(() => { onParticipantJoinedRef.current = onParticipantJoined; }, [onParticipantJoined]);
   useEffect(() => { onParticipantLeftRef.current = onParticipantLeft; }, [onParticipantLeft]);
+  useEffect(() => { onParticipantsChangeRef.current = onParticipantsChange; }, [onParticipantsChange]);
+  useEffect(() => { onScreenShareChangeRef.current = onScreenShareChange; }, [onScreenShareChange]);
   const onApiReadyRef = useRef(onApiReady);
   useEffect(() => { onApiReadyRef.current = onApiReady; }, [onApiReady]);
 
@@ -141,10 +162,18 @@ export function JitsiMeetComponent({
         return;
       }
 
-      // Detect mobile (improvement #4)
+      // Detect mobile
       const isMobile =
         /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
         window.innerWidth < 768;
+
+      // Resolve audio/video mute state: explicit prop overrides role-based defaults
+      const audioMuted = startWithAudioMuted !== undefined
+        ? startWithAudioMuted
+        : !(isAdmin || isModerator);
+      const videoMuted = startWithVideoMuted !== undefined
+        ? startWithVideoMuted
+        : false;
 
       const apiOptions: Record<string, any> = {
         roomName: resolvedRoom,
@@ -153,8 +182,8 @@ export function JitsiMeetComponent({
         height: "100%",
         configOverwrite: {
           prejoinPageEnabled: false,
-          startWithVideoMuted: false,
-          startWithAudioMuted: !(isAdmin || isModerator),
+          startWithVideoMuted: videoMuted,
+          startWithAudioMuted: audioMuted,
           disableDeepLinking: true,
           disableThirdPartyRequests: true,
           enableClosePage: false,
@@ -230,6 +259,11 @@ export function JitsiMeetComponent({
           setIsLoading(false);
           if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
         }
+        // Initial participant snapshot after joining
+        try {
+          const info: Array<{ id: string; displayName: string }> = api.getParticipantsInfo?.() || [];
+          onParticipantsChangeRef.current?.(info.map(p => ({ id: p.id, displayName: p.displayName || "" })));
+        } catch { /* getParticipantsInfo may not be available in all versions */ }
       });
 
       // Lobby auto-admit: when this user is a moderator, automatically approve
@@ -248,14 +282,27 @@ export function JitsiMeetComponent({
         onCallEndRef.current?.();
       });
 
+      const refreshParticipants = () => {
+        try {
+          const info: Array<{ id: string; displayName: string }> = api.getParticipantsInfo?.() || [];
+          onParticipantsChangeRef.current?.(info.map(p => ({ id: p.id, displayName: p.displayName || "" })));
+        } catch { /* ignore */ }
+      };
+
       api.addListener("participantJoined", () => {
         const count = api.getNumberOfParticipants?.() || 0;
         onParticipantJoinedRef.current?.(count);
+        refreshParticipants();
       });
 
       api.addListener("participantLeft", () => {
         const count = api.getNumberOfParticipants?.() || 0;
         onParticipantLeftRef.current?.(count);
+        refreshParticipants();
+      });
+
+      api.addListener("screenSharingStatusChanged", (event: { on: boolean; participantId?: string }) => {
+        onScreenShareChangeRef.current?.(event.on, event.participantId || "");
       });
 
       // Fallback: if videoConferenceJoined never fires, remove loading after 5s

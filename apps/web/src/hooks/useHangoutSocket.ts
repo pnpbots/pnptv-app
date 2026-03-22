@@ -18,6 +18,18 @@ interface CallState {
   endReason: string | null;
 }
 
+export interface CallParticipant {
+  userId: string;
+  name: string;
+  photoUrl: string;
+}
+
+export interface ReadReceiptEntry {
+  name: string;
+  photoUrl: string;
+  lastReadAt: string;
+}
+
 const EMPTY_CALL: CallState = {
   isActive: false,
   participantCount: 0,
@@ -41,6 +53,18 @@ export function useHangoutSocket(
   const [isConnected, setIsConnected] = useState(false);
   const [onlineMembers, setOnlineMembers] = useState<OnlineMember[]>([]);
 
+  // Feature 1: Screen share state — name of the user currently sharing, or null
+  const [screenShareUser, setScreenShareUser] = useState<string | null>(null);
+
+  // Feature 2: Call started timestamp (ISO string)
+  const [callStartedAt, setCallStartedAt] = useState<string | null>(null);
+
+  // Feature 3: Rich participant list (separate from the legacy string[] in CallState)
+  const [callParticipants, setCallParticipants] = useState<CallParticipant[]>([]);
+
+  // Feature 4: Read receipts keyed by userId
+  const [readReceipts, setReadReceipts] = useState<Map<string, ReadReceiptEntry>>(new Map());
+
   // Matrix typing users (merged below)
   const { typingUsers: matrixTypingUsers } = useRoomTyping(matrixRoomId ?? null);
 
@@ -54,6 +78,10 @@ export function useHangoutSocket(
       setTypingUsers([]);
       setCallState(EMPTY_CALL);
       setOnlineMembers([]);
+      setScreenShareUser(null);
+      setCallStartedAt(null);
+      setCallParticipants([]);
+      setReadReceipts(new Map());
       return;
     }
 
@@ -62,6 +90,10 @@ export function useHangoutSocket(
     setTypingUsers([]);
     setCallState(EMPTY_CALL);
     setOnlineMembers([]);
+    setScreenShareUser(null);
+    setCallStartedAt(null);
+    setCallParticipants([]);
+    setReadReceipts(new Map());
 
     const socket = connectSocket();
 
@@ -111,6 +143,7 @@ export function useHangoutSocket(
       callId: string;
       roomName: string;
       participantCount: number;
+      createdAt?: string;
     }) => {
       if (!ROOM_NAME_PATTERN.test(data.roomName ?? "")) return;
       setCallState({
@@ -121,13 +154,18 @@ export function useHangoutSocket(
         roomName: data.roomName,
         endReason: null,
       });
+      // Feature 2: capture timestamp if provided
+      if (data.createdAt) {
+        setCallStartedAt(data.createdAt);
+      }
     };
 
-    // Server sends { call: { id, roomName, ... }, startedBy: { ... } }
+    // Server sends { call: { id, roomName, createdAt, ... }, startedBy: { ... } }
     const onCallStarted = (data: {
-      call?: { id: string; roomName: string };
+      call?: { id: string; roomName: string; createdAt?: string };
       callId?: string;
       roomName?: string;
+      createdAt?: string;
     }) => {
       const roomName = data.call?.roomName ?? data.roomName ?? null;
       if (roomName && !ROOM_NAME_PATTERN.test(roomName)) return;
@@ -139,6 +177,12 @@ export function useHangoutSocket(
         roomName,
         endReason: null,
       });
+      // Feature 2: capture timestamp — prefer nested call object, fall back to top-level
+      const ts = data.call?.createdAt ?? data.createdAt ?? null;
+      setCallStartedAt(ts);
+      // Reset participants when a new call starts
+      setCallParticipants([]);
+      setScreenShareUser(null);
     };
 
     const onCallEnded = (data?: { callId?: string; reason?: string }) => {
@@ -147,20 +191,87 @@ export function useHangoutSocket(
         if (data?.callId && prev.callId && prev.callId !== data.callId) return prev;
         return { ...EMPTY_CALL, endReason: data?.reason || null };
       });
+      // Clear call-scoped state
+      setCallStartedAt(null);
+      setCallParticipants([]);
+      setScreenShareUser(null);
     };
 
-    const onCallJoined = (data: { participantCount?: number }) => {
+    // Feature 3: Server sends full participant snapshot
+    const onCallParticipants = (data: { participants: CallParticipant[] }) => {
+      if (!Array.isArray(data.participants)) return;
+      setCallParticipants(
+        data.participants.map((p) => ({
+          userId: String(p.userId).slice(0, 64),
+          name: String(p.name || "").slice(0, 100),
+          photoUrl: String(p.photoUrl || ""),
+        }))
+      );
+    };
+
+    const onCallJoined = (data: {
+      participantCount?: number;
+      user?: CallParticipant;
+    }) => {
       setCallState((prev) => ({
         ...prev,
         participantCount: data.participantCount ?? prev.participantCount + 1,
       }));
+      // Feature 3: add joiner to rich participant list if server provides user info
+      if (data.user?.userId) {
+        const joiner: CallParticipant = {
+          userId: String(data.user.userId).slice(0, 64),
+          name: String(data.user.name || "").slice(0, 100),
+          photoUrl: String(data.user.photoUrl || ""),
+        };
+        setCallParticipants((prev) => {
+          // Avoid duplicates
+          if (prev.some((p) => p.userId === joiner.userId)) return prev;
+          return [...prev, joiner];
+        });
+      }
     };
 
-    const onParticipantLeft = (data: { participantCount?: number }) => {
+    const onParticipantLeft = (data: {
+      participantCount?: number;
+      user?: { userId: string };
+    }) => {
       setCallState((prev) => ({
         ...prev,
         participantCount: data.participantCount ?? Math.max(0, prev.participantCount - 1),
       }));
+      // Feature 3: remove leaver from rich participant list
+      if (data.user?.userId) {
+        const leftId = String(data.user.userId);
+        setCallParticipants((prev) => prev.filter((p) => p.userId !== leftId));
+        // Feature 1: clear screen share if the leaver was sharing
+        setScreenShareUser((prev) => (prev === leftId ? null : prev));
+      }
+    };
+
+    // Feature 1: Screen share state
+    const onScreenShare = (data: { userId: string; sharing: boolean }) => {
+      if (!data.userId) return;
+      setScreenShareUser(data.sharing ? String(data.userId).slice(0, 64) : null);
+    };
+
+    // Feature 4: Incoming read receipt from another user
+    const onRead = (data: {
+      userId: string;
+      name: string;
+      photoUrl: string;
+      lastReadAt: string;
+    }) => {
+      if (!data.userId || data.userId === userId) return;
+      setReadReceipts((prev) => {
+        const next = new Map(prev);
+        next.set(String(data.userId).slice(0, 64), {
+          name: String(data.name || "").slice(0, 100),
+          photoUrl: String(data.photoUrl || ""),
+          lastReadAt: String(data.lastReadAt),
+        });
+        return next;
+      });
     };
 
     // Register ALL listeners BEFORE emitting join
@@ -173,6 +284,9 @@ export function useHangoutSocket(
     socket.on("hangout:call:ended", onCallEnded);
     socket.on("hangout:call:joined", onCallJoined);
     socket.on("hangout:call:participant:left", onParticipantLeft);
+    socket.on("hangout:call:participants", onCallParticipants);
+    socket.on("hangout:call:screenshare", onScreenShare);
+    socket.on("hangout:read", onRead);
 
     // Now emit join — if already connected, emit directly; otherwise onConnect handles it
     // Guard behind userId: an unauthenticated socket must not join a private room
@@ -194,6 +308,9 @@ export function useHangoutSocket(
       socket.off("hangout:call:ended", onCallEnded);
       socket.off("hangout:call:joined", onCallJoined);
       socket.off("hangout:call:participant:left", onParticipantLeft);
+      socket.off("hangout:call:participants", onCallParticipants);
+      socket.off("hangout:call:screenshare", onScreenShare);
+      socket.off("hangout:read", onRead);
 
       // Clear typing timers and map
       typingTimers.current.forEach((t) => clearTimeout(t));
@@ -204,21 +321,27 @@ export function useHangoutSocket(
     };
   }, [groupId, userId]);
 
-  // Emit typing indicator (debounced 2s) — tries Matrix first, always emits via socket
-  const emitTyping = useCallback(() => {
-    if (!groupId) return;
-    const now = Date.now();
-    if (now - lastTypingEmit.current < 2000) return;
-    lastTypingEmit.current = now;
+  // Emit typing indicator (debounced 2s) — tries Matrix first, always emits via socket.
+  // Feature 5: Pass isRecording=true to suppress emission during voice recording.
+  const emitTyping = useCallback(
+    (isRecording?: boolean) => {
+      if (!groupId) return;
+      // Suppress typing indicator while the user is recording a voice message
+      if (isRecording) return;
+      const now = Date.now();
+      if (now - lastTypingEmit.current < 2000) return;
+      lastTypingEmit.current = now;
 
-    // Matrix typing (fire-and-forget)
-    if (matrixRoomId) {
-      matrixSendTyping(matrixRoomId, true, 3000).catch(() => {});
-    }
+      // Matrix typing (fire-and-forget)
+      if (matrixRoomId) {
+        matrixSendTyping(matrixRoomId, true, 3000).catch(() => {});
+      }
 
-    const socket = connectSocket();
-    socket.emit("hangout:typing", { groupId });
-  }, [groupId, matrixRoomId]);
+      const socket = connectSocket();
+      socket.emit("hangout:typing", { groupId });
+    },
+    [groupId, matrixRoomId]
+  );
 
   const inviteToCall = useCallback(
     (targetUserId: string) => {
@@ -228,6 +351,13 @@ export function useHangoutSocket(
     },
     [groupId]
   );
+
+  // Feature 4: Emit mark-read so the server can broadcast to other participants
+  const emitMarkRead = useCallback(() => {
+    if (!groupId || !userId) return;
+    const socket = connectSocket();
+    socket.emit("hangout:mark-read", { groupId });
+  }, [groupId, userId]);
 
   // Merge socket + Matrix typing users (deduplicate by name)
   const mergedTypingUsers = React.useMemo(() => {
@@ -245,5 +375,14 @@ export function useHangoutSocket(
     isConnected,
     onlineMembers,
     inviteToCall,
+    // Feature 1
+    screenShareUser,
+    // Feature 2
+    callStartedAt,
+    // Feature 3
+    callParticipants,
+    // Feature 4
+    readReceipts,
+    emitMarkRead,
   };
 }

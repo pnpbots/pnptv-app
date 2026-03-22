@@ -97,6 +97,7 @@ const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 // ─── Reaction emojis (PNP-themed) ──────────────────────────────────────────
 
 const QUICK_REACTIONS = ["❤️", "😈", "💨", "🧊", "💎", "🔥", "👹", "🍆", "🍑"];
+const EXTENDED_REACTIONS = ["❤️", "😈", "💨", "🧊", "💎", "🔥", "👹", "🍆", "🍑", "😍", "🤤", "👅", "💦", "🥵", "😏", "🤪", "💜", "🖤", "⚡", "🌈", "👑", "🫦", "🫠", "😮‍💨"];
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -194,6 +195,7 @@ const MessageBubble = memo(function MessageBubble({
   const [isTranslating, setIsTranslating] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
   const [showActions, setShowActions] = useState(false);
+  const [showFullReactions, setShowFullReactions] = useState(false);
   const showAvatarFallback = !isValidPhotoUrl(msg.photo_url) || avatarError;
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -373,20 +375,32 @@ const MessageBubble = memo(function MessageBubble({
         {matrixEventId && (
           <div
             data-action-bar
-            className={`flex items-center gap-0.5 mt-0.5 transition-opacity ${showActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"} ${isMe ? "justify-end" : ""}`}
+            className={`flex flex-wrap items-center gap-0.5 mt-0.5 transition-opacity ${showFullReactions ? "max-w-[200px] p-1.5 rounded-xl bg-black/40 backdrop-blur-sm" : ""} ${showActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"} ${isMe ? "justify-end" : ""}`}
             onTouchStart={(e) => e.stopPropagation()}
           >
-            {QUICK_REACTIONS.slice(0, 6).map((emoji) => (
+            {(showFullReactions ? EXTENDED_REACTIONS : QUICK_REACTIONS.slice(0, 6)).map((emoji) => (
               <button
                 key={emoji}
-                onTouchEnd={(e) => { e.stopPropagation(); onReaction?.(matrixEventId, emoji); setShowActions(false); }}
-                onClick={() => { onReaction?.(matrixEventId, emoji); setShowActions(false); }}
+                onTouchEnd={(e) => { e.stopPropagation(); onReaction?.(matrixEventId, emoji); setShowActions(false); setShowFullReactions(false); }}
+                onClick={() => { onReaction?.(matrixEventId, emoji); setShowActions(false); setShowFullReactions(false); }}
                 className="text-sm hover:scale-125 active:scale-125 transition-transform p-0.5 rounded hover:bg-white/10 active:bg-white/10"
                 aria-label={`React ${emoji}`}
               >
                 {emoji}
               </button>
             ))}
+            {!showFullReactions && (
+              <button
+                onTouchEnd={(e) => { e.stopPropagation(); setShowFullReactions(true); }}
+                onClick={() => setShowFullReactions(true)}
+                className="text-xs p-0.5 rounded hover:bg-white/10 active:bg-white/10 transition-colors text-pnp-textSecondary"
+                aria-label="More reactions"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </button>
+            )}
             {onReply && (
               <button
                 onTouchEnd={(e) => { e.stopPropagation(); onReply(msg); setShowActions(false); }}
@@ -709,6 +723,11 @@ export default function Chat() {
     isConnected,
     onlineMembers,
     inviteToCall,
+    screenShareUser,
+    callStartedAt,
+    callParticipants,
+    readReceipts,
+    emitMarkRead,
   } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId, matrixRoomId);
 
   // Messages: Matrix is the single source of truth
@@ -803,6 +822,29 @@ export default function Chat() {
   const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false);
+
+  // Drag-and-drop state
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounter = useRef(0);
+
+  // Message search state
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Filtered messages for search
+  const filteredMessages = React.useMemo(() => {
+    if (!searchQuery.trim()) return messages;
+    const q = searchQuery.toLowerCase();
+    return messages.filter((m) =>
+      (m.content && m.content.toLowerCase().includes(q)) ||
+      (m.first_name && m.first_name.toLowerCase().includes(q)) ||
+      (m.username && m.username.toLowerCase().includes(q))
+    );
+  }, [messages, searchQuery]);
 
   // Lightbox
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -1028,6 +1070,67 @@ export default function Chat() {
     setUploadError(message);
   }, []);
 
+  // Voice recording handler — turns blob into a File for the existing media upload pipeline
+  const handleVoiceRecord = useCallback((blob: Blob, duration: number) => {
+    setIsRecording(false);
+    const file = new File([blob], `voice-${Date.now()}.webm`, { type: blob.type || "audio/webm" });
+    const previewUrl = URL.createObjectURL(blob);
+    clearMedia();
+    setMediaFile(file);
+    setMediaPreviewUrl(previewUrl);
+    setUploadError(null);
+  }, [clearMedia]);
+
+  // Drag-and-drop handlers for media upload
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.types.includes("Files")) setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) setIsDragOver(false);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    dragCounter.current = 0;
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      const isImage = file.type.startsWith("image/");
+      const isVideo = file.type.startsWith("video/");
+      const isAudio = file.type.startsWith("audio/");
+      if (!isImage && !isVideo && !isAudio) {
+        setUploadError("Only images, videos, and audio files are supported");
+        return;
+      }
+      if (isImage && file.size > 10 * 1024 * 1024) {
+        setUploadError("Image must be under 10MB");
+        return;
+      }
+      if (isVideo && file.size > 50 * 1024 * 1024) {
+        setUploadError("Video must be under 50MB");
+        return;
+      }
+      const previewUrl = URL.createObjectURL(file);
+      clearMedia();
+      setMediaFile(file);
+      setMediaPreviewUrl(previewUrl);
+    }
+  }, [clearMedia]);
+
   // ─── Smart auto-scroll ─────────────────────────────────────────────
 
   // Track last read-receipt eventId to avoid spamming
@@ -1047,12 +1150,13 @@ export default function Chat() {
       });
     }
 
-    // Send Matrix read receipt when near bottom
+    // Send Matrix read receipt when near bottom + emit socket mark-read
     if (isNearBottom.current && matrixRoomId && matrixMessages.length > 0) {
       const lastMsg = matrixMessages[matrixMessages.length - 1];
       if (lastMsg.eventId !== lastReceiptId.current) {
         lastReceiptId.current = lastMsg.eventId;
         sendReadReceipt(matrixRoomId, lastMsg.eventId);
+        emitMarkRead();
       }
     }
   }, [matrixRoomId, matrixMessages]);
@@ -1501,6 +1605,21 @@ export default function Chat() {
             </p>
           </div>
 
+          {/* Search button */}
+          <button
+            onClick={() => {
+              setShowSearch((v) => !v);
+              if (!showSearch) setTimeout(() => searchInputRef.current?.focus(), 100);
+            }}
+            className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all"
+            style={{ color: showSearch ? "#D4007A" : "#8E8E93" }}
+            aria-label="Search messages"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+            </svg>
+          </button>
+
           {/* Online members button — count hidden on xs to save space */}
           <button
             onClick={() => setShowOnline((v) => !v)}
@@ -1623,6 +1742,36 @@ export default function Chat() {
           </div>
         </div>
 
+        {/* Search bar */}
+        {showSearch && (
+          <div className="px-4 py-2 border-b border-pnp-border flex items-center gap-2 animate-fade-in-up">
+            <svg className="w-4 h-4 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+            </svg>
+            <input
+              ref={searchInputRef}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search messages..."
+              className="flex-1 bg-transparent text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none min-w-0"
+            />
+            {searchQuery && (
+              <span className="text-[10px] text-pnp-textSecondary flex-shrink-0">
+                {filteredMessages.length} found
+              </span>
+            )}
+            <button
+              onClick={() => { setShowSearch(false); setSearchQuery(""); }}
+              className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-white/10"
+              style={{ color: "#8E8E93" }}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         {/* Active call banner (not for main group — uses Main Stage) */}
         {showCallBanner && !activeGroup.isMain && (
           <VideoCallBanner
@@ -1631,6 +1780,8 @@ export default function Chat() {
             isJoining={callLoading}
             participantCount={callState.participantCount}
             callId={callState.callId}
+            callStartedAt={callStartedAt}
+            isSomeoneSharing={!!screenShareUser}
           />
         )}
 
@@ -1643,6 +1794,8 @@ export default function Chat() {
             initialMode="embedded"
             isAdmin={isAdmin}
             isModerator={callIsModerator}
+            callStartedAt={callStartedAt}
+            participantCount={callState.participantCount}
           />
         )}
 
@@ -2244,9 +2397,23 @@ export default function Chat() {
         <div
           ref={messagesContainerRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto px-4 py-3 pb-20 space-y-3 min-h-0"
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          className="flex-1 overflow-y-auto px-4 py-3 pb-20 space-y-3 min-h-0 relative"
         >
-          {/* Loading indicator placeholder — pagination is handled by Matrix scrollback */}
+          {/* Drag-and-drop overlay */}
+          {isDragOver && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center bg-pnp-background/80 backdrop-blur-sm border-2 border-dashed border-pnp-accent rounded-xl pointer-events-none">
+              <div className="text-center">
+                <svg className="w-12 h-12 mx-auto mb-2 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                </svg>
+                <p className="text-sm font-semibold text-pnp-accent">Drop to upload</p>
+              </div>
+            </div>
+          )}
 
           {messagesLoading ? (
             <div className="space-y-3" aria-label="Loading messages" aria-busy="true">
@@ -2262,56 +2429,104 @@ export default function Chat() {
             </div>
           ) : messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center py-12">
-              <svg className="w-12 h-12 mx-auto mb-3 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <svg className="w-16 h-16 mx-auto mb-4 text-pnp-textSecondary/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
-              <p className="text-pnp-textPrimary font-medium text-sm">{t.chat.noMessagesYet}</p>
-              <p className="text-xs text-pnp-textSecondary mt-1">
+              <p className="text-pnp-textPrimary font-semibold text-base mb-1">{t.chat.noMessagesYet}</p>
+              <p className="text-sm text-pnp-textSecondary mt-1 max-w-[240px]">
                 {t.chat.beFirstToSay}
               </p>
+              <div className="flex items-center gap-3 mt-4 text-[11px] text-pnp-textSecondary/60">
+                <span className="flex items-center gap-1">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25a2.25 2.25 0 00-2.25-2.25H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" /></svg>
+                  Share media
+                </span>
+                <span className="flex items-center gap-1">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /></svg>
+                  Voice notes
+                </span>
+                <span className="flex items-center gap-1">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" /></svg>
+                  Video call
+                </span>
+              </div>
             </div>
           ) : (
-            messages.map((msg, idx) => (
-              <React.Fragment key={msg.id}>
-                {/* Date separator */}
-                {(idx === 0 || !isSameDay(messages[idx - 1].created_at, msg.created_at)) && (
-                  <DateSeparator date={msg.created_at} />
-                )}
-                <MessageBubble
-                  msg={msg}
-                  isMe={msg.user_id === user?.dbId}
-                  userLang={user?.language || "en"}
-                  onNavigate={handleNavigate}
-                  onExpandImage={handleExpandImage}
-                  currentUserId={user?.dbId != null ? `@pnptv_${user.dbId}:matrix.pnptv.app` : undefined}
-                  matrixEventId={matrixEventIdMap.get(msg.id) || undefined}
-                  reactions={
-                    matrixEventIdMap.get(msg.id)
-                      ? matrixReactions.get(matrixEventIdMap.get(msg.id)!) ?? undefined
-                      : undefined
-                  }
-                  onReaction={handleReaction}
-                  onReply={setReplyToMsg}
-                  replyTo={msg.reply_to || null}
-                  isOwnerOrMod={isOwnerOrMod}
-                  onPin={isOwnerOrMod ? (eventId, body) => {
-                    if (activeGroup) pinHangoutMessage(activeGroup.id, eventId, body).then(() => loadPins(activeGroup.id)).catch(() => {});
-                  } : undefined}
-                  onDelete={isOwnerOrMod ? (eventId) => {
-                    if (activeGroup) {
-                      setConfirmAction({
-                        title: "Delete Message",
-                        message: "Delete this message for everyone?",
-                        isDanger: true,
-                        onConfirm: async () => {
-                          await deleteHangoutMessage(activeGroup.id, eventId);
-                        },
-                      });
+            <>
+              {searchQuery && filteredMessages.length === 0 && (
+                <div className="text-center py-8">
+                  <p className="text-sm text-pnp-textSecondary">No messages match "{searchQuery}"</p>
+                </div>
+              )}
+              {(searchQuery ? filteredMessages : messages).map((msg, idx, arr) => (
+                <React.Fragment key={msg.id}>
+                  {/* Date separator */}
+                  {(idx === 0 || !isSameDay(arr[idx - 1].created_at, msg.created_at)) && (
+                    <DateSeparator date={msg.created_at} />
+                  )}
+                  <MessageBubble
+                    msg={msg}
+                    isMe={msg.user_id === user?.dbId}
+                    userLang={user?.language || "en"}
+                    onNavigate={handleNavigate}
+                    onExpandImage={handleExpandImage}
+                    currentUserId={user?.dbId != null ? `@pnptv_${user.dbId}:matrix.pnptv.app` : undefined}
+                    matrixEventId={matrixEventIdMap.get(msg.id) || undefined}
+                    reactions={
+                      matrixEventIdMap.get(msg.id)
+                        ? matrixReactions.get(matrixEventIdMap.get(msg.id)!) ?? undefined
+                        : undefined
                     }
-                  } : undefined}
-                />
-              </React.Fragment>
-            ))
+                    onReaction={handleReaction}
+                    onReply={setReplyToMsg}
+                    replyTo={msg.reply_to || null}
+                    isOwnerOrMod={isOwnerOrMod}
+                    onPin={isOwnerOrMod ? (eventId, body) => {
+                      if (activeGroup) pinHangoutMessage(activeGroup.id, eventId, body).then(() => loadPins(activeGroup.id)).catch(() => {});
+                    } : undefined}
+                    onDelete={isOwnerOrMod ? (eventId) => {
+                      if (activeGroup) {
+                        setConfirmAction({
+                          title: "Delete Message",
+                          message: "Delete this message for everyone?",
+                          isDanger: true,
+                          onConfirm: async () => {
+                            await deleteHangoutMessage(activeGroup.id, eventId);
+                          },
+                        });
+                      }
+                    } : undefined}
+                  />
+                  {/* Seen-by indicators — show tiny avatars of who read up to this message */}
+                  {msg.user_id === user?.dbId && idx === arr.length - 1 && readReceipts.size > 0 && (
+                    <div className="flex justify-end gap-0.5 -mt-1 mr-12">
+                      {Array.from(readReceipts.entries())
+                        .filter(([uid]) => uid !== user?.dbId)
+                        .slice(0, 5)
+                        .map(([uid, receipt]) => (
+                          <div key={uid} className="relative group/seen">
+                            {receipt.photoUrl ? (
+                              <img src={receipt.photoUrl} alt={receipt.name} className="w-4 h-4 rounded-full object-cover ring-1 ring-pnp-background" />
+                            ) : (
+                              <div className="w-4 h-4 rounded-full bg-pnp-accent/30 flex items-center justify-center text-[7px] font-bold text-pnp-accent ring-1 ring-pnp-background">
+                                {receipt.name[0]?.toUpperCase()}
+                              </div>
+                            )}
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-1.5 py-0.5 bg-black/80 rounded text-[8px] text-white whitespace-nowrap opacity-0 group-hover/seen:opacity-100 transition-opacity pointer-events-none">
+                              {receipt.name}
+                            </div>
+                          </div>
+                        ))}
+                      {readReceipts.size > 5 && (
+                        <div className="w-4 h-4 rounded-full bg-white/10 flex items-center justify-center text-[7px] text-pnp-textSecondary ring-1 ring-pnp-background">
+                          +{readReceipts.size - 5}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </React.Fragment>
+              ))}
+            </>
           )}
           <div ref={messagesEndRef} />
         </div>
@@ -2409,6 +2624,7 @@ export default function Chat() {
                     onFileSelect={handleFileSelect}
                     onError={handleFileError}
                     disabled={sending}
+                    onVoiceRecord={handleVoiceRecord}
                   />
                 )}
 
@@ -2417,7 +2633,7 @@ export default function Chat() {
                   value={msgInput}
                   onChange={(e) => {
                     setMsgInput(e.target.value);
-                    emitTyping();
+                    emitTyping(isRecording);
                   }}
                   onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
                   placeholder={
@@ -2834,6 +3050,22 @@ export default function Chat() {
               <p className="text-sm text-pnp-textSecondary text-center py-4">No public groups to join yet.</p>
             ) : (
               <>
+                {/* Discover search */}
+                <div className="mb-3">
+                  <input
+                    type="text"
+                    placeholder="Search groups by name..."
+                    className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 transition-colors"
+                    onChange={(e) => {
+                      const q = e.target.value.toLowerCase();
+                      if (!q) { loadDiscover(); return; }
+                      setDiscoverList((prev) => prev.filter((g) =>
+                        g.name.toLowerCase().includes(q) ||
+                        (g.description || "").toLowerCase().includes(q)
+                      ));
+                    }}
+                  />
+                </div>
                 {/* Tag filter row */}
                 <div className="flex flex-wrap gap-1.5 mb-3">
                   {[...new Set(["chill", "party", "dating", "music", "gaming", "art", "fitness", "travel", ...discoverList.flatMap((g: any) => g.tags || [])])].map((tag) => (
