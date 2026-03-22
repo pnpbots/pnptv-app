@@ -2475,7 +2475,7 @@ app.get('/api/webapp/auth/oidc/login', oidcLoginLimiter, asyncHandler(async (req
  * and upserts the PNPtv user account before establishing the session.
  */
 app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(async (req, res) => {
-  const APP_URL = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
+  const APP_URL = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
 
   // ── 1. Guard: error from Authentik ──────────────────────────────────────────
   if (req.query.error) {
