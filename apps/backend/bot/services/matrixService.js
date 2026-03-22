@@ -484,6 +484,8 @@ async function getOrCreateHangoutRoom(hangoutGroupId, creatorUser, groupName) {
   }
 
   const creatorCreds = await provisionMatrixUser(creatorUser);
+  const adminToken = await getAdminToken();
+  const adminUserId = `@${process.env.MATRIX_ADMIN_USER || 'pnptv_admin'}:${MATRIX_SERVER_NAME}`;
 
   const roomResp = await synapsePost(
     '/_matrix/client/v3/createRoom',
@@ -493,6 +495,7 @@ async function getOrCreateHangoutRoom(hangoutGroupId, creatorUser, groupName) {
       preset:     'private_chat',
       visibility: 'private',
       room_version: '11',
+      invite:     [adminUserId],
       creation_content: { 'm.federate': false },
       initial_state: [
         {
@@ -512,7 +515,10 @@ async function getOrCreateHangoutRoom(hangoutGroupId, creatorUser, groupName) {
         },
       ],
       power_level_content_override: {
-        users: { [creatorCreds.matrixUserId]: 100 },
+        users: {
+          [creatorCreds.matrixUserId]: 100,
+          [adminUserId]: 100,
+        },
         users_default: 0,
         events_default: 0,
         state_default: 50,
@@ -535,16 +541,8 @@ async function getOrCreateHangoutRoom(hangoutGroupId, creatorUser, groupName) {
 
   const roomId = roomResp.room_id;
 
-  // Join the admin user so it can invite/kick members later
+  // Auto-join admin into the room so it can manage membership
   try {
-    const adminToken = await getAdminToken();
-    const adminUserId = `@${process.env.MATRIX_ADMIN_USER || 'pnptv_admin'}:${MATRIX_SERVER_NAME}`;
-    // Invite admin from creator, then join
-    await synapsePost(
-      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
-      { user_id: adminUserId },
-      creatorCreds.accessToken
-    );
     await synapsePost(
       `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
       {},
