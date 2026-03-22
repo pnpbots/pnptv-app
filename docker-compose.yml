@@ -899,6 +899,8 @@ services:
         condition: service_healthy
       redis-pnptv:
         condition: service_healthy
+      synapse:
+        condition: service_healthy
     deploy:
       resources:
         limits:
