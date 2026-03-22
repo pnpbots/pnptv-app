@@ -375,39 +375,6 @@ export function LandingPage() {
             <p className="text-pnp-textSecondary text-xs">The #1 queer PNP community</p>
           </div>
 
-          {/* Primary CTA — PNPtv ID */}
-          <button
-            onClick={async () => { try { await oidcLogin(); } catch {} }}
-            className="w-full py-3.5 px-6 rounded-xl font-bold text-sm flex items-center justify-center gap-2.5 text-white transition-all hover:brightness-110 active:scale-[0.98]"
-            style={{
-              background: "linear-gradient(135deg, #D4007A, #E69138)",
-              boxShadow: "0 0 24px rgba(212, 0, 122, 0.4)",
-            }}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0" aria-hidden="true">
-              <path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 00-5.25 5.25v3a3 3 0 00-3 3v6.75a3 3 0 003 3h10.5a3 3 0 003-3v-6.75a3 3 0 00-3-3v-3c0-2.9-2.35-5.25-5.25-5.25zm3.75 8.25v-3a3.75 3.75 0 10-7.5 0v3h7.5z" clipRule="evenodd" />
-            </svg>
-            Sign in with PNPtv ID
-          </button>
-
-          {/* Create account link */}
-          <p className="text-center text-xs text-pnp-textSecondary">
-            New here?{" "}
-            <a
-              href={`${AUTHENTIK_URL}/if/flow/default-enrollment-flow/`}
-              className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all"
-            >
-              Create a PNPtv ID
-            </a>
-          </p>
-
-          {/* Divider */}
-          <div className="flex items-center gap-3 w-full">
-            <div className="flex-1 h-px bg-white/10" />
-            <span className="text-[10px] text-pnp-textSecondary uppercase tracking-widest">or</span>
-            <div className="flex-1 h-px bg-white/10" />
-          </div>
-
           {/* Join existing — accordion */}
           <div className="w-full">
             <button
@@ -429,6 +396,23 @@ export function LandingPage() {
 
                 {loginView === "options" && (
                   <>
+                    <button
+                      onClick={async () => { try { await oidcLogin(); } catch {} }}
+                      className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-sm font-bold text-white transition-all hover:brightness-110 active:scale-[0.98]"
+                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0" aria-hidden="true">
+                        <path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 00-5.25 5.25v3a3 3 0 00-3 3v6.75a3 3 0 003 3h10.5a3 3 0 003-3v-6.75a3 3 0 00-3-3v-3c0-2.9-2.35-5.25-5.25-5.25zm3.75 8.25v-3a3.75 3.75 0 10-7.5 0v3h7.5z" clipRule="evenodd" />
+                      </svg>
+                      Sign in with PNPtv ID
+                    </button>
+
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-px bg-white/10" />
+                      <span className="text-[10px] text-pnp-textSecondary uppercase tracking-widest">or</span>
+                      <div className="flex-1 h-px bg-white/10" />
+                    </div>
+
                     <button onClick={() => setLoginView("telegram")} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white border border-pnp-border hover:border-white/30 hover:bg-pnp-surface transition-colors">
                       <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor" style={{ color: "#29B6F6" }}>
                         <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248l-1.97 9.289c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.062 13.85l-2.946-.924c-.64-.203-.654-.64.136-.953l11.5-4.431c.534-.194 1.001.13.81.706z" />
@@ -453,7 +437,14 @@ export function LandingPage() {
                       Sign in with PNPtv SSO
                     </button>
 
-                    <button onClick={() => { setLoginView("recover"); setRecoverSent(false); setRecoverError(null); setRecoverEmail(""); }} className="w-full text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-2">
+                    <p className="text-center text-xs text-pnp-textSecondary pt-1">
+                      New here?{" "}
+                      <a href={`${AUTHENTIK_URL}/if/flow/default-enrollment-flow/`} className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all">
+                        Create a PNPtv ID
+                      </a>
+                    </p>
+
+                    <button onClick={() => { setLoginView("recover"); setRecoverSent(false); setRecoverError(null); setRecoverEmail(""); }} className="w-full text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-1">
                       Had an X (Twitter) account? Recover it here
                     </button>
                   </>
