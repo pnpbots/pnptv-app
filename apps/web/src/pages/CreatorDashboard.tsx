@@ -9,7 +9,6 @@ import {
   getModelEarnings,
   getWithdrawableAmount,
   getWithdrawalHistory,
-  getWebRTCStreamerConfig,
   type CreatorEligibility,
   type CreatorDashboard as DashboardData,
   type ModelEarnings,
@@ -24,15 +23,13 @@ import { ContentTab } from "./creator/ContentTab";
 import { SettingsTab } from "./creator/SettingsTab";
 import { CallPackageManager } from "./creator/CallPackageManager";
 
-import { JitsiMeetComponent } from "@/components/hangouts";
-
 const TIERS: { key: "ice" | "crystal" | "diamond"; label: string; emoji: string }[] = [
   { key: "ice", label: "Ice", emoji: "❄" },
   { key: "crystal", label: "Crystal", emoji: "🔮" },
   { key: "diamond", label: "Diamond", emoji: "💎" },
 ];
 
-type TabKey = "overview" | "earnings" | "payouts" | "settings" | "content" | "golive" | "availability";
+type TabKey = "overview" | "earnings" | "payouts" | "settings" | "content" | "availability";
 
 // ─── Progress Bar ────────────────────────────────────────────────────────────
 
@@ -82,11 +79,6 @@ export default function CreatorDashboard() {
   const [activateTerms, setActivateTerms] = useState(false);
   const [activating, setActivating] = useState(false);
   const [activateError, setActivateError] = useState<string | null>(null);
-
-  // Go Live streamer state
-  const [streamerMeetingUrl, setStreamerMeetingUrl] = useState<string | null>(null);
-  const [streamerConnecting, setStreamerConnecting] = useState(false);
-  const [streamerError, setStreamerError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -233,7 +225,7 @@ export default function CreatorDashboard() {
         <>
           {/* Tab navigation */}
           <div className="flex overflow-x-auto border-b border-white/10 mb-4 scrollbar-hide">
-            {(["overview", "earnings", "payouts", "content", "golive", "availability", "settings"] as const).map((tab) => (
+            {(["overview", "earnings", "payouts", "content", "availability", "settings"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -246,7 +238,6 @@ export default function CreatorDashboard() {
                   : tab === "earnings" ? t.tabEarnings
                   : tab === "payouts" ? t.tabPayouts
                   : tab === "content" ? t.tabContent
-                  : tab === "golive" ? t.tabGoLive
                   : tab === "availability" ? "Availability"
                   : t.tabSettings
                 }
@@ -276,84 +267,6 @@ export default function CreatorDashboard() {
           )}
 
           {activeTab === "content" && <ContentTab t={t} />}
-
-          {activeTab === "golive" && (
-            <div className="glass-card-sm p-4 space-y-4">
-              <div>
-                <h2 className="text-base font-bold text-white">Go Live</h2>
-                <p className="text-xs text-pnp-textSecondary mt-0.5">Start a JaaS video stream that your audience can join</p>
-              </div>
-
-              {!streamerMeetingUrl && !streamerError && (
-                streamerConnecting ? (
-                  <div className="flex items-center justify-center py-16">
-                    <div className="w-10 h-10 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
-                  </div>
-                ) : (
-                  <button
-                    onClick={async () => {
-                      setStreamerConnecting(true);
-                      setStreamerError(null);
-                      try {
-                        const config = await getWebRTCStreamerConfig();
-                        if (config.meetingUrl) {
-                          setStreamerMeetingUrl(config.meetingUrl);
-                        } else {
-                          setStreamerError(config.error ?? "No channel assigned. Contact support.");
-                        }
-                      } catch (err: any) {
-                        setStreamerError(err?.message || "Failed to start stream.");
-                      } finally {
-                        setStreamerConnecting(false);
-                      }
-                    }}
-                    className="w-full flex items-center justify-center gap-2.5 min-h-[52px] px-6 rounded-2xl text-sm font-bold text-white btn-gradient transition-all hover:opacity-90 active:scale-[0.98]"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <circle cx="12" cy="12" r="2" />
-                      <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14" />
-                    </svg>
-                    Start Streaming
-                  </button>
-                )
-              )}
-
-              {streamerError && (
-                <div className="space-y-3">
-                  <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl text-sm bg-pnp-error/10 border border-pnp-error/25" role="alert">
-                    <span className="text-white/80 min-w-0 break-words">{streamerError}</span>
-                  </div>
-                  <button
-                    onClick={() => setStreamerError(null)}
-                    className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white btn-gradient"
-                  >
-                    Try Again
-                  </button>
-                </div>
-              )}
-
-              {streamerMeetingUrl && (
-                <>
-                  <div style={{ height: "calc(100vh - 280px)", minHeight: "400px" }}>
-                    <JitsiMeetComponent
-                      meetingUrl={streamerMeetingUrl}
-                      onCallEnd={() => setStreamerMeetingUrl(null)}
-                      isModerator
-                      fullScreen={false}
-                      className="w-full h-full"
-                    />
-                  </div>
-                  <button
-                    onClick={() => setStreamerMeetingUrl(null)}
-                    className="w-full py-3 rounded-2xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-[0.98]"
-                    style={{ background: "linear-gradient(135deg, #b91c1c, #dc2626)" }}
-                  >
-                    Stop Streaming
-                  </button>
-                </>
-              )}
-            </div>
-          )}
 
           {activeTab === "availability" && (
             <div className="space-y-4">

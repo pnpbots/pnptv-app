@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
+    <title>PNPtv! Studio</title>
+    <meta name="description" content="Stream live on PNPtv! — browser streaming, scenes, filters, and RTMP support." />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.cdnfonts.com/css/ethnocentric" rel="stylesheet" />
+    <style>
+      body { margin: 0; background: #121212; }
+      #splash {
+        position: fixed; inset: 0; z-index: 9999;
+        display: flex; align-items: center; justify-content: center;
+        background: #121212;
+        font-family: "Ethnocentric Rg", "Roboto Mono", monospace;
+        color: #fff; font-size: 1.25rem; letter-spacing: 0.1em;
+      }
+      #splash.hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="splash">PNPtv! Studio</div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

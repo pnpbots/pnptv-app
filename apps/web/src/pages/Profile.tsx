@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
-const StreamerDashboard = lazy(() => import("@/components/streaming/StreamerDashboard"));
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
@@ -24,7 +23,6 @@ import {
   unsubscribeFromCreator,
   initiateCreatorSubscriptionPayment,
   searchUsers,
-  getRtmpKey,
   getUserLabel,
   getLabelColor,
   assertPaymentUrl,
@@ -111,14 +109,6 @@ export default function Profile() {
       if (res.success) setProfileDistanceKm(res.distance_km);
     }).catch(() => {});
   }, [targetUserId, isOwnProfile, nearbyEnabled]);
-
-  // Go Live state
-  const [showGoLive, setShowGoLive] = useState(false);
-  const [rtmpInfo, setRtmpInfo] = useState<{ rtmpUrl: string; streamKey: string } | null>(null);
-  const [goLiveLoading, setGoLiveLoading] = useState(false);
-  const [goLiveError, setGoLiveError] = useState<string | null>(null);
-  const [showStreamKey, setShowStreamKey] = useState(false);
-  const [showBrowserStreamer, setShowBrowserStreamer] = useState(false);
 
   // Follow state
   const [isFollowing, setIsFollowing] = useState(false);
@@ -392,24 +382,6 @@ export default function Profile() {
   };
 
   const [followError, setFollowError] = useState<string | null>(null);
-
-  const handleGoLive = async () => {
-    setGoLiveLoading(true);
-    setGoLiveError(null);
-    try {
-      const result = await getRtmpKey();
-      if (result.success && result.rtmpUrl && result.streamKey) {
-        setRtmpInfo({ rtmpUrl: result.rtmpUrl, streamKey: result.streamKey });
-        setShowGoLive(true);
-      } else {
-        setGoLiveError(result.error || "Streaming unavailable");
-      }
-    } catch (err: unknown) {
-      setGoLiveError(err instanceof Error ? err.message : "Failed to load credentials");
-    } finally {
-      setGoLiveLoading(false);
-    }
-  };
 
   const handleFollow = async () => {
     if (followLoading || !profile) return;
@@ -1144,16 +1116,6 @@ export default function Profile() {
                     </button>
                   );
                 })()}
-                {profile.creatorStatus === "active" && (
-                  <button
-                    onClick={handleGoLive}
-                    disabled={goLiveLoading}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white btn-gradient disabled:opacity-50 transition-all"
-                  >
-                    <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                    {goLiveLoading ? "..." : "Go Live"}
-                  </button>
-                )}
               </div>
               {/* Secondary actions */}
               <div className="flex gap-2">
@@ -1322,90 +1284,6 @@ export default function Profile() {
           <p className="text-xs text-red-400 mt-2 text-center">{subscribeError}</p>
         )}
       </div>
-
-      {/* Go Live error */}
-      {goLiveError && (
-        <p className="text-xs text-center mt-2 text-pnp-error">{goLiveError}</p>
-      )}
-
-      {/* Go Live Modal */}
-      {showGoLive && rtmpInfo && !showBrowserStreamer && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowGoLive(false)}>
-          <div className="w-full max-w-lg bg-pnp-background border border-pnp-border rounded-t-2xl p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-bold text-pnp-textPrimary">Go Live</h2>
-              <button onClick={() => setShowGoLive(false)} className="text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors" aria-label="Close">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            {/* Stream from Browser — primary action */}
-            <button
-              onClick={() => { setShowGoLive(false); setShowBrowserStreamer(true); }}
-              className="w-full flex items-center gap-3 p-4 rounded-xl border border-pnp-accent/30 bg-pnp-accent/5 hover:bg-pnp-accent/10 transition-colors mb-4"
-            >
-              <div className="w-10 h-10 rounded-full bg-pnp-accent/20 flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-              </div>
-              <div className="text-left">
-                <p className="text-sm font-semibold text-pnp-textPrimary">Stream from this device</p>
-                <p className="text-xs text-pnp-textSecondary">Use your camera and microphone</p>
-              </div>
-              <svg className="w-4 h-4 text-pnp-textSecondary ml-auto flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-
-            <p className="text-xs text-pnp-textSecondary mb-3 uppercase tracking-wider font-semibold">Or use external app</p>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-pnp-textSecondary uppercase tracking-wider block mb-1">RTMP Server</label>
-                <div className="flex items-center gap-2 bg-pnp-surface border border-pnp-border rounded-lg px-3 py-2">
-                  <code className="text-sm text-pnp-textPrimary flex-1 break-all">{rtmpInfo.rtmpUrl}</code>
-                  <button onClick={() => navigator.clipboard?.writeText(rtmpInfo.rtmpUrl)} className="text-pnp-textSecondary hover:text-pnp-accent flex-shrink-0 transition-colors" aria-label="Copy RTMP URL">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="text-xs text-pnp-textSecondary uppercase tracking-wider block mb-1">Stream Key</label>
-                <div className="flex items-center gap-2 bg-pnp-surface border border-pnp-border rounded-lg px-3 py-2">
-                  <code className="text-sm text-pnp-textPrimary flex-1">
-                    {showStreamKey ? rtmpInfo.streamKey : "•".repeat(Math.min(rtmpInfo.streamKey.length, 20))}
-                  </code>
-                  <button onClick={() => setShowStreamKey(!showStreamKey)} className="text-pnp-textSecondary hover:text-pnp-accent flex-shrink-0 transition-colors" aria-label={showStreamKey ? "Hide stream key" : "Show stream key"}>
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      {showStreamKey ? (
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 4.411m0 0L21 21" />
-                      ) : (
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      )}
-                    </svg>
-                  </button>
-                  <button onClick={() => navigator.clipboard?.writeText(rtmpInfo.streamKey)} className="text-pnp-textSecondary hover:text-pnp-accent flex-shrink-0 transition-colors" aria-label="Copy stream key">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                  </button>
-                </div>
-                <p className="text-xs text-pnp-error mt-1">Never share your stream key with anyone.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Streamer Dashboard — full-screen overlay */}
-      {showBrowserStreamer && (
-        <Suspense fallback={
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-pnp-background">
-            <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
-          </div>
-        }>
-          <StreamerDashboard onClose={() => setShowBrowserStreamer(false)} />
-        </Suspense>
-      )}
 
       {/* ── Creator Subscription Payment Modal ── */}
       {showSubscribeModal && profile && (() => {
