@@ -55,7 +55,7 @@ class SocialPostService {
 
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
-              sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
+              sp.source_channel,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
               sp.is_promoted, sp.promoted_link, sp.promoted_link_label, sp.promoted_thumbnail,
@@ -95,7 +95,7 @@ class SocialPostService {
       const pinnedIds = new Set(page.filter(p => p.is_promoted).map(p => p.id));
       const { rows: promotedRows } = await query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
-                sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
+                sp.source_channel,
                 sp.reply_to_id, sp.repost_of_id,
                 sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
                 sp.is_promoted, sp.promoted_link, sp.promoted_link_label, sp.promoted_thumbnail,
@@ -199,7 +199,7 @@ class SocialPostService {
     const lim = Math.min(Number(limit) || 10, 20);
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
-              sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
+              sp.source_channel,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_wof, sp.created_at,
               u.id as author_id, u.username as author_username,
@@ -245,7 +245,7 @@ class SocialPostService {
 
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
-              sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
+              sp.source_channel,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_shareable, sp.is_wof, sp.created_at,
               COALESCE(sp.content_tier, 'free') as content_tier,
@@ -297,7 +297,7 @@ class SocialPostService {
     const [postsRes, profileRes] = await Promise.all([
       query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
-                sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
+                sp.source_channel,
                 sp.reply_to_id, sp.repost_of_id,
                 sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
                 COALESCE(sp.content_tier, 'free') as content_tier,
@@ -498,7 +498,7 @@ class SocialPostService {
     const [postsRes, profileRes, postCountRes, performerRes] = await Promise.all([
       query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
-                sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
+                sp.source_channel,
                 sp.reply_to_id, sp.repost_of_id,
                 sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
                 COALESCE(sp.content_tier, 'free') as content_tier,

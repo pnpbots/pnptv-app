@@ -96,7 +96,7 @@ async function createWebUser({ id, firstName, lastName, username, email, passwor
      RETURNING id, pnptv_id, first_name, last_name, username, email,
                subscription_status, tier, terms_accepted, photo_file_id, bio, language,
                telegram, twitter, x_id, role,
-               atproto_did, atproto_handle, atproto_pds_url`,
+`,
     [userId, pnptvId, firstName || 'User', lastName || null, displayName || null,
      email || null, passwordHash || null, telegramId || null, twitterHandle || null, xId || null, photoFileId || null]
   );
@@ -122,7 +122,7 @@ async function createWebUser({ id, firstName, lastName, username, email, passwor
 async function findOrLinkUser({ telegramId, twitterHandle, xId, email, firstName, lastName, username, photoFileId } = {}) {
   const RETURN_COLS = `id, pnptv_id, first_name, last_name, username, email,
     subscription_status, tier, terms_accepted, photo_file_id, bio, language, telegram, twitter, x_id, role,
-    atproto_did, atproto_handle, atproto_pds_url`;
+`;
 
   let user = null;
 
@@ -234,16 +234,11 @@ function buildSession(user, extra = {}) {
     role: user.role || 'user',
     creator_status: user.creator_status || 'none',
     contentDisclaimer: user.content_disclaimer || false,
-    // ATProto identity fields (preserved for hybrid session)
-    atproto_did: user.atproto_did || null,
-    atproto_handle: user.atproto_handle || null,
-    atproto_pds_url: user.atproto_pds_url || null,
     // X identity
     xHandle: user.twitter || user.x_username || extra.xHandle || null,
-    // Hybrid auth method flags — derived from available identity fields
+    // Auth method flags
     auth_methods: {
       telegram: !!(user.telegram),
-      atproto: !!(user.atproto_did),
       x: !!(user.twitter || user.x_user_id || user.x_id || extra.xHandle),
     },
     last_login_method: extra.last_login_method || user.last_login_method || null,
@@ -259,7 +254,7 @@ function setSessionCookieDuration(session, rememberMe = false) {
 
 // ── Unified service provisioning (fire-and-forget) ──────────────────────────
 // Called after every successful login to ensure all dependent services are set up.
-// Authentik is the source of truth; Matrix, PDS, and default follows are provisioned.
+// Authentik is the source of truth; Matrix and default follows are provisioned.
 function provisionAllServices(user) {
   setImmediate(async () => {
     const userId = user.id;
@@ -272,16 +267,7 @@ function provisionAllServices(user) {
       logger.warn(`[Provision] Matrix failed for user ${userId}: ${err.message}`);
     }
 
-    // 2. PDS / Bluesky — ATProto identity
-    try {
-      const PDSProvisioningService = require('../../services/PDSProvisioningService');
-      await PDSProvisioningService.createOrLinkPDS(user);
-      logger.info(`[Provision] PDS provisioned for user ${userId}`);
-    } catch (err) {
-      logger.warn(`[Provision] PDS failed for user ${userId}: ${err.message}`);
-    }
-
-    // 3. Default follows (idempotent)
+    // 2. Default follows (idempotent)
     enforceDefaultFollows(userId).catch(() => {});
   });
 }
@@ -458,7 +444,7 @@ const telegramCheckToken = async (req, res) => {
       req.session.save(err => (err ? reject(err) : resolve()))
     );
 
-    // Provision all services (Matrix, PDS, default follows) — fire-and-forget
+    // Provision all services (Matrix, default follows) — fire-and-forget
     provisionAllServices(user);
 
     logger.info(`Telegram deep link login: user ${user.id}`);
@@ -958,7 +944,7 @@ const oidcTokenExchange = async (req, res) => {
       req.session.save(err => (err ? reject(err) : resolve()))
     );
 
-    // 7. Provision all services (Matrix, PDS, default follows) — fire-and-forget
+    // 7. Provision all services (Matrix, default follows) — fire-and-forget
     provisionAllServices(user);
 
     logger.info(`OIDC token exchange successful: user ${user.id} (sub: ${profile.sub})`);
@@ -1495,7 +1481,7 @@ const xLoginCallback = async (req, res) => {
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );
-    // Provision all services (Matrix, PDS, default follows) — fire-and-forget
+    // Provision all services (Matrix, default follows) — fire-and-forget
     provisionAllServices(user);
     logger.info(`Web app X login: user ${user.id} via @${xHandle}`);
     return redirectToCanonicalApp(res);
@@ -2012,9 +1998,8 @@ const unlinkX = async (req, res) => {
 
     // Update session
     const hasTelegram = !!req.session.user?.auth_methods?.telegram;
-    const hasAtproto = !!req.session.user?.auth_methods?.atproto;
 
-    if (!hasTelegram && !hasAtproto) {
+    if (!hasTelegram) {
       // X was the only auth method — destroy session
       return req.session.destroy((err) => {
         if (err) logger.error('[X] Session destroy error during unlink:', err);
@@ -2119,7 +2104,7 @@ const telegramWidgetAuth = async (req, res) => {
       req.session.save(err => (err ? reject(err) : resolve()))
     );
 
-    // Provision all services (Matrix, PDS, default follows) — fire-and-forget
+    // Provision all services (Matrix, default follows) — fire-and-forget
     provisionAllServices(user);
 
     return res.json({
