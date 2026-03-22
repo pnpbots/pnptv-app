@@ -341,9 +341,9 @@ if (process.env.SENTRY_DSN) {
   logger.info('Sentry error tracking initialized');
 }
 
-// Trust proxy - required for rate limiting behind reverse proxy (nginx, etc.)
-// Setting to 1 trusts the first proxy (direct connection from nginx)
-app.set('trust proxy', 1);
+// Trust proxy - required for secure cookies and rate limiting behind reverse proxy
+// Setting to 2: Traefik (SSL termination) → nginx (SPA/routing) → Express
+app.set('trust proxy', 2);
 
 // CRITICAL: Apply body parsing FIRST for ALL routes
 // This must be before any route registration
