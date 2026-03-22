@@ -49,7 +49,7 @@ class PlatformBanService {
 
       // ── 1. Fetch full user record ────────────────────────────────────────────
       const userRes = await query(
-        `SELECT id, telegram, pnptv_id, email, username, x_id, bluesky_did, atproto_did, first_name
+        `SELECT id, telegram, pnptv_id, email, username, x_id, first_name
          FROM users WHERE id = $1`,
         [String(userId)]
       );
@@ -74,8 +74,8 @@ class PlatformBanService {
       const banRes = await query(
         `INSERT INTO platform_bans
            (user_id, telegram_id, pnptv_id, email, username,
-            x_id, bluesky_did, atproto_did, known_ips, reason, evidence, banned_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            x_id, known_ips, reason, evidence, banned_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
          RETURNING id`,
         [
           String(u.id),
@@ -84,8 +84,6 @@ class PlatformBanService {
           u.email      || null,
           u.username   || null,
           u.x_id       || null,
-          u.bluesky_did|| null,
-          u.atproto_did|| null,
           knownIps.length ? knownIps : null,
           reason,
           JSON.stringify(evidence),
@@ -195,9 +193,8 @@ class PlatformBanService {
    * @param {string} [ids.pnptvId]
    * @param {string} [ids.email]
    * @param {string} [ids.xId]
-   * @param {string} [ids.blueskyDid]
    */
-  static async isBanned({ userId, telegramId, pnptvId, email, xId, blueskyDid } = {}) {
+  static async isBanned({ userId, telegramId, pnptvId, email, xId } = {}) {
     try {
       const conditions = [];
       const values = [];
@@ -215,7 +212,6 @@ class PlatformBanService {
       add('pnptv_id',    pnptvId);
       add('email',       email);
       add('x_id',        xId);
-      add('bluesky_did', blueskyDid);
 
       if (conditions.length === 0) return null;
 

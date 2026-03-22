@@ -598,23 +598,28 @@ Type /subscribe to view membership plans and reactivate your access!`;
       }
 
       // Step 2b: Update other lifetime users to 'active' PRIME (plan_id contains 'lifetime' but NOT lifetime100)
-      const lifetimeResult = await query(`
-        UPDATE users
-        SET subscription_status = 'active',
-            tier = 'PRIME',
-            updated_at = NOW()
-        WHERE (plan_id ILIKE '%lifetime%' OR plan_id ILIKE '%life-time%')
-          AND plan_id != 'lifetime100'
-          AND (subscription_status != 'active' OR tier != 'PRIME')
-          AND id NOT IN (
-            SELECT DISTINCT user_id FROM user_entitlements
-            WHERE is_lifetime = true AND is_consumed = false
-          )
-        RETURNING id, username
-      `);
-      results.toActive += lifetimeResult.rowCount;
-      if (lifetimeResult.rowCount > 0) {
-        logger.info(`Activated ${lifetimeResult.rowCount} lifetime users`);
+      // Exclude users with lifetime entitlements (the DB trigger blocks tier changes on those)
+      try {
+        const lifetimeResult = await query(`
+          UPDATE users
+          SET subscription_status = 'active',
+              tier = 'PRIME',
+              updated_at = NOW()
+          WHERE (plan_id ILIKE '%lifetime%' OR plan_id ILIKE '%life-time%')
+            AND plan_id != 'lifetime100'
+            AND (subscription_status != 'active' OR tier != 'PRIME')
+            AND id NOT IN (
+              SELECT DISTINCT user_id FROM user_entitlements
+              WHERE is_lifetime = true AND is_consumed = false
+            )
+          RETURNING id, username
+        `);
+        results.toActive += lifetimeResult.rowCount;
+        if (lifetimeResult.rowCount > 0) {
+          logger.info(`Activated ${lifetimeResult.rowCount} lifetime users`);
+        }
+      } catch (ltErr) {
+        logger.warn(`Lifetime sync skipped (trigger protection): ${ltErr.message}`);
       }
 
       // Step 3: Mark expired entitlements as consumed

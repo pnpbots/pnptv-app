@@ -38,7 +38,6 @@ const globalBanCheck = () => async (ctx, next) => {
       pnptvId:    user?.pnptv_id    || undefined,
       email:      user?.email       || undefined,
       xId:        user?.x_id        || undefined,
-      blueskyDid: user?.bluesky_did || undefined,
     });
 
     if (ban) {

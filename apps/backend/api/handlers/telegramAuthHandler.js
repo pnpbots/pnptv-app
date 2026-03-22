@@ -1,6 +1,5 @@
 const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
-const PDSProvisioningService = require('../../bot/services/PDSProvisioningService');
 const PlatformBanService = require('../../bot/services/platformBanService');
 const AuthentikService = require('../../services/authentikService');
 const { isAdminUser } = require('../../bot/utils/helpers');
@@ -272,18 +271,7 @@ const handleTelegramAuth = async (req, res) => {
         logger.warn(`[Auth] Matrix provisioning failed (non-blocking): ${err.message}`);
       }
 
-      // 2. PDS / Bluesky — ATProto identity
-      try {
-        const pdsResult = await PDSProvisioningService.createOrLinkPDS(user);
-        logger.info(`[Auth] PDS provisioning completed for user ${user.id}:`, {
-          success: pdsResult.success,
-          status: pdsResult.status
-        });
-      } catch (pdsError) {
-        logger.warn(`[Auth] PDS provisioning failed (non-blocking): ${pdsError.message}`);
-      }
-
-      // 3. Default follows (idempotent)
+      // 2. Default follows (idempotent)
       enforceDefaultFollows(user.id).catch(() => {});
     });
 

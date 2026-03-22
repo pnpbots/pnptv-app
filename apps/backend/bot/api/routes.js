@@ -49,13 +49,11 @@ const referralService = require('../services/referralService');
 const { telegramAuth, checkTermsAccepted } = require('../../api/middleware/telegramAuth');
 const { handleTelegramAuth, handleAcceptTerms, checkAuthStatus } = require('../../api/handlers/telegramAuthHandler');
 
-// New route imports for auth, subscriptions, monetization, and PDS
+// New route imports for auth, subscriptions, monetization
 const authRoutes = require('./routes/authRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
 const modelRoutes = require('./routes/modelRoutes');
 const applyRoutes = require('./routes/applyRoutes');
-const pdsRoutes = require('./routes/pdsRoutes');
-const blueskyRoutes = require('./routes/blueskyRoutes');
 const elementRoutes = require('./routes/elementRoutes');
 const matrixController = require('./controllers/matrixController');
 const matrixMessageController = require('./controllers/matrixMessageController');
@@ -63,8 +61,7 @@ const creatorRoutes = require('./routes/creatorRoutes');
 const gamificationRoutes = require('./routes/gamificationRoutes');
 const canvaRoutes = require('./routes/canvaRoutes');
 
-// ATProto / Bluesky OAuth routes (public endpoints served at the monorepo root)
-const atprotoOAuthRoutes = require('./routes/atprotoOAuthRoutes');
+
 
 // Courtesy invite links — admin/model create, any authenticated user redeems
 const courtesyInviteRoutes = require('./routes/courtesyInviteRoutes');
@@ -75,8 +72,6 @@ const communityRoomController = require('./controllers/communityRoomController')
 // JaaS token generation (viewer, moderator, live streaming)
 const jaasController = require('./controllers/jaasController');
 
-// ATProto controller for profile fetching, unlinking, and cross-posting
-const atprotoController = require('./controllers/atprotoController');
 const SoundCloudService = require('../../services/soundCloudService');
 const AuthentikService = require('../../services/authentikService');
 
@@ -4680,101 +4675,6 @@ app.get('/api/proxy/live/streams', requireSessionAuth, requireMemberTier, asyncH
   }
 }));
 
-// --- Bluesky Social Proxy ---
-let _pdsAccessJwt = null;
-let _pdsJwtExpiry = 0;
-
-async function getPdsAccessToken() {
-  const now = Date.now();
-  if (_pdsAccessJwt && now < _pdsJwtExpiry) {
-    return _pdsAccessJwt;
-  }
-  const pdsUrl = process.env.BLUESKY_PDS_URL || 'http://bluesky-pds:3000';
-  const pdsHandle = process.env.PDS_ADMIN_HANDLE || '';
-  const pdsPassword = process.env.PDS_ACCOUNT_PASSWORD || '';
-  if (!pdsHandle || !pdsPassword) return null;
-
-  const resp = await axios.post(`${pdsUrl}/xrpc/com.atproto.server.createSession`, {
-    identifier: pdsHandle,
-    password: pdsPassword,
-  }, { timeout: 10000 });
-
-  _pdsAccessJwt = resp.data?.accessJwt;
-  // Cache for 90 minutes (tokens last ~2 hours)
-  _pdsJwtExpiry = now + 90 * 60 * 1000;
-  return _pdsAccessJwt;
-}
-
-app.get('/api/proxy/social/feed', requireSessionAuth, asyncHandler(async (req, res) => {
-  try {
-    const pdsUrl = process.env.BLUESKY_PDS_URL || 'http://bluesky-pds:3000';
-    const pdsHandle = process.env.PDS_ADMIN_HANDLE || '';
-    const { limit = 20 } = req.query;
-
-    if (!pdsHandle) {
-      return res.json({ success: true, posts: [], message: 'No PDS handle configured' });
-    }
-
-    // Authenticate to PDS
-    const token = await getPdsAccessToken();
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
-    // Self-hosted PDS: use listRecords instead of getAuthorFeed
-    // (getAuthorFeed requires AppView relay which standalone PDS lacks)
-    const handleResp = await axios.get(`${pdsUrl}/xrpc/com.atproto.identity.resolveHandle`, {
-      params: { handle: pdsHandle },
-      timeout: 5000,
-    });
-    const did = handleResp.data?.did;
-    if (!did) {
-      return res.json({ success: true, posts: [], message: 'Could not resolve handle' });
-    }
-
-    const resp = await axios.get(`${pdsUrl}/xrpc/com.atproto.repo.listRecords`, {
-      params: { repo: did, collection: 'app.bsky.feed.post', limit: +limit, reverse: true },
-      headers,
-      timeout: 10000,
-    });
-
-    // Also get the profile for display info
-    let profileName = '';
-    try {
-      const profileResp = await axios.get(`${pdsUrl}/xrpc/com.atproto.repo.getRecord`, {
-        params: { repo: did, collection: 'app.bsky.actor.profile', rkey: 'self' },
-        headers,
-        timeout: 5000,
-      });
-      profileName = profileResp.data?.value?.displayName || '';
-    } catch (_) { /* ignore if no profile */ }
-
-    const posts = (resp.data?.records || []).map((record) => ({
-      uri: record.uri,
-      cid: record.cid,
-      author: {
-        handle: pdsHandle,
-        displayName: profileName,
-        avatar: '',
-      },
-      record: {
-        text: record.value?.text || '',
-        createdAt: record.value?.createdAt || '',
-      },
-      likeCount: 0,
-      repostCount: 0,
-      replyCount: 0,
-    }));
-
-    res.json({ success: true, posts });
-  } catch (error) {
-    logger.error(`Social proxy feed error: ${error.message}`);
-    // Clear cached token on auth errors
-    if (error.response?.status === 401) {
-      _pdsAccessJwt = null;
-      _pdsJwtExpiry = 0;
-    }
-    res.json({ success: true, posts: [], message: 'Feed temporarily unavailable' });
-  }
-}));
 
 // Directus CMS internal URL (used by live performers and other CMS-backed routes)
 const DIRECTUS_INTERNAL_URL = process.env.DIRECTUS_URL || 'http://172.20.0.18:8055';
@@ -6845,9 +6745,6 @@ app.use('/api/model', modelRoutes);
 // Model/Creator application routes
 app.use('/api/apply', applyRoutes);
 
-// PDS provisioning routes
-app.use('/api/pds', pdsRoutes);
-app.use('/api/bluesky', blueskyRoutes);
 app.use('/api/element', elementRoutes);
 
 // ==========================================
@@ -7028,42 +6925,6 @@ app.put('/api/webapp/creator/next-show-date',
   requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
   asyncHandler(callBookingController.setNextShowDate));
 
-// ==========================================
-// ATProto / Bluesky OAuth Routes (PUBLIC — no session required)
-// These must be mounted at app root so the client_id URL and redirect_uri
-// match exactly what is served (e.g. https://pnptv.app/oauth/client-metadata.json)
-// ==========================================
-app.use('/', atprotoOAuthRoutes);
-
-// ==========================================
-// ATProto / Bluesky Profile & Social API Routes (session auth required)
-// ==========================================
-
-// GET  /api/atproto/profile       — fetch linked Bluesky profile (live from PDS)
-app.get('/api/atproto/profile', asyncHandler(atprotoController.getAtprotoProfile));
-
-// GET  /api/atproto/feed          — fetch user's Bluesky home timeline
-app.get('/api/atproto/feed', asyncHandler(atprotoController.getAtprotoFeed));
-
-// POST /api/atproto/like          — like a Bluesky post { uri, cid }
-app.post('/api/atproto/like', asyncHandler(atprotoController.likeBlueskyPost));
-
-// POST /api/atproto/repost        — repost a Bluesky post { uri, cid }
-app.post('/api/atproto/repost', asyncHandler(atprotoController.repostBlueskyPost));
-
-// POST /api/atproto/follow        — follow a Bluesky user { targetDid }
-app.post('/api/atproto/follow', asyncHandler(atprotoController.followBlueskyUser));
-
-// POST /api/webapp/auth/atproto/unlink — unlink Bluesky account (clears DID from user + revokes)
-app.post('/api/webapp/auth/atproto/unlink', requireSessionAuth, asyncHandler(atprotoController.unlinkAtproto));
-
-// POST /api/webapp/social/posts/:postId/crosspost-bluesky — cross-post a PNPtv post to Bluesky
-app.post(
-  '/api/webapp/social/posts/:postId/crosspost-bluesky',
-  requireSessionAuth,
-  socialActionLimiter,
-  asyncHandler(atprotoController.crossPostToBluesky)
-);
 
 // ==========================================
 // X (TWITTER) CROSS-POST ENDPOINTS

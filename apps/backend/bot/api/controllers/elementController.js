@@ -6,11 +6,10 @@
 const logger = require('../../../utils/logger');
 const { query } = require('../../../config/postgres');
 const ElementService = require('../../services/ElementService');
-const PDSProvisioningService = require('../../services/PDSProvisioningService');
 
 /**
  * POST /api/element/setup
- * Create Element account (auto-called after Bluesky setup)
+ * Create Element account
  *
  * Request:  {}
  * Response: { success: true, matrixUserId: "@user:element.pnptv.app", ... }
@@ -55,19 +54,6 @@ const setupElementAccount = async (req, res) => {
         already_exists: true,
         matrixUserId: existingElement.rows[0].external_user_id,
         message: 'Your Element account is already set up!'
-      });
-    }
-
-    // Verify PDS is provisioned (Element setup requires PDS)
-    const pdsMapping = await PDSProvisioningService.getUserPDSMapping(userId);
-
-    if (!pdsMapping) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'no_pds',
-          message: 'PDS must be provisioned first'
-        }
       });
     }
 

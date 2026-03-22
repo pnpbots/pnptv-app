@@ -79,7 +79,7 @@ const deleteMyAccount = async (req, res) => {
     //     using WHERE is_deleted = false exclude this record automatically.
     //   - Social media handles (instagram, twitter, x_id, x_username, etc.) are also
     //     PII that must be cleared.
-    //   - PDS/Bluesky credentials contain private keys and must be cleared.
+    //   - External credentials must be cleared.
     await query(
       `UPDATE users SET
         username            = $2,
@@ -106,10 +106,6 @@ const deleteMyAccount = async (req, res) => {
         x_username          = NULL,
         x_access_token_encrypted  = NULL,
         x_refresh_token_encrypted = NULL,
-        atproto_password    = NULL,
-        atproto_did         = NULL,
-        atproto_handle      = NULL,
-        atproto_pds_url     = NULL,
         canva_access_token_encrypted  = NULL,
         canva_refresh_token_encrypted = NULL,
         canva_user_id       = NULL,
