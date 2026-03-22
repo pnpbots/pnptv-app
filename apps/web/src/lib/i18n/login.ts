@@ -17,6 +17,11 @@ const strings = {
     lifetimeDealCta: "Get it →",
 
     // Auth buttons
+    signInWithPnptvId: "Sign in with PNPtv ID",
+    orContinueWith: "or continue with",
+    noAccountPrompt: "Don't have an account?",
+    createAccount: "Create one",
+    lastLoginedWith: "Last logged in with",
     loginWithTelegram: "Login with Telegram",
     waitingForTelegram: "Waiting for Telegram...",
     telegramInstructions: "Open Telegram and press Start to log in",

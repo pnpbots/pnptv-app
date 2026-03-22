@@ -12,6 +12,7 @@ const FileType = require('file-type');
 
 // ── Enforced follows (shared service) ────────────────────────────────────────
 const { enforceDefaultFollows } = require('../../services/followService');
+const AuthentikService = require('../../../services/authentikService');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -256,6 +257,35 @@ function setSessionCookieDuration(session, rememberMe = false) {
   session.cookie.maxAge = rememberMe ? 365 * dayMs : 90 * dayMs;
 }
 
+// ── Unified service provisioning (fire-and-forget) ──────────────────────────
+// Called after every successful login to ensure all dependent services are set up.
+// Authentik is the source of truth; Matrix, PDS, and default follows are provisioned.
+function provisionAllServices(user) {
+  setImmediate(async () => {
+    const userId = user.id;
+    // 1. Matrix — DMs and hangout chat rooms
+    try {
+      const matrixService = require('../../services/matrixService');
+      await matrixService.provisionMatrixUser(user);
+      logger.info(`[Provision] Matrix provisioned for user ${userId}`);
+    } catch (err) {
+      logger.warn(`[Provision] Matrix failed for user ${userId}: ${err.message}`);
+    }
+
+    // 2. PDS / Bluesky — ATProto identity
+    try {
+      const PDSProvisioningService = require('../../services/PDSProvisioningService');
+      await PDSProvisioningService.createOrLinkPDS(user);
+      logger.info(`[Provision] PDS provisioned for user ${userId}`);
+    } catch (err) {
+      logger.warn(`[Provision] PDS failed for user ${userId}: ${err.message}`);
+    }
+
+    // 3. Default follows (idempotent)
+    enforceDefaultFollows(userId).catch(() => {});
+  });
+}
+
 // ── Telegram Login Widget verification ───────────────────────────────────────
 
 function verifyTelegramAuth(data) {
@@ -390,6 +420,14 @@ const telegramCheckToken = async (req, res) => {
 
     const telegramId = String(telegramUser.id);
 
+    // Authentik sync — source of truth for identity
+    const pnptvId = await AuthentikService.syncTelegramUser(telegramUser);
+    if (pnptvId) {
+      logger.info(`[DeepLink] Authentik synced for Telegram ${telegramId}: ${pnptvId}`);
+    } else {
+      logger.warn(`[DeepLink] Authentik sync failed for Telegram ${telegramId}, continuing login`);
+    }
+
     const { user, isNew } = await findOrLinkUser({
       telegramId,
       firstName: telegramUser.first_name,
@@ -397,6 +435,12 @@ const telegramCheckToken = async (req, res) => {
       username: telegramUser.username,
       photoFileId: telegramUser.photo_url || null,
     });
+
+    // Persist Authentik UUID if available and not yet stored
+    if (pnptvId && (!user.pnptv_id || user.pnptv_id !== pnptvId)) {
+      query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2', [pnptvId, user.id]).catch(() => {});
+      user.pnptv_id = pnptvId;
+    }
 
     if (isNew) {
       logger.info(`Created new user via Telegram deep link: ${user.id} (@${user.username})`);
@@ -413,6 +457,9 @@ const telegramCheckToken = async (req, res) => {
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );
+
+    // Provision all services (Matrix, PDS, default follows) — fire-and-forget
+    provisionAllServices(user);
 
     logger.info(`Telegram deep link login: user ${user.id}`);
     return res.json({ authenticated: true, user: { id: user.id, username: user.username } });
@@ -814,6 +861,137 @@ const emailLogin = async (req, res) => {
   } catch (error) {
     logger.error('Email login error:', error);
     return res.status(500).json({ error: 'Login failed. Please try again.' });
+  }
+};
+
+/**
+ * POST /api/webapp/auth/oidc/token-exchange
+ * Exchange an Authentik OIDC access_token for a PNPtv backend session.
+ */
+const oidcTokenExchange = async (req, res) => {
+  try {
+    const { access_token } = req.body;
+    if (!access_token) {
+      return res.status(400).json({ error: 'access_token is required' });
+    }
+
+    // 1. Validate token against Authentik userinfo endpoint
+    const AUTHENTIK_URL = process.env.AUTHENTIK_URL || process.env.VITE_AUTHENTIK_URL || 'https://auth.pnptv.app';
+    let profile;
+    try {
+      const userinfoRes = await axios.get(`${AUTHENTIK_URL}/application/o/userinfo/`, {
+        headers: { 'Authorization': `Bearer ${access_token}` },
+        timeout: 8000,
+      });
+      profile = userinfoRes.data;
+    } catch (err) {
+      if (err.response?.status === 401) {
+        return res.status(401).json({ error: 'Invalid or expired token' });
+      }
+      throw err;
+    }
+
+    if (!profile.sub) {
+      return res.status(401).json({ error: 'Invalid token: missing sub claim' });
+    }
+
+    // 2. Find user by pnptv_id (Authentik UUID) or by email
+    let userResult = await query(
+      `SELECT * FROM users WHERE pnptv_id = $1 AND is_deleted = false`,
+      [profile.sub]
+    );
+
+    let user;
+    if (userResult.rows.length > 0) {
+      user = userResult.rows[0];
+    } else if (profile.email) {
+      userResult = await query(
+        `SELECT * FROM users WHERE email = $1 AND is_deleted = false`,
+        [profile.email.toLowerCase()]
+      );
+      if (userResult.rows.length > 0) {
+        user = userResult.rows[0];
+        // Link pnptv_id to this existing account if not already set
+        if (!user.pnptv_id) {
+          await query('UPDATE users SET pnptv_id = $1 WHERE id = $2', [profile.sub, user.id]);
+          user.pnptv_id = profile.sub;
+        }
+      }
+    }
+
+    if (!user) {
+      // 3. Create new user from Authentik profile
+      user = await createWebUser({
+        firstName: profile.given_name || profile.name || profile.preferred_username || 'Member',
+        lastName: profile.family_name || null,
+        email: profile.email || null,
+        username: profile.preferred_username || null,
+      });
+      await query(
+        'UPDATE users SET pnptv_id = $1, email_verified = true WHERE id = $2',
+        [profile.sub, user.id]
+      );
+      user.pnptv_id = profile.sub;
+      user.email_verified = true;
+      logger.info(`Created new user via Authentik OIDC: ${user.id} (sub: ${profile.sub})`);
+    }
+
+    // 4. Check bans
+    if (user.tier === 'banned') {
+      return res.status(403).json({ error: 'Account suspended' });
+    }
+
+    // 5. Update login metadata (fire-and-forget)
+    query(
+      `UPDATE users SET last_login_at = NOW(), last_login_method = 'oidc', updated_at = NOW() WHERE id = $1`,
+      [user.id]
+    ).catch(() => {});
+
+    // 6. Build session
+    const sessionData = buildSession(user, { last_login_method: 'oidc' });
+
+    await new Promise((resolve, reject) =>
+      req.session.regenerate(err => (err ? reject(err) : resolve()))
+    );
+    req.session.user = sessionData;
+    await new Promise((resolve, reject) =>
+      req.session.save(err => (err ? reject(err) : resolve()))
+    );
+
+    // 7. Provision all services (Matrix, PDS, default follows) — fire-and-forget
+    provisionAllServices(user);
+
+    logger.info(`OIDC token exchange successful: user ${user.id} (sub: ${profile.sub})`);
+
+    return res.json({
+      authenticated: true,
+      pnptvId: user.pnptv_id,
+      user: {
+        id: user.id,
+        pnptv_id: user.pnptv_id,
+        pnptvId: user.pnptv_id,
+        username: user.username,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        display_name: user.first_name || user.username || 'Member',
+        email: user.email,
+        subscription_type: user.subscription_status,
+        subscription_status: user.subscription_status,
+        tier: user.tier || 'free',
+        role: user.role || 'user',
+        terms_accepted: user.terms_accepted,
+        age_verified: user.age_verified,
+        photo_url: user.photo_file_id,
+        language: user.language || 'en',
+        creator_status: user.creator_status,
+        creator_type: user.creator_type,
+        last_login_method: 'oidc',
+      },
+      success: true,
+    });
+  } catch (error) {
+    logger.error('OIDC token exchange error:', error.message);
+    return res.status(500).json({ error: 'Authentication failed' });
   }
 };
 
@@ -1228,6 +1406,15 @@ const xLoginCallback = async (req, res) => {
 
     if (!xHandle) return redirectToCanonicalAuthError(res);
 
+    // Authentik sync — source of truth for identity
+    const xProfileForAuth = { id: xId, username: xHandle, name: xName, firstName: xName };
+    const pnptvId = await AuthentikService.syncXUser(xProfileForAuth);
+    if (pnptvId) {
+      logger.info(`[XLogin] Authentik synced for X @${xHandle}: ${pnptvId}`);
+    } else {
+      logger.warn(`[XLogin] Authentik sync failed for X @${xHandle}, continuing login`);
+    }
+
     // If already logged in via another method, prioritize linking to current session user
     if (req.session?.user?.id) {
       const existingId = req.session.user.id;
@@ -1252,6 +1439,10 @@ const xLoginCallback = async (req, res) => {
         `UPDATE users SET twitter = $1, x_id = COALESCE(x_id, $2), updated_at = NOW() WHERE id = $3`,
         [xHandle, xId, existingId]
       );
+      // Persist Authentik UUID if available
+      if (pnptvId) {
+        query('UPDATE users SET pnptv_id = COALESCE(pnptv_id, $1), updated_at = NOW() WHERE id = $2', [pnptvId, existingId]).catch(() => {});
+      }
       const { rows: updated } = await query(
         `SELECT id, pnptv_id, first_name, last_name, username, email,
                 subscription_status, terms_accepted, photo_file_id, bio, language, telegram, twitter, x_id, role
@@ -1268,6 +1459,8 @@ const xLoginCallback = async (req, res) => {
       await new Promise((resolve, reject) =>
         req.session.save(err => (err ? reject(err) : resolve()))
       );
+      // Provision all services — fire-and-forget
+      provisionAllServices(user);
       logger.info(`Linked X @${xHandle} to existing session user ${user.id}`);
       return redirectToCanonicalApp(res);
     }
@@ -1280,6 +1473,12 @@ const xLoginCallback = async (req, res) => {
       lastName: nameParts.join(' ') || null,
       username: xHandle,
     });
+
+    // Persist Authentik UUID if available and not yet stored
+    if (pnptvId && (!user.pnptv_id || user.pnptv_id !== pnptvId)) {
+      query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2', [pnptvId, user.id]).catch(() => {});
+      user.pnptv_id = pnptvId;
+    }
 
     if (isNew) {
       logger.info(`Created new user via X login: ${user.id} (@${xHandle})`);
@@ -1296,6 +1495,8 @@ const xLoginCallback = async (req, res) => {
     await new Promise((resolve, reject) =>
       req.session.save(err => (err ? reject(err) : resolve()))
     );
+    // Provision all services (Matrix, PDS, default follows) — fire-and-forget
+    provisionAllServices(user);
     logger.info(`Web app X login: user ${user.id} via @${xHandle}`);
     return redirectToCanonicalApp(res);
   } catch (error) {
@@ -1876,6 +2077,14 @@ const telegramWidgetAuth = async (req, res) => {
 
     const telegramId = String(id);
 
+    // Authentik sync — source of truth for identity
+    const pnptvId = await AuthentikService.syncTelegramUser({ id: telegramId, first_name, username });
+    if (pnptvId) {
+      logger.info(`[TelegramWidget] Authentik synced for Telegram ${telegramId}: ${pnptvId}`);
+    } else {
+      logger.warn(`[TelegramWidget] Authentik sync failed for Telegram ${telegramId}, continuing login`);
+    }
+
     const { user, isNew } = await findOrLinkUser({
       telegramId,
       firstName: first_name || null,
@@ -1883,6 +2092,12 @@ const telegramWidgetAuth = async (req, res) => {
       username: username || null,
       photoFileId: photo_url || null,
     });
+
+    // Persist Authentik UUID if available and not yet stored
+    if (pnptvId && (!user.pnptv_id || user.pnptv_id !== pnptvId)) {
+      query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2', [pnptvId, user.id]).catch(() => {});
+      user.pnptv_id = pnptvId;
+    }
 
     if (isNew) {
       logger.info(`[TelegramWidget] New user created: ${user.id} (@${user.username})`);
@@ -1904,12 +2119,15 @@ const telegramWidgetAuth = async (req, res) => {
       req.session.save(err => (err ? reject(err) : resolve()))
     );
 
+    // Provision all services (Matrix, PDS, default follows) — fire-and-forget
+    provisionAllServices(user);
+
     return res.json({
       success: true,
       isNew,
       user: {
         id: user.id,
-        pnptvId: user.pnptv_id,
+        pnptvId: user.pnptv_id || pnptvId,
         username: user.username,
         firstName: user.first_name,
         lastName: user.last_name,
@@ -1936,6 +2154,7 @@ module.exports = {
   telegramWidgetAuth,
   emailRegister,
   emailLogin,
+  oidcTokenExchange,
   verifyEmail,
   resendVerification,
   xLoginStart,

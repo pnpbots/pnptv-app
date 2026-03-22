@@ -6,9 +6,13 @@
  * Bridge layer between PNPtv users/rooms and the Synapse homeserver at
  * http://synapse:8008 (internal Docker network).
  *
- * All user accounts are provisioned automatically via the Synapse shared-secret
- * registration API — users never need to create or remember a Matrix password.
- * Their sole authentication surface is the PNPtv webapp session.
+ * All user accounts are provisioned automatically via the Synapse Admin API —
+ * users never need to create or remember a Matrix password, and no shared
+ * registration secret is required. Provisioning uses an admin access token to
+ * create/ensure the account exists (PUT /_synapse/admin/v2/users/...) and then
+ * obtains a fresh access token for that user via the admin login endpoint
+ * (POST /_synapse/admin/v1/users/.../login). Their sole authentication surface
+ * is the PNPtv webapp session.
  *
  * Matrix username format: pnptv_<telegram_id>  (e.g. pnptv_123456789)
  * Matrix user ID format:  @pnptv_<telegram_id>:matrix.pnptv.app
@@ -21,8 +25,6 @@ const { query } = require('../../config/postgres');
 const SYNAPSE_INTERNAL_URL = process.env.MATRIX_SYNAPSE_URL || 'http://synapse:8008';
 const MATRIX_SERVER_NAME   = process.env.MATRIX_SERVER_NAME || 'matrix.pnptv.app';
 const MATRIX_PUBLIC_URL    = process.env.MATRIX_PUBLIC_URL  || 'https://matrix.pnptv.app';
-const REGISTRATION_SECRET  = process.env.MATRIX_REGISTRATION_SECRET ||
-  ':#DWz*o&yO,koa8yBr4HoWBJ#g22ebMZOZI:8Wx5as0C=dO;vi';
 
 // AES-256-CBC encryption key derived from the app's ENCRYPTION_KEY
 const encryptionKey = () =>
@@ -47,13 +49,6 @@ function decryptToken(stored) {
   let decrypted  = decipher.update(enc, 'hex', 'utf8');
   decrypted += decipher.final('utf8');
   return decrypted;
-}
-
-// Build an HMAC-SHA1 MAC for the Synapse shared-secret registration protocol
-// Message: nonce NUL username NUL password NUL "notadmin"
-function buildRegistrationMac(nonce, username, password) {
-  const msg  = `${nonce}\x00${username}\x00${password}\x00notadmin`;
-  return crypto.createHmac('sha1', REGISTRATION_SECRET).update(msg).digest('hex');
 }
 
 // Thin fetch wrapper — throws on non-2xx unless the caller opts out via `raw`
@@ -131,107 +126,68 @@ async function synapsePut(path, body, token) {
 /**
  * Provision a Matrix account for a PNPtv user (idempotent).
  *
- * 1. If user.matrix_user_id is already set AND the stored token is valid,
- *    return the decrypted token immediately.
- * 2. Otherwise register via Synapse shared-secret API, login, persist
- *    encrypted credentials, and return them.
+ * 1. If user.matrix_user_id is already set AND the stored token passes a
+ *    whoami check, return the decrypted token immediately.
+ * 2. Otherwise use the Synapse Admin API to create/ensure the account exists,
+ *    obtain a fresh access token via the admin login endpoint (no password
+ *    required), persist encrypted credentials, and return them.
  *
  * @param {{ id: number, telegram: string, username?: string, first_name?: string, matrix_user_id?: string, matrix_access_token?: string }} user
  * @returns {{ matrixUserId: string, accessToken: string, homeserverUrl: string }}
  */
 async function provisionMatrixUser(user) {
-  // Determine Matrix username from PNPtv user ID (the canonical app identifier)
-  const matrixName  = `pnptv_${user.id}`.toLowerCase();
+  const telegramId  = user.telegram || String(user.id);
+  const matrixName  = `pnptv_${telegramId}`.toLowerCase();
   const matrixUserId = `@${matrixName}:${MATRIX_SERVER_NAME}`;
 
-  // Fast-path: credentials already stored
+  // Fast-path: credentials already stored and valid
   if (user.matrix_user_id && user.matrix_access_token) {
     try {
       const accessToken = decryptToken(user.matrix_access_token);
-
-      // Verify the token is still valid with a lightweight whoami call
       await synapseGet('/_matrix/client/v3/account/whoami', accessToken);
-
-      // Sync display name (best-effort, non-blocking)
-      const displayName = user.first_name || user.username || matrixName;
-      synapsePut(
-        `/_matrix/client/v3/profile/${encodeURIComponent(matrixUserId)}/displayname`,
-        { displayname: displayName },
-        accessToken
-      ).catch(() => {}); // fire-and-forget
-
       logger.debug(`[Matrix] Reusing existing credentials for user ${user.id} (${matrixUserId})`);
       return { matrixUserId, accessToken, homeserverUrl: MATRIX_PUBLIC_URL };
     } catch (verifyErr) {
-      // Token expired or invalid — fall through to re-provision
       logger.warn(`[Matrix] Stored token invalid for user ${user.id}, re-provisioning: ${verifyErr.message}`);
     }
   }
 
-  // Step 1: Obtain a registration nonce from Synapse
-  const nonceResp = await synapseGet('/_synapse/admin/v1/register');
-  const nonce = nonceResp.nonce;
+  const adminToken = await getAdminToken();
+  const displayName = user.first_name || user.username || matrixName;
 
-  // Step 2: Generate a random server-side password (users log in via PNPtv session, not password)
-  const password = crypto.randomBytes(32).toString('base64');
-  const mac      = buildRegistrationMac(nonce, matrixName, password);
-
-  // Step 3: Register the account
-  let registrationResult;
+  // Step 1: Ensure user exists via admin API (PUT is idempotent — creates or updates)
   try {
-    registrationResult = await synapsePost('/_synapse/admin/v1/register', {
-      nonce,
-      username:  matrixName,
-      password,
-      displayname: user.first_name || user.username || matrixName,
-      admin:     false,
-      mac,
-    });
-    logger.info(`[Matrix] Registered new account: ${matrixUserId}`);
-  } catch (regErr) {
-    if (regErr.errcode === 'M_USER_IN_USE') {
-      // Account already exists — proceed to login
-      logger.info(`[Matrix] Account already exists, logging in: ${matrixUserId}`);
-    } else {
-      throw regErr;
-    }
+    await synapsePut(
+      `/_synapse/admin/v2/users/${encodeURIComponent(matrixUserId)}`,
+      { displayname: displayName, admin: false, deactivated: false },
+      adminToken
+    );
+    logger.info(`[Matrix] Ensured user exists: ${matrixUserId}`);
+  } catch (ensureErr) {
+    logger.error(`[Matrix] Failed to ensure user ${matrixUserId}: ${ensureErr.message}`);
+    throw ensureErr;
   }
 
-  // If registration returned an access_token we can skip the login step
-  let accessToken = registrationResult?.access_token;
-  let deviceId    = registrationResult?.device_id;
-
-  if (!accessToken) {
-    // Step 4: Login to get a fresh access token
-    // We need the password — but if the account already existed we don't know it.
-    // Use the Synapse admin API to reset the password first, then login.
-    if (!registrationResult) {
-      // Account pre-existed: reset password via admin API so we can login
-      const adminToken = await getAdminToken();
-      await synapsePut(
-        `/_synapse/admin/v2/users/${encodeURIComponent(matrixUserId)}`,
-        { password, logout_devices: true },
-        adminToken
-      );
-    }
-
-    const loginResp = await synapsePost('/_matrix/client/v3/login', {
-      type:                        'm.login.password',
-      identifier:                  { type: 'm.id.user', user: matrixName },
-      password,
-      initial_device_display_name: `pnptv-webapp-${user.id}`,
-    });
-
+  // Step 2: Get access token via admin login API (no password needed)
+  let accessToken, deviceId;
+  try {
+    const loginResp = await synapsePost(
+      `/_synapse/admin/v1/users/${encodeURIComponent(matrixUserId)}/login`,
+      {},
+      adminToken
+    );
     accessToken = loginResp.access_token;
-    deviceId    = loginResp.device_id;
+    deviceId = loginResp.device_id || null;
+  } catch (loginErr) {
+    logger.error(`[Matrix] Admin login failed for ${matrixUserId}: ${loginErr.message}`);
+    throw loginErr;
   }
 
   if (!accessToken) {
     throw new Error(`[Matrix] Failed to obtain access token for ${matrixUserId}`);
   }
 
-  // Step 5: Set display name (best-effort, non-blocking)
-  const displayName = user.first_name || user.username || matrixName;
+  // Step 3: Set display name (best-effort)
   try {
     await synapsePut(
       `/_matrix/client/v3/profile/${encodeURIComponent(matrixUserId)}/displayname`,
@@ -242,7 +198,7 @@ async function provisionMatrixUser(user) {
     logger.warn(`[Matrix] Display name sync failed for ${matrixUserId}: ${dnErr.message}`);
   }
 
-  // Step 6: Persist encrypted credentials
+  // Step 4: Persist encrypted credentials
   const encryptedToken = encryptToken(accessToken);
   await query(
     `UPDATE users
@@ -251,7 +207,7 @@ async function provisionMatrixUser(user) {
          matrix_device_id    = $3,
          updated_at          = NOW()
      WHERE id = $4`,
-    [matrixUserId, encryptedToken, deviceId || null, user.id]
+    [matrixUserId, encryptedToken, deviceId, user.id]
   );
 
   logger.info(`[Matrix] Provisioned credentials for user ${user.id} -> ${matrixUserId}`);
@@ -432,14 +388,53 @@ async function getOrCreateDmRoom(userA, userB) {
     provisionMatrixUser(large),
   ]);
 
-  // Create DM room as userA
+  // Build display names for room metadata
+  const nameA = small.first_name || small.username || `User ${small.id}`;
+  const nameB = large.first_name || large.username || `User ${large.id}`;
+
+  // Create DM room as userA with upgraded properties
   const roomResp = await synapsePost(
     '/_matrix/client/v3/createRoom',
     {
       is_direct:     true,
       invite:        [credB.matrixUserId],
       preset:        'trusted_private_chat',
+      room_version:  '11',
+      name:          `${nameA} \u2194 ${nameB}`,
+      topic:         'PNPtv Direct Message',
       creation_content: { 'm.federate': false },
+      initial_state: [
+        {
+          type:      'm.room.encryption',
+          state_key: '',
+          content:   { algorithm: 'm.megolm.v1.aes-sha2' },
+        },
+        {
+          type:      'm.room.history_visibility',
+          state_key: '',
+          content:   { history_visibility: 'joined' },
+        },
+      ],
+      power_level_content_override: {
+        users: {
+          [credA.matrixUserId]: 50,
+          [credB.matrixUserId]: 50,
+        },
+        users_default: 0,
+        events_default: 0,
+        state_default: 50,
+        ban: 50,
+        kick: 50,
+        redact: 50,
+        invite: 50,
+        events: {
+          'm.room.name':         50,
+          'm.room.topic':        50,
+          'm.room.avatar':       50,
+          'm.room.power_levels': 100,
+          'm.room.encryption':   100,
+        },
+      },
     },
     credA.accessToken
   );
@@ -493,21 +488,46 @@ async function getOrCreateHangoutRoom(hangoutGroupId, creatorUser, groupName) {
   const roomResp = await synapsePost(
     '/_matrix/client/v3/createRoom',
     {
-      name:    groupName,
-      topic:   `PNPtv Hangout: ${groupName}`,
-      preset:  'private_chat',
+      name:       groupName,
+      topic:      `PNPtv Hangout \u2014 ${groupName}`,
+      preset:     'private_chat',
       visibility: 'private',
+      room_version: '11',
       creation_content: { 'm.federate': false },
+      initial_state: [
+        {
+          type:      'm.room.encryption',
+          state_key: '',
+          content:   { algorithm: 'm.megolm.v1.aes-sha2' },
+        },
+        {
+          type:      'm.room.history_visibility',
+          state_key: '',
+          content:   { history_visibility: 'shared' },
+        },
+        {
+          type:      'm.room.guest_access',
+          state_key: '',
+          content:   { guest_access: 'forbidden' },
+        },
+      ],
       power_level_content_override: {
-        // Creator gets power level 100 (room admin)
         users: { [creatorCreds.matrixUserId]: 100 },
         users_default: 0,
         events_default: 0,
         state_default: 50,
         ban: 50,
         kick: 50,
-        redact: 50,
+        redact: 0,
         invite: 0,
+        events: {
+          'm.room.name':         100,
+          'm.room.topic':        50,
+          'm.room.avatar':       50,
+          'm.room.power_levels': 100,
+          'm.room.encryption':   100,
+          'm.room.history_visibility': 100,
+        },
       },
     },
     creatorCreds.accessToken

@@ -4,45 +4,65 @@ import { handleCallback } from "@/lib/auth";
 import { redeemReferralCode } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  (window.location.hostname === "app.pnptv.app"
+    ? "https://app.pnptv.app"
+    : "https://pnptv.app");
+
 export default function AuthCallback() {
   const navigate = useNavigate();
   const { refreshUser } = useAuth();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const returnTo = params.get("return_to") || "/";
-    // Sanitise return_to: only allow same-origin relative paths
-    const safeDest = returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/";
+    handleCallback()
+      .then(async (oidcUser) => {
+        // Exchange OIDC access token for a backend session cookie
+        const token = oidcUser?.access_token;
+        if (token) {
+          try {
+            const res = await fetch(
+              `${API_BASE}/api/webapp/auth/oidc/token-exchange`,
+              {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ access_token: token }),
+              }
+            );
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.authenticated) {
+              localStorage.setItem("pnptv_last_auth", "pnptv_id");
+              if (data.user?.username) {
+                localStorage.setItem("pnptv_last_username", data.user.username);
+              }
+              await refreshUser();
+            } else {
+              console.warn(
+                "[AuthCallback] Token exchange rejected:",
+                res.status,
+                data
+              );
+            }
+          } catch (err) {
+            console.warn("[AuthCallback] Token exchange failed:", err);
+          }
+        }
 
-    const finish = async () => {
-      // Redeem referral code if one was stored before login
-      const refCode = localStorage.getItem("pnptv:pendingRef");
-      if (refCode) {
-        localStorage.removeItem("pnptv:pendingRef");
-        redeemReferralCode(refCode).catch(() => {});
-      }
-      await refreshUser();
-      navigate(safeDest, { replace: true });
-    };
+        // Redeem referral code if one was stored before login
+        const refCode = localStorage.getItem("pnptv:pendingRef");
+        if (refCode) {
+          localStorage.removeItem("pnptv:pendingRef");
+          redeemReferralCode(refCode).catch(() => {});
+        }
 
-    // If there is an OIDC authorization code in the URL, this is a client-side
-    // OIDC redirect (oidc-client-ts flow). Process it first, then sync session.
-    // If there is no code, the backend has already handled the callback and
-    // established the cookie session — just refresh and redirect.
-    if (params.get("code")) {
-      handleCallback()
-        .then(() => finish())
-        .catch((err) => {
-          setError(err?.message || "Authentication failed");
-        });
-    } else {
-      finish().catch((err) => {
+        navigate("/", { replace: true });
+      })
+      .catch((err) => {
         setError(err?.message || "Authentication failed");
       });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [navigate, refreshUser]);
 
   if (error) {
     return (

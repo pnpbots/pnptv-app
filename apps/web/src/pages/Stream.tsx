@@ -6,7 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 import { useI18n } from "@/lib/i18n";
 import { LivePlayer } from "@/components/LivePlayer";
-import { WebRTCPlayer } from "@/components/WebRTCPlayer";
+import { JitsiMeetComponent } from "@/components/hangouts";
 import { LiveRulesModal } from "@/components/LiveRulesModal";
 import { BuyTokensModal } from "@/components/BuyTokensModal";
 import { connectSocket } from "@/lib/socket";
@@ -16,10 +16,8 @@ import {
   getAllPerformers,
   getWebRTCStreams,
   getWebRTCStreamStatus,
-  getWebAppLiveStreams,
-  initiateRaid,
-  setHostedChannel,
-  getHostedChannel,
+  getWebRTCViewerToken,
+  streamHeartbeat,
   sendTip,
   TIP_AMOUNTS,
   getStreamOverlayPublic,
@@ -50,6 +48,8 @@ export default function Stream() {
 
   const [stream, setStream] = useState<LiveStream | null>(null);
   const [useWebRTC, setUseWebRTC] = useState(false);
+  const [jaasUrl, setJaasUrl] = useState<string | null>(null);
+  const [jaasError, setJaasError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<StreamOverlay | null>(null);
@@ -139,7 +139,7 @@ export default function Stream() {
   // Share button state
   const [shareCopied, setShareCopied] = useState(false);
 
-  // Load stream info. Checks WebRTC (LiveKit) streams first, then falls back
+  // Load stream info. Checks WebRTC (JaaS) streams first, then falls back
   // to Restreamer HLS streams and performer lookup.
   const loadStream = useCallback(() => {
     if (!streamId) return Promise.resolve();
@@ -158,7 +158,7 @@ export default function Stream() {
 
         console.log("[Stream] WebRTC streams:", webrtcStreams.length, "HLS streams:", hlsStreams.length, "Performers:", performers.length);
 
-        // 1. Check WebRTC (LiveKit) streams — preferred, sub-500ms latency
+        // 1. Check WebRTC (JaaS) streams — preferred
         const webrtcMatch = webrtcStreams.find(
           (s: any) => s.channelRef === streamId || s.channelRef === channelRef || s.id === streamId
         );
@@ -247,7 +247,7 @@ export default function Stream() {
         }
 
         // 6. Last resort: call the WebRTC status endpoint directly for the specific channel.
-        // If the channel exists in LiveKit (room was created even with 0 participants), show
+        // If the channel exists in JaaS (room was created even with 0 participants), show
         // it as "offline" rather than "not found". This handles the streamer's own page view
         // before they go live.
         if (channelRef) {
@@ -288,6 +288,55 @@ export default function Stream() {
     const interval = setInterval(loadStream, 30000);
     return () => clearInterval(interval);
   }, [loadStream]);
+
+  // Fetch JaaS meeting URL when the stream is WebRTC-based
+  useEffect(() => {
+    if (!useWebRTC || !stream) {
+      setJaasUrl(null);
+      setJaasError(null);
+      return;
+    }
+    const channelRef = extractChannelRef(stream.id) || stream.id;
+    setJaasUrl(null);
+    setJaasError(null);
+    getWebRTCViewerToken(channelRef)
+      .then((data) => {
+        if (data.meetingUrl) {
+          setJaasUrl(data.meetingUrl);
+        } else if (data.token) {
+          // Legacy wsUrl path — not expected after migration but guard against it
+          setJaasError("Stream requires a viewer token but no meeting URL was returned.");
+        } else {
+          setJaasError(data.error as string | undefined ?? "Unable to connect to stream.");
+        }
+      })
+      .catch((err: any) => {
+        setJaasError(err?.message || "Failed to load stream connection.");
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useWebRTC, stream?.id]);
+
+  // Heartbeat for token deduction while watching a WebRTC stream
+  useEffect(() => {
+    if (!useWebRTC || !stream || !jaasUrl) return;
+    const channelRef = extractChannelRef(stream.id) || stream.id;
+    const interval = setInterval(async () => {
+      try {
+        const res = await streamHeartbeat(channelRef);
+        if (res.success && typeof res.newBalance === "number" && res.newBalance >= 0) {
+          setTokenBalance(res.newBalance);
+        }
+      } catch (err: any) {
+        if (err?.status === 402 || err?.response?.status === 402) {
+          setShowTopUp(true);
+          setJaasUrl(null);
+          setJaasError("Insufficient tokens to continue watching.");
+        }
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useWebRTC, stream?.id, jaasUrl]);
 
   // Fallback poll: refresh viewer count from the streams endpoint every 30s
   // when Socket.IO is disconnected so the displayed count does not freeze.
@@ -908,17 +957,40 @@ export default function Stream() {
       {/* Video Player */}
       <div ref={videoContainerRef} className="relative -mx-4 sm:-mx-6">
         {useWebRTC ? (
-          <WebRTCPlayer 
-            channelRef={extractChannelRef(stream.id) || stream.id} 
-            title={stream.name} 
-            onBalanceUpdate={(bal) => {
-              if (bal === -1) {
-                setShowTopUp(true);
-              } else {
-                setTokenBalance(bal);
-              }
-            }}
-          />
+          jaasError ? (
+            <div className="relative aspect-video overflow-hidden rounded-xl bg-pnp-surface border border-pnp-border flex items-center justify-center">
+              <div className="text-center px-6">
+                <p className="text-pnp-error font-bold mb-2">Unable to Connect</p>
+                <p className="text-sm text-pnp-textSecondary mb-4">{jaasError}</p>
+                <button
+                  onClick={() => {
+                    setJaasError(null);
+                    setJaasUrl(null);
+                    setUseWebRTC(false);
+                    setLoading(true);
+                    loadStream().finally(() => setLoading(false));
+                  }}
+                  className="px-5 py-2.5 rounded-lg text-xs font-semibold text-white btn-gradient"
+                >
+                  Try Again
+                </button>
+              </div>
+            </div>
+          ) : jaasUrl ? (
+            <JitsiMeetComponent
+              meetingUrl={jaasUrl}
+              roomName={stream.name}
+              onCallEnd={() => {
+                setJaasUrl(null);
+                setUseWebRTC(false);
+              }}
+              className="w-full aspect-video"
+            />
+          ) : (
+            <div className="relative aspect-video overflow-hidden rounded-xl bg-pnp-surface border border-pnp-border flex items-center justify-center">
+              <div className="w-10 h-10 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+            </div>
+          )
         ) : (
           <LivePlayer src={stream.hlsUrl} title={stream.name} overlay={overlay} />
         )}

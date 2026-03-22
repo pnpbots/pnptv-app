@@ -10,8 +10,10 @@
   "room_directory": {
     "servers": ["matrix.pnptv.app"]
   },
-  "sso_redirect_options": {
-    "immediate": false,
-    "on_welcome_page": true
-  }
+  "setting_defaults": {
+    "UIFeature.registration": false,
+    "UIFeature.passwordReset": false
+  },
+  "disable_custom_urls": true,
+  "disable_guests": true
 }

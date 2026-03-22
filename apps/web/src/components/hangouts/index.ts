@@ -8,8 +8,6 @@ export { MediaUploadButton } from "./MediaUploadButton";
 export { VideoCallButton } from "./VideoCallButton";
 export { VideoCallBanner } from "./VideoCallBanner";
 export { JitsiMeetComponent } from "./JitsiMeetComponent";
-export { LiveKitMeetComponent } from "./LiveKitMeetComponent";
 export { VideoCallOverlay } from "./VideoCallOverlay";
 
-export { VideoCallModBot } from "./VideoCallModBot";
 export { HangoutMusicBar } from "./HangoutMusicBar";

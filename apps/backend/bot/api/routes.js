@@ -2369,6 +2369,7 @@ app.get('/api/webapp/auth/telegram/check', telegramCheckLimiter, asyncHandler(we
 app.post('/api/webapp/auth/telegram/widget', telegramWidgetLimiter, asyncHandler(webAppController.telegramWidgetAuth));
 app.post('/api/webapp/auth/email/register', authLimiter, asyncHandler(webAppController.emailRegister));
 app.post('/api/webapp/auth/email/login', authLimiter, asyncHandler(webAppController.emailLogin));
+app.post('/api/webapp/auth/oidc/token-exchange', authLimiter, asyncHandler(webAppController.oidcTokenExchange));
 
 // Request account recovery — delegates to the existing forgot-password handler
 app.post('/api/webapp/auth/recover-account', authLimiter, asyncHandler(async (req, res) => {
@@ -2942,14 +2943,14 @@ app.put('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSe
 const streamBridgeController = require('./controllers/streamBridgeController');
 app.get('/api/webapp/live/my-channel', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamBridgeController.getMyChannel));
 
-// LiveKit WebRTC Streaming — sub-500ms latency, replaces Restreamer pipeline
-const livekitStreamController = require('./controllers/livekitStreamController');
-app.get('/api/webapp/live/webrtc/config', requireSessionAuth, asyncHandler(livekitStreamController.getStreamerConfig));
-app.get('/api/webapp/live/webrtc/viewer-token/:channelRef', requireSessionAuth, requireMemberTier, asyncHandler(livekitStreamController.getViewerToken));
-app.get('/api/webapp/live/webrtc/streams', requireSessionAuth, requireMemberTier, asyncHandler(livekitStreamController.listStreams));
-app.get('/api/webapp/live/webrtc/status/:channelRef', requireSessionAuth, asyncHandler(livekitStreamController.getStreamStatus));
-app.post('/api/webapp/live/webrtc/end', requireSessionAuth, asyncHandler(livekitStreamController.endStream));
-app.post('/api/webapp/live/webrtc/heartbeat', requireSessionAuth, asyncHandler(livekitStreamController.streamHeartbeat));
+// JaaS WebRTC Streaming — replaces Restreamer pipeline
+const jaasStreamController = require('./controllers/jaasStreamController');
+app.get('/api/webapp/live/webrtc/config', requireSessionAuth, asyncHandler(jaasStreamController.getStreamerConfig));
+app.get('/api/webapp/live/webrtc/viewer-token/:channelRef', requireSessionAuth, requireMemberTier, asyncHandler(jaasStreamController.getViewerToken));
+app.get('/api/webapp/live/webrtc/streams', requireSessionAuth, requireMemberTier, asyncHandler(jaasStreamController.listStreams));
+app.get('/api/webapp/live/webrtc/status/:channelRef', requireSessionAuth, asyncHandler(jaasStreamController.getStreamStatus));
+app.post('/api/webapp/live/webrtc/end', requireSessionAuth, asyncHandler(jaasStreamController.endStream));
+app.post('/api/webapp/live/webrtc/heartbeat', requireSessionAuth, asyncHandler(jaasStreamController.streamHeartbeat));
 
 // Stream Auto-Chat (Grok-generated messages that post to live chat at intervals)
 const streamAutoController = require('./controllers/streamAutoController');
@@ -6901,20 +6902,6 @@ app.post('/api/jaas/live-token', requireSessionAuth, jaasTokenLimiter, asyncHand
 app.post('/api/jaas/refresh-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.refreshToken));
 */
 
-// ── LiveKit Token Endpoints ─────────────────────────────────────────────────
-const livekitController = require('./controllers/livekitController');
-const livekitTokenLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 20,
-  keyGenerator: (req) => String(req.session?.user?.id || req.ip),
-  handler: (req, res) => res.status(429).json({ error: 'Too many token requests. Please wait before generating another token.' }),
-  standardHeaders: true,
-  legacyHeaders: false,
-  skipFailedRequests: false,
-});
-
-app.get('/api/livekit/status', asyncHandler(livekitController.getStatus));
-app.post('/api/livekit/token', requireSessionAuth, livekitTokenLimiter, asyncHandler(livekitController.getToken));
 
 // ── Book a Call ──────────────────────────────────────────────────────────────
 const callPackageController = require('./controllers/callPackageController');

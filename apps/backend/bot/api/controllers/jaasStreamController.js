@@ -1,15 +1,16 @@
 'use strict';
 
 /**
- * livekitStreamController.js
+ * jaasStreamController.js
  *
- * REST endpoints for LiveKit-based live streaming.
- * Replaces the Restreamer proxy for browser streaming and adds WebRTC viewer tokens.
+ * REST endpoints for JaaS-based live streaming.
+ * Powered by JaaS (8x8.vc).
+ * Route paths are unchanged so existing frontend integrations continue to work.
  */
 
 const logger = require('../../../utils/logger');
 const { getPool } = require('../../../config/postgres');
-const livekitStreamService = require('../../services/livekitStreamService');
+const jaasStreamService = require('../../services/jaasStreamService');
 
 // Lazy-load tokenService so a load failure degrades only the heartbeat
 // endpoint rather than crashing the entire controller at require time.
@@ -19,7 +20,7 @@ function getTokenService() {
     try {
       _tokenService = require('../../services/tokenService');
     } catch (e) {
-      logger.error('[livekitStreamController] tokenService failed to load — streamHeartbeat will be unavailable:', e.message);
+      logger.error('[jaasStreamController] tokenService failed to load — streamHeartbeat will be unavailable:', e.message);
       _tokenService = null;
     }
   }
@@ -29,9 +30,9 @@ function getTokenService() {
 /**
  * GET /api/webapp/live/webrtc/config
  *
- * Returns the LiveKit WebSocket URL, streamer token, and room info
+ * Returns the JaaS meeting URL, streamer token, room name, and domain
  * for the authenticated user's assigned channel.
- * The frontend uses this to connect via livekit-client SDK.
+ * The frontend uses this to embed a JaaS (Jitsi) room as moderator.
  */
 const getStreamerConfig = async (req, res) => {
   const user = req.session.user;
@@ -56,8 +57,8 @@ const getStreamerConfig = async (req, res) => {
       || rows[0].username || 'Streamer';
     const photoUrl = rows[0].photo_file_id || '';
 
-    // Ensure the room exists
-    await livekitStreamService.ensureStreamRoom(channelRef);
+    // Register the channel in the Redis active-rooms set
+    await jaasStreamService.ensureStreamRoom(channelRef);
 
     // Signal streaming active in Redis (used by auto-chat controller)
     try {
@@ -70,17 +71,22 @@ const getStreamerConfig = async (req, res) => {
       logger.warn('Failed to set streaming:active flag in Redis', { userId: user.id, error: redisErr.message });
     }
 
-    // Generate a publisher token
-    const token = await livekitStreamService.generateStreamerToken(
+    // Generate a JaaS moderator token (streamer / publisher role)
+    const token = await jaasStreamService.generateStreamerToken(
       channelRef, user.id, displayName, photoUrl
     );
+
+    const roomName = jaasStreamService.toRoomName(channelRef);
+    const meetingUrl = jaasStreamService.toMeetingUrl(roomName, token);
 
     return res.json({
       success: true,
       token,
-      wsUrl: livekitStreamService.LIVEKIT_WS_URL,
-      roomName: livekitStreamService.toRoomName(channelRef),
+      meetingUrl,
+      roomName,
       channelRef,
+      domain: jaasStreamService.JAAS_DOMAIN,
+      appId: jaasStreamService.JAAS_APP_ID,
     });
   } catch (err) {
     logger.error('getStreamerConfig error', err);
@@ -91,7 +97,7 @@ const getStreamerConfig = async (req, res) => {
 /**
  * GET /api/webapp/live/webrtc/viewer-token/:channelRef
  *
- * Returns a subscribe-only LiveKit token for viewing a live stream.
+ * Returns a subscriber-only JaaS token for viewing a live stream.
  */
 const getViewerToken = async (req, res) => {
   const user = req.session.user;
@@ -105,7 +111,7 @@ const getViewerToken = async (req, res) => {
     const displayName = [user.first_name, user.last_name].filter(Boolean).join(' ')
       || user.username || 'Viewer';
 
-    const token = await livekitStreamService.generateViewerToken(
+    const token = await jaasStreamService.generateViewerToken(
       channelRef, user.id, displayName
     );
 
@@ -116,11 +122,16 @@ const getViewerToken = async (req, res) => {
       });
     }
 
+    const roomName = jaasStreamService.toRoomName(channelRef);
+    const meetingUrl = jaasStreamService.toMeetingUrl(roomName, token);
+
     return res.json({
       success: true,
       token,
-      wsUrl: livekitStreamService.LIVEKIT_WS_URL,
-      roomName: livekitStreamService.toRoomName(channelRef),
+      meetingUrl,
+      roomName,
+      domain: jaasStreamService.JAAS_DOMAIN,
+      appId: jaasStreamService.JAAS_APP_ID,
     });
   } catch (err) {
     logger.error('getViewerToken error', err);
@@ -131,12 +142,12 @@ const getViewerToken = async (req, res) => {
 /**
  * GET /api/webapp/live/webrtc/streams
  *
- * Lists active LiveKit live streams with participant counts.
+ * Lists active JaaS live streams tracked in Redis.
  * Enriches with user info from the database.
  */
 const listStreams = async (req, res) => {
   try {
-    const streams = await livekitStreamService.listActiveStreams();
+    const streams = await jaasStreamService.listActiveStreams();
 
     if (streams.length === 0) {
       return res.json({ success: true, streams: [] });
@@ -197,11 +208,14 @@ const listStreams = async (req, res) => {
         tags: (meta && Array.isArray(meta.tags)) ? meta.tags : [],
         thumbnailUrl: thumbMap[s.channelRef] || null,
         isLive: s.isLive,
-        viewerCount: Math.max(0, s.participantCount - 1), // subtract the streamer
-        userId: u ? u.id : null,
-        photoUrl: u ? u.photo_file_id : null,
-        performerName: displayName,
-        // No hlsUrl — WebRTC only (HLS fallback handled by LiveKit automatically)
+        // JaaS does not expose server-side participant counts; frontend tracks
+        // via its own participant-joined events after embedding.
+        viewerCount: 0,
+        userId: u?.id || null,
+        photoUrl: u?.photo_file_id || null,
+        roomName: s.roomName,
+        domain: jaasStreamService.JAAS_DOMAIN,
+        appId: jaasStreamService.JAAS_APP_ID,
       };
     });
 
@@ -216,6 +230,7 @@ const listStreams = async (req, res) => {
  * GET /api/webapp/live/webrtc/status/:channelRef
  *
  * Returns the live status of a specific channel.
+ * Backed by Redis streaming:rooms set membership.
  */
 const getStreamStatus = async (req, res) => {
   const { channelRef } = req.params;
@@ -224,21 +239,22 @@ const getStreamStatus = async (req, res) => {
   }
 
   try {
-    const status = await livekitStreamService.getStreamStatus(channelRef);
+    const status = await jaasStreamService.getStreamStatus(channelRef);
     if (!status) {
-      return res.json({ success: true, isLive: false, participantCount: 0 });
+      return res.json({ success: true, isLive: false, participantCount: 0, streamerConnected: false });
     }
     return res.json({ success: true, ...status });
   } catch (err) {
     logger.error('getStreamStatus error', err);
-    return res.json({ success: true, isLive: false, participantCount: 0 });
+    return res.json({ success: true, isLive: false, participantCount: 0, streamerConnected: false });
   }
 };
 
 /**
  * POST /api/webapp/live/webrtc/end
  *
- * End the current user's live stream (delete the LiveKit room).
+ * End the current user's live stream.
+ * Removes the channel from the Redis active-rooms set and clears the active flag.
  */
 const endStream = async (req, res) => {
   const user = req.session.user;
@@ -253,7 +269,7 @@ const endStream = async (req, res) => {
       return res.status(404).json({ success: false, error: 'No channel assigned' });
     }
 
-    await livekitStreamService.endStream(channelRef);
+    await jaasStreamService.endStream(channelRef);
 
     // Signal streaming inactive in Redis
     try {
@@ -273,6 +289,12 @@ const endStream = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/webapp/live/webrtc/heartbeat
+ *
+ * Deducts viewer tokens on a recurring interval while the viewer is watching.
+ * Business logic is unchanged — only the service layer backing changed.
+ */
 const streamHeartbeat = async (req, res) => {
   const user = req.session.user;
   const { channelRef } = req.body;

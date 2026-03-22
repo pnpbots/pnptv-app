@@ -15,10 +15,10 @@ import type { EventItem } from "@/components/events/EventCard";
 import { CallPackageCards } from "@/components/creators/CallPackageCards";
 import { SpotlightStrip, type SpotlightItem } from "@/components/SpotlightStrip";
 import { BuyTokensModal } from "@/components/BuyTokensModal";
-import { getUpcomingEvents } from "@/lib/api";
+import { JitsiMeetComponent } from "@/components/hangouts";
+import { getUpcomingEvents, getWebRTCStreamerConfig } from "@/lib/api";
 
 const StreamerDashboard = lazy(() => import("@/components/streaming/StreamerDashboard"));
-const WebRTCStreamer = lazy(() => import("@/components/WebRTCStreamer"));
 import {
   getFeaturedPerformers,
   getLiveStreams,
@@ -158,6 +158,9 @@ export default function Live() {
 
   // Go Live
   const [showBrowserStreamer, setShowBrowserStreamer] = useState(false);
+  const [streamerMeetingUrl, setStreamerMeetingUrl] = useState<string | null>(null);
+  const [streamerConnecting, setStreamerConnecting] = useState(false);
+  const [streamerError, setStreamerError] = useState<string | null>(null);
 
   // Socket (null stream — connected only for wallet push events)
   const {
@@ -762,12 +765,16 @@ export default function Live() {
         </div>
       )}
 
-      {/* WebRTC Streamer — sub-500ms latency via LiveKit */}
+      {/* Go Live — JaaS video call for streamers */}
       {showBrowserStreamer && (
         <div className="fixed inset-0 z-50 bg-pnp-background overflow-y-auto">
           <div className="max-w-2xl mx-auto px-4 py-6">
             <button
-              onClick={() => setShowBrowserStreamer(false)}
+              onClick={() => {
+                setShowBrowserStreamer(false);
+                setStreamerMeetingUrl(null);
+                setStreamerError(null);
+              }}
               className="mb-4 flex items-center gap-1.5 text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -775,13 +782,75 @@ export default function Live() {
               </svg>
               Back to Live
             </button>
-            <Suspense fallback={
-              <div className="flex items-center justify-center py-20">
-                <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+
+            {!streamerMeetingUrl && !streamerError && (
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-base font-bold text-white">{t.live.browserStreamerTitle ?? "Go Live"}</h2>
+                  <p className="text-xs text-pnp-textSecondary mt-0.5">Start a JaaS video call that viewers can join</p>
+                </div>
+                {streamerConnecting ? (
+                  <div className="flex items-center justify-center py-16">
+                    <div className="w-10 h-10 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      setStreamerConnecting(true);
+                      setStreamerError(null);
+                      try {
+                        const config = await getWebRTCStreamerConfig();
+                        if (config.meetingUrl) {
+                          setStreamerMeetingUrl(config.meetingUrl);
+                        } else {
+                          setStreamerError(config.error ?? t.live.noChannelAssigned ?? "No channel assigned. Contact support.");
+                        }
+                      } catch (err: any) {
+                        setStreamerError(err?.message || "Failed to start stream.");
+                      } finally {
+                        setStreamerConnecting(false);
+                      }
+                    }}
+                    className="w-full flex items-center justify-center gap-2.5 min-h-[52px] px-6 rounded-2xl text-sm font-bold text-white btn-gradient transition-all hover:opacity-90 active:scale-[0.98]"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <circle cx="12" cy="12" r="2" />
+                      <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14" />
+                    </svg>
+                    {t.live.startStreaming ?? "Start Streaming"}
+                  </button>
+                )}
               </div>
-            }>
-              <WebRTCStreamer />
-            </Suspense>
+            )}
+
+            {streamerError && (
+              <div className="space-y-4">
+                <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl text-sm bg-pnp-error/10 border border-pnp-error/25" role="alert">
+                  <span className="text-white/80 min-w-0 break-words">{streamerError}</span>
+                </div>
+                <button
+                  onClick={() => setStreamerError(null)}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white btn-gradient"
+                >
+                  Try Again
+                </button>
+              </div>
+            )}
+
+            {streamerMeetingUrl && (
+              <div className="w-full" style={{ height: "calc(100vh - 120px)" }}>
+                <JitsiMeetComponent
+                  meetingUrl={streamerMeetingUrl}
+                  onCallEnd={() => {
+                    setStreamerMeetingUrl(null);
+                    setShowBrowserStreamer(false);
+                  }}
+                  isModerator
+                  fullScreen={false}
+                  className="w-full h-full"
+                />
+              </div>
+            )}
           </div>
         </div>
       )}

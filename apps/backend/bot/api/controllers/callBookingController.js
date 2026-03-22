@@ -14,7 +14,7 @@ const { query, getPool } = require('../../../config/postgres');
 const { getRedis } = require('../../../config/redis');
 const callCheckoutService = require('../../services/callCheckoutService');
 const callPackageService = require('../../services/callPackageService');
-const livekitService = require('../../services/livekitService');
+const jaasService = require('../../services/jaasService');
 const CallBookingService = require('../../services/CallBookingService');
 const moment = require('moment-timezone');
 const logger = require('../../../utils/logger');
@@ -78,7 +78,7 @@ async function createCheckout(req, res) {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns credit details plus a fresh LiveKit token for the member.
+ * Returns credit details plus a fresh JaaS token for the caller.
  * :bookingId is call_credits.id.
  */
 async function getBooking(req, res) {
@@ -122,25 +122,26 @@ async function getBooking(req, res) {
       return res.status(404).json({ success: false, error: 'Booking not found' });
     }
 
-    // Determine a LiveKit room name for this credit (deterministic, stable per credit)
-    const roomName = `call-credit-${credit.id}`;
-    const isModerator = userId === credit.creator_id;
+    // Deterministic, stable room name per credit
+    const roomName = `booking-${credit.id}`;
+    const isModerator = userId === String(credit.creator_id);
+    const displayName = (isModerator ? credit.creator_display_name : credit.member_display_name) || userId;
+    const photoUrl = (isModerator ? credit.creator_photo : credit.member_photo) || '';
 
-    let livekitInfo = null;
-    if (livekitService.isConfigured()) {
+    let jaasInfo = null;
+    if (jaasService.isConfigured()) {
       try {
-        await livekitService.ensureRoom(roomName);
-        livekitInfo = await livekitService.generateMeetingInfo(
-          roomName,
-          userId,
-          (isModerator ? credit.creator_display_name : credit.member_display_name) || userId,
-          (isModerator ? credit.creator_photo : credit.member_photo) || '',
-          isModerator
-        );
-      } catch (lkErr) {
-        logger.warn('[callBookingController] LiveKit token generation failed', {
+        if (isModerator) {
+          jaasInfo = jaasService.generateModeratorConfig(roomName, userId, displayName, '', photoUrl);
+        } else {
+          jaasInfo = jaasService.generateViewerConfig(roomName, userId, displayName, '', photoUrl);
+        }
+        // Normalise to a consistent shape: { token, roomName, meetingUrl }
+        jaasInfo = { token: jaasInfo.token, roomName: jaasInfo.roomName, meetingUrl: jaasInfo.url };
+      } catch (jaasErr) {
+        logger.warn('[callBookingController] JaaS token generation failed', {
           creditId,
-          error: lkErr.message,
+          error: jaasErr.message,
         });
       }
     }
@@ -155,7 +156,7 @@ async function getBooking(req, res) {
       status: credit.booking_status || credit.status,
       start_at: credit.start_at || null,
       end_at: credit.end_at || null,
-      livekit_room: roomName,
+      room_name: roomName,
       created_at: credit.created_at,
       creator_username: credit.creator_username,
       creator_display_name: credit.creator_display_name,
@@ -165,7 +166,7 @@ async function getBooking(req, res) {
       member_photo: credit.member_photo,
     };
 
-    return res.json({ success: true, booking, livekit: livekitInfo });
+    return res.json({ success: true, booking, jaas: jaasInfo });
   } catch (err) {
     logger.error('[callBookingController] getBooking error', { error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to retrieve booking' });

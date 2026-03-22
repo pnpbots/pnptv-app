@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getCallBooking } from "@/lib/api";
-import { LiveKitMeetComponent } from "@/components/hangouts";
+import { JitsiMeetComponent } from "@/components/hangouts";
 import { PostCallSurveyModal } from "@/components/creators/PostCallSurveyModal";
 
 export default function BookingConfirmation() {
   const { bookingId } = useParams<{ bookingId: string }>();
   const navigate = useNavigate();
   const [booking, setBooking] = useState<any>(null);
-  const [livekit, setLivekit] = useState<{ token: string; wsUrl: string; roomName: string } | null>(null);
+  const [meetingData, setMeetingData] = useState<{ meetingUrl: string; roomName: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,22 +28,22 @@ export default function BookingConfirmation() {
     getCallBooking(Number(bookingId))
       .then((res) => {
         setBooking(res.booking);
-        // Don't store livekit token at load time — fetch fresh on join
+        // Don't store token at load time — fetch fresh on join
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load booking"))
       .finally(() => setLoading(false));
   }, [bookingId]);
 
-  // BC-H-03: Fetch fresh LiveKit token on "Join Call" click, not at page load
+  // BC-H-03: Fetch fresh JaaS token on "Join Call" click, not at page load
   const handleJoinCall = useCallback(async () => {
     if (!bookingId || !/^\d+$/.test(bookingId)) return;
     setJoining(true);
     try {
-      // Bug C-03: API returns { booking, livekit } at top level — not nested inside booking
+      // API returns { booking } where booking.jaas contains { meetingUrl, roomName, token }
       const res = await getCallBooking(Number(bookingId));
-      const livekitData = res.booking.livekit ?? (res as any).livekit ?? null;
-      if (livekitData) {
-        setLivekit(livekitData);
+      const callData = (res.booking as any).jaas ?? (res as any).jaas ?? null;
+      if (callData?.meetingUrl) {
+        setMeetingData({ meetingUrl: callData.meetingUrl, roomName: callData.roomName });
         setInCall(true);
       } else {
         setError("Unable to generate call token. Please try again.");
@@ -119,13 +119,12 @@ export default function BookingConfirmation() {
     );
   }
 
-  if (inCall && livekit) {
+  if (inCall && meetingData) {
     return (
       <div className="h-screen" style={{ background: "#111113" }}>
-        <LiveKitMeetComponent
-          token={livekit.token}
-          wsUrl={livekit.wsUrl}
-          roomName={livekit.roomName}
+        <JitsiMeetComponent
+          meetingUrl={meetingData.meetingUrl}
+          roomName={meetingData.roomName}
           onCallEnd={handleCallEnd}
           fullScreen
         />

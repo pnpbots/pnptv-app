@@ -680,13 +680,14 @@ export function getMyChannel(): Promise<{
   return request("/api/webapp/live/my-channel");
 }
 
-// ── LiveKit WebRTC Streaming ──────────────────────────────────────────────────
+// ── WebRTC Streaming (JaaS) ───────────────────────────────────────────────────
 
 export interface WebRTCStreamConfig {
   token: string;
-  wsUrl: string;
+  meetingUrl: string;
   roomName: string;
   channelRef: string;
+  error?: string;
 }
 
 export function getWebRTCStreamerConfig(): Promise<{ success: boolean; error?: string } & WebRTCStreamConfig> {
@@ -696,7 +697,7 @@ export function getWebRTCStreamerConfig(): Promise<{ success: boolean; error?: s
 export function getWebRTCViewerToken(channelRef: string): Promise<{
   success: boolean;
   token: string;
-  wsUrl: string;
+  meetingUrl: string;
   roomName: string;
   error?: string;
 }> {
@@ -1545,13 +1546,6 @@ export interface JaasCallInfo {
   appId?: string;
 }
 
-/** LiveKit connection info returned by the hangout call endpoints. */
-export interface LiveKitCallInfo {
-  token: string;
-  roomName: string;
-  wsUrl: string;
-}
-
 export interface ActiveCallInfo {
   id: string;
   groupId: number;
@@ -1575,8 +1569,6 @@ export interface StartCallResponse {
   isNew: boolean;
   call: ActiveCallInfo;
   jaas: JaasCallInfo | null;
-  /** @deprecated Always null — kept for backward compatibility */
-  livekit: LiveKitCallInfo | null;
 }
 
 export function startGroupCall(id: number): Promise<StartCallResponse> {
@@ -1705,25 +1697,10 @@ export interface GetActiveCallResponse {
   success: boolean;
   call: ActiveCallInfo | null;
   jaas: JaasCallInfo | null;
-  /** @deprecated Always null — kept for backward compatibility */
-  livekit: LiveKitCallInfo | null;
 }
 
 export function getActiveGroupCall(groupId: number): Promise<GetActiveCallResponse> {
   return request(`/api/webapp/hangouts/groups/${groupId}/calls/active`);
-}
-
-/**
- * Fetch a fresh LiveKit participant token for a given room.
- * Used when the client needs to reconnect without going through the full call flow.
- */
-export function getLiveKitToken(
-  roomName: string
-): Promise<{ success: boolean; token: string; wsUrl: string; roomName: string }> {
-  return request("/api/livekit/token", {
-    method: "POST",
-    body: { roomName },
-  });
 }
 
 export function leaveGroupCall(
@@ -4848,9 +4825,9 @@ export function createCallCheckout(
   });
 }
 
-export interface CallBookingLiveKit {
+export interface CallBookingJaas {
   token: string;
-  wsUrl: string;
+  meetingUrl: string;
   roomName: string;
 }
 
@@ -4867,7 +4844,7 @@ export interface CallBooking {
   creator_username: string;
   creator_photo: string | null;
   member_username: string;
-  livekit?: CallBookingLiveKit | null;
+  jaas?: CallBookingJaas | null;
   created_at: string;
 }
 

@@ -4,7 +4,7 @@ import { Card, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { PermissionGate } from "@/components/PermissionGate";
-import { JitsiMeetComponent, VideoCallModBot } from "@/components/hangouts";
+import { JitsiMeetComponent } from "@/components/hangouts";
 
 import {
   joinCommunityRoom,
@@ -144,12 +144,6 @@ export default function MainStage() {
           </div>
         </div>
 
-        {/* Mod Bot (right) — admin only, desktop */}
-        {isAdmin && (
-          <div className="hidden sm:flex flex-shrink-0 p-2">
-            <VideoCallModBot room={jitsiApi} isAdmin={isAdmin} />
-          </div>
-        )}
 
       </div>
     );

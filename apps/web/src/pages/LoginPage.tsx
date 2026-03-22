@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
-import { telegramWidgetAuth, recoverAccount, type TelegramWidgetUser } from "@/lib/api";
+import { telegramWidgetAuth, type TelegramWidgetUser } from "@/lib/api";
+import { login as oidcLogin } from "@/lib/auth";
 import { getI18n, getLang } from "@/lib/i18n";
 import { useAuth } from "@/hooks/useAuth";
 
-const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
+const AUTHENTIK_URL = import.meta.env.VITE_AUTHENTIK_URL || "https://auth.pnptv.app";
 
 // Strip leading '@' if present (BotFather usernames may be stored with it)
 function getBotUsername(): string {
@@ -35,6 +35,26 @@ function Spinner({ className = "h-5 w-5" }: { className?: string }) {
         className="opacity-75"
         fill="currentColor"
         d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+      />
+    </svg>
+  );
+}
+
+// ── ShieldIcon ────────────────────────────────────────────────────────────────
+
+function ShieldIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className="w-5 h-5 flex-shrink-0"
+      aria-hidden="true"
+    >
+      <path
+        fillRule="evenodd"
+        d="M12 1.5a.75.75 0 0 1 .75.75V4.5a.75.75 0 0 1-1.5 0V2.25A.75.75 0 0 1 12 1.5ZM5.636 4.136a.75.75 0 0 1 1.06 0l1.592 1.591a.75.75 0 0 1-1.061 1.06L5.636 5.197a.75.75 0 0 1 0-1.06Zm12.728 0a.75.75 0 0 1 0 1.06l-1.591 1.592a.75.75 0 0 1-1.061-1.061l1.591-1.591a.75.75 0 0 1 1.061 0Zm-6.816 4.496a.75.75 0 0 1 .82.311l5.228 7.917a.75.75 0 0 1-.777 1.148l-2.097-.43 1.045 3.9a.75.75 0 0 1-1.45.388l-1.044-3.899-1.601 1.42a.75.75 0 0 1-1.247-.606l.569-9.47a.75.75 0 0 1 .554-.678ZM3 10.5a.75.75 0 0 1 .75-.75H6a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 10.5Zm14.25 0a.75.75 0 0 1 .75-.75h2.25a.75.75 0 0 1 0 1.5H18a.75.75 0 0 1-.75-.75Zm-8.962 3.712a.75.75 0 0 1 0 1.061l-1.591 1.591a.75.75 0 1 1-1.061-1.06l1.591-1.592a.75.75 0 0 1 1.06 0Z"
+        clipRule="evenodd"
       />
     </svg>
   );
@@ -125,37 +145,34 @@ export function LoginPage() {
     if (storedUser) setLastUsername(storedUser);
   }, []);
 
-  const methodLabel = (method: string | null) => {
+  const methodLabel = (method: string | null): string | null => {
     if (!method) return null;
     const map: Record<string, string> = {
       telegram: "Telegram",
       deep_link: "Telegram",
-      email: t.loginWithEmail,
-      admin: "Email",
+      oidc: "PNPtv ID",
+      pnptv_id: "PNPtv ID",
     };
     return map[method] ?? null;
   };
+
+  const [oidcLoading, setOidcLoading] = useState(false);
 
   type WidgetStatus = "idle" | "verifying" | "error";
   const [widgetStatus, setWidgetStatus] = useState<WidgetStatus>("idle");
   const [widgetBlocked, setWidgetBlocked] = useState(false);
   const [widgetError, setWidgetError] = useState<string | null>(null);
 
-  // Recovery state
-  const [showRecovery, setShowRecovery] = useState(false);
-  const [recoveryEmail, setRecoveryEmail] = useState("");
-  const [isRecovering, setIsRecovering] = useState(false);
-  const [recoverySent, setRecoverySent] = useState(false);
-  const [recoveryError, setRecoveryError] = useState<string | null>(null);
-
-  // Email form state (Admins/Staff)
-  const [showEmailForm, setShowEmailForm] = useState(false);
-  const [emailVal, setEmailVal] = useState("");
-  const [passwordVal, setPasswordVal] = useState("");
-  const [rememberMe, setRememberMe] = useState(false);
-  const [emailLogging, setEmailLogging] = useState(false);
-  const [emailLoginError, setEmailLoginError] = useState<string | null>(null);
-  const emailInputRef = useRef<HTMLInputElement>(null);
+  const handleOidcLogin = async () => {
+    setOidcLoading(true);
+    try {
+      localStorage.setItem("pnptv_last_auth", "pnptv_id");
+      await oidcLogin();
+      // signinRedirect() navigates away; no need to reset loading state
+    } catch {
+      setOidcLoading(false);
+    }
+  };
 
   const handleWidgetAuth = useCallback(
     async (userData: TelegramWidgetUser) => {
@@ -165,7 +182,8 @@ export function LoginPage() {
         const result = await telegramWidgetAuth(userData);
         if (result.success) {
           localStorage.setItem("pnptv_last_auth", "telegram");
-          if (result.user?.username) localStorage.setItem("pnptv_last_username", result.user.username);
+          if (result.user?.username)
+            localStorage.setItem("pnptv_last_username", result.user.username);
           await refreshUser();
           window.location.href = "/";
         } else {
@@ -173,7 +191,8 @@ export function LoginPage() {
           setWidgetError(result.error || t.telegramWidgetError);
         }
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : t.telegramWidgetError;
+        const message =
+          err instanceof Error ? err.message : t.telegramWidgetError;
         setWidgetStatus("error");
         setWidgetError(message);
       }
@@ -185,175 +204,138 @@ export function LoginPage() {
     setWidgetBlocked(true);
   }, []);
 
-  const handleRecover = async () => {
-    if (!recoveryEmail.trim()) return;
-    setIsRecovering(true);
-    setRecoveryError(null);
-    try {
-      const res = await recoverAccount(recoveryEmail);
-      if (res.success) {
-        setRecoverySent(true);
-      } else {
-        setRecoveryError(res.message || "Failed to initiate recovery");
-      }
-    } catch (err: any) {
-      setRecoveryError(err.message || "Connection error");
-    } finally {
-      setIsRecovering(false);
-    }
-  };
-
-  const handleEmailLogin = async () => {
-    const trimmedEmail = emailVal.trim().toLowerCase();
-    if (!trimmedEmail || !passwordVal) {
-      setEmailLoginError(t.emailAndPasswordRequired);
-      return;
-    }
-    setEmailLogging(true);
-    setEmailLoginError(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/webapp/auth/email/login`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmedEmail, password: passwordVal, rememberMe }),
-      });
-      const data = await res.json();
-      if (res.ok && data.authenticated) {
-        localStorage.setItem("pnptv_last_auth", "email");
-        window.location.href = "/";
-      } else {
-        setEmailLoginError(data.error || data.message || t.loginFailed);
-      }
-    } catch {
-      setEmailLoginError(t.connectionError);
-    } finally {
-      setEmailLogging(false);
-    }
-  };
+  const label = methodLabel(lastMethod);
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden" style={{ background: "#121212" }}>
-      <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full opacity-20 blur-3xl pointer-events-none"
-        style={{ background: "radial-gradient(circle, #D4007A, transparent 70%)" }} />
-      <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full opacity-20 blur-3xl pointer-events-none"
-        style={{ background: "radial-gradient(circle, #E69138, transparent 70%)" }} />
+    <div
+      className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden"
+      style={{ background: "#121212" }}
+    >
+      {/* Background glows */}
+      <div
+        className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full opacity-20 blur-3xl pointer-events-none"
+        style={{ background: "radial-gradient(circle, #D4007A, transparent 70%)" }}
+      />
+      <div
+        className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full opacity-20 blur-3xl pointer-events-none"
+        style={{ background: "radial-gradient(circle, #E69138, transparent 70%)" }}
+      />
 
       <div className="glass-card neon-glow animate-subtle-glow w-full max-w-md p-8 sm:p-10 relative z-10 animate-fade-in-up">
+        {/* Logo + tagline */}
         <div className="text-center mb-8">
-          <img src="/logo-login.png" alt="PNPtv!" className="w-64 sm:w-72 h-auto mx-auto" />
-          <p className="text-sm mt-4 font-medium" style={{ color: "#E69138" }}>{t.tagline}</p>
+          <img
+            src="/logo-login.png"
+            alt="PNPtv!"
+            className="w-64 sm:w-72 h-auto mx-auto"
+          />
+          <p
+            className="text-sm mt-4 font-medium"
+            style={{ color: "#E69138" }}
+          >
+            {t.tagline}
+          </p>
         </div>
 
-        <div className="space-y-4">
-          {!showRecovery && !showEmailForm && (
-            <>
-              {widgetStatus === "verifying" && (
-                <div className="flex items-center justify-center gap-3 py-4 text-white text-sm font-medium">
-                  <Spinner />
-                  <span>{t.telegramWidgetVerifying}</span>
-                </div>
-              )}
-              <div className={widgetStatus === "verifying" ? "hidden" : ""}>
-                <TelegramLoginWidget onAuth={handleWidgetAuth} onLoadError={handleWidgetLoadError} />
-              </div>
-              {widgetBlocked && <p className="text-center text-xs" style={{ color: "#8E8E93" }}>{t.telegramWidgetBlocked}</p>}
-            </>
+        <div className="space-y-5">
+          {/* Last login method indicator */}
+          {label && (
+            <p className="text-center text-xs text-pnp-textSecondary">
+              {t.lastLoginedWith}{" "}
+              <span className="font-semibold text-white">{label}</span>
+              {lastUsername ? ` (@${lastUsername})` : ""}
+            </p>
           )}
 
-          {showRecovery && (
-            <div className="rounded-xl p-4 space-y-3 bg-white/5 border border-white/10 animate-fade-in-up">
-              <h3 className="text-sm font-bold text-white text-center">Recover Legacy Account</h3>
-              {recoverySent ? (
-                <div className="text-center space-y-2">
-                  <p className="text-xs text-green-400">Recovery link sent to your email via Authentik.</p>
-                  <button onClick={() => setShowRecovery(false)} className="text-xs underline text-pnp-textSecondary">Back to login</button>
-                </div>
-              ) : (
-                <>
-                  <p className="text-[10px] text-pnp-textSecondary text-center">Enter the email you used with X or your old account.</p>
-                  <input
-                    type="email"
-                    value={recoveryEmail}
-                    onChange={(e) => setRecoveryEmail(e.target.value)}
-                    placeholder="Email address"
-                    className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/10 text-xs text-white focus:outline-none focus:border-pnp-accent"
-                  />
-                  {recoveryError && <p className="text-[10px] text-red-400">{recoveryError}</p>}
-                  <div className="flex gap-2">
-                    <button onClick={handleRecover} disabled={isRecovering || !recoveryEmail.includes("@")}
-                      className="flex-1 py-2 rounded-lg bg-pnp-accent text-white text-xs font-bold disabled:opacity-50">
-                      {isRecovering ? <Spinner className="w-3 h-3 mx-auto" /> : "Send Recovery Link"}
-                    </button>
-                    <button onClick={() => setShowRecovery(false)} className="px-3 py-2 text-xs text-pnp-textSecondary">Cancel</button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
+          {/* Primary CTA — PNPtv ID */}
+          <button
+            onClick={handleOidcLogin}
+            disabled={oidcLoading}
+            className="w-full py-3.5 px-6 rounded-xl font-bold text-sm flex items-center justify-center gap-2.5 text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
+            style={{
+              background: oidcLoading
+                ? "linear-gradient(135deg, #a0005e, #b87020)"
+                : "linear-gradient(135deg, #D4007A, #E69138)",
+              boxShadow: "0 0 24px rgba(212, 0, 122, 0.4)",
+            }}
+          >
+            {oidcLoading ? (
+              <Spinner className="h-5 w-5" />
+            ) : (
+              <ShieldIcon />
+            )}
+            <span>{t.signInWithPnptvId}</span>
+          </button>
 
-          {showEmailForm && (
-            <div className="rounded-xl p-4 space-y-3 bg-white/5 border border-white/10 animate-fade-in-up">
-              <h3 className="text-sm font-bold text-white text-center">Staff Login</h3>
-              <input ref={emailInputRef} type="email" value={emailVal} onChange={(e) => setEmailVal(e.target.value)}
-                placeholder="Email" className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/10 text-xs text-white focus:outline-none focus:border-pnp-accent" />
-              <input type="password" value={passwordVal} onChange={(e) => setPasswordVal(e.target.value)}
-                placeholder="Password" className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/10 text-xs text-white focus:outline-none focus:border-pnp-accent" />
-              {emailLoginError && <p className="text-[10px] text-red-400">{emailLoginError}</p>}
-              <div className="flex gap-2">
-                <button onClick={handleEmailLogin} disabled={emailLogging} className="flex-1 py-2 rounded-lg bg-pnp-accent text-white text-xs font-bold">
-                  {emailLogging ? <Spinner className="w-3 h-3 mx-auto" /> : "Log In"}
-                </button>
-                <button onClick={() => setShowEmailForm(false)} className="px-3 py-2 text-xs text-pnp-textSecondary">Cancel</button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {!showRecovery && !showEmailForm && (
-          <div className="mt-6 space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-px bg-white/10" />
-              <span className="text-[10px] text-pnp-textSecondary uppercase tracking-widest">or</span>
-              <div className="flex-1 h-px bg-white/10" />
-            </div>
-            <button
-              onClick={() => { window.location.href = "/api/webapp/auth/oidc/login"; }}
-              className="w-full py-3 px-6 rounded-xl font-semibold text-sm flex items-center justify-center gap-3 bg-pnp-accent text-white hover:opacity-90 active:opacity-80 transition-all"
-            >
-              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-              </svg>
-              Sign in with PNPtv SSO
-            </button>
-
-            <div className="flex items-center gap-3 pt-2">
-              <div className="flex-1 h-px bg-white/5" />
-              <span className="text-[10px] text-pnp-textSecondary uppercase tracking-widest">Legacy Access</span>
-              <div className="flex-1 h-px bg-white/5" />
-            </div>
-            <button onClick={() => setShowRecovery(true)}
-              className="w-full py-3 px-6 rounded-xl font-semibold text-sm flex items-center justify-center gap-3 bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all">
-              Recover Account (formerly X)
-            </button>
-            <div className="text-center pt-2">
-              <button onClick={() => setShowEmailForm(true)} className="text-[10px] text-pnp-textSecondary hover:text-white transition-colors uppercase tracking-widest">
-                Staff Access
-              </button>
-            </div>
+          {/* Divider */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-white/10" />
+            <span className="text-[10px] text-pnp-textSecondary uppercase tracking-widest">
+              {t.orContinueWith}
+            </span>
+            <div className="flex-1 h-px bg-white/10" />
           </div>
-        )}
 
+          {/* Secondary — Telegram widget */}
+          {widgetStatus === "verifying" && (
+            <div className="flex items-center justify-center gap-3 py-4 text-white text-sm font-medium">
+              <Spinner />
+              <span>{t.telegramWidgetVerifying}</span>
+            </div>
+          )}
+          <div className={widgetStatus === "verifying" ? "hidden" : ""}>
+            <TelegramLoginWidget
+              onAuth={handleWidgetAuth}
+              onLoadError={handleWidgetLoadError}
+            />
+          </div>
+          {widgetStatus === "error" && widgetError && (
+            <p className="text-center text-xs text-red-400">{widgetError}</p>
+          )}
+          {widgetBlocked && (
+            <p className="text-center text-xs" style={{ color: "#8E8E93" }}>
+              {t.telegramWidgetBlocked}
+            </p>
+          )}
+
+          {/* Create account link */}
+          <p className="text-center text-xs text-pnp-textSecondary pt-1">
+            {t.noAccountPrompt}{" "}
+            <a
+              href={`${AUTHENTIK_URL}/if/flow/default-enrollment-flow/`}
+              className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all"
+            >
+              {t.createAccount}
+            </a>
+          </p>
+        </div>
+
+        {/* Legal footer */}
         <div className="mt-8 pt-6 border-t border-white/5">
           <p className="text-center text-[10px] text-pnp-textSecondary mb-3">
-            {t.legalPrefix} <a href="/terms" className="underline text-pnp-accent">{t.legalTerms}</a> {t.legalAnd} <a href="/privacy" className="underline text-pnp-accent">{t.legalPrivacyPolicy}</a>
+            {t.legalPrefix}{" "}
+            <a href="/terms" className="underline text-pnp-accent">
+              {t.legalTerms}
+            </a>{" "}
+            {t.legalAnd}{" "}
+            <a href="/privacy" className="underline text-pnp-accent">
+              {t.legalPrivacyPolicy}
+            </a>
           </p>
           <div className="flex flex-wrap justify-center gap-x-3 gap-y-1">
-            {["cookies", "safety", "contact"].map(key => (
-              <a key={key} href={`/${key}`} className="text-[10px] text-pnp-textSecondary hover:underline capitalize">{key}</a>
+            {["cookies", "safety", "contact"].map((key) => (
+              <a
+                key={key}
+                href={`/${key}`}
+                className="text-[10px] text-pnp-textSecondary hover:underline capitalize"
+              >
+                {key}
+              </a>
             ))}
           </div>
-          <p className="text-center text-[9px] text-pnp-textSecondary/50 mt-3">{t.copyright}</p>
+          <p className="text-center text-[9px] text-pnp-textSecondary/50 mt-3">
+            {t.copyright}
+          </p>
         </div>
       </div>
     </div>

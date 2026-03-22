@@ -885,18 +885,11 @@ services:
       POSTGRES_HOST: pg-pnptv
       REDIS_HOST: redis-pnptv
       BOT_LOCK_ENABLED: "false"
-      AMPACHE_URL: http://ampache:80
-      DIRECTUS_URL: http://directus:8055
-      BLUESKY_PDS_URL: http://bluesky-pds:3000
       BTCPAY_URL: http://btcpay-server:23000
       RESTREAMER_URL: http://restreamer:8080
       RESTREAMER_PUBLIC_URL: https://live.pnptv.app
       RESTREAMER_USER: admin
       RESTREAMER_PASSWORD: ${RESTREAMER_PASSWORD}
-      LIVEKIT_URL: http://livekit-server:7880
-      LIVEKIT_WS_URL: wss://pnptv.app/livekit-ws
-      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-pnptv}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
     networks:
       - proxy_net
       - app_net
@@ -921,9 +914,6 @@ services:
   # ===========================================
   # BLOCK K - BTCPay Server (Dash Pay)
   # Self-hosted payment processor for Dash
-  # Web UI: btcpay.pnptv.app (via NPM proxy)
-  # NOTE: Dash full node (dashd) must be configured
-  #       in BTCPay web UI after first boot.
   # ===========================================
 
   pg-btcpay:
@@ -1034,39 +1024,3 @@ services:
           cpus: '1.0'
           memory: 1g
     # No healthcheck — BTCPay .NET runtime image has no curl/wget
-
-  # ===========================================
-  # BLOCK L - LiveKit Server (Self-hosted WebRTC)
-  # Replaces JaaS for hangout video calls
-  # Internal: http://livekit-server:7880
-  # Public WSS: wss://pnptv.app/livekit-ws (via NPM proxy)
-  # ===========================================
-
-  livekit-server:
-    image: livekit/livekit-server:latest
-    container_name: livekit-server
-    restart: unless-stopped
-    networks:
-      - app_net
-      - db_net
-    ports:
-      - "7880:7880"
-      - "7443:7443"
-      - "50000-50200:50000-50200/udp"
-    volumes:
-      - ./config/livekit.yaml:/livekit.yaml
-    command: --config /livekit.yaml
-    depends_on:
-      redis-pnptv:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 1g
-    healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:7880/ || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s

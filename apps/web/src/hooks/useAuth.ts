@@ -129,6 +129,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (res.success && res.user) {
         setUser(mapTelegramUser(res.user));
       }
+    } else {
+      // Browser context without Telegram initData — redirect to Authentik OIDC
+      const { login: oidcLogin } = await import("@/lib/auth");
+      await oidcLogin();
     }
   }, []);
 

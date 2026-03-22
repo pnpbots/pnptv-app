@@ -1,7 +1,7 @@
 'use strict';
 const callPackageService = require('../../services/callPackageService');
 const CallBookingService = require('../../services/CallBookingService');
-const livekitService = require('../../services/livekitService');
+const jaasService = require('../../services/jaasService');
 const callNotificationService = require('../../services/callNotificationService');
 const moment = require('moment-timezone');
 
@@ -177,16 +177,15 @@ async function bookCall(req, res) {
     });
 
     // ── Post-booking orchestration (fire-and-forget) ───────────────────────
-    // Generate LiveKit room + tokens, send confirmations, schedule reminders.
+    // Generate JaaS tokens, send confirmations, schedule reminders.
     // Failures here must NOT block the booking response.
     (async () => {
       try {
-        const roomName = `call-credit-${Number(creditId)}`;
-        let livekitInfo = null;
+        const roomName = `booking-${Number(creditId)}`;
+        let memberJaasInfo = null;
+        let creatorJaasInfo = null;
 
-        if (livekitService.isConfigured()) {
-          await livekitService.ensureRoom(roomName);
-
+        if (jaasService.isConfigured()) {
           // Fetch display names for both parties
           const { query: dbQuery } = require('../../../config/postgres');
           const [memberResult, creatorResult] = await Promise.all([
@@ -196,37 +195,39 @@ async function bookCall(req, res) {
           const member = memberResult.rows[0] || {};
           const creator = creatorResult.rows[0] || {};
 
-          livekitInfo = await livekitService.generateMeetingInfo(
+          // Member gets a viewer token; creator gets a moderator token
+          const memberConfig = jaasService.generateViewerConfig(
             roomName, memberId,
             member.display_name || member.username || memberId,
-            member.photo_url || '', false
+            '', member.photo_url || ''
           );
+          memberJaasInfo = { token: memberConfig.token, roomName: memberConfig.roomName, meetingUrl: memberConfig.url };
 
-          // Generate a separate creator token for the creator's notification
-          const creatorLivekitInfo = await livekitService.generateMeetingInfo(
+          const creatorConfig = jaasService.generateModeratorConfig(
             roomName, creatorId,
             creator.display_name || creator.username || creatorId,
-            creator.photo_url || '', true
+            '', creator.photo_url || ''
           );
+          creatorJaasInfo = { token: creatorConfig.token, roomName: creatorConfig.roomName, meetingUrl: creatorConfig.url };
 
           // Send confirmations to both parties
           await Promise.allSettled([
             callNotificationService.sendBookingConfirmationToMember(
               memberId,
               { creator_name: creator.display_name || creator.username, start_at: startAt, duration_minutes: parsedDuration },
-              livekitInfo
+              memberJaasInfo
             ),
             callNotificationService.sendBookingConfirmationToCreator(
               creatorId,
               { start_at: startAt, duration_minutes: parsedDuration },
               { username: member.username, display_name: member.display_name },
-              creatorLivekitInfo
+              creatorJaasInfo
             ),
           ]);
 
-          // Schedule 1h and 15min reminders
+          // Schedule 1h and 15min reminders using the member's join URL
           callNotificationService.scheduleCallReminders(
-            Number(creditId), creatorId, memberId, startAt, livekitInfo
+            Number(creditId), creatorId, memberId, startAt, memberJaasInfo
           );
         }
       } catch (postErr) {

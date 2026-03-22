@@ -287,7 +287,6 @@ const startCall = async (req, res) => {
           isModerator,
         },
         jaas,
-        livekit: null,
       });
     }
 
@@ -380,7 +379,6 @@ const startCall = async (req, res) => {
       isNew: true,
       call: callPayload,
       jaas,
-      livekit: null,
     });
   } catch (err) {
     // Handle race condition: the unique partial index prevents duplicates
@@ -417,7 +415,6 @@ const startCall = async (req, res) => {
               isModerator,
             },
             jaas,
-            livekit: null,
           });
         }
       } catch (innerErr) {
@@ -558,7 +555,6 @@ const getActiveCall = async (req, res) => {
         })),
       },
       jaas,
-      livekit: null,
     });
   } catch (err) {
     logger.error('getActiveCall error', err);
@@ -567,7 +563,6 @@ const getActiveCall = async (req, res) => {
 };
 
 // ── POST /api/webapp/hangouts/groups/:id/calls/:callId/join ─────────────────
-// Join an existing active call and receive a fresh LiveKit token.
 
 const joinCall = async (req, res) => {
   const user = authGuard(req, res);
@@ -702,7 +697,6 @@ const joinCall = async (req, res) => {
         isModerator,
       },
       jaas,
-      livekit: null,
     });
   } catch (err) {
     logger.error('joinCall error', err);
