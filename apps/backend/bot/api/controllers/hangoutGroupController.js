@@ -1147,40 +1147,6 @@ const isOwnerOrMod = async (groupId, userId) => {
   return rows.length > 0;
 };
 
-// POST /api/webapp/hangouts/groups/:id/kick
-const kickMember = async (req, res) => {
-  const user = authGuard(req, res); if (!user) return;
-  const groupId = parseInt(req.params.id);
-  const { userId: targetId } = req.body;
-  if (!Number.isFinite(groupId) || !targetId) return res.status(400).json({ error: 'Missing fields' });
-
-  try {
-    if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
-    // Can't kick owner
-    const { rows: targetRows } = await query(
-      'SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
-      [groupId, targetId]
-    );
-    if (targetRows.length === 0) return res.status(404).json({ error: 'User not in group' });
-    if (targetRows[0].role === 'owner') return res.status(403).json({ error: 'Cannot kick the owner' });
-    // Moderators can only be kicked by owner
-    if (targetRows[0].role === 'moderator') {
-      const { rows: callerRows } = await query(
-        'SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
-        [groupId, user.id]
-      );
-      if (callerRows[0]?.role !== 'owner') return res.status(403).json({ error: 'Only the owner can remove moderators' });
-    }
-
-    await query('DELETE FROM hangout_group_members WHERE group_id=$1 AND user_id=$2', [groupId, targetId]);
-    matrixService.removeFromHangoutRoom(groupId, { id: targetId, matrix_user_id: null }).catch(() => {});
-    return res.json({ success: true });
-  } catch (err) {
-    logger.error('kickMember error', err);
-    return res.status(500).json({ error: 'Failed to kick member' });
-  }
-};
-
 // POST /api/webapp/hangouts/groups/:id/ban
 const banMember = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
