@@ -344,7 +344,7 @@ if (process.env.SENTRY_DSN) {
 // Trust proxy - required for secure cookies and rate limiting behind reverse proxy
 // Traefik (host mode, SSL termination) → nginx (sets X-Forwarded-Proto: https) → Express
 // nginx is the only proxy that sets forwarded headers, so trust 1 hop.
-app.set('trust proxy', true);
+app.set('trust proxy', 1);
 
 // CRITICAL: Apply body parsing FIRST for ALL routes
 // This must be before any route registration
