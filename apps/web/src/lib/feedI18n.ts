@@ -20,7 +20,6 @@ const strings = {
     posting: "Posting...",
     bulkUploadVideos: "Bulk Upload Videos",
     exclusiveToggle: "Exclusive content (subscribers only)",
-    alsoPostBluesky: "Also post to Bluesky",
     allowSharing: "Allow sharing",
     // Tabs
     allPosts: "All Posts",
@@ -69,7 +68,6 @@ const strings = {
     posting: "Publicando...",
     bulkUploadVideos: "Subir videos en lote",
     exclusiveToggle: "Contenido exclusivo (solo suscriptores)",
-    alsoPostBluesky: "También publicar en Bluesky",
     allowSharing: "Permitir compartir",
     allPosts: "Todos",
     wallOfFame: "Muro de la Fama",

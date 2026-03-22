@@ -82,7 +82,6 @@ const strings = {
     footerRefunds: "Refunds",
 
     footerContact: "Contact",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! All rights reserved.",
   },
@@ -164,7 +163,6 @@ const strings = {
     footerRefunds: "Reembolsos",
 
     footerContact: "Contacto",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! Todos los derechos reservados.",
   },
@@ -246,7 +244,6 @@ const strings = {
     footerRefunds: "Reembolsos",
 
     footerContact: "Contato",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! Todos os direitos reservados.",
   },
@@ -328,7 +325,6 @@ const strings = {
     footerRefunds: "退款",
 
     footerContact: "联系",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! 保留所有权利。",
   },
@@ -410,7 +406,6 @@ const strings = {
     footerRefunds: "退款",
 
     footerContact: "聯絡",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! 保留所有權利。",
   },
@@ -492,7 +487,6 @@ const strings = {
     footerRefunds: "Remboursements",
 
     footerContact: "Contact",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! Tous droits réservés.",
   },
@@ -574,7 +568,6 @@ const strings = {
     footerRefunds: "Erstattungen",
 
     footerContact: "Kontakt",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! Alle Rechte vorbehalten.",
   },
@@ -656,7 +649,6 @@ const strings = {
     footerRefunds: "การคืนเงิน",
 
     footerContact: "ติดต่อ",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! สงวนลิขสิทธิ์ทั้งหมด",
   },
@@ -738,7 +730,6 @@ const strings = {
     footerRefunds: "Rimborsi",
 
     footerContact: "Contatti",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! Tutti i diritti riservati.",
   },
@@ -820,7 +811,6 @@ const strings = {
     footerRefunds: "İadeler",
 
     footerContact: "İletişim",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! Tüm hakları saklıdır.",
   },
@@ -902,7 +892,6 @@ const strings = {
     footerRefunds: "Возвраты",
 
     footerContact: "Контакт",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! Все права защищены.",
   },
@@ -984,7 +973,6 @@ const strings = {
     footerRefunds: "Terugbetalingen",
 
     footerContact: "Contact",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! Alle rechten voorbehouden.",
   },
@@ -1066,7 +1054,6 @@ const strings = {
     footerRefunds: "Hoàn tiền",
 
     footerContact: "Liên hệ",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! Bảo lưu mọi quyền.",
   },
@@ -1148,7 +1135,6 @@ const strings = {
     footerRefunds: "返金",
 
     footerContact: "お問い合わせ",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! 全著作権所有。",
   },
@@ -1230,7 +1216,6 @@ const strings = {
     footerRefunds: "Pengembalian Dana",
 
     footerContact: "Hubungi",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! Hak cipta dilindungi.",
   },
@@ -1312,7 +1297,6 @@ const strings = {
     footerRefunds: "المبالغ المستردة",
 
     footerContact: "تواصل",
-    footerBluesky: "Bluesky (@pnptv.app)",
 
     footerCopyright: "© 2026 PNPtv! جميع الحقوق محفوظة.",
   },

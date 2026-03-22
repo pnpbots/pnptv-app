@@ -193,9 +193,6 @@ export function oidcLogout(): Promise<{ success: boolean }> {
   return request("/auth/oidc/logout", { method: "POST" });
 }
 
-export function unlinkAtproto(): Promise<{ success: boolean; message: string }> {
-  return request("/api/webapp/auth/atproto/unlink", { method: "POST" });
-}
 
 export function recoverAccount(email: string): Promise<{ success: boolean; message: string }> {
   return request("/api/webapp/auth/recover-account", {
@@ -204,15 +201,7 @@ export function recoverAccount(email: string): Promise<{ success: boolean; messa
   });
 }
 
-/**
- * Initiates an ATProto/Bluesky OAuth flow for the given handle.
- * This is a redirect — the function builds the URL and navigates to it.
- * The backend /oauth/login?handle=X will redirect to the Bluesky authorization server.
- */
-export function getAtprotoLoginUrl(handle: string): string {
-  const base = import.meta.env.VITE_API_URL || "https://pnptv.app";
-  return `${base}/oauth/login?handle=${encodeURIComponent(handle)}`;
-}
+
 
 // Age verification (self-declaration)
 export function verifyAgeSelf(): Promise<{ success: boolean }> {
@@ -854,11 +843,6 @@ export interface SocialPostItem {
   author_creator_price?: number;
   // Sharing control
   is_shareable?: boolean;
-  // Bluesky cross-post fields
-  bluesky_uri?: string | null;
-  bluesky_cid?: string | null;
-  source?: "local" | "bluesky";
-  bsky_author_handle?: string | null;
   bsky_author_avatar?: string | null;
   bsky_author_display_name?: string | null;
   // Tier-gating fields (free-tier users see blurred posts)
@@ -874,42 +858,6 @@ export interface SocialPostItem {
   promoted_link?: string | null;
   promoted_link_label?: string | null;
   promoted_thumbnail?: string | null;
-}
-
-// ============================================================================
-// ATProto / Bluesky Profile API
-// ============================================================================
-
-export interface AtprotoProfile {
-  did: string;
-  handle: string;
-  displayName?: string;
-  description?: string;
-  avatar?: string;
-  followersCount?: number;
-  followsCount?: number;
-  postsCount?: number;
-  profileUrl: string;
-}
-
-export function getAtprotoProfile(): Promise<{
-  success: boolean;
-  linked: boolean;
-  profile: AtprotoProfile | null;
-  error?: string;
-}> {
-  return request("/api/atproto/profile");
-}
-
-export function crossPostToBluesky(postId: number): Promise<{
-  success: boolean;
-  uri?: string;
-  cid?: string;
-  error?: string;
-}> {
-  return request(`/api/webapp/social/posts/${postId}/crosspost-bluesky`, {
-    method: "POST",
-  });
 }
 
 export interface XStatus {
@@ -3344,7 +3292,7 @@ export interface AdminDemographics {
     posts: number; postLikes: number; dms: number; chatMessages: number; hangouts: number;
     hangoutMembers: number; streams: number; notificationsSent: number; follows: number;
     mediaPlays: number; mediaFavorites: number; tips: number; pushSubscribers: number;
-    xLinked: number; blueskyLinked: number;
+    xLinked: number;
   };
   insights: { type: string; title: string; body: string }[];
 }
