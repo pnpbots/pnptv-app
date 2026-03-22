@@ -76,8 +76,8 @@ export default function Profile() {
 
   const t = useI18n();
   const p = t.profile;
-  const isOwnProfile = !paramUserId || paramUserId === String(user?.id);
-  const targetUserId = paramUserId || String(user?.id || "");
+  const isOwnProfile = !paramUserId || paramUserId === String(user?.id) || paramUserId === String(user?.dbId);
+  const targetUserId = paramUserId || String(user?.dbId || user?.id || "");
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("profile");
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
