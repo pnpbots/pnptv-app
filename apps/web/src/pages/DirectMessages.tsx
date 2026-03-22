@@ -22,7 +22,7 @@ import {
   type DirectMessage,
 } from "@/lib/api";
 import EmojiReactionBar, { type Reaction } from "@/components/EmojiReactionBar";
-import { useRoomMessages, sendMatrixMessage, sendMatrixReply, sendReaction, redactEvent, useRoomReactions } from "@/hooks/useMatrix";
+import { useRoomMessages, sendMatrixMessage, sendMatrixReply, sendReaction, redactEvent, useRoomReactions, sendReadReceipt } from "@/hooks/useMatrix";
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -763,6 +763,18 @@ function Conversation({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Send Matrix read receipt when conversation is viewed / new messages arrive
+  const lastReceiptId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!matrixRoomId || matrixMessages.length === 0) return;
+    const lastMsg = matrixMessages[matrixMessages.length - 1];
+    if (lastMsg.eventId !== lastReceiptId.current) {
+      lastReceiptId.current = lastMsg.eventId;
+      sendReadReceipt(matrixRoomId, lastMsg.eventId);
+      markThreadAsRead(userId).catch(() => {});
+    }
+  }, [matrixRoomId, matrixMessages, userId]);
+
   // ─── Media handling ──────────────────────────────────────────────────────
 
   const clearMedia = useCallback(() => {
@@ -939,16 +951,35 @@ function Conversation({
       )}
 
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5 flex-shrink-0">
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-white/5 flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
         <button
           onClick={() => navigate("/dm")}
-          className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+          className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 flex-shrink-0"
           aria-label={t.backToThreads}
         >
           <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </button>
+
+        {/* Partner avatar */}
+        <button
+          onClick={() => navigate(`/profile/${userId}`)}
+          className="relative flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded-full"
+        >
+          <div
+            className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold"
+            style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.3), rgba(123,97,255,0.3))", color: "#D4007A" }}
+          >
+            {partnerInitial}
+          </div>
+          {/* Matrix connection indicator */}
+          <span
+            className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-pnp-background"
+            style={{ background: matrixRoomId ? "#34C759" : "#8E8E93" }}
+          />
+        </button>
+
         <button
           onClick={() => navigate(`/profile/${userId}`)}
           className="flex-1 min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded-lg px-1"
@@ -956,25 +987,54 @@ function Conversation({
           <h2 className="text-sm font-bold text-white truncate">
             {partnerName || t.conversationFallbackTitle}
           </h2>
-          <p className="text-xs" style={{ color: "#8E8E93" }}>
-            {t.tapToViewProfile}
-          </p>
+          <div className="flex items-center gap-1.5 text-xs" style={{ color: "#8E8E93" }}>
+            <span>{t.tapToViewProfile}</span>
+            {matrixRoomId && (
+              <>
+                <span style={{ color: "rgba(142,142,147,0.4)" }}>&middot;</span>
+                <span className="flex items-center gap-0.5 text-pnp-accent text-[10px] font-medium">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                  </svg>
+                  E2E
+                </span>
+              </>
+            )}
+          </div>
         </button>
       </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
         {isLoading ? (
-          <div className="space-y-3" aria-label="Loading messages" aria-busy="true">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="animate-pulse flex gap-2">
-                <div className="w-8 h-8 rounded-full bg-white/10 flex-shrink-0" />
-                <div className="flex-1 space-y-1.5">
-                  <div className="h-3 bg-white/10 rounded w-24" />
-                  <div className="h-8 bg-white/10 rounded-2xl w-48" />
+          <div className="space-y-4 py-4" aria-label="Loading messages" aria-busy="true">
+            {[false, true, false, true, false].map((isRight, i) => (
+              <div key={i} className={`animate-pulse flex gap-2.5 ${isRight ? "flex-row-reverse" : ""}`}>
+                <div className="w-8 h-8 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.06)" }} />
+                <div className={`space-y-1.5 flex flex-col ${isRight ? "items-end" : "items-start"}`}>
+                  <div className="h-3 rounded w-16" style={{ background: "rgba(255,255,255,0.06)" }} />
+                  <div
+                    className="rounded-2xl"
+                    style={{
+                      background: isRight
+                        ? "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(230,145,56,0.15))"
+                        : "rgba(255,255,255,0.04)",
+                      width: [160, 200, 140, 180, 120][i],
+                      height: [32, 40, 48, 32, 36][i],
+                    }}
+                  />
                 </div>
               </div>
             ))}
+            <div className="text-center pt-2">
+              <p className="text-[11px] text-pnp-textSecondary/50 flex items-center justify-center gap-1.5">
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Syncing with Matrix...
+              </p>
+            </div>
           </div>
         ) : loadError ? (
           <div className="flex flex-col items-center justify-center h-full text-center py-12">
@@ -991,13 +1051,23 @@ function Conversation({
           </div>
         ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center py-12">
-            <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            </svg>
-            <p className="text-white font-medium text-sm">{t.noConversationMessages}</p>
-            <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(123,97,255,0.12))" }}>
+              <svg className="w-8 h-8" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </div>
+            <p className="text-white font-bold text-base mb-1">{t.noConversationMessages}</p>
+            <p className="text-xs mt-1 max-w-[240px]" style={{ color: "#8E8E93" }}>
               {t.sayHello}
             </p>
+            {matrixRoomId && (
+              <div className="flex items-center gap-1.5 mt-3 px-3 py-1.5 rounded-full text-[11px] font-medium" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+                End-to-end encrypted via Matrix
+              </div>
+            )}
           </div>
         ) : (
           messages.map((msg) => (

@@ -149,15 +149,37 @@ const sendDmMediaMessage = async (req, res) => {
     const matrixRoomId = await matrixService.getOrCreateDmRoom(senderRow.rows[0], recipRow.rows[0]);
     await matrixService.ensureUserInRoom(matrixRoomId, senderCreds);
 
-    const msgtype = mediaResult.mediaType === 'video' ? 'm.video' : 'm.image';
+    // Upload media to Matrix content repository (mxc:// URL)
+    const fs = require('fs').promises;
+    const path = require('path');
+    const PUBLIC_ROOT = path.join(__dirname, '../../../../public');
+    const localPath = path.join(PUBLIC_ROOT, mediaResult.mediaUrl);
+    const fileBuffer = await fs.readFile(localPath);
+
+    const mxcFilename = caption || (mediaResult.mediaType === 'video' ? 'video.mp4' : mediaResult.mediaType === 'audio' ? 'voice-message.webm' : 'image.webp');
+    const mxcMime = mediaResult.mediaMime || (mediaResult.mediaType === 'video' ? 'video/mp4' : mediaResult.mediaType === 'audio' ? 'audio/webm' : 'image/webp');
+    const mxcUrl = await matrixService.uploadMedia(fileBuffer, mxcFilename, mxcMime, senderCreds.accessToken);
+
+    // Upload thumbnail if available
+    let thumbMxcUrl;
+    if (mediaResult.thumbUrl) {
+      try {
+        const thumbPath = path.join(PUBLIC_ROOT, mediaResult.thumbUrl);
+        const thumbBuf = await fs.readFile(thumbPath);
+        thumbMxcUrl = await matrixService.uploadMedia(thumbBuf, 'thumbnail.webp', 'image/webp', senderCreds.accessToken);
+      } catch { /* non-critical */ }
+    }
+
+    const msgtype = mediaResult.mediaType === 'video' ? 'm.video' : mediaResult.mediaType === 'audio' ? 'm.audio' : 'm.image';
     const resp = await matrixService.sendRoomMediaMessage(matrixRoomId, senderCreds.accessToken, {
-      url: mediaResult.mediaUrl,
+      url: mxcUrl,
       msgtype,
-      body: caption || 'media',
+      body: mxcFilename,
       info: {
-        mimetype: mediaResult.mediaMime,
+        mimetype: mxcMime,
         w: mediaResult.width || undefined,
         h: mediaResult.height || undefined,
+        thumbnail_url: thumbMxcUrl,
       },
     });
 
