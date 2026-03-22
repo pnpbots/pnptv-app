@@ -397,7 +397,7 @@ export function LandingPage() {
                 {loginView === "options" && (
                   <>
                     <button
-                      onClick={async () => { try { await oidcLogin(); } catch {} }}
+                      onClick={async () => { try { await oidcLogin(); } catch (e) { console.error('[PNPtv ID] SSO login failed:', e); } }}
                       className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-sm font-bold text-white transition-all hover:brightness-110 active:scale-[0.98]"
                       style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
                     >

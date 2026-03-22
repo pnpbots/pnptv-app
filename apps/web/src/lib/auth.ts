@@ -2,7 +2,9 @@ import { UserManager, WebStorageStateStore, User } from "oidc-client-ts";
 
 const AUTHENTIK_URL = import.meta.env.VITE_AUTHENTIK_URL || "https://auth.pnptv.app";
 const CLIENT_ID = import.meta.env.VITE_AUTHENTIK_CLIENT_ID || "pnptv-web";
-const APP_URL = import.meta.env.VITE_APP_URL || "https://app.pnptv.app";
+
+// Use current origin so SSO works on both pnptv.app and app.pnptv.app
+const APP_URL = typeof window !== "undefined" ? window.location.origin : (import.meta.env.VITE_APP_URL || "https://app.pnptv.app");
 
 const userManager = new UserManager({
   authority: `${AUTHENTIK_URL}/application/o/pnptv-web/`,
