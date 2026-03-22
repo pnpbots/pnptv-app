@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
-import { checkAuthStatus, apiLogout, ApiError, type TelegramAuthResponse } from "@/lib/api";
+import { checkAuthStatus, apiLogout, oidcLogout, ApiError, type TelegramAuthResponse } from "@/lib/api";
 import { disconnectSocket } from "@/lib/socket";
 import React from "react";
 
@@ -21,6 +21,7 @@ export interface PnptvUser {
   creator_status?: string;
   creator_type?: string | null;
   contentDisclaimer?: boolean;
+  hasSeenTutorial?: boolean;
   lastLoginMethod?: string | null;
   city?: string | null;
   country?: string | null;
@@ -58,6 +59,7 @@ function mapUser(u: NonNullable<TelegramAuthResponse["user"]>): PnptvUser {
     creator_status: u.creator_status,
     creator_type: u.creator_type,
     contentDisclaimer: u.contentDisclaimer || false,
+    hasSeenTutorial: u.hasSeenTutorial || false,
     lastLoginMethod: u.last_login_method ?? null,
     city: u.city ?? null,
     country: u.country ?? null,
@@ -71,8 +73,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const init = async () => {
       try {
-        const SESSION_RETRIES = 2;
-        const SESSION_RETRY_DELAY = 1000;
+        // Detect post-OIDC landing: backend redirects here with ?oidc_linked=1
+        // after establishing the server-side session. Clean the URL immediately
+        // so the param doesn't persist in browser history.
+        const searchParams = new URLSearchParams(window.location.search);
+        const isOidcReturn = searchParams.has("oidc_linked");
+        const oidcError = searchParams.get("oidc_error");
+        if (isOidcReturn || oidcError) {
+          const cleanUrl = window.location.pathname +
+            (searchParams.toString().replace(/oidc_linked=1?&?|oidc_error=[^&]*&?/g, "").replace(/&$|\?$/, "") || "");
+          window.history.replaceState(null, "", cleanUrl);
+        }
+
+        // After OIDC return, retry more aggressively — the session cookie
+        // from the 302 redirect may take one extra round-trip to be sent.
+        const SESSION_RETRIES = isOidcReturn ? 4 : 2;
+        const SESSION_RETRY_DELAY = isOidcReturn ? 500 : 1000;
         let lastErr: unknown;
         for (let attempt = 0; attempt <= SESSION_RETRIES; attempt++) {
           try {
@@ -110,9 +126,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const handleLogout = useCallback(async () => {
     disconnectSocket();
+    // Revoke OIDC session on the backend before clearing local state
+    if (user?.lastLoginMethod === "oidc") {
+      await oidcLogout().catch(() => {});
+    }
     await apiLogout();
     setUser(null);
-  }, []);
+  }, [user]);
 
   const refreshUser = useCallback(async () => {
     try {

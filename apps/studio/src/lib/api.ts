@@ -103,6 +103,7 @@ export interface TelegramAuthResponse {
     creator_status?: string;
     creator_type?: string | null;
     contentDisclaimer?: boolean;
+    hasSeenTutorial?: boolean;
     last_login_method?: string | null;
     city?: string | null;
     country?: string | null;
@@ -126,6 +127,10 @@ export function checkAuthStatus(): Promise<AuthStatusResponse> {
 
 export function apiLogout(): Promise<{ success: boolean }> {
   return request("/api/logout", { method: "POST" });
+}
+
+export function oidcLogout(): Promise<{ success: boolean }> {
+  return request("/api/auth/oidc/logout", { method: "POST" });
 }
 
 // ── RTMP / Channel ────────────────────────────────────────────────────────────

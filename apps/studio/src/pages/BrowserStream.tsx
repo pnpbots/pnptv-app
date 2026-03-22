@@ -10,6 +10,7 @@ import { StudioTabBar } from "@/components/studio/StudioTabBar";
 import type { ActiveTab } from "@/components/studio/StudioTabBar";
 import { StudioSettingsPanel } from "@/components/studio/StudioSettingsPanel";
 import { StudioChatPanel } from "@/components/studio/StudioChatPanel";
+import { PreStreamSetup } from "@/components/studio/PreStreamSetup";
 import {
   TabPanel,
   ConfirmStopDialog,
@@ -349,8 +350,20 @@ export default function BrowserStream() {
         <GoLiveButton />
       </header>
 
-      {/* ── MOBILE LAYOUT (hidden at lg:) ─────────────────────────────────── */}
-      <div className="flex flex-col flex-1 min-h-0 lg:hidden overflow-hidden">
+      {/* ── PRE-STREAM SETUP (shown when not live and not connecting) ───────── */}
+      {!isLive && !isConnecting && (
+        <PreStreamSetup
+          videoRef={videoRef}
+          streamTitle={streamTitle}
+          setStreamTitle={setStreamTitle}
+          onStartStream={handleGoLiveClick}
+          isConnecting={isConnecting}
+          channel={channel}
+        />
+      )}
+
+      {/* ── MOBILE LAYOUT (hidden at lg:) — only shown when live/connecting ── */}
+      <div className={`flex flex-col flex-1 min-h-0 lg:hidden overflow-hidden${!isLive && !isConnecting ? " hidden" : ""}`}>
         {/* Preview canvas — 16:9 */}
         <StudioCanvas
           videoRef={videoRef}
@@ -407,8 +420,8 @@ export default function BrowserStream() {
         </div>
       </div>
 
-      {/* ── DESKTOP LAYOUT (hidden below lg:) ────────────────────────────── */}
-      <div className="hidden lg:flex flex-1 min-h-0 overflow-hidden">
+      {/* ── DESKTOP LAYOUT (hidden below lg:) — only shown when live/connecting */}
+      <div className={`hidden${isLive || isConnecting ? " lg:flex" : ""} flex-1 min-h-0 overflow-hidden`}>
 
         {/* Left column — scene + audio */}
         <aside
