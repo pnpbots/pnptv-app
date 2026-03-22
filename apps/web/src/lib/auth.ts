@@ -19,7 +19,22 @@ const userManager = new UserManager({
 });
 
 export async function login(): Promise<void> {
-  await userManager.signinRedirect();
+  try {
+    await userManager.signinRedirect();
+  } catch (err) {
+    // Fallback: build authorize URL manually if oidc-client-ts fails
+    console.warn("[auth] signinRedirect failed, using fallback:", err);
+    const origin = window.location.origin;
+    const state = Math.random().toString(36).slice(2);
+    const params = new URLSearchParams({
+      client_id: CLIENT_ID,
+      redirect_uri: `${origin}/auth/callback`,
+      response_type: "code",
+      scope: "openid profile email",
+      state,
+    });
+    window.location.href = `${AUTHENTIK_URL}/application/o/authorize/?${params}`;
+  }
 }
 
 export async function handleCallback(): Promise<User> {
