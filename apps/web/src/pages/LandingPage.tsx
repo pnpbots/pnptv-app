@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { telegramWidgetAuth, recoverAccount, TelegramWidgetUser } from "@/lib/api";
+import { login as oidcLogin } from "@/lib/auth";
 import { useAuth } from "@/hooks/useAuth";
-import { LanguageSelector } from "@/components/LanguageSelector"; // Import LanguageSelector
+import { LanguageSelector } from "@/components/LanguageSelector";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
+const AUTHENTIK_URL = import.meta.env.VITE_AUTHENTIK_URL || "https://auth.pnptv.app";
 
 function getBotUsername(): string {
   const raw = import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "PNPLatinoTV_Bot";
@@ -371,6 +373,39 @@ export function LandingPage() {
           <div>
             <p className="text-gradient text-xs font-bold uppercase tracking-widest mb-1">The Clouds &amp; Rush Network</p>
             <p className="text-pnp-textSecondary text-xs">The #1 queer PNP community</p>
+          </div>
+
+          {/* Primary CTA — PNPtv ID */}
+          <button
+            onClick={async () => { try { await oidcLogin(); } catch {} }}
+            className="w-full py-3.5 px-6 rounded-xl font-bold text-sm flex items-center justify-center gap-2.5 text-white transition-all hover:brightness-110 active:scale-[0.98]"
+            style={{
+              background: "linear-gradient(135deg, #D4007A, #E69138)",
+              boxShadow: "0 0 24px rgba(212, 0, 122, 0.4)",
+            }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0" aria-hidden="true">
+              <path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 00-5.25 5.25v3a3 3 0 00-3 3v6.75a3 3 0 003 3h10.5a3 3 0 003-3v-6.75a3 3 0 00-3-3v-3c0-2.9-2.35-5.25-5.25-5.25zm3.75 8.25v-3a3.75 3.75 0 10-7.5 0v3h7.5z" clipRule="evenodd" />
+            </svg>
+            Sign in with PNPtv ID
+          </button>
+
+          {/* Create account link */}
+          <p className="text-center text-xs text-pnp-textSecondary">
+            New here?{" "}
+            <a
+              href={`${AUTHENTIK_URL}/if/flow/default-enrollment-flow/`}
+              className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all"
+            >
+              Create a PNPtv ID
+            </a>
+          </p>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3 w-full">
+            <div className="flex-1 h-px bg-white/10" />
+            <span className="text-[10px] text-pnp-textSecondary uppercase tracking-widest">or</span>
+            <div className="flex-1 h-px bg-white/10" />
           </div>
 
           {/* Join existing — accordion */}
