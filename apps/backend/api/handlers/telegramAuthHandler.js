@@ -4,6 +4,7 @@ const PDSProvisioningService = require('../../bot/services/PDSProvisioningServic
 const PlatformBanService = require('../../bot/services/platformBanService');
 const AuthentikService = require('../../services/authentikService');
 const { isAdminUser } = require('../../bot/utils/helpers');
+const { enforceDefaultFollows } = require('../../bot/services/followService');
 const crypto = require('crypto');
 
 /**
@@ -260,30 +261,30 @@ const handleTelegramAuth = async (req, res) => {
 
     logger.info(`User ${user.id} authenticated successfully, terms accepted: ${user.terms_accepted}`);
 
-    // ASYNC: Provision PDS in background (don't block login)
-    // This runs independently without awaiting
+    // ASYNC: Provision all services in background (don't block login)
     setImmediate(async () => {
+      // 1. Matrix — DMs and hangout chat rooms
+      try {
+        const matrixService = require('../../bot/services/matrixService');
+        await matrixService.provisionMatrixUser(user);
+        logger.info(`[Auth] Matrix provisioned for user ${user.id}`);
+      } catch (err) {
+        logger.warn(`[Auth] Matrix provisioning failed (non-blocking): ${err.message}`);
+      }
+
+      // 2. PDS / Bluesky — ATProto identity
       try {
         const pdsResult = await PDSProvisioningService.createOrLinkPDS(user);
         logger.info(`[Auth] PDS provisioning completed for user ${user.id}:`, {
           success: pdsResult.success,
           status: pdsResult.status
         });
-
-        // Optionally store PDS info in session for frontend
-        if (pdsResult.success) {
-          req.session.user.pds = {
-            pnptv_uuid: pdsResult.pnptv_uuid,
-            pds_handle: pdsResult.pds_handle,
-            pds_did: pdsResult.pds_did,
-            status: pdsResult.status
-          };
-          req.session.save();
-        }
       } catch (pdsError) {
-        logger.warn(`[Auth] PDS provisioning failed (non-blocking):`, pdsError.message);
-        // Continue - login succeeds even if PDS provisioning fails
+        logger.warn(`[Auth] PDS provisioning failed (non-blocking): ${pdsError.message}`);
       }
+
+      // 3. Default follows (idempotent)
+      enforceDefaultFollows(user.id).catch(() => {});
     });
 
     // Return success with full user data matching auth-status format

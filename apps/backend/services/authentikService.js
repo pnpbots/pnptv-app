@@ -557,6 +557,65 @@ class AuthentikService {
   }
 
   /**
+   * Sync an X/Twitter user with Authentik.
+   * Ensures the user exists in Authentik and returns their UUID (sub).
+   */
+  static async syncXUser(xProfile) {
+    if (!AUTHENTIK_TOKEN) {
+      logger.error('AUTHENTIK_API_TOKEN is not configured');
+      return null;
+    }
+
+    try {
+      const xId = String(xProfile.id || xProfile.xId);
+      const handle = xProfile.username || xProfile.xHandle || `x_${xId}`;
+      const username = handle;
+      const email = `${xId}@x.pnptv.app`; // Virtual email for Authentik
+
+      // 1. Check if user exists in Authentik by username
+      const searchRes = await axios.get(`${AUTHENTIK_URL}/api/v3/core/users/`, {
+        params: { username: username },
+        headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` }
+      });
+
+      let authentikUser = searchRes.data.results.find(u => u.username === username);
+
+      if (authentikUser) {
+        logger.debug(`Found existing Authentik user for X: ${username}`);
+        const displayName = xProfile.name || xProfile.firstName || handle;
+        if (authentikUser.name !== displayName) {
+          await axios.patch(`${AUTHENTIK_URL}/api/v3/core/users/${authentikUser.pk}/`, {
+            name: displayName
+          }, {
+            headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` }
+          });
+        }
+      } else {
+        logger.info(`Creating new Authentik user for X ID: ${xId} (@${handle})`);
+        const createRes = await axios.post(`${AUTHENTIK_URL}/api/v3/core/users/`, {
+          username: username,
+          name: xProfile.name || xProfile.firstName || handle,
+          email: email,
+          type: 'internal',
+          path: 'users/x',
+          attributes: {
+            x_id: xId,
+            x_handle: handle,
+          }
+        }, {
+          headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` }
+        });
+        authentikUser = createRes.data;
+      }
+
+      return authentikUser.uuid || authentikUser.pk;
+    } catch (error) {
+      logger.error('Error syncing X user with Authentik:', error.response?.data || error.message);
+      return null;
+    }
+  }
+
+  /**
    * Trigger a password reset flow in Authentik for the given email.
    * This sends an email to the user with a recovery link.
    */

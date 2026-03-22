@@ -15,5 +15,8 @@
     "UIFeature.passwordReset": false
   },
   "disable_custom_urls": true,
-  "disable_guests": true
+  "disable_guests": true,
+  "sso_redirect_options": {
+    "immediate": true
+  }
 }
