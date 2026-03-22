@@ -250,6 +250,8 @@ export function LandingPage() {
 
   const [loginOpen, setLoginOpen] = useState(false);
   const [loginView, setLoginView] = useState<"options" | "telegram" | "email" | "recover">("options");
+  const [oidcLoading, setOidcLoading] = useState(false);
+  const [oidcError, setOidcError] = useState<string | null>(null);
 
   const [widgetStatus, setWidgetStatus] = useState<"idle" | "verifying" | "error">("idle");
   const [widgetBlocked, setWidgetBlocked] = useState(false);
@@ -397,15 +399,32 @@ export function LandingPage() {
                 {loginView === "options" && (
                   <>
                     <button
-                      onClick={async () => { try { await oidcLogin(); } catch (e) { console.error('[PNPtv ID] SSO login failed:', e); } }}
-                      className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-sm font-bold text-white transition-all hover:brightness-110 active:scale-[0.98]"
-                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                      onClick={async () => {
+                        setOidcLoading(true);
+                        setOidcError(null);
+                        try {
+                          localStorage.setItem("pnptv_last_auth", "pnptv_id");
+                          await oidcLogin();
+                        } catch (e: any) {
+                          console.error('[PNPtv ID] SSO login failed:', e);
+                          setOidcLoading(false);
+                          setOidcError(e?.message || "Could not connect to login server. Try again.");
+                        }
+                      }}
+                      disabled={oidcLoading}
+                      className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-sm font-bold text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-70"
+                      style={{ background: oidcLoading ? "linear-gradient(135deg, #a0005e, #b87020)" : "linear-gradient(135deg, #D4007A, #E69138)" }}
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0" aria-hidden="true">
-                        <path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 00-5.25 5.25v3a3 3 0 00-3 3v6.75a3 3 0 003 3h10.5a3 3 0 003-3v-6.75a3 3 0 00-3-3v-3c0-2.9-2.35-5.25-5.25-5.25zm3.75 8.25v-3a3.75 3.75 0 10-7.5 0v3h7.5z" clipRule="evenodd" />
-                      </svg>
-                      Sign in with PNPtv ID
+                      {oidcLoading ? (
+                        <Spinner />
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0" aria-hidden="true">
+                          <path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 00-5.25 5.25v3a3 3 0 00-3 3v6.75a3 3 0 003 3h10.5a3 3 0 003-3v-6.75a3 3 0 00-3-3v-3c0-2.9-2.35-5.25-5.25-5.25zm3.75 8.25v-3a3.75 3.75 0 10-7.5 0v3h7.5z" clipRule="evenodd" />
+                        </svg>
+                      )}
+                      {oidcLoading ? "Connecting..." : "Sign in with PNPtv ID"}
                     </button>
+                    {oidcError && <p className="text-red-400 text-xs text-center">{oidcError}</p>}
 
                     <div className="flex items-center gap-3">
                       <div className="flex-1 h-px bg-white/10" />
