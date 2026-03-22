@@ -47,7 +47,7 @@ async function reactToChatMessage(req, res) {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
 
-  const messageId = parseInt(req.params.messageId, 10);
+  const messageId = Number(req.params.messageId);
   if (!Number.isFinite(messageId) || messageId <= 0) return res.status(400).json({ error: 'Invalid message ID' });
 
   const { emoji } = req.body;
@@ -74,7 +74,7 @@ async function reactToChatMessage(req, res) {
 
 // GET /api/webapp/chat/messages/:messageId/reactions
 async function getChatReactions(req, res) {
-  const messageId = parseInt(req.params.messageId, 10);
+  const messageId = Number(req.params.messageId);
   if (!Number.isFinite(messageId) || messageId <= 0) return res.status(400).json({ error: 'Invalid message ID' });
 
   try {
