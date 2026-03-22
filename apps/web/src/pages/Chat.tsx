@@ -237,24 +237,24 @@ const MessageBubble = memo(function MessageBubble({
   }, []);
 
   return (
-    <div className={`flex gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
+    <div className={`flex gap-1.5 sm:gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
       {/* Avatar */}
       <button
         onClick={() => onNavigate(profilePath)}
-        className="w-11 h-11 flex items-center justify-center rounded-full flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+        className="w-8 h-8 sm:w-11 sm:h-11 flex items-center justify-center rounded-full flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
         aria-label={`View ${msg.first_name || msg.username || "user"}'s profile`}
       >
         {!showAvatarFallback && (
           <img
             src={msg.photo_url!}
             alt=""
-            className="w-8 h-8 rounded-full object-cover"
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover"
             onError={() => setAvatarError(true)}
           />
         )}
         {showAvatarFallback && (
           <div
-            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs font-bold"
             style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
           >
             {(msg.first_name || msg.username || "?")[0].toUpperCase()}
@@ -264,7 +264,7 @@ const MessageBubble = memo(function MessageBubble({
 
       {/* Bubble */}
       <div
-        className={`max-w-[75%] ${isMe ? "text-right items-end" : "items-start"} flex flex-col group`}
+        className={`max-w-[85%] sm:max-w-[75%] ${isMe ? "text-right items-end" : "items-start"} flex flex-col group`}
         onClick={(e) => {
           // Toggle action bar on tap (mobile-friendly)
           const target = e.target as HTMLElement;
@@ -1594,28 +1594,28 @@ export default function Chat() {
         )}
 
         {/* Chat header */}
-        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
+        <div className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm overflow-x-hidden">
           <button
             onClick={closeChat}
-            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent flex-shrink-0"
+            className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent flex-shrink-0"
             aria-label={t.chat.backToGroupList}
           >
-            <svg className="w-5 h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-4.5 h-4.5 sm:w-5 sm:h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
 
-          {/* Group avatar in header */}
-          <div className="relative flex-shrink-0">
+          {/* Group avatar in header — hidden on very small screens */}
+          <div className="relative flex-shrink-0 hidden xs:block">
             {activeGroup.avatarUrl && !activeGroup.isMain && !activeGroup.isWallOfFame ? (
               <img
                 src={activeGroup.avatarUrl}
                 alt=""
-                className="w-9 h-9 rounded-full object-cover ring-1 ring-white/10"
+                className="w-8 h-8 rounded-full object-cover ring-1 ring-white/10"
               />
             ) : (
               <div
-                className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
                 style={{
                   background: activeGroup.isMain
                     ? "linear-gradient(135deg, #D4007A, #E69138)"
@@ -1628,16 +1628,14 @@ export default function Chat() {
                 {activeGroup.isMain ? "P" : activeGroup.isWallOfFame ? "\u{1F3C6}" : (activeGroup.name?.[0] || "?").toUpperCase()}
               </div>
             )}
-            {/* Connection indicator dot */}
-            <span
-              className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-pnp-background"
-              style={{ background: isConnected ? "#34C759" : "#8E8E93" }}
-            />
+            {isConnected && (
+              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 ring-2 ring-pnp-background" />
+            )}
           </div>
 
           <div className="flex-1 min-w-0">
-            <h2 className="text-sm font-bold text-pnp-textPrimary truncate">{activeGroup.name}</h2>
-            <div className="flex items-center gap-1.5 text-xs text-pnp-textSecondary">
+            <h2 className="text-[13px] sm:text-sm font-bold text-pnp-textPrimary truncate">{activeGroup.name}</h2>
+            <div className="flex items-center gap-1 text-[10px] sm:text-xs text-pnp-textSecondary">
               <span>{activeGroup.memberCount} {activeGroup.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}</span>
               {onlineMembers.length > 0 && (
                 <>
@@ -1645,22 +1643,16 @@ export default function Chat() {
                   <span className="text-green-400 font-medium">{onlineMembers.length} online</span>
                 </>
               )}
-              {matrixRoomId && (
-                <>
-                  <span className="text-pnp-textSecondary/40">&middot;</span>
-                  <span className="text-pnp-accent text-[10px]">E2E</span>
-                </>
-              )}
             </div>
           </div>
 
-          {/* Search button */}
+          {/* Search button — visible only on sm+ screens; on mobile it lives in the three-dot menu */}
           <button
             onClick={() => {
               setShowSearch((v) => !v);
               if (!showSearch) setTimeout(() => searchInputRef.current?.focus(), 100);
             }}
-            className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all"
+            className="hidden sm:flex w-8 h-8 items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all flex-shrink-0"
             style={{ color: showSearch ? "#D4007A" : "#8E8E93" }}
             aria-label="Search messages"
           >
@@ -1669,10 +1661,10 @@ export default function Chat() {
             </svg>
           </button>
 
-          {/* Online members button — count hidden on xs to save space */}
+          {/* Online members — only icon on mobile */}
           <button
             onClick={() => setShowOnline((v) => !v)}
-            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors hover:bg-white/5 min-w-[32px] min-h-[32px] justify-center"
+            className="hidden sm:flex items-center gap-1 px-1.5 py-1 rounded-lg transition-colors hover:bg-white/5 min-h-[28px] justify-center flex-shrink-0"
             title={t.chat.onlineNow}
             aria-label={t.chat.showOnlineMembers}
           >
@@ -1680,14 +1672,14 @@ export default function Chat() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-60" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
             </span>
-            <span className="text-xs font-medium text-green-400">{onlineMembers.length}</span>
+            <span className="text-[11px] font-medium text-green-400">{onlineMembers.length}</span>
           </button>
 
           {/* Video call: Main Stage link for main group, regular call button for others */}
           {activeGroup.isMain ? (
             <button
               onClick={() => navigate("/main-stage")}
-              className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold text-white transition-colors flex-shrink-0"
               style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
               aria-label="Go to Main Stage"
             >
@@ -1706,10 +1698,10 @@ export default function Chat() {
           )}
 
           {/* Three-dot overflow menu */}
-          <div className="relative">
+          <div className="relative flex-shrink-0">
             <button
               onClick={() => setShowGroupMenu(v => !v)}
-              className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
               style={{ color: "#8E8E93" }}
               aria-label="Group options"
               aria-expanded={showGroupMenu}
@@ -1722,6 +1714,18 @@ export default function Chat() {
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setShowGroupMenu(false)} />
                 <div className="absolute right-0 top-10 z-40 rounded-xl overflow-hidden shadow-xl min-w-[160px]" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  {/* Search — only shown in menu on mobile; hidden on sm+ where the icon is in the header */}
+                  <button
+                    onClick={() => {
+                      setShowGroupMenu(false);
+                      setShowSearch((v) => !v);
+                      if (!showSearch) setTimeout(() => searchInputRef.current?.focus(), 100);
+                    }}
+                    className="sm:hidden w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
+                  >
+                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+                    Search
+                  </button>
                   <button
                     onClick={() => { setShowGroupMenu(false); setShowOnline(true); }}
                     className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
@@ -2497,10 +2501,10 @@ export default function Chat() {
               </div>
             </div>
           ) : messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center py-12">
+            <div className="flex flex-col items-center justify-center h-full text-center py-8 sm:py-12">
               {/* Visual hangout explainer as empty state */}
-              <div className="w-20 h-20 mx-auto mb-5 rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(123,97,255,0.12))" }}>
-                <svg className="w-10 h-10" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
+              <div className="w-14 h-14 sm:w-20 sm:h-20 mx-auto mb-4 sm:mb-5 rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(123,97,255,0.12))" }}>
+                <svg className="w-7 h-7 sm:w-10 sm:h-10" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                 </svg>
               </div>
@@ -2509,8 +2513,8 @@ export default function Chat() {
                 {t.chat.beFirstToSay}
               </p>
 
-              {/* Feature pills */}
-              <div className="flex flex-wrap justify-center gap-2 mt-5">
+              {/* Feature pills — on mobile show only Photos & Videos + Voice Messages */}
+              <div className="flex flex-wrap justify-center gap-2 mt-4 sm:mt-5">
                 <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-pnp-textSecondary" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
                   <svg className="w-3.5 h-3.5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25a2.25 2.25 0 00-2.25-2.25H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" /></svg>
                   Photos & Videos
@@ -2519,11 +2523,11 @@ export default function Chat() {
                   <svg className="w-3.5 h-3.5" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /></svg>
                   Voice Messages
                 </div>
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-pnp-textSecondary" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-pnp-textSecondary" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
                   <svg className="w-3.5 h-3.5" style={{ color: "#E69138" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" /></svg>
                   Video Calls
                 </div>
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-pnp-textSecondary" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-pnp-textSecondary" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
                   <svg className="w-3.5 h-3.5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.182 15.182a4.5 4.5 0 01-6.364 0M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75zm-.375 0h.008v.015h-.008V9.75zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75zm-.375 0h.008v.015h-.008V9.75z" /></svg>
                   Reactions
                 </div>
@@ -2694,7 +2698,7 @@ export default function Chat() {
             </div>
           ) : (
             /* Normal input area */
-            <div className="px-4 py-3">
+            <div className="px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-pnp-background/80 backdrop-blur-md">
               <div className="flex items-center gap-2">
                 {/* Media upload button — hidden when group has allowMedia set to false */}
                 {groupDetail?.allowMedia !== false && (
@@ -2797,7 +2801,7 @@ export default function Chat() {
   // ─── Group List View ──────────────────────────────────────────────────
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6">
+    <div className="max-w-2xl mx-auto px-4 py-6 pb-safe">
       <Helmet>
         <title>{t.chat.pageTitle}</title>
         <meta name="description" content={t.chat.pageDescription} />
@@ -3138,16 +3142,16 @@ export default function Chat() {
             <button
               key={group.id}
               onClick={() => openChat(group)}
-              className="w-full glass-card-sm p-4 text-left hover:border-white/20 active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              className="w-full glass-card-sm p-3 sm:p-4 text-left hover:border-white/20 active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             >
               <div className="flex gap-3 items-center">
                 {/* Group avatar */}
-                <div className="relative w-12 h-12 flex-shrink-0">
+                <div className="relative w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0">
                   {group.avatarUrl && !group.isMain && !group.isWallOfFame ? (
                     <img
                       src={group.avatarUrl}
                       alt=""
-                      className="w-12 h-12 rounded-full object-cover ring-2 ring-white/10"
+                      className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover ring-2 ring-white/10"
                       onError={(e) => {
                         const img = e.target as HTMLImageElement;
                         img.style.display = "none";
@@ -3157,7 +3161,7 @@ export default function Chat() {
                     />
                   ) : null}
                   <div
-                    className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold"
+                    className="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-base sm:text-lg font-bold"
                     style={{
                       display: group.avatarUrl && !group.isMain && !group.isWallOfFame ? "none" : undefined,
                       background: group.isMain
@@ -3180,42 +3184,46 @@ export default function Chat() {
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-pnp-textPrimary text-sm truncate">
+                  {/* Name row — badges on mobile pushed to right side via ml-auto on the badge cluster */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold text-pnp-textPrimary text-sm truncate min-w-0">
                       {group.name}
                     </span>
-                    {/* Unread badge */}
+                    {/* Status badges: main/wof/private/live — always visible */}
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {group.isMain && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary">
+                          {t.chat.labelMain}
+                        </span>
+                      )}
+                      {group.isWallOfFame && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded text-yellow-300" style={{ background: "rgba(255,215,0,0.15)" }}>
+                          {t.chat.labelWallOfFame}
+                        </span>
+                      )}
+                      {!group.isPublic && !group.isMain && !group.isWallOfFame && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary">
+                          {t.chat.labelPrivate}
+                        </span>
+                      )}
+                      {group.hasActiveCall && (
+                        <div className="flex items-center gap-1">
+                          <span className="relative flex h-1.5 w-1.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pnp-accent opacity-75" />
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 dot-gradient" />
+                          </span>
+                          <span className="text-[10px] text-gradient font-semibold">{t.chat.labelLive}</span>
+                        </div>
+                      )}
+                    </div>
+                    {/* Unread badge — right-aligned via ml-auto */}
                     {(group.unreadCount ?? 0) > 0 && (
                       <span
-                        className="text-[10px] px-1.5 py-0.5 rounded-full text-white font-bold flex-shrink-0 min-w-[18px] text-center"
+                        className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full text-white font-bold flex-shrink-0 min-w-[18px] text-center"
                         style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
                       >
                         {group.unreadCount! > 99 ? "99+" : group.unreadCount}
                       </span>
-                    )}
-                    {group.isMain && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary flex-shrink-0">
-                        {t.chat.labelMain}
-                      </span>
-                    )}
-                    {group.isWallOfFame && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 text-yellow-300" style={{ background: "rgba(255,215,0,0.15)" }}>
-                        {t.chat.labelWallOfFame}
-                      </span>
-                    )}
-                    {!group.isPublic && !group.isMain && !group.isWallOfFame && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary flex-shrink-0">
-                        {t.chat.labelPrivate}
-                      </span>
-                    )}
-                    {group.hasActiveCall && (
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <span className="relative flex h-1.5 w-1.5">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pnp-accent opacity-75" />
-                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 dot-gradient" />
-                        </span>
-                        <span className="text-[10px] text-gradient font-semibold">{t.chat.labelLive}</span>
-                      </div>
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
@@ -3228,11 +3236,12 @@ export default function Chat() {
                       </span>
                     )}
                   </div>
+                  {/* Description — hidden on mobile, visible on sm+ */}
                   {!group.isMain && !group.isWallOfFame && group.description && (
-                    <p className="text-[10px] text-pnp-textSecondary truncate mt-0.5">{group.description}</p>
+                    <p className="hidden sm:block text-[10px] text-pnp-textSecondary truncate mt-0.5">{group.description}</p>
                   )}
                   {!group.isMain && !group.isWallOfFame && (group.tags || []).length > 0 && (
-                    <div className="flex flex-wrap gap-0.5 mt-0.5">
+                    <div className="hidden sm:flex flex-wrap gap-0.5 mt-0.5">
                       {(group.tags || []).slice(0, 3).map((tag: string) => (
                         <span key={tag} className="px-1.5 py-0.5 rounded-full text-[9px] bg-white/10 text-pnp-textSecondary">{tag}</span>
                       ))}
