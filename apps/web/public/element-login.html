@@ -19,62 +19,59 @@
 
   status.innerText = 'Preparing session...';
 
-  // 1. Clear only Matrix/Element localStorage keys — NOT all keys, because this
-  //    iframe shares localStorage with the parent app (same origin).
+  // 1. Clear only Matrix/Element localStorage keys (same-origin safety)
   try {
     var keysToRemove = [];
     for (var i = 0; i < localStorage.length; i++) {
       var k = localStorage.key(i);
-      if (k && (k.startsWith('mx_') || k.startsWith('element-') || k.startsWith('matrix-'))) {
+      if (k && (k.startsWith('mx_') || k.startsWith('element') || k.startsWith('matrix')
+                || k.startsWith('riot') || k.startsWith('idb-') || k.startsWith('loglevel'))) {
         keysToRemove.push(k);
       }
     }
     keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
   } catch(e) {}
-  // Only clear Element-related sessionStorage keys
   try {
     var sessionKeysToRemove = [];
     for (var i = 0; i < sessionStorage.length; i++) {
       var k = sessionStorage.key(i);
-      if (k && (k.startsWith('mx_') || k.startsWith('element-') || k.startsWith('matrix-'))) {
+      if (k && (k.startsWith('mx_') || k.startsWith('element') || k.startsWith('matrix')
+                || k.startsWith('riot') || k.startsWith('idb-') || k.startsWith('loglevel'))) {
         sessionKeysToRemove.push(k);
       }
     }
     sessionKeysToRemove.forEach(function(k) { sessionStorage.removeItem(k); });
   } catch(e) {}
 
-  // 2. Delete only Matrix/Element IndexedDB databases (not app databases)
-  var matrixDbPrefixes = ['matrix-js-sdk', 'element-', 'matrix-react-sdk', 'riot-web'];
-  var matrixDbExact = ['logs', 'element-pickle-key'];
-  function isMatrixDb(name) {
-    if (!name) return false;
-    if (matrixDbExact.indexOf(name) !== -1) return true;
-    for (var i = 0; i < matrixDbPrefixes.length; i++) {
-      if (name.startsWith(matrixDbPrefixes[i])) return true;
-    }
-    return false;
-  }
+  // 2. Delete ALL IndexedDB databases — Element stores crypto/sync/pickle
+  //    under various names. The PNPtv app does not use IndexedDB (only
+  //    Cache API via service worker), so this is safe.
   try {
     if (indexedDB.databases) {
       var dbs = await indexedDB.databases();
-      await Promise.all(dbs.filter(function(db) { return isMatrixDb(db.name); }).map(function(db) {
+      await Promise.all(dbs.map(function(db) {
         return new Promise(function(resolve) {
           var req = indexedDB.deleteDatabase(db.name);
           req.onsuccess = resolve;
           req.onerror = resolve;
           req.onblocked = resolve;
-          setTimeout(resolve, 2000);
+          setTimeout(resolve, 3000);
         });
       }));
     } else {
       // Firefox fallback — try known Element DB names
-      await Promise.all(matrixDbExact.concat(matrixDbPrefixes.map(function(p) { return p + ':crypto'; })).map(function(name) {
+      var knownDbs = [
+        'matrix-js-sdk:crypto', 'matrix-js-sdk:riot-web-sync',
+        'matrix-js-sdk:default-sync', 'logs', 'element-pickle-key',
+        'matrix-react-sdk', '_matrix-js-sdk', 'idb-keyval'
+      ];
+      await Promise.all(knownDbs.map(function(name) {
         return new Promise(function(resolve) {
           var req = indexedDB.deleteDatabase(name);
           req.onsuccess = resolve;
           req.onerror = resolve;
           req.onblocked = resolve;
-          setTimeout(resolve, 2000);
+          setTimeout(resolve, 3000);
         });
       }));
     }
@@ -86,9 +83,10 @@
   localStorage.setItem('mx_access_token', token);
   localStorage.setItem('mx_is_guest', 'false');
   localStorage.setItem('mx_has_pickle_key', 'false');
+  localStorage.setItem('mx_has_access_token', 'true');
 
-  // 4. Small delay to ensure IDB cleanup completes
-  await new Promise(function(r) { setTimeout(r, 500); });
+  // 4. Wait for IDB cleanup to settle
+  await new Promise(function(r) { setTimeout(r, 800); });
 
   // 5. Navigate to Element with the room
   var dest = '/element/';
