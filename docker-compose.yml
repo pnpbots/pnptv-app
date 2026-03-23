@@ -681,6 +681,13 @@ services:
       SYNAPSE_OIDC_CLIENT_SECRET: ${SYNAPSE_OIDC_CLIENT_SECRET}
     networks:
       - pnptvapp_net
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "pnptvapp_pnptvapp_net"
+      traefik.http.routers.synapse.rule: "Host(`matrix.pnptv.app`)"
+      traefik.http.routers.synapse.entrypoints: "websecure"
+      traefik.http.routers.synapse.tls.certresolver: "letsencrypt"
+      traefik.http.services.synapse.loadbalancer.server.port: "8008"
     depends_on:
       pg-synapse:
         condition: service_healthy

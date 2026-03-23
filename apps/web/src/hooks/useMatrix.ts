@@ -101,8 +101,10 @@ export interface MatrixMessage {
   timestamp: number;
   isMine: boolean;
   mediaUrl?: string;
-  mediaType?: "image" | "video" | "file";
+  mediaType?: "image" | "video" | "audio" | "file";
   mediaMime?: string;
+  /** Duration in seconds for audio messages */
+  duration?: number;
   /** Reply-to info extracted from m.relates_to */
   replyToEventId?: string;
   replyToSenderId?: string;
@@ -151,15 +153,23 @@ function eventToMessage(event: MatrixEvent, myUserId: string, roomTimeline?: Mat
     return { ...base, body };
   }
 
-  if (msgtype === "m.image" || msgtype === "m.video" || msgtype === "m.file") {
-    const mediaType = msgtype === "m.image" ? "image" : msgtype === "m.video" ? "video" : "file";
-    const url = content.url ?? content.external_url ?? "";
+  if (msgtype === "m.image" || msgtype === "m.video" || msgtype === "m.audio" || msgtype === "m.file") {
+    const mediaType = msgtype === "m.image" ? "image" : msgtype === "m.video" ? "video" : msgtype === "m.audio" ? "audio" : "file";
+    let url = content.url ?? content.external_url ?? "";
+    // Convert mxc:// URLs to downloadable HTTP URLs
+    if (typeof url === "string" && url.startsWith("mxc://") && matrixClient) {
+      url = matrixClient.mxcUrlToHttp(url, undefined, undefined, undefined, true) ?? url;
+    }
+    // Extract duration for audio messages (Matrix sends milliseconds, convert to seconds)
+    const durationMs = content.info?.duration;
+    const durationSec = typeof durationMs === "number" && durationMs > 0 ? Math.round(durationMs / 1000) : undefined;
     return {
       ...base,
       body: body || "",
       mediaUrl: url,
       mediaType,
       mediaMime: content.info?.mimetype,
+      duration: durationSec,
     };
   }
 
@@ -349,7 +359,7 @@ export async function sendMatrixReply(
 export async function sendMatrixMediaMessage(
   roomId: string,
   url: string,
-  msgtype: "m.image" | "m.video" | "m.file",
+  msgtype: "m.image" | "m.video" | "m.audio" | "m.file",
   body: string
 ): Promise<ISendEventResponse> {
   const client = await initMatrix();

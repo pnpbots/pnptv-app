@@ -664,7 +664,7 @@ const joinCall = async (req, res) => {
     // Broadcast full participant list for real-time UI
     try {
       const { rows: allParticipants } = await query(
-        `SELECT cp.user_id AS "userId", u.first_name AS name, u.photo_url AS "photoUrl"
+        `SELECT cp.user_id AS "userId", u.first_name AS name, u.photo_file_id AS "photoUrl"
          FROM hangout_call_participants cp
          JOIN users u ON u.id = cp.user_id
          WHERE cp.call_id = $1 AND cp.left_at IS NULL`,
@@ -903,7 +903,7 @@ const leaveCall = async (req, res) => {
       // Broadcast updated participant list
       try {
         const { rows: allParticipants } = await query(
-          `SELECT cp.user_id AS "userId", u.first_name AS name, u.photo_url AS "photoUrl"
+          `SELECT cp.user_id AS "userId", u.first_name AS name, u.photo_file_id AS "photoUrl"
            FROM hangout_call_participants cp
            JOIN users u ON u.id = cp.user_id
            WHERE cp.call_id = $1 AND cp.left_at IS NULL`,

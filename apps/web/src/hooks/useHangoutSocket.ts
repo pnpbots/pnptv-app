@@ -1,7 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { connectSocket } from "@/lib/socket";
-import { type GroupMessage } from "@/lib/api";
-import { sendTyping as matrixSendTyping, useRoomTyping } from "@/hooks/useMatrix";
 
 interface OnlineMember {
   userId: string;
@@ -65,8 +63,7 @@ export function useHangoutSocket(
   // Feature 4: Read receipts keyed by userId
   const [readReceipts, setReadReceipts] = useState<Map<string, ReadReceiptEntry>>(new Map());
 
-  // Matrix typing users (merged below)
-  const { typingUsers: matrixTypingUsers } = useRoomTyping(matrixRoomId ?? null);
+  // Typing is handled by Element Web iframe — no parent-side Matrix SDK needed
 
   // Refs for debouncing and cleanup
   const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -321,26 +318,20 @@ export function useHangoutSocket(
     };
   }, [groupId, userId]);
 
-  // Emit typing indicator (debounced 2s) — tries Matrix first, always emits via socket.
-  // Feature 5: Pass isRecording=true to suppress emission during voice recording.
+  // Emit typing indicator via Socket.IO (debounced 2s).
+  // Matrix typing is handled natively by Element Web iframe.
   const emitTyping = useCallback(
     (isRecording?: boolean) => {
       if (!groupId) return;
-      // Suppress typing indicator while the user is recording a voice message
       if (isRecording) return;
       const now = Date.now();
       if (now - lastTypingEmit.current < 2000) return;
       lastTypingEmit.current = now;
 
-      // Matrix typing (fire-and-forget)
-      if (matrixRoomId) {
-        matrixSendTyping(matrixRoomId, true, 3000).catch(() => {});
-      }
-
       const socket = connectSocket();
       socket.emit("hangout:typing", { groupId });
     },
-    [groupId, matrixRoomId]
+    [groupId]
   );
 
   const inviteToCall = useCallback(
@@ -359,14 +350,8 @@ export function useHangoutSocket(
     socket.emit("hangout:mark-read", { groupId });
   }, [groupId, userId]);
 
-  // Merge socket + Matrix typing users (deduplicate by name)
-  const mergedTypingUsers = React.useMemo(() => {
-    const names = new Set(typingUsers);
-    for (const mu of matrixTypingUsers) {
-      names.add(mu.displayName);
-    }
-    return Array.from(names);
-  }, [typingUsers, matrixTypingUsers]);
+  // Typing users from Socket.IO (Matrix typing handled by Element Web)
+  const mergedTypingUsers = useMemo(() => typingUsers, [typingUsers]);
 
   return {
     emitTyping,

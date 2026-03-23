@@ -1,9 +1,8 @@
-import React, {
+import {
   useState,
   useEffect,
   useRef,
   useCallback,
-  memo,
 } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useParams } from "react-router-dom";
@@ -16,7 +15,6 @@ import { useI18n } from "@/lib/i18n";
 import {
   getHangoutGroups,
   createHangoutGroup,
-  sendGroupMediaMessage,
   startGroupCall,
   getActiveGroupCall,
   leaveHangoutGroup,
@@ -29,7 +27,6 @@ import {
   getJoinRequests,
   handleJoinRequest,
   getOrCreateHangoutRoom,
-  sendHangoutMessage,
   getHangoutGroup,
   kickHangoutMember,
   banHangoutMember,
@@ -38,53 +35,30 @@ import {
   unmuteHangoutMember,
   promoteHangoutMember,
   demoteHangoutMember,
-  pinHangoutMessage,
   unpinHangoutMessage,
   getHangoutPins,
   updateHangoutSettings,
-  transferHangoutOwnership,
   getHangoutInviteLink,
   updateHangoutNotification,
-  deleteHangoutMessage,
-  reactToChatMessage,
-  getChatReactions,
   updateHangoutGroup,
   uploadGroupAvatar,
   kickGroupMember,
   updateMemberRole,
   type HangoutGroup,
-  type GroupMessage,
   type GroupMember,
-  type StartCallResponse,
-  type GetActiveCallResponse,
   type DiscoverGroup,
   type JoinRequest,
 } from "@/lib/api";
 import {
-  useRoomMessages,
-  sendMatrixMessage,
-  sendMatrixReply,
-  sendReadReceipt,
-  sendReaction,
-  redactEvent,
-  useRoomReactions,
-  getMatrixClient,
-  type ReactionEntry,
-} from "@/hooks/useMatrix";
-import {
-  MediaUploadButton,
-  MediaPreview,
-  MediaMessage,
-  MediaLightbox,
   VideoCallButton,
   VideoCallBanner,
   VideoCallOverlay,
 } from "@/components/hangouts";
+
 import { connectSocket } from "@/lib/socket";
-import { translateText } from "@/lib/feedI18n";
 import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
-import { NearbyBadge, useNearbyToggle } from "@/components/NearbyBadge";
-import { SpotlightStrip, type SpotlightItem } from "@/components/SpotlightStrip";
+import { NearbyBadge } from "@/components/NearbyBadge";
+import { SpotlightStrip } from "@/components/SpotlightStrip";
 import { getUpcomingEvents } from "@/lib/api";
 import type { EventItem } from "@/components/events/EventCard";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
@@ -92,409 +66,7 @@ import { EventDetailModal } from "@/components/events";
 import { HangoutsPaywall } from "@/components/HangoutsPaywall";
 import { ApiError } from "@/lib/api";
 
-const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
-
-// ─── Reaction emojis (PNP-themed) ──────────────────────────────────────────
-
-const QUICK_REACTIONS = ["❤️", "😈", "💨", "🧊", "💎", "🔥", "👹", "🍆", "🍑"];
-const EXTENDED_REACTIONS = ["❤️", "😈", "💨", "🧊", "💎", "🔥", "👹", "🍆", "🍑", "😍", "🤤", "👅", "💦", "🥵", "😏", "🤪", "💜", "🖤", "⚡", "🌈", "👑", "🫦", "🫠", "😮‍💨"];
-
-// ─── Utilities ──────────────────────────────────────────────────────────────
-
-function isValidPhotoUrl(photo: string | null | undefined): photo is string {
-  return !!photo && (photo.startsWith("/") || photo.startsWith("http"));
-}
-
-/** Extract the telegram/db ID from a Matrix user ID like @pnptv_1234567:matrix.pnptv.app → "1234567" */
-function telegramIdFromMatrixId(matrixId: string): string {
-  return matrixId.split(":")[0].replace(/^@pnptv_/, "").replace(/^@/, "");
-}
-
-function timeAgo(dateStr: string): string {
-  if (!dateStr) return "";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  return `${Math.floor(hrs / 24)}d`;
-}
-
-function formatDateSeparator(dateStr: string, today: string, yesterday: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const messageDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const diffDays = Math.floor((todayDate.getTime() - messageDay.getTime()) / 86400000);
-
-  if (diffDays === 0) return today;
-  if (diffDays === 1) return yesterday;
-  return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-}
-
-function isSameDay(a: string, b: string): boolean {
-  const dA = new Date(a);
-  const dB = new Date(b);
-  return (
-    dA.getFullYear() === dB.getFullYear() &&
-    dA.getMonth() === dB.getMonth() &&
-    dA.getDate() === dB.getDate()
-  );
-}
-
 type View = "list" | "chat";
-
-// ─── Message Bubble ─────────────────────────────────────────────────────────
-
-interface MessageBubbleProps {
-  msg: GroupMessage;
-  isMe: boolean;
-  userLang: string;
-  onNavigate: (path: string) => void;
-  onExpandImage: (src: string) => void;
-  currentUserId?: string;
-  /** Matrix event ID for this message (for reactions) */
-  matrixEventId?: string;
-  /** Reactions on this message */
-  reactions?: ReactionEntry[];
-  /** Called when user toggles a reaction emoji */
-  onReaction?: (eventId: string, emoji: string) => void;
-  /** Called when user taps reply */
-  onReply?: (msg: GroupMessage) => void;
-  /** Quoted reply reference */
-  replyTo?: { name: string; content: string } | null;
-  /** Called when owner/mod pins a message */
-  onPin?: (eventId: string, body: string) => void;
-  /** Called when owner/mod deletes a message */
-  onDelete?: (eventId: string) => void;
-  /** Whether the current viewer is owner or mod */
-  isOwnerOrMod?: boolean;
-}
-
-const MessageBubble = memo(function MessageBubble({
-  msg,
-  isMe,
-  userLang,
-  onNavigate,
-  onExpandImage,
-  currentUserId,
-  matrixEventId,
-  reactions,
-  onReaction,
-  onReply,
-  replyTo,
-  onPin,
-  onDelete,
-  isOwnerOrMod,
-}: MessageBubbleProps) {
-  const profilePath = isMe ? "/profile" : `/profile/${msg.user_id}`;
-  const hasMedia = !!(msg.media_url && msg.media_type);
-  const hasText = !!(msg.content && msg.content.trim());
-  const [translatedContent, setTranslatedContent] = useState<string | null>(null);
-  const [isTranslating, setIsTranslating] = useState(false);
-  const [avatarError, setAvatarError] = useState(false);
-  const [showActions, setShowActions] = useState(false);
-  const [showFullReactions, setShowFullReactions] = useState(false);
-  const showAvatarFallback = !isValidPhotoUrl(msg.photo_url) || avatarError;
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleTranslate = useCallback(async () => {
-    if (isTranslating) return;
-    if (translatedContent) { setTranslatedContent(null); return; }
-    if (!msg.content) return;
-    setIsTranslating(true);
-    const result = await translateText(msg.content, userLang || "en");
-    if (result) setTranslatedContent(result);
-    setIsTranslating(false);
-  }, [isTranslating, translatedContent, msg.content, userLang]);
-
-  // Long-press to show action bar on mobile
-  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
-  const onTouchStart = useCallback((e: React.TouchEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('[data-action-bar]')) return;
-    touchStartPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    longPressTimer.current = setTimeout(() => {
-      setShowActions(true);
-      // Haptic feedback if available
-      try { navigator.vibrate?.(30); } catch {}
-    }, 400);
-  }, []);
-  const onTouchMove = useCallback((e: React.TouchEvent) => {
-    // Cancel long-press if finger moved more than 10px (user is scrolling)
-    if (longPressTimer.current && touchStartPos.current) {
-      const dx = Math.abs(e.touches[0].clientX - touchStartPos.current.x);
-      const dy = Math.abs(e.touches[0].clientY - touchStartPos.current.y);
-      if (dx > 10 || dy > 10) {
-        clearTimeout(longPressTimer.current);
-        longPressTimer.current = null;
-      }
-    }
-  }, []);
-  const onTouchEnd = useCallback(() => {
-    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
-  }, []);
-
-  return (
-    <div className={`flex gap-1.5 sm:gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
-      {/* Avatar */}
-      <button
-        onClick={() => onNavigate(profilePath)}
-        className="w-8 h-8 sm:w-11 sm:h-11 flex items-center justify-center rounded-full flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
-        aria-label={`View ${msg.first_name || msg.username || "user"}'s profile`}
-      >
-        {!showAvatarFallback && (
-          <img
-            src={msg.photo_url!}
-            alt=""
-            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover"
-            onError={() => setAvatarError(true)}
-          />
-        )}
-        {showAvatarFallback && (
-          <div
-            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs font-bold"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
-          >
-            {(msg.first_name || msg.username || "?")[0].toUpperCase()}
-          </div>
-        )}
-      </button>
-
-      {/* Bubble */}
-      <div
-        className={`max-w-[85%] sm:max-w-[75%] ${isMe ? "text-right items-end" : "items-start"} flex flex-col group`}
-        onClick={(e) => {
-          // Toggle action bar on tap (mobile-friendly)
-          const target = e.target as HTMLElement;
-          if (target.closest('[data-action-bar]')) return; // Don't toggle if tapping action buttons
-          setShowActions((prev) => !prev);
-        }}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        onTouchCancel={onTouchEnd}
-      >
-        {/* Name + time */}
-        <div className={`flex items-center gap-1.5 mb-0.5 ${isMe ? "justify-end" : ""}`}>
-          <button
-            onClick={() => onNavigate(profilePath)}
-            className="text-xs font-medium text-pnp-textPrimary hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pnp-accent rounded"
-          >
-            {msg.first_name || msg.username || "User"}
-          </button>
-          <span className="text-[10px] text-pnp-textSecondary">
-            {timeAgo(msg.created_at)}
-          </span>
-        </div>
-
-        {/* Reply quote */}
-        {replyTo && (
-          <div
-            className={`rounded-xl px-2.5 py-1.5 mb-1 text-[11px] border-l-2 ${isMe ? "self-end" : "self-start"}`}
-            style={{ background: "rgba(255,255,255,0.04)", borderColor: "#D4007A", color: "#8E8E93" }}
-          >
-            <span className="font-semibold" style={{ color: "#D4007A" }}>{replyTo.name}</span>
-            <p className="truncate max-w-[200px]">{replyTo.content}</p>
-          </div>
-        )}
-
-        {/* Text content */}
-        {hasText && (
-          <div>
-            <div
-              className="rounded-2xl px-3 py-2 text-sm text-pnp-textPrimary whitespace-pre-wrap break-words"
-              style={{
-                background: isMe
-                  ? "linear-gradient(135deg, #D4007A, #E69138)"
-                  : "rgba(255,255,255,0.08)",
-              }}
-            >
-              {translatedContent ?? msg.content}
-            </div>
-            <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
-              <button
-                onClick={handleTranslate}
-                disabled={isTranslating}
-                className="flex items-center gap-0.5 text-[10px] transition-colors hover:text-teal-400 disabled:opacity-40 px-1 py-0.5 rounded"
-                style={translatedContent ? { color: "#5ED1C4" } : { color: "#8E8E93" }}
-                title={translatedContent ? "Show original" : "Translate"}
-              >
-                {isTranslating ? (
-                  <span>...</span>
-                ) : (
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 01-3.827-5.802" />
-                  </svg>
-                )}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Media attachment */}
-        {hasMedia && (
-          <div className={isMe ? "self-end" : "self-start"}>
-            <MediaMessage
-              mediaUrl={msg.media_url!}
-              mediaType={msg.media_type!}
-              thumbUrl={msg.media_thumb_url}
-              width={msg.media_width}
-              height={msg.media_height}
-              onExpandImage={onExpandImage}
-              isMe={isMe}
-            />
-          </div>
-        )}
-
-        {/* Reaction pills */}
-        {reactions && reactions.length > 0 && (
-          <div className={`flex flex-wrap gap-1 mt-1 ${isMe ? "justify-end" : ""}`}>
-            {reactions.map((r) => {
-              const myReaction = currentUserId && r.users.some((u) => u.userId === currentUserId);
-              return (
-                <button
-                  key={r.emoji}
-                  onClick={() => matrixEventId && onReaction?.(matrixEventId, r.emoji)}
-                  className={`flex items-center gap-0.5 px-1.5 h-6 rounded-full text-xs border transition-all active:scale-95 ${
-                    myReaction
-                      ? "bg-pnp-accent/20 border-pnp-accent"
-                      : "bg-white/5 border-white/10 hover:bg-white/10"
-                  }`}
-                >
-                  <span>{r.emoji}</span>
-                  <span className="text-[10px]" style={{ color: myReaction ? "#D4007A" : "#8E8E93" }}>{r.count}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Quick-react + reply — visible on hover (desktop) or long-press (mobile) */}
-        {matrixEventId && (
-          <div
-            data-action-bar
-            className={`flex flex-wrap items-center gap-0.5 mt-0.5 transition-opacity ${showFullReactions ? "max-w-[200px] p-1.5 rounded-xl bg-black/40 backdrop-blur-sm" : ""} ${showActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"} ${isMe ? "justify-end" : ""}`}
-            onTouchStart={(e) => e.stopPropagation()}
-          >
-            {(showFullReactions ? EXTENDED_REACTIONS : QUICK_REACTIONS.slice(0, 6)).map((emoji) => (
-              <button
-                key={emoji}
-                onTouchEnd={(e) => { e.stopPropagation(); onReaction?.(matrixEventId, emoji); setShowActions(false); setShowFullReactions(false); }}
-                onClick={() => { onReaction?.(matrixEventId, emoji); setShowActions(false); setShowFullReactions(false); }}
-                className="text-sm hover:scale-125 active:scale-125 transition-transform p-0.5 rounded hover:bg-white/10 active:bg-white/10"
-                aria-label={`React ${emoji}`}
-              >
-                {emoji}
-              </button>
-            ))}
-            {!showFullReactions && (
-              <button
-                onTouchEnd={(e) => { e.stopPropagation(); setShowFullReactions(true); }}
-                onClick={() => setShowFullReactions(true)}
-                className="text-xs p-0.5 rounded hover:bg-white/10 active:bg-white/10 transition-colors text-pnp-textSecondary"
-                aria-label="More reactions"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </button>
-            )}
-            {onReply && (
-              <button
-                onTouchEnd={(e) => { e.stopPropagation(); onReply(msg); setShowActions(false); }}
-                onClick={() => { onReply(msg); setShowActions(false); }}
-                className="p-1 rounded hover:bg-white/10 active:bg-white/10 transition-colors ml-0.5"
-                aria-label="Reply"
-              >
-                <svg className="w-3.5 h-3.5" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                </svg>
-              </button>
-            )}
-            {isOwnerOrMod && matrixEventId && onPin && (
-              <button
-                onTouchEnd={(e) => { e.stopPropagation(); onPin(matrixEventId, msg.content || ""); setShowActions(false); }}
-                onClick={() => { onPin(matrixEventId, msg.content || ""); setShowActions(false); }}
-                className="p-1 rounded hover:bg-white/10 active:bg-white/10 transition-colors ml-0.5"
-                aria-label="Pin message"
-                title="Pin"
-              >
-                <svg className="w-3.5 h-3.5" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                </svg>
-              </button>
-            )}
-            {isOwnerOrMod && matrixEventId && onDelete && (
-              <button
-                onTouchEnd={(e) => { e.stopPropagation(); onDelete(matrixEventId); setShowActions(false); }}
-                onClick={() => { onDelete(matrixEventId); setShowActions(false); }}
-                className="p-1 rounded hover:bg-white/10 active:bg-white/10 transition-colors ml-0.5"
-                aria-label="Delete message"
-                title="Delete"
-              >
-                <svg className="w-3.5 h-3.5" style={{ color: "#FF6B6B" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
-            )}
-            {showActions && (
-              <button
-                onTouchEnd={(e) => { e.stopPropagation(); setShowActions(false); }}
-                onClick={() => setShowActions(false)}
-                className="p-1 rounded hover:bg-white/10 active:bg-white/10 transition-colors ml-0.5"
-                aria-label="Close"
-              >
-                <svg className="w-3 h-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            )}
-          </div>
-        )}
-
-      </div>
-    </div>
-  );
-});
-
-// ─── Typing Indicator ───────────────────────────────────────────────────────
-
-function TypingIndicator({ users }: { users: string[] }) {
-  const t = useI18n();
-  if (users.length === 0) return null;
-  let text: string;
-  if (users.length === 1) text = t.chat.isTyping(users[0]);
-  else if (users.length === 2) text = t.chat.areTyping(users[0], users[1]);
-  else text = t.chat.othersTyping(users[0], users.length - 1);
-
-  return (
-    <div className="flex items-center gap-1.5 px-4 py-1 text-xs text-pnp-textSecondary animate-fade-in-up">
-      <span className="flex gap-0.5">
-        <span className="w-1 h-1 rounded-full bg-pnp-textSecondary animate-bounce" style={{ animationDelay: "0ms" }} />
-        <span className="w-1 h-1 rounded-full bg-pnp-textSecondary animate-bounce" style={{ animationDelay: "150ms" }} />
-        <span className="w-1 h-1 rounded-full bg-pnp-textSecondary animate-bounce" style={{ animationDelay: "300ms" }} />
-      </span>
-      <span>{text}...</span>
-    </div>
-  );
-}
-
-// ─── Date Separator ─────────────────────────────────────────────────────────
-
-function DateSeparator({ date }: { date: string }) {
-  const t = useI18n();
-  return (
-    <div className="flex items-center gap-3 py-2">
-      <div className="flex-1 h-px bg-white/10" />
-      <span className="text-[10px] font-medium text-pnp-textSecondary uppercase tracking-wider">
-        {formatDateSeparator(date, t.chat.today, t.chat.yesterday)}
-      </span>
-      <div className="flex-1 h-px bg-white/10" />
-    </div>
-  );
-}
 
 // ─── Call Invite Toast ──────────────────────────────────────────────────────
 
@@ -567,7 +139,7 @@ function CallInviteToast({
 
 export default function Chat() {
   const { user } = useAuth();
-  const { isPrime, isMember, isFree, isBanned, isAdmin } = useTier();
+  const { isPrime, isBanned, isAdmin } = useTier();
   const navigate = useNavigate();
   const { groupId: urlGroupId } = useParams<{ groupId?: string }>();
   const t = useI18n();
@@ -600,127 +172,17 @@ export default function Chat() {
   // Chat view state
   const [view, setView] = useState<View>("list");
   const [activeGroup, setActiveGroup] = useState<HangoutGroup | null>(null);
-  const [messagesLoading, setMessagesLoading] = useState(false);
-  const [msgInput, setMsgInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const isNearBottom = useRef(true);
-  const prevScrollHeight = useRef(0);
-  const reactionInFlight = useRef(new Set<string>());
 
-  // Group members (loaded on chat open for display name/avatar lookup)
+  // Group members (loaded on chat open for member management panels)
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
 
-  // Member lookup: telegram ID → { name, photoUrl } for resolving Matrix sender IDs
-  const memberLookup = React.useMemo(() => {
-    const map = new Map<string, { name: string; photoUrl: string | null }>();
-    for (const m of groupMembers) {
-      map.set(String(m.user_id), {
-        name: m.first_name || m.username || "User",
-        photoUrl: m.photo_url || null,
-      });
-    }
-    if (user) {
-      map.set(String(user.dbId), {
-        name: user.firstName || user.displayName || "You",
-        photoUrl: user.photoUrl || null,
-      });
-    }
-    return map;
-  }, [groupMembers, user]);
-
-  // Matrix room for hangout chat
+  // Matrix room + credentials for Element Web iframe
   const [matrixRoomId, setMatrixRoomId] = useState<string | null>(null);
-  const { messages: matrixMessages } = useRoomMessages(matrixRoomId);
+  const [matrixCreds, setMatrixCreds] = useState<{ userId: string; accessToken: string; homeserver: string } | null>(null);
+  const [matrixError, setMatrixError] = useState<string | null>(null);
 
-  // Resolve a Matrix user ID to a display name using multiple fallback sources
-  const resolveDisplayName = useCallback((matrixId: string): { name: string; photoUrl: string | null } => {
-    const telegramId = telegramIdFromMatrixId(matrixId);
-
-    // 1. Try groupMembers lookup (PNPtv DB data)
-    const memberInfo = memberLookup.get(telegramId);
-    if (memberInfo && memberInfo.name !== "User") return memberInfo;
-
-    // 2. Try Matrix room member display name from the SDK
-    try {
-      const client = getMatrixClient();
-      if (client && matrixRoomId) {
-        const room = client.getRoom(matrixRoomId);
-        if (room) {
-          const member = room.getMember(matrixId);
-          if (member?.name && member.name !== matrixId) {
-            return { name: member.name, photoUrl: memberInfo?.photoUrl || null };
-          }
-        }
-      }
-    } catch { /* ignore */ }
-
-    // 3. Fallback to member info or telegram ID
-    return memberInfo || { name: telegramId, photoUrl: null };
-  }, [memberLookup, matrixRoomId]);
-
-  // Convert Matrix messages to GroupMessage shape for existing MessageBubble components.
-  // We use a stable hash of the eventId string as the numeric id field.
-  const matrixAsGroupMessages: GroupMessage[] = matrixMessages.map((m) => {
-    // FNV-1a 32-bit hash for stable numeric id
-    let hash = 2166136261;
-    for (let i = 0; i < m.eventId.length; i++) {
-      hash ^= m.eventId.charCodeAt(i);
-      hash = (hash * 16777619) >>> 0;
-    }
-    const senderTelegramId = telegramIdFromMatrixId(m.senderId);
-    const senderInfo = resolveDisplayName(m.senderId);
-    const replyTelegramId = m.replyToSenderId ? telegramIdFromMatrixId(m.replyToSenderId) : undefined;
-    const replyInfo = replyTelegramId ? resolveDisplayName(m.replyToSenderId!) : undefined;
-    return {
-      id: hash,
-      room: matrixRoomId ?? "",
-      content: m.body,
-      user_id: senderTelegramId,
-      username: senderInfo.name,
-      first_name: senderInfo.name,
-      photo_url: senderInfo.photoUrl || null,
-      created_at: new Date(m.timestamp).toISOString(),
-      media_url: m.mediaUrl ?? null,
-      media_type: m.mediaType === "file" ? null : (m.mediaType ?? null),
-      media_mime: m.mediaMime ?? null,
-      media_thumb_url: null,
-      media_width: null,
-      media_height: null,
-      // Reply-to from Matrix event relations
-      reply_to: m.replyToEventId ? {
-        name: replyInfo?.name || "User",
-        content: m.replyToBody || "[message]",
-      } : null,
-    } satisfies GroupMessage;
-  });
-
-  // Map from GroupMessage numeric id → Matrix eventId (for reactions)
-  const matrixEventIdMap = React.useMemo(() => {
-    const map = new Map<number, string>();
-    matrixMessages.forEach((m) => {
-      let hash = 2166136261;
-      for (let i = 0; i < m.eventId.length; i++) {
-        hash ^= m.eventId.charCodeAt(i);
-        hash = (hash * 16777619) >>> 0;
-      }
-      map.set(hash, m.eventId);
-    });
-    return map;
-  }, [matrixMessages]);
-
-  // Matrix reactions for this room
-  const { reactions: matrixReactions } = useRoomReactions(matrixRoomId);
-
-  // Reply-to state
-  const [replyToMsg, setReplyToMsg] = useState<GroupMessage | null>(null);
-
-
-  // Socket hook — kept for presence, typing, calls only (messages come from Matrix)
+  // Socket hook — presence, calls only (messages handled by Element Web iframe)
   const {
-    emitTyping,
-    typingUsers,
     callState,
     isConnected,
     onlineMembers,
@@ -728,128 +190,7 @@ export default function Chat() {
     screenShareUser,
     callStartedAt,
     callParticipants,
-    readReceipts,
-    emitMarkRead,
   } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId, matrixRoomId);
-
-  // Messages: Matrix is the single source of truth
-  const messages: GroupMessage[] = React.useMemo(() => {
-    return matrixAsGroupMessages;
-  }, [matrixAsGroupMessages]);
-
-  // Handle reaction toggle — always via Matrix
-  const handleReaction = useCallback(async (idOrEventId: string, emoji: string) => {
-    if (!matrixRoomId) {
-      console.warn("[Reaction] No matrixRoomId, cannot react");
-      return;
-    }
-    // Resolve to Matrix event ID
-    const eventId = idOrEventId.startsWith("$")
-      ? idOrEventId
-      : matrixEventIdMap.get(parseInt(idOrEventId, 10)) ?? null;
-    if (!eventId) {
-      console.warn("[Reaction] Could not resolve eventId for", idOrEventId);
-      return;
-    }
-
-    // Debounce: prevent double-sends for the same event+emoji while in flight
-    const flightKey = `${eventId}:${emoji}`;
-    if (reactionInFlight.current.has(flightKey)) return;
-    reactionInFlight.current.add(flightKey);
-
-    const entries = matrixReactions.get(eventId);
-    const myMatrixId = user?.dbId ? `@pnptv_${user.dbId}:matrix.pnptv.app` : "";
-    const existing = entries?.find((e) => e.emoji === emoji);
-    const myEntry = myMatrixId ? existing?.users.find((u) => u.userId === myMatrixId) : undefined;
-    if (myEntry) {
-      // Already reacted — remove (toggle off)
-      redactEvent(matrixRoomId, myEntry.reactionEventId)
-        .catch((err) => console.warn("[Reaction] redact failed:", err))
-        .finally(() => { reactionInFlight.current.delete(flightKey); });
-    } else {
-      // Send new reaction — handle duplicate gracefully (toggle off if server says duplicate)
-      sendReaction(matrixRoomId, eventId, emoji)
-        .catch((err) => {
-          const errObj = err as { errcode?: string };
-          if (errObj.errcode === "M_DUPLICATE_ANNOTATION") {
-            // Already reacted but local state didn't know — find and redact via timeline
-            console.info("[Reaction] Duplicate detected, toggling off");
-            try {
-              const client = getMatrixClient();
-              if (!client) return;
-              const room = client.getRoom(matrixRoomId);
-              if (!room) return;
-              const timeline = room.getLiveTimeline().getEvents();
-              for (const ev of timeline) {
-                if (ev.getType() !== "m.reaction" || ev.isRedacted()) continue;
-                const rel = ev.getContent()?.["m.relates_to"];
-                if (rel?.event_id === eventId && rel?.key === emoji && ev.getSender() === myMatrixId) {
-                  redactEvent(matrixRoomId, ev.getId()!).catch(() => {});
-                  break;
-                }
-              }
-            } catch { /* best effort */ }
-          } else {
-            console.warn("[Reaction] send failed:", err);
-          }
-        })
-        .finally(() => { reactionInFlight.current.delete(flightKey); });
-    }
-  }, [matrixRoomId, matrixReactions, matrixEventIdMap, user?.dbId]);
-
-  // sendMessage: send via Matrix (with optional reply-to via Matrix event relation)
-  const sendMessage = useCallback(
-    async (text: string, replyToEventId?: string | null) => {
-      if (!activeGroup) return;
-      try {
-        if (replyToEventId && matrixRoomId) {
-          // Reply via Matrix event relation
-          await sendMatrixReply(matrixRoomId, text, replyToEventId);
-        } else {
-          await sendHangoutMessage(activeGroup.id, text);
-        }
-        // Message will appear via Matrix timeline listener
-      } catch {
-        // Fallback: try direct Matrix send if REST fails
-        if (matrixRoomId) {
-          await sendMatrixMessage(matrixRoomId, text).catch(() => {});
-        }
-      }
-    },
-    [activeGroup, matrixRoomId]
-  );
-
-  // Media upload state
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
-  const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-
-  // Voice recording state
-  const [isRecording, setIsRecording] = useState(false);
-
-  // Drag-and-drop state
-  const [isDragOver, setIsDragOver] = useState(false);
-  const dragCounter = useRef(0);
-
-  // Message search state
-  const [showSearch, setShowSearch] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  // Filtered messages for search
-  const filteredMessages = React.useMemo(() => {
-    if (!searchQuery.trim()) return messages;
-    const q = searchQuery.toLowerCase();
-    return messages.filter((m) =>
-      (m.content && m.content.toLowerCase().includes(q)) ||
-      (m.first_name && m.first_name.toLowerCase().includes(q)) ||
-      (m.username && m.username.toLowerCase().includes(q))
-    );
-  }, [messages, searchQuery]);
-
-  // Lightbox
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   // Video call — JaaS/Jitsi credentials
   const [callMeetingUrl, setCallMeetingUrl] = useState<string | null>(null);
@@ -857,7 +198,9 @@ export default function Chat() {
   const [callIsModerator, setCallIsModerator] = useState(false);
   const [callLoading, setCallLoading] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
-  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Error feedback (video call errors shown here)
+  const [chatError, setChatError] = useState<string | null>(null);
 
   // Create group error
   const [createError, setCreateError] = useState<string | null>(null);
@@ -921,9 +264,6 @@ export default function Chat() {
   const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
   const [eventKey, setEventKey] = useState(0);
-
-  // Slow mode cooldown (seconds remaining after sending a message)
-  const [slowModeCooldown, setSlowModeCooldown] = useState(0);
 
   // ─── Group list loading ─────────────────────────────────────────────
 
@@ -1057,220 +397,69 @@ export default function Chat() {
     }
   };
 
-  // ─── Media handling ─────────────────────────────────────────────────
-
-  const clearMedia = useCallback(() => {
-    if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl);
-    setMediaFile(null);
-    setMediaPreviewUrl(null);
-    setUploadProgress(null);
-    setUploadError(null);
-  }, [mediaPreviewUrl]);
-
-  const handleFileSelect = useCallback(
-    (file: File, previewUrl: string) => {
-      clearMedia();
-      setMediaFile(file);
-      setMediaPreviewUrl(previewUrl);
-      setUploadError(null);
-    },
-    [clearMedia]
-  );
-
-  const handleFileError = useCallback((message: string) => {
-    setUploadError(message);
-  }, []);
-
-  // Voice recording handler — turns blob into a File for the existing media upload pipeline
-  const handleVoiceRecord = useCallback((blob: Blob, duration: number) => {
-    setIsRecording(false);
-    const file = new File([blob], `voice-${Date.now()}.webm`, { type: blob.type || "audio/webm" });
-    const previewUrl = URL.createObjectURL(blob);
-    clearMedia();
-    setMediaFile(file);
-    setMediaPreviewUrl(previewUrl);
-    setUploadError(null);
-  }, [clearMedia]);
-
-  // Drag-and-drop handlers for media upload
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounter.current++;
-    if (e.dataTransfer.types.includes("Files")) setIsDragOver(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounter.current--;
-    if (dragCounter.current === 0) setIsDragOver(false);
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-    dragCounter.current = 0;
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      const file = files[0];
-      const isImage = file.type.startsWith("image/");
-      const isVideo = file.type.startsWith("video/");
-      const isAudio = file.type.startsWith("audio/");
-      if (!isImage && !isVideo && !isAudio) {
-        setUploadError("Only images, videos, and audio files are supported");
-        return;
-      }
-      if (isImage && file.size > 10 * 1024 * 1024) {
-        setUploadError("Image must be under 10MB");
-        return;
-      }
-      if (isVideo && file.size > 50 * 1024 * 1024) {
-        setUploadError("Video must be under 50MB");
-        return;
-      }
-      const previewUrl = URL.createObjectURL(file);
-      clearMedia();
-      setMediaFile(file);
-      setMediaPreviewUrl(previewUrl);
-    }
-  }, [clearMedia]);
-
-  // ─── Smart auto-scroll ─────────────────────────────────────────────
-
-  // Track last read-receipt eventId to avoid spamming
-  const lastReceiptId = useRef<string | null>(null);
-
-  const handleScroll = useCallback(() => {
-    const el = messagesContainerRef.current;
-    if (!el) return;
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    isNearBottom.current = distFromBottom < 150;
-
-    // Infinite scroll: paginate Matrix room when near top
-    if (el.scrollTop < 100 && matrixRoomId) {
-      prevScrollHeight.current = el.scrollHeight;
-      import("@/hooks/useMatrix").then(({ paginateRoom }) => {
-        paginateRoom(matrixRoomId).catch(() => {});
-      });
-    }
-
-    // Send Matrix read receipt when near bottom + emit socket mark-read
-    if (isNearBottom.current && matrixRoomId && matrixMessages.length > 0) {
-      const lastMsg = matrixMessages[matrixMessages.length - 1];
-      if (lastMsg.eventId !== lastReceiptId.current) {
-        lastReceiptId.current = lastMsg.eventId;
-        sendReadReceipt(matrixRoomId, lastMsg.eventId);
-        emitMarkRead();
-      }
-    }
-  }, [matrixRoomId, matrixMessages]);
-
-  // Start (and cancel) the messagesLoading fallback timer whenever the active group changes.
-  // Using a useEffect here ensures the previous timer is always cancelled before a new one
-  // starts, preventing stale timers from clearing the loading state for the wrong group.
-  useEffect(() => {
-    if (!activeGroup) return;
-    loadingTimerRef.current = setTimeout(() => setMessagesLoading(false), 8000);
-    return () => {
-      if (loadingTimerRef.current) {
-        clearTimeout(loadingTimerRef.current);
-        loadingTimerRef.current = null;
-      }
-    };
-  }, [activeGroup?.id]);
-
-  // Preserve scroll position after loading older messages
-  useEffect(() => {
-    if (prevScrollHeight.current > 0) {
-      const el = messagesContainerRef.current;
-      if (el) {
-        el.scrollTop = el.scrollHeight - prevScrollHeight.current;
-      }
-      prevScrollHeight.current = 0;
-    }
-  }, [matrixMessages.length]);
-
-  // Auto-scroll on new messages (only when near bottom)
-  useEffect(() => {
-    if (isNearBottom.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages]);
 
   // ─── Chat view open/close ──────────────────────────────────────────
 
   const openChat = async (group: HangoutGroup) => {
-    // Banned users cannot access hangouts
     if (isBanned) {
       setError("Your account has been suspended and you cannot access hangouts.");
       return;
     }
-    // Dismiss the tutorial immediately when entering a chat so the overlay
-    // can never surface while the user is in the chat input view.
     if (showTutorial) dismissTutorial();
     setActiveGroup(group);
     setView("chat");
-    // Update URL so NearbyWidget and other route-aware components detect the hangout
     navigate(`/chat/${group.id}`, { replace: true });
     setCallId(null);
     setCallIsModerator(false);
-    setMessagesLoading(true);
-    setMsgInput("");
-    setUploadError(null);
-    clearMedia();
-    isNearBottom.current = true;
+    setChatError(null);
 
-    // Mark as read
     markGroupAsRead(group.id).catch(() => {});
-
-    // Load group members for display name/avatar lookup in Matrix messages
     loadGroupDetail(group.id);
 
-    // Silently try to provision a Matrix room for this group (non-blocking upgrade)
     setMatrixRoomId(null);
-    getOrCreateHangoutRoom(group.id)
-      .then((res) => { if (res.success) setMatrixRoomId(res.roomId); })
-      .catch(() => { /* Matrix unavailable — Socket.IO continues as sole message source */ });
+    setMatrixCreds(null);
+    setMatrixError(null);
 
-    // If there's already an active call, fetch the URL so the banner/overlay appears.
-    // We only auto-open the overlay when the user explicitly clicks Join (not on entering
-    // the chat), but we do set callId so the banner renders with an accurate callId.
+    Promise.all([
+      getOrCreateHangoutRoom(group.id),
+      import("@/lib/api").then(({ getMatrixToken }) => getMatrixToken()),
+    ])
+      .then(([roomRes, tokenRes]) => {
+        if (roomRes.success) setMatrixRoomId(roomRes.roomId);
+        if (tokenRes.success) setMatrixCreds({
+          userId: tokenRes.matrixUserId,
+          accessToken: tokenRes.accessToken,
+          homeserver: tokenRes.homeserverUrl,
+        });
+      })
+      .catch(() => {
+        setMatrixError("Chat unavailable");
+      });
+
     if (group.hasActiveCall) {
       try {
         const callData = await getActiveGroupCall(group.id);
         if (callData.call) {
           setCallId(callData.call.id);
-          // Do NOT auto-open the overlay — let the user choose to join via the banner
-          // (keeps the chat readable without forcing the call on them).
         }
-      } catch {
-        /* silent */
-      }
+      } catch { /* silent */ }
     }
   };
 
   const closeChat = () => {
-    if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
     setView("list");
     navigate("/chat", { replace: true });
     setActiveGroup(null);
     setMatrixRoomId(null);
+    setMatrixError(null);
     setCallId(null);
     setCallIsModerator(false);
     setShowOnline(false);
     setShowGroupSettings(false);
-    setMsgInput("");
-    setUploadError(null);
-    clearMedia();
     loadGroups();
   };
+
+  // ─── Group settings ─────────────────────────────────────────────────
 
   const openGroupSettings = useCallback(async (group: HangoutGroup) => {
     setSettingsName(group.name);
@@ -1351,83 +540,6 @@ export default function Chat() {
     }
   }, [activeGroup]);
 
-  // Clear messagesLoading once socket delivers messages
-  useEffect(() => {
-    if (messages.length > 0) {
-      setMessagesLoading(false);
-    }
-  }, [messages]);
-
-  // ─── Send logic ─────────────────────────────────────────────────────
-
-  const handleSend = useCallback(async () => {
-    if (sending || !activeGroup) return;
-    const hasText = msgInput.trim().length > 0;
-    const hasMediaFile = mediaFile !== null;
-    if (!hasText && !hasMediaFile) return;
-
-    setSending(true);
-    const text = msgInput.trim();
-    // Look up the Matrix eventId for the reply target
-    const replyToEventId = replyToMsg ? (matrixEventIdMap.get(replyToMsg.id) || null) : null;
-    setMsgInput("");
-
-    try {
-      if (hasMediaFile && mediaFile) {
-        // Media uploads still use HTTP
-        setUploadProgress(30);
-        const data = await sendGroupMediaMessage(
-          activeGroup.id,
-          mediaFile,
-          text || undefined
-        );
-        setUploadProgress(100);
-        // Message will arrive via Matrix timeline (backend bridges media to Matrix)
-        if (!data.success) throw new Error(t.chat.errorUploadFailed);
-        clearMedia();
-      } else {
-        // Text messages go via Matrix (with optional reply-to)
-        await sendMessage(text, replyToEventId);
-      }
-      // Apply slow mode cooldown for regular members (not creator/mod/admin)
-      const slowSecs = groupDetail?.slowModeSeconds;
-      if (slowSecs && slowSecs > 0) {
-        const senderMember = groupMembers.find((m: any) => String(m.user_id) === String(user?.dbId));
-        const isPrivileged =
-          String(activeGroup.creatorId) === String(user?.dbId) ||
-          senderMember?.role === "moderator" ||
-          senderMember?.role === "owner";
-        if (!isPrivileged) {
-          setSlowModeCooldown(slowSecs);
-        }
-      }
-    } catch (err) {
-      if (!hasMediaFile) setMsgInput(text);
-      setUploadError(
-        err instanceof Error ? err.message : t.chat.errorFailedToSend
-      );
-      setUploadProgress(null);
-    } finally {
-      setSending(false);
-      setReplyToMsg(null);
-    }
-  }, [sending, activeGroup, msgInput, mediaFile, clearMedia, sendMessage, replyToMsg, groupDetail, groupMembers, user, t.chat, matrixEventIdMap]);
-
-  // ─── Slow mode countdown ─────────────────────────────────────────────
-  useEffect(() => {
-    if (slowModeCooldown <= 0) return;
-    const interval = setInterval(() => {
-      setSlowModeCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [slowModeCooldown]);
-
   // ─── Video call ─────────────────────────────────────────────────────
 
   const handleStartCall = async () => {
@@ -1440,16 +552,15 @@ export default function Chat() {
         setCallId(data.call.id);
         setCallIsModerator(data.call?.isModerator ?? false);
       } else if (data.jaas === null) {
-        setUploadError(t.chat.videoCallsUnavailable);
+        setChatError(t.chat.videoCallsUnavailable);
       } else {
-        setUploadError(t.chat.videoCallUrlInvalid);
+        setChatError(t.chat.videoCallUrlInvalid);
       }
     } catch (err) {
       if (err instanceof ApiError && err.code === "MEMBERSHIP_REQUIRED") {
         setShowPaywall(true);
       } else {
-        const msg = err instanceof Error ? err.message : "Failed to start video call";
-        setUploadError(msg);
+        setChatError(err instanceof Error ? err.message : "Failed to start video call");
       }
     } finally {
       setCallLoading(false);
@@ -1466,17 +577,16 @@ export default function Chat() {
     setCallIsModerator(false);
   }, [activeGroup, callId, callState.callId]);
 
-  // Show notification when call ends due to creator leaving
   useEffect(() => {
     if (callState.endReason === "creator_left") {
-      setUploadError(t.chat.callEndedHostLeft);
+      setChatError(t.chat.callEndedHostLeft);
       setCallMeetingUrl(null);
       setCallId(null);
       setCallIsModerator(false);
     }
   }, [callState.endReason, t.chat]);
 
-  // Global invite listener — works regardless of which group is active
+  // Global invite listener
   useEffect(() => {
     const socket = connectSocket();
     let dismissTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1497,7 +607,6 @@ export default function Chat() {
       dismissTimer = setTimeout(() => setInviteNotif(null), 8000);
     };
     socket.on("hangout:invite:received", onInvite);
-
     return () => {
       socket.off("hangout:invite:received", onInvite);
       if (dismissTimer) clearTimeout(dismissTimer);
@@ -1534,46 +643,19 @@ export default function Chat() {
     });
   }, [groups, activeGroup, loadGroups]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Memoized callbacks ────────────────────────────────────────────
-
-  const handleNavigate = useCallback(
-    (path: string) => navigate(path),
-    [navigate]
-  );
-
-  const handleExpandImage = useCallback((src: string) => {
-    setLightboxSrc(src);
-  }, []);
-
-  // Build media list for lightbox navigation
-  const mediaUrls = React.useMemo(
-    () => messages.filter((m) => m.media_url && m.media_type === "image").map((m) => m.media_url!),
-    [messages]
-  );
-
-  const handleLightboxNavigate = useCallback((src: string) => {
-    setLightboxSrc(src);
-  }, []);
-
   // ─── Chat View ────────────────────────────────────────────────────────
 
   if (view === "chat" && activeGroup) {
-    // Derive current user's member record and enforce group settings
     const myMember = groupMembers.find((m: any) => String(m.user_id) === String(user?.dbId));
     const isOwnerOrMod =
       String(activeGroup.creatorId) === String(user?.dbId) ||
       myMember?.role === "moderator" ||
       myMember?.role === "owner" ||
       isAdmin;
-    const isMuted = myMember?.is_muted === true;
-    const mutedUntil: string | null = myMember?.muted_until ?? null;
-    const isReadOnly = groupDetail?.isReadOnly === true && !isOwnerOrMod;
-    const isSlowModeActive = slowModeCooldown > 0 && !isOwnerOrMod;
-    const canSend = !sending && !isSlowModeActive && (msgInput.trim().length > 0 || mediaFile !== null);
     const showCallBanner = !callMeetingUrl && callState.isActive;
 
     return (
-      <div className="fixed inset-0 flex flex-col bg-pnp-background z-[30]">
+      <div className="fixed inset-x-0 top-0 bottom-16 lg:bottom-0 lg:left-72 flex flex-col bg-pnp-background z-[30]">
         {/* Membership paywall — shown when a non-member tries to start/join a call */}
         {showPaywall && (
           <HangoutsPaywall onBack={() => setShowPaywall(false)} />
@@ -1582,19 +664,8 @@ export default function Chat() {
         {/* Incoming call invite toast */}
         <CallInviteToast notif={inviteNotif} groups={groups} onOpen={openChat} onDismiss={() => setInviteNotif(null)} navigate={navigate} t={t} />
 
-        {/* Lightbox */}
-        {lightboxSrc && (
-          <MediaLightbox
-            src={lightboxSrc}
-            mediaType="image"
-            mediaList={mediaUrls}
-            onClose={() => setLightboxSrc(null)}
-            onNavigate={handleLightboxNavigate}
-          />
-        )}
-
         {/* Chat header */}
-        <div className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm overflow-x-hidden">
+        <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
           <button
             onClick={closeChat}
             className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent flex-shrink-0"
@@ -1605,8 +676,8 @@ export default function Chat() {
             </svg>
           </button>
 
-          {/* Group avatar in header — hidden on very small screens */}
-          <div className="relative flex-shrink-0 hidden xs:block">
+          {/* Group avatar in header */}
+          <div className="relative flex-shrink-0">
             {activeGroup.avatarUrl && !activeGroup.isMain && !activeGroup.isWallOfFame ? (
               <img
                 src={activeGroup.avatarUrl}
@@ -1646,21 +717,6 @@ export default function Chat() {
             </div>
           </div>
 
-          {/* Search button — visible only on sm+ screens; on mobile it lives in the three-dot menu */}
-          <button
-            onClick={() => {
-              setShowSearch((v) => !v);
-              if (!showSearch) setTimeout(() => searchInputRef.current?.focus(), 100);
-            }}
-            className="hidden sm:flex w-8 h-8 items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all flex-shrink-0"
-            style={{ color: showSearch ? "#D4007A" : "#8E8E93" }}
-            aria-label="Search messages"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-            </svg>
-          </button>
-
           {/* Online members — only icon on mobile */}
           <button
             onClick={() => setShowOnline((v) => !v)}
@@ -1675,27 +731,13 @@ export default function Chat() {
             <span className="text-[11px] font-medium text-green-400">{onlineMembers.length}</span>
           </button>
 
-          {/* Video call: Main Stage link for main group, regular call button for others */}
-          {activeGroup.isMain ? (
-            <button
-              onClick={() => navigate("/main-stage")}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold text-white transition-colors flex-shrink-0"
-              style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
-              aria-label="Go to Main Stage"
-            >
-              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-              <span className="hidden sm:inline">Main Stage</span>
-            </button>
-          ) : (
-            <VideoCallButton
-              hasActiveCall={!!callMeetingUrl || callState.isActive}
-              onStartCall={handleStartCall}
-              isLoading={callLoading}
-              participantCount={callState.participantCount}
-            />
-          )}
+          {/* Video call button — shown for all hangouts */}
+          <VideoCallButton
+            hasActiveCall={!!callMeetingUrl || callState.isActive}
+            onStartCall={handleStartCall}
+            isLoading={callLoading}
+            participantCount={callState.participantCount}
+          />
 
           {/* Three-dot overflow menu */}
           <div className="relative flex-shrink-0">
@@ -1714,18 +756,6 @@ export default function Chat() {
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setShowGroupMenu(false)} />
                 <div className="absolute right-0 top-10 z-40 rounded-xl overflow-hidden shadow-xl min-w-[160px]" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
-                  {/* Search — only shown in menu on mobile; hidden on sm+ where the icon is in the header */}
-                  <button
-                    onClick={() => {
-                      setShowGroupMenu(false);
-                      setShowSearch((v) => !v);
-                      if (!showSearch) setTimeout(() => searchInputRef.current?.focus(), 100);
-                    }}
-                    className="sm:hidden w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
-                  >
-                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
-                    Search
-                  </button>
                   <button
                     onClick={() => { setShowGroupMenu(false); setShowOnline(true); }}
                     className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
@@ -1760,7 +790,7 @@ export default function Chat() {
                     <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
                     Pinned Messages
                   </button>
-                  {!activeGroup.isMain && !activeGroup.isWallOfFame && (isAdmin || String(activeGroup.creatorId) === String(user?.dbId)) && (
+                  {!activeGroup.isWallOfFame && (isAdmin || String(activeGroup.creatorId) === String(user?.dbId)) && (
                     <button
                       onClick={() => openGroupSettings(activeGroup)}
                       className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
@@ -1795,29 +825,14 @@ export default function Chat() {
           </div>
         </div>
 
-        {/* Search bar */}
-        {showSearch && (
-          <div className="px-4 py-2 border-b border-pnp-border flex items-center gap-2 animate-fade-in-up">
-            <svg className="w-4 h-4 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+        {/* Error toast (video call errors etc.) */}
+        {chatError && (
+          <div className="mx-3 mt-2 px-3 py-2 rounded-xl flex items-center gap-2 bg-red-500/10 border border-red-500/20 animate-fade-in-up">
+            <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
             </svg>
-            <input
-              ref={searchInputRef}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search messages..."
-              className="flex-1 bg-transparent text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none min-w-0"
-            />
-            {searchQuery && (
-              <span className="text-[10px] text-pnp-textSecondary flex-shrink-0">
-                {filteredMessages.length} found
-              </span>
-            )}
-            <button
-              onClick={() => { setShowSearch(false); setSearchQuery(""); }}
-              className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-white/10"
-              style={{ color: "#8E8E93" }}
-            >
+            <p className="flex-1 text-xs text-red-300">{chatError}</p>
+            <button onClick={() => setChatError(null)} className="text-red-400 hover:text-red-300 transition-colors">
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -1825,8 +840,8 @@ export default function Chat() {
           </div>
         )}
 
-        {/* Active call banner (not for main group — uses Main Stage) */}
-        {showCallBanner && !activeGroup.isMain && (
+        {/* Active call banner */}
+        {showCallBanner && (
           <VideoCallBanner
             isActive={true}
             onJoin={handleStartCall}
@@ -1839,8 +854,8 @@ export default function Chat() {
           />
         )}
 
-        {/* Embedded video call (not for main group) */}
-        {callMeetingUrl && !activeGroup.isMain && (
+        {/* Embedded video call */}
+        {callMeetingUrl && (
           <VideoCallOverlay
             meetingUrl={callMeetingUrl}
             groupName={activeGroup.name}
@@ -2447,315 +1462,59 @@ export default function Chat() {
           <HangoutEventReminder groupId={activeGroup.id} />
         )}
 
-        {/* Messages area */}
-        <div
-          ref={messagesContainerRef}
-          onScroll={handleScroll}
-          onDragEnter={handleDragEnter}
-          onDragLeave={handleDragLeave}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-          className="flex-1 overflow-y-auto px-4 py-3 pb-20 space-y-3 min-h-0 relative"
-        >
-          {/* Drag-and-drop overlay */}
-          {isDragOver && (
-            <div className="absolute inset-0 z-30 flex items-center justify-center bg-pnp-background/80 backdrop-blur-sm border-2 border-dashed border-pnp-accent rounded-xl pointer-events-none">
-              <div className="text-center">
-                <svg className="w-12 h-12 mx-auto mb-2 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-                </svg>
-                <p className="text-sm font-semibold text-pnp-accent">Drop to upload</p>
-              </div>
-            </div>
-          )}
-
-          {messagesLoading ? (
-            <div className="space-y-4 py-4" aria-label="Loading messages" aria-busy="true">
-              {/* Alternating left/right skeleton bubbles for realistic feel */}
-              {[false, false, true, false, true].map((isRight, i) => (
-                <div key={i} className={`animate-pulse flex gap-2.5 ${isRight ? "flex-row-reverse" : ""}`}>
-                  <div className="w-9 h-9 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.06)" }} />
-                  <div className={`space-y-1.5 ${isRight ? "items-end" : "items-start"} flex flex-col`}>
-                    <div className="h-3 rounded w-20" style={{ background: "rgba(255,255,255,0.06)" }} />
-                    <div
-                      className="rounded-2xl"
-                      style={{
-                        background: isRight
-                          ? "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(230,145,56,0.15))"
-                          : "rgba(255,255,255,0.04)",
-                        width: [180, 140, 200, 120, 160][i],
-                        height: [36, 52, 32, 44, 36][i],
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-              <div className="text-center pt-2">
-                <p className="text-[11px] text-pnp-textSecondary/50 flex items-center justify-center gap-1.5">
-                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Syncing with Matrix...
-                </p>
-              </div>
-            </div>
-          ) : messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center py-8 sm:py-12">
-              {/* Visual hangout explainer as empty state */}
-              <div className="w-14 h-14 sm:w-20 sm:h-20 mx-auto mb-4 sm:mb-5 rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(123,97,255,0.12))" }}>
-                <svg className="w-7 h-7 sm:w-10 sm:h-10" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-              </div>
-              <p className="text-pnp-textPrimary font-bold text-lg mb-1">{t.chat.noMessagesYet}</p>
-              <p className="text-sm text-pnp-textSecondary mt-1 max-w-[260px] leading-relaxed">
-                {t.chat.beFirstToSay}
-              </p>
-
-              {/* Feature pills — on mobile show only Photos & Videos + Voice Messages */}
-              <div className="flex flex-wrap justify-center gap-2 mt-4 sm:mt-5">
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-pnp-textSecondary" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                  <svg className="w-3.5 h-3.5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25a2.25 2.25 0 00-2.25-2.25H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" /></svg>
-                  Photos & Videos
-                </div>
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-pnp-textSecondary" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                  <svg className="w-3.5 h-3.5" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /></svg>
-                  Voice Messages
-                </div>
-                <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-pnp-textSecondary" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                  <svg className="w-3.5 h-3.5" style={{ color: "#E69138" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" /></svg>
-                  Video Calls
-                </div>
-                <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-pnp-textSecondary" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                  <svg className="w-3.5 h-3.5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.182 15.182a4.5 4.5 0 01-6.364 0M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75zm-.375 0h.008v.015h-.008V9.75zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75zm-.375 0h.008v.015h-.008V9.75z" /></svg>
-                  Reactions
-                </div>
-              </div>
-            </div>
-          ) : (
-            <>
-              {searchQuery && filteredMessages.length === 0 && (
-                <div className="text-center py-8">
-                  <p className="text-sm text-pnp-textSecondary">No messages match "{searchQuery}"</p>
-                </div>
-              )}
-              {(searchQuery ? filteredMessages : messages).map((msg, idx, arr) => (
-                <React.Fragment key={msg.id}>
-                  {/* Date separator */}
-                  {(idx === 0 || !isSameDay(arr[idx - 1].created_at, msg.created_at)) && (
-                    <DateSeparator date={msg.created_at} />
-                  )}
-                  <MessageBubble
-                    msg={msg}
-                    isMe={msg.user_id === user?.dbId}
-                    userLang={user?.language || "en"}
-                    onNavigate={handleNavigate}
-                    onExpandImage={handleExpandImage}
-                    currentUserId={user?.dbId != null ? `@pnptv_${user.dbId}:matrix.pnptv.app` : undefined}
-                    matrixEventId={matrixEventIdMap.get(msg.id) || undefined}
-                    reactions={
-                      matrixEventIdMap.get(msg.id)
-                        ? matrixReactions.get(matrixEventIdMap.get(msg.id)!) ?? undefined
-                        : undefined
-                    }
-                    onReaction={handleReaction}
-                    onReply={setReplyToMsg}
-                    replyTo={msg.reply_to || null}
-                    isOwnerOrMod={isOwnerOrMod}
-                    onPin={isOwnerOrMod ? (eventId, body) => {
-                      if (activeGroup) pinHangoutMessage(activeGroup.id, eventId, body).then(() => loadPins(activeGroup.id)).catch(() => {});
-                    } : undefined}
-                    onDelete={isOwnerOrMod ? (eventId) => {
-                      if (activeGroup) {
-                        setConfirmAction({
-                          title: "Delete Message",
-                          message: "Delete this message for everyone?",
-                          isDanger: true,
-                          onConfirm: async () => {
-                            await deleteHangoutMessage(activeGroup.id, eventId);
-                          },
-                        });
-                      }
-                    } : undefined}
-                  />
-                  {/* Seen-by indicators — show tiny avatars of who read up to this message */}
-                  {msg.user_id === user?.dbId && idx === arr.length - 1 && readReceipts.size > 0 && (
-                    <div className="flex justify-end gap-0.5 -mt-1 mr-12">
-                      {Array.from(readReceipts.entries())
-                        .filter(([uid]) => uid !== user?.dbId)
-                        .slice(0, 5)
-                        .map(([uid, receipt]) => (
-                          <div key={uid} className="relative group/seen">
-                            {receipt.photoUrl ? (
-                              <img src={receipt.photoUrl} alt={receipt.name} className="w-4 h-4 rounded-full object-cover ring-1 ring-pnp-background" />
-                            ) : (
-                              <div className="w-4 h-4 rounded-full bg-pnp-accent/30 flex items-center justify-center text-[7px] font-bold text-pnp-accent ring-1 ring-pnp-background">
-                                {receipt.name[0]?.toUpperCase()}
-                              </div>
-                            )}
-                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-1.5 py-0.5 bg-black/80 rounded text-[8px] text-white whitespace-nowrap opacity-0 group-hover/seen:opacity-100 transition-opacity pointer-events-none">
-                              {receipt.name}
-                            </div>
-                          </div>
-                        ))}
-                      {readReceipts.size > 5 && (
-                        <div className="w-4 h-4 rounded-full bg-white/10 flex items-center justify-center text-[7px] text-pnp-textSecondary ring-1 ring-pnp-background">
-                          +{readReceipts.size - 5}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </React.Fragment>
-              ))}
-            </>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Typing indicator */}
-        <TypingIndicator users={typingUsers} />
-
-        {/* Reply-to bar */}
-        {replyToMsg && (
-          <div className="mx-4 mb-1 flex items-center gap-2 px-3 py-2 rounded-xl animate-fade-in-up" style={{ background: "rgba(212,0,122,0.08)", borderLeft: "3px solid #D4007A" }}>
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-semibold" style={{ color: "#D4007A" }}>
-                {replyToMsg.first_name || replyToMsg.username || "User"}
-              </p>
-              <p className="text-xs text-pnp-textSecondary truncate">{replyToMsg.content || "[media]"}</p>
-            </div>
-            <button
-              onClick={() => setReplyToMsg(null)}
-              className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-white/10"
-              aria-label="Cancel reply"
-            >
-              <svg className="w-3.5 h-3.5" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        )}
-
-        {/* Upload preview */}
-        {mediaFile && mediaPreviewUrl && (
-          <MediaPreview
-            file={mediaFile}
-            previewUrl={mediaPreviewUrl}
-            uploadProgress={sending ? (uploadProgress ?? 10) : null}
-            uploadError={uploadError}
-            onCancel={clearMedia}
+        {/* Element Web embedded chat — full messaging UI via Matrix */}
+        {matrixRoomId && matrixCreds ? (
+          <iframe
+            key={`${matrixRoomId}-${matrixCreds.userId}`}
+            src={`/element-login.html#hs=${encodeURIComponent(matrixCreds.homeserver)}&uid=${encodeURIComponent(matrixCreds.userId)}&token=${encodeURIComponent(matrixCreds.accessToken)}&room=${encodeURIComponent(matrixRoomId)}`}
+            className="flex-1 min-h-0 w-full border-0"
+            allow="microphone; camera; clipboard-write; encrypted-media"
+            title="Hangout Chat"
           />
-        )}
-
-        {/* Upload error (without a file selected) */}
-        {uploadError && !mediaFile && (
-          <div className="mx-4 mb-2 flex items-center gap-2 text-xs text-pnp-error animate-fade-in-up" role="alert">
-            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-            </svg>
-            <span>{uploadError}</span>
-            <button
-              onClick={() => setUploadError(null)}
-              className="ml-auto text-pnp-textSecondary hover:text-pnp-textPrimary"
-              aria-label={t.chat.dismissError}
-            >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        ) : matrixError ? (
+          <div className="flex-1 flex items-center justify-center min-h-0">
+            <div className="text-center px-6">
+              <svg className="w-8 h-8 mx-auto mb-3 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
               </svg>
-            </button>
+              <p className="text-sm text-pnp-textSecondary mb-3">Chat unavailable</p>
+              <button
+                onClick={() => {
+                  setMatrixError(null);
+                  setMatrixRoomId(null);
+                  setMatrixCreds(null);
+                  Promise.all([
+                    getOrCreateHangoutRoom(activeGroup.id),
+                    import("@/lib/api").then(({ getMatrixToken }) => getMatrixToken()),
+                  ])
+                    .then(([roomRes, tokenRes]) => {
+                      if (roomRes.success) setMatrixRoomId(roomRes.roomId);
+                      if (tokenRes.success) setMatrixCreds({
+                        userId: tokenRes.matrixUserId,
+                        accessToken: tokenRes.accessToken,
+                        homeserver: tokenRes.homeserverUrl,
+                      });
+                    })
+                    .catch(() => setMatrixError("Chat unavailable"));
+                }}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-white active:scale-95 transition-all"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                Tap to retry
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center min-h-0">
+            <div className="text-center">
+              <svg className="w-8 h-8 mx-auto mb-3 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <p className="text-sm text-pnp-textSecondary">Connecting to chat...</p>
+            </div>
           </div>
         )}
-
-        {/* Input bar — relative + z-50 ensures it stacks above any fixed
-            floating widgets (e.g. CristinaWidget FAB) that share the same
-            bottom region of the viewport on mobile. */}
-        <div className="relative z-50 border-t border-pnp-border flex-shrink-0 bg-pnp-background">
-          {isReadOnly ? (
-            /* Read-only mode: group is read-only and current user is not owner/mod */
-            <div className="px-4 py-3 flex items-center justify-center">
-              <div className="w-full rounded-full bg-white/5 px-4 py-2.5 flex items-center justify-center gap-2">
-                <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                </svg>
-                <span className="text-sm text-pnp-textSecondary">This group is read-only</span>
-              </div>
-            </div>
-          ) : isMuted ? (
-            /* Muted: current user is muted in this group */
-            <div className="px-4 py-3 flex items-center justify-center">
-              <div className="w-full rounded-full bg-white/5 px-4 py-2.5 flex items-center justify-center gap-2">
-                <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-                </svg>
-                <span className="text-sm text-pnp-textSecondary">
-                  You are muted
-                  {mutedUntil
-                    ? ` until ${new Date(mutedUntil).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
-                    : ""}
-                </span>
-              </div>
-            </div>
-          ) : (
-            /* Normal input area */
-            <div className="px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-pnp-background/80 backdrop-blur-md">
-              <div className="flex items-center gap-2">
-                {/* Media upload button — hidden when group has allowMedia set to false */}
-                {groupDetail?.allowMedia !== false && (
-                  <MediaUploadButton
-                    onFileSelect={handleFileSelect}
-                    onError={handleFileError}
-                    disabled={sending}
-                    onVoiceRecord={handleVoiceRecord}
-                  />
-                )}
-
-                {/* Text input */}
-                <input
-                  value={msgInput}
-                  onChange={(e) => {
-                    setMsgInput(e.target.value);
-                    emitTyping(isRecording);
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-                  placeholder={
-                    isSlowModeActive
-                      ? `Slow mode \u2014 wait ${slowModeCooldown}s`
-                      : mediaFile
-                      ? t.chat.addACaption
-                      : t.chat.typeAMessage
-                  }
-                  className="flex-1 bg-white/5 rounded-full px-4 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 min-w-0 transition-colors"
-                  maxLength={2000}
-                  disabled={sending || isSlowModeActive}
-                  aria-label="Message input"
-                />
-
-                {/* Send button */}
-                <button
-                  onClick={handleSend}
-                  disabled={!canSend}
-                  className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
-                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-                  aria-label={t.chat.sendMessage}
-                >
-                  {sending ? (
-                    <svg className="w-4 h-4 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                  ) : isSlowModeActive ? (
-                    <span className="text-white text-xs font-bold tabular-nums">{slowModeCooldown}s</span>
-                  ) : (
-                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                    </svg>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
 
         {/* In-app confirmation modal */}
         {confirmAction && (

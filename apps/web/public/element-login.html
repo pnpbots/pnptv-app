@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Loading chat...</title></head>
+<body style="background:#0d0d0d;color:#888;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+<p id="status">Loading chat...</p>
+<script>
+(async function() {
+  var status = document.getElementById('status');
+  var params = new URLSearchParams(window.location.hash.substring(1));
+  var hs = params.get('hs');
+  var uid = params.get('uid');
+  var token = params.get('token');
+  var room = params.get('room');
+
+  if (!hs || !uid || !token) {
+    status.innerText = 'Missing credentials.';
+    return;
+  }
+
+  status.innerText = 'Preparing session...';
+
+  // 1. Clear only Matrix/Element localStorage keys — NOT all keys, because this
+  //    iframe shares localStorage with the parent app (same origin).
+  try {
+    var keysToRemove = [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && (k.startsWith('mx_') || k.startsWith('element-') || k.startsWith('matrix-'))) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
+  } catch(e) {}
+  // Only clear Element-related sessionStorage keys
+  try {
+    var sessionKeysToRemove = [];
+    for (var i = 0; i < sessionStorage.length; i++) {
+      var k = sessionStorage.key(i);
+      if (k && (k.startsWith('mx_') || k.startsWith('element-') || k.startsWith('matrix-'))) {
+        sessionKeysToRemove.push(k);
+      }
+    }
+    sessionKeysToRemove.forEach(function(k) { sessionStorage.removeItem(k); });
+  } catch(e) {}
+
+  // 2. Delete only Matrix/Element IndexedDB databases (not app databases)
+  var matrixDbPrefixes = ['matrix-js-sdk', 'element-', 'matrix-react-sdk', 'riot-web'];
+  var matrixDbExact = ['logs', 'element-pickle-key'];
+  function isMatrixDb(name) {
+    if (!name) return false;
+    if (matrixDbExact.indexOf(name) !== -1) return true;
+    for (var i = 0; i < matrixDbPrefixes.length; i++) {
+      if (name.startsWith(matrixDbPrefixes[i])) return true;
+    }
+    return false;
+  }
+  try {
+    if (indexedDB.databases) {
+      var dbs = await indexedDB.databases();
+      await Promise.all(dbs.filter(function(db) { return isMatrixDb(db.name); }).map(function(db) {
+        return new Promise(function(resolve) {
+          var req = indexedDB.deleteDatabase(db.name);
+          req.onsuccess = resolve;
+          req.onerror = resolve;
+          req.onblocked = resolve;
+          setTimeout(resolve, 2000);
+        });
+      }));
+    } else {
+      // Firefox fallback — try known Element DB names
+      await Promise.all(matrixDbExact.concat(matrixDbPrefixes.map(function(p) { return p + ':crypto'; })).map(function(name) {
+        return new Promise(function(resolve) {
+          var req = indexedDB.deleteDatabase(name);
+          req.onsuccess = resolve;
+          req.onerror = resolve;
+          req.onblocked = resolve;
+          setTimeout(resolve, 2000);
+        });
+      }));
+    }
+  } catch(e) {}
+
+  // 3. Set fresh Element session credentials
+  localStorage.setItem('mx_hs_url', hs);
+  localStorage.setItem('mx_user_id', uid);
+  localStorage.setItem('mx_access_token', token);
+  localStorage.setItem('mx_is_guest', 'false');
+  localStorage.setItem('mx_has_pickle_key', 'false');
+
+  // 4. Small delay to ensure IDB cleanup completes
+  await new Promise(function(r) { setTimeout(r, 500); });
+
+  // 5. Navigate to Element with the room
+  var dest = '/element/';
+  if (room) dest += '#/room/' + encodeURIComponent(room);
+  window.location.replace(dest);
+})();
+</script>
+</body>
+</html>

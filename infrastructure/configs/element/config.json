@@ -5,18 +5,24 @@
       "server_name": "matrix.pnptv.app"
     }
   },
-  "brand": "PNPTV Chat",
+  "brand": "PNPtv! Chat",
   "default_theme": "dark",
   "room_directory": {
     "servers": ["matrix.pnptv.app"]
   },
   "setting_defaults": {
     "UIFeature.registration": false,
-    "UIFeature.passwordReset": false
+    "UIFeature.passwordReset": false,
+    "UIFeature.feedback": false,
+    "UIFeature.explorePublicSpaces": false
   },
   "disable_custom_urls": true,
   "disable_guests": true,
   "sso_redirect_options": {
-    "immediate": true
-  }
+    "immediate": false
+  },
+  "embedded_pages": {
+    "welcome_url": ""
+  },
+  "show_labs_settings": false
 }
