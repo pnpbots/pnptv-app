@@ -22,12 +22,6 @@ export interface CallParticipant {
   photoUrl: string;
 }
 
-export interface ReadReceiptEntry {
-  name: string;
-  photoUrl: string;
-  lastReadAt: string;
-}
-
 const EMPTY_CALL: CallState = {
   isActive: false,
   participantCount: 0,
@@ -60,9 +54,6 @@ export function useHangoutSocket(
   // Feature 3: Rich participant list (separate from the legacy string[] in CallState)
   const [callParticipants, setCallParticipants] = useState<CallParticipant[]>([]);
 
-  // Feature 4: Read receipts keyed by userId
-  const [readReceipts, setReadReceipts] = useState<Map<string, ReadReceiptEntry>>(new Map());
-
   // Typing is handled by Element Web iframe — no parent-side Matrix SDK needed
 
   // Refs for debouncing and cleanup
@@ -78,7 +69,6 @@ export function useHangoutSocket(
       setScreenShareUser(null);
       setCallStartedAt(null);
       setCallParticipants([]);
-      setReadReceipts(new Map());
       return;
     }
 
@@ -252,25 +242,6 @@ export function useHangoutSocket(
       setScreenShareUser(data.sharing ? String(data.userId).slice(0, 64) : null);
     };
 
-    // Feature 4: Incoming read receipt from another user
-    const onRead = (data: {
-      userId: string;
-      name: string;
-      photoUrl: string;
-      lastReadAt: string;
-    }) => {
-      if (!data.userId || data.userId === userId) return;
-      setReadReceipts((prev) => {
-        const next = new Map(prev);
-        next.set(String(data.userId).slice(0, 64), {
-          name: String(data.name || "").slice(0, 100),
-          photoUrl: String(data.photoUrl || ""),
-          lastReadAt: String(data.lastReadAt),
-        });
-        return next;
-      });
-    };
-
     // Register ALL listeners BEFORE emitting join
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -283,7 +254,6 @@ export function useHangoutSocket(
     socket.on("hangout:call:participant:left", onParticipantLeft);
     socket.on("hangout:call:participants", onCallParticipants);
     socket.on("hangout:call:screenshare", onScreenShare);
-    socket.on("hangout:read", onRead);
 
     // Now emit join — if already connected, emit directly; otherwise onConnect handles it
     // Guard behind userId: an unauthenticated socket must not join a private room
@@ -307,7 +277,6 @@ export function useHangoutSocket(
       socket.off("hangout:call:participant:left", onParticipantLeft);
       socket.off("hangout:call:participants", onCallParticipants);
       socket.off("hangout:call:screenshare", onScreenShare);
-      socket.off("hangout:read", onRead);
 
       // Clear typing timers and map
       typingTimers.current.forEach((t) => clearTimeout(t));
@@ -366,8 +335,6 @@ export function useHangoutSocket(
     callStartedAt,
     // Feature 3
     callParticipants,
-    // Feature 4
-    readReceipts,
     emitMarkRead,
   };
 }
