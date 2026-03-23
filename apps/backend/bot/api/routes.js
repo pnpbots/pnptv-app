@@ -651,6 +651,11 @@ app.get('/subscription', (req, res) => {
   res.redirect(301, '/suscripcion');
 });
 
+// Shorthand alias → lifetime100
+app.get('/lifetime', (req, res) => {
+  res.redirect(301, '/lifetime100');
+});
+
 // LIFETIME100 pass promo page
 app.get('/lifetime100', pageLimiter, (req, res) => {
   const host = req.get('host') || '';

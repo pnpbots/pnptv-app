@@ -1180,6 +1180,7 @@ export function getMatrixToken(): Promise<{
   success: boolean;
   matrixUserId: string;
   accessToken: string;
+  deviceId?: string;
   homeserverUrl: string;
 }> {
   return request("/api/webapp/matrix/token");
@@ -1210,21 +1211,6 @@ export function sendHangoutMessage(
   });
 }
 
-export function sendDirectMessage(
-  userId: string,
-  content: string
-): Promise<{
-  success: boolean;
-  message: { id: number; senderId: string; recipientId: string; content: string; isRead: boolean; createdAt: string; isMine: boolean };
-  matrixEventId?: string;
-  remaining?: number;
-  limit?: number;
-}> {
-  return request(`/api/webapp/matrix/dm/${userId}/message`, {
-    method: "POST",
-    body: { content },
-  });
-}
 
 export function getWofStats(): Promise<{ total_posts: number; total_likes: number; unique_contributors: number }> {
   return request("/api/webapp/social/wof/stats");
@@ -1873,91 +1859,12 @@ export interface MessageThread {
   unreadCount: number;
 }
 
-export interface DirectMessage {
-  id: number;
-  senderId: string;
-  recipientId: string;
-  content: string | null;
-  mediaUrl: string | null;
-  mediaType: "image" | "video" | null;
-  mediaMime: string | null;
-  mediaThumbUrl: string | null;
-  isRead: boolean;
-  createdAt: string;
-  isMine: boolean;
-}
-
 export function getMessageThreads(): Promise<{
   success: boolean;
   threads: MessageThread[];
   count: number;
 }> {
   return request("/api/webapp/messages/threads");
-}
-
-export function getMessages(
-  otherUserId: string,
-  limit?: number,
-  before?: number
-): Promise<{
-  success: boolean;
-  messages: DirectMessage[];
-  count: number;
-  hasMore: boolean;
-}> {
-  const params = new URLSearchParams();
-  if (limit) params.append("limit", limit.toString());
-  if (before) params.append("before", before.toString());
-  return request(`/api/webapp/messages/thread/${otherUserId}?${params.toString()}`);
-}
-
-export function sendMessage(recipientId: string, content: string): Promise<{
-  success: boolean;
-  message: DirectMessage;
-  /** Remaining DM sends for today (free-tier users only) */
-  remaining?: number;
-  /** Daily DM limit (free-tier users only) */
-  limit?: number;
-}> {
-  return request("/api/webapp/messages/send", {
-    method: "POST",
-    body: { recipientId, content },
-  });
-}
-
-export async function sendDmMediaMessage(
-  recipientId: string,
-  mediaFile: File,
-  caption?: string
-): Promise<{ success: boolean; message: DirectMessage; remaining?: number; limit?: number }> {
-  const formData = new FormData();
-  formData.append("media", mediaFile);
-  if (caption?.trim()) formData.append("content", caption.trim());
-
-  const res = await fetch(
-    `${API_BASE}/api/webapp/dm/media/${encodeURIComponent(recipientId)}`,
-    {
-      method: "POST",
-      credentials: "include",
-      body: formData,
-    }
-  );
-
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(error.error || `API error ${res.status}`);
-  }
-
-  return res.json();
-}
-
-export function deleteMessage(messageId: number): Promise<{
-  success: boolean;
-  message: string;
-}> {
-  return request(`/api/webapp/messages/${messageId}`, {
-    method: "DELETE",
-  });
 }
 
 export function markThreadAsRead(otherUserId: string): Promise<{
@@ -1993,29 +1900,6 @@ export function getChatReactions(
   return request(`/api/webapp/chat/messages/${messageId}/reactions`);
 }
 
-// ── DM Reactions ──────────────────────────────────────────────────────────────
-
-export function reactToDm(
-  messageId: number,
-  emoji: string
-): Promise<{
-  success: boolean;
-  added: boolean;
-  reactions: Array<{ emoji: string; count: number; users: Array<{ id: string; username: string }> }>;
-}> {
-  return request(`/api/webapp/dm/messages/${messageId}/react`, {
-    method: "POST",
-    body: { emoji },
-  });
-}
-
-export function getDmReactions(
-  messageId: number
-): Promise<{
-  reactions: Array<{ emoji: string; count: number; users: Array<{ id: string; username: string }> }>;
-}> {
-  return request(`/api/webapp/dm/messages/${messageId}/reactions`);
-}
 
 // ============================================================================
 // Phase 1: Notifications API

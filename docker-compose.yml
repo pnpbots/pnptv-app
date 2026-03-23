@@ -353,7 +353,7 @@ services:
     environment:
       AUTHENTIK_HOST: http://authentik-server:9000
       AUTHENTIK_INSECURE: "true"
-      AUTHENTIK_TOKEN: "a7JnX0DJbP7vE6ci2xwHRKMZKFO81Z8AHfao4KgoxAfz3ROG6bUJqo1JPKJO"
+      AUTHENTIK_TOKEN: ${AUTHENTIK_OUTPOST_TOKEN}
       AUTHENTIK_REDIS__HOST: redis-authentik
     networks:
       - pnptvapp_net

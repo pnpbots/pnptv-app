@@ -22,10 +22,10 @@ const authGuard = (req, res) => {
   return user;
 };
 
-// Check if user is a member of the group
+// Check if user is a non-banned member of the group
 const isMember = async (groupId, userId) => {
   const { rows } = await query(
-    'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+    'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned = false OR is_banned IS NULL)',
     [groupId, userId]
   );
   return rows.length > 0;
@@ -126,22 +126,21 @@ const createGroup = async (req, res) => {
     }
 
     // Monthly limit: max 3 user-created hangouts per PRIME user per calendar month
-    const { rows: limitRows } = await query(
-      `SELECT COUNT(*)::int AS cnt FROM hangout_groups
-       WHERE creator_id = $1 AND is_main = false AND is_wall_of_fame = false
-         AND created_at >= date_trunc('month', NOW())`,
-      [user.id]
-    );
-    if (limitRows[0].cnt >= 3) {
-      return res.status(403).json({ error: 'Monthly hangout limit reached (3 per month)' });
-    }
-
+    // Atomic INSERT...SELECT to prevent race condition where concurrent requests bypass the limit
     const { rows } = await query(
       `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members)
-       VALUES ($1, $2, $3, false, $4, 25)
+       SELECT $1, $2, $3, false, $4, 25
+       WHERE (
+         SELECT COUNT(*)::int FROM hangout_groups
+         WHERE creator_id = $3 AND is_main = false AND is_wall_of_fame = false
+           AND created_at >= date_trunc('month', NOW())
+       ) < 3
        RETURNING *`,
       [name.trim().slice(0, 100), description.trim().slice(0, 500), user.id, isPublic !== false]
     );
+    if (rows.length === 0) {
+      return res.status(403).json({ error: 'Monthly hangout limit reached (3 per month)' });
+    }
 
     const group = rows[0];
 
@@ -756,11 +755,14 @@ const sendMessage = async (req, res) => {
         return res.status(403).json({ error: 'This group is read-only' });
       }
 
-      // Muted user check
+      // Ban + mute check
       const { rows: memberRows } = await query(
-        'SELECT is_muted, muted_until FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+        'SELECT is_banned, is_muted, muted_until FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
         [groupId, user.id]
       );
+      if (memberRows[0]?.is_banned) {
+        return res.status(403).json({ error: 'You are banned from this group' });
+      }
       if (memberRows[0]?.is_muted) {
         if (!memberRows[0].muted_until || new Date(memberRows[0].muted_until) > new Date()) {
           return res.status(403).json({ error: 'You are muted in this group' });

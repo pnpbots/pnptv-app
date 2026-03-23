@@ -42,7 +42,7 @@ const authGuard = (req, res) => {
 
 const isMember = async (groupId, userId) => {
   const { rows } = await query(
-    'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+    'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned = false OR is_banned IS NULL)',
     [groupId, userId]
   );
   return rows.length > 0;
@@ -402,7 +402,7 @@ const startCall = async (req, res) => {
             );
             if (ownerCheck.length > 0) isModerator = true;
           }
-          const jaas = await buildJaaSPayload(call.room_name, user, isModerator, false);
+          const jaas = await buildJaaSPayload(call.room_name, user, isModerator, call.is_persistent);
           return res.json({
             success: true,
             isNew: false,
@@ -412,6 +412,7 @@ const startCall = async (req, res) => {
               roomName: call.room_name,
               creatorId: call.creator_id,
               createdAt: call.created_at,
+              isPersistent: call.is_persistent,
               isModerator,
             },
             jaas,

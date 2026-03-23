@@ -5,8 +5,6 @@ import {
   searchNearby,
   searchNearbyPlaces,
   getPublicProfile,
-  getOrCreateDmRoom,
-  sendDirectMessage,
   getNearbyFeedPosters,
   getNearbyHangoutMembers,
   getNearbyStreamViewers,
@@ -14,11 +12,11 @@ import {
   getNearbyAllUsers,
   getWalletBalance,
   getOrCreateHangoutRoom,
+  getMatrixToken,
   type NearbyUser,
   type NearbyPlace,
   type NearbyContextUser,
 } from "@/lib/api";
-import { useRoomMessages, sendMatrixMessage } from "@/hooks/useMatrix";
 import type { UserProfile } from "@/lib/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -111,180 +109,24 @@ function getCornerOffset(myOrder: number, myCorner: string): number {
 }
 
 // ── DM chat sub-view ──────────────────────────────────────────────────────────
-function DmView({
-  roomId,
-  partnerId,
-  partnerName,
-  myUserId,
-  onBack,
-}: {
-  roomId: string;
-  partnerId: string;
-  partnerName: string;
-  myUserId: string | null;
-  onBack: () => void;
-}) {
-  const { messages, loading } = useRoomMessages(roomId);
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const handleSend = useCallback(async () => {
-    const trimmed = text.trim();
-    if (!trimmed || sending) return;
-    setSending(true);
-    setSendError(null);
-    setText("");
-    try {
-      // Send through backend REST endpoint (auth/block/quota checks + Matrix + PG sync)
-      await sendDirectMessage(partnerId, trimmed);
-      // Message will appear via Matrix timeline listener
-    } catch (err) {
-      // Fallback: try direct Matrix send
-      try {
-        await sendMatrixMessage(roomId, trimmed);
-      } catch {
-        setText(trimmed);
-        setSendError(err instanceof Error ? err.message : "Failed to send");
-      }
-    } finally {
-      setSending(false);
-    }
-  }, [text, sending, roomId, partnerId]);
-
-  return (
-    <div className="flex flex-col h-full" style={{ minHeight: 0 }}>
-      {/* Header */}
-      <div
-        className="flex items-center gap-2 px-3 py-2.5 border-b flex-shrink-0"
-        style={{ borderColor: "rgba(255,255,255,0.08)" }}
-      >
-        <button
-          onClick={onBack}
-          className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
-          aria-label="Back"
-        >
-          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <span className="text-sm font-bold text-white truncate flex-1">{partnerName}</span>
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2" style={{ minHeight: 0 }}>
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: `${LEMON}30`, borderTopColor: LEMON }} />
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-xs" style={{ color: "#8E8E93" }}>No messages yet — say hi!</p>
-          </div>
-        ) : (
-          messages.map((msg) => {
-            const isMe = msg.isMine;
-            return (
-              <div key={msg.eventId} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
-                <div
-                  className="max-w-[80%] rounded-2xl px-3 py-2 text-sm text-white break-words whitespace-pre-wrap"
-                  style={{ background: isMe ? PINK : "rgba(255,255,255,0.10)" }}
-                >
-                  {msg.body}
-                </div>
-              </div>
-            );
-          })
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Error */}
-      {sendError && (
-        <p className="px-3 text-xs mb-1" style={{ color: "#FF453A" }}>{sendError}</p>
-      )}
-
-      {/* Input */}
-      <div
-        className="flex items-center gap-2 px-3 py-2 border-t flex-shrink-0"
-        style={{ borderColor: "rgba(255,255,255,0.08)" }}
-      >
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-          placeholder="Type a message..."
-          className="flex-1 bg-white/5 rounded-full px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-white/20 min-w-0"
-          maxLength={2000}
-          disabled={sending}
-        />
-        <button
-          onClick={handleSend}
-          disabled={!text.trim() || sending}
-          className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 active:scale-90 transition-all disabled:opacity-30"
-          style={{ background: PINK }}
-          aria-label="Send"
-        >
-          {sending ? (
-            <svg className="w-3.5 h-3.5 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-          ) : (
-            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-            </svg>
-          )}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Group chat sub-view (mini chat for video call overlay) ───────────────────
-function GroupChatView({
+// ── Element iframe chat sub-view (used for group chat during video calls) ────
+function ElementChatView({
   roomId,
   chatName,
-  loading: roomLoading,
+  matrixCreds,
+  loading,
   onBack,
 }: {
   roomId: string | null;
   chatName: string;
+  matrixCreds: { userId: string; accessToken: string; deviceId?: string; homeserver: string } | null;
   loading: boolean;
   onBack: () => void;
 }) {
-  const { messages, loading: msgsLoading } = useRoomMessages(roomId);
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const handleSend = useCallback(async () => {
-    const trimmed = text.trim();
-    if (!trimmed || sending || !roomId) return;
-    setSending(true);
-    setSendError(null);
-    setText("");
-    try {
-      await sendMatrixMessage(roomId, trimmed);
-    } catch (err) {
-      setText(trimmed);
-      setSendError(err instanceof Error ? err.message : "Failed to send");
-    } finally {
-      setSending(false);
-    }
-  }, [text, sending, roomId]);
-
-  const isLoading = roomLoading || msgsLoading;
+  const elementSrc =
+    roomId && matrixCreds
+      ? `/element-login.html#hs=${encodeURIComponent(matrixCreds.homeserver)}&uid=${encodeURIComponent(matrixCreds.userId)}&token=${encodeURIComponent(matrixCreds.accessToken)}&room=${encodeURIComponent(roomId)}${matrixCreds.deviceId ? "&did=" + encodeURIComponent(matrixCreds.deviceId) : ""}`
+      : null;
 
   return (
     <div className="flex flex-col h-full" style={{ minHeight: 0 }}>
@@ -302,95 +144,25 @@ function GroupChatView({
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        <span className="text-2xl">🌈</span>
         <span className="text-sm font-bold text-white truncate flex-1">{chatName}</span>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2" style={{ minHeight: 0 }}>
-        {isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: `${LEMON}30`, borderTopColor: LEMON }} />
-          </div>
-        ) : !roomId ? (
-          <div className="text-center py-8">
-            <p className="text-xs" style={{ color: "#FF453A" }}>Could not load chat room</p>
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-xs" style={{ color: "#8E8E93" }}>No messages yet — say hi!</p>
-          </div>
-        ) : (
-          messages.map((msg) => {
-            const isMe = msg.isMine;
-            return (
-              <div key={msg.eventId} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
-                {!isMe && (
-                  <div className="flex flex-col items-start max-w-[80%]">
-                    <span className="text-[9px] font-medium mb-0.5 ml-1" style={{ color: LEMON }}>
-                      {msg.senderId?.replace(/^@/, "").replace(/:.*$/, "") || "User"}
-                    </span>
-                    <div
-                      className="rounded-2xl px-3 py-2 text-sm text-white break-words whitespace-pre-wrap"
-                      style={{ background: "rgba(255,255,255,0.10)" }}
-                    >
-                      {msg.body}
-                    </div>
-                  </div>
-                )}
-                {isMe && (
-                  <div
-                    className="max-w-[80%] rounded-2xl px-3 py-2 text-sm text-white break-words whitespace-pre-wrap"
-                    style={{ background: PINK }}
-                  >
-                    {msg.body}
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Error */}
-      {sendError && (
-        <p className="px-3 text-xs mb-1" style={{ color: "#FF453A" }}>{sendError}</p>
-      )}
-
-      {/* Input */}
-      {roomId && (
-        <div
-          className="flex items-center gap-2 px-3 py-2 border-t flex-shrink-0"
-          style={{ borderColor: "rgba(255,255,255,0.08)" }}
-        >
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder="Type a message..."
-            className="flex-1 bg-white/5 rounded-full px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-white/20 min-w-0"
-            maxLength={2000}
-            disabled={sending}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!text.trim() || sending}
-            className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 active:scale-90 transition-all disabled:opacity-30"
-            style={{ background: PINK }}
-            aria-label="Send"
-          >
-            {sending ? (
-              <svg className="w-3.5 h-3.5 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
-            )}
-          </button>
+      {/* Element iframe or loading/error */}
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: `${LEMON}30`, borderTopColor: LEMON }} />
+        </div>
+      ) : elementSrc ? (
+        <iframe
+          key={`${roomId}-${matrixCreds!.userId}`}
+          src={elementSrc}
+          className="flex-1 min-h-0 w-full border-0"
+          allow="microphone; camera; clipboard-write; encrypted-media; display-capture; autoplay; speaker-selection"
+          title={chatName}
+        />
+      ) : (
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-xs" style={{ color: "#FF453A" }}>Could not load chat room</p>
         </div>
       )}
     </div>
@@ -680,14 +452,12 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
   const [profileIndex, setProfileIndex] = useState(0);
 
   // DM state
-  const [dmRoomId, setDmRoomId] = useState<string | null>(null);
-  const [dmLoading, setDmLoading] = useState(false);
-  const [dmError, setDmError] = useState<string | null>(null);
 
   // Group chat popup state (used when in a video call to avoid navigating away)
   const [groupChatRoomId, setGroupChatRoomId] = useState<string | null>(null);
   const [groupChatLoading, setGroupChatLoading] = useState(false);
   const [groupChatName, setGroupChatName] = useState<string>("Group Chat");
+  const [matrixCreds, setMatrixCreds] = useState<{ userId: string; accessToken: string; deviceId?: string; homeserver: string } | null>(null);
 
   // Detect if user is in a video call (Main Stage or active hangout call)
   const inVideoCall = location.pathname === "/main-stage" || location.pathname.startsWith("/chat/");
@@ -737,8 +507,8 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
     setSelectedUser(null);
     setSelectedPlace(null);
     setProfile(null);
-    setDmRoomId(null);
-    setDmError(null);
+
+
     setPage(0);
     setProfileIndex(0);
     setMembers([]);
@@ -752,8 +522,8 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
     setSelectedUser(null);
     setSelectedPlace(null);
     setProfile(null);
-    setDmRoomId(null);
-    setDmError(null);
+
+
     setPage(0);
     setProfileIndex(0);
   }, []);
@@ -954,30 +724,15 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
     finally { setProfileLoading(false); }
   }, [members]);
 
-  // ── Open DM room ───────────────────────────────────────────────────────────
-  const openDm = useCallback(async (member: NearbyMember) => {
-    setDmLoading(true);
-    setDmError(null);
-    setDmRoomId(null);
-    try {
-      const res = await getOrCreateDmRoom(String(member.user_id));
-      if (res.success) {
-        setDmRoomId(res.roomId);
-        setView("dm");
-      } else {
-        setDmError("Could not open DM room");
-      }
-    } catch (err) {
-      setDmError(err instanceof Error ? err.message : "Failed to open DM");
-    } finally {
-      setDmLoading(false);
-    }
-  }, []);
+  // ── Open DM — navigate to full Element-based DM page ────────────────────────
+  const openDm = useCallback((member: NearbyMember) => {
+    closeModal();
+    navigate(`/dm/${member.user_id}`);
+  }, [closeModal, navigate]);
 
   // Direct DM from card (hangouts/live — skips profile view)
   const handleDirectDm = useCallback((member: NearbyMember, e: React.MouseEvent) => {
     e.stopPropagation();
-    setSelectedUser(member);
     openDm(member);
   }, [openDm]);
 
@@ -989,14 +744,23 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
     if (inVideoCall) {
       setGroupChatLoading(true);
       setGroupChatName(hangoutGroupName || "Group Chat");
+      setMatrixCreds(null);
+      setGroupChatRoomId(null);
       setView("groupChat");
       try {
-        const res = await getOrCreateHangoutRoom(targetGroup);
-        if (res.success && res.roomId) {
-          setGroupChatRoomId(res.roomId);
-        }
+        const [roomRes, tokenRes] = await Promise.all([
+          getOrCreateHangoutRoom(targetGroup),
+          getMatrixToken(),
+        ]);
+        if (roomRes.success && roomRes.roomId) setGroupChatRoomId(roomRes.roomId);
+        if (tokenRes.success) setMatrixCreds({
+          userId: tokenRes.matrixUserId,
+          accessToken: tokenRes.accessToken,
+          deviceId: tokenRes.deviceId || undefined,
+          homeserver: tokenRes.homeserverUrl,
+        });
       } catch {
-        // Failed to get room
+        // Failed to get room or token
       } finally {
         setGroupChatLoading(false);
       }
@@ -1335,32 +1099,17 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
                         </p>
                       )}
 
-                      {/* DM error */}
-                      {dmError && (
-                        <p className="text-xs" style={{ color: "#FF453A" }}>{dmError}</p>
-                      )}
-
                       {/* Action buttons */}
                       <div className="flex items-center gap-3 mt-2 w-full">
                         <button
                           onClick={() => openDm(selectedUser)}
-                          disabled={dmLoading}
-                          className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                          className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95 flex items-center justify-center gap-1.5"
                           style={{ background: PINK }}
                         >
-                          {dmLoading ? (
-                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                            </svg>
-                          ) : (
-                            <>
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                              </svg>
-                              Message
-                            </>
-                          )}
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                          </svg>
+                          Message
                         </button>
                         <button
                           onClick={() => { closeModal(); navigate(`/profile/${selectedUser.user_id}`); }}
@@ -1387,29 +1136,14 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
               </>
             )}
 
-            {/* ── DM VIEW ───────────────────────────────────────────────── */}
-            {view === "dm" && selectedUser && dmRoomId && (
-              <DmView
-                roomId={dmRoomId}
-                partnerId={String(selectedUser.user_id)}
-                partnerName={
-                  profile?.firstName ||
-                  selectedUser.name ||
-                  selectedUser.username ||
-                  "User"
-                }
-                myUserId={null}
-                onBack={() => setView("profile")}
-              />
-            )}
-
-            {/* ── GROUP CHAT VIEW (video call overlay) ────────────────── */}
+            {/* ── GROUP CHAT VIEW (video call overlay — Element iframe) ─ */}
             {view === "groupChat" && (
-              <GroupChatView
+              <ElementChatView
                 roomId={groupChatRoomId}
                 chatName={groupChatName}
+                matrixCreds={matrixCreds}
                 loading={groupChatLoading}
-                onBack={() => { setView("grid"); setGroupChatRoomId(null); }}
+                onBack={() => { setView("grid"); setGroupChatRoomId(null); setMatrixCreds(null); }}
               />
             )}
 

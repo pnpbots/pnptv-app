@@ -296,7 +296,7 @@ function UserDetailSheet({ user, onClose, onNavigate }: UserDetailSheetProps) {
           {/* Actions */}
           <div className="flex gap-2">
             <button
-              onClick={() => onNavigate(`/messages/${user.user_id}`)}
+              onClick={() => onNavigate(`/dm/${user.user_id}`)}
               className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white active:scale-[0.98] transition-transform"
               style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
             >

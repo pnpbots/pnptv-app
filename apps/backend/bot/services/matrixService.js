@@ -22,7 +22,7 @@ const crypto = require('crypto');
 const fs     = require('fs/promises');
 const path   = require('path');
 const logger = require('../../utils/logger');
-const { query } = require('../../config/postgres');
+const { query, getClient } = require('../../config/postgres');
 
 const SYNAPSE_INTERNAL_URL = process.env.MATRIX_SYNAPSE_URL || 'http://synapse:8008';
 const MATRIX_SERVER_NAME   = process.env.MATRIX_SERVER_NAME || 'matrix.pnptv.app';
@@ -150,7 +150,13 @@ async function provisionMatrixUser(user) {
       logger.debug(`[Matrix] Reusing existing credentials for user ${user.id} (${matrixUserId})`);
       return { matrixUserId, accessToken, deviceId: user.matrix_device_id || null, homeserverUrl: MATRIX_PUBLIC_URL };
     } catch (verifyErr) {
-      logger.warn(`[Matrix] Stored token invalid for user ${user.id}, re-provisioning: ${verifyErr.message}`);
+      const errCode = verifyErr?.response?.data?.errcode || verifyErr?.errcode || '';
+      if (errCode === 'M_UNKNOWN_TOKEN' || errCode === 'M_MISSING_TOKEN') {
+        logger.warn(`[Matrix] Token revoked/expired for user ${user.id} (${errCode}), re-provisioning`);
+      } else {
+        logger.warn(`[Matrix] Stored token invalid for user ${user.id}, re-provisioning: ${verifyErr.message}`);
+      }
+      // Fall through to re-provision with fresh admin login token below
     }
   }
 
@@ -486,15 +492,27 @@ async function getOrCreateDmRoom(userA, userB) {
     ? [userA, userB]
     : [userB, userA];
 
-  // Check for existing room
-  const existing = await query(
-    `SELECT matrix_room_id FROM dm_matrix_rooms WHERE user_a = $1 AND user_b = $2`,
-    [small.id, large.id]
-  );
+  // Check for existing room (FOR UPDATE prevents race condition where two concurrent
+  // calls both read "not found" and create duplicate rooms)
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(
+      `SELECT matrix_room_id FROM dm_matrix_rooms WHERE user_a = $1 AND user_b = $2 FOR UPDATE`,
+      [small.id, large.id]
+    );
 
-  if (existing.rows.length > 0) {
-    logger.debug(`[Matrix] Reusing DM room for ${small.id}<->${large.id}: ${existing.rows[0].matrix_room_id}`);
-    return existing.rows[0].matrix_room_id;
+    if (existing.rows.length > 0) {
+      await client.query('COMMIT');
+      logger.debug(`[Matrix] Reusing DM room for ${small.id}<->${large.id}: ${existing.rows[0].matrix_room_id}`);
+      return existing.rows[0].matrix_room_id;
+    }
+    await client.query('COMMIT');
+  } catch (lockErr) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw lockErr;
+  } finally {
+    client.release();
   }
 
   // Provision both users
@@ -520,11 +538,6 @@ async function getOrCreateDmRoom(userA, userB) {
       creation_content: { 'm.federate': false },
       initial_state: [
         {
-          type:      'm.room.encryption',
-          state_key: '',
-          content:   { algorithm: 'm.megolm.v1.aes-sha2' },
-        },
-        {
           type:      'm.room.history_visibility',
           state_key: '',
           content:   { history_visibility: 'joined' },
@@ -547,7 +560,6 @@ async function getOrCreateDmRoom(userA, userB) {
           'm.room.topic':        100,
           'm.room.avatar':       100,
           'm.room.power_levels': 100,
-          'm.room.encryption':   100,
         },
       },
     },
@@ -614,11 +626,6 @@ async function getOrCreateHangoutRoom(hangoutGroupId, creatorUser, groupName) {
       creation_content: { 'm.federate': false },
       initial_state: [
         {
-          type:      'm.room.encryption',
-          state_key: '',
-          content:   { algorithm: 'm.megolm.v1.aes-sha2' },
-        },
-        {
           type:      'm.room.history_visibility',
           state_key: '',
           content:   { history_visibility: 'shared' },
@@ -646,7 +653,6 @@ async function getOrCreateHangoutRoom(hangoutGroupId, creatorUser, groupName) {
           'm.room.topic':        50,
           'm.room.avatar':       50,
           'm.room.power_levels': 100,
-          'm.room.encryption':   100,
           'm.room.history_visibility': 100,
         },
       },

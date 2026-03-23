@@ -149,11 +149,12 @@ const getOrCreateHangoutRoom = async (req, res) => {
   }
 
   try {
-    // Verify group exists and caller is a member
+    // Verify group exists and caller is a non-banned member
     const groupResult = await query(
       `SELECT g.id, g.name, g.is_main
        FROM hangout_groups g
        JOIN hangout_group_members m ON m.group_id = g.id AND m.user_id = $1
+         AND (m.is_banned = false OR m.is_banned IS NULL)
        WHERE g.id = $2`,
       [sessionUser.id, groupId]
     );
@@ -217,11 +218,12 @@ const syncHangoutRoomMembers = async (req, res) => {
   }
 
   try {
-    // Load group + verify caller has sufficient role
+    // Load group + verify caller has sufficient role (exclude banned)
     const groupResult = await query(
       `SELECT g.id, g.name, gm.role
        FROM hangout_groups g
        JOIN hangout_group_members gm ON gm.group_id = g.id AND gm.user_id = $1
+         AND (gm.is_banned = false OR gm.is_banned IS NULL)
        WHERE g.id = $2`,
       [sessionUser.id, groupId]
     );
@@ -260,12 +262,13 @@ const syncHangoutRoomMembers = async (req, res) => {
     // Ensure room exists
     await matrixService.getOrCreateHangoutRoom(groupId, callerUser, groupName);
 
-    // Load all current group members
+    // Load all current non-banned group members
     const membersResult = await query(
       `SELECT u.id, u.telegram, u.username, u.first_name, u.matrix_user_id, u.matrix_access_token
        FROM hangout_group_members gm
        JOIN users u ON u.id = gm.user_id
-       WHERE gm.group_id = $1 AND u.is_deleted = false`,
+       WHERE gm.group_id = $1 AND u.is_deleted = false
+         AND (gm.is_banned = false OR gm.is_banned IS NULL)`,
       [groupId]
     );
 

@@ -291,9 +291,9 @@ function initSocketIO(io) {
       if (!Number.isFinite(gid)) return;
 
       try {
-        // Verify membership before joining the Socket.IO room
+        // Verify non-banned membership before joining the Socket.IO room
         const { rows } = await query(
-          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned = false OR is_banned IS NULL)',
           [gid, user.id]
         );
         if (rows.length === 0) {

@@ -1,28 +1,17 @@
-import React, {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  memo,
-} from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useI18n } from "@/lib/i18n";
 import {
   getMessageThreads,
-  getMessages,
-  sendDmMediaMessage,
-  sendDirectMessage,
-  markThreadAsRead,
+  getMatrixToken,
   getOrCreateDmRoom,
+  markThreadAsRead,
   type MessageThread,
-  type DirectMessage,
 } from "@/lib/api";
-import EmojiReactionBar, { type Reaction } from "@/components/EmojiReactionBar";
-import { useRoomMessages, sendMatrixMessage, sendMatrixReply, sendReaction, redactEvent, useRoomReactions, sendReadReceipt } from "@/hooks/useMatrix";
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -37,363 +26,7 @@ function timeAgo(dateStr: string, nowLabel: string): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
-const ACCEPTED_TYPES = "image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,video/mp4,video/webm";
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
-
-function isVideoFile(file: File): boolean {
-  return file.type.startsWith("video/");
-}
-
-// ─── Lightbox ────────────────────────────────────────────────────────────────
-
-interface LightboxProps {
-  src: string;
-  onClose: () => void;
-}
-
-function Lightbox({ src, onClose }: LightboxProps) {
-  const { dm: t } = useI18n();
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={t.imageLightboxLabel}
-    >
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-        aria-label={t.closeLightbox}
-      >
-        <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-      <img
-        src={src}
-        alt={t.sharedImage}
-        className="max-w-full max-h-full object-contain rounded-lg"
-        onClick={(e) => e.stopPropagation()}
-      />
-    </div>
-  );
-}
-
-// ─── Media bubble ─────────────────────────────────────────────────────────────
-
-interface MediaBubbleProps {
-  mediaUrl: string;
-  mediaType: "image" | "video";
-  thumbUrl?: string | null;
-  onExpandImage: (src: string) => void;
-}
-
-const MediaBubble = memo(function MediaBubble({
-  mediaUrl,
-  mediaType,
-  thumbUrl,
-  onExpandImage,
-}: MediaBubbleProps) {
-  const { dm: t } = useI18n();
-  const [imgError, setImgError] = useState(false);
-  const [vidError, setVidError] = useState(false);
-  // For images: use thumbnail for display, open full URL in lightbox
-  const displayUrl = (mediaType === "image" && thumbUrl) ? thumbUrl : mediaUrl;
-
-  if (mediaType === "image") {
-    if (imgError) {
-      return (
-        <div className="mt-2 flex items-center gap-1.5 text-xs" style={{ color: "#FF453A" }}>
-          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-          </svg>
-          {t.imageFailedToLoad}
-        </div>
-      );
-    }
-    return (
-      <button
-        onClick={() => onExpandImage(mediaUrl)}
-        className="mt-2 block max-w-[240px] sm:max-w-[300px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 rounded-lg"
-        aria-label={t.viewFullImage}
-      >
-        <img
-          src={displayUrl}
-          alt={t.sharedImage}
-          loading="lazy"
-          className="max-h-60 rounded-lg object-cover w-full hover:opacity-90 active:opacity-75 transition-opacity"
-          onError={() => setImgError(true)}
-        />
-      </button>
-    );
-  }
-
-  if (vidError) {
-    return (
-      <div className="mt-2 flex items-center gap-1.5 text-xs" style={{ color: "#FF453A" }}>
-        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-        </svg>
-        {t.videoFailedToLoad}
-      </div>
-    );
-  }
-
-  return (
-    <video
-      src={mediaUrl}
-      controls
-      preload="metadata"
-      className="mt-2 max-h-60 max-w-[240px] sm:max-w-[300px] w-full rounded-lg object-cover"
-      onError={() => setVidError(true)}
-      aria-label={t.sharedVideo}
-    />
-  );
-});
-
-// ─── Message bubble ───────────────────────────────────────────────────────────
-
-interface DmBubbleProps {
-  msg: DirectMessage;
-  userId: string;
-  initial: string;
-  currentUser: { photoUrl?: string | null; firstName?: string; username?: string } | null;
-  partnerName: string;
-  onNavigate: (path: string) => void;
-  onExpandImage: (src: string) => void;
-  reactions?: Reaction[];
-  onReaction?: (messageId: number, emoji: string) => void;
-  onReply?: (msg: DirectMessage) => void;
-  currentUserId?: string;
-  replyTo?: { name: string; content: string } | null;
-}
-
-const DmBubble = memo(function DmBubble({
-  msg,
-  userId,
-  initial,
-  currentUser,
-  onNavigate,
-  onExpandImage,
-  reactions,
-  onReaction,
-  onReply,
-  currentUserId,
-  replyTo,
-}: DmBubbleProps) {
-  const { dm: t } = useI18n();
-  const isMe = msg.isMine;
-  const avatarPath = isMe ? "/profile" : `/profile/${userId}`;
-  const rawAvatarUrl = isMe ? currentUser?.photoUrl : null;
-  const avatarUrl =
-    rawAvatarUrl &&
-    (rawAvatarUrl.startsWith("/") || rawAvatarUrl.startsWith("http"))
-      ? rawAvatarUrl
-      : null;
-
-  const hasText = !!(msg.content && msg.content.trim());
-  const hasMedia = !!(msg.mediaUrl && msg.mediaType);
-
-  return (
-    <div className={`flex gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
-      {/* Avatar */}
-      <button
-        onClick={() => onNavigate(avatarPath)}
-        className="flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 rounded-full"
-        aria-label={isMe ? t.viewYourProfile : t.viewPartnerProfile}
-      >
-        {avatarUrl ? (
-          <img
-            src={avatarUrl}
-            className="w-8 h-8 rounded-full object-cover"
-            alt=""
-          />
-        ) : (
-          <div
-            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
-            style={{
-              background: isMe ? "rgba(230, 145, 56, 0.2)" : "rgba(212, 0, 122, 0.2)",
-              color: isMe ? "#E69138" : "#D4007A",
-            }}
-          >
-            {initial}
-          </div>
-        )}
-      </button>
-
-      {/* Bubble */}
-      <div className={`max-w-[75%] flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-        {/* Timestamp */}
-        <div className={`flex items-center gap-1.5 mb-0.5 ${isMe ? "justify-end" : ""}`}>
-          <span className="text-[10px]" style={{ color: "#8E8E93" }}>
-            {timeAgo(msg.createdAt, t.timeNow)}
-          </span>
-        </div>
-
-        {/* Reply-to reference */}
-        {replyTo && (
-          <div className="text-[10px] px-2.5 py-1 mb-0.5 rounded-lg" style={{ background: "rgba(212,0,122,0.08)", borderLeft: "2px solid #D4007A" }}>
-            <span className="font-semibold" style={{ color: "#D4007A" }}>{replyTo.name}</span>
-            <p className="truncate max-w-[200px]" style={{ color: "#8E8E93" }}>{replyTo.content}</p>
-          </div>
-        )}
-
-        {/* Text bubble */}
-        {hasText && (
-          <div
-            className="rounded-2xl px-3 py-2 text-sm text-white whitespace-pre-wrap break-words group relative"
-            style={{
-              background: isMe
-                ? "linear-gradient(135deg, #D4007A, #E69138)"
-                : "rgba(255,255,255,0.08)",
-            }}
-          >
-            {msg.content}
-            {/* Reply button */}
-            {onReply && (
-              <button
-                onClick={() => onReply(msg)}
-                className="absolute -top-2 opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
-                style={{ [isMe ? "left" : "right"]: -8 }}
-                aria-label="Reply"
-              >
-                <svg className="w-3 h-3 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                </svg>
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Media */}
-        {hasMedia && (
-          <MediaBubble
-            mediaUrl={msg.mediaUrl!}
-            mediaType={msg.mediaType!}
-            thumbUrl={msg.mediaThumbUrl}
-            onExpandImage={onExpandImage}
-          />
-        )}
-
-        {/* Reactions */}
-        {typeof msg.id === "number" && (
-          <EmojiReactionBar
-            reactions={reactions || []}
-            onToggle={(emoji) => onReaction?.(msg.id as number, emoji)}
-            currentUserId={currentUserId}
-            size="sm"
-            className={`mt-1 ${isMe ? "justify-end" : ""}`}
-          />
-        )}
-      </div>
-    </div>
-  );
-});
-
-// ─── Upload preview ───────────────────────────────────────────────────────────
-
-interface UploadPreviewProps {
-  file: File;
-  previewUrl: string;
-  isSending: boolean;
-  uploadError: string | null;
-  onCancel: () => void;
-}
-
-function UploadPreview({
-  file,
-  previewUrl,
-  isSending,
-  uploadError,
-  onCancel,
-}: UploadPreviewProps) {
-  const { dm: t } = useI18n();
-  const isVid = isVideoFile(file);
-
-  return (
-    <div className="mx-4 mb-2 glass-card-sm p-2 flex items-start gap-2 animate-fade-in-up">
-      <div className="relative flex-shrink-0">
-        {isVid ? (
-          <video
-            src={previewUrl}
-            className="w-16 h-16 rounded-lg object-cover"
-            muted
-            playsInline
-            aria-label={t.videoPreview}
-          />
-        ) : (
-          <img
-            src={previewUrl}
-            alt={t.uploadPreview}
-            className="w-16 h-16 rounded-lg object-cover"
-          />
-        )}
-        <div
-          className="absolute bottom-1 left-1 text-[9px] font-bold px-1 rounded"
-          style={{
-            background: "rgba(0,0,0,0.7)",
-            color: isVid ? "#E69138" : "#D4007A",
-          }}
-        >
-          {isVid ? t.vidLabel : t.imgLabel}
-        </div>
-      </div>
-
-      <div className="flex-1 min-w-0">
-        <p className="text-xs text-white truncate">{file.name}</p>
-        <p className="text-[10px]" style={{ color: "#8E8E93" }}>
-          {(file.size / 1024 / 1024).toFixed(1)} MB
-        </p>
-
-        {uploadError ? (
-          <p className="text-[10px] mt-1" style={{ color: "#FF453A" }}>
-            {uploadError}
-          </p>
-        ) : isSending ? (
-          <div className="mt-1.5">
-            <div className="h-1 rounded-full bg-white/10 overflow-hidden">
-              <div
-                className="h-full w-2/3 rounded-full animate-pulse"
-                style={{ background: "linear-gradient(90deg, #D4007A, #E69138)" }}
-              />
-            </div>
-            <p className="text-[10px] mt-0.5" style={{ color: "#8E8E93" }}>
-              {t.uploading}
-            </p>
-          </div>
-        ) : (
-          <p className="text-[10px] mt-1" style={{ color: "#8E8E93" }}>
-            {t.pressToShare}
-          </p>
-        )}
-      </div>
-
-      {!isSending && (
-        <button
-          onClick={onCancel}
-          className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-          aria-label={t.removeMedia}
-        >
-          <svg className="w-4 h-4" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ─── Root component ───────────────────────────────────────────────────────────
+// ─── Main entry ───────────────────────────────────────────────────────────────
 
 export default function DirectMessages() {
   const { userId } = useParams<{ userId: string }>();
@@ -403,15 +36,7 @@ export default function DirectMessages() {
   const { dm: t } = useI18n();
 
   if (userId) {
-    return (
-      <Conversation
-        userId={userId}
-        currentUser={user}
-        navigate={navigate}
-        userTier={user?.tier ?? null}
-        userRole={user?.role ?? null}
-      />
-    );
+    return <Conversation userId={userId} navigate={navigate} />;
   }
   return (
     <>
@@ -420,20 +45,14 @@ export default function DirectMessages() {
         <meta name="description" content={t.pageDescription} />
       </Helmet>
       {showTutorial && <TutorialOverlay section="dm" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
-      <ThreadList currentUser={user} navigate={navigate} />
+      <ThreadList navigate={navigate} />
     </>
   );
 }
 
 // ─── Thread List ──────────────────────────────────────────────────────────────
 
-function ThreadList({
-  currentUser,
-  navigate,
-}: {
-  currentUser: { firstName?: string; username?: string } | null;
-  navigate: (path: string) => void;
-}) {
+function ThreadList({ navigate }: { navigate: (path: string) => void }) {
   const { dm: t } = useI18n();
   const [threads, setThreads] = useState<MessageThread[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -587,648 +206,134 @@ function ThreadList({
   );
 }
 
-// ─── Conversation View ────────────────────────────────────────────────────────
+// ─── Conversation View (Element Web iframe) ──────────────────────────────────
 
 function Conversation({
   userId,
-  currentUser,
   navigate,
-  userTier,
-  userRole,
 }: {
   userId: string;
-  currentUser: { photoUrl?: string | null; firstName?: string; username?: string; dbId?: string } | null;
   navigate: (path: string) => void;
-  userTier: string | null | undefined;
-  userRole: string | null | undefined;
 }) {
   const { dm: t } = useI18n();
-  // REST messages — initial load + fallback
-  const [restMessages, setRestMessages] = useState<DirectMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [msgInput, setMsgInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
-  const [partnerName, setPartnerName] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Matrix room
   const [matrixRoomId, setMatrixRoomId] = useState<string | null>(null);
-  const [matrixInitError, setMatrixInitError] = useState<string | null>(null);
+  const [matrixCreds, setMatrixCreds] = useState<{
+    userId: string;
+    accessToken: string;
+    deviceId?: string;
+    homeserver: string;
+  } | null>(null);
+  const [matrixError, setMatrixError] = useState<string | null>(null);
+  const [partnerName, setPartnerName] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
 
-
-  // Free-tier DM quota tracking
-  const [dmRemaining, setDmRemaining] = useState<number | null>(null);
-  const [dmLimit, setDmLimit] = useState(3);
-  const isAdmin = userRole?.toLowerCase() === "admin" || userRole?.toLowerCase() === "superadmin";
-  const isFree = (userTier?.toLowerCase() === "free" || !userTier) && !isAdmin;
-
-  // Media upload state
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
-  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Reply-to state
-  const [replyToMsg, setReplyToMsg] = useState<DirectMessage | null>(null);
-
-  // Lightbox
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-
-  // Matrix live messages (only active when roomId is known)
-  const { messages: matrixMessages, loading: matrixLoading } = useRoomMessages(matrixRoomId);
-  const { reactions: matrixReactionsMap } = useRoomReactions(matrixRoomId);
-
-  // Convert Matrix messages to DirectMessage shape for the existing bubble components
-  const matrixAsDmMessages: DirectMessage[] = matrixMessages.map((m) => {
-    // FNV-1a 32-bit hash for stable numeric id
-    let hash = 2166136261;
-    for (let i = 0; i < m.eventId.length; i++) {
-      hash ^= m.eventId.charCodeAt(i);
-      hash = (hash * 16777619) >>> 0;
-    }
-    return {
-      id: hash,
-      senderId: m.senderId,
-      recipientId: "",
-      content: m.body,
-      mediaUrl: m.mediaUrl ?? null,
-      mediaType: m.mediaType === "image" ? "image" as const : m.mediaType === "video" ? "video" as const : null,
-      mediaMime: m.mediaMime ?? null,
-      mediaThumbUrl: null,
-      isRead: true,
-      isMine: m.isMine,
-      createdAt: new Date(m.timestamp).toISOString(),
-      // Reply-to from Matrix
-      _replyTo: m.replyToEventId ? {
-        name: m.replyToSenderId?.split(":")[0].replace(/^@pnptv_/, "").replace(/^@/, "") || "User",
-        content: m.replyToBody || "[message]",
-      } : undefined,
-    } as DirectMessage & { _replyTo?: { name: string; content: string } };
-  });
-
-  // Final message list: Matrix is the single source of truth when available.
-  // During Matrix sync, show REST messages as a bridge so the screen isn't empty.
-  const messages: DirectMessage[] = matrixRoomId
-    ? matrixAsDmMessages.length > 0
-      ? matrixAsDmMessages
-      : matrixLoading
-        ? restMessages  // show REST messages while Matrix is still syncing
-        : matrixAsDmMessages  // sync done — show Matrix (even if empty = new conversation)
-    : restMessages;
-
-  // Map from DM message numeric id (FNV hash) → Matrix eventId (for reactions)
-  const dmEventIdMap = React.useMemo(() => {
-    const map = new Map<number, string>();
-    matrixMessages.forEach((m) => {
-      let hash = 2166136261;
-      for (let i = 0; i < m.eventId.length; i++) {
-        hash ^= m.eventId.charCodeAt(i);
-        hash = (hash * 16777619) >>> 0;
-      }
-      map.set(hash, m.eventId);
-    });
-    return map;
-  }, [matrixMessages]);
-
-  const loadMessages = useCallback(async () => {
-    try {
-      const data = await getMessages(userId, 50);
-      setRestMessages(data.messages || []);
-      setLoadError(null);
-    } catch {
-      setLoadError(t.loadMessagesError);
-    }
-  }, [userId, t.loadMessagesError]);
-
-  // Bootstrap: load REST messages AND establish Matrix room in parallel
-  useEffect(() => {
-    setIsLoading(true);
+  const loadChat = useCallback(() => {
     setMatrixRoomId(null);
-    setMatrixInitError(null);
+    setMatrixCreds(null);
+    setMatrixError(null);
+    setIsLoading(true);
 
-    // Load REST messages (fast, for immediate display) + resolve partner name
-    const restPromise = loadMessages();
-
-    // Fetch partner name from thread list (lightweight)
+    // Fetch partner name from thread list
     getMessageThreads()
       .then((res) => {
-        const thread = (res.threads || []).find((t: MessageThread) => String(t.userId) === String(userId));
+        const thread = (res.threads || []).find(
+          (th: MessageThread) => String(th.userId) === String(userId)
+        );
         if (thread) setPartnerName(thread.firstName || thread.username || "");
       })
       .catch(() => {});
 
-    // Establish Matrix DM room (may take a moment for provisioning)
-    getOrCreateDmRoom(userId)
-      .then((res) => {
-        if (res.success) setMatrixRoomId(res.roomId);
+    // Fetch Matrix token + DM room in parallel
+    Promise.all([
+      getOrCreateDmRoom(userId),
+      getMatrixToken(),
+    ])
+      .then(([roomRes, tokenRes]) => {
+        if (roomRes.success) setMatrixRoomId(roomRes.roomId);
+        if (tokenRes.success)
+          setMatrixCreds({
+            userId: tokenRes.matrixUserId,
+            accessToken: tokenRes.accessToken,
+            deviceId: tokenRes.deviceId || undefined,
+            homeserver: tokenRes.homeserverUrl,
+          });
       })
       .catch(() => {
-        setMatrixInitError("real-time unavailable");
-      });
+        setMatrixError("Chat unavailable");
+      })
+      .finally(() => setIsLoading(false));
 
-    // Loading is done when REST finishes (Matrix room setup is non-blocking)
-    restPromise.finally(() => setIsLoading(false));
     markThreadAsRead(userId).catch(() => {});
-  }, [userId, loadMessages]);
-
-  // REST polling fallback when Matrix is not available (reduced frequency)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => {
-    if (matrixRoomId) {
-      // Matrix connected — no need to poll
-      if (pollRef.current) clearInterval(pollRef.current);
-      return;
-    }
-    if (matrixInitError !== null) {
-      // Matrix failed — fall back to 10-second polling
-      pollRef.current = setInterval(() => {
-        loadMessages();
-      }, 10000);
-    }
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [matrixRoomId, matrixInitError, loadMessages]);
-
-  // Cleanup poll on unmount
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    loadChat();
+  }, [loadChat]);
 
-  // Send Matrix read receipt when conversation is viewed / new messages arrive
-  const lastReceiptId = useRef<string | null>(null);
-  useEffect(() => {
-    if (!matrixRoomId || matrixMessages.length === 0) return;
-    const lastMsg = matrixMessages[matrixMessages.length - 1];
-    if (lastMsg.eventId !== lastReceiptId.current) {
-      lastReceiptId.current = lastMsg.eventId;
-      sendReadReceipt(matrixRoomId, lastMsg.eventId);
-      markThreadAsRead(userId).catch(() => {});
-    }
-  }, [matrixRoomId, matrixMessages, userId]);
-
-  // ─── Media handling ──────────────────────────────────────────────────────
-
-  const clearMedia = useCallback(() => {
-    setMediaFile(null);
-    if (mediaPreview) URL.revokeObjectURL(mediaPreview);
-    setMediaPreview(null);
-    setUploadError(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }, [mediaPreview]);
-
-  const handleFileSelect = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      const ALLOWED_DM_TYPES = new Set([
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-        "image/gif",
-        "image/heic",
-        "image/heif",
-        "video/mp4",
-        "video/webm",
-      ]);
-      if (!ALLOWED_DM_TYPES.has(file.type)) {
-        setUploadError(t.invalidFileType);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-        return;
-      }
-
-      if (file.size > MAX_FILE_SIZE) {
-        setUploadError(t.fileTooLarge);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-        return;
-      }
-
-      clearMedia();
-      setMediaFile(file);
-      setMediaPreview(URL.createObjectURL(file));
-      setUploadError(null);
-    },
-    [clearMedia, t.invalidFileType, t.fileTooLarge]
-  );
-
-  // ─── Send logic ──────────────────────────────────────────────────────────
-
-  const handleSend = useCallback(async () => {
-    if (sending) return;
-    const hasText = msgInput.trim().length > 0;
-    const hasMedia = mediaFile !== null;
-    if (!hasText && !hasMedia) return;
-    // Block send for free-tier users who have exhausted their daily limit
-    if (isFree && dmRemaining !== null && dmRemaining <= 0) return;
-
-    setSending(true);
-    setSendError(null);
-    const text = msgInput.trim();
-    const currentReplyToEventId = replyToMsg ? dmEventIdMap.get(replyToMsg.id as number) : undefined;
-    setMsgInput("");
-    setReplyToMsg(null);
-
-    try {
-      if (hasMedia && mediaFile) {
-        // Media always goes via REST (Matrix doesn't handle file uploads here)
-        const data = await sendDmMediaMessage(userId, mediaFile, text || undefined);
-        if (data.success && data.message) {
-          setRestMessages((prev) => [...prev, data.message]);
-        }
-        if (data.remaining !== undefined) {
-          setDmRemaining(data.remaining);
-          if (data.limit !== undefined) setDmLimit(data.limit);
-        }
-        // Backend bridges media to Matrix automatically
-        clearMedia();
-      } else if (currentReplyToEventId && matrixRoomId) {
-        // Reply via Matrix event relation
-        await sendMatrixReply(matrixRoomId, text, currentReplyToEventId);
-      } else {
-        // Text: send via new Matrix-primary REST endpoint
-        try {
-          const data = await sendDirectMessage(userId, text);
-          // Message will appear via Matrix timeline listener when matrixRoomId is set
-          if (!matrixRoomId && data.success && data.message) {
-            setRestMessages((prev) => [...prev, {
-              id: data.message.id,
-              content: data.message.content,
-              isMine: true,
-              createdAt: data.message.createdAt,
-            } as DirectMessage]);
-          }
-          if (data.remaining !== undefined) {
-            setDmRemaining(data.remaining);
-            if (data.limit !== undefined) setDmLimit(data.limit);
-          }
-        } catch (restErr) {
-          // Fallback: try direct Matrix send if REST fails
-          if (matrixRoomId) {
-            await sendMatrixMessage(matrixRoomId, text);
-          } else {
-            throw restErr;
-          }
-        }
-      }
-    } catch (err) {
-      if (!hasMedia) setMsgInput(text);
-      // 429 DM_LIMIT_REACHED — set remaining to 0 so UI blocks further sends
-      const errMsg = err instanceof Error ? err.message : "";
-      if (errMsg.includes("DM_LIMIT_REACHED") || errMsg.includes("limit")) {
-        setDmRemaining(0);
-        setSendError(t.limitReached);
-      } else {
-        setSendError(errMsg || t.sendFailed);
-      }
-      setUploadError(
-        hasMedia
-          ? err instanceof Error
-            ? err.message
-            : t.uploadFailed
-          : null
-      );
-    } finally {
-      setSending(false);
-    }
-  }, [sending, msgInput, mediaFile, userId, matrixRoomId, clearMedia, isFree, dmRemaining, t.limitReached, t.sendFailed, t.uploadFailed]);
-
-  const handleNavigate = useCallback(
-    (path: string) => navigate(path),
-    [navigate]
-  );
-
-  const handleExpandImage = useCallback((src: string) => {
-    setLightboxSrc(src);
-  }, []);
-
-  const handleDmReaction = useCallback(async (messageId: number, emoji: string) => {
-    const matrixEventId = dmEventIdMap.get(messageId);
-    if (!matrixRoomId || !matrixEventId) {
-      console.warn("[DM Reaction] No matrixRoomId or eventId for messageId", messageId);
-      return;
-    }
-
-    try {
-      const entries = matrixReactionsMap.get(matrixEventId);
-      const myMatrixId = currentUser?.dbId ? `@pnptv_${currentUser.dbId}:matrix.pnptv.app` : "";
-      const existing = entries?.find((e) => e.emoji === emoji);
-      const myEntry = myMatrixId ? existing?.users.find((u) => u.userId === myMatrixId) : undefined;
-      if (myEntry) {
-        await redactEvent(matrixRoomId, myEntry.reactionEventId);
-      } else {
-        await sendReaction(matrixRoomId, matrixEventId, emoji);
-      }
-    } catch (err) {
-      console.warn("[DM Reaction] failed:", err);
-    }
-  }, [dmEventIdMap, matrixRoomId, matrixReactionsMap, currentUser?.dbId]);
-
-  const limitReached = isFree && dmRemaining !== null && dmRemaining <= 0;
-  const canSend = !sending && !limitReached && (msgInput.trim().length > 0 || mediaFile !== null);
-
-  // Derive initials for current user + partner
-  const myInitial = (
-    currentUser?.firstName ||
-    currentUser?.username ||
-    "Y"
-  )[0].toUpperCase();
-  const partnerInitial = (partnerName || "U")[0].toUpperCase();
+  const elementSrc =
+    matrixRoomId && matrixCreds
+      ? `/element-login.html#hs=${encodeURIComponent(matrixCreds.homeserver)}&uid=${encodeURIComponent(matrixCreds.userId)}&token=${encodeURIComponent(matrixCreds.accessToken)}&room=${encodeURIComponent(matrixRoomId)}${matrixCreds.deviceId ? "&did=" + encodeURIComponent(matrixCreds.deviceId) : ""}`
+      : null;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Lightbox */}
-      {lightboxSrc && (
-        <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
-      )}
-
+    <div className="flex flex-col h-[calc(100dvh-4rem)]">
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-white/5 flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5">
         <button
           onClick={() => navigate("/dm")}
-          className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 flex-shrink-0"
+          className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
           aria-label={t.backToThreads}
         >
           <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-
-        {/* Partner avatar */}
         <button
           onClick={() => navigate(`/profile/${userId}`)}
-          className="relative flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded-full"
+          className="flex-1 min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 rounded-lg px-1"
         >
-          <div
-            className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold"
-            style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.3), rgba(123,97,255,0.3))", color: "#D4007A" }}
-          >
-            {partnerInitial}
-          </div>
-          {/* Matrix connection indicator */}
-          <span
-            className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-pnp-background"
-            style={{ background: matrixRoomId ? "#34C759" : "#8E8E93" }}
-          />
-        </button>
-
-        <button
-          onClick={() => navigate(`/profile/${userId}`)}
-          className="flex-1 min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded-lg px-1"
-        >
-          <h2 className="text-sm font-bold text-white truncate">
+          <h2 className="font-semibold text-white text-sm truncate">
             {partnerName || t.conversationFallbackTitle}
           </h2>
-          <div className="flex items-center gap-1.5 text-xs" style={{ color: "#8E8E93" }}>
-            <span>{t.tapToViewProfile}</span>
-            {matrixRoomId && (
-              <>
-                <span style={{ color: "rgba(142,142,147,0.4)" }}>&middot;</span>
-                <span className="flex items-center gap-0.5 text-pnp-accent text-[10px] font-medium">
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                  </svg>
-                  E2E
-                </span>
-              </>
-            )}
-          </div>
+          <p className="text-[10px]" style={{ color: "#8E8E93" }}>
+            {t.tapToViewProfile}
+          </p>
         </button>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
-        {isLoading ? (
-          <div className="space-y-4 py-4" aria-label="Loading messages" aria-busy="true">
-            {[false, true, false, true, false].map((isRight, i) => (
-              <div key={i} className={`animate-pulse flex gap-2.5 ${isRight ? "flex-row-reverse" : ""}`}>
-                <div className="w-8 h-8 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.06)" }} />
-                <div className={`space-y-1.5 flex flex-col ${isRight ? "items-end" : "items-start"}`}>
-                  <div className="h-3 rounded w-16" style={{ background: "rgba(255,255,255,0.06)" }} />
-                  <div
-                    className="rounded-2xl"
-                    style={{
-                      background: isRight
-                        ? "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(230,145,56,0.15))"
-                        : "rgba(255,255,255,0.04)",
-                      width: [160, 200, 140, 180, 120][i],
-                      height: [32, 40, 48, 32, 36][i],
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-            <div className="text-center pt-2">
-              <p className="text-[11px] text-pnp-textSecondary/50 flex items-center justify-center gap-1.5">
-                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Syncing with Matrix...
-              </p>
-            </div>
+      {/* Element Web iframe */}
+      {isLoading ? (
+        <div className="flex-1 flex items-center justify-center min-h-0">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-2 border-white/20 border-t-pnp-accent rounded-full animate-spin" />
+            <p className="text-sm" style={{ color: "#8E8E93" }}>Loading chat...</p>
           </div>
-        ) : loadError ? (
-          <div className="flex flex-col items-center justify-center h-full text-center py-12">
-            <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#FF453A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        </div>
+      ) : elementSrc ? (
+        <iframe
+          key={`${matrixRoomId}-${matrixCreds!.userId}`}
+          src={elementSrc}
+          className="flex-1 min-h-0 w-full border-0"
+          allow="microphone; camera; clipboard-write; encrypted-media; display-capture; autoplay; speaker-selection"
+          title="Direct Message"
+        />
+      ) : matrixError ? (
+        <div className="flex-1 flex items-center justify-center min-h-0">
+          <div className="text-center px-6">
+            <svg className="w-8 h-8 mx-auto mb-3 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
             </svg>
-            <p className="text-white/80 text-sm mb-3">{loadError}</p>
+            <p className="text-sm text-pnp-textSecondary mb-3">Chat unavailable</p>
             <button
-              onClick={() => { setIsLoading(true); loadMessages().finally(() => setIsLoading(false)); }}
-              className="btn-gradient px-5 py-2 rounded-lg text-white text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+              onClick={loadChat}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
             >
               {t.tryAgain}
             </button>
           </div>
-        ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center py-12">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(123,97,255,0.12))" }}>
-              <svg className="w-8 h-8" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
-            </div>
-            <p className="text-white font-bold text-base mb-1">{t.noConversationMessages}</p>
-            <p className="text-xs mt-1 max-w-[240px]" style={{ color: "#8E8E93" }}>
-              {t.sayHello}
-            </p>
-            {matrixRoomId && (
-              <div className="flex items-center gap-1.5 mt-3 px-3 py-1.5 rounded-full text-[11px] font-medium" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                </svg>
-                End-to-end encrypted via Matrix
-              </div>
-            )}
-          </div>
-        ) : (
-          messages.map((msg) => (
-            <DmBubble
-              key={msg.id}
-              msg={msg}
-              userId={userId}
-              initial={msg.isMine ? myInitial : partnerInitial}
-              currentUser={currentUser}
-              partnerName={partnerName}
-              onNavigate={handleNavigate}
-              onExpandImage={handleExpandImage}
-              reactions={(() => {
-                const matrixEvId = typeof msg.id === "number" ? dmEventIdMap.get(msg.id) : undefined;
-                if (matrixEvId && matrixReactionsMap.has(matrixEvId)) {
-                  return matrixReactionsMap.get(matrixEvId)!.map(e => ({
-                    emoji: e.emoji,
-                    count: e.count,
-                    users: e.users.map(u => ({ id: u.userId, username: u.userId.split(":")[0].replace(/^@/, "") })),
-                  }));
-                }
-                return undefined;
-              })()}
-              onReaction={handleDmReaction}
-              onReply={matrixRoomId ? setReplyToMsg : undefined}
-              replyTo={(msg as DirectMessage & { _replyTo?: { name: string; content: string } })._replyTo || null}
-              currentUserId={currentUser?.dbId ? `@pnptv_${currentUser.dbId}:matrix.pnptv.app` : undefined}
-            />
-          ))
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Reply-to bar */}
-      {replyToMsg && (
-        <div className="mx-4 mb-1 flex items-center gap-2 px-3 py-2 rounded-xl animate-fade-in-up" style={{ background: "rgba(212,0,122,0.08)", borderLeft: "3px solid #D4007A" }}>
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-semibold" style={{ color: "#D4007A" }}>
-              {replyToMsg.isMine ? (currentUser?.firstName || "You") : (partnerName || "User")}
-            </p>
-            <p className="text-xs text-pnp-textSecondary truncate">{replyToMsg.content || "[media]"}</p>
-          </div>
-          <button onClick={() => setReplyToMsg(null)} className="text-pnp-textSecondary hover:text-white" aria-label="Cancel reply">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
         </div>
-      )}
-
-      {/* Send error banner */}
-      {sendError && (
-        <div
-          className="mx-4 mb-2 flex items-center gap-2 text-xs px-3 py-2 rounded-lg"
-          style={{ background: "rgba(255,69,58,0.1)", color: "#FF453A" }}
-          role="alert"
-          aria-live="polite"
-        >
-          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-          </svg>
-          <span className="flex-1 min-w-0">{sendError}</span>
-          <button
-            onClick={() => setSendError(null)}
-            className="flex-shrink-0 hover:opacity-70 transition-opacity"
-            aria-label={t.dismissError}
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-      )}
-
-      {/* Upload preview */}
-      {mediaFile && mediaPreview && (
-        <UploadPreview
-          file={mediaFile}
-          previewUrl={mediaPreview}
-          isSending={sending}
-          uploadError={uploadError}
-          onCancel={clearMedia}
-        />
-      )}
-
-      {/* Free-tier DM limit banner */}
-      {isFree && dmRemaining !== null && (
-        <div className="mx-4 mb-2 rounded-lg border border-purple-500/30 bg-purple-900/30 p-3 text-center">
-          <p className="text-sm text-purple-200">
-            {dmRemaining > 0
-              ? t.messagesRemaining(dmRemaining, dmLimit)
-              : t.dailyLimitReached}
-            {" — "}
-            <Link
-              to="/subscribe"
-              className="font-semibold text-purple-400 hover:text-purple-300"
-            >
-              {t.goUnlimited}
-            </Link>
-          </p>
-        </div>
-      )}
-
-      {/* Input bar — relative + z-50 ensures it stacks above any fixed
-          floating widgets (e.g. CristinaWidget FAB) that share the same
-          bottom region of the viewport on mobile. */}
-      <div className="relative z-50 px-4 py-3 border-t border-white/5 flex-shrink-0 bg-pnp-background">
-        <div className="flex items-center gap-2">
-          {/* Media picker button */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={sending}
-            className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/5 active:scale-95 transition-all disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-            aria-label={t.attachPhotoVideo}
-          >
-            <svg className="w-5 h-5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
-            </svg>
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={ACCEPTED_TYPES}
-            className="hidden"
-            onChange={handleFileSelect}
-            aria-label={t.selectPhotoVideo}
-          />
-
-          {/* Text input */}
-          <input
-            value={msgInput}
-            onChange={(e) => setMsgInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-            placeholder={mediaFile ? t.placeholderCaption : t.placeholderText}
-            className="flex-1 bg-white/5 rounded-full px-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-white/20 min-w-0"
-            maxLength={1000}
-            disabled={sending}
-            aria-label={t.messageInput}
-          />
-
-          {/* Send button */}
-          <button
-            onClick={handleSend}
-            disabled={!canSend}
-            className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center active:scale-95 transition-all disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-            aria-label={t.sendMessage}
-          >
-            {sending ? (
-              <svg className="w-4 h-4 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
-            )}
-          </button>
-        </div>
-      </div>
+      ) : null}
     </div>
   );
 }

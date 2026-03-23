@@ -50,20 +50,29 @@ const uploadHangoutMedia = async (req, res) => {
   }
 
   try {
-    // Membership check
+    // Membership check (exclude banned users)
     const { rows: memberRows } = await query(
-      'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+      'SELECT is_banned FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
       [groupId, user.id]
     );
     if (memberRows.length === 0) {
       return res.status(403).json({ error: 'Not a member of this group' });
     }
+    if (memberRows[0].is_banned) {
+      return res.status(403).json({ error: 'You are banned from this group' });
+    }
 
-    // Block check: group creator blocked uploader OR uploader blocked group creator
-    const { rows: groupCreatorRows } = await query(
-      'SELECT creator_id, name FROM hangout_groups WHERE id = $1',
+    // Check allow_media group setting
+    const { rows: groupSettingsRows } = await query(
+      'SELECT creator_id, name, allow_media FROM hangout_groups WHERE id = $1',
       [groupId]
     );
+    if (groupSettingsRows[0]?.allow_media === false) {
+      return res.status(403).json({ error: 'Media uploads are disabled in this group' });
+    }
+
+    // Block check: group creator blocked uploader OR uploader blocked group creator
+    const groupCreatorRows = groupSettingsRows;
     const creatorId = groupCreatorRows[0]?.creator_id;
     const groupName = groupCreatorRows[0]?.name || `Hangout ${groupId}`;
     if (creatorId && String(creatorId) !== String(user.id)) {

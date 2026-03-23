@@ -1227,7 +1227,7 @@ export default function Chat() {
             key={`${matrixRoomId}-${matrixCreds.userId}`}
             src={`/element-login.html#hs=${encodeURIComponent(matrixCreds.homeserver)}&uid=${encodeURIComponent(matrixCreds.userId)}&token=${encodeURIComponent(matrixCreds.accessToken)}&room=${encodeURIComponent(matrixRoomId)}${matrixCreds.deviceId ? '&did=' + encodeURIComponent(matrixCreds.deviceId) : ''}`}
             className="flex-1 min-h-0 w-full border-0"
-            allow="microphone; camera; clipboard-write; encrypted-media"
+            allow="microphone; camera; clipboard-write; encrypted-media; display-capture; autoplay; speaker-selection"
             title="Hangout Chat"
           />
         ) : matrixError ? (
