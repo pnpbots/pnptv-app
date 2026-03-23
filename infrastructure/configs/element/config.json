@@ -21,6 +21,9 @@
     "UIFeature.thirdPartyId": false,
     "UIFeature.identityServer": false,
     "UIFeature.deactivate": false,
+    "showHiddenEventsInTimeline": false,
+    "hideProfileChanges": true,
+    "hideRedactions": false,
     "custom_themes": [
       {
         "name": "PNPtv! Dark",

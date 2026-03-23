@@ -160,6 +160,28 @@ async function provisionMatrixUser(user) {
     }
   }
 
+  // Acquire per-user advisory lock to prevent duplicate token generation from concurrent requests.
+  // pg_advisory_xact_lock uses user.id as key — only one provisioning per user at a time.
+  const lockClient = await getClient();
+  try {
+    await lockClient.query('BEGIN');
+    await lockClient.query('SELECT pg_advisory_xact_lock($1)', [user.id]);
+
+    // Re-check after acquiring lock — another request may have already provisioned
+    const { rows: freshRows } = await lockClient.query(
+      'SELECT matrix_user_id, matrix_access_token, matrix_device_id FROM users WHERE id = $1',
+      [user.id]
+    );
+    if (freshRows[0]?.matrix_access_token) {
+      try {
+        const freshToken = decryptToken(freshRows[0].matrix_access_token);
+        await synapseGet('/_matrix/client/v3/account/whoami', freshToken);
+        await lockClient.query('COMMIT');
+        logger.debug(`[Matrix] Another request already provisioned user ${user.id}`);
+        return { matrixUserId, accessToken: freshToken, deviceId: freshRows[0].matrix_device_id || null, homeserverUrl: MATRIX_PUBLIC_URL };
+      } catch (_) { /* token still bad, proceed with provisioning */ }
+    }
+
   const adminToken = await getAdminToken();
   const displayName = user.first_name || user.username || matrixName;
 
@@ -220,9 +242,9 @@ async function provisionMatrixUser(user) {
     accessToken
   );
 
-  // Step 4: Persist encrypted credentials
+  // Step 4: Persist encrypted credentials (inside advisory lock transaction)
   const encryptedToken = encryptToken(accessToken);
-  await query(
+  await lockClient.query(
     `UPDATE users
      SET matrix_user_id      = $1,
          matrix_access_token = $2,
@@ -231,9 +253,16 @@ async function provisionMatrixUser(user) {
      WHERE id = $4`,
     [matrixUserId, encryptedToken, deviceId, user.id]
   );
+  await lockClient.query('COMMIT');
 
   logger.info(`[Matrix] Provisioned credentials for user ${user.id} -> ${matrixUserId}`);
   return { matrixUserId, accessToken, deviceId, homeserverUrl: MATRIX_PUBLIC_URL };
+  } catch (provisionErr) {
+    await lockClient.query('ROLLBACK').catch(() => {});
+    throw provisionErr;
+  } finally {
+    lockClient.release();
+  }
 }
 
 // ─── avatar sync ─────────────────────────────────────────────────────────────
@@ -600,15 +629,23 @@ async function getOrCreateDmRoom(userA, userB) {
  * @returns {string} matrix_room_id
  */
 async function getOrCreateHangoutRoom(hangoutGroupId, creatorUser, groupName) {
-  const existing = await query(
-    `SELECT matrix_room_id FROM hangout_matrix_rooms WHERE hangout_group_id = $1`,
-    [hangoutGroupId]
-  );
+  // Use advisory lock to prevent duplicate room creation from concurrent requests
+  const lockClient = await getClient();
+  try {
+    await lockClient.query('BEGIN');
+    await lockClient.query('SELECT pg_advisory_xact_lock($1)', [100000 + hangoutGroupId]);
 
-  if (existing.rows.length > 0) {
-    logger.debug(`[Matrix] Reusing hangout room for group ${hangoutGroupId}: ${existing.rows[0].matrix_room_id}`);
-    return existing.rows[0].matrix_room_id;
-  }
+    const existing = await lockClient.query(
+      `SELECT matrix_room_id FROM hangout_matrix_rooms WHERE hangout_group_id = $1`,
+      [hangoutGroupId]
+    );
+
+    if (existing.rows.length > 0) {
+      await lockClient.query('COMMIT');
+      lockClient.release();
+      logger.debug(`[Matrix] Reusing hangout room for group ${hangoutGroupId}: ${existing.rows[0].matrix_room_id}`);
+      return existing.rows[0].matrix_room_id;
+    }
 
   const creatorCreds = await provisionMatrixUser(creatorUser);
   const adminToken = await getAdminToken();
@@ -674,15 +711,22 @@ async function getOrCreateHangoutRoom(hangoutGroupId, creatorUser, groupName) {
     logger.warn(`[Matrix] Admin auto-join failed for hangout room ${roomId}: ${adminJoinErr.message}`);
   }
 
-  await query(
+  await lockClient.query(
     `INSERT INTO hangout_matrix_rooms (hangout_group_id, matrix_room_id)
      VALUES ($1, $2)
      ON CONFLICT (hangout_group_id) DO UPDATE SET matrix_room_id = EXCLUDED.matrix_room_id`,
     [hangoutGroupId, roomId]
   );
+  await lockClient.query('COMMIT');
 
   logger.info(`[Matrix] Created hangout room ${roomId} for group ${hangoutGroupId}`);
   return roomId;
+  } catch (hangoutRoomErr) {
+    await lockClient.query('ROLLBACK').catch(() => {});
+    throw hangoutRoomErr;
+  } finally {
+    lockClient.release();
+  }
 }
 
 // ─── group membership ─────────────────────────────────────────────────────────
