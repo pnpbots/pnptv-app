@@ -47,7 +47,7 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
     method,
     credentials: "include",
     headers: {
-      "Content-Type": "application/json",
+      ...(body ? { "Content-Type": "application/json" } : {}),
       ...headers,
     },
     ...(body ? { body: JSON.stringify(body) } : {}),

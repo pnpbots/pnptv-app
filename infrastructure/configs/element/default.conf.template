@@ -18,6 +18,7 @@ server {
     }
     location /config {
         root /tmp/element-web-config;
+        try_files $uri /config.json;
         add_header Cache-Control "no-cache";
     }
     location /modules {

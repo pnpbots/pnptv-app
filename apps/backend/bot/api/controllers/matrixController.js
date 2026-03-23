@@ -50,6 +50,7 @@ const getToken = async (req, res) => {
       success: true,
       matrixUserId:   creds.matrixUserId,
       accessToken:    creds.accessToken,
+      deviceId:       creds.deviceId || null,
       homeserverUrl:  MATRIX_PUBLIC_URL,
     });
   } catch (err) {

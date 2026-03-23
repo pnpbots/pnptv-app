@@ -25,9 +25,10 @@ try {
 const { query, closePool } = require(path.join(BACKEND_ROOT, 'config/postgres'));
 const matrixService = require(path.join(BACKEND_ROOT, 'bot/services/matrixService'));
 
-const DRY_RUN = process.argv.includes('--dry-run');
-const BATCH_SIZE = 5;        // concurrent provisions per batch
-const DELAY_MS   = 500;      // pause between batches to avoid hammering Synapse
+const DRY_RUN     = process.argv.includes('--dry-run');
+const SYNC_AVATARS = process.argv.includes('--sync-avatars');
+const BATCH_SIZE  = 5;        // concurrent provisions per batch
+const DELAY_MS    = 500;      // pause between batches to avoid hammering Synapse
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -51,9 +52,11 @@ async function main() {
         console.log(`  [DRY] Would provision: ${u.id} (${u.username || u.first_name || 'no name'})`);
       }
     }
-    console.log('\nDone (no changes made).');
-    if (closePool) await closePool();
-    return;
+    if (!SYNC_AVATARS) {
+      console.log('\nDone (no changes made).');
+      if (closePool) await closePool();
+      return;
+    }
   }
 
   let success = 0;
@@ -94,6 +97,44 @@ async function main() {
     console.log(`\nFailed users:`);
     for (const e of errors) {
       console.log(`  ${e.userId}: ${e.error}`);
+    }
+  }
+
+  // ─── Avatar sync mode ────────────────────────────────────────────────────
+  if (SYNC_AVATARS) {
+    console.log(`\n=== Bulk Avatar Sync ${DRY_RUN ? '(DRY RUN)' : ''} ===\n`);
+
+    const { rows: avatarUsers } = await query(
+      `SELECT id, photo_file_id, matrix_user_id, matrix_access_token
+       FROM users
+       WHERE is_deleted = false
+         AND matrix_user_id IS NOT NULL
+         AND matrix_access_token IS NOT NULL
+         AND photo_file_id IS NOT NULL
+       ORDER BY id ASC`
+    );
+
+    console.log(`Found ${avatarUsers.length} users with avatars to sync.\n`);
+
+    if (!DRY_RUN) {
+      let avatarOk = 0, avatarFail = 0;
+      for (let i = 0; i < avatarUsers.length; i += BATCH_SIZE) {
+        const batch = avatarUsers.slice(i, i + BATCH_SIZE);
+        await Promise.allSettled(
+          batch.map(u =>
+            matrixService.syncMatrixAvatar(u)
+              .then(() => { avatarOk++; console.log(`  [OK]  Avatar synced: ${u.id}`); })
+              .catch(err => { avatarFail++; console.error(`  [ERR] Avatar ${u.id}: ${err.message}`); })
+          )
+        );
+        if (i + BATCH_SIZE < avatarUsers.length) await sleep(DELAY_MS);
+        console.log(`  --- Progress: ${Math.min(i + BATCH_SIZE, avatarUsers.length)}/${avatarUsers.length} ---`);
+      }
+      console.log(`\nAvatar sync: ${avatarOk} ok, ${avatarFail} failed`);
+    } else {
+      for (const u of avatarUsers) {
+        console.log(`  [DRY] Would sync avatar: ${u.id} (${u.photo_file_id})`);
+      }
     }
   }
 

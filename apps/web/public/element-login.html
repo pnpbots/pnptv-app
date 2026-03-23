@@ -1,97 +1,73 @@
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>Loading chat...</title></head>
-<body style="background:#0d0d0d;color:#888;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
-<p id="status">Loading chat...</p>
+<body style="background:#0d0d0d;color:#aaa;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+<p id="status">Connecting to chat...</p>
 <script>
 (async function() {
   var status = document.getElementById('status');
-  var params = new URLSearchParams(window.location.hash.substring(1));
-  var hs = params.get('hs');
-  var uid = params.get('uid');
-  var token = params.get('token');
-  var room = params.get('room');
-
-  if (!hs || !uid || !token) {
-    status.innerText = 'Missing credentials.';
-    return;
-  }
-
-  status.innerText = 'Preparing session...';
-
-  // 1. Clear only Matrix/Element localStorage keys (same-origin safety)
   try {
+    var params = new URLSearchParams(window.location.hash.substring(1));
+    var hs = params.get('hs');
+    var uid = params.get('uid');
+    var token = params.get('token');
+    var did = params.get('did');
+    var room = params.get('room');
+
+    if (!hs || !uid || !token) {
+      status.innerText = 'Missing credentials.';
+      return;
+    }
+
+    // Clear Matrix/Element localStorage keys
     var keysToRemove = [];
     for (var i = 0; i < localStorage.length; i++) {
       var k = localStorage.key(i);
-      if (k && (k.startsWith('mx_') || k.startsWith('element') || k.startsWith('matrix')
-                || k.startsWith('riot') || k.startsWith('idb-') || k.startsWith('loglevel'))) {
-        keysToRemove.push(k);
-      }
+      if (k && (/^(mx_|element|matrix|riot|idb-|loglevel)/.test(k))) keysToRemove.push(k);
     }
     keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
-  } catch(e) {}
-  try {
-    var sessionKeysToRemove = [];
+
+    // Clear Matrix/Element sessionStorage keys
+    var sr = [];
     for (var i = 0; i < sessionStorage.length; i++) {
       var k = sessionStorage.key(i);
-      if (k && (k.startsWith('mx_') || k.startsWith('element') || k.startsWith('matrix')
-                || k.startsWith('riot') || k.startsWith('idb-') || k.startsWith('loglevel'))) {
-        sessionKeysToRemove.push(k);
+      if (k && (/^(mx_|element|matrix|riot|idb-|loglevel)/.test(k))) sr.push(k);
+    }
+    sr.forEach(function(k) { sessionStorage.removeItem(k); });
+
+    // Delete IndexedDB databases (fire-and-forget if blocked)
+    try {
+      if (indexedDB.databases) {
+        var dbs = await indexedDB.databases();
+        for (var j = 0; j < dbs.length; j++) {
+          try { indexedDB.deleteDatabase(dbs[j].name); } catch(e) {}
+        }
       }
-    }
-    sessionKeysToRemove.forEach(function(k) { sessionStorage.removeItem(k); });
-  } catch(e) {}
+    } catch(e) {}
 
-  // 2. Delete ALL IndexedDB databases — Element stores crypto/sync/pickle
-  //    under various names. The PNPtv app does not use IndexedDB (only
-  //    Cache API via service worker), so this is safe.
-  try {
-    if (indexedDB.databases) {
-      var dbs = await indexedDB.databases();
-      await Promise.all(dbs.map(function(db) {
-        return new Promise(function(resolve) {
-          var req = indexedDB.deleteDatabase(db.name);
-          req.onsuccess = resolve;
-          req.onerror = resolve;
-          req.onblocked = resolve;
-          setTimeout(resolve, 3000);
-        });
-      }));
-    } else {
-      // Firefox fallback — try known Element DB names
-      var knownDbs = [
-        'matrix-js-sdk:crypto', 'matrix-js-sdk:riot-web-sync',
-        'matrix-js-sdk:default-sync', 'logs', 'element-pickle-key',
-        'matrix-react-sdk', '_matrix-js-sdk', 'idb-keyval'
-      ];
-      await Promise.all(knownDbs.map(function(name) {
-        return new Promise(function(resolve) {
-          var req = indexedDB.deleteDatabase(name);
-          req.onsuccess = resolve;
-          req.onerror = resolve;
-          req.onblocked = resolve;
-          setTimeout(resolve, 3000);
-        });
-      }));
-    }
-  } catch(e) {}
+    // Set fresh Element session credentials
+    localStorage.setItem('mx_hs_url', hs);
+    localStorage.setItem('mx_user_id', uid);
+    localStorage.setItem('mx_access_token', token);
+    if (did) localStorage.setItem('mx_device_id', did);
+    localStorage.setItem('mx_is_guest', 'false');
+    localStorage.setItem('mx_has_pickle_key', 'false');
+    localStorage.setItem('mx_has_access_token', 'true');
 
-  // 3. Set fresh Element session credentials
-  localStorage.setItem('mx_hs_url', hs);
-  localStorage.setItem('mx_user_id', uid);
-  localStorage.setItem('mx_access_token', token);
-  localStorage.setItem('mx_is_guest', 'false');
-  localStorage.setItem('mx_has_pickle_key', 'false');
-  localStorage.setItem('mx_has_access_token', 'true');
+    // Tell Element this is a fresh login
+    sessionStorage.setItem('mx_fresh_login', 'true');
 
-  // 4. Wait for IDB cleanup to settle
-  await new Promise(function(r) { setTimeout(r, 800); });
+    // Force PNPtv! Dark theme
+    localStorage.setItem('mx_theme', 'custom-PNPtv! Dark');
 
-  // 5. Navigate to Element with the room
-  var dest = '/element/';
-  if (room) dest += '#/room/' + encodeURIComponent(room);
-  window.location.replace(dest);
+    // Redirect to Element
+    var dest = '/element/';
+    if (room) dest += '#/room/' + encodeURIComponent(room);
+    window.location.replace(dest);
+
+  } catch(err) {
+    status.innerText = 'Error: ' + err.message;
+  }
 })();
 </script>
 </body>

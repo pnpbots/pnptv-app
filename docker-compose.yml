@@ -704,7 +704,7 @@ services:
       start_period: 60s
 
   element-web:
-    image: vectorim/element-web:latest
+    image: vectorim/element-web:v1.12.8
     container_name: element-web
     restart: unless-stopped
     volumes:

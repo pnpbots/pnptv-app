@@ -15,12 +15,9 @@ import { useI18n } from "@/lib/i18n";
 import {
   getHangoutGroups,
   createHangoutGroup,
-  startGroupCall,
-  getActiveGroupCall,
   leaveHangoutGroup,
   deleteHangoutGroup,
   markGroupAsRead,
-  leaveGroupCall,
   joinHangoutGroup,
   discoverHangoutGroups,
   requestJoinGroup,
@@ -49,13 +46,6 @@ import {
   type DiscoverGroup,
   type JoinRequest,
 } from "@/lib/api";
-import {
-  VideoCallButton,
-  VideoCallBanner,
-  VideoCallOverlay,
-} from "@/components/hangouts";
-
-import { connectSocket } from "@/lib/socket";
 import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
 import { NearbyBadge } from "@/components/NearbyBadge";
 import { SpotlightStrip } from "@/components/SpotlightStrip";
@@ -63,77 +53,8 @@ import { getUpcomingEvents } from "@/lib/api";
 import type { EventItem } from "@/components/events/EventCard";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
 import { EventDetailModal } from "@/components/events";
-import { HangoutsPaywall } from "@/components/HangoutsPaywall";
-import { ApiError } from "@/lib/api";
 
 type View = "list" | "chat";
-
-// ─── Call Invite Toast ──────────────────────────────────────────────────────
-
-function CallInviteToast({
-  notif,
-  groups,
-  onOpen,
-  onDismiss,
-  navigate,
-  t,
-}: {
-  notif: { groupId: number; groupName: string; fromName: string; fromPhotoUrl: string | null } | null;
-  groups: HangoutGroup[];
-  onOpen: (group: HangoutGroup) => Promise<void>;
-  onDismiss: () => void;
-  navigate: (path: string) => void;
-  t: any;
-}) {
-  if (!notif) return null;
-  const group = groups.find(g => g.id === notif.groupId);
-  const validPhoto = notif.fromPhotoUrl && (notif.fromPhotoUrl.startsWith("/") || notif.fromPhotoUrl.startsWith("http"));
-  return (
-    <div className="absolute top-3 left-3 right-3 z-50 animate-fade-in-up" style={{ animationDuration: "0.2s" }}>
-      <div className="glass-card-sm p-3 flex items-center gap-3" style={{ borderColor: "rgba(94,209,196,0.3)" }}>
-        {validPhoto ? (
-          <img src={notif.fromPhotoUrl!} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
-        ) : (
-          <div
-            className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
-          >
-            {(notif.fromName || "?")[0].toUpperCase()}
-          </div>
-        )}
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-white truncate">{t.chat.callInviteTitle(notif.fromName)}</p>
-          <p className="text-[10px] text-pnp-textSecondary truncate">{t.chat.callInviteBody(notif.groupName)}</p>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <button
-            onClick={() => {
-              if (group) {
-                onOpen(group).catch(() => {});
-              } else {
-                // User isn't a member — navigate to hangouts so they can find the group
-                navigate("/chat");
-              }
-              onDismiss();
-            }}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white active:scale-95 transition-all hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-1 focus-visible:ring-offset-pnp-background"
-            style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
-          >
-            {t.chat.joinCall}
-          </button>
-          <button
-            onClick={onDismiss}
-            className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all"
-            style={{ color: "#8E8E93" }}
-            aria-label="Dismiss"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
@@ -178,28 +99,16 @@ export default function Chat() {
 
   // Matrix room + credentials for Element Web iframe
   const [matrixRoomId, setMatrixRoomId] = useState<string | null>(null);
-  const [matrixCreds, setMatrixCreds] = useState<{ userId: string; accessToken: string; homeserver: string } | null>(null);
+  const [matrixCreds, setMatrixCreds] = useState<{ userId: string; accessToken: string; deviceId?: string; homeserver: string } | null>(null);
   const [matrixError, setMatrixError] = useState<string | null>(null);
 
-  // Socket hook — presence, calls only (messages handled by Element Web iframe)
+  // Socket hook — presence only (messages handled by Element Web iframe)
   const {
-    callState,
     isConnected,
     onlineMembers,
-    inviteToCall,
-    screenShareUser,
-    callStartedAt,
-    callParticipants,
   } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId, matrixRoomId);
 
-  // Video call — JaaS/Jitsi credentials
-  const [callMeetingUrl, setCallMeetingUrl] = useState<string | null>(null);
-  const [callId, setCallId] = useState<string | null>(null);
-  const [callIsModerator, setCallIsModerator] = useState(false);
-  const [callLoading, setCallLoading] = useState(false);
-  const [showPaywall, setShowPaywall] = useState(false);
-
-  // Error feedback (video call errors shown here)
+  // Error feedback
   const [chatError, setChatError] = useState<string | null>(null);
 
   // Create group error
@@ -250,14 +159,6 @@ export default function Chat() {
 
   // Dedicated error states for non-upload errors
   const [discoverError, setDiscoverError] = useState<string | null>(null);
-
-  // Incoming invite notification (global — received even from other groups)
-  const [inviteNotif, setInviteNotif] = useState<{
-    groupId: number;
-    groupName: string;
-    fromName: string;
-    fromPhotoUrl: string | null;
-  } | null>(null);
 
   // SpotlightStrip — hangout events
   const [hangoutEvents, setHangoutEvents] = useState<EventItem[]>([]);
@@ -409,8 +310,6 @@ export default function Chat() {
     setActiveGroup(group);
     setView("chat");
     navigate(`/chat/${group.id}`, { replace: true });
-    setCallId(null);
-    setCallIsModerator(false);
     setChatError(null);
 
     markGroupAsRead(group.id).catch(() => {});
@@ -429,21 +328,13 @@ export default function Chat() {
         if (tokenRes.success) setMatrixCreds({
           userId: tokenRes.matrixUserId,
           accessToken: tokenRes.accessToken,
+          deviceId: tokenRes.deviceId || undefined,
           homeserver: tokenRes.homeserverUrl,
         });
       })
       .catch(() => {
         setMatrixError("Chat unavailable");
       });
-
-    if (group.hasActiveCall) {
-      try {
-        const callData = await getActiveGroupCall(group.id);
-        if (callData.call) {
-          setCallId(callData.call.id);
-        }
-      } catch { /* silent */ }
-    }
   };
 
   const closeChat = () => {
@@ -452,8 +343,6 @@ export default function Chat() {
     setActiveGroup(null);
     setMatrixRoomId(null);
     setMatrixError(null);
-    setCallId(null);
-    setCallIsModerator(false);
     setShowOnline(false);
     setShowGroupSettings(false);
     loadGroups();
@@ -540,79 +429,6 @@ export default function Chat() {
     }
   }, [activeGroup]);
 
-  // ─── Video call ─────────────────────────────────────────────────────
-
-  const handleStartCall = async () => {
-    if (!activeGroup || callLoading) return;
-    setCallLoading(true);
-    try {
-      const data = await startGroupCall(activeGroup.id);
-      if (data.jaas?.meetingUrl && data.call?.id) {
-        setCallMeetingUrl(data.jaas.meetingUrl);
-        setCallId(data.call.id);
-        setCallIsModerator(data.call?.isModerator ?? false);
-      } else if (data.jaas === null) {
-        setChatError(t.chat.videoCallsUnavailable);
-      } else {
-        setChatError(t.chat.videoCallUrlInvalid);
-      }
-    } catch (err) {
-      if (err instanceof ApiError && err.code === "MEMBERSHIP_REQUIRED") {
-        setShowPaywall(true);
-      } else {
-        setChatError(err instanceof Error ? err.message : "Failed to start video call");
-      }
-    } finally {
-      setCallLoading(false);
-    }
-  };
-
-  const handleEndCall = useCallback(() => {
-    const resolvedCallId = callId ?? callState.callId;
-    if (activeGroup && resolvedCallId) {
-      leaveGroupCall(activeGroup.id, resolvedCallId).catch(() => {});
-    }
-    setCallMeetingUrl(null);
-    setCallId(null);
-    setCallIsModerator(false);
-  }, [activeGroup, callId, callState.callId]);
-
-  useEffect(() => {
-    if (callState.endReason === "creator_left") {
-      setChatError(t.chat.callEndedHostLeft);
-      setCallMeetingUrl(null);
-      setCallId(null);
-      setCallIsModerator(false);
-    }
-  }, [callState.endReason, t.chat]);
-
-  // Global invite listener
-  useEffect(() => {
-    const socket = connectSocket();
-    let dismissTimer: ReturnType<typeof setTimeout> | null = null;
-    const onInvite = (data: {
-      groupId: number;
-      groupName: string;
-      fromUserId: string;
-      fromName: string;
-      fromPhotoUrl: string | null;
-    }) => {
-      setInviteNotif({
-        groupId: data.groupId,
-        groupName: data.groupName,
-        fromName: data.fromName,
-        fromPhotoUrl: data.fromPhotoUrl,
-      });
-      if (dismissTimer) clearTimeout(dismissTimer);
-      dismissTimer = setTimeout(() => setInviteNotif(null), 8000);
-    };
-    socket.on("hangout:invite:received", onInvite);
-    return () => {
-      socket.off("hangout:invite:received", onInvite);
-      if (dismissTimer) clearTimeout(dismissTimer);
-    };
-  }, []);
-
   // ─── Group management ──────────────────────────────────────────────
 
   const handleLeaveGroup = useCallback((gid: number) => {
@@ -652,18 +468,9 @@ export default function Chat() {
       myMember?.role === "moderator" ||
       myMember?.role === "owner" ||
       isAdmin;
-    const showCallBanner = !callMeetingUrl && callState.isActive;
 
     return (
       <div className="fixed inset-x-0 top-0 bottom-16 lg:bottom-0 lg:left-72 flex flex-col bg-pnp-background z-[30]">
-        {/* Membership paywall — shown when a non-member tries to start/join a call */}
-        {showPaywall && (
-          <HangoutsPaywall onBack={() => setShowPaywall(false)} />
-        )}
-
-        {/* Incoming call invite toast */}
-        <CallInviteToast notif={inviteNotif} groups={groups} onOpen={openChat} onDismiss={() => setInviteNotif(null)} navigate={navigate} t={t} />
-
         {/* Chat header */}
         <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
           <button
@@ -730,14 +537,6 @@ export default function Chat() {
             </span>
             <span className="text-[11px] font-medium text-green-400">{onlineMembers.length}</span>
           </button>
-
-          {/* Video call button — shown for all hangouts */}
-          <VideoCallButton
-            hasActiveCall={!!callMeetingUrl || callState.isActive}
-            onStartCall={handleStartCall}
-            isLoading={callLoading}
-            participantCount={callState.participantCount}
-          />
 
           {/* Three-dot overflow menu */}
           <div className="relative flex-shrink-0">
@@ -838,34 +637,6 @@ export default function Chat() {
               </svg>
             </button>
           </div>
-        )}
-
-        {/* Active call banner */}
-        {showCallBanner && (
-          <VideoCallBanner
-            isActive={true}
-            onJoin={handleStartCall}
-            isJoining={callLoading}
-            participantCount={callState.participantCount}
-            participants={callParticipants}
-            callId={callState.callId}
-            callStartedAt={callStartedAt}
-            isSomeoneSharing={!!screenShareUser}
-          />
-        )}
-
-        {/* Embedded video call */}
-        {callMeetingUrl && (
-          <VideoCallOverlay
-            meetingUrl={callMeetingUrl}
-            groupName={activeGroup.name}
-            onClose={handleEndCall}
-            initialMode="embedded"
-            isAdmin={isAdmin}
-            isModerator={callIsModerator}
-            callStartedAt={callStartedAt}
-            participantCount={callState.participantCount}
-          />
         )}
 
         {/* Online Members Panel */}
@@ -1014,18 +785,6 @@ export default function Chat() {
                               <NearbyBadge distanceKm={(member as any).distance_km} variant="compact" />
                             </div>
                           </div>
-                          {(callState.isActive || callMeetingUrl) && !isMe && (
-                            <button
-                              onClick={() => {
-                                inviteToCall(member.userId);
-                                setShowOnline(false);
-                              }}
-                              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white flex-shrink-0 transition-all active:scale-95"
-                              style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
-                            >
-                              {t.chat.invite}
-                            </button>
-                          )}
                         </div>
                       );
                     })}
@@ -1466,7 +1225,7 @@ export default function Chat() {
         {matrixRoomId && matrixCreds ? (
           <iframe
             key={`${matrixRoomId}-${matrixCreds.userId}`}
-            src={`/element-login.html#hs=${encodeURIComponent(matrixCreds.homeserver)}&uid=${encodeURIComponent(matrixCreds.userId)}&token=${encodeURIComponent(matrixCreds.accessToken)}&room=${encodeURIComponent(matrixRoomId)}`}
+            src={`/element-login.html#hs=${encodeURIComponent(matrixCreds.homeserver)}&uid=${encodeURIComponent(matrixCreds.userId)}&token=${encodeURIComponent(matrixCreds.accessToken)}&room=${encodeURIComponent(matrixRoomId)}${matrixCreds.deviceId ? '&did=' + encodeURIComponent(matrixCreds.deviceId) : ''}`}
             className="flex-1 min-h-0 w-full border-0"
             allow="microphone; camera; clipboard-write; encrypted-media"
             title="Hangout Chat"
@@ -1492,6 +1251,7 @@ export default function Chat() {
                       if (tokenRes.success) setMatrixCreds({
                         userId: tokenRes.matrixUserId,
                         accessToken: tokenRes.accessToken,
+                        deviceId: tokenRes.deviceId || undefined,
                         homeserver: tokenRes.homeserverUrl,
                       });
                     })
@@ -1567,8 +1327,6 @@ export default function Chat() {
       </Helmet>
       {showTutorial && <TutorialOverlay section="hangouts" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
 
-      {/* Incoming call invite toast */}
-      <CallInviteToast notif={inviteNotif} groups={groups} onOpen={openChat} onDismiss={() => setInviteNotif(null)} navigate={navigate} t={t} />
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>

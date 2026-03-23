@@ -95,8 +95,7 @@ async function createWebUser({ id, firstName, lastName, username, email, passwor
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'free','free','user',false,true,NOW(),NOW())
      RETURNING id, pnptv_id, first_name, last_name, username, email,
                subscription_status, tier, terms_accepted, photo_file_id, bio, language,
-               telegram, twitter, x_id, role,
-`,
+               telegram, twitter, x_id, role`,
     [userId, pnptvId, firstName || 'User', lastName || null, displayName || null,
      email || null, passwordHash || null, telegramId || null, twitterHandle || null, xId || null, photoFileId || null]
   );
@@ -1967,6 +1966,13 @@ const uploadAvatar = async (req, res) => {
     );
 
     logger.info(`Avatar uploaded: user ${user.id} → ${filename}`);
+
+    // Fire-and-forget: sync avatar to Matrix profile
+    const matrixService = require('../../services/matrixService');
+    matrixService.syncMatrixAvatar({ id: user.id, photo_file_id: relativeUrl }).catch(err =>
+      logger.warn(`Matrix avatar sync after upload failed for user ${user.id}: ${err.message}`)
+    );
+
     return res.json({ success: true, photoUrl: relativeUrl });
   } catch (error) {
     logger.error('Avatar upload error:', error);

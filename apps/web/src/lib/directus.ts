@@ -1,6 +1,7 @@
 import { createDirectus, rest, authentication, readItems } from "@directus/sdk";
 
-const DIRECTUS_URL = import.meta.env.VITE_DIRECTUS_URL || "https://cms.pnptv.app";
+const _raw = import.meta.env.VITE_DIRECTUS_URL || "/cms";
+const DIRECTUS_URL = _raw.startsWith("/") ? `${window.location.origin}${_raw}` : _raw;
 
 export const directus = createDirectus(DIRECTUS_URL)
   .with(authentication("json"))

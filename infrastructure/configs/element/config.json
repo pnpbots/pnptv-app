@@ -5,8 +5,8 @@
       "server_name": "matrix.pnptv.app"
     }
   },
-  "brand": "PNPtv! Chat",
-  "default_theme": "dark",
+  "brand": "PNPtv! Hangouts",
+  "default_theme": "custom-PNPtv! Dark",
   "room_directory": {
     "servers": ["matrix.pnptv.app"]
   },
@@ -14,7 +14,35 @@
     "UIFeature.registration": false,
     "UIFeature.passwordReset": false,
     "UIFeature.feedback": false,
-    "UIFeature.explorePublicSpaces": false
+    "UIFeature.explorePublicSpaces": false,
+    "UIFeature.communities": false,
+    "UIFeature.advancedSettings": false,
+    "UIFeature.shareQRCode": false,
+    "UIFeature.thirdPartyId": false,
+    "UIFeature.identityServer": false,
+    "UIFeature.deactivate": false,
+    "custom_themes": [
+      {
+        "name": "PNPtv! Dark",
+        "is_dark": true,
+        "colors": {
+          "accent-color": "#D4007A",
+          "primary-color": "#D4007A",
+          "warning-color": "#E69138",
+          "sidebar-color": "#0A0A0A",
+          "roomlist-background-color": "#0F0F0F",
+          "roomlist-text-color": "#FFFFFF",
+          "roomlist-text-secondary-color": "#A1A1A3",
+          "roomlist-highlights-color": "#1E1E1E",
+          "roomlist-separator-color": "#2A2A2A",
+          "timeline-background-color": "#121212",
+          "timeline-text-color": "#FFFFFF",
+          "timeline-text-secondary-color": "#A1A1A3",
+          "timeline-highlights-color": "#1E1E1E",
+          "reaction-row-button-selected-bg-color": "#D4007A"
+        }
+      }
+    ]
   },
   "disable_custom_urls": true,
   "disable_guests": true,
@@ -24,5 +52,14 @@
   "embedded_pages": {
     "welcome_url": ""
   },
-  "show_labs_settings": false
+  "show_labs_settings": false,
+  "bug_report_endpoint_url": "",
+  "features": {
+    "feature_group_calls": true
+  },
+  "element_call": {
+    "url": "https://call.element.io",
+    "participant_limit": 8,
+    "brand": "PNPtv! Call"
+  }
 }

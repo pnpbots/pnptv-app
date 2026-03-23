@@ -19,6 +19,8 @@
  */
 
 const crypto = require('crypto');
+const fs     = require('fs/promises');
+const path   = require('path');
 const logger = require('../../utils/logger');
 const { query } = require('../../config/postgres');
 
@@ -146,7 +148,7 @@ async function provisionMatrixUser(user) {
       const accessToken = decryptToken(user.matrix_access_token);
       await synapseGet('/_matrix/client/v3/account/whoami', accessToken);
       logger.debug(`[Matrix] Reusing existing credentials for user ${user.id} (${matrixUserId})`);
-      return { matrixUserId, accessToken, homeserverUrl: MATRIX_PUBLIC_URL };
+      return { matrixUserId, accessToken, deviceId: user.matrix_device_id || null, homeserverUrl: MATRIX_PUBLIC_URL };
     } catch (verifyErr) {
       logger.warn(`[Matrix] Stored token invalid for user ${user.id}, re-provisioning: ${verifyErr.message}`);
     }
@@ -164,20 +166,28 @@ async function provisionMatrixUser(user) {
     );
     logger.info(`[Matrix] Ensured user exists: ${matrixUserId}`);
   } catch (ensureErr) {
-    logger.error(`[Matrix] Failed to ensure user ${matrixUserId}: ${ensureErr.message}`);
-    throw ensureErr;
+    // M_USER_IN_USE means the account already exists — safe to continue to login step
+    if (ensureErr.errcode === 'M_USER_IN_USE') {
+      logger.info(`[Matrix] User already exists: ${matrixUserId} — proceeding to login`);
+    } else {
+      logger.error(`[Matrix] Failed to ensure user ${matrixUserId}: ${ensureErr.message}`);
+      throw ensureErr;
+    }
   }
 
   // Step 2: Get access token via admin login API (no password needed)
+  // Synapse admin login does NOT return device_id in the response,
+  // so we generate one and pass it in the request body.
+  const generatedDeviceId = `PNPTV_${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
   let accessToken, deviceId;
   try {
     const loginResp = await synapsePost(
       `/_synapse/admin/v1/users/${encodeURIComponent(matrixUserId)}/login`,
-      {},
+      { device_id: generatedDeviceId, initial_device_display_name: `pnptv-webapp-${telegramId}` },
       adminToken
     );
     accessToken = loginResp.access_token;
-    deviceId = loginResp.device_id || null;
+    deviceId = loginResp.device_id || generatedDeviceId;
   } catch (loginErr) {
     logger.error(`[Matrix] Admin login failed for ${matrixUserId}: ${loginErr.message}`);
     throw loginErr;
@@ -198,6 +208,12 @@ async function provisionMatrixUser(user) {
     logger.warn(`[Matrix] Display name sync failed for ${matrixUserId}: ${dnErr.message}`);
   }
 
+  // Step 3b: Set avatar (best-effort)
+  await syncMatrixAvatar(
+    { id: user.id, photo_file_id: user.photo_file_id, matrix_user_id: matrixUserId },
+    accessToken
+  );
+
   // Step 4: Persist encrypted credentials
   const encryptedToken = encryptToken(accessToken);
   await query(
@@ -211,7 +227,75 @@ async function provisionMatrixUser(user) {
   );
 
   logger.info(`[Matrix] Provisioned credentials for user ${user.id} -> ${matrixUserId}`);
-  return { matrixUserId, accessToken, homeserverUrl: MATRIX_PUBLIC_URL };
+  return { matrixUserId, accessToken, deviceId, homeserverUrl: MATRIX_PUBLIC_URL };
+}
+
+// ─── avatar sync ─────────────────────────────────────────────────────────────
+
+const AVATARS_DIR = path.join(__dirname, '../../../../public/uploads/avatars');
+
+/**
+ * Sync a user's PNPtv avatar to their Matrix profile.
+ *
+ * Accepts either a raw accessToken string OR an encrypted one (from DB).
+ * During provisioning the raw token is passed directly; for post-upload
+ * sync the encrypted token is read from the user record.
+ *
+ * Best-effort — errors are logged but never thrown.
+ *
+ * @param {object} user  Must have: id, photo_file_id, matrix_user_id
+ * @param {string} [rawAccessToken]  If provided, used as-is (skip decrypt)
+ */
+async function syncMatrixAvatar(user, rawAccessToken) {
+  try {
+    // Resolve photo_file_id — may be passed in or need a DB lookup
+    let photoFileId = user.photo_file_id;
+    if (photoFileId === undefined) {
+      const row = await query('SELECT photo_file_id FROM users WHERE id = $1', [user.id]);
+      photoFileId = row.rows[0]?.photo_file_id;
+    }
+    if (!photoFileId) {
+      logger.debug(`[Matrix] syncAvatar: user ${user.id} has no avatar — skipping`);
+      return;
+    }
+
+    // Resolve Matrix credentials
+    let matrixUserId = user.matrix_user_id;
+    let accessToken  = rawAccessToken || null;
+
+    if (!matrixUserId || !accessToken) {
+      const row = await query(
+        'SELECT matrix_user_id, matrix_access_token FROM users WHERE id = $1',
+        [user.id]
+      );
+      const u = row.rows[0];
+      if (!u?.matrix_user_id || !u?.matrix_access_token) {
+        logger.debug(`[Matrix] syncAvatar: user ${user.id} has no Matrix account — skipping`);
+        return;
+      }
+      matrixUserId = u.matrix_user_id;
+      if (!accessToken) accessToken = decryptToken(u.matrix_access_token);
+    }
+
+    // Read avatar from disk
+    const filename = path.basename(photoFileId);
+    const filePath = path.join(AVATARS_DIR, filename);
+    const buffer   = await fs.readFile(filePath);
+
+    // Upload to Matrix media repo
+    const mxcUri = await uploadMedia(buffer, filename, 'image/webp', accessToken);
+
+    // Set avatar_url on Matrix profile
+    await synapsePut(
+      `/_matrix/client/v3/profile/${encodeURIComponent(matrixUserId)}/avatar_url`,
+      { avatar_url: mxcUri },
+      accessToken
+    );
+
+    logger.info(`[Matrix] Avatar synced for user ${user.id} -> ${mxcUri}`);
+  } catch (err) {
+    logger.warn(`[Matrix] Avatar sync failed for user ${user.id}: ${err.message}`);
+  }
 }
 
 // ─── admin token ──────────────────────────────────────────────────────────────
@@ -845,4 +929,5 @@ module.exports = {
   redactRoomEvent,
   syncRoomSettings,
   setUserPowerLevel,
+  syncMatrixAvatar,
 };
