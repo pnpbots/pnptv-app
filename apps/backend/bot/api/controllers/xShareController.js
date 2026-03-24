@@ -308,7 +308,7 @@ const shareToX = async (req, res) => {
 
     // ── 3. Fetch the social post ───────────────────────────────────────────
     const { rows: postRows } = await query(
-      `SELECT id, user_id, content FROM social_posts WHERE id = $1 AND is_deleted = false`,
+      `SELECT id, user_id, content, media_type FROM social_posts WHERE id = $1 AND is_deleted = false`,
       [postId],
       { cache: false }
     );
@@ -396,7 +396,9 @@ const shareToX = async (req, res) => {
     // ── 7. Build tweet text ────────────────────────────────────────────────
     // Reserve 24 chars for the PNPtv link (23 T.co-shortened + 1 space),
     // leaving 256 chars for the post content.
-    const postLink = `${PNPTV_APP_URL}`;
+    const postLink = post.media_type === 'video'
+      ? `${PNPTV_APP_URL}/v/${postId}`
+      : `${PNPTV_APP_URL}/social/post/${postId}`;
     const linkLength = 24; // T.co wraps all links to 23 chars + 1 space separator
     const maxContent = X_MAX_TEXT_LENGTH - linkLength;
 
