@@ -569,7 +569,7 @@ async function getOrCreateDmRoom(userA, userB) {
         {
           type:      'm.room.history_visibility',
           state_key: '',
-          content:   { history_visibility: 'joined' },
+          content:   { history_visibility: 'shared' },
         },
       ],
       power_level_content_override: {
