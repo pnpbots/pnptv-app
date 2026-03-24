@@ -7599,6 +7599,8 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
 // Crawlers (Twitterbot, Facebot, etc.) hit /og/* to get proper previews.
 // Real browsers are immediately meta-refreshed to the SPA URL.
 const ogController = require('./controllers/ogController');
+// Video preview page for X sharing — standalone branded page with OG tags
+app.get('/v/:postId', asyncHandler(ogController.renderVideoPreview));
 // Player endpoint must be registered BEFORE the wildcard /og/* route
 app.get('/og/player/:postId', asyncHandler(ogController.renderPlayer));
 app.get('/og/*', asyncHandler(ogController.renderOG));

@@ -450,6 +450,96 @@ const getChannelsOG = () => ({
   playerUrl: null,
 });
 
+// ─── Video Preview OG (generic PNP branding for X sharing) ───────────────────
+
+const getVideoPreviewOG = async (postId) => {
+  const id = parseInt(postId, 10);
+  if (!Number.isFinite(id) || id <= 0) return getDefaultOG();
+
+  const cacheKey = `og:vpreview:${id}`;
+  const cached = await cacheGet(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const result = await query(
+      `SELECT sp.id, sp.media_url, sp.media_type, sp.media_urls,
+              sp.video_thumbnail_url
+       FROM social_posts sp
+       WHERE sp.id = $1
+         AND sp.is_deleted = false
+         AND (sp.is_exclusive IS NOT TRUE)`,
+      [id]
+    );
+
+    if (!result.rows.length) return getDefaultOG();
+
+    const post = result.rows[0];
+    const isVideo = post.media_type === 'video';
+    const rawMediaUrl = post.media_url || null;
+    const rawThumbUrl = post.video_thumbnail_url || null;
+
+    let parsedMediaUrls = null;
+    if (post.media_urls) {
+      try {
+        parsedMediaUrls = typeof post.media_urls === 'string'
+          ? JSON.parse(post.media_urls)
+          : post.media_urls;
+      } catch (_) { /* ignore */ }
+    }
+    const firstMedia = parsedMediaUrls?.[0];
+    const effectiveMediaUrl = rawMediaUrl || firstMedia?.url || null;
+    const effectiveThumbUrl = rawThumbUrl || firstMedia?.thumbnail_url || null;
+
+    const absoluteMediaUrl = toAbsoluteUrl(effectiveMediaUrl);
+    const absoluteThumbUrl = toAbsoluteUrl(effectiveThumbUrl);
+
+    const title = 'Watch on PNPtv! — Clouds & Rush Network';
+    const description = 'Exclusive community content on PNPtv! Stream, connect, and vibe with the hottest PNP creators. Join free today.';
+
+    let ogData;
+    if (isVideo && absoluteMediaUrl) {
+      ogData = {
+        title,
+        description,
+        image: absoluteThumbUrl || `${APP_BASE_URL}/og-default.png`,
+        imageWidth: 1280,
+        imageHeight: 720,
+        url: `${APP_BASE_URL}/v/${id}`,
+        type: 'video.other',
+        video: absoluteMediaUrl,
+        videoType: 'video/mp4',
+        videoWidth: 1280,
+        videoHeight: 720,
+        twitterCard: 'player',
+        playerUrl: `${APP_BASE_URL.replace('app.', 'api.')}/og/player/${id}`,
+      };
+    } else {
+      // Image or text post — still use the preview page
+      ogData = {
+        title,
+        description,
+        image: absoluteThumbUrl || toAbsoluteUrl(effectiveMediaUrl) || `${APP_BASE_URL}/og-default.png`,
+        imageWidth: 1200,
+        imageHeight: 630,
+        url: `${APP_BASE_URL}/v/${id}`,
+        type: 'website',
+        video: null,
+        videoType: null,
+        videoWidth: null,
+        videoHeight: null,
+        twitterCard: 'summary_large_image',
+        playerUrl: null,
+      };
+    }
+
+    await cacheSet(cacheKey, ogData, TTL_POST);
+    return ogData;
+  } catch (err) {
+    logger.error('ogService.getVideoPreviewOG error', { postId, error: err.message });
+    return getDefaultOG();
+  }
+};
+
 module.exports = {
   getPostOG,
   getProfileOG,
@@ -457,4 +547,5 @@ module.exports = {
   getCmsPageOG,
   getDefaultOG,
   getChannelsOG,
+  getVideoPreviewOG,
 };

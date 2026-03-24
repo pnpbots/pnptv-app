@@ -156,6 +156,15 @@ const resolveOgData = async (strippedPath) => {
     };
   }
 
+  // /v/:postId (video preview for X sharing)
+  m = strippedPath.match(/^\/v\/(\d+)\/?$/);
+  if (m) {
+    return {
+      ogData: await ogService.getVideoPreviewOG(m[1]),
+      canonicalPath: `/v/${m[1]}`,
+    };
+  }
+
   // /channels (directory page)
   if (/^\/channels\/?$/.test(strippedPath)) {
     return {
@@ -312,4 +321,232 @@ const renderPlayer = async (req, res) => {
   }
 };
 
-module.exports = { renderOG, renderPlayer };
+// ─── renderVideoPreview ──────────────────────────────────────────────────────
+// Standalone page served at /v/:postId — contains OG tags for X crawlers
+// AND a branded video player + CTA for real browsers.
+
+const renderVideoPreview = async (req, res) => {
+  const postId = parseInt(req.params.postId, 10);
+
+  try {
+    const og = Number.isFinite(postId) && postId > 0
+      ? await ogService.getVideoPreviewOG(postId)
+      : ogService.getDefaultOG();
+
+    // Fetch the actual video URL for the player
+    let videoUrl = null;
+    let thumbUrl = null;
+    if (Number.isFinite(postId) && postId > 0) {
+      const result = await query(
+        `SELECT media_url, media_type, video_thumbnail_url
+         FROM social_posts
+         WHERE id = $1
+           AND is_deleted = false
+           AND (is_exclusive IS NOT TRUE)
+         LIMIT 1`,
+        [postId]
+      );
+      const post = result.rows[0];
+      if (post && post.media_type === 'video' && post.media_url) {
+        videoUrl = post.media_url.startsWith('http')
+          ? post.media_url
+          : `${APP_BASE_URL}${post.media_url}`;
+        thumbUrl = post.video_thumbnail_url
+          ? (post.video_thumbnail_url.startsWith('http')
+              ? post.video_thumbnail_url
+              : `${APP_BASE_URL}${post.video_thumbnail_url}`)
+          : null;
+      }
+    }
+
+    const playerMeta = og.playerUrl
+      ? `
+    <meta name="twitter:player" content="${escAttr(og.playerUrl)}" />
+    <meta name="twitter:player:width" content="${escAttr(String(og.videoWidth || 1280))}" />
+    <meta name="twitter:player:height" content="${escAttr(String(og.videoHeight || 720))}" />`
+      : '';
+
+    const videoMeta = og.video
+      ? `
+    <meta property="og:video" content="${escAttr(og.video)}" />
+    <meta property="og:video:secure_url" content="${escAttr(og.video)}" />
+    <meta property="og:video:type" content="${escAttr(og.videoType || 'video/mp4')}" />
+    <meta property="og:video:width" content="${escAttr(String(og.videoWidth || 1280))}" />
+    <meta property="og:video:height" content="${escAttr(String(og.videoHeight || 720))}" />`
+      : '';
+
+    const videoPlayerHtml = videoUrl
+      ? `<video
+          src="${escAttr(videoUrl)}"
+          controls
+          playsinline
+          preload="metadata"
+          ${thumbUrl ? `poster="${escAttr(thumbUrl)}"` : ''}
+          style="width:100%;max-height:70vh;border-radius:16px;background:#000;object-fit:contain;"
+        >Your browser does not support the video tag.</video>`
+      : `<div style="width:100%;height:300px;border-radius:16px;background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;">
+          <p style="color:#8E8E93;font-size:14px;">Video not available</p>
+        </div>`;
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escAttr(og.title)}</title>
+  <meta name="description" content="${escAttr(og.description)}" />
+
+  <!-- Open Graph -->
+  <meta property="og:site_name" content="PNPtv!" />
+  <meta property="og:title" content="${escAttr(og.title)}" />
+  <meta property="og:description" content="${escAttr(og.description)}" />
+  <meta property="og:image" content="${escAttr(og.image)}" />
+  <meta property="og:image:width" content="${escAttr(String(og.imageWidth || 1200))}" />
+  <meta property="og:image:height" content="${escAttr(String(og.imageHeight || 630))}" />
+  <meta property="og:url" content="${escAttr(og.url || `${APP_BASE_URL}/v/${postId}`)}" />
+  <meta property="og:type" content="${escAttr(og.type || 'website')}" />${videoMeta}
+
+  <!-- Twitter / X Card -->
+  <meta name="twitter:card" content="${escAttr(og.twitterCard || 'summary_large_image')}" />
+  <meta name="twitter:site" content="@pnptv" />
+  <meta name="twitter:title" content="${escAttr(og.title)}" />
+  <meta name="twitter:description" content="${escAttr(og.description)}" />
+  <meta name="twitter:image" content="${escAttr(og.image)}" />${playerMeta}
+
+  <!-- Canonical -->
+  <link rel="canonical" href="${escAttr(og.url || `${APP_BASE_URL}/v/${postId}`)}" />
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; min-height: 100vh;
+      background: #0A0A0A;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      color: #fff;
+      -webkit-font-smoothing: antialiased;
+    }
+    .container {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 24px 16px 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+    }
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo-circle {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #D4007A, #E69138);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .logo-circle img { width: 28px; height: 28px; object-fit: contain; }
+    .brand-name {
+      font-size: 20px;
+      font-weight: 800;
+      background: linear-gradient(135deg, #D4007A, #E69138);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .video-wrapper {
+      width: 100%;
+      border-radius: 16px;
+      overflow: hidden;
+      background: #000;
+    }
+    .info {
+      text-align: center;
+      max-width: 480px;
+    }
+    .info h1 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      line-height: 1.3;
+    }
+    .info p {
+      font-size: 14px;
+      color: #8E8E93;
+      line-height: 1.5;
+    }
+    .cta-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 32px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #D4007A, #E69138);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 700;
+      text-decoration: none;
+      transition: opacity 0.2s, transform 0.2s;
+      border: none;
+      cursor: pointer;
+    }
+    .cta-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .cta-btn:active { transform: translateY(0); }
+    .cta-btn svg { width: 18px; height: 18px; }
+    .footer-text {
+      font-size: 12px;
+      color: #48484A;
+      text-align: center;
+    }
+    .footer-text a { color: #8E8E93; text-decoration: none; }
+    .footer-text a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo-row">
+      <div class="logo-circle">
+        <img src="${APP_BASE_URL}/Logo2-50.png" alt="PNPtv!" />
+      </div>
+      <span class="brand-name">PNPtv!</span>
+    </div>
+
+    <div class="video-wrapper">
+      ${videoPlayerHtml}
+    </div>
+
+    <div class="info">
+      <h1>Clouds &amp; Rush Network</h1>
+      <p>Exclusive community content. Stream, connect, and vibe with the hottest PNP creators.</p>
+    </div>
+
+    <a href="${APP_BASE_URL}" class="cta-btn">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 01-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.58-5.84a14.927 14.927 0 00-2.58 5.84m2.699 2.7c-.103.021-.207.041-.311.06a15.09 15.09 0 01-2.448-2.448 14.9 14.9 0 01.06-.312m-2.24 2.39a4.493 4.493 0 00-1.757 4.306 4.493 4.493 0 004.306-1.758M16.5 9a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
+      </svg>
+      Get PNPtv!
+    </a>
+
+    <p class="footer-text">
+      <a href="${APP_BASE_URL}/terms">Terms</a> &middot;
+      <a href="${APP_BASE_URL}/privacy">Privacy</a> &middot;
+      <a href="${APP_BASE_URL}/community-guidelines">Community Guidelines</a>
+    </p>
+  </div>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=600');
+    return res.send(html);
+  } catch (err) {
+    logger.error('ogController.renderVideoPreview error', { postId, error: err.message });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.redirect(APP_BASE_URL);
+  }
+};
+
+module.exports = { renderOG, renderPlayer, renderVideoPreview };
