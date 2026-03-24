@@ -4,6 +4,8 @@ import {
   useRef,
   useCallback,
 } from "react";
+import { connectSocket } from "@/lib/socket";
+import { MediaMessage } from "@/components/hangouts/MediaMessage";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -23,7 +25,6 @@ import {
   requestJoinGroup,
   getJoinRequests,
   handleJoinRequest,
-  getOrCreateHangoutRoom,
   getHangoutGroup,
   kickHangoutMember,
   banHangoutMember,
@@ -41,10 +42,14 @@ import {
   uploadGroupAvatar,
   kickGroupMember,
   updateMemberRole,
+  getGroupMessages,
+  sendGroupMessage,
+  sendGroupMediaMessage,
   type HangoutGroup,
   type GroupMember,
   type DiscoverGroup,
   type JoinRequest,
+  type GroupMessage,
 } from "@/lib/api";
 import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
 import { NearbyBadge } from "@/components/NearbyBadge";
@@ -97,16 +102,26 @@ export default function Chat() {
   // Group members (loaded on chat open for member management panels)
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
 
-  // Matrix room + credentials for Element Web iframe
-  const [matrixRoomId, setMatrixRoomId] = useState<string | null>(null);
-  const [matrixCreds, setMatrixCreds] = useState<{ userId: string; accessToken: string; deviceId?: string; homeserver: string } | null>(null);
-  const [matrixError, setMatrixError] = useState<string | null>(null);
+  // Native chat messages state
+  const [messages, setMessages] = useState<GroupMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [messageInput, setMessageInput] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
 
-  // Socket hook — presence only (messages handled by Element Web iframe)
+  // Socket hook — presence + real-time messages
   const {
     isConnected,
     onlineMembers,
-  } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId, matrixRoomId);
+    emitTyping,
+    typingUsers,
+  } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId);
 
   // Error feedback
   const [chatError, setChatError] = useState<string | null>(null);
@@ -200,6 +215,93 @@ export default function Chat() {
       .then((res) => { if (res.success) setHangoutEvents(res.events); })
       .catch(() => {});
   }, []);
+
+  // ─── Real-time incoming messages via Socket.IO ───────────────────────
+
+  useEffect(() => {
+    if (!activeGroup) return;
+    const socket = connectSocket();
+    const room = `hangout:${activeGroup.id}`;
+
+    const onMessage = (msg: GroupMessage) => {
+      if (msg.room !== room) return;
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    };
+
+    socket.on("chat:message", onMessage);
+    return () => {
+      socket.off("chat:message", onMessage);
+    };
+  }, [activeGroup?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Message sending handlers ────────────────────────────────────────
+
+  const handleSendMessage = async () => {
+    if (!activeGroup || sendingMessage) return;
+
+    if (mediaFile) {
+      setSendingMessage(true);
+      try {
+        await sendGroupMediaMessage(activeGroup.id, mediaFile, messageInput.trim() || undefined);
+        setMessageInput("");
+        setMediaFile(null);
+        setMediaPreview(null);
+      } catch (err) {
+        setChatError(err instanceof Error ? err.message : "Failed to send media");
+      } finally {
+        setSendingMessage(false);
+      }
+      return;
+    }
+
+    if (!messageInput.trim()) return;
+    setSendingMessage(true);
+    try {
+      await sendGroupMessage(activeGroup.id, messageInput.trim());
+      setMessageInput("");
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Failed to send message");
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  const handleMediaSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setMediaFile(file);
+    if (file.type.startsWith("image/")) {
+      setMediaPreview(URL.createObjectURL(file));
+    } else {
+      setMediaPreview(null);
+    }
+  };
+
+  const cancelMedia = () => {
+    setMediaFile(null);
+    if (mediaPreview) {
+      URL.revokeObjectURL(mediaPreview);
+      setMediaPreview(null);
+    }
+  };
+
+  const loadMoreMessages = async () => {
+    if (!activeGroup || messagesLoading || !hasMoreMessages || messages.length === 0) return;
+    const oldest = messages[0];
+    setMessagesLoading(true);
+    try {
+      const res = await getGroupMessages(activeGroup.id, oldest.created_at);
+      if (res.success) {
+        setMessages((prev) => [...res.messages, ...prev]);
+        setHasMoreMessages(res.messages.length >= 50);
+      }
+    } catch { /* silent */ }
+    finally { setMessagesLoading(false); }
+  };
 
   useEffect(() => {
     setIsLoading(true);
@@ -315,34 +417,32 @@ export default function Chat() {
     markGroupAsRead(group.id).catch(() => {});
     loadGroupDetail(group.id);
 
-    setMatrixRoomId(null);
-    setMatrixCreds(null);
-    setMatrixError(null);
+    setMessages([]);
+    setHasMoreMessages(true);
+    setMessageInput("");
+    setMediaFile(null);
+    setMediaPreview(null);
 
-    Promise.all([
-      getOrCreateHangoutRoom(group.id),
-      import("@/lib/api").then(({ getMatrixToken }) => getMatrixToken()),
-    ])
-      .then(([roomRes, tokenRes]) => {
-        if (roomRes.success) setMatrixRoomId(roomRes.roomId);
-        if (tokenRes.success) setMatrixCreds({
-          userId: tokenRes.matrixUserId,
-          accessToken: tokenRes.accessToken,
-          deviceId: tokenRes.deviceId || undefined,
-          homeserver: tokenRes.homeserverUrl,
-        });
+    setMessagesLoading(true);
+    getGroupMessages(group.id)
+      .then((res) => {
+        if (res.success) {
+          setMessages(res.messages);
+          setHasMoreMessages(res.messages.length >= 50);
+        }
       })
-      .catch(() => {
-        setMatrixError("Chat unavailable");
-      });
+      .catch(() => setChatError("Failed to load messages"))
+      .finally(() => setMessagesLoading(false));
   };
 
   const closeChat = () => {
     setView("list");
     navigate("/chat", { replace: true });
     setActiveGroup(null);
-    setMatrixRoomId(null);
-    setMatrixError(null);
+    setMessages([]);
+    setMessageInput("");
+    setMediaFile(null);
+    setMediaPreview(null);
     setShowOnline(false);
     setShowGroupSettings(false);
     loadGroups();
@@ -536,6 +636,20 @@ export default function Chat() {
               <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
             </span>
             <span className="text-[11px] font-medium text-green-400">{onlineMembers.length}</span>
+          </button>
+
+          {/* Join Main Stage — JaaS video call */}
+          <button
+            onClick={() => navigate("/main-stage")}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all hover:opacity-90 active:scale-95 flex-shrink-0"
+            style={{ background: "linear-gradient(135deg, rgba(94,209,196,0.25), rgba(212,0,122,0.2))", color: "#5ED1C4" }}
+            title="Join Main Stage"
+            aria-label="Join Main Stage video call"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            <span className="hidden sm:inline">Main Stage</span>
           </button>
 
           {/* Three-dot overflow menu */}
@@ -1221,58 +1335,232 @@ export default function Chat() {
           <HangoutEventReminder groupId={activeGroup.id} />
         )}
 
-        {/* Element Web embedded chat — full messaging UI via Matrix */}
-        {matrixRoomId && matrixCreds ? (
-          <iframe
-            key={`${matrixRoomId}-${matrixCreds.userId}`}
-            src={`/element-login.html#hs=${encodeURIComponent(matrixCreds.homeserver)}&uid=${encodeURIComponent(matrixCreds.userId)}&token=${encodeURIComponent(matrixCreds.accessToken)}&room=${encodeURIComponent(matrixRoomId)}${matrixCreds.deviceId ? '&did=' + encodeURIComponent(matrixCreds.deviceId) : ''}`}
-            className="flex-1 min-h-0 w-full border-0"
-            allow="microphone; camera; clipboard-write; encrypted-media; display-capture; autoplay; speaker-selection"
-            title="Hangout Chat"
-          />
-        ) : matrixError ? (
-          <div className="flex-1 flex items-center justify-center min-h-0">
-            <div className="text-center px-6">
-              <svg className="w-8 h-8 mx-auto mb-3 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-              </svg>
-              <p className="text-sm text-pnp-textSecondary mb-3">Chat unavailable</p>
-              <button
-                onClick={() => {
-                  setMatrixError(null);
-                  setMatrixRoomId(null);
-                  setMatrixCreds(null);
-                  Promise.all([
-                    getOrCreateHangoutRoom(activeGroup.id),
-                    import("@/lib/api").then(({ getMatrixToken }) => getMatrixToken()),
-                  ])
-                    .then(([roomRes, tokenRes]) => {
-                      if (roomRes.success) setMatrixRoomId(roomRes.roomId);
-                      if (tokenRes.success) setMatrixCreds({
-                        userId: tokenRes.matrixUserId,
-                        accessToken: tokenRes.accessToken,
-                        deviceId: tokenRes.deviceId || undefined,
-                        homeserver: tokenRes.homeserverUrl,
-                      });
-                    })
-                    .catch(() => setMatrixError("Chat unavailable"));
-                }}
-                className="px-4 py-2 rounded-xl text-sm font-semibold text-white active:scale-95 transition-all"
-                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-              >
-                Tap to retry
-              </button>
+        {/* Native chat messages */}
+        <div
+          ref={messagesContainerRef}
+          className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            if (el.scrollTop < 60 && hasMoreMessages && !messagesLoading) {
+              loadMoreMessages();
+            }
+          }}
+        >
+          {messagesLoading && messages.length === 0 ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <svg className="w-8 h-8 mx-auto mb-3 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <p className="text-sm text-pnp-textSecondary">Loading messages...</p>
+              </div>
             </div>
+          ) : messages.length === 0 ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center px-6">
+                <p className="text-2xl mb-2">💬</p>
+                <p className="text-sm text-pnp-textSecondary">No messages yet. Say something!</p>
+              </div>
+            </div>
+          ) : (
+            <>
+              {messagesLoading && (
+                <div className="flex justify-center py-2">
+                  <svg className="w-5 h-5 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                </div>
+              )}
+              {messages.map((msg, idx) => {
+                const isMe = String(msg.user_id) === String(user?.dbId);
+                const showAvatar = !isMe && (idx === 0 || String(messages[idx - 1]?.user_id) !== String(msg.user_id));
+                const timeStr = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+                return (
+                  <div key={msg.id} className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"}`}>
+                    {/* Avatar */}
+                    <div className="w-7 flex-shrink-0">
+                      {showAvatar && !isMe ? (
+                        <img
+                          src={msg.photo_url || "/default-avatar.svg"}
+                          alt=""
+                          className="w-7 h-7 rounded-full object-cover"
+                          onError={(e) => { (e.target as HTMLImageElement).src = "/default-avatar.svg"; }}
+                        />
+                      ) : null}
+                    </div>
+
+                    {/* Bubble */}
+                    <div className={`max-w-[75%] ${isMe ? "items-end" : "items-start"} flex flex-col`}>
+                      {/* Sender name for group chat */}
+                      {showAvatar && !isMe && (
+                        <span className="text-[10px] text-pnp-textSecondary ml-1 mb-0.5">
+                          {msg.first_name || msg.username || "User"}
+                        </span>
+                      )}
+
+                      {/* Reply preview */}
+                      {msg.reply_to && (
+                        <div className={`text-[10px] px-2 py-1 mb-0.5 rounded-lg border-l-2 ${
+                          isMe ? "bg-white/10 border-white/30" : "bg-white/5 border-pnp-accent/50"
+                        }`}>
+                          <span className="font-semibold text-pnp-accent">{msg.reply_to.name}</span>
+                          <p className="text-pnp-textSecondary truncate">{msg.reply_to.content}</p>
+                        </div>
+                      )}
+
+                      <div
+                        className={`rounded-2xl px-3 py-2 text-sm break-words ${
+                          isMe
+                            ? "text-white rounded-br-md"
+                            : "bg-white/10 text-white rounded-bl-md"
+                        }`}
+                        style={isMe ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
+                      >
+                        {/* Media content */}
+                        {msg.media_url && msg.media_type && (
+                          <div className="mb-1">
+                            <MediaMessage
+                              mediaUrl={msg.media_url}
+                              mediaType={msg.media_type}
+                              thumbUrl={msg.media_thumb_url}
+                              width={msg.media_width}
+                              height={msg.media_height}
+                              duration={msg.media_duration}
+                              onExpandImage={(url) => setLightboxUrl(url)}
+                              isMe={isMe}
+                            />
+                          </div>
+                        )}
+
+                        {/* Text content */}
+                        {msg.content && <p>{msg.content}</p>}
+
+                        {/* Timestamp */}
+                        <p className={`text-[10px] mt-0.5 ${isMe ? "text-white/60" : "text-pnp-textSecondary"}`}>
+                          {timeStr}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </>
+          )}
+        </div>
+
+        {/* Typing indicator */}
+        {typingUsers.length > 0 && (
+          <div className="px-4 py-1">
+            <p className="text-xs text-pnp-textSecondary italic">
+              {typingUsers.join(", ")} {typingUsers.length === 1 ? "is" : "are"} typing...
+            </p>
           </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center min-h-0">
-            <div className="text-center">
-              <svg className="w-8 h-8 mx-auto mb-3 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24">
+        )}
+
+        {/* Media preview */}
+        {mediaFile && (
+          <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-2">
+            {mediaPreview ? (
+              <img src={mediaPreview} alt="" className="w-12 h-12 rounded-lg object-cover" />
+            ) : (
+              <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center">
+                <svg className="w-5 h-5 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+              </div>
+            )}
+            <span className="text-xs text-pnp-textSecondary flex-1 truncate">{mediaFile.name}</span>
+            <button onClick={cancelMedia} className="text-red-400 text-xs font-semibold">Remove</button>
+          </div>
+        )}
+
+        {/* Message input bar */}
+        <div className="flex items-end gap-2 px-3 py-2 border-t border-pnp-border" style={{ background: "#1C1C1E" }}>
+          {/* Media upload button */}
+          <input
+            ref={mediaInputRef}
+            type="file"
+            accept="image/*,video/*,audio/*"
+            className="hidden"
+            onChange={handleMediaSelect}
+          />
+          <button
+            type="button"
+            onClick={() => mediaInputRef.current?.click()}
+            className="p-2 rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 active:scale-90 transition-all flex-shrink-0"
+            aria-label="Attach media"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+            </svg>
+          </button>
+
+          {/* Text input */}
+          <textarea
+            value={messageInput}
+            onChange={(e) => {
+              setMessageInput(e.target.value);
+              emitTyping();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSendMessage();
+              }
+            }}
+            placeholder="Type a message..."
+            className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-4 py-2.5 text-sm resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-24"
+            rows={1}
+            style={{ minHeight: "40px" }}
+          />
+
+          {/* Send button */}
+          <button
+            type="button"
+            onClick={handleSendMessage}
+            disabled={sendingMessage || (!messageInput.trim() && !mediaFile)}
+            className="p-2 rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            aria-label="Send message"
+          >
+            {sendingMessage ? (
+              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
-              <p className="text-sm text-pnp-textSecondary">Connecting to chat...</p>
-            </div>
+            ) : (
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+              </svg>
+            )}
+          </button>
+        </div>
+
+        {/* Lightbox for images */}
+        {lightboxUrl && (
+          <div
+            className="fixed inset-0 z-[80] bg-black/90 flex items-center justify-center"
+            onClick={() => setLightboxUrl(null)}
+          >
+            <button
+              onClick={() => setLightboxUrl(null)}
+              className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white/10 text-white"
+              aria-label="Close"
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <img
+              src={lightboxUrl}
+              alt=""
+              className="max-w-full max-h-full object-contain"
+              onClick={(e) => e.stopPropagation()}
+            />
           </div>
         )}
 
