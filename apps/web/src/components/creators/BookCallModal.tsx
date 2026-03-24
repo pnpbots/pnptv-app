@@ -357,7 +357,7 @@ export function BookCallModal({
       }
 
       if (provider === "epayco" && res.checkoutUrl) {
-        window.location.href = res.checkoutUrl;
+        window.location.href = assertPaymentUrl(res.checkoutUrl);
         return;
       }
 

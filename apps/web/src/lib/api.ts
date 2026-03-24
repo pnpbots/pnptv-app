@@ -2223,6 +2223,37 @@ export function addTicketMessage(
   });
 }
 
+// Cristina AI Payment Verification (admin-only)
+export interface PaymentVerificationResult {
+  valid: boolean;
+  confidence: "high" | "medium" | "low";
+  reason: string;
+  recommendation: "activate" | "reject" | "manual_review";
+  warnings: string[];
+}
+
+export interface PaymentVerificationResponse {
+  success: boolean;
+  analysis: PaymentVerificationResult;
+  activation: { success: boolean; granted?: number; errors?: number; warning?: string | null; error?: string } | null;
+  error?: string;
+}
+
+export function verifyPaymentWithCristina(params: {
+  userId: string;
+  provider: string;
+  reference: string;
+  amount: number;
+  planId: string;
+  notes?: string;
+  activate?: boolean;
+}): Promise<PaymentVerificationResponse> {
+  return request("/api/webapp/support/verify-payment", {
+    method: "POST",
+    body: params,
+  });
+}
+
 // Performers (Directus CMS-backed)
 export interface FeaturedPerformer {
   id: string;
@@ -4374,13 +4405,40 @@ export function toggleVideoPrime(
 }
 
 /**
- * Validates that a payment redirect URL is an absolute HTTPS URL before the
- * caller navigates to it.  Throws if the value is missing or uses any other
- * scheme, preventing open-redirect and mixed-content attacks.
+ * Allowed hostnames for payment redirect URLs.  Any checkout link returned by
+ * the backend MUST belong to one of these domains (or a subdomain), otherwise
+ * the client refuses to navigate — preventing open-redirect & phishing attacks.
+ */
+const ALLOWED_PAYMENT_HOSTS = [
+  "pnptv.app",
+  "app.pnptv.app",
+  "btcpay.pnptv.app",
+  "checkout.epayco.co",
+];
+
+function isAllowedPaymentHost(hostname: string): boolean {
+  return ALLOWED_PAYMENT_HOSTS.some(
+    (h) => hostname === h || hostname.endsWith(`.${h}`),
+  );
+}
+
+/**
+ * Validates that a payment redirect URL is an absolute HTTPS URL on a trusted
+ * domain before the caller navigates to it.  Throws if the value is missing,
+ * uses a disallowed scheme, or targets an untrusted host.
  */
 export function assertPaymentUrl(url: unknown): string {
   if (typeof url !== "string" || !url.startsWith("https://")) {
     throw new Error("Invalid payment URL — must be https://");
+  }
+  try {
+    const parsed = new URL(url);
+    if (!isAllowedPaymentHost(parsed.hostname)) {
+      throw new Error("Untrusted payment domain");
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message === "Untrusted payment domain") throw e;
+    throw new Error("Invalid payment URL — malformed");
   }
   return url;
 }

@@ -668,7 +668,8 @@ export default function Stream() {
       try {
         const result = await sendTip(streamId || "", amount, undefined, "dash");
         if (result.invoiceId) {
-          setDashTip({ invoiceId: result.invoiceId, checkoutUrl: result.checkoutUrl || "", loading: true, invoiceAmount: amount, createdAt: Date.now() });
+          const safeCheckoutUrl = result.checkoutUrl ? assertPaymentUrl(result.checkoutUrl) : "";
+          setDashTip({ invoiceId: result.invoiceId, checkoutUrl: safeCheckoutUrl, loading: true, invoiceAmount: amount, createdAt: Date.now() });
           setDashTipSecondsLeft(900);
           // Fetch payment details
           getDashPaymentDetails(result.invoiceId)
