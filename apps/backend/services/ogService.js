@@ -105,6 +105,8 @@ const getPostOG = async (postId) => {
          sp.media_type,
          sp.media_urls,
          sp.video_thumbnail_url,
+         sp.media_width,
+         sp.media_height,
          u.username,
          u.first_name,
          u.photo_file_id AS author_photo
@@ -150,6 +152,11 @@ const getPostOG = async (postId) => {
 
     let ogData;
     if (isVideo && absoluteMediaUrl) {
+      // Detect MIME type from URL extension
+      const ext = (absoluteMediaUrl.match(/\.(mp4|mov|webm|3gp|m4v)(\?|$)/i) || [])[1];
+      const mimeMap = { mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', '3gp': 'video/3gpp', m4v: 'video/mp4' };
+      const videoType = mimeMap[ext?.toLowerCase()] || 'video/mp4';
+
       ogData = {
         title,
         description,
@@ -159,9 +166,9 @@ const getPostOG = async (postId) => {
         url: `${APP_BASE_URL}/social/post/${id}`,
         type: 'video.other',
         video: absoluteMediaUrl,
-        videoType: 'video/mp4',
-        videoWidth: 1280,
-        videoHeight: 720,
+        videoType,
+        videoWidth: post.media_width || 1280,
+        videoHeight: post.media_height || 720,
         twitterCard: 'player',
         playerUrl: `${APP_BASE_URL.replace('app.', 'api.')}/og/player/${id}`,
       };
@@ -463,7 +470,7 @@ const getVideoPreviewOG = async (postId) => {
   try {
     const result = await query(
       `SELECT sp.id, sp.media_url, sp.media_type, sp.media_urls,
-              sp.video_thumbnail_url
+              sp.video_thumbnail_url, sp.media_width, sp.media_height
        FROM social_posts sp
        WHERE sp.id = $1
          AND sp.is_deleted = false
@@ -498,6 +505,10 @@ const getVideoPreviewOG = async (postId) => {
 
     let ogData;
     if (isVideo && absoluteMediaUrl) {
+      const ext = (absoluteMediaUrl.match(/\.(mp4|mov|webm|3gp|m4v)(\?|$)/i) || [])[1];
+      const mimeMap = { mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', '3gp': 'video/3gpp', m4v: 'video/mp4' };
+      const videoType = mimeMap[ext?.toLowerCase()] || 'video/mp4';
+
       ogData = {
         title,
         description,
@@ -507,9 +518,9 @@ const getVideoPreviewOG = async (postId) => {
         url: `${APP_BASE_URL}/v/${id}`,
         type: 'video.other',
         video: absoluteMediaUrl,
-        videoType: 'video/mp4',
-        videoWidth: 1280,
-        videoHeight: 720,
+        videoType,
+        videoWidth: post.media_width || 1280,
+        videoHeight: post.media_height || 720,
         twitterCard: 'player',
         playerUrl: `${APP_BASE_URL.replace('app.', 'api.')}/og/player/${id}`,
       };

@@ -308,7 +308,7 @@ const shareToX = async (req, res) => {
 
     // ── 3. Fetch the social post ───────────────────────────────────────────
     const { rows: postRows } = await query(
-      `SELECT id, user_id, content, media_type FROM social_posts WHERE id = $1 AND is_deleted = false`,
+      `SELECT id, user_id, content, media_type, media_url, media_urls FROM social_posts WHERE id = $1 AND is_deleted = false`,
       [postId],
       { cache: false }
     );
@@ -409,10 +409,50 @@ const shareToX = async (req, res) => {
 
     const tweetText = content ? `${content}\n${postLink}` : postLink;
 
-    // ── 8. Post to X ──────────────────────────────────────────────────────
+    // ── 8. Post to X (with media upload if available) ────────────────────
     let xResponse;
     try {
-      xResponse = await postTweetText(accessToken, tweetText);
+      // Resolve media URL for native X upload (video/image)
+      let mediaUrl = null;
+      if (post.media_url) {
+        mediaUrl = post.media_url.startsWith('http')
+          ? post.media_url
+          : `${PNPTV_APP_URL}${post.media_url}`;
+      } else if (post.media_urls) {
+        try {
+          const parsed = typeof post.media_urls === 'string' ? JSON.parse(post.media_urls) : post.media_urls;
+          const first = Array.isArray(parsed) ? parsed[0] : null;
+          const firstUrl = first?.url || first;
+          if (firstUrl) {
+            mediaUrl = firstUrl.startsWith('http') ? firstUrl : `${PNPTV_APP_URL}${firstUrl}`;
+          }
+        } catch (_) { /* ignore parse errors */ }
+      }
+
+      if (mediaUrl) {
+        // Upload media natively to X for rich embedding
+        const XPostService = require('../../services/xPostService');
+        let mediaId = null;
+        try {
+          mediaId = await XPostService.uploadMediaToX({ accessToken, mediaUrl });
+        } catch (uploadErr) {
+          logger.warn('[X Share] Media upload failed, posting text-only', {
+            postId, error: uploadErr.message,
+          });
+        }
+
+        if (mediaId) {
+          xResponse = await axios.post(
+            `${X_API_BASE}/tweets`,
+            { text: tweetText, media: { media_ids: [String(mediaId)] } },
+            { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 30000 }
+          );
+        } else {
+          xResponse = await postTweetText(accessToken, tweetText);
+        }
+      } else {
+        xResponse = await postTweetText(accessToken, tweetText);
+      }
     } catch (xErr) {
       const status = xErr.response?.status;
       const xErrData = xErr.response?.data;
