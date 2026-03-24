@@ -23,7 +23,9 @@
     "UIFeature.deactivate": false,
     "showHiddenEventsInTimeline": false,
     "hideProfileChanges": true,
-    "hideRedactions": false,
+    "hideJoinLeaves": true,
+    "hideInviteRejections": true,
+    "hideRedactions": true,
     "custom_themes": [
       {
         "name": "PNPtv! Dark",
@@ -61,7 +63,7 @@
     "feature_group_calls": true
   },
   "element_call": {
-    "url": "https://call.element.io",
+    "url": "https://call.pnptv.app",
     "participant_limit": 8,
     "brand": "PNPtv! Call"
   }
