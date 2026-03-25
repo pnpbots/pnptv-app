@@ -22,8 +22,9 @@ const SIDEBAR_DM_BASE = import.meta.env.VITE_API_URL || "";
 
 function HamburgerIcon() {
   return (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+      <rect x="3" y="3" width="7" height="18" rx="1.5" />
+      <path strokeLinecap="round" d="M14 6h7M14 10h7M14 14h5" />
     </svg>
   );
 }
@@ -247,6 +248,7 @@ interface SidebarDmChatProps {
 
 function SidebarDmChat({ userId, myDbId, onBack }: SidebarDmChatProps) {
   const [messages, setMessages] = useState<SidebarDmMessage[]>([]);
+  const dmNavigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -457,8 +459,8 @@ function SidebarDmChat({ userId, myDbId, onBack }: SidebarDmChatProps) {
           </svg>
         </button>
 
-        {/* Partner avatar */}
-        <div className="relative flex-shrink-0">
+        {/* Partner avatar — clickable to profile */}
+        <button onClick={() => dmNavigate(`/profile/${userId}`)} className="relative flex-shrink-0 cursor-pointer">
           {partnerPhoto && (partnerPhoto.startsWith("/") || partnerPhoto.startsWith("http")) ? (
             <img src={partnerPhoto} alt="" className="w-8 h-8 rounded-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }} />
           ) : null}
@@ -472,9 +474,9 @@ function SidebarDmChat({ userId, myDbId, onBack }: SidebarDmChatProps) {
           >
             {(partnerName || "?")[0].toUpperCase()}
           </div>
-        </div>
+        </button>
 
-        <span className="text-sm font-semibold text-pnp-textPrimary truncate flex-1 min-w-0">
+        <span onClick={() => dmNavigate(`/profile/${userId}`)} className="text-sm font-semibold text-pnp-textPrimary truncate flex-1 min-w-0 cursor-pointer hover:underline">
           {partnerName || "Conversation"}
         </span>
       </div>
@@ -736,20 +738,20 @@ export function Layout() {
     };
   }, [mobileMenuOpen]);
 
-  // Fetch hangout groups when mobile menu opens (cache in state between opens)
+  // Fetch hangout groups on mount (for unread badge) and when mobile menu opens
   useEffect(() => {
-    if (!mobileMenuOpen || !isAuthenticated) return;
-    if (hangoutGroups.length > 0) return; // already loaded
-    setHangoutGroupsLoading(true);
-    getHangoutGroups()
-      .then((res) => {
-        if (res.success) {
-          setHangoutGroups(res.groups);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setHangoutGroupsLoading(false));
-  }, [mobileMenuOpen, isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!isAuthenticated) return;
+    const fetch = () => {
+      setHangoutGroupsLoading(true);
+      getHangoutGroups()
+        .then((res) => { if (res.success) setHangoutGroups(res.groups); })
+        .catch(() => {})
+        .finally(() => setHangoutGroupsLoading(false));
+    };
+    fetch();
+    const interval = setInterval(fetch, 60000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -921,14 +923,23 @@ export function Layout() {
       {/* ── Mobile topbar ────────────────────────────────────────────────────── */}
       <header className="lg:hidden sticky top-0 z-40 h-14 flex items-center justify-between px-4 glass-nav border-b border-pnp-border">
         <div className="flex items-center gap-2">
-          {/* Hamburger */}
+          {/* Hamburger with unread badge */}
           <button
             onClick={() => setMobileMenuOpen(true)}
-            className="p-1.5 -ml-1 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+            className="relative p-1.5 -ml-1 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
             aria-label="Open menu"
             aria-expanded={mobileMenuOpen}
           >
             <HamburgerIcon />
+            {(() => {
+              const hangoutUnread = hangoutGroups.reduce((sum, g) => sum + (g.unreadCount ?? 0), 0);
+              const total = dmUnread + hangoutUnread;
+              return total > 0 ? (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-[#D4007A] rounded-full text-[10px] font-bold text-white flex items-center justify-center shadow-lg shadow-[#D4007A]/40">
+                  {total > 99 ? "99+" : total}
+                </span>
+              ) : null;
+            })()}
           </button>
           <img src="/logo-header.png" alt="PNPtv!" className="h-9 w-auto" />
         </div>
