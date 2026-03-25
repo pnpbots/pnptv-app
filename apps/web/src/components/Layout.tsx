@@ -13,8 +13,6 @@ import { useNearbyToggle } from "@/components/NearbyBadge";
 import { getMessageThreads, getHangoutGroups, markThreadAsRead, type MessageThread, type HangoutGroup } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { LandingPage } from "@/pages/LandingPage";
-import { RadioWidget } from "@/components/RadioWidget";
-import { NearbyWidget } from "@/components/NearbyWidget";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 
@@ -266,6 +264,9 @@ function SidebarDmChat({ userId, partnerName, partnerPhoto, myDbId, onBack, onTh
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const lastTypingEmit = useRef(0);
 
+  const onThreadsRefreshRef = useRef(onThreadsRefresh);
+  onThreadsRefreshRef.current = onThreadsRefresh;
+
   const loadMessages = useCallback(async () => {
     setIsLoading(true);
     setChatError(null);
@@ -283,8 +284,8 @@ function SidebarDmChat({ userId, partnerName, partnerPhoto, myDbId, onBack, onTh
       setIsLoading(false);
     }
     markThreadAsRead(userId).catch(() => {});
-    onThreadsRefresh();
-  }, [userId, onThreadsRefresh]);
+    onThreadsRefreshRef.current();
+  }, [userId]);
 
   useEffect(() => {
     loadMessages();
@@ -1164,28 +1165,11 @@ export function Layout() {
         <BottomNav />
       </div>
 
-      {/* Widgets: compact strip in landscape video calls on mobile, normal FABs otherwise */}
+      {/* Unified Cristina widget: AI Chat + VJ + Travel Agent */}
       {isAuthenticated && (() => {
         const inVideoCall = location.pathname.startsWith("/chat/") || location.pathname === "/main-stage";
-        const showWidgetStrip = isLandscape && isMobile && inVideoCall;
-
-        if (showWidgetStrip) {
-          return (
-            <div className="fixed bottom-3 right-3 z-[38] flex items-center gap-2 rounded-full px-2 py-1.5" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}>
-              <RadioWidget compact />
-              <NearbyWidget compact />
-              <CristinaWidget compact />
-            </div>
-          );
-        }
-
-        return (
-          <>
-            <RadioWidget />
-            <NearbyWidget />
-            <CristinaWidget />
-          </>
-        );
+        const showCompact = isLandscape && isMobile && inVideoCall;
+        return <CristinaWidget compact={showCompact} />;
       })()}
 
       {/* Toast notifications */}
