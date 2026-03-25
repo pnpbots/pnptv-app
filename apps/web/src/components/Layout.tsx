@@ -935,6 +935,30 @@ export function Layout() {
             </svg>
           </button>
           <NotificationBell />
+          <button
+            onClick={() => navigate("/profile")}
+            className="p-0.5 rounded-full transition-colors"
+            aria-label="My profile"
+          >
+            {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
+              <img
+                src={user.photoUrl}
+                alt=""
+                className="w-7 h-7 rounded-full object-cover"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }}
+              />
+            ) : null}
+            <div
+              className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold"
+              style={{
+                background: "linear-gradient(135deg, #D4007A, #E69138)",
+                color: "#fff",
+                display: user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? "none" : undefined,
+              }}
+            >
+              {(user?.displayName || "U")[0].toUpperCase()}
+            </div>
+          </button>
         </div>
       </header>
 
