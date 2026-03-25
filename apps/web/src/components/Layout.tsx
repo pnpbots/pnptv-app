@@ -259,9 +259,6 @@ export function Layout() {
     { to: "/creators/apply", label: t.nav.becomeModel },
   ];
 
-  // Mobile-only primary links (desktop sidebar uses primaryLinks above unchanged)
-  const mobilePrimaryLinks = primaryLinks.filter((l) => l.to !== "/creators/apply");
-
   const secondaryLinks = [
     { to: "/blog", label: "Blog" },
     { to: "/support", label: "Help" },
@@ -634,34 +631,14 @@ export function Layout() {
                 />
               </div>
 
-              {/* Divider before quick nav links */}
-              <div className="px-3 pb-1">
-                <div className="h-px bg-pnp-border" />
-              </div>
-
-              {/* Quick nav links (mobile-primary, no becomeModel) */}
-              <div className="px-3 py-2 space-y-0.5">
-                {mobilePrimaryLinks.map((link) => (
-                  <NavLink
-                    key={link.to}
-                    to={link.to}
-                    end={link.end}
-                    className={({ isActive }: { isActive: boolean }) =>
-                      `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        isActive
-                          ? "nav-active"
-                          : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                      }`
-                    }
-                  >
-                    {link.label}
-                  </NavLink>
-                ))}
-                {isAdmin && (
+              {/* Admin link (only for admins) */}
+              {isAdmin && (
+                <div className="px-3 pb-1">
+                  <div className="h-px bg-pnp-border" />
                   <NavLink
                     to="/admin"
                     className={({ isActive }: { isActive: boolean }) =>
-                      `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      `block px-3 py-2 mt-1 rounded-lg text-sm font-medium transition-colors ${
                         isActive
                           ? "nav-active"
                           : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
@@ -670,8 +647,8 @@ export function Layout() {
                   >
                     {t.nav.admin}
                   </NavLink>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Divider */}
               <div className="px-3 pb-1">
