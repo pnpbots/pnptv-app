@@ -159,6 +159,7 @@ function ChannelDetailView({
   channelId: number;
   onBack: () => void;
 }) {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [channel, setChannel] = useState<CreatorChannel | null>(null);
   const [posts, setPosts] = useState<SocialPostItem[]>([]);
@@ -425,15 +426,17 @@ function ChannelDetailView({
                 {textPosts.map((p) => (
                   <div key={p.id} className="rounded-xl border border-pnp-border bg-pnp-surface p-4">
                     <div className="flex items-center gap-2 mb-2">
-                      {isValidPhotoUrl(p.author_photo) ? (
-                        <img src={p.author_photo!} alt="" className="w-7 h-7 rounded-full object-cover"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                      ) : (
-                        <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white"
-                          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
-                          {(p.author_first_name || "?").charAt(0).toUpperCase()}
-                        </div>
-                      )}
+                      <button onClick={(e) => { e.stopPropagation(); navigate(`/profile/${p.author_id}`); }} className="flex-shrink-0">
+                        {isValidPhotoUrl(p.author_photo) ? (
+                          <img src={p.author_photo!} alt="" className="w-7 h-7 rounded-full object-cover cursor-pointer"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                        ) : (
+                          <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer"
+                            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+                            {(p.author_first_name || "?").charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                      </button>
                       <span className="text-xs font-semibold text-pnp-textPrimary">
                         {p.author_first_name || p.author_username}
                       </span>

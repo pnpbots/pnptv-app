@@ -1007,11 +1007,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       return (
                         <div key={member.userId} className="flex items-center gap-3 py-2">
                           {member.photoUrl ? (
-                            <img src={member.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                            <img src={member.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0 cursor-pointer" onClick={() => navigate(`/profile/${member.userId}`)} />
                           ) : (
                             <div
-                              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 cursor-pointer"
                               style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                              onClick={() => navigate(`/profile/${member.userId}`)}
                             >
                               {(member.name || "?")[0].toUpperCase()}
                             </div>
@@ -1328,8 +1329,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                               const canManage = !isMe && !isOwner && (String(activeGroup.creatorId) === String(user?.dbId) || isAdmin);
                               return (
                                 <div key={m.user_id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5">
-                                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
-                                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
+                                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 cursor-pointer"
+                                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                                    onClick={() => navigate(`/profile/${m.user_id}`)}>
                                     {m.photo_url ? <img src={m.photo_url} alt="" className="w-7 h-7 rounded-full object-cover" /> : (m.first_name || m.username || "?")[0].toUpperCase()}
                                   </div>
                                   <div className="flex-1 min-w-0">
@@ -2528,7 +2530,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       ) : (
                         (joinRequests[group.id] || []).map((req) => (
                           <div key={req.id} className="flex items-center gap-2 p-2 rounded-lg bg-white/5">
-                            <div className="w-8 h-8 rounded-full bg-pnp-surface flex items-center justify-center text-xs font-bold text-pnp-textPrimary flex-shrink-0">
+                            <div className="w-8 h-8 rounded-full bg-pnp-surface flex items-center justify-center text-xs font-bold text-pnp-textPrimary flex-shrink-0 cursor-pointer" onClick={() => navigate(`/profile/${req.user_id}`)}>
                               {req.photo_url ? (
                                 <img src={req.photo_url} alt="" className="w-8 h-8 rounded-full object-cover" />
                               ) : (

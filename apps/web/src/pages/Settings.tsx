@@ -947,16 +947,18 @@ export default function Settings() {
                   className="flex items-center gap-3 rounded-lg px-3 py-2.5"
                   style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
                 >
-                  {photo ? (
-                    <img src={photo} alt={u.firstName} className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
-                  ) : (
-                    <div
-                      className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
-                    >
-                      {initial}
-                    </div>
-                  )}
+                  <button onClick={() => navigate(`/profile/${u.id}`)} className="flex-shrink-0">
+                    {photo ? (
+                      <img src={photo} alt={u.firstName} className="w-9 h-9 rounded-full object-cover cursor-pointer" />
+                    ) : (
+                      <div
+                        className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold cursor-pointer"
+                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                      >
+                        {initial}
+                      </div>
+                    )}
+                  </button>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-white truncate">{u.firstName || u.username}</p>
                     {u.username && (

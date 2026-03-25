@@ -113,7 +113,7 @@ export default function Join() {
         <meta property="og:site_name" content="PNPtv" />
         <meta property="og:title" content={t.pageTitle} />
         <meta property="og:description" content={t.ogDescription} />
-        <meta property="og:image" content="https://app.pnptv.app/og-image.png" />
+        <meta property="og:image" content="https://pnptv.app/og-image.png" />
         <meta property="og:image:width" content="1200" />
         <meta property="og:image:height" content="630" />
         <meta property="og:url" content="https://pnptv.app/login" />
@@ -121,7 +121,7 @@ export default function Join() {
         <meta name="twitter:site" content="@PNPTelevision" />
         <meta name="twitter:title" content={t.pageTitle} />
         <meta name="twitter:description" content={t.ogDescription} />
-        <meta name="twitter:image" content="https://app.pnptv.app/og-image.png" />
+        <meta name="twitter:image" content="https://pnptv.app/og-image.png" />
       </Helmet>
 
       <div className="min-h-screen" style={{ background: "#0A0A0B", color: "#fff" }}>
@@ -371,13 +371,15 @@ export default function Join() {
             <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-none">
               {performers.map((p) => (
                 <div key={p.id} className="flex-shrink-0 flex flex-col items-center gap-2 w-20">
-                  {isValidPhoto(p.photoUrl) ? (
-                    <img src={p.photoUrl} alt={p.displayName} className="w-16 h-16 rounded-full object-cover" style={{ border: "2px solid rgba(212,0,122,0.4)" }} />
-                  ) : (
-                    <div className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
-                      {(p.displayName || "?")[0].toUpperCase()}
-                    </div>
-                  )}
+                  <button onClick={() => navigate(`/profile/${p.userId ?? p.id}`)} className="flex-shrink-0">
+                    {isValidPhoto(p.photoUrl) ? (
+                      <img src={p.photoUrl} alt={p.displayName} className="w-16 h-16 rounded-full object-cover cursor-pointer" style={{ border: "2px solid rgba(212,0,122,0.4)" }} />
+                    ) : (
+                      <div className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold cursor-pointer" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+                        {(p.displayName || "?")[0].toUpperCase()}
+                      </div>
+                    )}
+                  </button>
                   <p className="text-xs text-center text-white/60 leading-tight line-clamp-2">{p.displayName}</p>
                 </div>
               ))}

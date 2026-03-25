@@ -20,6 +20,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
 import { checkAuthStatus, getXStatus, sharePostToX, getOwnChannels, type SocialPostItem, type CreatorChannel } from "@/lib/api";
@@ -67,6 +68,8 @@ export interface PostComposerProps {
   compact?: boolean;
   placeholder?: string;
   className?: string;
+  /** When set, posts are scoped to this hangout group's feed */
+  hangoutGroupId?: number;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -235,9 +238,11 @@ export function PostComposer({
   compact = false,
   placeholder,
   className = "",
+  hangoutGroupId,
 }: PostComposerProps) {
   const { user, isAuthenticated } = useAuth();
   const { feed: tFeed, profile: tProfile } = useI18n();
+  const navigate = useNavigate();
 
   // ── Unique IDs for ARIA ────────────────────────────────────────────────────
   const baseId = useId();
@@ -499,6 +504,7 @@ export function PostComposer({
             if (isExclusive) formData.append("isExclusive", "true");
             if (!isShareable) formData.append("isShareable", "false");
             if (selectedChannelId !== null) formData.append("channelId", String(selectedChannelId));
+            if (hangoutGroupId) formData.append("hangoutGroupId", String(hangoutGroupId));
 
             const xhr = new XMLHttpRequest();
             xhr.open("POST", `${API_BASE}/api/webapp/social/posts/with-multi-media`);
@@ -544,6 +550,7 @@ export function PostComposer({
             if (videoTitle.trim()) formData.append("videoTitle", videoTitle.trim());
             if (videoDescription.trim()) formData.append("videoDescription", videoDescription.trim());
             if (selectedChannelId !== null) formData.append("channelId", String(selectedChannelId));
+            if (hangoutGroupId) formData.append("hangoutGroupId", String(hangoutGroupId));
 
             const xhr = new XMLHttpRequest();
             xhr.open("POST", `${API_BASE}/api/webapp/social/posts/with-media`);
@@ -588,6 +595,7 @@ export function PostComposer({
             isExclusive: isExclusive,
             isShareable: isShareable,
             ...(selectedChannelId !== null ? { channelId: selectedChannelId } : {}),
+            ...(hangoutGroupId ? { hangoutGroupId } : {}),
           }),
         });
         if (!res.ok) {
@@ -613,7 +621,7 @@ export function PostComposer({
     } finally {
       setIsPosting(false);
     }
-  }, [text, files, isPosting, isExclusive, isShareable, crossPostX, videoTitle, videoDescription, selectedChannelId, onPostCreated, clearForm]);
+  }, [text, files, isPosting, isExclusive, isShareable, crossPostX, videoTitle, videoDescription, selectedChannelId, hangoutGroupId, onPostCreated, clearForm]);
 
   // ── Keyboard submit (Ctrl/Cmd + Enter) ────────────────────────────────────
   const handleKeyDown = useCallback(
@@ -658,7 +666,9 @@ export function PostComposer({
         }}
       >
         <div className="flex gap-3 items-center">
-          <ComposerAvatar photoUrl={user?.photoUrl} displayName={displayName} />
+          <button onClick={(e) => { e.stopPropagation(); navigate("/profile"); }} className="flex-shrink-0">
+            <ComposerAvatar photoUrl={user?.photoUrl} displayName={displayName} />
+          </button>
           <div className="flex-1 min-w-0 text-white/40 text-sm">
             {resolvedPlaceholder}
           </div>
@@ -699,7 +709,9 @@ export function PostComposer({
 
       <div className="flex gap-3">
         {/* Avatar */}
-        <ComposerAvatar photoUrl={user?.photoUrl} displayName={displayName} />
+        <button onClick={() => navigate("/profile")} className="flex-shrink-0">
+          <ComposerAvatar photoUrl={user?.photoUrl} displayName={displayName} />
+        </button>
 
         {/* Composer body */}
         <div className="flex-1 min-w-0">

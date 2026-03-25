@@ -164,8 +164,9 @@ export function NotificationDropdown({ onClose }: Props) {
                 >
                   {/* Actor avatar */}
                   <div
-                    className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold bg-gradient-to-br from-[#D4007A] to-[#E69138] text-white overflow-hidden"
+                    className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold bg-gradient-to-br from-[#D4007A] to-[#E69138] text-white overflow-hidden cursor-pointer"
                     aria-hidden="true"
+                    onClick={(e) => { e.stopPropagation(); onClose(); navigate(`/profile/${notif.actorId}`); }}
                   >
                     {notif.actorPhotoUrl ? (
                       <img
