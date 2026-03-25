@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { BottomNav } from "./BottomNav";
 import { useAuth } from "@/hooks/useAuth";
@@ -241,14 +241,11 @@ interface SidebarDmMessage {
 
 interface SidebarDmChatProps {
   userId: string;
-  partnerName: string;
-  partnerPhoto: string | null;
   myDbId: string;
   onBack: () => void;
-  onThreadsRefresh: () => void;
 }
 
-function SidebarDmChat({ userId, partnerName, partnerPhoto, myDbId, onBack, onThreadsRefresh }: SidebarDmChatProps) {
+function SidebarDmChat({ userId, myDbId, onBack }: SidebarDmChatProps) {
   const [messages, setMessages] = useState<SidebarDmMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
@@ -260,36 +257,49 @@ function SidebarDmChat({ userId, partnerName, partnerPhoto, myDbId, onBack, onTh
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [partnerName, setPartnerName] = useState("");
+  const [partnerPhoto, setPartnerPhoto] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const lastTypingEmit = useRef(0);
-
-  const onThreadsRefreshRef = useRef(onThreadsRefresh);
-  onThreadsRefreshRef.current = onThreadsRefresh;
-
-  const loadMessages = useCallback(async () => {
-    setIsLoading(true);
-    setChatError(null);
-    try {
-      const res = await fetch(`${SIDEBAR_DM_BASE}/api/webapp/dm/conversation/${userId}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to load");
-      const data = await res.json();
-      if (data.success) {
-        setMessages(data.messages || []);
-        setHasMore((data.messages || []).length >= 30);
-      }
-    } catch {
-      setChatError("Failed to load messages");
-    } finally {
-      setIsLoading(false);
-    }
-    markThreadAsRead(userId).catch(() => {});
-    onThreadsRefreshRef.current();
-  }, [userId]);
+  const hasFetched = useRef(false);
 
   useEffect(() => {
-    loadMessages();
-  }, [loadMessages]);
+    if (hasFetched.current) return;
+    hasFetched.current = true;
+
+    // Fetch partner info
+    fetch(`${SIDEBAR_DM_BASE}/api/webapp/dm/user/${userId}`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.success && data.user) {
+          setPartnerName(data.user.first_name || data.user.username || "");
+          setPartnerPhoto(data.user.photo_file_id || null);
+        }
+      })
+      .catch(() => {});
+
+    // Fetch messages
+    fetch(`${SIDEBAR_DM_BASE}/api/webapp/dm/conversation/${userId}`, { credentials: "include" })
+      .then((r) => {
+        if (!r.ok) throw new Error("Failed to load");
+        return r.json();
+      })
+      .then((data) => {
+        if (data.success) {
+          setMessages(data.messages || []);
+          setHasMore((data.messages || []).length >= 30);
+        }
+      })
+      .catch(() => {
+        setChatError("Failed to load messages");
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+
+    markThreadAsRead(userId).catch(() => {});
+  }, [userId]);
 
   // Auto-scroll to bottom on initial load
   useEffect(() => {
@@ -994,39 +1004,21 @@ export function Layout() {
             {/* Scrollable nav body — switches between conversation hub and inline DM chat */}
             {inlineDmUserId ? (
               <div className="flex-1 min-h-0 flex flex-col">
-                {(() => {
-                  const dmThread = threads.find((th) => String(th.userId) === String(inlineDmUserId));
-                  return (
-                    <SidebarDmChat
-                      userId={inlineDmUserId}
-                      partnerName={dmThread ? (dmThread.firstName || dmThread.username) : ""}
-                      partnerPhoto={dmThread?.photoUrl ?? null}
-                      myDbId={user?.dbId ?? ""}
-                      onBack={() => {
-                        setInlineDmUserId(null);
-                        // Refresh threads so unread counts update in the list
-                        getMessageThreads()
-                          .then((res) => {
-                            if (res.success) {
-                              setThreads(res.threads);
-                              setDmUnread(res.threads.filter((th) => th.unreadCount > 0).length);
-                            }
-                          })
-                          .catch(() => {});
-                      }}
-                      onThreadsRefresh={() => {
-                        getMessageThreads()
-                          .then((res) => {
-                            if (res.success) {
-                              setThreads(res.threads);
-                              setDmUnread(res.threads.filter((th) => th.unreadCount > 0).length);
-                            }
-                          })
-                          .catch(() => {});
-                      }}
-                    />
-                  );
-                })()}
+                <SidebarDmChat
+                  userId={inlineDmUserId}
+                  myDbId={user?.dbId ?? ""}
+                  onBack={() => {
+                    setInlineDmUserId(null);
+                    getMessageThreads()
+                      .then((res) => {
+                        if (res.success) {
+                          setThreads(res.threads);
+                          setDmUnread(res.threads.filter((th) => th.unreadCount > 0).length);
+                        }
+                      })
+                      .catch(() => {});
+                  }}
+                />
               </div>
             ) : (
               <>
