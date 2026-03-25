@@ -1,142 +1,27 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
-import { useDirectus } from "@/hooks/useDirectus";
-import { useI18n } from "@/lib/i18n";
-import { UpcomingEvents } from "@/components/events/UpcomingEvents";
-import { CreateEventModal } from "@/components/events/CreateEventModal";
-import type { EventItem } from "@/components/events/EventCard";
-import {
-  getHangoutGroups,
-  updateProfile,
-  getUpcomingEvents,
-  getMyRsvps,
-  rsvpEvent,
-  unrsvpEvent,
-  cancelEvent,
-  type HangoutGroup,
-} from "@/lib/api";
-import {
-  HighlightCarousel,
-  EventDetailModal,
-  type HighlightItem,
-  type AnnouncementItem
-} from "@/components/events";
+import { updateProfile } from "@/lib/api";
 import { SocialFeedTabs } from "@/components/social";
-import { SpotlightStrip, type SpotlightItem } from "@/components/SpotlightStrip";
 import { NearbyWidget } from "@/components/NearbyWidget";
 
-interface Announcement extends AnnouncementItem {}
-
 export default function Home() {
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { tier, isPrime, isMember, isAdmin } = useTier();
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("home");
-  const canCreateLive = isAdmin || user?.role === "model" || user?.role === "creator";
 
   const [contentDisclaimer, setContentDisclaimer] = useState(user?.contentDisclaimer || false);
-  const [showCreateEvent, setShowCreateEvent] = useState(false);
-  const [eventKey, setEventKey] = useState(0);
-  const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
-  const [userGroups, setUserGroups] = useState<HangoutGroup[]>([]);
-
-  const { data: announcements, isLoading: annLoading } = useDirectus<Announcement>({
-    collection: "announcements",
-    params: {
-      filter: { status: { _eq: "published" } },
-      sort: ["-is_pinned", "-published_at"],
-      limit: 5,
-    },
-  });
-
-  const [events, setEvents] = useState<EventItem[]>([]);
-  const [evLoading, setEvLoading] = useState(true);
-  const [myRsvps, setMyRsvps] = useState<EventItem[]>([]);
 
   const username = user?.username || user?.displayName || "user";
 
-  const loadEvents = useCallback(() => {
-    setEvLoading(true);
-    getUpcomingEvents({ limit: 8 })
-      .then((res) => {
-        if (res.success) setEvents(res.events);
-      })
-      .catch(() => {})
-      .finally(() => setEvLoading(false));
-  }, []);
-
-  useEffect(() => {
-    if (authLoading) return;
-
-    loadEvents();
-
-    if (isAuthenticated) {
-      getHangoutGroups()
-        .then((res) => {
-          if (res.success) setUserGroups(res.groups);
-        })
-        .catch(() => {});
-
-      getMyRsvps()
-        .then((res) => {
-          if (res.success) setMyRsvps(res.events);
-        })
-        .catch(() => {});
-    }
-  }, [authLoading, isAuthenticated, loadEvents]);
-
-  const handleRsvp = useCallback(async (eventId: string, shouldRsvp: boolean) => {
-    try {
-      const res = shouldRsvp ? await rsvpEvent(eventId) : await unrsvpEvent(eventId);
-      if (res.success) {
-        const applyUpdate = (prev: EventItem[]) =>
-          prev.map((e) =>
-            e.id === eventId
-              ? { ...e, rsvpCount: res.rsvpCount, userRsvpd: res.userRsvpd }
-              : e
-          );
-        setEvents(applyUpdate);
-        if (!shouldRsvp) {
-          setMyRsvps((prev) => prev.filter((e) => e.id !== eventId));
-        } else {
-          setMyRsvps((prev) => {
-            if (prev.some((e) => e.id === eventId)) return applyUpdate(prev);
-            const found = events.find((e) => e.id === eventId);
-            return found
-              ? [{ ...found, rsvpCount: res.rsvpCount, userRsvpd: res.userRsvpd }, ...prev]
-              : prev;
-          });
-        }
-      }
-    } catch { /* silent */ }
-  }, [events]);
-
-  const handleCancel = useCallback(async (eventId: string) => {
-    if (!window.confirm("Cancel this event?")) return;
-    try {
-      await cancelEvent(eventId);
-      setEvents((prev) => prev.filter((e) => e.id !== eventId));
-    } catch { /* silent */ }
-  }, []);
-
-  // Combine and sort highlights: pinned announcements first, then by date
-  const highlights: HighlightItem[] = [
-    ...announcements.map((a) => ({ kind: "announcement" as const, data: a })),
-    ...events.map((e) => ({ kind: "event" as const, data: e })),
-  ].sort((a, b) => {
-    const aPinned = a.kind === "announcement" && a.data.is_pinned;
-    const bPinned = b.kind === "announcement" && b.data.is_pinned;
-    if (aPinned && !bPinned) return -1;
-    if (!aPinned && bPinned) return 1;
-    const aDate = a.kind === "event" ? a.data.scheduledAt : a.data.published_at;
-    const bDate = b.kind === "event" ? b.data.scheduledAt : b.data.published_at;
-    return new Date(aDate).getTime() - new Date(bDate).getTime();
-  });
+  // Read optional hashtag filter from ?tag= query param
+  const hashtagFilter = new URLSearchParams(location.search).get("tag") || undefined;
 
   const handleAcceptDisclaimer = useCallback(async () => {
     await updateProfile({ contentDisclaimer: true });
@@ -168,34 +53,6 @@ export default function Home() {
           {tier}
         </span>
       </div>
-
-      {/* Quick access row — SpotlightStrip */}
-      <SpotlightStrip
-        items={[
-          {
-            kind: "action",
-            id: "main-stage",
-            label: "Main Stage",
-            sublabel: "24/7 open",
-            icon: (
-              <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#5ED1C4" }}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-            ),
-            gradient: "linear-gradient(135deg, rgba(94,209,196,0.3), rgba(212,0,122,0.2))",
-            onClick: () => navigate("/main-stage"),
-            pinned: true,
-          },
-          ...events.map((ev) => ({ kind: "event" as const, data: ev })),
-        ]}
-        onItemClick={(item) => {
-          if (item.kind === "event") setDetailEvent(item.data);
-        }}
-        showAction
-        onAction={() => setShowCreateEvent(true)}
-        actionLabel="Create event"
-        emptyAction={!evLoading ? () => setShowCreateEvent(true) : undefined}
-      />
 
       {/* Desktop: Nearby widget + quick cards */}
       <div className="hidden lg:block mb-6 space-y-4">
@@ -324,33 +181,9 @@ export default function Home() {
         contentDisclaimerAccepted={contentDisclaimer}
         onAcceptDisclaimer={handleAcceptDisclaimer}
         onNavigate={navigate}
-        showComposer={true}
+        showComposer={!hashtagFilter}
+        hashtagFilter={hashtagFilter}
       />
-
-      {/* Modals */}
-      {showCreateEvent && (
-        <CreateEventModal
-          canCreateLive={canCreateLive}
-          userGroups={userGroups}
-          onClose={() => setShowCreateEvent(false)}
-          onCreated={(_event: EventItem) => {
-            setShowCreateEvent(false);
-            setEventKey((k) => k + 1);
-          }}
-        />
-      )}
-
-      {detailEvent && (
-        <EventDetailModal
-          event={detailEvent}
-          onClose={() => setDetailEvent(null)}
-          onRsvp={handleRsvp}
-          onUpdated={(updated) => {
-            setEvents((prev) => prev.map((e) => e.id === updated.id ? updated : e));
-            setDetailEvent(updated);
-          }}
-        />
-      )}
     </div>
   );
 }

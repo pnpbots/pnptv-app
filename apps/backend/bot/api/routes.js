@@ -56,7 +56,6 @@ const modelRoutes = require('./routes/modelRoutes');
 const applyRoutes = require('./routes/applyRoutes');
 const elementRoutes = require('./routes/elementRoutes');
 const matrixController = require('./controllers/matrixController');
-const matrixMessageController = require('./controllers/matrixMessageController');
 const creatorRoutes = require('./routes/creatorRoutes');
 const gamificationRoutes = require('./routes/gamificationRoutes');
 const canvaRoutes = require('./routes/canvaRoutes');
@@ -2727,6 +2726,17 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
 
   logger.info('[OIDC] Session established', { userId: userRow.id, sub });
 
+  // Sync Authentik groups based on PNPtv role/tier (fire-and-forget)
+  setImmediate(async () => {
+    try {
+      await AuthentikService.syncUserGroups(sub, {
+        role: userRow.role,
+        tier: userRow.tier,
+        creatorStatus: userRow.creator_status,
+      });
+    } catch {}
+  });
+
   // Redirect to the app (return_to must start with / to prevent open redirect)
   const safeReturnTo = typeof returnTo === 'string' && /^\/[a-z0-9/_-]*/i.test(returnTo) ? returnTo : '/';
   res.redirect(`${APP_URL}${safeReturnTo === '/' ? '' : safeReturnTo}?oidc_linked=1`);
@@ -3205,6 +3215,8 @@ app.post('/api/webapp/support/ticket', requireSessionAuth, supportChatLimiter, a
 app.get('/api/webapp/support/ticket', requireSessionAuth, asyncHandler(supportController.getTicket));
 app.get('/api/webapp/support/ticket/messages', requireSessionAuth, asyncHandler(supportController.getTicketMessages));
 app.post('/api/webapp/support/ticket/message', requireSessionAuth, supportChatLimiter, asyncHandler(supportController.addTicketMessage));
+// Admin: Cristina AI payment verification agent
+app.post('/api/webapp/support/verify-payment', adminGuard, asyncHandler(supportController.verifyPayment));
 
 // Admin: manually trigger Cristina ticket worker
 app.post('/api/admin/support/cristina/run', verifyAdminJWT, asyncHandler(async (req, res) => {
@@ -4294,6 +4306,10 @@ app.post('/api/webapp/hangouts/groups/:id/delete-message', requireSessionAuth, a
 // Legacy single-call endpoint (kept for backward compatibility)
 app.post('/api/webapp/hangouts/groups/:id/call', requireSessionAuth, asyncHandler(hangoutGroupController.startCall));
 
+// ── Hangout Feed Integration ────────────────────────────────────────────────
+app.get('/api/webapp/hangouts/groups/:id/feed', requireSessionAuth, asyncHandler(socialController.getHangoutFeed));
+app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, asyncHandler(socialController.dropToFeed));
+
 // ── Hangout Video Calls (JaaS) ──────────────────────────────────────────────
 app.use('/api/webapp/hangouts/groups', requireSessionAuth, hangoutVideoCallRoutes);
 
@@ -4468,6 +4484,8 @@ app.get('/api/webapp/social/home-feed', asyncHandler(socialController.getHomeFee
 app.get('/api/webapp/social/feed', requireSessionAuth, asyncHandler(socialController.getFeed));
 // Wall of Fame sub-feed — WoF-only posts
 app.get('/api/webapp/social/wof-feed', asyncHandler(socialController.getWofFeed));
+// Hashtag feed — posts containing a specific #tag (?tag=pnp)
+app.get('/api/webapp/social/hashtag-feed', requireSessionAuth, asyncHandler(socialController.getHashtagFeed));
 app.get('/api/webapp/social/wall/:userId', asyncHandler(socialController.getWall));
 app.get('/api/webapp/social/profile/:userId', asyncHandler(socialController.getPublicProfile));
 app.post('/api/webapp/social/posts', requireSessionAuth, socialPostLimiter, asyncHandler(socialController.createPost));
@@ -4488,6 +4506,9 @@ app.get('/api/webapp/social/wof/leaderboard', asyncHandler(socialController.getW
 app.get('/api/webapp/social/wof/stats', asyncHandler(socialController.getWofStats));
 app.post('/api/admin/social/posts/:postId/wof', adminGuard, asyncHandler(socialController.adminFlagWof));
 app.delete('/api/admin/social/posts/:postId/wof', adminGuard, asyncHandler(socialController.adminUnflagWof));
+
+// ── User Hangout Activity (for profiles) ────────────────────────────────────
+app.get('/api/webapp/social/hangout-activity/:userId', requireSessionAuth, asyncHandler(socialController.getUserHangoutActivity));
 
 // ── Promoted Posts (CMS Sync) ────────────────────────────────────────────────
 app.post('/api/admin/social/sync-promoted', adminGuard, asyncHandler(promotedPostController.handleSyncPromoted));
@@ -7137,8 +7158,7 @@ app.get('/api/webapp/matrix/token', requireSessionAuth, asyncHandler(matrixContr
 app.post('/api/webapp/matrix/dm/:userId', requireSessionAuth, asyncHandler(matrixController.getOrCreateDmRoom));
 app.post('/api/webapp/matrix/hangout-room/:groupId', requireSessionAuth, asyncHandler(matrixController.getOrCreateHangoutRoom));
 app.post('/api/webapp/matrix/hangout-room/:groupId/sync-members', requireSessionAuth, asyncHandler(matrixController.syncHangoutRoomMembers));
-app.post('/api/webapp/matrix/hangout/:groupId/message', requireSessionAuth, asyncHandler(matrixMessageController.sendHangoutMessage));
-app.post('/api/webapp/matrix/dm/:userId/message', requireSessionAuth, asyncHandler(matrixMessageController.sendDmMessage));
+// Matrix message routes removed — messages now stored directly in PG via REST + Socket.IO
 
 // Creator monetization routes
 app.use('/api/webapp/creator', creatorRoutes);
@@ -7196,6 +7216,12 @@ app.get('/api/community-room/leaderboard', requireSessionAuth, asyncHandler(comm
 app.post('/api/community-room/moderation/mute', verifyAdminJWT, asyncHandler(communityRoomController.muteUser));
 app.post('/api/community-room/moderation/remove', verifyAdminJWT, asyncHandler(communityRoomController.removeUser));
 app.post('/api/community-room/moderation/clear-chat', verifyAdminJWT, asyncHandler(communityRoomController.clearChat));
+app.get('/api/community-room/stage-state', requireSessionAuth, asyncHandler(communityRoomController.getStageState));
+app.post('/api/community-room/stage-mode', requireSessionAuth, asyncHandler(communityRoomController.setStageMode));
+app.post('/api/community-room/knock', requireSessionAuth, asyncHandler(communityRoomController.knockToSpeak));
+app.post('/api/community-room/knock/approve', requireSessionAuth, asyncHandler(communityRoomController.approveKnock));
+app.post('/api/community-room/knock/deny', requireSessionAuth, asyncHandler(communityRoomController.denyKnock));
+app.post('/api/community-room/clip', requireSessionAuth, asyncHandler(communityRoomController.clipMoment));
 
 // ── JaaS Token Endpoints (DISABLED) ─────────────────────────────────────────
 /*

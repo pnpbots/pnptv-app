@@ -55,7 +55,7 @@ class SocialPostService {
 
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
-              sp.source_channel,
+              sp.source_channel, sp.hangout_group_id,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
               sp.is_promoted, sp.promoted_link, sp.promoted_link_label, sp.promoted_thumbnail,
@@ -67,12 +67,15 @@ class SocialPostService {
               u.creator_verified as author_creator_verified, u.creator_price_usd as author_creator_price,
               EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me,
               rp.content as repost_content, rp.created_at as repost_created_at,
-              ru.username as repost_author_username, ru.first_name as repost_author_first_name
+              ru.username as repost_author_username, ru.first_name as repost_author_first_name,
+              hg.name as hangout_group_name, hg.avatar_url as hangout_group_avatar
        FROM social_posts sp
        JOIN users u ON sp.user_id = u.id
        LEFT JOIN social_posts rp ON sp.repost_of_id = rp.id
        LEFT JOIN users ru ON rp.user_id = ru.id
+       LEFT JOIN hangout_groups hg ON sp.hangout_group_id = hg.id
        WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL
+         AND (sp.hangout_group_id IS NULL OR hg.feed_visibility = 'public')
          ${cursorClause}
          AND sp.user_id != ALL($${blockedParamIdx}::text[])
        ORDER BY sp.id DESC
@@ -271,6 +274,127 @@ class SocialPostService {
     return { posts, nextCursor };
   }
 
+  // ── Hashtag Feed ──────────────────────────────────────────────────────────
+
+  /**
+   * Paginated feed filtered by a single hashtag present in post content.
+   * Uses a case-insensitive word-boundary match so #pnp does not match #pnplive.
+   *
+   * @param {number}   userId     - Authenticated viewer's user ID (for liked_by_me)
+   * @param {string}   tag        - Hashtag without the leading # character
+   * @param {string}   cursor     - Opaque pagination cursor (last seen post id)
+   * @param {number}   limit      - Page size (max 50)
+   * @param {string}   viewerTier - Viewer's current access tier
+   * @param {boolean}  isAdmin    - True for admin/superadmin roles
+   * @param {number[]} blockedIds - IDs the viewer has blocked
+   */
+  static async getHashtagFeed(userId, tag, cursor, limit = 20, viewerTier, isAdmin = false, blockedIds = []) {
+    if (!tag || typeof tag !== 'string') return { posts: [], nextCursor: null };
+    // Sanitize: only allow word chars + accented letters, 1-64 chars
+    const cleanTag = tag.replace(/[^a-zA-Z0-9_\u00C0-\u024F]/g, '').slice(0, 64);
+    if (!cleanTag) return { posts: [], nextCursor: null };
+
+    const lim = Math.min(Number(limit) || 20, 50);
+    const cursorId = cursor ? parseInt(cursor, 10) : null;
+    const blockedParam = blockedIds.length > 0 ? blockedIds.map(Number) : [];
+
+    // Param order: $1=userId, $2=pattern, $3=lim, [$4=cursorId], $N=blockedParam
+    const params = [userId, `#${cleanTag}`, lim];
+    if (cursorId) params.push(cursorId);
+    params.push(blockedParam);
+    const blockedParamIdx = params.length;
+    const cursorClause = cursorId ? `AND sp.id < $4` : '';
+
+    const { rows } = await query(
+      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
+              sp.source_channel, sp.hangout_group_id,
+              sp.reply_to_id, sp.repost_of_id,
+              sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
+              sp.is_promoted, sp.promoted_link, sp.promoted_link_label, sp.promoted_thumbnail,
+              COALESCE(sp.content_tier, 'free') as content_tier,
+              u.id as author_id, u.username as author_username,
+              u.first_name as author_first_name, u.photo_file_id as author_photo,
+              u.city as author_city, u.country as author_country,
+              u.creator_status as author_creator_status, u.creator_type as author_creator_type,
+              u.creator_verified as author_creator_verified, u.creator_price_usd as author_creator_price,
+              EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me,
+              rp.content as repost_content, rp.created_at as repost_created_at,
+              ru.username as repost_author_username, ru.first_name as repost_author_first_name,
+              hg.name as hangout_group_name, hg.avatar_url as hangout_group_avatar
+       FROM social_posts sp
+       JOIN users u ON sp.user_id = u.id
+       LEFT JOIN social_posts rp ON sp.repost_of_id = rp.id
+       LEFT JOIN users ru ON rp.user_id = ru.id
+       LEFT JOIN hangout_groups hg ON sp.hangout_group_id = hg.id
+       WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL
+         AND sp.content ILIKE '%' || $2 || '%'
+         AND (sp.hangout_group_id IS NULL OR hg.feed_visibility = 'public')
+         ${cursorClause}
+         AND sp.user_id != ALL($${blockedParamIdx}::text[])
+       ORDER BY sp.id DESC
+       LIMIT $3`,
+      params
+    );
+    let posts = sanitizePostRows(rows);
+    if (viewerTier !== undefined) {
+      posts = await CreatorService.filterFeedExclusivePosts(posts, userId, viewerTier);
+      posts = SocialPostService._applyContentTierBlur(posts, viewerTier, isAdmin);
+    }
+    const nextCursor = rows.length === lim ? String(rows[rows.length - 1].id) : null;
+    return { posts, nextCursor };
+  }
+
+  // ── Hangout Feed ─────────────────────────────────────────────────────────
+
+  /**
+   * Paginated feed scoped to a specific hangout group.
+   * Only returns posts where hangout_group_id matches.
+   */
+  static async getHangoutFeed(hangoutGroupId, userId, cursor, limit = 20, viewerTier, isAdmin = false, blockedIds = []) {
+    const lim = Math.min(Number(limit) || 20, 50);
+    const cursorId = cursor ? parseInt(cursor, 10) : null;
+    const blockedParam = blockedIds.length > 0 ? blockedIds.map(Number) : [];
+
+    const params = [userId, hangoutGroupId, lim];
+    if (cursorId) params.push(cursorId);
+    params.push(blockedParam);
+    const blockedParamIdx = params.length;
+    const cursorClause = cursorId ? `AND sp.id < $4` : '';
+
+    const { rows } = await query(
+      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
+              sp.source_channel, sp.hangout_group_id, sp.source_message_id,
+              sp.reply_to_id, sp.repost_of_id,
+              sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
+              COALESCE(sp.content_tier, 'free') as content_tier,
+              u.id as author_id, u.username as author_username,
+              u.first_name as author_first_name, u.photo_file_id as author_photo,
+              u.city as author_city, u.country as author_country,
+              u.creator_status as author_creator_status, u.creator_type as author_creator_type,
+              u.creator_verified as author_creator_verified, u.creator_price_usd as author_creator_price,
+              EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me,
+              rp.content as repost_content, rp.created_at as repost_created_at,
+              ru.username as repost_author_username, ru.first_name as repost_author_first_name
+       FROM social_posts sp
+       JOIN users u ON sp.user_id = u.id
+       LEFT JOIN social_posts rp ON sp.repost_of_id = rp.id
+       LEFT JOIN users ru ON rp.user_id = ru.id
+       WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL
+         AND sp.hangout_group_id = $2
+         ${cursorClause}
+         AND sp.user_id != ALL($${blockedParamIdx}::text[])
+       ORDER BY sp.id DESC
+       LIMIT $3`,
+      params
+    );
+    let posts = sanitizePostRows(rows);
+    if (viewerTier !== undefined) {
+      posts = SocialPostService._applyContentTierBlur(posts, viewerTier, isAdmin);
+    }
+    const nextCursor = posts.length === lim ? String(posts[posts.length - 1].id) : null;
+    return { posts, nextCursor };
+  }
+
   // ── Wall ──────────────────────────────────────────────────────────────────
 
   /**
@@ -339,14 +463,14 @@ class SocialPostService {
 
   // ── Create Post ───────────────────────────────────────────────────────────
 
-  static async createPost(userId, content, mediaUrl, mediaType, replyToId, repostOfId, isWof = false, isExclusive = false, isShareable = true, videoThumbnailUrl = null, videoTitle = null, videoDescription = null) {
+  static async createPost(userId, content, mediaUrl, mediaType, replyToId, repostOfId, isWof = false, isExclusive = false, isShareable = true, videoThumbnailUrl = null, videoTitle = null, videoDescription = null, hangoutGroupId = null, sourceMessageId = null) {
     const contentTier = isExclusive ? 'PRIME' : 'free';
     const { rows } = await query(
-      `INSERT INTO social_posts (user_id, content, media_url, media_type, reply_to_id, repost_of_id, is_wof, is_exclusive, is_shareable, video_thumbnail_url, content_tier, video_title, video_description)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      `INSERT INTO social_posts (user_id, content, media_url, media_type, reply_to_id, repost_of_id, is_wof, is_exclusive, is_shareable, video_thumbnail_url, content_tier, video_title, video_description, hangout_group_id, source_message_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING id, content, media_url, media_type, video_thumbnail_url, video_title, video_description, reply_to_id, repost_of_id,
-                 likes_count, reposts_count, replies_count, is_wof, is_exclusive, is_shareable, content_tier, created_at`,
-      [userId, content, mediaUrl, mediaType, replyToId || null, repostOfId || null, isWof, isExclusive, isShareable, videoThumbnailUrl || null, contentTier, videoTitle || null, videoDescription || null]
+                 likes_count, reposts_count, replies_count, is_wof, is_exclusive, is_shareable, content_tier, created_at, hangout_group_id, source_message_id`,
+      [userId, content, mediaUrl, mediaType, replyToId || null, repostOfId || null, isWof, isExclusive, isShareable, videoThumbnailUrl || null, contentTier, videoTitle || null, videoDescription || null, hangoutGroupId || null, sourceMessageId || null]
     );
     const post = rows[0];
 

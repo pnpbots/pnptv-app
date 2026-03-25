@@ -146,7 +146,7 @@ function emitNewPost(io, post, authorId) {
 
 const createPost = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, isExclusive, isShareable } = req.body;
+  const { content, isExclusive, isShareable, hangoutGroupId: rawHangoutGroupId } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ error: 'Content required' });
 
   let replyToId = req.body.replyToId ? parseInt(req.body.replyToId, 10) : null;
@@ -197,6 +197,25 @@ const createPost = async (req, res) => {
     const exclusive = !!isExclusive;
     const shareable = isShareable !== false;
 
+    // Validate hangout group if provided (post scoped to a hangout feed)
+    let hangoutGroupId = null;
+    if (rawHangoutGroupId) {
+      hangoutGroupId = parseInt(rawHangoutGroupId, 10);
+      if (!Number.isFinite(hangoutGroupId) || hangoutGroupId <= 0) {
+        return res.status(400).json({ error: 'Invalid hangoutGroupId' });
+      }
+      // Must be a member of the group
+      const memberCheck = await dbQuery(
+        'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned = false OR is_banned IS NULL)',
+        [hangoutGroupId, user.id]
+      );
+      if (!memberCheck.rows.length) return res.status(403).json({ error: 'Must be a group member to post' });
+      // Group must not be in ghost mode
+      const groupCheck = await dbQuery('SELECT feed_visibility FROM hangout_groups WHERE id=$1', [hangoutGroupId]);
+      if (!groupCheck.rows.length) return res.status(404).json({ error: 'Group not found' });
+      if (groupCheck.rows[0].feed_visibility === 'ghost') return res.status(403).json({ error: 'This group does not have a feed' });
+    }
+
     // Validate channel ownership if provided (only for non-reply posts)
     let channelId = null;
     if (!replyToId && req.body.channelId) {
@@ -212,7 +231,7 @@ const createPost = async (req, res) => {
       if (!isOwner && !isCollaborator) return res.status(403).json({ error: 'Channel not found or not yours' });
     }
 
-    const post = await SocialPostService.createPost(user.id, content.trim(), null, null, replyToId, repostOfId, false, exclusive, shareable);
+    const post = await SocialPostService.createPost(user.id, content.trim(), null, null, replyToId, repostOfId, false, exclusive, shareable, null, null, null, hangoutGroupId);
 
     // Assign to channel and update post_count
     if (channelId) {
@@ -571,6 +590,33 @@ const createPostWithMedia = async (req, res) => {
     const vTitle = (mediaType === 'video' && videoTitle) ? videoTitle.toString().trim().slice(0, 150) : null;
     const vDesc = (mediaType === 'video' && videoDescription) ? videoDescription.toString().trim().slice(0, 2000) : null;
 
+    // Validate hangout group if provided
+    let hangoutGroupId = null;
+    if (req.body.hangoutGroupId) {
+      hangoutGroupId = parseInt(req.body.hangoutGroupId, 10);
+      if (!Number.isFinite(hangoutGroupId) || hangoutGroupId <= 0) {
+        if (finalFilePath) await fs.unlink(finalFilePath).catch(() => {});
+        return res.status(400).json({ error: 'Invalid hangoutGroupId' });
+      }
+      const memberCheck = await dbQuery(
+        'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned = false OR is_banned IS NULL)',
+        [hangoutGroupId, user.id]
+      );
+      if (!memberCheck.rows.length) {
+        if (finalFilePath) await fs.unlink(finalFilePath).catch(() => {});
+        return res.status(403).json({ error: 'Must be a group member to post' });
+      }
+      const groupCheck = await dbQuery('SELECT feed_visibility FROM hangout_groups WHERE id=$1', [hangoutGroupId]);
+      if (!groupCheck.rows.length) {
+        if (finalFilePath) await fs.unlink(finalFilePath).catch(() => {});
+        return res.status(404).json({ error: 'Group not found' });
+      }
+      if (groupCheck.rows[0].feed_visibility === 'ghost') {
+        if (finalFilePath) await fs.unlink(finalFilePath).catch(() => {});
+        return res.status(403).json({ error: 'This group does not have a feed' });
+      }
+    }
+
     // Validate channel ownership if provided (only for non-reply posts)
     let channelId = null;
     if (!replyToId && req.body.channelId) {
@@ -594,7 +640,7 @@ const createPostWithMedia = async (req, res) => {
     }
 
     const post = await SocialPostService.createPost(
-      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable, null, vTitle, vDesc
+      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable, null, vTitle, vDesc, hangoutGroupId
     );
 
     // Assign to channel and update post_count
@@ -1382,4 +1428,175 @@ const unassignPostFromChannel = async (req, res) => {
   }
 };
 
-module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, editPost, getReplies, postToMastodon, createPostWithMedia, createPostWithMultiMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof, getPost, getPublicPost, searchMentions, assignPostToChannel, unassignPostFromChannel };
+// ── Hangout Feed ──────────────────────────────────────────────────────────────
+
+const getHangoutFeed = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    // Must be a member
+    const memberCheck = await dbQuery(
+      'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned = false OR is_banned IS NULL)',
+      [groupId, user.id]
+    );
+    if (!memberCheck.rows.length) return res.status(403).json({ error: 'Must be a group member' });
+
+    // Check feed visibility
+    const groupCheck = await dbQuery('SELECT feed_visibility FROM hangout_groups WHERE id=$1', [groupId]);
+    if (!groupCheck.rows.length) return res.status(404).json({ error: 'Group not found' });
+    if (groupCheck.rows[0].feed_visibility === 'ghost') return res.json({ success: true, posts: [], nextCursor: null });
+
+    const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+    const viewerTier = await validateTierFresh(user.id, user.tier || 'free');
+    const blockedRes = await dbQuery('SELECT blocked FROM users WHERE id = $1', [user.id]);
+    const blockedIds = (blockedRes.rows[0]?.blocked || []).map(Number);
+
+    const result = await SocialPostService.getHangoutFeed(groupId, user.id, req.query.cursor, req.query.limit, viewerTier, isAdmin, blockedIds);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    logger.error('getHangoutFeed error', err);
+    return res.status(500).json({ error: 'Failed to load hangout feed' });
+  }
+};
+
+// ── Drop to Feed — promote a chat message into a hangout feed post ───────────
+
+const dropToFeed = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  const { messageId } = req.body;
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!messageId) return res.status(400).json({ error: 'messageId required' });
+
+  const msgId = parseInt(messageId, 10);
+  if (!Number.isFinite(msgId) || msgId <= 0) return res.status(400).json({ error: 'Invalid messageId' });
+
+  try {
+    // Must be member
+    const memberCheck = await dbQuery(
+      'SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned = false OR is_banned IS NULL)',
+      [groupId, user.id]
+    );
+    if (!memberCheck.rows.length) return res.status(403).json({ error: 'Must be a group member' });
+
+    // Group must not be ghost
+    const groupCheck = await dbQuery('SELECT feed_visibility, name FROM hangout_groups WHERE id=$1', [groupId]);
+    if (!groupCheck.rows.length) return res.status(404).json({ error: 'Group not found' });
+    if (groupCheck.rows[0].feed_visibility === 'ghost') return res.status(403).json({ error: 'This group does not have a feed' });
+
+    // Fetch the chat message
+    const msgRes = await dbQuery(
+      `SELECT id, room, user_id, content, media_url, media_type, media_thumb_url, media_width, media_height
+       FROM chat_messages WHERE id=$1 AND room=$2 AND is_deleted = false`,
+      [msgId, `hangout:${groupId}`]
+    );
+    if (!msgRes.rows.length) return res.status(404).json({ error: 'Message not found' });
+
+    const msg = msgRes.rows[0];
+
+    // Only the message author or a moderator/owner can drop to feed
+    const isOwnerOrMod = memberCheck.rows[0].role === 'owner' || memberCheck.rows[0].role === 'moderator';
+    if (String(msg.user_id) !== String(user.id) && !isOwnerOrMod) {
+      return res.status(403).json({ error: 'Only the author or a moderator can drop this to the feed' });
+    }
+
+    // Check if already dropped
+    const existingCheck = await dbQuery('SELECT id FROM social_posts WHERE source_message_id=$1', [msgId]);
+    if (existingCheck.rows.length) return res.status(409).json({ error: 'This message has already been dropped to the feed' });
+
+    // Create the post
+    const postContent = msg.content || '';
+    const post = await SocialPostService.createPost(
+      msg.user_id, postContent, msg.media_url, msg.media_type,
+      null, null, false, false, true, null, null, null,
+      groupId, msgId
+    );
+
+    const authorPhoto = await getUserPhotoFromDb(msg.user_id);
+    const authorRes = await dbQuery('SELECT username, first_name FROM users WHERE id=$1', [msg.user_id]);
+    const author = authorRes.rows[0] || {};
+
+    const fullPost = {
+      ...post,
+      author_id: msg.user_id,
+      author_username: author.username || '',
+      author_first_name: author.first_name || '',
+      author_photo: authorPhoto,
+      liked_by_me: false,
+      hangout_group_id: groupId,
+      hangout_group_name: groupCheck.rows[0].name,
+    };
+
+    // Emit to hangout feed room
+    const io = req.app.get('io');
+    if (io) io.to(`hangout:${groupId}`).emit('hangout:feed:new_post', fullPost);
+
+    return res.json({ success: true, post: fullPost });
+  } catch (err) {
+    logger.error('dropToFeed error', err);
+    return res.status(500).json({ error: 'Failed to drop to feed' });
+  }
+};
+
+// ── User hangout activity (for profiles) ─────────────────────────────────────
+
+const getUserHangoutActivity = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const targetUserId = req.params.userId || user.id;
+
+  try {
+    // Public hangouts the user is a member of (with message count as activity)
+    const { rows } = await dbQuery(
+      `SELECT g.id, g.name, g.avatar_url, g.is_main, g.is_public, g.feed_visibility,
+              (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
+              (SELECT COUNT(*)::int FROM chat_messages cm WHERE cm.room = 'hangout:' || g.id::text AND cm.user_id = $1 AND cm.is_deleted = false) as message_count,
+              (SELECT MAX(cm.created_at) FROM chat_messages cm WHERE cm.room = 'hangout:' || g.id::text AND cm.user_id = $1 AND cm.is_deleted = false) as last_active_at
+       FROM hangout_groups g
+       JOIN hangout_group_members gm ON gm.group_id = g.id AND gm.user_id = $1
+       WHERE g.is_public = true
+       ORDER BY last_active_at DESC NULLS LAST
+       LIMIT 10`,
+      [targetUserId]
+    );
+
+    return res.json({
+      success: true,
+      hangouts: rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        avatarUrl: r.avatar_url,
+        isMain: r.is_main,
+        memberCount: r.member_count,
+        messageCount: r.message_count,
+        lastActiveAt: r.last_active_at,
+      })),
+    });
+  } catch (err) {
+    logger.error('getUserHangoutActivity error', err);
+    return res.status(500).json({ error: 'Failed to load hangout activity' });
+  }
+};
+
+const getHashtagFeed = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const tag = (req.query.tag || '').trim();
+  if (!tag) return res.status(400).json({ error: 'Missing tag parameter' });
+  try {
+    const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+    const viewerTier = await validateTierFresh(user.id, user.tier || 'free');
+    if (viewerTier !== (user.tier || 'free').toLowerCase()) req.session.user.tier = viewerTier;
+    const blockedRes = await dbQuery('SELECT blocked FROM users WHERE id = $1', [user.id]);
+    const blockedIds = (blockedRes.rows[0]?.blocked || []).map(Number);
+    const result = await SocialPostService.getHashtagFeed(
+      user.id, tag, req.query.cursor, req.query.limit, viewerTier, isAdmin, blockedIds
+    );
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    logger.error('getHashtagFeed error', err);
+    return res.status(500).json({ error: 'Failed to load hashtag feed' });
+  }
+};
+
+module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, editPost, getReplies, postToMastodon, createPostWithMedia, createPostWithMultiMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof, getPost, getPublicPost, searchMentions, assignPostToChannel, unassignPostFromChannel, getHangoutFeed, dropToFeed, getUserHangoutActivity, getHashtagFeed };

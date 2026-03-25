@@ -827,6 +827,11 @@ export interface SocialPostItem {
   promoted_link?: string | null;
   promoted_link_label?: string | null;
   promoted_thumbnail?: string | null;
+  // Hangout feed integration
+  hangout_group_id?: number | null;
+  hangout_group_name?: string | null;
+  hangout_group_avatar?: string | null;
+  source_message_id?: number | null;
 }
 
 export interface XStatus {
@@ -1000,6 +1005,16 @@ export function getWofFeedPosts(
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
   return request(`/api/webapp/social/wof-feed?${params}`);
+}
+
+export function getPostsByHashtag(
+  tag: string,
+  cursor?: string,
+  limit = 20
+): Promise<{ success: boolean; posts: SocialPostItem[]; nextCursor: string | null }> {
+  const params = new URLSearchParams({ tag, limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  return request(`/api/webapp/social/hashtag-feed?${params}`);
 }
 
 export function createSocialPost(
@@ -1290,6 +1305,7 @@ export interface HangoutGroup {
   lastMessage: string | null;
   unreadCount?: number;
   tags?: string[];
+  feedVisibility?: "public" | "shadow" | "ghost";
 }
 
 export interface GroupMessage {
@@ -1596,6 +1612,7 @@ export function updateHangoutSettings(groupId: number, settings: {
   isPublic?: boolean;
   name?: string;
   description?: string;
+  feedVisibility?: "public" | "shadow" | "ghost";
 }): Promise<{ success: boolean; settings: Record<string, unknown> }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/settings`, {
     method: "PUT",
@@ -1649,6 +1666,39 @@ export function leaveGroupCall(
   return request(`/api/webapp/hangouts/groups/${groupId}/calls/${callId}/leave`, {
     method: "POST",
   });
+}
+
+// ============================================================================
+// Hangout Feed Integration
+// ============================================================================
+
+export function getHangoutFeed(groupId: number, cursor?: string, limit = 20): Promise<{ success: boolean; posts: SocialPostItem[]; nextCursor: string | null }> {
+  const params = new URLSearchParams();
+  if (cursor) params.set("cursor", cursor);
+  params.set("limit", String(limit));
+  return request(`/api/webapp/hangouts/groups/${groupId}/feed?${params}`);
+}
+
+export function dropToFeed(groupId: number, messageId: number): Promise<{ success: boolean; post: SocialPostItem }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/drop-to-feed`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messageId }),
+  });
+}
+
+export interface HangoutActivity {
+  id: number;
+  name: string;
+  avatarUrl: string | null;
+  isMain: boolean;
+  memberCount: number;
+  messageCount: number;
+  lastActiveAt: string | null;
+}
+
+export function getUserHangoutActivity(userId: string): Promise<{ success: boolean; hangouts: HangoutActivity[] }> {
+  return request(`/api/webapp/social/hangout-activity/${userId}`);
 }
 
 // ============================================================================
@@ -1972,6 +2022,14 @@ export function markNotificationsAsRead(
 // Subscription & Payments
 // ============================================================================
 
+export interface PlanAddOn {
+  id: string;
+  name?: string;
+  add_on_id?: string;
+  duration_days: number | null;
+  is_lifetime: boolean;
+}
+
 export interface SubscriptionPlan {
   id: string;
   name: string;
@@ -1982,11 +2040,14 @@ export interface SubscriptionPlan {
   duration_days: number;
   duration?: number;
   features?: string[];
+  description?: string;
+  addOns?: PlanAddOn[];
   priceUSD: number;
   priceCOP: number;
   exchangeRate?: number;
   active: boolean;
   tier?: string;
+  isLifetime?: boolean;
 }
 
 export function getSubscriptionPlans(): Promise<{
@@ -4035,6 +4096,21 @@ export function updateAdminTicket(
 // Community Room (Main Stage) API — 24/7 open video room powered by JaaS
 // ============================================================================
 
+export interface StagePermissions {
+  role: 'free' | 'member' | 'prime' | 'admin';
+  canToggleAudio: boolean;
+  canToggleVideo: boolean;
+  canScreenshare: boolean;
+  canClipMoment: boolean;
+  canKnockToSpeak: boolean;
+  isModerator: boolean;
+}
+
+export interface StageState {
+  mode: 'ambient' | 'dj-live' | 'community';
+  master: { userId: string; displayName: string; startedAt: number } | null;
+}
+
 export interface CommunityRoomInfo {
   token: string;
   meetingUrl: string;
@@ -4044,6 +4120,8 @@ export interface CommunityRoomInfo {
   isModerator: boolean;
   isTrueModerator: boolean;
   isOpen24_7: boolean;
+  permissions: StagePermissions;
+  stageState: StageState;
   room: {
     id: string;
     code: string;
@@ -4092,6 +4170,45 @@ export function getCommunityRoomStats(): Promise<{
   };
 }> {
   return request("/api/community-room/stats");
+}
+
+export function getStageState(): Promise<{ success: boolean; stageState: StageState }> {
+  return request("/api/community-room/stage-state");
+}
+
+export function setStageMode(mode: string): Promise<{ success: boolean }> {
+  return request("/api/community-room/stage-mode", {
+    method: "POST",
+    body: { mode },
+  });
+}
+
+export function knockToSpeak(): Promise<{ success: boolean }> {
+  return request("/api/community-room/knock", {
+    method: "POST",
+    body: {},
+  });
+}
+
+export function approveKnock(targetUserId: string): Promise<{ success: boolean }> {
+  return request("/api/community-room/knock/approve", {
+    method: "POST",
+    body: { targetUserId },
+  });
+}
+
+export function denyKnock(targetUserId: string): Promise<{ success: boolean }> {
+  return request("/api/community-room/knock/deny", {
+    method: "POST",
+    body: { targetUserId },
+  });
+}
+
+export function clipMoment(caption: string): Promise<{ success: boolean; postId?: number }> {
+  return request("/api/community-room/clip", {
+    method: "POST",
+    body: { caption },
+  });
 }
 
 // ============================================================================

@@ -15,8 +15,9 @@ function truncateAtWord(text: string, max: number): string {
 }
 
 /**
- * Renders a string with @username tokens converted to tappable links
- * that navigate to /profile/:username.
+ * Renders a string with @username and #hashtag tokens converted to tappable links.
+ * @username navigates to /profile/:username.
+ * #hashtag navigates to /?tag=hashtagname for filtered feed.
  * Optionally collapses long text behind a "View more" toggle.
  */
 export function MentionText({ text, className, maxLength }: MentionTextProps) {
@@ -30,7 +31,8 @@ export function MentionText({ text, className, maxLength }: MentionTextProps) {
     ? truncateAtWord(text, maxLength)
     : text;
 
-  const parts = displayText.split(/(@[a-zA-Z0-9_]{2,32})/g);
+  // Split on both @mention and #hashtag tokens
+  const parts = displayText.split(/(@[a-zA-Z0-9_]{2,32}|#[a-zA-Z0-9_\u00C0-\u024F]{1,64})/g);
 
   return (
     <span className={className}>
@@ -51,6 +53,24 @@ export function MentionText({ text, className, maxLength }: MentionTextProps) {
             </span>
           );
         }
+
+        if (/^#[a-zA-Z0-9_\u00C0-\u024F]{1,64}$/.test(part)) {
+          const tag = part.slice(1);
+          return (
+            <span
+              key={i}
+              className="font-medium cursor-pointer hover:underline"
+              style={{ color: "#D4007A" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/?tag=${encodeURIComponent(tag)}`);
+              }}
+            >
+              {part}
+            </span>
+          );
+        }
+
         return <React.Fragment key={i}>{part}</React.Fragment>;
       })}
       {needsTruncation && !expanded && (
