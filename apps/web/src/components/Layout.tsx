@@ -18,7 +18,7 @@ import { NearbyWidget } from "@/components/NearbyWidget";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 
-const SIDEBAR_API_BASE = import.meta.env.VITE_API_URL || (typeof window !== "undefined" && window.location.hostname === "app.pnptv.app" ? "https://app.pnptv.app" : "https://pnptv.app");
+const SIDEBAR_DM_BASE = import.meta.env.VITE_API_URL || "";
 
 // ── HamburgerIcon / CloseIcon ─────────────────────────────────────────────────
 
@@ -270,7 +270,7 @@ function SidebarDmChat({ userId, partnerName, partnerPhoto, myDbId, onBack, onTh
     setIsLoading(true);
     setChatError(null);
     try {
-      const res = await fetch(`${SIDEBAR_API_BASE}/api/webapp/dm/conversation/${userId}`, { credentials: "include" });
+      const res = await fetch(`${SIDEBAR_DM_BASE}/api/webapp/dm/conversation/${userId}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load");
       const data = await res.json();
       if (data.success) {
@@ -355,7 +355,7 @@ function SidebarDmChat({ userId, partnerName, partnerPhoto, myDbId, onBack, onTh
         const formData = new FormData();
         formData.append("media", mediaFile);
         if (messageInput.trim()) formData.append("content", messageInput.trim());
-        const res = await fetch(`${SIDEBAR_API_BASE}/api/webapp/dm/media/${userId}`, {
+        const res = await fetch(`${SIDEBAR_DM_BASE}/api/webapp/dm/media/${userId}`, {
           method: "POST",
           credentials: "include",
           body: formData,
@@ -372,7 +372,7 @@ function SidebarDmChat({ userId, partnerName, partnerPhoto, myDbId, onBack, onTh
         if (mediaPreview) { URL.revokeObjectURL(mediaPreview); setMediaPreview(null); }
         setMessageInput("");
       } else {
-        const res = await fetch(`${SIDEBAR_API_BASE}/api/webapp/dm/send/${userId}`, {
+        const res = await fetch(`${SIDEBAR_DM_BASE}/api/webapp/dm/send/${userId}`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -419,7 +419,7 @@ function SidebarDmChat({ userId, partnerName, partnerPhoto, myDbId, onBack, onTh
     try {
       const oldest = messages[0];
       const res = await fetch(
-        `${SIDEBAR_API_BASE}/api/webapp/dm/conversation/${userId}?cursor=${encodeURIComponent(oldest.created_at)}`,
+        `${SIDEBAR_DM_BASE}/api/webapp/dm/conversation/${userId}?cursor=${encodeURIComponent(oldest.created_at)}`,
         { credentials: "include" }
       );
       if (!res.ok) throw new Error("Failed");
