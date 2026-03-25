@@ -154,13 +154,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "chat",
-        element: (
-          <ModuleLoader>
-            <VerificationGate>
-              <Chat />
-            </VerificationGate>
-          </ModuleLoader>
-        ),
+        element: <Navigate to="/?view=hangouts" replace />,
       },
       {
         path: "chat/:groupId",
@@ -300,7 +294,7 @@ export const router = createBrowserRouter([
       },
       { path: "become-a-model", element: <Navigate to="/creators/apply" replace /> },
       { path: "creator", element: <Navigate to="/creators" replace /> },
-      { path: "hangouts", element: <Navigate to="/chat" replace /> },
+      { path: "hangouts", element: <Navigate to="/?view=hangouts" replace /> },
       { path: "pnplive", element: <Navigate to="/live" replace /> },
       { path: "pnptv-haus", element: <Navigate to="/da-haus" replace /> },
       { path: "community-room", element: <Navigate to="/da-haus" replace /> },

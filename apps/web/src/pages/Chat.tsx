@@ -6,6 +6,8 @@ import {
 } from "react";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
+import { VideoCallOverlay } from "@/components/hangouts/VideoCallOverlay";
+import { VideoCallBanner } from "@/components/hangouts/VideoCallBanner";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -45,12 +47,21 @@ import {
   getGroupMessages,
   sendGroupMessage,
   sendGroupMediaMessage,
+  startGroupCall,
+  getActiveGroupCall,
+  getHangoutFeed,
+  dropToFeed,
+  togglePostLike,
+  deleteSocialPost,
   type HangoutGroup,
   type GroupMember,
   type DiscoverGroup,
   type JoinRequest,
   type GroupMessage,
+  type SocialPostItem,
 } from "@/lib/api";
+import SocialPostCard from "@/components/social/SocialPostCard";
+import { PostComposer } from "@/components/PostComposer";
 import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
 import { NearbyBadge } from "@/components/NearbyBadge";
 import { SpotlightStrip } from "@/components/SpotlightStrip";
@@ -63,7 +74,7 @@ type View = "list" | "chat";
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
-export default function Chat() {
+export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean } = {}) {
   const { user } = useAuth();
   const { isPrime, isBanned, isAdmin } = useTier();
   const navigate = useNavigate();
@@ -121,6 +132,10 @@ export default function Chat() {
     onlineMembers,
     emitTyping,
     typingUsers,
+    callState,
+    callStartedAt,
+    callParticipants,
+    screenShareUser,
   } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId);
 
   // Error feedback
@@ -149,6 +164,14 @@ export default function Chat() {
   const [groupDetail, setGroupDetail] = useState<any>(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
 
+  // Hangout Feed tab state
+  const [chatTab, setChatTab] = useState<"chat" | "feed">("chat");
+  const [hangoutFeedPosts, setHangoutFeedPosts] = useState<SocialPostItem[]>([]);
+  const [hangoutFeedLoading, setHangoutFeedLoading] = useState(false);
+  const [hangoutFeedLoaded, setHangoutFeedLoaded] = useState(false);
+  const [hangoutFeedNextCursor, setHangoutFeedNextCursor] = useState<string | null>(null);
+  const [hangoutFeedLoadingMore, setHangoutFeedLoadingMore] = useState(false);
+
   // Pinned messages
   const [pinnedMessages, setPinnedMessages] = useState<any[]>([]);
   const [showPins, setShowPins] = useState(false);
@@ -174,6 +197,11 @@ export default function Chat() {
 
   // Dedicated error states for non-upload errors
   const [discoverError, setDiscoverError] = useState<string | null>(null);
+
+  // Video call state — per-group JaaS integration
+  const [callMeetingUrl, setCallMeetingUrl] = useState<string | null>(null);
+  const [callLoading, setCallLoading] = useState(false);
+  const [inCall, setInCall] = useState(false);
 
   // SpotlightStrip — hangout events
   const [hangoutEvents, setHangoutEvents] = useState<EventItem[]>([]);
@@ -287,6 +315,32 @@ export default function Chat() {
       URL.revokeObjectURL(mediaPreview);
       setMediaPreview(null);
     }
+  };
+
+  // ─── Video call handlers ─────────────────────────────────────────────
+
+  const handleJoinHangout = async () => {
+    if (!activeGroup || callLoading) return;
+    setCallLoading(true);
+    setChatError(null);
+    try {
+      const res = await startGroupCall(activeGroup.id);
+      if (res.jaas?.meetingUrl) {
+        setCallMeetingUrl(res.jaas.meetingUrl);
+        setInCall(true);
+      } else {
+        setChatError("Video room is temporarily unavailable. Please try again.");
+      }
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Failed to join video call");
+    } finally {
+      setCallLoading(false);
+    }
+  };
+
+  const handleCloseCall = () => {
+    setInCall(false);
+    setCallMeetingUrl(null);
   };
 
   const loadMoreMessages = async () => {
@@ -422,6 +476,8 @@ export default function Chat() {
     setMessageInput("");
     setMediaFile(null);
     setMediaPreview(null);
+    setInCall(false);
+    setCallMeetingUrl(null);
 
     setMessagesLoading(true);
     getGroupMessages(group.id)
@@ -559,6 +615,43 @@ export default function Chat() {
     });
   }, [groups, activeGroup, loadGroups]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─── Hangout Feed helpers ─────────────────────────────────────────────
+
+  const loadHangoutFeed = useCallback(async () => {
+    if (!activeGroup) return;
+    setHangoutFeedLoading(true);
+    try {
+      const res = await getHangoutFeed(activeGroup.id);
+      if (res.success) {
+        setHangoutFeedPosts(res.posts);
+        setHangoutFeedNextCursor(res.nextCursor);
+        setHangoutFeedLoaded(true);
+      }
+    } catch { /* silent */ }
+    setHangoutFeedLoading(false);
+  }, [activeGroup]);
+
+  const loadMoreHangoutFeed = useCallback(async () => {
+    if (!activeGroup || !hangoutFeedNextCursor || hangoutFeedLoadingMore) return;
+    setHangoutFeedLoadingMore(true);
+    try {
+      const res = await getHangoutFeed(activeGroup.id, hangoutFeedNextCursor);
+      if (res.success) {
+        setHangoutFeedPosts((prev) => [...prev, ...res.posts]);
+        setHangoutFeedNextCursor(res.nextCursor);
+      }
+    } catch { /* silent */ }
+    setHangoutFeedLoadingMore(false);
+  }, [activeGroup, hangoutFeedNextCursor, hangoutFeedLoadingMore]);
+
+  // Reset feed state when switching groups
+  useEffect(() => {
+    setChatTab("chat");
+    setHangoutFeedPosts([]);
+    setHangoutFeedLoaded(false);
+    setHangoutFeedNextCursor(null);
+  }, [activeGroup?.id]);
+
   // ─── Chat View ────────────────────────────────────────────────────────
 
   if (view === "chat" && activeGroup) {
@@ -638,18 +731,34 @@ export default function Chat() {
             <span className="text-[11px] font-medium text-green-400">{onlineMembers.length}</span>
           </button>
 
-          {/* Join Main Stage — JaaS video call */}
+          {/* Join Hangout — per-group JaaS video call */}
           <button
-            onClick={() => navigate("/main-stage")}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all hover:opacity-90 active:scale-95 flex-shrink-0"
-            style={{ background: "linear-gradient(135deg, rgba(94,209,196,0.25), rgba(212,0,122,0.2))", color: "#5ED1C4" }}
-            title="Join Main Stage"
-            aria-label="Join Main Stage video call"
+            onClick={handleJoinHangout}
+            disabled={callLoading}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all hover:opacity-90 active:scale-95 flex-shrink-0 disabled:opacity-50"
+            style={{ background: "linear-gradient(135deg, rgba(94,209,196,0.3), rgba(212,0,122,0.25))", color: "#5ED1C4" }}
+            title="Join Hangout!"
+            aria-label="Join hangout video call"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-            <span className="hidden sm:inline">Main Stage</span>
+            {callLoading ? (
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            ) : (
+              <>
+                {callState.isActive && (
+                  <span className="relative flex h-2 w-2 flex-shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
+                  </span>
+                )}
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </>
+            )}
+            <span className="hidden sm:inline">{callState.isActive ? "Join Call" : "Join Hangout!"}</span>
           </button>
 
           {/* Three-dot overflow menu */}
@@ -751,6 +860,24 @@ export default function Chat() {
               </svg>
             </button>
           </div>
+        )}
+
+        {/* Active call banner — shown when someone else started a call */}
+        {!inCall && (
+          <VideoCallBanner
+            isActive={callState.isActive}
+            participantCount={callState.participantCount}
+            participants={callParticipants.map((p) => ({
+              userId: p.userId,
+              name: p.name,
+              photoUrl: p.photoUrl || null,
+            }))}
+            onJoin={handleJoinHangout}
+            isJoining={callLoading}
+            callId={callState.callId}
+            callStartedAt={callStartedAt}
+            isSomeoneSharing={!!screenShareUser}
+          />
         )}
 
         {/* Online Members Panel */}
@@ -1058,6 +1185,41 @@ export default function Chat() {
                             </div>
                           </div>
 
+                          {/* Feed Visibility */}
+                          <div className="px-3 py-2.5 rounded-lg bg-white/5 mb-2">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-sm text-white">Feed Mode</span>
+                              <span className="text-xs text-pnp-textSecondary capitalize">{groupDetail?.feed_visibility ?? activeGroup.feedVisibility ?? "public"}</span>
+                            </div>
+                            <div className="flex gap-1.5">
+                              {([
+                                { value: "public", label: "Public", desc: "Visible to all" },
+                                { value: "shadow", label: "Shadow", desc: "Members only" },
+                                { value: "ghost", label: "Ghost", desc: "No feed" },
+                              ] as const).map(({ value, label }) => (
+                                <button
+                                  key={value}
+                                  onClick={async () => {
+                                    await updateHangoutSettings(activeGroup.id, { feedVisibility: value });
+                                    loadGroupDetail(activeGroup.id);
+                                    // Update local state
+                                    setGroups((prev) => prev.map((g) => g.id === activeGroup.id ? { ...g, feedVisibility: value } : g));
+                                    if (value === "ghost") setChatTab("chat");
+                                  }}
+                                  className="flex-1 py-1.5 rounded text-[10px] font-semibold transition-all"
+                                  style={{
+                                    background: (groupDetail?.feed_visibility ?? activeGroup.feedVisibility ?? "public") === value
+                                      ? "linear-gradient(135deg, #7B61FF, #D4007A)"
+                                      : "rgba(255,255,255,0.05)",
+                                    color: "#fff",
+                                  }}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
                           {/* Tags */}
                           <div className="px-3 py-2.5 rounded-lg bg-white/5 mb-2">
                             <span className="text-sm text-white block mb-1">Tags <span className="text-pnp-textSecondary text-[10px] font-normal">(max 5)</span></span>
@@ -1335,6 +1497,87 @@ export default function Chat() {
           <HangoutEventReminder groupId={activeGroup.id} />
         )}
 
+        {/* Chat / Feed tab bar — only show if group has a feed (not ghost mode) */}
+        {activeGroup.feedVisibility !== "ghost" && (
+          <div className="flex border-b border-pnp-border flex-shrink-0">
+            <button
+              onClick={() => setChatTab("chat")}
+              className={`flex-1 py-2 text-xs font-bold transition-colors ${chatTab === "chat" ? "text-pnp-accent border-b-2 border-pnp-accent" : "text-pnp-textSecondary hover:text-white"}`}
+            >
+              Chat
+            </button>
+            <button
+              onClick={() => { setChatTab("feed"); if (!hangoutFeedLoaded) loadHangoutFeed(); }}
+              className={`flex-1 py-2 text-xs font-bold transition-colors ${chatTab === "feed" ? "text-pnp-accent border-b-2 border-pnp-accent" : "text-pnp-textSecondary hover:text-white"}`}
+            >
+              Feed
+            </button>
+          </div>
+        )}
+
+        {/* Hangout Feed Tab */}
+        {chatTab === "feed" && activeGroup.feedVisibility !== "ghost" ? (
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-3">
+            {/* Hangout PostComposer */}
+            <PostComposer
+              compact
+              hangoutGroupId={activeGroup.id}
+              placeholder="Post to this hangout's feed..."
+              onPostCreated={(post) => setHangoutFeedPosts((prev) => [post, ...prev])}
+            />
+            {hangoutFeedLoading && hangoutFeedPosts.length === 0 ? (
+              <div className="flex items-center justify-center py-12">
+                <svg className="w-8 h-8 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              </div>
+            ) : hangoutFeedPosts.length === 0 ? (
+              <div className="text-center py-12 text-pnp-textSecondary">
+                <p className="text-2xl mb-2">📰</p>
+                <p className="text-sm font-medium mb-1">No posts yet</p>
+                <p className="text-xs">Be the first to post in this hangout's feed!</p>
+              </div>
+            ) : (
+              <>
+                {hangoutFeedPosts.map((post) => (
+                  <SocialPostCard
+                    key={post.id}
+                    post={post}
+                    currentUserId={user?.dbId || ""}
+                    isAdmin={isAdmin}
+                    userLang="en"
+                    onLike={async (id) => {
+                      try {
+                        const res = await togglePostLike(id);
+                        setHangoutFeedPosts((prev) =>
+                          prev.map((p) => p.id === id ? { ...p, liked_by_me: res.liked, likes_count: res.likes_count ?? p.likes_count } : p)
+                        );
+                      } catch {}
+                    }}
+                    onDelete={async (id) => {
+                      try {
+                        await deleteSocialPost(id);
+                        setHangoutFeedPosts((prev) => prev.filter((p) => p.id !== id));
+                      } catch {}
+                    }}
+                    onNavigate={navigate}
+                  />
+                ))}
+                {hangoutFeedNextCursor && (
+                  <button
+                    onClick={loadMoreHangoutFeed}
+                    disabled={hangoutFeedLoadingMore}
+                    className="w-full py-2 text-xs font-medium text-pnp-accent hover:text-white transition-colors"
+                  >
+                    {hangoutFeedLoadingMore ? "Loading..." : "Load more"}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+        <>
         {/* Native chat messages */}
         <div
           ref={messagesContainerRef}
@@ -1432,6 +1675,28 @@ export default function Chat() {
                               onExpandImage={(url) => setLightboxUrl(url)}
                               isMe={isMe}
                             />
+                            {/* Drop to Feed button — promote media to hangout feed */}
+                            {activeGroup.feedVisibility !== "ghost" && (
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  try {
+                                    const res = await dropToFeed(activeGroup.id, msg.id);
+                                    if (res.success) {
+                                      setHangoutFeedPosts((prev) => [res.post, ...prev]);
+                                      setChatError(null);
+                                    }
+                                  } catch (err: any) {
+                                    setChatError(err?.message || "Already dropped to feed");
+                                  }
+                                }}
+                                className="mt-1 text-[10px] font-medium px-2 py-0.5 rounded-full transition-colors hover:bg-white/10"
+                                style={{ color: "#7B61FF" }}
+                                title="Drop to Feed"
+                              >
+                                Drop to Feed
+                              </button>
+                            )}
                           </div>
                         )}
 
@@ -1539,6 +1804,8 @@ export default function Chat() {
             )}
           </button>
         </div>
+        </>
+        )}
 
         {/* Lightbox for images */}
         {lightboxUrl && (
@@ -1562,6 +1829,20 @@ export default function Chat() {
               onClick={(e) => e.stopPropagation()}
             />
           </div>
+        )}
+
+        {/* Video call overlay — fullscreen JaaS embed */}
+        {inCall && callMeetingUrl && (
+          <VideoCallOverlay
+            meetingUrl={callMeetingUrl}
+            roomName={callState.roomName || undefined}
+            groupName={activeGroup.name}
+            onClose={handleCloseCall}
+            isAdmin={isAdmin}
+            isModerator={isOwnerOrMod}
+            callStartedAt={callStartedAt}
+            participantCount={callState.participantCount}
+          />
         )}
 
         {/* In-app confirmation modal */}
@@ -1608,12 +1889,14 @@ export default function Chat() {
   // ─── Group List View ──────────────────────────────────────────────────
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 pb-safe">
-      <Helmet>
-        <title>{t.chat.pageTitle}</title>
-        <meta name="description" content={t.chat.pageDescription} />
-      </Helmet>
-      {showTutorial && <TutorialOverlay section="hangouts" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
+    <div className={embeddedMode ? "" : "max-w-2xl mx-auto px-4 py-6 pb-safe"}>
+      {!embeddedMode && (
+        <Helmet>
+          <title>{t.chat.pageTitle}</title>
+          <meta name="description" content={t.chat.pageDescription} />
+        </Helmet>
+      )}
+      {!embeddedMode && showTutorial && <TutorialOverlay section="hangouts" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
 
       {/* Header */}
       <div className="flex items-center justify-between mb-6">

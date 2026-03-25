@@ -681,7 +681,7 @@ export function Layout() {
 
   const primaryLinks = [
     { to: "/", label: t.nav.home, end: true },
-    { to: "/chat", label: t.nav.hangouts },
+    { to: "/?view=hangouts", label: t.nav.hangouts },
     { to: "/media", label: t.nav.prime },
     { to: "/live", label: t.nav.live },
     { to: "/channels", label: "Channels" },

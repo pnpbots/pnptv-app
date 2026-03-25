@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, lazy, Suspense } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -8,6 +8,8 @@ import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { updateProfile } from "@/lib/api";
 import { SocialFeedTabs } from "@/components/social";
 import { NearbyWidget } from "@/components/NearbyWidget";
+
+const ChatEmbedded = lazy(() => import("@/pages/Chat"));
 
 export default function Home() {
   const { user, isAuthenticated } = useAuth();
@@ -20,8 +22,21 @@ export default function Home() {
 
   const username = user?.username || user?.displayName || "user";
 
-  // Read optional hashtag filter from ?tag= query param
-  const hashtagFilter = new URLSearchParams(location.search).get("tag") || undefined;
+  const searchParams = new URLSearchParams(location.search);
+  const viewMode = searchParams.get("view") === "hangouts" ? "hangouts" : "feed";
+
+  // Read optional hashtag filter from ?tag= query param (only applies in feed mode)
+  const hashtagFilter = viewMode === "feed" ? (searchParams.get("tag") || undefined) : undefined;
+
+  const handleSetView = (mode: "feed" | "hangouts") => {
+    const params = new URLSearchParams(location.search);
+    if (mode === "hangouts") {
+      params.set("view", "hangouts");
+    } else {
+      params.delete("view");
+    }
+    navigate(`/?${params.toString()}`, { replace: true });
+  };
 
   const handleAcceptDisclaimer = useCallback(async () => {
     await updateProfile({ contentDisclaimer: true });
@@ -34,7 +49,7 @@ export default function Home() {
         <title>Home — PNPtv!</title>
         <meta name="description" content="Your PNPtv feed. Browse announcements, featured performers, and community posts." />
       </Helmet>
-      {showTutorial && <TutorialOverlay section="home" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
+      {showTutorial && viewMode === "feed" && <TutorialOverlay section="home" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
 
       {/* Slim hero bar */}
       <div className="flex items-center justify-between px-4 py-2.5 glass-card-sm mb-3 animate-fade-in-up">
@@ -132,8 +147,8 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Mobile: PRIME CTA */}
-      {!isPrime && (
+      {/* Mobile: PRIME CTA — only in feed mode */}
+      {!isPrime && viewMode === "feed" && (
         <button onClick={() => navigate("/subscribe")} className="lg:hidden w-full mb-4 group">
           <div
             className="rounded-xl px-4 py-2.5 flex items-center gap-3 transition-all"
@@ -170,20 +185,58 @@ export default function Home() {
         </button>
       )}
 
-      {/* Social feed — full width */}
-      <SocialFeedTabs
-        currentUserId={user?.dbId ? String(user.dbId) : ""}
-        isAdmin={isAdmin}
-        isAuthenticated={isAuthenticated}
-        userLang={user?.language}
-        viewerCity={user?.city}
-        viewerCountry={user?.country}
-        contentDisclaimerAccepted={contentDisclaimer}
-        onAcceptDisclaimer={handleAcceptDisclaimer}
-        onNavigate={navigate}
-        showComposer={!hashtagFilter}
-        hashtagFilter={hashtagFilter}
-      />
+      {/* Feed / Hangouts toggle */}
+      <div className="flex items-center gap-2 mb-4">
+        <button
+          onClick={() => handleSetView("feed")}
+          className="px-4 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95"
+          style={
+            viewMode === "feed"
+              ? { background: "#D4007A", color: "#fff" }
+              : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
+          }
+        >
+          Feed
+        </button>
+        <button
+          onClick={() => handleSetView("hangouts")}
+          className="px-4 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95"
+          style={
+            viewMode === "hangouts"
+              ? { background: "#D4007A", color: "#fff" }
+              : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
+          }
+        >
+          Hangouts
+        </button>
+      </div>
+
+      {/* View content */}
+      {viewMode === "feed" ? (
+        <SocialFeedTabs
+          currentUserId={user?.dbId ? String(user.dbId) : ""}
+          isAdmin={isAdmin}
+          isAuthenticated={isAuthenticated}
+          userLang={user?.language}
+          viewerCity={user?.city}
+          viewerCountry={user?.country}
+          contentDisclaimerAccepted={contentDisclaimer}
+          onAcceptDisclaimer={handleAcceptDisclaimer}
+          onNavigate={navigate}
+          showComposer={!hashtagFilter}
+          hashtagFilter={hashtagFilter}
+        />
+      ) : (
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center py-16">
+              <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: "#D4007A", borderTopColor: "transparent" }} />
+            </div>
+          }
+        >
+          <ChatEmbedded embeddedMode />
+        </Suspense>
+      )}
     </div>
   );
 }
