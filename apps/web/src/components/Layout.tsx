@@ -10,7 +10,7 @@ import { CristinaWidget } from "@/components/CristinaWidget";
 import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
 import { useNearbyToggle } from "@/components/NearbyBadge";
-import { getMessageThreads } from "@/lib/api";
+import { getMessageThreads, getHangoutGroups, type MessageThread, type HangoutGroup } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { LandingPage } from "@/pages/LandingPage";
 import { RadioWidget } from "@/components/RadioWidget";
@@ -34,6 +34,194 @@ function CloseIcon() {
   );
 }
 
+// ── Conversation Hub helpers ──────────────────────────────────────────────────
+
+function timeAgo(dateStr: string): string {
+  if (!dateStr) return "";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  return `${Math.floor(hrs / 24)}d`;
+}
+
+interface ConversationItem {
+  type: "dm" | "hangout";
+  id: string;
+  name: string;
+  photoUrl: string | null;
+  lastMessage: string | null;
+  lastActivity: string;
+  unreadCount: number;
+  memberCount?: number;
+  hasActiveCall?: boolean;
+  path: string;
+}
+
+interface MobileConversationListProps {
+  filter: "all" | "dms" | "hangouts";
+  threads: MessageThread[];
+  hangoutGroups: HangoutGroup[];
+  hangoutGroupsLoading: boolean;
+  onNavigate: (path: string) => void;
+  noConversationsLabel: string;
+}
+
+function MobileConversationList({
+  filter,
+  threads,
+  hangoutGroups,
+  hangoutGroupsLoading,
+  onNavigate,
+  noConversationsLabel,
+}: MobileConversationListProps) {
+  const dmItems: ConversationItem[] = threads.map((th) => ({
+    type: "dm",
+    id: th.userId,
+    name: th.firstName || th.username,
+    photoUrl: th.photoUrl,
+    lastMessage: th.lastMessage,
+    lastActivity: th.lastMessageAt,
+    unreadCount: th.unreadCount,
+    path: `/dm/${th.userId}`,
+  }));
+
+  const hangoutItems: ConversationItem[] = hangoutGroups.map((g) => ({
+    type: "hangout",
+    id: String(g.id),
+    name: g.name,
+    photoUrl: g.avatarUrl,
+    lastMessage: g.lastMessage,
+    lastActivity: g.createdAt,
+    unreadCount: g.unreadCount ?? 0,
+    memberCount: g.memberCount,
+    hasActiveCall: g.hasActiveCall,
+    path: `/chat/${g.id}`,
+  }));
+
+  let items: ConversationItem[] = [];
+  if (filter === "dms") {
+    items = dmItems;
+  } else if (filter === "hangouts") {
+    items = hangoutItems;
+  } else {
+    // Merge and sort by most recent activity
+    items = [...dmItems, ...hangoutItems].sort(
+      (a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
+    );
+  }
+
+  const isLoading = filter !== "dms" && hangoutGroupsLoading && hangoutItems.length === 0;
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2 pb-2">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex items-center gap-3 px-1 py-2 animate-pulse">
+            <div className="w-10 h-10 rounded-full bg-white/10 flex-shrink-0" />
+            <div className="flex-1 space-y-1.5">
+              <div className="h-3 bg-white/10 rounded w-28" />
+              <div className="h-2.5 bg-white/10 rounded w-40" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <p className="text-xs text-pnp-textSecondary/50 text-center py-4 px-2">
+        {noConversationsLabel}
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-0.5 max-h-60 overflow-y-auto pb-1">
+      {items.map((item) => (
+        <button
+          key={`${item.type}-${item.id}`}
+          onClick={() => onNavigate(item.path)}
+          className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-pnp-surface transition-colors text-left"
+        >
+          {/* Avatar */}
+          <div className="relative flex-shrink-0">
+            {item.photoUrl &&
+            (item.photoUrl.startsWith("/") || item.photoUrl.startsWith("http")) ? (
+              <img
+                src={item.photoUrl}
+                alt=""
+                className="w-10 h-10 rounded-full object-cover"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                  (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display");
+                }}
+              />
+            ) : null}
+            <div
+              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+              style={{
+                background: item.type === "hangout" ? "rgba(212,0,122,0.15)" : "rgba(212,0,122,0.2)",
+                color: "#D4007A",
+                display:
+                  item.photoUrl &&
+                  (item.photoUrl.startsWith("/") || item.photoUrl.startsWith("http"))
+                    ? "none"
+                    : undefined,
+              }}
+            >
+              {item.type === "hangout" ? (
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+                </svg>
+              ) : (
+                (item.name || "?")[0].toUpperCase()
+              )}
+            </div>
+            {/* Active call indicator */}
+            {item.hasActiveCall && (
+              <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-pnp-background bg-green-500" />
+            )}
+          </div>
+
+          {/* Text */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-1">
+              <span
+                className={`text-sm truncate ${
+                  item.unreadCount > 0 ? "font-semibold text-pnp-textPrimary" : "font-medium text-pnp-textSecondary"
+                }`}
+              >
+                {item.name}
+              </span>
+              <span className="text-[10px] text-pnp-textSecondary/50 flex-shrink-0">
+                {timeAgo(item.lastActivity)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-1 mt-0.5">
+              <span className="text-xs text-pnp-textSecondary/60 truncate">
+                {item.lastMessage
+                  ? item.lastMessage
+                  : item.memberCount !== undefined
+                    ? `${item.memberCount} members`
+                    : ""}
+              </span>
+              {item.unreadCount > 0 && (
+                <span className="flex-shrink-0 min-w-[18px] h-[18px] rounded-full text-[10px] font-bold text-white flex items-center justify-center px-1" style={{ background: "#D4007A" }}>
+                  {item.unreadCount > 9 ? "9+" : item.unreadCount}
+                </span>
+              )}
+            </div>
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── Layout ────────────────────────────────────────────────────────────────────
 
 export function Layout() {
@@ -44,6 +232,10 @@ export function Layout() {
   const location = useLocation();
   const t = useI18n();
   const [dmUnread, setDmUnread] = useState(0);
+  const [threads, setThreads] = useState<MessageThread[]>([]);
+  const [hangoutGroups, setHangoutGroups] = useState<HangoutGroup[]>([]);
+  const [conversationFilter, setConversationFilter] = useState<"all" | "dms" | "hangouts">("all");
+  const [hangoutGroupsLoading, setHangoutGroupsLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { enabled: nearbyEnabled, toggle: toggleNearby } = useNearbyToggle();
   const mobileMenuRef = useRef<HTMLDivElement>(null);
@@ -67,6 +259,9 @@ export function Layout() {
     { to: "/creators/apply", label: t.nav.becomeModel },
   ];
 
+  // Mobile-only primary links (desktop sidebar uses primaryLinks above unchanged)
+  const mobilePrimaryLinks = primaryLinks.filter((l) => l.to !== "/creators/apply");
+
   const secondaryLinks = [
     { to: "/blog", label: "Blog" },
     { to: "/support", label: "Help" },
@@ -79,6 +274,7 @@ export function Layout() {
     { to: "/community-resources", label: "Community Resources" },
     { to: "/about", label: "About" },
     { to: "/careers", label: "Careers" },
+    { to: "/creators/apply", label: t.nav.becomeModel },
   ];
 
   // Close mobile menu on route change
@@ -110,24 +306,35 @@ export function Layout() {
     };
   }, [mobileMenuOpen]);
 
+  // Fetch hangout groups when mobile menu opens (cache in state between opens)
   useEffect(() => {
-    if (!isAuthenticated) return;
-    getMessageThreads()
+    if (!mobileMenuOpen || !isAuthenticated) return;
+    if (hangoutGroups.length > 0) return; // already loaded
+    setHangoutGroupsLoading(true);
+    getHangoutGroups()
       .then((res) => {
         if (res.success) {
-          setDmUnread(res.threads.filter((t: any) => t.unread_count > 0).length);
+          setHangoutGroups(res.groups);
         }
       })
-      .catch(() => {});
-    const interval = setInterval(() => {
+      .catch(() => {})
+      .finally(() => setHangoutGroupsLoading(false));
+  }, [mobileMenuOpen, isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const fetchThreads = () => {
       getMessageThreads()
         .then((res) => {
           if (res.success) {
-            setDmUnread(res.threads.filter((t: any) => t.unread_count > 0).length);
+            setThreads(res.threads);
+            setDmUnread(res.threads.filter((th) => th.unreadCount > 0).length);
           }
         })
         .catch(() => {});
-    }, 30000);
+    };
+    fetchThreads();
+    const interval = setInterval(fetchThreads, 30000);
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
@@ -380,60 +587,115 @@ export function Layout() {
             </div>
 
             {/* Scrollable nav body */}
-            <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5" aria-label="Mobile navigation">
-              {/* Primary links */}
-              {primaryLinks.map((link) => (
-                <NavLink
-                  key={link.to}
-                  to={link.to}
-                  end={link.end}
-                  className={({ isActive }: { isActive: boolean }) =>
-                    `block px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                      isActive
-                        ? "nav-active"
-                        : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                    }`
-                  }
-                >
-                  {link.label}
-                </NavLink>
-              ))}
-              {isAdmin && (
-                <NavLink
-                  to="/admin"
-                  className={({ isActive }: { isActive: boolean }) =>
-                    `block px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                      isActive
-                        ? "nav-active"
-                        : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                    }`
-                  }
-                >
-                  {t.nav.admin}
-                </NavLink>
-              )}
+            <nav className="flex-1 overflow-y-auto flex flex-col" aria-label="Mobile navigation">
+              {/* ── Conversation Hub ─────────────────────────────────────── */}
+              <div className="px-3 pt-3 pb-2">
+                <p className="px-1 pb-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">
+                  {t.nav.conversationHub}
+                </p>
+                {/* Filter tabs */}
+                <div className="flex gap-1.5 mb-3">
+                  {(["all", "dms", "hangouts"] as const).map((filter) => {
+                    const label =
+                      filter === "all"
+                        ? t.nav.filterAll
+                        : filter === "dms"
+                          ? t.nav.filterDMs
+                          : t.nav.filterHangouts;
+                    const isActive = conversationFilter === filter;
+                    return (
+                      <button
+                        key={filter}
+                        onClick={() => setConversationFilter(filter)}
+                        className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                          isActive
+                            ? "text-white"
+                            : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                        }`}
+                        style={isActive ? { background: "#D4007A" } : {}}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
 
-              {/* Divider */}
-              <div className="py-2 px-1">
+                {/* Conversation list */}
+                <MobileConversationList
+                  filter={conversationFilter}
+                  threads={threads}
+                  hangoutGroups={hangoutGroups}
+                  hangoutGroupsLoading={hangoutGroupsLoading}
+                  onNavigate={(path) => {
+                    setMobileMenuOpen(false);
+                    navigate(path);
+                  }}
+                  noConversationsLabel={t.nav.noConversations}
+                />
+              </div>
+
+              {/* Divider before quick nav links */}
+              <div className="px-3 pb-1">
                 <div className="h-px bg-pnp-border" />
               </div>
 
-              {/* Secondary links */}
-              {mobileSecondaryLinks.map((link) => (
-                <NavLink
-                  key={link.to}
-                  to={link.to}
-                  className={({ isActive }: { isActive: boolean }) =>
-                    `block px-3 py-2 rounded-lg text-sm transition-colors ${
-                      isActive
-                        ? "text-pnp-textPrimary"
-                        : "text-pnp-textSecondary/70 hover:text-pnp-textSecondary hover:bg-pnp-surface"
-                    }`
-                  }
-                >
-                  {link.label}
-                </NavLink>
-              ))}
+              {/* Quick nav links (mobile-primary, no becomeModel) */}
+              <div className="px-3 py-2 space-y-0.5">
+                {mobilePrimaryLinks.map((link) => (
+                  <NavLink
+                    key={link.to}
+                    to={link.to}
+                    end={link.end}
+                    className={({ isActive }: { isActive: boolean }) =>
+                      `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        isActive
+                          ? "nav-active"
+                          : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                      }`
+                    }
+                  >
+                    {link.label}
+                  </NavLink>
+                ))}
+                {isAdmin && (
+                  <NavLink
+                    to="/admin"
+                    className={({ isActive }: { isActive: boolean }) =>
+                      `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        isActive
+                          ? "nav-active"
+                          : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                      }`
+                    }
+                  >
+                    {t.nav.admin}
+                  </NavLink>
+                )}
+              </div>
+
+              {/* Divider */}
+              <div className="px-3 pb-1">
+                <div className="h-px bg-pnp-border" />
+              </div>
+
+              {/* Secondary links (includes Become a Model) */}
+              <div className="px-3 py-2 space-y-0.5">
+                {mobileSecondaryLinks.map((link) => (
+                  <NavLink
+                    key={link.to}
+                    to={link.to}
+                    className={({ isActive }: { isActive: boolean }) =>
+                      `block px-3 py-2 rounded-lg text-sm transition-colors ${
+                        isActive
+                          ? "text-pnp-textPrimary"
+                          : "text-pnp-textSecondary/70 hover:text-pnp-textSecondary hover:bg-pnp-surface"
+                      }`
+                    }
+                  >
+                    {link.label}
+                  </NavLink>
+                ))}
+              </div>
             </nav>
 
             {/* Divider + User profile card at the bottom */}
