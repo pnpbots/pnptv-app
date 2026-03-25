@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { BottomNav } from "./BottomNav";
 import { useAuth } from "@/hooks/useAuth";
@@ -10,11 +10,15 @@ import { CristinaWidget } from "@/components/CristinaWidget";
 import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
 import { useNearbyToggle } from "@/components/NearbyBadge";
-import { getMessageThreads, getHangoutGroups, type MessageThread, type HangoutGroup } from "@/lib/api";
+import { getMessageThreads, getHangoutGroups, markThreadAsRead, type MessageThread, type HangoutGroup } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { LandingPage } from "@/pages/LandingPage";
 import { RadioWidget } from "@/components/RadioWidget";
 import { NearbyWidget } from "@/components/NearbyWidget";
+import { connectSocket } from "@/lib/socket";
+import { MediaMessage } from "@/components/hangouts/MediaMessage";
+
+const SIDEBAR_API_BASE = import.meta.env.VITE_API_URL || (typeof window !== "undefined" && window.location.hostname === "app.pnptv.app" ? "https://app.pnptv.app" : "https://pnptv.app");
 
 // ── HamburgerIcon / CloseIcon ─────────────────────────────────────────────────
 
@@ -65,7 +69,7 @@ interface MobileConversationListProps {
   threads: MessageThread[];
   hangoutGroups: HangoutGroup[];
   hangoutGroupsLoading: boolean;
-  onNavigate: (path: string) => void;
+  onNavigate: (path: string, type: "dm" | "hangout") => void;
   noConversationsLabel: string;
 }
 
@@ -144,7 +148,7 @@ function MobileConversationList({
       {items.map((item) => (
         <button
           key={`${item.type}-${item.id}`}
-          onClick={() => onNavigate(item.path)}
+          onClick={() => onNavigate(item.path, item.type)}
           className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-pnp-surface transition-colors text-left"
         >
           {/* Avatar */}
@@ -222,6 +226,421 @@ function MobileConversationList({
   );
 }
 
+// ── SidebarDmChat ─────────────────────────────────────────────────────────────
+
+interface SidebarDmMessage {
+  id: number;
+  sender_id: string;
+  recipient_id: string;
+  content: string | null;
+  media_url: string | null;
+  media_type: "image" | "video" | "audio" | null;
+  media_mime?: string | null;
+  media_thumb_url?: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+interface SidebarDmChatProps {
+  userId: string;
+  partnerName: string;
+  partnerPhoto: string | null;
+  myDbId: string;
+  onBack: () => void;
+  onThreadsRefresh: () => void;
+}
+
+function SidebarDmChat({ userId, partnerName, partnerPhoto, myDbId, onBack, onThreadsRefresh }: SidebarDmChatProps) {
+  const [messages, setMessages] = useState<SidebarDmMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [messageInput, setMessageInput] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
+  const lastTypingEmit = useRef(0);
+
+  const loadMessages = useCallback(async () => {
+    setIsLoading(true);
+    setChatError(null);
+    try {
+      const res = await fetch(`${SIDEBAR_API_BASE}/api/webapp/dm/conversation/${userId}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load");
+      const data = await res.json();
+      if (data.success) {
+        setMessages(data.messages || []);
+        setHasMore((data.messages || []).length >= 30);
+      }
+    } catch {
+      setChatError("Failed to load messages");
+    } finally {
+      setIsLoading(false);
+    }
+    markThreadAsRead(userId).catch(() => {});
+    onThreadsRefresh();
+  }, [userId, onThreadsRefresh]);
+
+  useEffect(() => {
+    loadMessages();
+  }, [loadMessages]);
+
+  // Auto-scroll to bottom on initial load
+  useEffect(() => {
+    if (!isLoading && messages.length > 0) {
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }), 50);
+    }
+  }, [isLoading]);
+
+  // Socket: real-time incoming messages
+  useEffect(() => {
+    const socket = connectSocket();
+
+    const onDmMessage = (msg: SidebarDmMessage) => {
+      if (String(msg.sender_id) !== String(userId)) return;
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+      markThreadAsRead(userId).catch(() => {});
+    };
+
+    const onDmSent = (data: { success: boolean; message?: SidebarDmMessage }) => {
+      if (!data.message) return;
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === data.message!.id)) return prev;
+        return [...prev, data.message!];
+      });
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    };
+
+    const onDmTyping = (data: { from: string }) => {
+      if (String(data.from) !== String(userId)) return;
+      setIsTyping(true);
+      setTimeout(() => setIsTyping(false), 3000);
+    };
+
+    socket.on("dm:message", onDmMessage);
+    socket.on("dm:sent", onDmSent);
+    socket.on("dm:typing", onDmTyping);
+
+    return () => {
+      socket.off("dm:message", onDmMessage);
+      socket.off("dm:sent", onDmSent);
+      socket.off("dm:typing", onDmTyping);
+    };
+  }, [userId]);
+
+  const emitTyping = () => {
+    const now = Date.now();
+    if (now - lastTypingEmit.current < 2000) return;
+    lastTypingEmit.current = now;
+    const socket = connectSocket();
+    socket.emit("dm:typing", { recipientId: userId });
+  };
+
+  const handleSendMessage = async () => {
+    if (!messageInput.trim() && !mediaFile) return;
+    if (sendingMessage) return;
+    setSendingMessage(true);
+    setChatError(null);
+    try {
+      if (mediaFile) {
+        const formData = new FormData();
+        formData.append("media", mediaFile);
+        if (messageInput.trim()) formData.append("content", messageInput.trim());
+        const res = await fetch(`${SIDEBAR_API_BASE}/api/webapp/dm/media/${userId}`, {
+          method: "POST",
+          credentials: "include",
+          body: formData,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error((err as { error?: string }).error || "Failed to send media");
+        }
+        const data = await res.json();
+        if (data.message) {
+          setMessages((prev) => prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]);
+        }
+        setMediaFile(null);
+        if (mediaPreview) { URL.revokeObjectURL(mediaPreview); setMediaPreview(null); }
+        setMessageInput("");
+      } else {
+        const res = await fetch(`${SIDEBAR_API_BASE}/api/webapp/dm/send/${userId}`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: messageInput.trim() }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error((err as { error?: string }).error || "Failed to send");
+        }
+        const data = await res.json();
+        if (data.message) {
+          setMessages((prev) => prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]);
+        }
+        setMessageInput("");
+      }
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Failed to send message");
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  const handleMediaSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setMediaFile(file);
+    if (file.type.startsWith("image/")) {
+      setMediaPreview(URL.createObjectURL(file));
+    } else {
+      setMediaPreview(null);
+    }
+    e.target.value = "";
+  };
+
+  const cancelMedia = () => {
+    setMediaFile(null);
+    if (mediaPreview) { URL.revokeObjectURL(mediaPreview); setMediaPreview(null); }
+  };
+
+  const loadMoreMessages = async () => {
+    if (loadingMore || !hasMore || messages.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const oldest = messages[0];
+      const res = await fetch(
+        `${SIDEBAR_API_BASE}/api/webapp/dm/conversation/${userId}?cursor=${encodeURIComponent(oldest.created_at)}`,
+        { credentials: "include" }
+      );
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
+      if (data.success) {
+        setMessages((prev) => [...(data.messages || []), ...prev]);
+        setHasMore((data.messages || []).length >= 30);
+      }
+    } catch { /* silent */ }
+    finally { setLoadingMore(false); }
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-2 py-2 border-b border-pnp-border flex-shrink-0">
+        <button
+          onClick={onBack}
+          className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all flex-shrink-0"
+          aria-label="Back to conversations"
+        >
+          <svg className="w-4 h-4 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+
+        {/* Partner avatar */}
+        <div className="relative flex-shrink-0">
+          {partnerPhoto && (partnerPhoto.startsWith("/") || partnerPhoto.startsWith("http")) ? (
+            <img src={partnerPhoto} alt="" className="w-8 h-8 rounded-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }} />
+          ) : null}
+          <div
+            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+            style={{
+              background: "rgba(212,0,122,0.2)",
+              color: "#D4007A",
+              display: partnerPhoto && (partnerPhoto.startsWith("/") || partnerPhoto.startsWith("http")) ? "none" : undefined,
+            }}
+          >
+            {(partnerName || "?")[0].toUpperCase()}
+          </div>
+        </div>
+
+        <span className="text-sm font-semibold text-pnp-textPrimary truncate flex-1 min-w-0">
+          {partnerName || "Conversation"}
+        </span>
+      </div>
+
+      {/* Error banner */}
+      {chatError && (
+        <div className="px-3 py-1.5 bg-red-500/10 border-b border-red-500/20 flex-shrink-0">
+          <p className="text-xs text-red-400">{chatError}</p>
+        </div>
+      )}
+
+      {/* Messages area */}
+      <div
+        className="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-1"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          if (el.scrollTop < 60 && hasMore && !loadingMore) loadMoreMessages();
+        }}
+      >
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="w-6 h-6 border-2 border-white/20 border-t-pnp-accent rounded-full animate-spin" />
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center px-4">
+              <p className="text-lg mb-1">💬</p>
+              <p className="text-xs text-pnp-textSecondary">Start a conversation!</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            {loadingMore && (
+              <div className="flex justify-center py-1">
+                <svg className="w-4 h-4 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              </div>
+            )}
+            {messages.map((msg) => {
+              const isMe = String(msg.sender_id) === String(myDbId);
+              const timeStr = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              return (
+                <div key={msg.id} className={`flex gap-1.5 ${isMe ? "flex-row-reverse" : "flex-row"}`}>
+                  <div className={`max-w-[85%] flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+                    <div
+                      className={`rounded-2xl px-2.5 py-1.5 text-xs break-words ${isMe ? "text-white rounded-br-md" : "bg-white/10 text-white rounded-bl-md"}`}
+                      style={isMe ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
+                    >
+                      {msg.media_url && msg.media_type && (
+                        <div className="mb-1">
+                          <MediaMessage
+                            mediaUrl={msg.media_url}
+                            mediaType={msg.media_type}
+                            thumbUrl={msg.media_thumb_url}
+                            onExpandImage={(url) => setLightboxUrl(url)}
+                            isMe={isMe}
+                          />
+                        </div>
+                      )}
+                      {msg.content && <p>{msg.content}</p>}
+                      <p className={`text-[9px] mt-0.5 ${isMe ? "text-white/60" : "text-pnp-textSecondary"}`}>{timeStr}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={messagesEndRef} />
+          </>
+        )}
+      </div>
+
+      {/* Typing indicator */}
+      {isTyping && (
+        <div className="px-3 py-1 flex-shrink-0">
+          <p className="text-[10px] text-pnp-textSecondary italic">{partnerName || "User"} is typing...</p>
+        </div>
+      )}
+
+      {/* Media preview */}
+      {mediaFile && (
+        <div className="px-2 py-1.5 border-t border-pnp-border flex items-center gap-2 flex-shrink-0">
+          {mediaPreview ? (
+            <img src={mediaPreview} alt="" className="w-10 h-10 rounded-lg object-cover" />
+          ) : (
+            <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
+              <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+              </svg>
+            </div>
+          )}
+          <span className="text-[10px] text-pnp-textSecondary flex-1 truncate">{mediaFile.name}</span>
+          <button onClick={cancelMedia} className="text-red-400 text-[10px] font-semibold">Remove</button>
+        </div>
+      )}
+
+      {/* Input bar */}
+      <div className="flex items-end gap-1.5 px-2 py-2 border-t border-pnp-border flex-shrink-0" style={{ background: "#1C1C1E" }}>
+        <input
+          ref={mediaInputRef}
+          type="file"
+          accept="image/*,video/*,audio/*"
+          className="hidden"
+          onChange={handleMediaSelect}
+        />
+        <button
+          type="button"
+          onClick={() => mediaInputRef.current?.click()}
+          className="p-1.5 rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 active:scale-90 transition-all flex-shrink-0"
+          aria-label="Attach media"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+          </svg>
+        </button>
+
+        <textarea
+          value={messageInput}
+          onChange={(e) => { setMessageInput(e.target.value); emitTyping(); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }
+          }}
+          placeholder="Type a message..."
+          className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-3 py-2 text-xs resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-20"
+          rows={1}
+          style={{ minHeight: "36px" }}
+        />
+
+        <button
+          type="button"
+          onClick={handleSendMessage}
+          disabled={sendingMessage || (!messageInput.trim() && !mediaFile)}
+          className="p-1.5 rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30"
+          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          aria-label="Send message"
+        >
+          {sendingMessage ? (
+            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+            </svg>
+          )}
+        </button>
+      </div>
+
+      {/* Lightbox */}
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 z-[80] bg-black/90 flex items-center justify-center"
+          onClick={() => setLightboxUrl(null)}
+        >
+          <button
+            onClick={() => setLightboxUrl(null)}
+            className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white/10 text-white"
+            aria-label="Close"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          <img
+            src={lightboxUrl}
+            alt=""
+            className="max-w-full max-h-full object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Layout ────────────────────────────────────────────────────────────────────
 
 export function Layout() {
@@ -237,6 +656,7 @@ export function Layout() {
   const [conversationFilter, setConversationFilter] = useState<"all" | "dms" | "hangouts">("all");
   const [hangoutGroupsLoading, setHangoutGroupsLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [inlineDmUserId, setInlineDmUserId] = useState<string | null>(null);
   const { enabled: nearbyEnabled, toggle: toggleNearby } = useNearbyToggle();
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const isLandscape = useOrientation();
@@ -274,9 +694,10 @@ export function Layout() {
     { to: "/creators/apply", label: t.nav.becomeModel },
   ];
 
-  // Close mobile menu on route change
+  // Close mobile menu on route change and reset inline DM
   useEffect(() => {
     setMobileMenuOpen(false);
+    setInlineDmUserId(null);
   }, [location.pathname]);
 
   // Close menu on outside click
@@ -285,6 +706,7 @@ export function Layout() {
     function handleClick(e: MouseEvent) {
       if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
         setMobileMenuOpen(false);
+        setInlineDmUserId(null);
       }
     }
     document.addEventListener("mousedown", handleClick);
@@ -501,32 +923,6 @@ export function Layout() {
         </div>
 
         <div className="flex items-center gap-2">
-          {isAdmin && (
-            <button
-              onClick={() => navigate("/admin")}
-              className="p-1 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
-              aria-label="Admin panel"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
-          )}
-          <button
-            onClick={() => navigate("/dm")}
-            className="relative p-1 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
-            aria-label="Direct messages"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            </svg>
-            {dmUnread > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-[#D4007A] rounded-full text-[9px] font-bold text-white flex items-center justify-center">
-                {dmUnread > 9 ? "9+" : dmUnread}
-              </span>
-            )}
-          </button>
           <button
             onClick={toggleNearby}
             className="p-1 rounded-lg transition-colors"
@@ -539,19 +935,6 @@ export function Layout() {
             </svg>
           </button>
           <NotificationBell />
-
-          <button
-            onClick={() => navigate("/profile")}
-            className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center text-sm font-bold flex-shrink-0"
-            style={!(user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http"))) ? { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" } : undefined}
-            aria-label="Profile"
-          >
-            {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
-              <img src={user.photoUrl} alt={user.displayName || "Profile"} className="w-full h-full object-cover" onError={(e) => { const btn = e.currentTarget.parentElement!; btn.style.background = "linear-gradient(135deg, #D4007A, #E69138)"; btn.style.color = "#fff"; e.currentTarget.replaceWith(document.createTextNode((user?.displayName || "U")[0].toUpperCase())); }} />
-            ) : (
-              (user?.displayName || t.nav.user)[0].toUpperCase()
-            )}
-          </button>
         </div>
       </header>
 
@@ -561,7 +944,7 @@ export function Layout() {
           {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={() => setMobileMenuOpen(false)}
+            onClick={() => { setMobileMenuOpen(false); setInlineDmUserId(null); }}
             aria-hidden="true"
           />
 
@@ -576,128 +959,173 @@ export function Layout() {
               <img src="/logo-header.png" alt="PNPtv!" className="h-7 w-auto" />
               <button
                 className="p-1.5 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
-                onClick={() => setMobileMenuOpen(false)}
+                onClick={() => { setMobileMenuOpen(false); setInlineDmUserId(null); }}
                 aria-label="Close menu"
               >
                 <CloseIcon />
               </button>
             </div>
 
-            {/* Scrollable nav body */}
-            <nav className="flex-1 overflow-y-auto flex flex-col min-h-0" aria-label="Mobile navigation">
-              {/* ── Conversation Hub ─────────────────────────────────────── */}
-              <div className="px-3 pt-2 pb-1 flex flex-col flex-1 min-h-0">
-                {/* Filter tabs */}
-                <div className="flex gap-1 mb-2 flex-shrink-0">
-                  {(["all", "dms", "hangouts"] as const).map((filter) => {
-                    const label =
-                      filter === "all"
-                        ? t.nav.filterAll
-                        : filter === "dms"
-                          ? t.nav.filterDMs
-                          : t.nav.filterHangouts;
-                    const isActive = conversationFilter === filter;
-                    return (
-                      <button
-                        key={filter}
-                        onClick={() => setConversationFilter(filter)}
-                        className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                          isActive
-                            ? "text-white"
-                            : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                        }`}
-                        style={isActive ? { background: "#D4007A" } : {}}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Conversation list */}
-                <MobileConversationList
-                  filter={conversationFilter}
-                  threads={threads}
-                  hangoutGroups={hangoutGroups}
-                  hangoutGroupsLoading={hangoutGroupsLoading}
-                  onNavigate={(path) => {
-                    setMobileMenuOpen(false);
-                    navigate(path);
-                  }}
-                  noConversationsLabel={t.nav.noConversations}
-                />
-              </div>
-
-            </nav>
-
-            {/* Bottom section: secondary links + admin + profile */}
-            <div className="flex-shrink-0 border-t border-pnp-border">
-              {/* Compact secondary links row */}
-              <div className="px-3 pt-2 pb-1 flex flex-wrap gap-x-3 gap-y-0.5">
-                {mobileSecondaryLinks.map((link) => (
-                  <NavLink
-                    key={link.to}
-                    to={link.to}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={({ isActive }: { isActive: boolean }) =>
-                      `text-[11px] transition-colors ${
-                        isActive
-                          ? "text-pnp-textPrimary"
-                          : "text-pnp-textSecondary/50 hover:text-pnp-textSecondary"
-                      }`
-                    }
-                  >
-                    {link.label}
-                  </NavLink>
-                ))}
-                {isAdmin && (
-                  <NavLink
-                    to="/admin"
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={({ isActive }: { isActive: boolean }) =>
-                      `text-[11px] font-semibold transition-colors ${
-                        isActive
-                          ? "nav-active"
-                          : "text-pnp-textSecondary/50 hover:text-pnp-textSecondary"
-                      }`
-                    }
-                  >
-                    {t.nav.admin}
-                  </NavLink>
-                )}
-              </div>
-
-              {/* User profile card */}
-              <div className="px-3 pb-3 pt-1">
-                <button
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    navigate("/profile");
-                  }}
-                  className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors"
-                >
-                  {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
-                    <img
-                      src={user.photoUrl}
-                      alt={user.displayName || "Profile"}
-                      className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }}
+            {/* Scrollable nav body — switches between conversation hub and inline DM chat */}
+            {inlineDmUserId ? (
+              <div className="flex-1 min-h-0 flex flex-col">
+                {(() => {
+                  const dmThread = threads.find((th) => String(th.userId) === String(inlineDmUserId));
+                  return (
+                    <SidebarDmChat
+                      userId={inlineDmUserId}
+                      partnerName={dmThread ? (dmThread.firstName || dmThread.username) : ""}
+                      partnerPhoto={dmThread?.photoUrl ?? null}
+                      myDbId={user?.dbId ?? ""}
+                      onBack={() => {
+                        setInlineDmUserId(null);
+                        // Refresh threads so unread counts update in the list
+                        getMessageThreads()
+                          .then((res) => {
+                            if (res.success) {
+                              setThreads(res.threads);
+                              setDmUnread(res.threads.filter((th) => th.unreadCount > 0).length);
+                            }
+                          })
+                          .catch(() => {});
+                      }}
+                      onThreadsRefresh={() => {
+                        getMessageThreads()
+                          .then((res) => {
+                            if (res.success) {
+                              setThreads(res.threads);
+                              setDmUnread(res.threads.filter((th) => th.unreadCount > 0).length);
+                            }
+                          })
+                          .catch(() => {});
+                      }}
                     />
-                  ) : null}
-                  <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: (user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http"))) ? "none" : undefined }}
-                  >
-                    {(user?.displayName || t.nav.user)[0].toUpperCase()}
-                  </div>
-                  <div className="text-left min-w-0">
-                    <div className="text-sm font-medium text-pnp-textPrimary truncate">
-                      {user?.displayName || t.nav.user}
-                    </div>
-                  </div>
-                </button>
+                  );
+                })()}
               </div>
-            </div>
+            ) : (
+              <>
+                <nav className="flex-1 overflow-y-auto flex flex-col min-h-0" aria-label="Mobile navigation">
+                  {/* ── Conversation Hub ─────────────────────────────────── */}
+                  <div className="px-3 pt-2 pb-1 flex flex-col flex-1 min-h-0">
+                    {/* Filter tabs */}
+                    <div className="flex gap-1 mb-2 flex-shrink-0">
+                      {(["all", "dms", "hangouts"] as const).map((filter) => {
+                        const label =
+                          filter === "all"
+                            ? t.nav.filterAll
+                            : filter === "dms"
+                              ? t.nav.filterDMs
+                              : t.nav.filterHangouts;
+                        const isActive = conversationFilter === filter;
+                        return (
+                          <button
+                            key={filter}
+                            onClick={() => setConversationFilter(filter)}
+                            className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                              isActive
+                                ? "text-white"
+                                : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                            }`}
+                            style={isActive ? { background: "#D4007A" } : {}}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Conversation list */}
+                    <MobileConversationList
+                      filter={conversationFilter}
+                      threads={threads}
+                      hangoutGroups={hangoutGroups}
+                      hangoutGroupsLoading={hangoutGroupsLoading}
+                      onNavigate={(path, type) => {
+                        if (type === "dm") {
+                          const dmUserId = path.replace("/dm/", "");
+                          setInlineDmUserId(dmUserId);
+                        } else {
+                          setMobileMenuOpen(false);
+                          setInlineDmUserId(null);
+                          navigate(path);
+                        }
+                      }}
+                      noConversationsLabel={t.nav.noConversations}
+                    />
+                  </div>
+                </nav>
+
+                {/* Bottom section: secondary links + admin + profile */}
+                <div className="flex-shrink-0 border-t border-pnp-border">
+                  {/* Compact secondary links row */}
+                  <div className="px-3 pt-2 pb-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                    {mobileSecondaryLinks.map((link) => (
+                      <NavLink
+                        key={link.to}
+                        to={link.to}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={({ isActive }: { isActive: boolean }) =>
+                          `text-[11px] transition-colors ${
+                            isActive
+                              ? "text-pnp-textPrimary"
+                              : "text-pnp-textSecondary/50 hover:text-pnp-textSecondary"
+                          }`
+                        }
+                      >
+                        {link.label}
+                      </NavLink>
+                    ))}
+                    {isAdmin && (
+                      <NavLink
+                        to="/admin"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={({ isActive }: { isActive: boolean }) =>
+                          `text-[11px] font-semibold transition-colors ${
+                            isActive
+                              ? "nav-active"
+                              : "text-pnp-textSecondary/50 hover:text-pnp-textSecondary"
+                          }`
+                        }
+                      >
+                        {t.nav.admin}
+                      </NavLink>
+                    )}
+                  </div>
+
+                  {/* User profile card */}
+                  <div className="px-3 pb-3 pt-1">
+                    <button
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        navigate("/profile");
+                      }}
+                      className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors"
+                    >
+                      {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
+                        <img
+                          src={user.photoUrl}
+                          alt={user.displayName || "Profile"}
+                          className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }}
+                        />
+                      ) : null}
+                      <div
+                        className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: (user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http"))) ? "none" : undefined }}
+                      >
+                        {(user?.displayName || t.nav.user)[0].toUpperCase()}
+                      </div>
+                      <div className="text-left min-w-0">
+                        <div className="text-sm font-medium text-pnp-textPrimary truncate">
+                          {user?.displayName || t.nav.user}
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
