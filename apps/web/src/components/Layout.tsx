@@ -140,7 +140,7 @@ function MobileConversationList({
   }
 
   return (
-    <div className="space-y-0.5 max-h-60 overflow-y-auto pb-1">
+    <div className="space-y-0.5 flex-1 overflow-y-auto pb-1">
       {items.map((item) => (
         <button
           key={`${item.type}-${item.id}`}
@@ -572,8 +572,8 @@ export function Layout() {
             style={{ animationDuration: "0.18s" }}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-4 h-14 border-b border-pnp-border">
-              <img src="/logo-header.png" alt="PNPtv!" className="h-9 w-auto" />
+            <div className="flex items-center justify-between px-3 h-11 border-b border-pnp-border flex-shrink-0">
+              <img src="/logo-header.png" alt="PNPtv!" className="h-7 w-auto" />
               <button
                 className="p-1.5 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
                 onClick={() => setMobileMenuOpen(false)}
@@ -584,14 +584,11 @@ export function Layout() {
             </div>
 
             {/* Scrollable nav body */}
-            <nav className="flex-1 overflow-y-auto flex flex-col" aria-label="Mobile navigation">
+            <nav className="flex-1 overflow-y-auto flex flex-col min-h-0" aria-label="Mobile navigation">
               {/* ── Conversation Hub ─────────────────────────────────────── */}
-              <div className="px-3 pt-3 pb-2">
-                <p className="px-1 pb-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">
-                  {t.nav.conversationHub}
-                </p>
+              <div className="px-3 pt-2 pb-1 flex flex-col flex-1 min-h-0">
                 {/* Filter tabs */}
-                <div className="flex gap-1.5 mb-3">
+                <div className="flex gap-1 mb-2 flex-shrink-0">
                   {(["all", "dms", "hangouts"] as const).map((filter) => {
                     const label =
                       filter === "all"
@@ -631,80 +628,75 @@ export function Layout() {
                 />
               </div>
 
-              {/* Admin link (only for admins) */}
-              {isAdmin && (
-                <div className="px-3 pb-1">
-                  <div className="h-px bg-pnp-border" />
-                  <NavLink
-                    to="/admin"
-                    className={({ isActive }: { isActive: boolean }) =>
-                      `block px-3 py-2 mt-1 rounded-lg text-sm font-medium transition-colors ${
-                        isActive
-                          ? "nav-active"
-                          : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                      }`
-                    }
-                  >
-                    {t.nav.admin}
-                  </NavLink>
-                </div>
-              )}
+            </nav>
 
-              {/* Divider */}
-              <div className="px-3 pb-1">
-                <div className="h-px bg-pnp-border" />
-              </div>
-
-              {/* Secondary links (includes Become a Model) */}
-              <div className="px-3 py-2 space-y-0.5">
+            {/* Bottom section: secondary links + admin + profile */}
+            <div className="flex-shrink-0 border-t border-pnp-border">
+              {/* Compact secondary links row */}
+              <div className="px-3 pt-2 pb-1 flex flex-wrap gap-x-3 gap-y-0.5">
                 {mobileSecondaryLinks.map((link) => (
                   <NavLink
                     key={link.to}
                     to={link.to}
+                    onClick={() => setMobileMenuOpen(false)}
                     className={({ isActive }: { isActive: boolean }) =>
-                      `block px-3 py-2 rounded-lg text-sm transition-colors ${
+                      `text-[11px] transition-colors ${
                         isActive
                           ? "text-pnp-textPrimary"
-                          : "text-pnp-textSecondary/70 hover:text-pnp-textSecondary hover:bg-pnp-surface"
+                          : "text-pnp-textSecondary/50 hover:text-pnp-textSecondary"
                       }`
                     }
                   >
                     {link.label}
                   </NavLink>
                 ))}
+                {isAdmin && (
+                  <NavLink
+                    to="/admin"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={({ isActive }: { isActive: boolean }) =>
+                      `text-[11px] font-semibold transition-colors ${
+                        isActive
+                          ? "nav-active"
+                          : "text-pnp-textSecondary/50 hover:text-pnp-textSecondary"
+                      }`
+                    }
+                  >
+                    {t.nav.admin}
+                  </NavLink>
+                )}
               </div>
-            </nav>
 
-            {/* Divider + User profile card at the bottom */}
-            <div className="border-t border-pnp-border p-4">
-              <button
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  navigate("/profile");
-                }}
-                className="flex items-center gap-3 w-full px-2 py-2 rounded-lg hover:bg-white/5 transition-colors"
-              >
-                {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
-                  <img
-                    src={user.photoUrl}
-                    alt={user.displayName || "Profile"}
-                    className="w-9 h-9 rounded-full object-cover flex-shrink-0"
-                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }}
-                  />
-                ) : null}
-                <div
-                  className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: (user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http"))) ? "none" : undefined }}
+              {/* User profile card */}
+              <div className="px-3 pb-3 pt-1">
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    navigate("/profile");
+                  }}
+                  className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors"
                 >
-                  {(user?.displayName || t.nav.user)[0].toUpperCase()}
-                </div>
-                <div className="text-left min-w-0">
-                  <div className="text-sm font-medium text-pnp-textPrimary truncate">
-                    {user?.displayName || t.nav.user}
+                  {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
+                    <img
+                      src={user.photoUrl}
+                      alt={user.displayName || "Profile"}
+                      className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }}
+                    />
+                  ) : null}
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: (user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http"))) ? "none" : undefined }}
+                  >
+                    {(user?.displayName || t.nav.user)[0].toUpperCase()}
                   </div>
-                  <div className="text-xs text-pnp-textSecondary/60">View profile</div>
-                </div>
-              </button>
+                  <div className="text-left min-w-0">
+                    <div className="text-sm font-medium text-pnp-textPrimary truncate">
+                      {user?.displayName || t.nav.user}
+                    </div>
+                  </div>
+                </button>
+              </div>
             </div>
           </div>
         </div>
