@@ -84,6 +84,7 @@ export function AnimatedVideoThumbnail({ videoUrl, posterUrl, alt }: Props) {
           muted
           playsInline
           preload="metadata"
+          onContextMenu={(e) => e.preventDefault()}
           className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${
             videoReady ? "opacity-100" : "opacity-0"
           }`}

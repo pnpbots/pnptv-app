@@ -190,6 +190,7 @@ function MediaPreviewGrid({ files, onRemove, disabled }: MediaPreviewGridProps) 
                 muted
                 playsInline
                 preload="metadata"
+                onContextMenu={(e) => e.preventDefault()}
               />
             ) : (
               <img

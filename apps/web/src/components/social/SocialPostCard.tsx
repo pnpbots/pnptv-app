@@ -275,6 +275,16 @@ export default function SocialPostCard({
                 {t.featured}
               </span>
             )}
+            {/* Hangout context badge — shows which hangout the post was made in */}
+            {post.hangout_group_name && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onNavigate(`/?hangout=${post.hangout_group_id}`); }}
+                className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full hover:opacity-80 transition-opacity"
+                style={{ background: "rgba(123,97,255,0.15)", color: "#7B61FF" }}
+              >
+                #{post.hangout_group_name.replace(/\s+/g, "")}
+              </button>
+            )}
             {/* Wall of Fame badge */}
             {post.is_wof && (
               <span
@@ -523,6 +533,8 @@ export default function SocialPostCard({
                       <video
                         src={post.media_url}
                         controls
+                        controlsList="nodownload"
+                        onContextMenu={(e) => e.preventDefault()}
                         playsInline
                         muted
                         className="w-full max-h-80 rounded-lg object-cover"

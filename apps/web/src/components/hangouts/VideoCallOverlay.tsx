@@ -196,6 +196,7 @@ function PreCallPreview({ onJoin, onCancel, groupName }: PreCallPreviewProps) {
             autoPlay
             muted
             playsInline
+            onContextMenu={(e) => e.preventDefault()}
             className={`w-full h-full object-cover [transform:scaleX(-1)] ${videoOff || deviceError ? "invisible" : "visible"}`}
           />
 

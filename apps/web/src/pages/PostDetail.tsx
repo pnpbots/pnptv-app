@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { getSocialPost, updateProfile, type SocialPostItem } from "@/lib/api";
 import { SharePostModal } from "@/components/SharePostModal";
 
-const APP_BASE = "https://app.pnptv.app";
+const APP_BASE = "https://pnptv.app";
 
 function timeAgo(dateStr: string): string {
   if (!dateStr) return "";
@@ -270,6 +270,8 @@ export default function PostDetail() {
                           <video
                             src={m.url}
                             controls
+                            controlsList="nodownload"
+                            onContextMenu={(e) => e.preventDefault()}
                             playsInline
                             muted
                             className="w-full max-h-80 rounded-lg object-cover"
@@ -304,6 +306,8 @@ export default function PostDetail() {
                         <video
                           src={post.media_url}
                           controls
+                          controlsList="nodownload"
+                          onContextMenu={(e) => e.preventDefault()}
                           playsInline
                           muted
                           className="w-full max-h-96 rounded-xl object-cover"

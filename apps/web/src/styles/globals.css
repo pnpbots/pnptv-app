@@ -28,6 +28,14 @@
     -webkit-touch-callout: none;
   }
 
+  video::-internal-media-controls-download-button {
+    display: none;
+  }
+
+  video::-webkit-media-controls-enclosure {
+    overflow: hidden;
+  }
+
   /* Re-enable pointer events on clickable images (buttons, links, interactive areas) */
   button img, a img, [role="button"] img, [data-interactive] img,
   label img, [onclick] img {
@@ -339,6 +347,14 @@
   border-radius: 24px;
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
+}
+
+/* ── Main Stage gradient animation ─────────────────────────────── */
+
+@keyframes stageGradient {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
 
 /* ── Screen Capture & Print Protection ─────────────────────────── */

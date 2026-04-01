@@ -346,6 +346,8 @@ export function MediaLightbox({
           <video
             src={src}
             controls
+            controlsList="nodownload"
+            onContextMenu={(e) => e.preventDefault()}
             autoPlay
             playsInline
             className="max-w-[90vw] max-h-[90vh] rounded-lg"

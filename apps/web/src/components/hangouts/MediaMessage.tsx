@@ -336,6 +336,8 @@ export function MediaMessage({
         src={mediaUrl}
         poster={thumbUrl || undefined}
         controls
+        controlsList="nodownload"
+        onContextMenu={(e) => e.preventDefault()}
         playsInline
         preload="metadata"
         className="w-full h-full object-contain rounded-xl"

@@ -210,6 +210,7 @@ export function BulkVideoUpload({
                     className="w-full h-full object-cover"
                     muted
                     preload="metadata"
+                    onContextMenu={(e) => e.preventDefault()}
                   />
                   {item.status === "done" && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/50">

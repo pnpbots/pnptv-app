@@ -217,6 +217,8 @@ function RandomVideoActionCard({ action, mediaFolderId, onSaved, t }: {
           <video
             src={mediaUrl}
             controls
+            controlsList="nodownload"
+            onContextMenu={(e) => e.preventDefault()}
             className="w-full rounded-lg max-h-48 bg-black"
             preload="metadata"
           />

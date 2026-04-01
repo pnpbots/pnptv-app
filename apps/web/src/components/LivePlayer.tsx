@@ -194,6 +194,8 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
         playsInline
         muted
         controls
+        controlsList="nodownload"
+        onContextMenu={(e) => e.preventDefault()}
       />
       {status === "live" && (
         <div className="absolute top-3 left-3 z-10">

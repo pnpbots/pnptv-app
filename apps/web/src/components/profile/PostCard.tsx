@@ -383,6 +383,8 @@ export default function PostCard({
                 <video
                   src={post.media_url}
                   controls
+                  controlsList="nodownload"
+                  onContextMenu={(e) => e.preventDefault()}
                   className="w-full max-h-80 rounded-lg object-cover"
                   preload="metadata"
                 />
