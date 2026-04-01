@@ -34,9 +34,12 @@ import {
   rsvpEvent,
   unrsvpEvent,
   cancelEvent,
+  getUserHangoutActivity,
+  createSupportTicket,
   type UserProfile,
   type SocialPostItem,
   type EventItem,
+  type HangoutActivity,
 } from "@/lib/api";
 import { EventCard } from "@/components/events/EventCard";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
@@ -110,6 +113,35 @@ export default function Profile() {
     }).catch(() => {});
   }, [targetUserId, isOwnProfile, nearbyEnabled]);
 
+  // Bug report
+  const [showBugModal, setShowBugModal] = useState(false);
+  const [bugText, setBugText] = useState("");
+  const [bugSending, setBugSending] = useState(false);
+  const [bugSent, setBugSent] = useState(false);
+  const bugTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (showBugModal && bugTextareaRef.current) bugTextareaRef.current.focus();
+  }, [showBugModal]);
+
+  const handleSubmitBug = async () => {
+    if (!bugText.trim() || bugText.trim().length < 10) return;
+    setBugSending(true);
+    try {
+      const ctx = [
+        `URL: ${window.location.pathname}${window.location.search}`,
+        `UA: ${navigator.userAgent}`,
+        `Screen: ${screen.width}x${screen.height} (${window.devicePixelRatio}x)`,
+        `Viewport: ${window.innerWidth}x${window.innerHeight}`,
+        `Lang: ${navigator.language}`,
+        `Time: ${new Date().toISOString()}`,
+      ].join("\n");
+      await createSupportTicket("bug", `${bugText.trim()}\n\n--- Device Info ---\n${ctx}`);
+      setBugSent(true);
+      setTimeout(() => { setShowBugModal(false); setBugText(""); setBugSent(false); }, 2000);
+    } catch { /* noop */ } finally { setBugSending(false); }
+  };
+
   // Follow state
   const [isFollowing, setIsFollowing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
@@ -124,6 +156,10 @@ export default function Profile() {
   // My Events state (own profile only)
   const [myEvents, setMyEvents] = useState<EventItem[]>([]);
   const [myEventsLoading, setMyEventsLoading] = useState(false);
+
+  // Hangout activity state
+  const [hangoutActivity, setHangoutActivity] = useState<HangoutActivity[]>([]);
+  const [hangoutActivityLoading, setHangoutActivityLoading] = useState(false);
   const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
   const [showCreateEvent, setShowCreateEvent] = useState(false);
 
@@ -240,6 +276,12 @@ export default function Profile() {
             .then((r) => { if (r.success) setMyEvents(r.events); })
             .catch(() => {})
             .finally(() => setMyEventsLoading(false));
+          // Load hangout activity
+          setHangoutActivityLoading(true);
+          getUserHangoutActivity(targetUserId)
+            .then((r) => { if (r.success) setHangoutActivity(r.hangouts); })
+            .catch(() => {})
+            .finally(() => setHangoutActivityLoading(false));
         } else {
           setPosts((prev) => [...prev, ...postsRes.posts]);
         }
@@ -268,6 +310,12 @@ export default function Profile() {
           if (isAuthenticated) {
             isUserBlocked(targetUserId)
               .then((r) => { if (r.success) setIsBlocked(r.isBlocked); })
+              .catch(() => {});
+          }
+          // Load hangout activity for public profiles too
+          if (isAuthenticated) {
+            getUserHangoutActivity(targetUserId)
+              .then((r) => { if (r.success) setHangoutActivity(r.hangouts); })
               .catch(() => {});
           }
         } else {
@@ -516,7 +564,7 @@ export default function Profile() {
 
   const handleShareProfile = useCallback(async () => {
     const userId = profile?.id || paramUserId || "";
-    const url = `https://app.pnptv.app/profile/${userId}`;
+    const url = `https://pnptv.app/profile/${userId}`;
     const displayName = profile
       ? profile.firstName + (profile.lastName ? ` ${profile.lastName}` : "")
       : "Someone";
@@ -1183,6 +1231,17 @@ export default function Profile() {
                   </svg>
                 </button>
                 <button
+                  onClick={() => setShowBugModal(true)}
+                  className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs text-red-400/70 hover:text-red-400 transition-colors"
+                  style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.12)" }}
+                  title={p.reportBug}
+                  aria-label={p.reportBug}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 12.75c1.148 0 2.278.08 3.383.237 1.037.146 1.866.966 1.866 2.013 0 3.728-2.35 6.75-5.25 6.75S6.75 18.728 6.75 15c0-1.046.83-1.867 1.866-2.013A24.204 24.204 0 0112 12.75zm0 0c2.883 0 5.647.508 8.207 1.44a23.91 23.91 0 01-1.152-6.135 23.863 23.863 0 01.497-5.93c.15-.667-.107-1.358-.661-1.755a1.908 1.908 0 00-1.902-.098L12 3.75 6.99.375a1.91 1.91 0 00-1.902.098c-.554.397-.81 1.088-.66 1.755.27 1.215.426 2.47.496 5.93a23.91 23.91 0 01-1.152 6.135A24.087 24.087 0 0112 12.75z" />
+                  </svg>
+                </button>
+                <button
                   onClick={() => { resetAllTutorials(); window.location.reload(); }}
                   className="flex-1 py-1.5 rounded-lg text-xs text-white/50 hover:text-white/80 transition-colors"
                   style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
@@ -1658,6 +1717,56 @@ export default function Profile() {
         </div>
       )}
 
+      {/* ── Hangout Activity ── */}
+      {hangoutActivity.length > 0 && (
+        <div className="mt-4">
+          <h2 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3">Hangouts</h2>
+          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+            {hangoutActivity.map((h) => (
+              <button
+                key={h.id}
+                onClick={() => navigate(`/hangouts/${h.id}`)}
+                className="flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all hover:bg-white/10 active:scale-95"
+                style={{ background: "rgba(123,97,255,0.08)", border: "1px solid rgba(123,97,255,0.15)" }}
+              >
+                {h.avatarUrl ? (
+                  <img src={h.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover ring-1 ring-white/10" />
+                ) : (
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+                    style={{
+                      background: h.isMain
+                        ? "linear-gradient(135deg, #D4007A, #E69138)"
+                        : "linear-gradient(135deg, rgba(123,97,255,0.3), rgba(212,0,122,0.3))",
+                      color: h.isMain ? "#fff" : "#7B61FF",
+                    }}
+                  >
+                    {h.isMain ? "P" : (h.name?.[0] || "?").toUpperCase()}
+                  </div>
+                )}
+                <div className="text-left min-w-0">
+                  <p className="text-xs font-semibold text-white truncate max-w-[100px]">{h.name}</p>
+                  <p className="text-[10px]" style={{ color: "#8E8E93" }}>
+                    {h.messageCount > 0 ? `${h.messageCount} msgs` : "Member"}
+                    {h.memberCount > 0 && <> &middot; {h.memberCount} members</>}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {hangoutActivityLoading && (
+        <div className="mt-4">
+          <div className="h-4 bg-white/10 rounded w-24 mb-3" />
+          <div className="flex gap-2">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex-shrink-0 w-36 h-14 rounded-xl bg-white/5 animate-pulse" />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── My Events (own profile only) ── */}
       {isOwnProfile && (
         <div className="mt-4">
@@ -1808,6 +1917,73 @@ export default function Profile() {
           open={showBookCall}
           onClose={() => setShowBookCall(false)}
         />
+      )}
+
+      {/* ── Bug Report Modal ── */}
+      {showBugModal && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center"
+          onClick={() => !bugSending && setShowBugModal(false)}
+        >
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div
+            className="relative w-full sm:max-w-md mx-auto bg-pnp-surface rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl border border-white/10 animate-in slide-in-from-bottom duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-pnp-textPrimary flex items-center gap-2">
+                <span className="text-red-400">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 12.75c1.148 0 2.278.08 3.383.237 1.037.146 1.866.966 1.866 2.013 0 3.728-2.35 6.75-5.25 6.75S6.75 18.728 6.75 15c0-1.046.83-1.867 1.866-2.013A24.204 24.204 0 0112 12.75zm0 0c2.883 0 5.647.508 8.207 1.44a23.91 23.91 0 01-1.152-6.135 23.863 23.863 0 01.497-5.93c.15-.667-.107-1.358-.661-1.755a1.908 1.908 0 00-1.902-.098L12 3.75 6.99.375a1.91 1.91 0 00-1.902.098c-.554.397-.81 1.088-.66 1.755.27 1.215.426 2.47.496 5.93a23.91 23.91 0 01-1.152 6.135A24.087 24.087 0 0112 12.75z" />
+                  </svg>
+                </span>
+                {t.support.reportBugTitle}
+              </h2>
+              <button
+                onClick={() => !bugSending && setShowBugModal(false)}
+                className="p-1.5 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            {bugSent ? (
+              <div className="flex flex-col items-center py-8 gap-3">
+                <div className="w-12 h-12 rounded-full bg-green-500/15 flex items-center justify-center">
+                  <svg className="w-6 h-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <p className="text-sm text-green-400 font-medium text-center">{t.support.reportBugSuccess}</p>
+              </div>
+            ) : (
+              <>
+                <textarea
+                  ref={bugTextareaRef}
+                  value={bugText}
+                  onChange={(e) => setBugText(e.target.value)}
+                  placeholder={t.support.reportBugPlaceholder}
+                  maxLength={2000}
+                  rows={5}
+                  className="w-full rounded-xl p-3 text-sm bg-pnp-dark text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 border border-white/10 focus:border-red-400/50 focus:outline-none resize-none"
+                />
+                <div className="flex items-center justify-between mt-2 mb-4">
+                  <p className="text-[10px] text-pnp-textSecondary">{t.support.reportBugDeviceInfo}</p>
+                  <p className="text-[10px] text-pnp-textSecondary">{bugText.length}/2000</p>
+                </div>
+                <button
+                  onClick={handleSubmitBug}
+                  disabled={bugSending || bugText.trim().length < 10}
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-40"
+                  style={{ background: "linear-gradient(135deg, #ef4444, #dc2626)" }}
+                >
+                  {bugSending ? t.support.reportBugSending : t.support.reportBugSubmit}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

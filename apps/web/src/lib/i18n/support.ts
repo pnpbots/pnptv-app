@@ -57,6 +57,16 @@ const strings = {
     // Help tag
     helpTag: "Help",
 
+    // Quick Bug Report modal
+    reportBugTitle: "Report a Bug",
+    reportBugCard: "Found a bug?",
+    reportBugCardDesc: "Quick-submit a bug report with one tap. We auto-collect device info to help us fix it faster.",
+    reportBugPlaceholder: "Describe what happened — what did you expect vs. what actually occurred?",
+    reportBugSubmit: "Send Report",
+    reportBugSending: "Sending...",
+    reportBugSuccess: "Bug report sent! We'll look into it.",
+    reportBugDeviceInfo: "Device info will be included automatically.",
+
     // Help Center home screen
     helpCenterTitle: "How can I help you?",
     helpCenterSubtitle: "Choose a topic or chat with me directly",
@@ -142,6 +152,15 @@ const strings = {
     waitingForSupport: "Esperando respuesta del equipo de soporte...",
 
     helpTag: "Ayuda",
+    reportBugTitle: "Reportar un Bug",
+    reportBugCard: "¿Encontraste un bug?",
+    reportBugCardDesc: "Envía un reporte rápido con un solo toque. Recopilamos info del dispositivo automáticamente para resolverlo más rápido.",
+    reportBugPlaceholder: "Describe qué pasó — ¿qué esperabas vs. qué ocurrió realmente?",
+    reportBugSubmit: "Enviar Reporte",
+    reportBugSending: "Enviando...",
+    reportBugSuccess: "¡Reporte enviado! Lo revisaremos pronto.",
+    reportBugDeviceInfo: "La info del dispositivo se incluirá automáticamente.",
+
     helpCenterTitle: "¿Cómo puedo ayudarte?",
     helpCenterSubtitle: "Elige un tema o chatea conmigo directamente",
     helpCenterChatBtn: "💬 Chatear con Cristina",

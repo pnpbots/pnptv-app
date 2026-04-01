@@ -23,6 +23,7 @@ const strings = {
     editProfile: "Edit Profile",
     signOut: "Sign Out",
     resetTutorials: "Reset Tutorials",
+    reportBug: "Report Bug",
     creatorDashboard: "Creator Dashboard",
     changePhoto: "Change photo",
 
@@ -379,6 +380,7 @@ const strings = {
     editProfile: "Editar perfil",
     signOut: "Cerrar sesión",
     resetTutorials: "Reiniciar tutoriales",
+    reportBug: "Reportar Bug",
     creatorDashboard: "Panel de creador",
     changePhoto: "Cambiar foto",
 
