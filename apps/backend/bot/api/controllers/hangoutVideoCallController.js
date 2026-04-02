@@ -1061,12 +1061,8 @@ const startDmCall = async (req, res) => {
       io.to(`user:${partnerId}`).emit('dm:call:started', {
         callId: newCall.id,
         roomName,
-        caller: {
-          id: user.id,
-          username: user.username,
-          firstName: user.firstName || user.first_name,
-          photoUrl: user.photoUrl || null,
-        },
+        callerName: user.firstName || user.first_name || user.username || 'Someone',
+        callerId: user.id,
         meetingUrl: jaas?.meetingUrl || null,
       });
     }

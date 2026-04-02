@@ -180,9 +180,7 @@ const editDmMessage = async (req, res) => {
     if (io) {
       io.to(`user:${updatedMsg.sender_id}`).to(`user:${updatedMsg.recipient_id}`)
         .emit('dm:message:edited', {
-          id: updatedMsg.id,
-          senderId: updatedMsg.sender_id,
-          recipientId: updatedMsg.recipient_id,
+          messageId: updatedMsg.id,
           content: updatedMsg.content,
           editedAt: updatedMsg.edited_at,
           editCount: updatedMsg.edit_count,
@@ -227,9 +225,8 @@ const deleteDmMessage = async (req, res) => {
     if (io) {
       io.to(`user:${msg.sender_id}`).to(`user:${msg.recipient_id}`)
         .emit('dm:message:deleted', {
-          id: msg.id,
-          senderId: msg.sender_id,
-          recipientId: msg.recipient_id,
+          messageId: msg.id,
+          forAll: true,
         });
     }
 
