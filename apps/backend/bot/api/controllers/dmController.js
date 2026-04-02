@@ -127,7 +127,149 @@ const sendMessage = async (req, res) => {
   }
 };
 
-module.exports = { getThreads, getConversation, getPartnerInfo, sendMessage };
+// Edit a sent DM (own message, within 48 hours)
+const editDmMessage = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const msgId = req.params.msgId;
+  const { content } = req.body;
 
+  if (!content || !content.trim()) {
+    return res.status(400).json({ error: 'Content is required' });
+  }
+  if (content.length > 4000) {
+    return res.status(400).json({ error: 'Message too long' });
+  }
 
-module.exports = { getThreads, getConversation, getPartnerInfo, sendMessage };
+  try {
+    const { rows } = await query(
+      `SELECT id, sender_id, recipient_id, content, created_at, is_deleted
+       FROM direct_messages WHERE id = $1`,
+      [msgId]
+    );
+
+    if (rows.length === 0) return res.status(404).json({ error: 'Message not found' });
+
+    const msg = rows[0];
+    if (String(msg.sender_id) !== String(user.id)) {
+      return res.status(403).json({ error: 'Cannot edit another user\'s message' });
+    }
+    if (msg.is_deleted) {
+      return res.status(410).json({ error: 'Message has been deleted' });
+    }
+
+    const ageMs = Date.now() - new Date(msg.created_at).getTime();
+    if (ageMs > 48 * 60 * 60 * 1000) {
+      return res.status(403).json({ error: 'Message is too old to edit' });
+    }
+
+    const { rows: updated } = await query(
+      `UPDATE direct_messages
+       SET content = $1,
+           edited_at = NOW(),
+           edit_count = edit_count + 1,
+           original_content = COALESCE(original_content, content)
+       WHERE id = $2
+       RETURNING id, sender_id, recipient_id, content, edited_at, edit_count, created_at`,
+      [content.trim(), msgId]
+    );
+
+    const updatedMsg = updated[0];
+
+    // Broadcast to both participants
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user:${updatedMsg.sender_id}`).to(`user:${updatedMsg.recipient_id}`)
+        .emit('dm:message:edited', {
+          id: updatedMsg.id,
+          senderId: updatedMsg.sender_id,
+          recipientId: updatedMsg.recipient_id,
+          content: updatedMsg.content,
+          editedAt: updatedMsg.edited_at,
+          editCount: updatedMsg.edit_count,
+        });
+    }
+
+    return res.json({ success: true, message: updatedMsg });
+  } catch (err) {
+    logger.error('editDmMessage error', err);
+    return res.status(500).json({ error: 'Failed to edit message' });
+  }
+};
+
+// Delete a sent DM (soft-delete; sender only)
+const deleteDmMessage = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const msgId = req.params.msgId;
+
+  try {
+    const { rows } = await query(
+      `SELECT id, sender_id, recipient_id, is_deleted FROM direct_messages WHERE id = $1`,
+      [msgId]
+    );
+
+    if (rows.length === 0) return res.status(404).json({ error: 'Message not found' });
+
+    const msg = rows[0];
+    if (String(msg.sender_id) !== String(user.id)) {
+      return res.status(403).json({ error: 'Cannot delete another user\'s message' });
+    }
+    if (msg.is_deleted) {
+      return res.status(410).json({ error: 'Message already deleted' });
+    }
+
+    await query(
+      `UPDATE direct_messages SET is_deleted = true WHERE id = $1`,
+      [msgId]
+    );
+
+    // Broadcast to both participants
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user:${msg.sender_id}`).to(`user:${msg.recipient_id}`)
+        .emit('dm:message:deleted', {
+          id: msg.id,
+          senderId: msg.sender_id,
+          recipientId: msg.recipient_id,
+        });
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('deleteDmMessage error', err);
+    return res.status(500).json({ error: 'Failed to delete message' });
+  }
+};
+
+// Full-text search within a DM conversation
+const searchDmMessages = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const { partnerId: rawPartnerId } = req.params;
+  const { q } = req.query;
+
+  if (!q || !q.trim()) {
+    return res.status(400).json({ error: 'Search query is required' });
+  }
+
+  const { resolveUserId } = require('../../utils/helpers');
+  const partnerId = (await resolveUserId(rawPartnerId)) || rawPartnerId;
+
+  try {
+    const { rows } = await query(
+      `SELECT id, sender_id, recipient_id, content, media_url, media_type, created_at, edited_at
+       FROM direct_messages
+       WHERE ((sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1))
+         AND is_deleted = false
+         AND to_tsvector('english', content) @@ plainto_tsquery('english', $3)
+       ORDER BY created_at DESC
+       LIMIT 30`,
+      [user.id, partnerId, q.trim()]
+    );
+
+    return res.json({ success: true, messages: rows });
+  } catch (err) {
+    logger.error('searchDmMessages error', err);
+    return res.status(500).json({ error: 'Failed to search messages' });
+  }
+};
+
+module.exports = { getThreads, getConversation, getPartnerInfo, sendMessage, editDmMessage, deleteDmMessage, searchDmMessages };

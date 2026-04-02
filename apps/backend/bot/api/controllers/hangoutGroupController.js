@@ -2,6 +2,7 @@
 
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
+const socketSingleton = require('../../services/socketSingleton');
 const userService = require('../../../services/userService');
 const VideoCallModel = require('../../../models/videoCallModel');
 const { buildJitsiHangoutsUrl } = require('../../utils/jitsiHangoutsWebApp');
@@ -58,7 +59,7 @@ const listGroups = async (req, res) => {
 
     const { rows } = await query(
       `SELECT g.id, g.name, g.description, g.avatar_url, g.creator_id,
-              g.is_main, g.is_wall_of_fame, g.is_public, g.max_members, g.created_at,
+              g.is_main, g.is_wall_of_fame, g.is_public, g.max_members, g.created_at, g.feed_visibility,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
               (
                 (SELECT COUNT(*)::int FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true) > 0
@@ -98,6 +99,7 @@ const listGroups = async (req, res) => {
       activeCallId: r.active_call_id,
       lastMessage: null, // Messages live in Matrix; frontend renders from Matrix SDK
       unreadCount: parseInt(unreadCounts[i], 10) || 0,
+      feedVisibility: r.feed_visibility || 'public',
     }));
 
     return res.json({ success: true, groups });
@@ -256,6 +258,7 @@ const getGroup = async (req, res) => {
         autoDeleteHours: g.auto_delete_hours,
         tags: g.tags || [],
         inviteCode: g.invite_code,
+        feedVisibility: g.feed_visibility || 'public',
       },
       members: members.map(m => ({ ...m, photo_url: isValidPhotoUrl(m.photo_url) ? m.photo_url : null })),
     });
@@ -703,22 +706,49 @@ const getMessages = async (req, res) => {
               cm.media_thumb_url, cm.media_width, cm.media_height,
               cm.media_metadata, cm.reply_to_id,
               r.first_name AS reply_name, r.username AS reply_username, r.content AS reply_content,
-              cm.created_at
+              cm.created_at, cm.edited_at, cm.edit_count, cm.is_pinned,
+              rxn.reactions
        FROM chat_messages cm
        LEFT JOIN users u ON u.id = cm.user_id
        LEFT JOIN chat_messages r ON r.id = cm.reply_to_id
+       LEFT JOIN LATERAL (
+         SELECT json_agg(json_build_object(
+           'emoji', sub.emoji,
+           'count', sub.cnt,
+           'users', sub.users
+         )) AS reactions
+         FROM (
+           SELECT emoji, COUNT(*)::int AS cnt, array_agg(cr.user_id) AS users
+           FROM chat_message_reactions cr
+           WHERE cr.message_id = cm.id
+           GROUP BY emoji
+         ) sub
+       ) rxn ON true
        WHERE cm.room=$1 AND cm.is_deleted=false
          ${cursor ? 'AND cm.created_at < $2' : ''}
        ORDER BY cm.created_at DESC LIMIT 50`,
       cursor ? [room, cursor] : [room]
     );
 
-    // Attach reply_to object and clean up helper columns
+    const currentUserId = String(user.id);
+
+    // Attach reply_to object, reacted_by_me flag, and clean up helper columns
     for (const msg of rows) {
       if (msg.reply_to_id && (msg.reply_name || msg.reply_username)) {
         msg.reply_to = { name: msg.reply_name || msg.reply_username || 'User', content: (msg.reply_content || '[media]').slice(0, 100) };
       }
       delete msg.reply_name; delete msg.reply_username; delete msg.reply_content;
+
+      if (Array.isArray(msg.reactions)) {
+        msg.reactions = msg.reactions.map((r) => ({
+          emoji: r.emoji,
+          count: r.count,
+          users: Array.isArray(r.users) ? r.users.map(String) : [],
+          reacted_by_me: Array.isArray(r.users) && r.users.map(String).includes(currentUserId),
+        }));
+      } else {
+        msg.reactions = [];
+      }
     }
 
     return res.json({ success: true, messages: rows.reverse().map(normalizeMessage) });
@@ -733,7 +763,8 @@ const getMessages = async (req, res) => {
 const sendMessage = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  const { content } = req.body;
+  const { content, replyToId } = req.body;
+  const parsedReplyToId = replyToId ? parseInt(replyToId, 10) : null;
 
   if (!content?.trim()) return res.status(400).json({ error: 'Content required' });
 
@@ -811,15 +842,26 @@ const sendMessage = async (req, res) => {
     const photoUrl = isValidPhotoUrl(rawPhoto) ? rawPhoto : null;
 
     const { rows } = await query(
-      `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content, reply_to_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, room, user_id, username, first_name, photo_url, content,
                  media_url, media_type, media_mime, media_thumb_url,
-                 media_width, media_height, media_metadata, created_at`,
-      [room, user.id, user.username || null, user.firstName || user.first_name || null, photoUrl, text]
+                 media_width, media_height, media_metadata, reply_to_id, created_at`,
+      [room, user.id, user.username || null, user.firstName || user.first_name || null, photoUrl, text, parsedReplyToId]
     );
 
     const msg = normalizeMessage(rows[0]);
+
+    // Attach reply_to preview if replying
+    if (parsedReplyToId) {
+      const { rows: replyRows } = await query(
+        'SELECT first_name, username, content FROM chat_messages WHERE id = $1',
+        [parsedReplyToId]
+      );
+      if (replyRows[0]) {
+        msg.reply_to = { name: replyRows[0].first_name || replyRows[0].username || 'User', content: (replyRows[0].content || '[media]').slice(0, 100) };
+      }
+    }
 
     // Touch activity timestamp
     await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
@@ -1383,7 +1425,7 @@ const updateGroupSettings = async (req, res) => {
   try {
     if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
 
-    const { slowModeSeconds, isReadOnly, allowMedia, allowMemberInvites, autoDeleteHours, tags, isPublic, name, description } = req.body;
+    const { slowModeSeconds, isReadOnly, allowMedia, allowMemberInvites, autoDeleteHours, tags, isPublic, name, description, feedVisibility } = req.body;
 
     const sets = [];
     const vals = [];
@@ -1398,13 +1440,14 @@ const updateGroupSettings = async (req, res) => {
     if (isPublic !== undefined) { sets.push(`is_public = $${idx++}`); vals.push(!!isPublic); }
     if (name !== undefined && name.trim()) { sets.push(`name = $${idx++}`); vals.push(name.trim().slice(0, 100)); }
     if (description !== undefined) { sets.push(`description = $${idx++}`); vals.push((description || '').trim().slice(0, 500)); }
+    if (feedVisibility !== undefined && ['public', 'shadow', 'ghost'].includes(feedVisibility)) { sets.push(`feed_visibility = $${idx++}`); vals.push(feedVisibility); }
 
     if (sets.length === 0) return res.status(400).json({ error: 'No settings to update' });
 
     vals.push(groupId);
     const { rows } = await query(
       `UPDATE hangout_groups SET ${sets.join(', ')} WHERE id = $${idx} AND is_main = false
-       RETURNING id, name, description, is_public, slow_mode_seconds, is_read_only, allow_media, allow_member_invites, auto_delete_hours, tags`,
+       RETURNING id, name, description, is_public, slow_mode_seconds, is_read_only, allow_media, allow_member_invites, auto_delete_hours, tags, feed_visibility`,
       vals
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found or is main' });
@@ -1478,7 +1521,7 @@ const getInviteLink = async (req, res) => {
       );
       rows = result.rows;
     }
-    return res.json({ success: true, inviteCode: rows[0].invite_code, inviteUrl: `https://app.pnptv.app/hangouts/invite/${rows[0].invite_code}` });
+    return res.json({ success: true, inviteCode: rows[0].invite_code, inviteUrl: `https://pnptv.app/hangouts/invite/${rows[0].invite_code}` });
   } catch (err) {
     logger.error('getInviteLink error', err);
     return res.status(500).json({ error: 'Failed to generate invite link' });
@@ -1582,6 +1625,296 @@ const adminDeleteMessage = async (req, res) => {
   }
 };
 
+// ── Helper: aggregated reactions for a message, annotated with reacted_by_me ──
+const fetchReactions = async (messageId, currentUserId) => {
+  const { rows } = await query(
+    `SELECT emoji, COUNT(*)::int AS count, array_agg(user_id) AS users
+     FROM chat_message_reactions
+     WHERE message_id = $1
+     GROUP BY emoji`,
+    [messageId]
+  );
+  const uid = String(currentUserId);
+  return rows.map((r) => ({
+    emoji: r.emoji,
+    count: r.count,
+    users: Array.isArray(r.users) ? r.users.map(String) : [],
+    reacted_by_me: Array.isArray(r.users) && r.users.map(String).includes(uid),
+  }));
+};
+
+// PATCH /api/webapp/hangouts/groups/:id/messages/:msgId
+const editMessage = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  const msgId   = parseInt(req.params.msgId, 10);
+  if (!Number.isFinite(groupId) || !Number.isFinite(msgId)) {
+    return res.status(400).json({ error: 'Invalid parameters' });
+  }
+
+  const content = req.body.content?.trim();
+  if (!content) return res.status(400).json({ error: 'Content required' });
+  if (content.length > 2000) return res.status(400).json({ error: 'Content too long' });
+
+  try {
+    if (!(await isMember(groupId, user.id))) {
+      return res.status(403).json({ error: 'Not a member of this group' });
+    }
+
+    const { rows: msgRows } = await query(
+      `SELECT id, user_id, created_at, is_deleted FROM chat_messages WHERE id=$1 AND room='hangout:'||$2`,
+      [msgId, groupId]
+    );
+    if (msgRows.length === 0) return res.status(404).json({ error: 'Message not found' });
+
+    const msg = msgRows[0];
+    if (String(msg.user_id) !== String(user.id)) {
+      return res.status(403).json({ error: 'Cannot edit another user\'s message' });
+    }
+    if (msg.is_deleted) return res.status(409).json({ error: 'Cannot edit a deleted message' });
+
+    const ageMs = Date.now() - new Date(msg.created_at).getTime();
+    if (ageMs > 48 * 60 * 60 * 1000) {
+      return res.status(409).json({ error: 'Message too old to edit (48-hour limit)' });
+    }
+
+    const { rows: updated } = await query(
+      `UPDATE chat_messages
+       SET content = $1,
+           edited_at = NOW(),
+           edit_count = edit_count + 1,
+           original_content = COALESCE(original_content, content)
+       WHERE id = $2
+       RETURNING id, content, edited_at, edit_count`,
+      [content, msgId]
+    );
+
+    const result = updated[0];
+    const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+    if (io) {
+      io.to(`hangout:${groupId}`).emit('hangout:message:edited', {
+        messageId: result.id,
+        content:   result.content,
+        editedAt:  result.edited_at,
+        editCount: result.edit_count,
+      });
+    }
+
+    return res.json({ success: true, message: result });
+  } catch (err) {
+    logger.error('editMessage error', err);
+    return res.status(500).json({ error: 'Failed to edit message' });
+  }
+};
+
+// DELETE /api/webapp/hangouts/groups/:id/messages/:msgId
+const deleteMessage = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  const msgId   = parseInt(req.params.msgId, 10);
+  if (!Number.isFinite(groupId) || !Number.isFinite(msgId)) {
+    return res.status(400).json({ error: 'Invalid parameters' });
+  }
+
+  // Accept forAll from both query-string and body
+  const forAll = (req.query.forAll ?? req.body?.forAll) === 'true';
+
+  try {
+    if (!(await isMember(groupId, user.id))) {
+      return res.status(403).json({ error: 'Not a member of this group' });
+    }
+
+    const { rows: msgRows } = await query(
+      `SELECT id, user_id, is_deleted FROM chat_messages WHERE id=$1 AND room='hangout:'||$2`,
+      [msgId, groupId]
+    );
+    if (msgRows.length === 0) return res.status(404).json({ error: 'Message not found' });
+
+    const msg = msgRows[0];
+    if (msg.is_deleted) return res.status(409).json({ error: 'Message already deleted' });
+
+    const isOwnMessage = String(msg.user_id) === String(user.id);
+
+    if (forAll && !isOwnMessage) {
+      // Only mods/owner may delete others' messages for everyone
+      if (!(await isOwnerOrMod(groupId, user.id))) {
+        return res.status(403).json({ error: 'Not authorized to delete this message for all' });
+      }
+    } else if (!forAll && !isOwnMessage) {
+      // Cannot delete someone else's message (even for self only)
+      return res.status(403).json({ error: 'Cannot delete another user\'s message' });
+    }
+
+    await query(
+      `UPDATE chat_messages
+       SET is_deleted = true, deleted_by = $1, deleted_for_all = $2
+       WHERE id = $3`,
+      [String(user.id), forAll, msgId]
+    );
+
+    const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+    if (io) {
+      io.to(`hangout:${groupId}`).emit('hangout:message:deleted', {
+        messageId: msgId,
+        deletedBy: user.id,
+        forAll,
+      });
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('deleteMessage error', err);
+    return res.status(500).json({ error: 'Failed to delete message' });
+  }
+};
+
+// GET /api/webapp/hangouts/groups/:id/messages/search?q=
+const searchMessages = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group id' });
+
+  const q = req.query.q?.trim();
+  if (!q || q.length < 2) return res.status(400).json({ error: 'Query must be at least 2 characters' });
+
+  try {
+    if (!(await isMember(groupId, user.id))) {
+      return res.status(403).json({ error: 'Not a member of this group' });
+    }
+
+    const room = `hangout:${groupId}`;
+    const { rows } = await query(
+      `SELECT cm.id, cm.room, cm.user_id, cm.username, cm.first_name,
+              COALESCE(u.photo_file_id, cm.photo_url) AS photo_url,
+              cm.content,
+              cm.media_url, cm.media_type, cm.media_mime,
+              cm.media_thumb_url, cm.media_width, cm.media_height,
+              cm.media_metadata, cm.reply_to_id,
+              r.first_name AS reply_name, r.username AS reply_username, r.content AS reply_content,
+              cm.created_at, cm.edited_at, cm.edit_count, cm.is_pinned
+       FROM chat_messages cm
+       LEFT JOIN users u ON u.id = cm.user_id
+       LEFT JOIN chat_messages r ON r.id = cm.reply_to_id
+       WHERE cm.room = $1
+         AND cm.is_deleted = false
+         AND to_tsvector('english', COALESCE(cm.content, '')) @@ plainto_tsquery('english', $2)
+       ORDER BY cm.created_at DESC
+       LIMIT 30`,
+      [room, q]
+    );
+
+    for (const msg of rows) {
+      if (msg.reply_to_id && (msg.reply_name || msg.reply_username)) {
+        msg.reply_to = { name: msg.reply_name || msg.reply_username || 'User', content: (msg.reply_content || '[media]').slice(0, 100) };
+      }
+      delete msg.reply_name; delete msg.reply_username; delete msg.reply_content;
+      msg.reactions = [];
+    }
+
+    return res.json({ success: true, messages: rows.map(normalizeMessage) });
+  } catch (err) {
+    logger.error('searchMessages error', err);
+    return res.status(500).json({ error: 'Failed to search messages' });
+  }
+};
+
+// POST /api/webapp/hangouts/groups/:id/messages/:msgId/react
+const toggleReaction = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  const msgId   = parseInt(req.params.msgId, 10);
+  if (!Number.isFinite(groupId) || !Number.isFinite(msgId)) {
+    return res.status(400).json({ error: 'Invalid parameters' });
+  }
+
+  const emoji = req.body.emoji?.trim();
+  if (!emoji || emoji.length > 10) return res.status(400).json({ error: 'Invalid emoji' });
+
+  try {
+    if (!(await isMember(groupId, user.id))) {
+      return res.status(403).json({ error: 'Not a member of this group' });
+    }
+
+    // Verify message belongs to this group
+    const { rows: msgRows } = await query(
+      `SELECT id FROM chat_messages WHERE id=$1 AND room='hangout:'||$2 AND is_deleted=false`,
+      [msgId, groupId]
+    );
+    if (msgRows.length === 0) return res.status(404).json({ error: 'Message not found' });
+
+    // Check if reaction already exists
+    const { rows: existing } = await query(
+      `SELECT id FROM chat_message_reactions WHERE message_id=$1 AND user_id=$2 AND emoji=$3`,
+      [msgId, String(user.id), emoji]
+    );
+
+    if (existing.length > 0) {
+      // Remove the reaction
+      await query(
+        `DELETE FROM chat_message_reactions WHERE message_id=$1 AND user_id=$2 AND emoji=$3`,
+        [msgId, String(user.id), emoji]
+      );
+    } else {
+      // Enforce max 20 unique emojis per message
+      const { rows: uniqueEmojiRows } = await query(
+        `SELECT COUNT(DISTINCT emoji)::int AS cnt FROM chat_message_reactions WHERE message_id=$1`,
+        [msgId]
+      );
+      if (uniqueEmojiRows[0].cnt >= 20) {
+        return res.status(409).json({ error: 'Maximum of 20 unique emoji reactions reached for this message' });
+      }
+      await query(
+        `INSERT INTO chat_message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [msgId, String(user.id), emoji]
+      );
+    }
+
+    const reactions = await fetchReactions(msgId, user.id);
+
+    const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+    if (io) {
+      io.to(`hangout:${groupId}`).emit('hangout:reaction:updated', {
+        messageId: msgId,
+        reactions,
+      });
+    }
+
+    return res.json({ success: true, reactions });
+  } catch (err) {
+    logger.error('toggleReaction error', err);
+    return res.status(500).json({ error: 'Failed to toggle reaction' });
+  }
+};
+
+// GET /api/webapp/hangouts/groups/:id/messages/:msgId/reactions
+const getReactions = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  const msgId   = parseInt(req.params.msgId, 10);
+  if (!Number.isFinite(groupId) || !Number.isFinite(msgId)) {
+    return res.status(400).json({ error: 'Invalid parameters' });
+  }
+
+  try {
+    if (!(await isMember(groupId, user.id))) {
+      return res.status(403).json({ error: 'Not a member of this group' });
+    }
+
+    // Verify message belongs to this group
+    const { rows: msgRows } = await query(
+      `SELECT id FROM chat_messages WHERE id=$1 AND room='hangout:'||$2 AND is_deleted=false`,
+      [msgId, groupId]
+    );
+    if (msgRows.length === 0) return res.status(404).json({ error: 'Message not found' });
+
+    const reactions = await fetchReactions(msgId, user.id);
+    return res.json({ success: true, reactions });
+  } catch (err) {
+    logger.error('getReactions error', err);
+    return res.status(500).json({ error: 'Failed to load reactions' });
+  }
+};
+
 module.exports = {
   listGroups,
   createGroup,
@@ -1617,4 +1950,9 @@ module.exports = {
   joinByInvite,
   updateNotificationMode,
   adminDeleteMessage,
+  editMessage,
+  deleteMessage,
+  searchMessages,
+  toggleReaction,
+  getReactions,
 };

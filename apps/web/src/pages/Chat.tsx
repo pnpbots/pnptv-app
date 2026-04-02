@@ -1,4 +1,4 @@
-import {
+import React, {
   useState,
   useEffect,
   useRef,
@@ -47,6 +47,10 @@ import {
   getGroupMessages,
   sendGroupMessage,
   sendGroupMediaMessage,
+  editGroupMessage,
+  deleteGroupMessage,
+  searchGroupMessages,
+  toggleMessageReaction,
   startGroupCall,
   getActiveGroupCall,
   getHangoutFeed,
@@ -58,6 +62,7 @@ import {
   type DiscoverGroup,
   type JoinRequest,
   type GroupMessage,
+  type MessageReaction,
   type SocialPostItem,
 } from "@/lib/api";
 import SocialPostCard from "@/components/social/SocialPostCard";
@@ -136,6 +141,14 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     callStartedAt,
     callParticipants,
     screenShareUser,
+    emitEditMessage,
+    emitDeleteMessage,
+    emitReaction,
+    emitReadMessage,
+    onMessageEdit,
+    onMessageDelete,
+    onReactionUpdate,
+    onReadReceipt,
   } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId);
 
   // Error feedback
@@ -209,6 +222,35 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
   const [eventKey, setEventKey] = useState(0);
 
+  // ─── Telegram-style chat features ──────────────────────────────────────
+  // Reply-to-send
+  const [replyingTo, setReplyingTo] = useState<GroupMessage | null>(null);
+  // Message editing
+  const [editingMessage, setEditingMessage] = useState<GroupMessage | null>(null);
+  // Context menu
+  const [contextMenu, setContextMenu] = useState<{ msg: GroupMessage; x: number; y: number } | null>(null);
+  // Quick reaction picker
+  const [reactionPickerMsgId, setReactionPickerMsgId] = useState<number | null>(null);
+  // Message search
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<GroupMessage[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  // Scroll-to-bottom FAB
+  const [showScrollFab, setShowScrollFab] = useState(false);
+  const [unreadBelowCount, setUnreadBelowCount] = useState(0);
+  // Read receipts
+  const [readReceipts, setReadReceipts] = useState<Map<string, number>>(new Map());
+  // Local deletions (delete-for-me, stored in memory)
+  const [localDeletedIds, setLocalDeletedIds] = useState<Set<number>>(new Set());
+  // Long-press timer for mobile
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Pinned message cycling
+  const [currentPinIndex, setCurrentPinIndex] = useState(0);
+
+  // Quick reaction emojis
+  const QUICK_REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F44E}"];
+
   // ─── Group list loading ─────────────────────────────────────────────
 
   const loadGroups = useCallback(async () => {
@@ -266,10 +308,71 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     };
   }, [activeGroup?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─── Telegram-style socket event callbacks ───────────────────────────
+  useEffect(() => {
+    onMessageEdit((data) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.messageId
+            ? { ...m, content: data.content, edited_at: data.editedAt, edit_count: data.editCount }
+            : m
+        )
+      );
+    });
+    onMessageDelete((data) => {
+      if (data.forAll) {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === data.messageId ? { ...m, is_deleted: true, content: null } : m))
+        );
+      }
+    });
+    onReactionUpdate((data) => {
+      const myId = String(user?.dbId);
+      const enriched = (data.reactions || []).map((r: any) => ({
+        emoji: r.emoji,
+        count: r.count,
+        users: r.users || [],
+        reacted_by_me: Array.isArray(r.users) && r.users.map(String).includes(myId),
+      }));
+      setMessages((prev) =>
+        prev.map((m) => (m.id === data.messageId ? { ...m, reactions: enriched } : m))
+      );
+    });
+    onReadReceipt((data) => {
+      setReadReceipts((prev) => {
+        const next = new Map(prev);
+        next.set(data.userId, data.lastReadMessageId);
+        return next;
+      });
+    });
+    return () => {
+      onMessageEdit(null);
+      onMessageDelete(null);
+      onReactionUpdate(null);
+      onReadReceipt(null);
+    };
+  }, [onMessageEdit, onMessageDelete, onReactionUpdate, onReadReceipt]);
+
   // ─── Message sending handlers ────────────────────────────────────────
 
   const handleSendMessage = async () => {
     if (!activeGroup || sendingMessage) return;
+
+    // Editing an existing message
+    if (editingMessage) {
+      if (!messageInput.trim()) return;
+      setSendingMessage(true);
+      try {
+        await editGroupMessage(activeGroup.id, editingMessage.id, messageInput.trim());
+        setMessageInput("");
+        setEditingMessage(null);
+      } catch (err) {
+        setChatError(err instanceof Error ? err.message : "Failed to edit message");
+      } finally {
+        setSendingMessage(false);
+      }
+      return;
+    }
 
     if (mediaFile) {
       setSendingMessage(true);
@@ -278,6 +381,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         setMessageInput("");
         setMediaFile(null);
         setMediaPreview(null);
+        setReplyingTo(null);
       } catch (err) {
         setChatError(err instanceof Error ? err.message : "Failed to send media");
       } finally {
@@ -289,8 +393,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     if (!messageInput.trim()) return;
     setSendingMessage(true);
     try {
-      await sendGroupMessage(activeGroup.id, messageInput.trim());
+      await sendGroupMessage(activeGroup.id, messageInput.trim(), replyingTo?.id || null);
       setMessageInput("");
+      setReplyingTo(null);
     } catch (err) {
       setChatError(err instanceof Error ? err.message : "Failed to send message");
     } finally {
@@ -316,6 +421,86 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setMediaPreview(null);
     }
   };
+
+  // ─── Telegram-style message action handlers ──────────────────────────
+
+  const handleContextMenu = useCallback((e: React.MouseEvent | React.TouchEvent, msg: GroupMessage) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const x = "clientX" in e ? e.clientX : e.touches?.[0]?.clientX ?? 0;
+    const y = "clientY" in e ? e.clientY : e.touches?.[0]?.clientY ?? 0;
+    setContextMenu({ msg, x, y });
+  }, []);
+
+  const handleLongPressStart = useCallback((e: React.TouchEvent, msg: GroupMessage) => {
+    longPressTimer.current = setTimeout(() => {
+      handleContextMenu(e, msg);
+    }, 500);
+  }, [handleContextMenu]);
+
+  const handleLongPressEnd = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  const handleReply = useCallback((msg: GroupMessage) => {
+    setReplyingTo(msg);
+    setContextMenu(null);
+  }, []);
+
+  const handleEditStart = useCallback((msg: GroupMessage) => {
+    setEditingMessage(msg);
+    setMessageInput(msg.content || "");
+    setContextMenu(null);
+  }, []);
+
+  const handleDeleteMessage = useCallback(async (msg: GroupMessage, forAll: boolean) => {
+    if (!activeGroup) return;
+    try {
+      if (forAll) {
+        await deleteGroupMessage(activeGroup.id, msg.id, true);
+      } else {
+        setLocalDeletedIds((prev) => new Set(prev).add(msg.id));
+      }
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Failed to delete message");
+    }
+    setContextMenu(null);
+  }, [activeGroup]);
+
+  const handleReaction = useCallback(async (msgId: number, emoji: string) => {
+    if (!activeGroup) return;
+    try {
+      await toggleMessageReaction(activeGroup.id, msgId, emoji);
+    } catch { /* silent */ }
+    setContextMenu(null);
+    setReactionPickerMsgId(null);
+  }, [activeGroup]);
+
+  const handleSearch = useCallback(async (q: string) => {
+    if (!activeGroup || !q.trim() || q.length < 2) return;
+    setSearchLoading(true);
+    try {
+      const res = await searchGroupMessages(activeGroup.id, q);
+      setSearchResults(res.messages || []);
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [activeGroup]);
+
+  const handleCopyMessage = useCallback((msg: GroupMessage) => {
+    if (msg.content) navigator.clipboard.writeText(msg.content).catch(() => {});
+    setContextMenu(null);
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingMessage(null);
+    setMessageInput("");
+  }, []);
 
   // ─── Video call handlers ─────────────────────────────────────────────
 
@@ -800,6 +985,13 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   >
                     <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                     Settings
+                  </button>
+                  <button
+                    onClick={() => { setShowGroupMenu(false); setShowSearch(true); }}
+                    className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
+                  >
+                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+                    Search Messages
                   </button>
                   <button
                     onClick={() => {
@@ -1589,6 +1781,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             if (el.scrollTop < 60 && hasMoreMessages && !messagesLoading) {
               loadMoreMessages();
             }
+            // Show scroll-to-bottom FAB when scrolled up
+            const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+            setShowScrollFab(distFromBottom > 200);
           }}
         >
           {messagesLoading && messages.length === 0 ? (
@@ -1618,113 +1813,255 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   </svg>
                 </div>
               )}
-              {messages.map((msg, idx) => {
-                const isMe = String(msg.user_id) === String(user?.dbId);
-                const showAvatar = !isMe && (idx === 0 || String(messages[idx - 1]?.user_id) !== String(msg.user_id));
-                const timeStr = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              {(() => {
+                // Filter out locally deleted messages
+                const visibleMessages = messages.filter((m) => !localDeletedIds.has(m.id));
+                // Group messages by date for date separators
+                let lastDateStr = "";
+                return visibleMessages.map((msg, idx) => {
+                  const isMe = String(msg.user_id) === String(user?.dbId);
+                  const prev = idx > 0 ? visibleMessages[idx - 1] : null;
+                  const next = idx < visibleMessages.length - 1 ? visibleMessages[idx + 1] : null;
+                  const timeStr = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-                return (
-                  <div key={msg.id} className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"}`}>
-                    {/* Avatar */}
-                    <div className="w-7 flex-shrink-0">
-                      {showAvatar && !isMe ? (
-                        <img
-                          src={msg.photo_url || "/default-avatar.svg"}
-                          alt=""
-                          className="w-7 h-7 rounded-full object-cover"
-                          onError={(e) => { (e.target as HTMLImageElement).src = "/default-avatar.svg"; }}
-                        />
-                      ) : null}
-                    </div>
+                  // Message grouping: same user within 1 minute
+                  const sameUserAsPrev = prev && String(prev.user_id) === String(msg.user_id) &&
+                    (new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime()) < 60000;
+                  const sameUserAsNext = next && String(next.user_id) === String(msg.user_id) &&
+                    (new Date(next.created_at).getTime() - new Date(msg.created_at).getTime()) < 60000;
 
-                    {/* Bubble */}
-                    <div className={`max-w-[75%] ${isMe ? "items-end" : "items-start"} flex flex-col`}>
-                      {/* Sender name for group chat */}
-                      {showAvatar && !isMe && (
-                        <span className="text-[10px] text-pnp-textSecondary ml-1 mb-0.5">
-                          {msg.first_name || msg.username || "User"}
-                        </span>
-                      )}
+                  const showAvatar = !isMe && !sameUserAsPrev;
+                  const showName = !isMe && !sameUserAsPrev;
+                  const isLastInGroup = !sameUserAsNext;
 
-                      {/* Reply preview */}
-                      {msg.reply_to && (
-                        <div className={`text-[10px] px-2 py-1 mb-0.5 rounded-lg border-l-2 ${
-                          isMe ? "bg-white/10 border-white/30" : "bg-white/5 border-pnp-accent/50"
-                        }`}>
-                          <span className="font-semibold text-pnp-accent">{msg.reply_to.name}</span>
-                          <p className="text-pnp-textSecondary truncate">{msg.reply_to.content}</p>
-                        </div>
-                      )}
-
-                      <div
-                        className={`rounded-2xl px-3 py-2 text-sm break-words ${
-                          isMe
-                            ? "text-white rounded-br-md"
-                            : "bg-white/10 text-white rounded-bl-md"
-                        }`}
-                        style={isMe ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
-                      >
-                        {/* Media content */}
-                        {msg.media_url && msg.media_type && (
-                          <div className="mb-1">
-                            <MediaMessage
-                              mediaUrl={msg.media_url}
-                              mediaType={msg.media_type}
-                              thumbUrl={msg.media_thumb_url}
-                              width={msg.media_width}
-                              height={msg.media_height}
-                              duration={msg.media_duration}
-                              onExpandImage={(url) => setLightboxUrl(url)}
-                              isMe={isMe}
-                            />
-                            {/* Drop to Feed button — promote media to hangout feed */}
-                            {activeGroup.feedVisibility !== "ghost" && (
-                              <button
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  try {
-                                    const res = await dropToFeed(activeGroup.id, msg.id);
-                                    if (res.success) {
-                                      setHangoutFeedPosts((prev) => [res.post, ...prev]);
-                                      setChatError(null);
-                                    }
-                                  } catch (err: any) {
-                                    setChatError(err?.message || "Already dropped to feed");
-                                  }
-                                }}
-                                className="mt-1 text-[10px] font-medium px-2 py-0.5 rounded-full transition-colors hover:bg-white/10"
-                                style={{ color: "#7B61FF" }}
-                                title="Drop to Feed"
-                              >
-                                Drop to Feed
-                              </button>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Text content */}
-                        {msg.content && <p>{msg.content}</p>}
-
-                        {/* Timestamp */}
-                        <p className={`text-[10px] mt-0.5 ${isMe ? "text-white/60" : "text-pnp-textSecondary"}`}>
-                          {timeStr}
-                        </p>
+                  // Date separator
+                  const msgDate = new Date(msg.created_at);
+                  const dateStr = msgDate.toDateString();
+                  let dateSeparator = null;
+                  if (dateStr !== lastDateStr) {
+                    lastDateStr = dateStr;
+                    const today = new Date().toDateString();
+                    const yesterday = new Date(Date.now() - 86400000).toDateString();
+                    const label = dateStr === today ? "Today" : dateStr === yesterday ? "Yesterday" : msgDate.toLocaleDateString([], { month: "long", day: "numeric" });
+                    dateSeparator = (
+                      <div key={`date-${dateStr}`} className="flex justify-center py-2">
+                        <span className="text-[11px] text-pnp-textSecondary bg-white/5 px-3 py-0.5 rounded-full">{label}</span>
                       </div>
-                    </div>
-                  </div>
-                );
-              })}
+                    );
+                  }
+
+                  // Read receipt status for own messages
+                  let readStatus: "sent" | "read" | null = null;
+                  if (isMe) {
+                    const readByOthers = Array.from(readReceipts.values()).some((lastRead) => lastRead >= msg.id);
+                    readStatus = readByOthers ? "read" : "sent";
+                  }
+
+                  // Deleted message display
+                  if (msg.is_deleted) {
+                    return (
+                      <React.Fragment key={msg.id}>
+                        {dateSeparator}
+                        <div className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${!sameUserAsPrev ? "mt-2" : "mt-0.5"}`}>
+                          <div className="w-7 flex-shrink-0" />
+                          <div className={`max-w-[75%] flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+                            <div className="rounded-2xl px-3 py-2 text-sm bg-white/5 border border-white/10 italic text-pnp-textSecondary">
+                              This message was deleted
+                            </div>
+                          </div>
+                        </div>
+                      </React.Fragment>
+                    );
+                  }
+
+                  return (
+                    <React.Fragment key={msg.id}>
+                      {dateSeparator}
+                      <div
+                        data-msg-id={msg.id}
+                        className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${!sameUserAsPrev ? "mt-2" : "mt-0.5"}`}
+                        onContextMenu={(e) => handleContextMenu(e, msg)}
+                        onTouchStart={(e) => handleLongPressStart(e, msg)}
+                        onTouchEnd={handleLongPressEnd}
+                        onTouchMove={handleLongPressEnd}
+                      >
+                        {/* Avatar */}
+                        <div className="w-7 flex-shrink-0 self-end">
+                          {showAvatar && isLastInGroup ? (
+                            <img
+                              src={msg.photo_url || "/default-avatar.svg"}
+                              alt=""
+                              className="w-7 h-7 rounded-full object-cover cursor-pointer"
+                              onClick={() => navigate(`/profile/${msg.user_id}`)}
+                              onError={(e) => { (e.target as HTMLImageElement).src = "/default-avatar.svg"; }}
+                            />
+                          ) : null}
+                        </div>
+
+                        {/* Bubble */}
+                        <div className={`max-w-[75%] flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+                          {/* Sender name */}
+                          {showName && (
+                            <span className="text-[10px] text-pnp-textSecondary ml-1 mb-0.5">
+                              {msg.first_name || msg.username || "User"}
+                            </span>
+                          )}
+
+                          {/* Reply preview */}
+                          {msg.reply_to && (
+                            <div className={`text-[10px] px-2 py-1 mb-0.5 rounded-lg border-l-2 max-w-full ${
+                              isMe ? "bg-white/10 border-white/30" : "bg-white/5 border-pnp-accent/50"
+                            }`}>
+                              <span className="font-semibold text-pnp-accent">{msg.reply_to.name}</span>
+                              <p className="text-pnp-textSecondary truncate">{msg.reply_to.content}</p>
+                            </div>
+                          )}
+
+                          <div
+                            className={`relative px-3 py-2 text-sm break-words ${
+                              isMe
+                                ? `text-white ${isLastInGroup ? "rounded-2xl rounded-br-sm" : "rounded-2xl"}`
+                                : `bg-white/10 text-white ${isLastInGroup ? "rounded-2xl rounded-bl-sm" : "rounded-2xl"}`
+                            }`}
+                            style={isMe ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
+                          >
+                            {/* SVG bubble tail for last message in group */}
+                            {isLastInGroup && (
+                              <svg
+                                className={`absolute bottom-0 w-2 h-3 ${isMe ? "-right-1.5" : "-left-1.5"}`}
+                                viewBox="0 0 8 12"
+                                fill={isMe ? "#E69138" : "rgba(255,255,255,0.1)"}
+                              >
+                                {isMe ? (
+                                  <path d="M0 0 C0 0 0 12 8 12 C3 12 0 8 0 0Z" />
+                                ) : (
+                                  <path d="M8 0 C8 0 8 12 0 12 C5 12 8 8 8 0Z" />
+                                )}
+                              </svg>
+                            )}
+
+                            {/* Media content */}
+                            {msg.media_url && msg.media_type && (
+                              <div className="mb-1">
+                                <MediaMessage
+                                  mediaUrl={msg.media_url}
+                                  mediaType={msg.media_type}
+                                  thumbUrl={msg.media_thumb_url}
+                                  width={msg.media_width}
+                                  height={msg.media_height}
+                                  duration={msg.media_duration}
+                                  onExpandImage={(url) => setLightboxUrl(url)}
+                                  isMe={isMe}
+                                />
+                                {activeGroup.feedVisibility !== "ghost" && (
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      try {
+                                        const res = await dropToFeed(activeGroup.id, msg.id);
+                                        if (res.success) {
+                                          setHangoutFeedPosts((prev) => [res.post, ...prev]);
+                                          setChatError(null);
+                                        }
+                                      } catch (err: any) {
+                                        setChatError(err?.message || "Already dropped to feed");
+                                      }
+                                    }}
+                                    className="mt-1 text-[10px] font-medium px-2 py-0.5 rounded-full transition-colors hover:bg-white/10"
+                                    style={{ color: "#7B61FF" }}
+                                    title="Drop to Feed"
+                                  >
+                                    Drop to Feed
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Text content */}
+                            {msg.content && <p>{msg.content}</p>}
+
+                            {/* Timestamp + edited + read receipts */}
+                            <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
+                              {msg.edited_at && (
+                                <span className={`text-[9px] ${isMe ? "text-white/50" : "text-pnp-textSecondary"}`}>edited</span>
+                              )}
+                              <span className={`text-[10px] ${isMe ? "text-white/60" : "text-pnp-textSecondary"}`}>
+                                {timeStr}
+                              </span>
+                              {isMe && readStatus && (
+                                <span className={`text-[10px] ${readStatus === "read" ? "text-blue-400" : "text-white/40"}`}>
+                                  {readStatus === "read" ? "\u2713\u2713" : "\u2713"}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Reactions row */}
+                          {msg.reactions && msg.reactions.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-0.5 ml-1">
+                              {msg.reactions.map((r) => (
+                                <button
+                                  key={r.emoji}
+                                  onClick={() => handleReaction(msg.id, r.emoji)}
+                                  className={`inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full border transition-colors ${
+                                    r.reacted_by_me
+                                      ? "border-pnp-accent/50 bg-pnp-accent/10"
+                                      : "border-white/10 bg-white/5 hover:bg-white/10"
+                                  }`}
+                                >
+                                  <span>{r.emoji}</span>
+                                  <span className="text-[10px] text-pnp-textSecondary">{r.count}</span>
+                                </button>
+                              ))}
+                              <button
+                                onClick={() => setReactionPickerMsgId(msg.id)}
+                                className="text-xs px-1.5 py-0.5 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-pnp-textSecondary"
+                              >
+                                +
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </React.Fragment>
+                  );
+                });
+              })()}
+
+              {/* Scroll-to-bottom FAB */}
+              {showScrollFab && (
+                <button
+                  onClick={() => {
+                    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                    setUnreadBelowCount(0);
+                  }}
+                  className="sticky bottom-2 left-1/2 -translate-x-1/2 z-10 w-10 h-10 rounded-full bg-pnp-surface border border-pnp-border shadow-lg flex items-center justify-center hover:bg-white/10 transition-colors"
+                >
+                  <svg className="w-5 h-5 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                  {unreadBelowCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: "#D4007A" }}>
+                      {unreadBelowCount}
+                    </span>
+                  )}
+                </button>
+              )}
+
               <div ref={messagesEndRef} />
             </>
           )}
         </div>
 
-        {/* Typing indicator */}
+        {/* Telegram-style typing indicator */}
         {typingUsers.length > 0 && (
-          <div className="px-4 py-1">
-            <p className="text-xs text-pnp-textSecondary italic">
-              {typingUsers.join(", ")} {typingUsers.length === 1 ? "is" : "are"} typing...
-            </p>
+          <div className="px-4 py-1 flex items-center gap-2">
+            <div className="bg-white/10 rounded-2xl rounded-bl-sm px-3 py-2 inline-flex items-center gap-1.5">
+              <span className="text-[10px] text-pnp-textSecondary mr-1">{typingUsers.join(", ")}</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-pnp-textSecondary animate-bounce" style={{ animationDelay: "0ms" }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-pnp-textSecondary animate-bounce" style={{ animationDelay: "150ms" }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-pnp-textSecondary animate-bounce" style={{ animationDelay: "300ms" }} />
+            </div>
           </div>
         )}
 
@@ -1742,6 +2079,28 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             )}
             <span className="text-xs text-pnp-textSecondary flex-1 truncate">{mediaFile.name}</span>
             <button onClick={cancelMedia} className="text-red-400 text-xs font-semibold">Remove</button>
+          </div>
+        )}
+
+        {/* Reply/Edit preview bar */}
+        {(replyingTo || editingMessage) && (
+          <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-2" style={{ background: "#1C1C1E" }}>
+            <div className="flex-1 border-l-2 border-pnp-accent pl-2">
+              <p className="text-[10px] font-semibold text-pnp-accent">
+                {editingMessage ? "Editing message" : `Reply to ${replyingTo?.first_name || replyingTo?.username || "User"}`}
+              </p>
+              <p className="text-xs text-pnp-textSecondary truncate">
+                {(editingMessage?.content || replyingTo?.content || "[media]").slice(0, 80)}
+              </p>
+            </div>
+            <button
+              onClick={() => { setReplyingTo(null); cancelEdit(); }}
+              className="p-1 rounded-full hover:bg-white/10 text-pnp-textSecondary"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         )}
 
@@ -1830,6 +2189,161 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               className="max-w-full max-h-full object-contain"
               onClick={(e) => e.stopPropagation()}
             />
+          </div>
+        )}
+
+        {/* Telegram-style context menu */}
+        {contextMenu && (
+          <div
+            className="fixed inset-0 z-[85]"
+            onClick={() => setContextMenu(null)}
+          >
+            <div
+              className="absolute rounded-xl overflow-hidden shadow-2xl border border-white/10"
+              style={{
+                background: "#2C2C2E",
+                left: Math.min(contextMenu.x, window.innerWidth - 200),
+                top: Math.min(contextMenu.y, window.innerHeight - 300),
+                minWidth: 180,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Quick reactions bar */}
+              <div className="flex justify-around px-3 py-2 border-b border-white/10">
+                {QUICK_REACTIONS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    onClick={() => handleReaction(contextMenu.msg.id, emoji)}
+                    className="text-lg hover:scale-125 transition-transform active:scale-90"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+
+              {/* Action items */}
+              <div className="py-1">
+                <button onClick={() => handleReply(contextMenu.msg)} className="w-full text-left px-4 py-2.5 text-sm text-white hover:bg-white/10 flex items-center gap-3">
+                  <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>
+                  Reply
+                </button>
+                {contextMenu.msg.content && (
+                  <button onClick={() => handleCopyMessage(contextMenu.msg)} className="w-full text-left px-4 py-2.5 text-sm text-white hover:bg-white/10 flex items-center gap-3">
+                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
+                    Copy
+                  </button>
+                )}
+                {/* Edit — own messages within 48h */}
+                {String(contextMenu.msg.user_id) === String(user?.dbId) &&
+                 contextMenu.msg.content &&
+                 (Date.now() - new Date(contextMenu.msg.created_at).getTime()) < 48 * 3600 * 1000 && (
+                  <button onClick={() => handleEditStart(contextMenu.msg)} className="w-full text-left px-4 py-2.5 text-sm text-white hover:bg-white/10 flex items-center gap-3">
+                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" /></svg>
+                    Edit
+                  </button>
+                )}
+                {/* Delete for me */}
+                {String(contextMenu.msg.user_id) === String(user?.dbId) && (
+                  <button onClick={() => handleDeleteMessage(contextMenu.msg, false)} className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-white/10 flex items-center gap-3">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                    Delete for me
+                  </button>
+                )}
+                {/* Delete for everyone — own <48h or mod/owner */}
+                {(String(contextMenu.msg.user_id) === String(user?.dbId) &&
+                  (Date.now() - new Date(contextMenu.msg.created_at).getTime()) < 48 * 3600 * 1000) && (
+                  <button onClick={() => handleDeleteMessage(contextMenu.msg, true)} className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-white/10 flex items-center gap-3">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                    Delete for everyone
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Reaction emoji picker (full grid) */}
+        {reactionPickerMsgId && (
+          <div
+            className="fixed inset-0 z-[85] flex items-end justify-center"
+            style={{ background: "rgba(0,0,0,0.5)" }}
+            onClick={() => setReactionPickerMsgId(null)}
+          >
+            <div
+              className="w-full max-w-md rounded-t-2xl p-4"
+              style={{ background: "#2C2C2E" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-center mb-3"><div className="w-10 h-1 rounded-full bg-white/20" /></div>
+              <div className="grid grid-cols-8 gap-2">
+                {["\u{1F44D}","\u{1F44E}","\u{2764}\u{FE0F}","\u{1F525}","\u{1F389}","\u{1F602}","\u{1F62E}","\u{1F622}",
+                  "\u{1F914}","\u{1F60D}","\u{1F44F}","\u{1F64F}","\u{1F4AF}","\u{1F60E}","\u{1F92F}","\u{1F973}",
+                  "\u{1F60B}","\u{1F611}","\u{1F62D}","\u{1F621}","\u{1F47B}","\u{1F4A9}","\u{1F496}","\u{2B50}",
+                  "\u{1F308}","\u{1F64C}","\u{270C}\u{FE0F}","\u{1F918}","\u{1F440}","\u{1F4AA}","\u{1F37B}","\u{1F381}"].map((emoji) => (
+                  <button
+                    key={emoji}
+                    onClick={() => handleReaction(reactionPickerMsgId, emoji)}
+                    className="text-2xl p-1 hover:scale-125 transition-transform active:scale-90 rounded-lg hover:bg-white/10"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Search overlay */}
+        {showSearch && (
+          <div className="absolute inset-0 z-[60] flex flex-col" style={{ background: "#1C1C1E" }}>
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-pnp-border">
+              <button onClick={() => { setShowSearch(false); setSearchQuery(""); setSearchResults([]); }} className="p-2 text-pnp-textSecondary">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+              </button>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  if (e.target.value.length >= 2) handleSearch(e.target.value);
+                }}
+                placeholder="Search messages..."
+                className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-xl px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-pnp-accent/50"
+                autoFocus
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {searchLoading ? (
+                <div className="flex justify-center py-8">
+                  <svg className="w-6 h-6 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                </div>
+              ) : searchResults.length === 0 && searchQuery.length >= 2 ? (
+                <p className="text-center text-sm text-pnp-textSecondary py-8">No messages found</p>
+              ) : (
+                searchResults.map((msg) => (
+                  <button
+                    key={msg.id}
+                    onClick={() => {
+                      setShowSearch(false);
+                      setSearchQuery("");
+                      setSearchResults([]);
+                      // Scroll to message if in view
+                      const el = document.querySelector(`[data-msg-id="${msg.id}"]`);
+                      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }}
+                    className="w-full text-left px-4 py-3 border-b border-white/5 hover:bg-white/5"
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-semibold text-pnp-accent">{msg.first_name || msg.username}</span>
+                      <span className="text-[10px] text-pnp-textSecondary">
+                        {new Date(msg.created_at).toLocaleDateString([], { month: "short", day: "numeric" })}
+                      </span>
+                    </div>
+                    <p className="text-sm text-white truncate">{msg.content}</p>
+                  </button>
+                ))
+              )}
+            </div>
           </div>
         )}
 

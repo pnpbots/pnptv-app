@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || (window.location.hostname === "app.pnptv.app" ? "https://app.pnptv.app" : "https://pnptv.app");
+const API_BASE = import.meta.env.VITE_API_URL || (window.location.hostname === "pnptv.app" ? "https://pnptv.app" : "https://pnptv.app");
 
 function friendlyHttpError(status: number, fallback: string): string {
   if (status === 413) return "File is too large. Max 512 MB (or 3 GB for creators).";
@@ -1308,6 +1308,13 @@ export interface HangoutGroup {
   feedVisibility?: "public" | "shadow" | "ghost";
 }
 
+export interface MessageReaction {
+  emoji: string;
+  count: number;
+  users: string[];
+  reacted_by_me: boolean;
+}
+
 export interface GroupMessage {
   id: number;
   room: string;
@@ -1326,6 +1333,11 @@ export interface GroupMessage {
   reply_to_id?: number | null;
   reply_to?: { name: string; content: string } | null;
   created_at: string;
+  edited_at?: string | null;
+  edit_count?: number;
+  is_deleted?: boolean;
+  is_pinned?: boolean;
+  reactions?: MessageReaction[];
 }
 
 export interface GroupMember {
@@ -1460,11 +1472,51 @@ export function getGroupMessages(
 
 export function sendGroupMessage(
   id: number,
-  content: string
+  content: string,
+  replyToId?: number | null
 ): Promise<{ success: boolean; message: GroupMessage }> {
   return request(`/api/webapp/hangouts/groups/${id}/messages`, {
     method: "POST",
+    body: { content, ...(replyToId ? { replyToId } : {}) },
+  });
+}
+
+export function editGroupMessage(
+  groupId: number,
+  messageId: number,
+  content: string
+): Promise<{ success: boolean; message: GroupMessage }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/messages/${messageId}`, {
+    method: "PATCH",
     body: { content },
+  });
+}
+
+export function deleteGroupMessage(
+  groupId: number,
+  messageId: number,
+  forAll: boolean = false
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/messages/${messageId}?forAll=${forAll}`, {
+    method: "DELETE",
+  });
+}
+
+export function searchGroupMessages(
+  groupId: number,
+  q: string
+): Promise<{ success: boolean; messages: GroupMessage[] }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/messages/search?q=${encodeURIComponent(q)}`);
+}
+
+export function toggleMessageReaction(
+  groupId: number,
+  messageId: number,
+  emoji: string
+): Promise<{ success: boolean; reactions: MessageReaction[] }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/messages/${messageId}/react`, {
+    method: "POST",
+    body: { emoji },
   });
 }
 
@@ -1924,6 +1976,54 @@ export function markThreadAsRead(otherUserId: string): Promise<{
   return request(`/api/webapp/messages/thread/${otherUserId}/read`, {
     method: "PUT",
   });
+}
+
+// ── DM Telegram-style features ───────────────────────────────────────────────
+
+export function editDmMessage(
+  messageId: number,
+  content: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/dm/messages/${messageId}`, {
+    method: "PATCH",
+    body: { content },
+  });
+}
+
+export function deleteDmMessage(
+  messageId: number,
+  forAll: boolean = false
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/dm/messages/${messageId}?forAll=${forAll}`, {
+    method: "DELETE",
+  });
+}
+
+export function searchDmMessages(
+  partnerId: string,
+  q: string
+): Promise<{ success: boolean; messages: any[] }> {
+  return request(`/api/webapp/dm/conversation/${partnerId}/search?q=${encodeURIComponent(q)}`);
+}
+
+// ── DM Video Calls ──────────────────────────────────────────────────────────
+
+export function startDmCall(
+  partnerId: string
+): Promise<{ success: boolean; meetingUrl: string; callId: string }> {
+  return request(`/api/webapp/dm/${partnerId}/call`, { method: "POST" });
+}
+
+export function getActiveDmCall(
+  partnerId: string
+): Promise<{ success: boolean; active: boolean; meetingUrl?: string; callId?: string }> {
+  return request(`/api/webapp/dm/${partnerId}/call/active`);
+}
+
+export function endDmCall(
+  partnerId: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/dm/${partnerId}/call/end`, { method: "POST" });
 }
 
 // ── Chat Message Reactions ────────────────────────────────────────────────────
@@ -5231,4 +5331,48 @@ export function getNearbyEventAttendees(eventId: string): Promise<{ success: boo
 
 export function getNearbyAllUsers(): Promise<{ success: boolean; users: NearbyContextUser[] }> {
   return request("/api/webapp/nearby/all-users");
+}
+
+// ── Casting Applications ─────────────────────────────────────────────────────
+
+export interface CastingStatus {
+  success: boolean;
+  eligible: boolean;
+  hasPhoto: boolean;
+  postCount: number;
+  requiredPosts: number;
+  tier: string;
+  application: { id: string; status: string; createdAt: string } | null;
+}
+
+export function getCastingStatus(): Promise<CastingStatus> {
+  return request("/api/casting/status");
+}
+
+export function submitCastingApplication(): Promise<{ success: boolean; application: { id: string; status: string; createdAt: string } }> {
+  return request("/api/casting/apply", { method: "POST" });
+}
+
+export interface CastingApplication {
+  id: string;
+  user_id: string;
+  username: string;
+  first_name: string;
+  photo_file_id: string | null;
+  tier: string;
+  post_count: number;
+  status: string;
+  admin_notes: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
+export function getCastingApplications(status?: string): Promise<{ success: boolean; applications: CastingApplication[]; statusCounts: Record<string, number> }> {
+  const params = status ? `?status=${status}` : "";
+  return request(`/api/casting/admin/list${params}`);
+}
+
+export function reviewCastingApplication(applicationId: string, decision: "approved" | "rejected", notes?: string): Promise<{ success: boolean }> {
+  return request("/api/casting/review", { method: "POST", body: { applicationId, decision, notes } });
 }

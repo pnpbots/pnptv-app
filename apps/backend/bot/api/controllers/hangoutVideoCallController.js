@@ -988,10 +988,243 @@ const leaveCall = async (req, res) => {
   }
 };
 
+// ── POST /api/webapp/dm/:partnerId/call ─────────────────────────────────────
+// Start a 1-to-1 JaaS video call between the current user and a partner.
+// If an active call already exists between the pair, returns the existing one.
+
+const startDmCall = async (req, res) => {
+  const user = authGuard(req, res);
+  if (!user) return;
+
+  const { partnerId } = req.params;
+  if (!partnerId || partnerId === user.id) {
+    return res.status(400).json({ error: 'Invalid partner ID' });
+  }
+
+  try {
+    // Block check — bidirectional
+    const [blockedByPartner, blockedByUser] = await Promise.all([
+      BlockedUser.isBlocked(partnerId, user.id),
+      BlockedUser.isBlocked(user.id, partnerId),
+    ]);
+    if (blockedByPartner || blockedByUser) {
+      return res.status(403).json({ error: 'Cannot start a call with this user' });
+    }
+
+    // Verify partner exists
+    const { rows: partnerRows } = await query(
+      `SELECT id, username, first_name FROM users WHERE id = $1`,
+      [partnerId]
+    );
+    if (partnerRows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check for an already-active call between the pair using the deterministic key
+    const { rows: existing } = await query(
+      `SELECT id, room_name, caller_id, callee_id, created_at
+       FROM dm_video_calls
+       WHERE LEAST(caller_id, callee_id) = LEAST($1, $2)
+         AND GREATEST(caller_id, callee_id) = GREATEST($1, $2)
+         AND status = 'active'
+       LIMIT 1`,
+      [user.id, partnerId]
+    );
+
+    if (existing.length > 0) {
+      const call = existing[0];
+      const jaas = await buildJaaSPayload(call.room_name, user, true, false);
+      return res.json({
+        success: true,
+        isNew: false,
+        call: { id: call.id, roomName: call.room_name, callerId: call.caller_id, calleeId: call.callee_id, createdAt: call.created_at },
+        jaas,
+      });
+    }
+
+    // Build a unique, deterministic room name
+    const roomName = `dm-${[user.id, partnerId].sort().join('-')}-${Date.now()}`;
+
+    const { rows: callRows } = await query(
+      `INSERT INTO dm_video_calls (caller_id, callee_id, room_name)
+       VALUES ($1, $2, $3)
+       RETURNING id, caller_id, callee_id, room_name, created_at`,
+      [user.id, partnerId, roomName]
+    );
+
+    const newCall = callRows[0];
+    const jaas = await buildJaaSPayload(roomName, user, true, false);
+
+    // Notify the partner via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user:${partnerId}`).emit('dm:call:started', {
+        callId: newCall.id,
+        roomName,
+        caller: {
+          id: user.id,
+          username: user.username,
+          firstName: user.firstName || user.first_name,
+          photoUrl: user.photoUrl || null,
+        },
+        meetingUrl: jaas?.meetingUrl || null,
+      });
+    }
+
+    logger.info('DM video call started', { callId: newCall.id, callerId: user.id, calleeId: partnerId });
+
+    return res.status(201).json({
+      success: true,
+      isNew: true,
+      call: {
+        id: newCall.id,
+        roomName: newCall.room_name,
+        callerId: newCall.caller_id,
+        calleeId: newCall.callee_id,
+        createdAt: newCall.created_at,
+      },
+      jaas,
+    });
+  } catch (err) {
+    // Handle race: unique partial index fires when two concurrent calls are started
+    if (err.code === '23505' && err.constraint?.includes('idx_dm_calls_active')) {
+      try {
+        const { rows } = await query(
+          `SELECT id, room_name, caller_id, callee_id, created_at
+           FROM dm_video_calls
+           WHERE LEAST(caller_id, callee_id) = LEAST($1, $2)
+             AND GREATEST(caller_id, callee_id) = GREATEST($1, $2)
+             AND status = 'active'
+           LIMIT 1`,
+          [user.id, partnerId]
+        );
+        if (rows.length > 0) {
+          const call = rows[0];
+          const jaas = await buildJaaSPayload(call.room_name, user, true, false);
+          return res.json({
+            success: true,
+            isNew: false,
+            call: { id: call.id, roomName: call.room_name, callerId: call.caller_id, calleeId: call.callee_id, createdAt: call.created_at },
+            jaas,
+          });
+        }
+      } catch (innerErr) {
+        logger.error('startDmCall race-condition recovery failed', innerErr);
+      }
+    }
+    logger.error('startDmCall error', err);
+    return res.status(500).json({ error: 'Failed to start DM call' });
+  }
+};
+
+// ── GET /api/webapp/dm/:partnerId/call/active ────────────────────────────────
+// Returns the active call between the pair, or { active: false }.
+
+const getActiveDmCall = async (req, res) => {
+  const user = authGuard(req, res);
+  if (!user) return;
+
+  const { partnerId } = req.params;
+  if (!partnerId || partnerId === user.id) {
+    return res.status(400).json({ error: 'Invalid partner ID' });
+  }
+
+  try {
+    const { rows } = await query(
+      `SELECT id, room_name, caller_id, callee_id, created_at
+       FROM dm_video_calls
+       WHERE LEAST(caller_id, callee_id) = LEAST($1, $2)
+         AND GREATEST(caller_id, callee_id) = GREATEST($1, $2)
+         AND status = 'active'
+       LIMIT 1`,
+      [user.id, partnerId]
+    );
+
+    if (rows.length === 0) {
+      return res.json({ success: true, active: false });
+    }
+
+    const call = rows[0];
+    const jaas = await buildJaaSPayload(call.room_name, user, true, false);
+
+    return res.json({
+      success: true,
+      active: true,
+      call: {
+        id: call.id,
+        roomName: call.room_name,
+        callerId: call.caller_id,
+        calleeId: call.callee_id,
+        createdAt: call.created_at,
+      },
+      jaas,
+    });
+  } catch (err) {
+    logger.error('getActiveDmCall error', err);
+    return res.status(500).json({ error: 'Failed to get active DM call' });
+  }
+};
+
+// ── POST /api/webapp/dm/:partnerId/call/end ──────────────────────────────────
+// End an active DM call.  Both participants may end the call.
+
+const endDmCall = async (req, res) => {
+  const user = authGuard(req, res);
+  if (!user) return;
+
+  const { partnerId } = req.params;
+  if (!partnerId || partnerId === user.id) {
+    return res.status(400).json({ error: 'Invalid partner ID' });
+  }
+
+  try {
+    const { rows, rowCount } = await query(
+      `UPDATE dm_video_calls
+       SET status = 'ended', ended_at = NOW(), ended_by = $1
+       WHERE LEAST(caller_id, callee_id) = LEAST($1, $2)
+         AND GREATEST(caller_id, callee_id) = GREATEST($1, $2)
+         AND status = 'active'
+         AND (caller_id = $1 OR callee_id = $1)
+       RETURNING id, caller_id, callee_id`,
+      [user.id, partnerId]
+    );
+
+    if (rowCount === 0) {
+      return res.status(404).json({ error: 'No active DM call found' });
+    }
+
+    const call = rows[0];
+
+    // Notify the other participant
+    const otherUserId = String(call.caller_id) === String(user.id) ? call.callee_id : call.caller_id;
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user:${otherUserId}`).emit('dm:call:ended', {
+        callId: call.id,
+        endedBy: {
+          id: user.id,
+          username: user.username,
+          firstName: user.firstName || user.first_name,
+        },
+      });
+    }
+
+    logger.info('DM video call ended', { callId: call.id, endedBy: user.id });
+
+    return res.json({ success: true, callId: call.id });
+  } catch (err) {
+    logger.error('endDmCall error', err);
+    return res.status(500).json({ error: 'Failed to end DM call' });
+  }
+};
+
 module.exports = {
   startCall,
   getActiveCall,
   joinCall,
   endCall,
   leaveCall,
+  startDmCall,
+  getActiveDmCall,
+  endDmCall,
 };

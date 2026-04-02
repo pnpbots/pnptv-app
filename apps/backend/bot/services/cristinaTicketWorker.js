@@ -246,12 +246,28 @@ REAL USER DATA FOR THIS TICKET:
     await this.postToSupportThread(ticket, adminNote);
 
     // 11. Persist reply for web widget
-    await SupportTicketMessageModel.create({
+    const savedMsg = await SupportTicketMessageModel.create({
       userId,
       senderType: 'agent',
       senderName: 'Cristina AI',
       content: replyText,
     });
+
+    // 11b. Push to web widget in real-time via Socket.IO
+    try {
+      const io = require('./socketSingleton').get();
+      if (io && savedMsg) {
+        io.to(`user:${userId}`).emit('support:newMessage', {
+          id: savedMsg.id,
+          sender_type: 'agent',
+          sender_name: 'Cristina AI',
+          content: replyText,
+          created_at: savedMsg.created_at || new Date().toISOString(),
+        });
+      }
+    } catch (socketErr) {
+      logger.debug('CristinaTicketWorker: socket emit failed', { error: socketErr.message });
+    }
 
     // 12. Update ticket metadata
     await SupportTopicModel.updateLastAgentMessage(userId);
@@ -263,6 +279,12 @@ REAL USER DATA FOR THIS TICKET:
     if (shouldResolve) {
       await SupportTopicModel.updateStatus(userId, 'resolved');
       await SupportTopicModel.updateResolutionTime(userId);
+
+      // Notify web widget of status change
+      try {
+        const io = require('./socketSingleton').get();
+        if (io) io.to(`user:${userId}`).emit('support:statusChange', { status: 'resolved', updatedAt: new Date().toISOString() });
+      } catch (_) { /* silent */ }
 
       if (this.telegram && this.supportGroupId && ticket.thread_id) {
         try {

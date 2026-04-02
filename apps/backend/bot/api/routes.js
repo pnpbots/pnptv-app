@@ -54,6 +54,7 @@ const authRoutes = require('./routes/authRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
 const modelRoutes = require('./routes/modelRoutes');
 const applyRoutes = require('./routes/applyRoutes');
+const castingRoutes = require('./routes/castingRoutes');
 const elementRoutes = require('./routes/elementRoutes');
 const matrixController = require('./controllers/matrixController');
 const creatorRoutes = require('./routes/creatorRoutes');
@@ -2425,7 +2426,7 @@ app.post('/api/webapp/auth/reset-password', authLimiter, asyncHandler(webAppCont
 // Required env vars:
 //   AUTHENTIK_OIDC_CLIENT_ID      — Client ID from the Authentik application config
 //   AUTHENTIK_OIDC_CLIENT_SECRET  — Client secret (server-side only, never sent to browser)
-//   AUTHENTIK_OIDC_REDIRECT_URI   — Must match exactly in Authentik (default: https://app.pnptv.app/auth/oidc/callback)
+//   AUTHENTIK_OIDC_REDIRECT_URI   — Must match exactly in Authentik (default: https://pnptv.app/auth/oidc/callback)
 //   AUTHENTIK_OIDC_ISSUER         — Issuer slug URL (default: https://auth.pnptv.app/application/o/pnptv-app/)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -3317,7 +3318,7 @@ async function ensureEmailCredentials(userId, email, language) {
               <p style="margin: 8px 0 0 0; font-size: 12px; color: #A1A1A6;"><strong>IMPORTANTE:</strong> Guarda este ID en un lugar seguro. Es la &uacute;nica forma de recuperar tu cuenta si pierdes el acceso.</p>
             </div>
             <p style="font-size:13px;color:#A1A1A6;">Puedes cambiar tu contrase&ntilde;a en cualquier momento desde tu perfil.</p>
-            <a href="https://app.pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Iniciar sesi&oacute;n</a>
+            <a href="https://pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Iniciar sesi&oacute;n</a>
           </div>`
         : `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#1C1C1E;color:#F5F5F7;border-radius:12px;">
             <h2 style="color:#D4007A;margin-top:0;">Welcome to PNPtv!</h2>
@@ -3332,7 +3333,7 @@ async function ensureEmailCredentials(userId, email, language) {
               <p style="margin: 8px 0 0 0; font-size: 12px; color: #A1A1A6;"><strong>IMPORTANT:</strong> Save this ID in a safe place. It is the only way to recover your account if you lose access.</p>
             </div>
             <p style="font-size:13px;color:#A1A1A6;">You can change your password anytime from your profile settings.</p>
-            <a href="https://app.pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Log In</a>
+            <a href="https://pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Log In</a>
           </div>`,
     });
     }
@@ -4235,6 +4236,7 @@ const chatMediaController = require('./controllers/chatMediaController');
 const hangoutGroupController = require('./controllers/hangoutGroupController');
 const hangoutMediaController = require('./controllers/hangoutMediaController');
 const hangoutVideoCallRoutes = require('./routes/hangoutVideoCallRoutes');
+const hangoutVideoCallController = require('./controllers/hangoutVideoCallController');
 const dmController = require('./controllers/dmController');
 const socialController = require('./controllers/socialController');
 const promotedPostController = require('./controllers/promotedPostController');
@@ -4275,6 +4277,12 @@ app.post('/api/webapp/hangouts/groups/:id/requests/:requestId/:action', requireS
 
 // ── Hangout Group Chat ───────────────────────────────────────────────────────
 app.get('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.getMessages));
+// search MUST be registered before /:msgId routes so "search" is not parsed as a msgId
+app.get('/api/webapp/hangouts/groups/:id/messages/search', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.searchMessages));
+app.patch('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.editMessage));
+app.delete('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.deleteMessage));
+app.post('/api/webapp/hangouts/groups/:id/messages/:msgId/react', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.toggleReaction));
+app.get('/api/webapp/hangouts/groups/:id/messages/:msgId/reactions', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.getReactions));
 app.post('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.sendMessage));
 // Media upload for hangout group chat (images 10 MB / videos 50 MB, per-hangout dirs)
 app.post(
@@ -4312,6 +4320,13 @@ app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, asy
 
 // ── Hangout Video Calls (JaaS) ──────────────────────────────────────────────
 app.use('/api/webapp/hangouts/groups', requireSessionAuth, hangoutVideoCallRoutes);
+
+// ── DM Video Calls (JaaS) ───────────────────────────────────────────────────
+// active MUST be registered before :partnerId/call/end to prevent route collision
+
+app.get('/api/webapp/dm/:partnerId/call/active', requireSessionAuth, asyncHandler(hangoutVideoCallController.getActiveDmCall));
+app.post('/api/webapp/dm/:partnerId/call', requireSessionAuth, asyncHandler(hangoutVideoCallController.startDmCall));
+app.post('/api/webapp/dm/:partnerId/call/end', requireSessionAuth, asyncHandler(hangoutVideoCallController.endDmCall));
 
 // ── DM Media ────────────────────────────────────────────────────────────────
 // Send an image or video as a direct message
@@ -4473,9 +4488,14 @@ app.post('/api/webapp/admin/trials/revoke-unused', adminGuard, asyncHandler(asyn
 
 // DM threads & conversations
 app.get('/api/webapp/dm/threads', requireSessionAuth, asyncHandler(dmController.getThreads));
+// search MUST be registered before :partnerId wildcard routes to avoid collision
+app.get('/api/webapp/dm/conversation/:partnerId/search', requireSessionAuth, asyncHandler(dmController.searchDmMessages));
 app.get('/api/webapp/dm/conversation/:partnerId', requireSessionAuth, asyncHandler(dmController.getConversation));
 app.get('/api/webapp/dm/user/:partnerId', requireSessionAuth, asyncHandler(dmController.getPartnerInfo));
 app.post('/api/webapp/dm/send/:recipientId', requireFreeTierDmLimit, asyncHandler(dmController.sendMessage));
+// DM message management (edit / delete)
+app.patch('/api/webapp/dm/messages/:msgId', requireSessionAuth, asyncHandler(dmController.editDmMessage));
+app.delete('/api/webapp/dm/messages/:msgId', requireSessionAuth, asyncHandler(dmController.deleteDmMessage));
 
 // Social feed, wall, posts
 // Public home-feed — no auth required, returns latest posts for the home page preview
@@ -5955,7 +5975,7 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
 
     // Create a real payments row for the Daimo tip so we get a UUID paymentId
     // that works with /checkout/:paymentId and PaymentModel.getById
-    const webAppUrl = process.env.WEB_APP_URL || 'https://app.pnptv.app';
+    const webAppUrl = process.env.WEB_APP_URL || 'https://pnptv.app';
     let paymentUrl = null;
     let tipPaymentId = null;
     try {
@@ -6382,7 +6402,7 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, asyncHandler(as
       userId,
       orderId,
       description: `PNPtv ${plan.display_name || plan.name} subscription`,
-      redirectUrl: `${process.env.WEBAPP_URL || 'https://app.pnptv.app'}/subscribe`,
+      redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/subscribe`,
     });
 
     const { query: dbQuery } = require('../../config/postgres');
@@ -7147,6 +7167,7 @@ app.use('/api/model', modelRoutes);
 
 // Model/Creator application routes
 app.use('/api/apply', applyRoutes);
+app.use('/api/casting', castingRoutes);
 
 app.use('/api/element', elementRoutes);
 
@@ -7651,7 +7672,7 @@ app.get('/api/og-prerender', (req, res, next) => {
   // Fallback if middleware calls next()
   res.type('html').send(`<!DOCTYPE html><html><head>
     <meta property="og:title" content="PNPtv!" />
-    <meta property="og:image" content="${process.env.APP_PUBLIC_URL || 'https://app.pnptv.app'}/og-image.png" />
+    <meta property="og:image" content="${process.env.APP_PUBLIC_URL || 'https://pnptv.app'}/og-image.png" />
     <meta name="twitter:card" content="summary_large_image" />
   </head><body></body></html>`);
 });

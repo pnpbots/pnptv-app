@@ -141,6 +141,9 @@ const onlineUsersMap = new Map();
 // Map<groupId, { trackId, trackUrl, trackTitle, trackArtist, trackArt, isPlaying, position, startedAt }>
 const hangoutMusicState = new Map();
 
+// ── Random Video Call state ──────────────────────────────────────────────────
+const pendingRandomCalls = new Map(); // callId → { callerId, calleeId, roomId, matrixRoomId, timeout }
+
 function emitGroupPresence(io, gid) {
   const online = [];
   for (const [uid, p] of onlineUsersMap) {
@@ -280,7 +283,7 @@ function initSocketIO(io) {
       }
     });
 
-    // ── Legacy community chat handlers removed — all messaging now via Matrix ──
+    // ── Legacy community chat handlers removed — messaging now via PG + Socket.IO ──
 
     // ── Hangout Group Rooms ─────────────────────────────────────────────────
     // Clients join hangout rooms to receive chat messages AND call events.
@@ -304,8 +307,7 @@ function initSocketIO(io) {
         const room = `hangout:${gid}`;
         socket.join(room);
 
-        // Messages live in Matrix — frontend fetches via useRoomMessages() hook.
-        // No PG history push needed.
+        // Messages live in PG chat_messages — frontend fetches via REST API.
 
         // Send active call info if any
         const { rows: activeCall } = await query(
@@ -362,21 +364,7 @@ function initSocketIO(io) {
           await redis.del(`hangout:unread:${gid}:${user.id}`);
         } catch (_) { /* non-fatal */ }
 
-        // Ensure this user is in the Matrix room for this hangout — fire-and-forget.
-        // This is a best-effort sync: the authoritative membership change happens in
-        // the REST joinGroup handler, but sockets may connect before that in edge cases
-        // (e.g. the Matrix room was created after the user joined the PG group).
-        matrixService.inviteToHangoutRoom(gid, {
-          id:                  user.id,
-          telegram:            user.telegram || String(user.id),
-          username:            user.username || null,
-          first_name:          user.firstName || user.first_name || null,
-          matrix_user_id:      user.matrix_user_id      || null,
-          matrix_access_token: user.matrix_access_token || null,
-          matrix_device_id:    user.matrix_device_id    || null,
-        }).catch((matrixErr) => {
-          logger.debug(`[Matrix] hangout:join sync failed for user ${user.id} / group ${gid}: ${matrixErr.message}`);
-        });
+        // Messages now stored in PG chat_messages, no Matrix sync needed.
       } catch (err) {
         logger.error('hangout:join error', err);
       }
@@ -496,23 +484,37 @@ function initSocketIO(io) {
           return;
         }
 
-        // ── Matrix-only send (no PG insert) ──
-        const userRow = await query(
-          `SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
-           FROM users WHERE id = $1 AND is_deleted = false`,
-          [user.id]
+        // ── PG insert + Socket.IO broadcast ──
+        const isValidPhoto = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
+        const photoResult = await query('SELECT photo_file_id FROM users WHERE id = $1', [user.id]);
+        const rawPhoto = photoResult.rows[0]?.photo_file_id || user.photoUrl || null;
+        const photoUrl = isValidPhoto(rawPhoto) ? rawPhoto : null;
+
+        const room = `hangout:${gid}`;
+        const text = content.trim().slice(0, 2000);
+        const { rows: insertedRows } = await query(
+          `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content, reply_to_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           RETURNING id, room, user_id, username, first_name, photo_url, content,
+                     media_url, media_type, media_mime, media_thumb_url,
+                     media_width, media_height, media_metadata, reply_to_id, created_at`,
+          [room, user.id, user.username || null, user.firstName || user.first_name || null, photoUrl, text, parsedReplyToId]
         );
-        if (!userRow.rows[0]) {
-          socket.emit('hangout:error', { message: 'User not found' });
-          return;
+        const msg = { ...insertedRows[0], photo_url: isValidPhoto(insertedRows[0].photo_url) ? insertedRows[0].photo_url : null };
+
+        // Attach reply_to preview if replying
+        if (parsedReplyToId) {
+          const { rows: replyRows } = await query(
+            'SELECT first_name, username, content FROM chat_messages WHERE id = $1',
+            [parsedReplyToId]
+          );
+          if (replyRows[0]) {
+            msg.reply_to = { name: replyRows[0].first_name || replyRows[0].username || 'User', content: (replyRows[0].content || '[media]').slice(0, 100) };
+          }
         }
 
-        const userCreds = await matrixService.provisionMatrixUser(userRow.rows[0]);
-        const groupRow = await query('SELECT name FROM hangout_groups WHERE id = $1', [gid]);
-        const groupName = groupRow.rows[0]?.name || `Hangout ${gid}`;
-        const matrixRoomId = await matrixService.getOrCreateHangoutRoom(gid, userRow.rows[0], groupName);
-        await matrixService.ensureUserInRoom(matrixRoomId, userCreds);
-        await matrixService.sendRoomMessage(matrixRoomId, userCreds.accessToken, content.trim());
+        // Broadcast to all users in the hangout room
+        io.to(room).emit('chat:message', msg);
 
         // Touch activity timestamp for 72h inactivity cleanup
         await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [gid]);
@@ -541,8 +543,8 @@ function initSocketIO(io) {
             // Batch: use Redis counter to aggregate message count per user per group.
             // Each notification replaces the previous one (same tag) with updated count.
             const redis = getRedis();
-            const senderName = user.username || firstName || 'Someone';
-            const preview = content.trim().length > 80 ? content.trim().slice(0, 77) + '...' : content.trim();
+            const senderName = user.username || user.firstName || user.first_name || 'Someone';
+            const preview = text.length > 80 ? text.slice(0, 77) + '...' : text;
 
             await Promise.allSettled(offlineIds.map(async (targetId) => {
               const countKey = `hangout:unread:${gid}:${targetId}`;
@@ -704,6 +706,222 @@ function initSocketIO(io) {
         });
       } catch (err) {
         logger.error('hangout:mark-read error', { userId: user.id, groupId: gid, error: err.message });
+      }
+    });
+
+    // ── Hangout Message Edit ───────────────────────────────────────────────────
+
+    socket.on('hangout:message:edit', async ({ groupId, messageId, content } = {}) => {
+      if (!groupId || !messageId || !content?.trim()) return;
+      const gid   = parseInt(groupId,  10);
+      const msgId = parseInt(messageId, 10);
+      if (!Number.isFinite(gid) || !Number.isFinite(msgId)) return;
+
+      const text = content.trim();
+      if (text.length > 2000) {
+        socket.emit('hangout:error', { message: 'Content too long', code: 'CONTENT_TOO_LONG' });
+        return;
+      }
+
+      if (!rateLimit(`edit:${user.id}`, 10, 60000)) {
+        socket.emit('hangout:error', { message: 'Too many edits. Slow down.', code: 'RATE_LIMITED' });
+        return;
+      }
+
+      try {
+        const { rows: memberRows } = await query(
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned=false OR is_banned IS NULL)',
+          [gid, user.id]
+        );
+        if (memberRows.length === 0) return;
+
+        const { rows: msgRows } = await query(
+          `SELECT id, user_id, created_at, is_deleted FROM chat_messages WHERE id=$1 AND room='hangout:'||$2`,
+          [msgId, gid]
+        );
+        if (msgRows.length === 0) return;
+
+        const msg = msgRows[0];
+        if (String(msg.user_id) !== String(user.id)) return;
+        if (msg.is_deleted) return;
+
+        const ageMs = Date.now() - new Date(msg.created_at).getTime();
+        if (ageMs > 48 * 60 * 60 * 1000) {
+          socket.emit('hangout:error', { message: 'Message too old to edit (48-hour limit)', code: 'TOO_OLD' });
+          return;
+        }
+
+        const { rows: updated } = await query(
+          `UPDATE chat_messages
+           SET content = $1,
+               edited_at = NOW(),
+               edit_count = edit_count + 1,
+               original_content = COALESCE(original_content, content)
+           WHERE id = $2
+           RETURNING id, content, edited_at, edit_count`,
+          [text, msgId]
+        );
+
+        const result = updated[0];
+        io.to(`hangout:${gid}`).emit('hangout:message:edited', {
+          messageId: result.id,
+          content:   result.content,
+          editedAt:  result.edited_at,
+          editCount: result.edit_count,
+        });
+      } catch (err) {
+        logger.error('hangout:message:edit error', { userId: user.id, groupId: gid, messageId: msgId, error: err.message });
+      }
+    });
+
+    // ── Hangout Message Delete ─────────────────────────────────────────────────
+
+    socket.on('hangout:message:delete', async ({ groupId, messageId, forAll } = {}) => {
+      if (!groupId || !messageId) return;
+      const gid   = parseInt(groupId,  10);
+      const msgId = parseInt(messageId, 10);
+      if (!Number.isFinite(gid) || !Number.isFinite(msgId)) return;
+
+      const deleteForAll = forAll === true || forAll === 'true';
+
+      try {
+        const { rows: memberRows } = await query(
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned=false OR is_banned IS NULL)',
+          [gid, user.id]
+        );
+        if (memberRows.length === 0) return;
+
+        const { rows: msgRows } = await query(
+          `SELECT id, user_id, is_deleted FROM chat_messages WHERE id=$1 AND room='hangout:'||$2`,
+          [msgId, gid]
+        );
+        if (msgRows.length === 0) return;
+
+        const msg = msgRows[0];
+        if (msg.is_deleted) return;
+
+        const isOwnMessage = String(msg.user_id) === String(user.id);
+
+        if (!isOwnMessage) {
+          if (!deleteForAll) return; // Cannot soft-delete another user's message for self-only
+          // Moderator/owner check
+          const { rows: roleRows } = await query(
+            "SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role IN ('owner','moderator')",
+            [gid, user.id]
+          );
+          if (roleRows.length === 0) return;
+        }
+
+        await query(
+          `UPDATE chat_messages SET is_deleted=true, deleted_by=$1, deleted_for_all=$2 WHERE id=$3`,
+          [String(user.id), deleteForAll, msgId]
+        );
+
+        io.to(`hangout:${gid}`).emit('hangout:message:deleted', {
+          messageId: msgId,
+          deletedBy: user.id,
+          forAll:    deleteForAll,
+        });
+      } catch (err) {
+        logger.error('hangout:message:delete error', { userId: user.id, groupId: gid, messageId: msgId, error: err.message });
+      }
+    });
+
+    // ── Hangout Reaction Toggle ────────────────────────────────────────────────
+
+    socket.on('hangout:reaction:toggle', async ({ groupId, messageId, emoji } = {}) => {
+      if (!groupId || !messageId || !emoji?.trim()) return;
+      const gid   = parseInt(groupId,  10);
+      const msgId = parseInt(messageId, 10);
+      if (!Number.isFinite(gid) || !Number.isFinite(msgId)) return;
+
+      const emojiStr = emoji.trim();
+      if (emojiStr.length > 10) return;
+
+      if (!rateLimit(`react:${user.id}`, 30, 60000)) {
+        socket.emit('hangout:error', { message: 'Too many reactions. Slow down.', code: 'RATE_LIMITED' });
+        return;
+      }
+
+      try {
+        const { rows: memberRows } = await query(
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned=false OR is_banned IS NULL)',
+          [gid, user.id]
+        );
+        if (memberRows.length === 0) return;
+
+        const { rows: msgRows } = await query(
+          `SELECT id FROM chat_messages WHERE id=$1 AND room='hangout:'||$2 AND is_deleted=false`,
+          [msgId, gid]
+        );
+        if (msgRows.length === 0) return;
+
+        const { rows: existing } = await query(
+          `SELECT id FROM chat_message_reactions WHERE message_id=$1 AND user_id=$2 AND emoji=$3`,
+          [msgId, String(user.id), emojiStr]
+        );
+
+        if (existing.length > 0) {
+          await query(
+            `DELETE FROM chat_message_reactions WHERE message_id=$1 AND user_id=$2 AND emoji=$3`,
+            [msgId, String(user.id), emojiStr]
+          );
+        } else {
+          const { rows: uniqueEmojiRows } = await query(
+            `SELECT COUNT(DISTINCT emoji)::int AS cnt FROM chat_message_reactions WHERE message_id=$1`,
+            [msgId]
+          );
+          if (uniqueEmojiRows[0].cnt >= 20) {
+            socket.emit('hangout:error', { message: 'Maximum emoji reactions reached for this message', code: 'REACTION_LIMIT' });
+            return;
+          }
+          await query(
+            `INSERT INTO chat_message_reactions (message_id, user_id, emoji) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+            [msgId, String(user.id), emojiStr]
+          );
+        }
+
+        const { rows: aggRows } = await query(
+          `SELECT emoji, COUNT(*)::int AS count, array_agg(user_id) AS users
+           FROM chat_message_reactions WHERE message_id=$1 GROUP BY emoji`,
+          [msgId]
+        );
+        const reactions = aggRows.map((r) => ({
+          emoji:  r.emoji,
+          count:  r.count,
+          users:  Array.isArray(r.users) ? r.users.map(String) : [],
+        }));
+
+        io.to(`hangout:${gid}`).emit('hangout:reaction:updated', { messageId: msgId, reactions });
+      } catch (err) {
+        logger.error('hangout:reaction:toggle error', { userId: user.id, groupId: gid, messageId: msgId, error: err.message });
+      }
+    });
+
+    // ── Hangout Read Receipt (per-message) ────────────────────────────────────
+
+    socket.on('hangout:read:message', async ({ groupId, messageId } = {}) => {
+      if (!groupId || !messageId) return;
+      const gid   = parseInt(groupId,  10);
+      const msgId = parseInt(messageId, 10);
+      if (!Number.isFinite(gid) || !Number.isFinite(msgId)) return;
+
+      if (!rateLimit(`read:${user.id}:${gid}`, 5, 5000)) return;
+
+      try {
+        await query(
+          `UPDATE hangout_group_members
+           SET last_read_message_id = GREATEST(COALESCE(last_read_message_id, 0), $1)
+           WHERE group_id=$2 AND user_id=$3`,
+          [msgId, gid, user.id]
+        );
+
+        socket.to(`hangout:${gid}`).emit('hangout:read:update', {
+          userId:            user.id,
+          lastReadMessageId: msgId,
+        });
+      } catch (err) {
+        logger.error('hangout:read:message error', { userId: user.id, groupId: gid, messageId: msgId, error: err.message });
       }
     });
 
@@ -954,38 +1172,19 @@ function initSocketIO(io) {
       }
 
       try {
-        // ── Matrix-only send (no PG insert) ──
-        const [senderRow, recipientRow] = await Promise.all([
-          query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
-                 FROM users WHERE id = $1 AND is_deleted = false`, [user.id]),
-          query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
-                 FROM users WHERE id = $1 AND is_deleted = false`, [recipientId]),
-        ]);
-        if (!senderRow.rows[0] || !recipientRow.rows[0]) {
-          socket.emit('dm:error', { message: 'User not found' });
-          return;
-        }
+        // ── PG insert via DmService (handles blocks, privacy, thread upsert, push) ──
+        const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+        const message = await DmService.sendMessage(user.id, recipientId, { content: content.trim() }, { isAdmin });
 
-        const senderCreds = await matrixService.provisionMatrixUser(senderRow.rows[0]);
-        const matrixRoomId = await matrixService.getOrCreateDmRoom(senderRow.rows[0], recipientRow.rows[0]);
-        await matrixService.ensureUserInRoom(matrixRoomId, senderCreds);
-        await matrixService.sendRoomMessage(matrixRoomId, senderCreds.accessToken, content.trim());
+        // Emit to recipient's personal room for real-time delivery
+        io.to(`user:${recipientId}`).emit('dm:message', {
+          ...message,
+          senderName: user.firstName || user.first_name || user.username || 'User',
+          senderPhoto: user.photoUrl || user.photo_url || null,
+        });
 
-        // Update dm_threads metadata (no message row)
-        const [a, b] = [user.id, recipientId].sort();
-        const preview = content.trim().slice(0, 100);
-        await query(
-          `INSERT INTO dm_threads (user_a, user_b, last_message_at, last_message, unread_for_a, unread_for_b)
-           VALUES ($1, $2, NOW(), $3, $4, $5)
-           ON CONFLICT (user_a, user_b) DO UPDATE SET
-             last_message_at = NOW(),
-             last_message = EXCLUDED.last_message,
-             unread_for_a = CASE WHEN dm_threads.user_a = $6 THEN 0 ELSE dm_threads.unread_for_a + 1 END,
-             unread_for_b = CASE WHEN dm_threads.user_b = $6 THEN 0 ELSE dm_threads.unread_for_b + 1 END`,
-          [a, b, preview, user.id === a ? 0 : 1, user.id === b ? 0 : 1, user.id]
-        );
-
-        socket.emit('dm:sent', { success: true });
+        // Confirm to sender with the saved message
+        socket.emit('dm:sent', { success: true, message });
       } catch (err) {
         if (err.statusCode) {
           socket.emit('dm:error', { message: err.message, code: err.code });
@@ -1008,6 +1207,155 @@ function initSocketIO(io) {
         if (rows.length > 0) return;
       } catch { return; }
       io.to(`user:${recipientId}`).emit('dm:typing', { from: user.id });
+    });
+
+    // Edit an existing DM (sender only, within 48 hours)
+    socket.on('dm:message:edit', async ({ messageId, content } = {}) => {
+      if (!messageId || !content || !content.trim()) return;
+      if (content.length > 4000) {
+        socket.emit('dm:error', { message: 'Message too long', code: 'MSG_TOO_LONG' });
+        return;
+      }
+      if (!rateLimit(`dm:edit:${user.id}`, 30, 60000)) {
+        socket.emit('dm:error', { message: 'Editing too fast. Slow down.', code: 'RATE_LIMITED' });
+        return;
+      }
+
+      try {
+        const { rows } = await query(
+          `SELECT id, sender_id, recipient_id, content, created_at, is_deleted
+           FROM direct_messages WHERE id = $1`,
+          [messageId]
+        );
+
+        if (rows.length === 0) {
+          socket.emit('dm:error', { message: 'Message not found', code: 'NOT_FOUND' });
+          return;
+        }
+
+        const msg = rows[0];
+        if (String(msg.sender_id) !== String(user.id)) {
+          socket.emit('dm:error', { message: 'Cannot edit another user\'s message', code: 'FORBIDDEN' });
+          return;
+        }
+        if (msg.is_deleted) {
+          socket.emit('dm:error', { message: 'Message has been deleted', code: 'DELETED' });
+          return;
+        }
+        const ageMs = Date.now() - new Date(msg.created_at).getTime();
+        if (ageMs > 48 * 60 * 60 * 1000) {
+          socket.emit('dm:error', { message: 'Message is too old to edit', code: 'TOO_OLD' });
+          return;
+        }
+
+        const { rows: updated } = await query(
+          `UPDATE direct_messages
+           SET content = $1,
+               edited_at = NOW(),
+               edit_count = edit_count + 1,
+               original_content = COALESCE(original_content, content)
+           WHERE id = $2
+           RETURNING id, sender_id, recipient_id, content, edited_at, edit_count`,
+          [content.trim(), messageId]
+        );
+
+        const updatedMsg = updated[0];
+        const payload = {
+          id: updatedMsg.id,
+          senderId: updatedMsg.sender_id,
+          recipientId: updatedMsg.recipient_id,
+          content: updatedMsg.content,
+          editedAt: updatedMsg.edited_at,
+          editCount: updatedMsg.edit_count,
+        };
+
+        io.to(`user:${msg.sender_id}`).to(`user:${msg.recipient_id}`)
+          .emit('dm:message:edited', payload);
+      } catch (err) {
+        logger.error('dm:message:edit error', err);
+        socket.emit('dm:error', { message: 'Failed to edit message', code: 'SERVER_ERROR' });
+      }
+    });
+
+    // Delete a DM (soft-delete; sender only)
+    socket.on('dm:message:delete', async ({ messageId } = {}) => {
+      if (!messageId) return;
+      if (!rateLimit(`dm:delete:${user.id}`, 20, 60000)) {
+        socket.emit('dm:error', { message: 'Deleting too fast. Slow down.', code: 'RATE_LIMITED' });
+        return;
+      }
+
+      try {
+        const { rows } = await query(
+          `SELECT id, sender_id, recipient_id, is_deleted FROM direct_messages WHERE id = $1`,
+          [messageId]
+        );
+
+        if (rows.length === 0) {
+          socket.emit('dm:error', { message: 'Message not found', code: 'NOT_FOUND' });
+          return;
+        }
+
+        const msg = rows[0];
+        if (String(msg.sender_id) !== String(user.id)) {
+          socket.emit('dm:error', { message: 'Cannot delete another user\'s message', code: 'FORBIDDEN' });
+          return;
+        }
+        if (msg.is_deleted) {
+          socket.emit('dm:error', { message: 'Message already deleted', code: 'ALREADY_DELETED' });
+          return;
+        }
+
+        await query(
+          `UPDATE direct_messages SET is_deleted = true WHERE id = $1`,
+          [messageId]
+        );
+
+        io.to(`user:${msg.sender_id}`).to(`user:${msg.recipient_id}`)
+          .emit('dm:message:deleted', {
+            id: msg.id,
+            senderId: msg.sender_id,
+            recipientId: msg.recipient_id,
+          });
+      } catch (err) {
+        logger.error('dm:message:delete error', err);
+        socket.emit('dm:error', { message: 'Failed to delete message', code: 'SERVER_ERROR' });
+      }
+    });
+
+    // Decline an incoming DM video call (callee only)
+    socket.on('dm:call:decline', async ({ callId } = {}) => {
+      if (!callId) return;
+
+      try {
+        const { rows, rowCount } = await query(
+          `UPDATE dm_video_calls
+           SET status = 'declined', ended_at = NOW(), ended_by = $1
+           WHERE id = $2 AND callee_id = $1 AND status = 'active'
+           RETURNING id, caller_id, callee_id`,
+          [user.id, callId]
+        );
+
+        if (rowCount === 0) {
+          socket.emit('dm:error', { message: 'Call not found or already ended', code: 'NOT_FOUND' });
+          return;
+        }
+
+        const call = rows[0];
+        io.to(`user:${call.caller_id}`).emit('dm:call:declined', {
+          callId: call.id,
+          declinedBy: {
+            id: user.id,
+            username: user.username,
+            firstName: user.firstName || user.first_name,
+          },
+        });
+
+        logger.info('DM call declined via socket', { callId, calleeId: user.id, callerId: call.caller_id });
+      } catch (err) {
+        logger.error('dm:call:decline error', err);
+        socket.emit('dm:error', { message: 'Failed to decline call', code: 'SERVER_ERROR' });
+      }
     });
 
     // ── Live Stream Chat ──────────────────────────────────────────────────────
@@ -1628,6 +1976,311 @@ function initSocketIO(io) {
         logger.info(`Browser stream stopped: user ${user.id}, channel '${channelRef}'`);
         socket.emit('stream:stopped', { channelRef, reason: 'user_stopped' });
       }
+    });
+
+    // ── Random Video Call ────────────────────────────────────────────────────
+
+    socket.on('randomcall:initiate', async ({ context } = {}) => {
+      if (!user) return;
+      const userId = String(user.id);
+
+      // Rate limit: 1 per 30s
+      const rlKey = `randomcall:initiate:${userId}`;
+      if (rateLimitCounters.has(rlKey)) {
+        const rl = rateLimitCounters.get(rlKey);
+        if (rl.count >= 1 && Date.now() < rl.reset) {
+          return socket.emit('randomcall:error', { message: 'Please wait before trying again' });
+        }
+      }
+      rateLimitCounters.set(rlKey, { count: 1, reset: Date.now() + 30000 });
+
+      try {
+        // Check caller is Prime
+        const tierRes = await query(
+          `SELECT tier, COALESCE(role, 'user') as role FROM users WHERE id = $1`, [userId]
+        );
+        if (!tierRes.rows.length) return;
+        const callerRow = tierRes.rows[0];
+        if (callerRow.tier !== 'prime' && callerRow.role !== 'admin' && callerRow.role !== 'superadmin') {
+          return socket.emit('randomcall:error', { message: 'Prime subscription required' });
+        }
+
+        // Check not already in a call
+        for (const [, call] of pendingRandomCalls) {
+          if (call.callerId === userId || call.calleeId === userId) {
+            return socket.emit('randomcall:error', { message: 'Already in a call' });
+          }
+        }
+
+        // Get online users, exclude self
+        const candidates = [];
+        for (const [uid, presence] of onlineUsersMap) {
+          if (String(uid) !== userId) {
+            candidates.push({ userId: String(uid), name: presence.name, photoUrl: presence.photoUrl });
+          }
+        }
+
+        if (candidates.length === 0) {
+          return socket.emit('randomcall:no-match', {});
+        }
+
+        // Filter blocked users
+        let blocked = new Set();
+        try {
+          const blockedByMe = await BlockedUser.getBlockedByUser(userId);
+          blockedByMe.forEach(b => blocked.add(String(b.blocked_user_id || b.blocked_id)));
+          const blockersOfMe = await BlockedUser.getBlockedByUser(userId); // reverse check
+          // Also check who blocked us
+          const blockCheckRes = await query(
+            `SELECT blocker_id FROM blocked_users WHERE blocked_id = $1`, [userId]
+          );
+          blockCheckRes.rows.forEach(r => blocked.add(String(r.blocker_id)));
+        } catch (e) {
+          logger.warn('[RandomCall] Block check failed:', e.message);
+        }
+
+        const eligible = candidates.filter(c => !blocked.has(c.userId));
+
+        // Filter to Prime users only
+        if (eligible.length === 0) {
+          return socket.emit('randomcall:no-match', {});
+        }
+
+        const eligibleIds = eligible.map(c => c.userId);
+        let primeUsers;
+        try {
+          const primeRes = await query(
+            `SELECT id FROM users WHERE id = ANY($1) AND (tier = 'prime' OR role IN ('admin', 'superadmin'))`,
+            [eligibleIds]
+          );
+          const primeSet = new Set(primeRes.rows.map(r => String(r.id)));
+          primeUsers = eligible.filter(c => primeSet.has(c.userId));
+        } catch (e) {
+          logger.warn('[RandomCall] Prime filter failed:', e.message);
+          primeUsers = eligible; // fallback: allow all if query fails
+        }
+
+        if (primeUsers.length === 0) {
+          return socket.emit('randomcall:no-match', {});
+        }
+
+        // Random pick
+        const callee = primeUsers[Math.floor(Math.random() * primeUsers.length)];
+
+        // Check callee not already in a call
+        for (const [, call] of pendingRandomCalls) {
+          if (call.callerId === callee.userId || call.calleeId === callee.userId) {
+            // Try another
+            const filtered = primeUsers.filter(u => {
+              for (const [, c] of pendingRandomCalls) {
+                if (c.callerId === u.userId || c.calleeId === u.userId) return false;
+              }
+              return true;
+            });
+            if (filtered.length === 0) {
+              return socket.emit('randomcall:no-match', {});
+            }
+            // reassign callee
+            Object.assign(callee, filtered[Math.floor(Math.random() * filtered.length)]);
+            break;
+          }
+        }
+
+        // Create/get DM room
+        const callerUser = { id: userId, first_name: user.name || user.firstName || 'User' };
+        const calleeUserRow = await query(
+          `SELECT id, first_name, username, photo_url FROM users WHERE id = $1`, [callee.userId]
+        );
+        if (!calleeUserRow.rows.length) {
+          return socket.emit('randomcall:no-match', {});
+        }
+        const calleeDbUser = calleeUserRow.rows[0];
+
+        let matrixRoomId;
+        try {
+          matrixRoomId = await matrixService.getOrCreateDmRoom(
+            { id: userId, first_name: callerUser.first_name },
+            { id: callee.userId, first_name: calleeDbUser.first_name || 'User' }
+          );
+        } catch (e) {
+          logger.error('[RandomCall] Failed to create DM room:', e.message);
+          return socket.emit('randomcall:error', { message: 'Failed to set up call room' });
+        }
+
+        // Generate call ID
+        const callId = `rc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+        // Store pending call with 30s timeout
+        const timeoutHandle = setTimeout(() => {
+          const call = pendingRandomCalls.get(callId);
+          if (call) {
+            pendingRandomCalls.delete(callId);
+            io.to(`user:${call.callerId}`).emit('randomcall:timeout', { callId });
+            io.to(`user:${call.calleeId}`).emit('randomcall:timeout', { callId });
+          }
+        }, 30000);
+
+        pendingRandomCalls.set(callId, {
+          callerId: userId,
+          calleeId: callee.userId,
+          matrixRoomId,
+          timeout: timeoutHandle,
+          createdAt: Date.now(),
+        });
+
+        // Get caller info for callee
+        const callerInfo = {
+          userId,
+          name: user.name || user.firstName || 'Someone',
+          photoUrl: user.photoUrl || null,
+        };
+
+        const calleeInfo = {
+          userId: callee.userId,
+          name: calleeDbUser.first_name || callee.name || 'Someone',
+          photoUrl: calleeDbUser.photo_url || callee.photoUrl || null,
+        };
+
+        // Emit to both parties
+        socket.emit('randomcall:ringing', { callId, peer: calleeInfo });
+        io.to(`user:${callee.userId}`).emit('randomcall:incoming', { callId, caller: callerInfo });
+
+        logger.info(`[RandomCall] ${userId} → ${callee.userId} (callId=${callId})`);
+
+      } catch (err) {
+        logger.error('[RandomCall] initiate error:', err);
+        socket.emit('randomcall:error', { message: 'Something went wrong' });
+      }
+    });
+
+    socket.on('randomcall:accept', async ({ callId } = {}) => {
+      if (!user || !callId) return;
+      const userId = String(user.id);
+      const call = pendingRandomCalls.get(callId);
+
+      if (!call || call.calleeId !== userId) {
+        return socket.emit('randomcall:error', { message: 'Call not found or expired' });
+      }
+
+      // Clear timeout
+      clearTimeout(call.timeout);
+
+      try {
+        // Build Element Call URL
+        const elementCallUrl = process.env.ELEMENT_CALL_URL || 'https://call.pnptv.app';
+        const callUrl = `${elementCallUrl}/#/room/${encodeURIComponent(call.matrixRoomId)}?skipLobby=true&hideHeader=true`;
+
+        // Get peer info
+        const callerRes = await query(
+          `SELECT first_name, photo_url FROM users WHERE id = $1`, [call.callerId]
+        );
+        const calleeRes = await query(
+          `SELECT first_name, photo_url FROM users WHERE id = $1`, [call.calleeId]
+        );
+
+        const callerInfo = {
+          userId: call.callerId,
+          name: callerRes.rows[0]?.first_name || 'User',
+          photoUrl: callerRes.rows[0]?.photo_url || null,
+        };
+        const calleeInfo = {
+          userId: call.calleeId,
+          name: calleeRes.rows[0]?.first_name || 'User',
+          photoUrl: calleeRes.rows[0]?.photo_url || null,
+        };
+
+        // Update call state (keep in map for end-call tracking, extend timeout to 1h)
+        call.status = 'active';
+        call.timeout = setTimeout(() => {
+          pendingRandomCalls.delete(callId);
+        }, 3600000);
+
+        // Emit accepted to both
+        io.to(`user:${call.callerId}`).emit('randomcall:accepted', {
+          callId,
+          callUrl,
+          peer: calleeInfo,
+          matrixRoomId: call.matrixRoomId,
+        });
+        io.to(`user:${call.calleeId}`).emit('randomcall:accepted', {
+          callId,
+          callUrl,
+          peer: callerInfo,
+          matrixRoomId: call.matrixRoomId,
+        });
+
+        logger.info(`[RandomCall] Accepted: ${call.callerId} ↔ ${call.calleeId} (callId=${callId})`);
+
+      } catch (err) {
+        logger.error('[RandomCall] accept error:', err);
+        socket.emit('randomcall:error', { message: 'Failed to set up call' });
+      }
+    });
+
+    socket.on('randomcall:decline', ({ callId } = {}) => {
+      if (!user || !callId) return;
+      const userId = String(user.id);
+      const call = pendingRandomCalls.get(callId);
+
+      if (!call || call.calleeId !== userId) return;
+
+      clearTimeout(call.timeout);
+      pendingRandomCalls.delete(callId);
+
+      io.to(`user:${call.callerId}`).emit('randomcall:declined', { callId });
+      logger.info(`[RandomCall] Declined by ${userId} (callId=${callId})`);
+    });
+
+    socket.on('randomcall:cancel', ({ callId } = {}) => {
+      if (!user || !callId) return;
+      const userId = String(user.id);
+      const call = pendingRandomCalls.get(callId);
+
+      if (!call || call.callerId !== userId) return;
+
+      clearTimeout(call.timeout);
+      pendingRandomCalls.delete(callId);
+
+      io.to(`user:${call.calleeId}`).emit('randomcall:cancelled', { callId });
+      logger.info(`[RandomCall] Cancelled by ${userId} (callId=${callId})`);
+    });
+
+    socket.on('randomcall:end', ({ callId } = {}) => {
+      if (!user || !callId) return;
+      const userId = String(user.id);
+      const call = pendingRandomCalls.get(callId);
+
+      if (!call) return;
+      if (call.callerId !== userId && call.calleeId !== userId) return;
+
+      clearTimeout(call.timeout);
+      pendingRandomCalls.delete(callId);
+
+      const otherUserId = call.callerId === userId ? call.calleeId : call.callerId;
+      io.to(`user:${otherUserId}`).emit('randomcall:ended', { callId });
+      logger.info(`[RandomCall] Ended by ${userId} (callId=${callId})`);
+    });
+
+    // ── Main Stage Events ────────────────────────────────────────────────────
+
+    socket.on('mainstage:join', () => {
+      // Rate-limit: 5 join attempts per 30 seconds per user
+      if (!rateLimit(`mainstage:join:${user.id}`, 5, 30000)) {
+        logger.warn('mainstage:join rate-limited', { userId: user.id });
+        return;
+      }
+      socket.join('mainstage');
+      logger.debug('Socket joined mainstage room', { socketId: socket.id, userId: user.id });
+    });
+
+    socket.on('mainstage:leave', () => {
+      // Rate-limit: 5 leave attempts per 30 seconds per user
+      if (!rateLimit(`mainstage:leave:${user.id}`, 5, 30000)) {
+        logger.warn('mainstage:leave rate-limited', { userId: user.id });
+        return;
+      }
+      socket.leave('mainstage');
+      logger.debug('Socket left mainstage room', { socketId: socket.id, userId: user.id });
     });
 
     socket.on('disconnect', async () => {
