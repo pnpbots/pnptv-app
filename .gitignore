@@ -7,3 +7,6 @@ backups/
 *.log
 *.backup-emergency
 infrastructure/data/
+
+# User-uploaded media (served from disk, not tracked in git)
+public/uploads/
