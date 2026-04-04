@@ -24,6 +24,19 @@ class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("ErrorBoundary caught:", error, errorInfo);
 
+    // Auto-recover from DOM mutation errors (browser extensions / translate)
+    const isDomError =
+      error.name === "NotFoundError" ||
+      error.message?.includes("removeChild") ||
+      error.message?.includes("insertBefore") ||
+      error.message?.includes("is not a child");
+
+    if (isDomError) {
+      console.warn("ErrorBoundary: DOM mutation error, auto-recovering");
+      this.setState({ hasError: false, error: null });
+      return;
+    }
+
     // Auto-reload on stale chunk errors (dynamic import fails after deploy)
     const isChunkError =
       error.message?.includes("Failed to fetch dynamically imported module") ||

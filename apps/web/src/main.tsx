@@ -3,6 +3,34 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./styles/globals.css";
 
+// ── Patch DOM to prevent "removeChild" / "insertBefore" crashes ──────────────
+// Browser extensions (Google Translate, ad blockers, etc.) and PWA chrome can
+// mutate the DOM outside of React. When React later tries to reconcile, it
+// calls removeChild/insertBefore on a node whose children have shifted, causing
+// "NotFoundError: The node to be removed is not a child of this node."
+// This patch makes those calls no-ops when the child doesn't belong to the parent.
+if (typeof Node !== "undefined") {
+  const origRemoveChild = Node.prototype.removeChild;
+  // @ts-expect-error - intentional monkey-patch
+  Node.prototype.removeChild = function <T extends Node>(child: T): T {
+    if (child.parentNode !== this) {
+      console.warn("[DOM patch] removeChild: node is not a child, skipping", child);
+      return child;
+    }
+    return origRemoveChild.call(this, child) as T;
+  };
+
+  const origInsertBefore = Node.prototype.insertBefore;
+  // @ts-expect-error - intentional monkey-patch
+  Node.prototype.insertBefore = function <T extends Node>(newNode: T, refNode: Node | null): T {
+    if (refNode && refNode.parentNode !== this) {
+      console.warn("[DOM patch] insertBefore: ref node is not a child, appending instead", refNode);
+      return origInsertBefore.call(this, newNode, null) as T;
+    }
+    return origInsertBefore.call(this, newNode, refNode) as T;
+  };
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />
