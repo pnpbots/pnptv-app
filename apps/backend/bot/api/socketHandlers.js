@@ -458,6 +458,25 @@ function initSocketIO(io) {
         // Touch activity timestamp for 72h inactivity cleanup
         await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [gid]);
 
+        // ── Webapp → Telegram bridge: forward text message to linked Telegram group ──
+        (async () => {
+          try {
+            const { rows: tgRows } = await query(
+              'SELECT telegram_chat_id FROM hangout_groups WHERE id = $1 AND telegram_chat_id IS NOT NULL',
+              [gid]
+            );
+            if (tgRows.length === 0) return;
+            const tgChatId = tgRows[0].telegram_chat_id;
+            const { getBotInstance } = require('../core/bot');
+            const bot = getBotInstance();
+            if (!bot) return;
+            const senderName = user.firstName || user.first_name || user.username || 'User';
+            await bot.telegram.sendMessage(tgChatId, `${senderName}: ${text}`, { parse_mode: undefined });
+          } catch (bridgeErr) {
+            logger.warn('[App→TG Bridge] socket text forward failed', { error: bridgeErr.message, groupId: gid });
+          }
+        })();
+
         // ── Push notifications to offline hangout members ──
         // Fire-and-forget: don't block the message flow
         (async () => {

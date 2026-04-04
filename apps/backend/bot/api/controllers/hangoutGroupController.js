@@ -897,6 +897,25 @@ const sendMessage = async (req, res) => {
       io.to(room).emit('chat:message', msg);
     }
 
+    // ── Webapp → Telegram bridge: forward text to linked Telegram group ──
+    (async () => {
+      try {
+        const { rows: tgRows } = await query(
+          'SELECT telegram_chat_id FROM hangout_groups WHERE id = $1 AND telegram_chat_id IS NOT NULL',
+          [groupId]
+        );
+        if (tgRows.length === 0) return;
+        const tgChatId = tgRows[0].telegram_chat_id;
+        const { getBotInstance } = require('../../core/bot');
+        const bot = getBotInstance();
+        if (!bot) return;
+        const senderName = user.firstName || user.first_name || user.username || 'User';
+        await bot.telegram.sendMessage(tgChatId, `${senderName}: ${text}`, { parse_mode: undefined });
+      } catch (bridgeErr) {
+        logger.warn('[App→TG Bridge] REST text forward failed', { error: bridgeErr.message, groupId });
+      }
+    })();
+
     return res.json({ success: true, message: msg });
   } catch (err) {
     logger.error('sendMessage hangout error', err);

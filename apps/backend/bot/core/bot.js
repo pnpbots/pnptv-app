@@ -645,6 +645,179 @@ const startBot = async () => {
       registerPrimeChannelMirrorHandler(bot);
     } catch (e) { logger.error(`Prime channel mirror handler failed: ${e.message}`); }
 
+    // ── Telegram → Webapp hangout chat bridge ────────────────────────────────
+    // When a message arrives in a linked Telegram group, insert it into
+    // chat_messages and broadcast to webapp clients via Socket.IO.
+    bot.on('message', async (ctx, next) => {
+      // Only handle group/supergroup messages
+      if (ctx.chat.type !== 'group' && ctx.chat.type !== 'supergroup') return next();
+      // Skip bot commands — they're handled by dedicated handlers
+      if (ctx.message?.text?.startsWith('/')) return next();
+      // Skip messages from bots (including our own bridge forwards)
+      if (ctx.from?.is_bot) return next();
+
+      const chatId = ctx.chat.id;
+      try {
+        const { query: dbQuery } = require('../../config/postgres');
+        const socketIO = require('../services/socketSingleton').get();
+        if (!socketIO) return next();
+
+        // Check if this Telegram group is linked to a hangout
+        const { getRedis } = require('../../config/redis');
+        const redis = getRedis();
+        const cacheKey = `tg-hangout-link:${chatId}`;
+        let hangoutId = null;
+
+        // Cache the link lookup for 60s to avoid DB hits on every message
+        const cached = await redis.get(cacheKey);
+        if (cached === 'none') return next();
+        if (cached) {
+          hangoutId = parseInt(cached, 10);
+        } else {
+          const { rows } = await dbQuery(
+            'SELECT id FROM hangout_groups WHERE telegram_chat_id = $1',
+            [chatId]
+          );
+          if (rows.length === 0) {
+            await redis.set(cacheKey, 'none', 'EX', 60);
+            return next();
+          }
+          hangoutId = rows[0].id;
+          await redis.set(cacheKey, String(hangoutId), 'EX', 60);
+        }
+
+        // Resolve the PNPtv user from their Telegram ID
+        const telegramId = String(ctx.from.id);
+        const { rows: userRows } = await dbQuery(
+          'SELECT id, username, first_name, photo_file_id FROM users WHERE telegram = $1 LIMIT 1',
+          [telegramId]
+        );
+
+        // Use PNPtv user data if found, otherwise use Telegram profile
+        const userId = userRows[0]?.id || null;
+        const username = userRows[0]?.username || ctx.from.username || null;
+        const firstName = userRows[0]?.first_name || ctx.from.first_name || 'Telegram User';
+        const rawPhoto = userRows[0]?.photo_file_id || null;
+        const isValidPhoto = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
+        const photoUrl = isValidPhoto(rawPhoto) ? rawPhoto : null;
+
+        // Auto-add Telegram user as hangout member if they're a registered PNPtv user
+        if (userId) {
+          await dbQuery(
+            `INSERT INTO hangout_group_members (group_id, user_id, role)
+             VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING`,
+            [hangoutId, userId]
+          );
+        }
+
+        const room = `hangout:${hangoutId}`;
+
+        // ── Extract content from various Telegram message types ──
+        let textContent = null;
+        let mediaUrl = null;
+        let mediaType = null;
+        let mediaMime = null;
+        let mediaThumbUrl = null;
+        let mediaWidth = null;
+        let mediaHeight = null;
+
+        const msg = ctx.message;
+
+        if (msg.text) {
+          textContent = msg.text.slice(0, 2000);
+        }
+
+        if (msg.caption) {
+          textContent = msg.caption.slice(0, 2000);
+        }
+
+        // Photo
+        if (msg.photo && msg.photo.length > 0) {
+          try {
+            const largest = msg.photo[msg.photo.length - 1];
+            const fileLink = await ctx.telegram.getFileLink(largest.file_id);
+            mediaUrl = fileLink.href || fileLink.toString();
+            mediaType = 'image';
+            mediaMime = 'image/jpeg';
+            mediaWidth = largest.width;
+            mediaHeight = largest.height;
+          } catch (e) { logger.warn('Bridge: failed to get photo link', { error: e.message }); }
+        }
+
+        // Video / video note
+        if (msg.video || msg.video_note) {
+          try {
+            const vid = msg.video || msg.video_note;
+            const fileLink = await ctx.telegram.getFileLink(vid.file_id);
+            mediaUrl = fileLink.href || fileLink.toString();
+            mediaType = 'video';
+            mediaMime = vid.mime_type || 'video/mp4';
+            mediaWidth = vid.width;
+            mediaHeight = vid.height;
+          } catch (e) { logger.warn('Bridge: failed to get video link', { error: e.message }); }
+        }
+
+        // Voice / audio
+        if (msg.voice || msg.audio) {
+          try {
+            const aud = msg.voice || msg.audio;
+            const fileLink = await ctx.telegram.getFileLink(aud.file_id);
+            mediaUrl = fileLink.href || fileLink.toString();
+            mediaType = 'audio';
+            mediaMime = aud.mime_type || 'audio/ogg';
+          } catch (e) { logger.warn('Bridge: failed to get audio link', { error: e.message }); }
+        }
+
+        // Sticker → treat as image
+        if (msg.sticker && !msg.sticker.is_animated && !msg.sticker.is_video) {
+          try {
+            const fileLink = await ctx.telegram.getFileLink(msg.sticker.file_id);
+            mediaUrl = fileLink.href || fileLink.toString();
+            mediaType = 'image';
+            mediaMime = 'image/webp';
+            mediaWidth = msg.sticker.width;
+            mediaHeight = msg.sticker.height;
+            if (!textContent) textContent = msg.sticker.emoji || null;
+          } catch (e) { logger.warn('Bridge: failed to get sticker link', { error: e.message }); }
+        }
+
+        // Skip if no useful content
+        if (!textContent && !mediaUrl) return next();
+
+        // Mark message as originating from Telegram bridge (store in metadata)
+        const metadata = { source: 'telegram', telegramMsgId: msg.message_id, telegramUserId: telegramId };
+
+        // Insert into chat_messages
+        const { rows: inserted } = await dbQuery(
+          `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content,
+             media_url, media_type, media_mime, media_thumb_url, media_width, media_height, media_metadata)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+           RETURNING id, room, user_id, username, first_name, photo_url, content,
+                     media_url, media_type, media_mime, media_thumb_url,
+                     media_width, media_height, media_metadata, reply_to_id, created_at`,
+          [
+            room, userId, username, firstName, photoUrl, textContent,
+            mediaUrl, mediaType, mediaMime, mediaThumbUrl, mediaWidth, mediaHeight,
+            JSON.stringify(metadata),
+          ]
+        );
+
+        const chatMsg = { ...inserted[0], photo_url: isValidPhoto(inserted[0].photo_url) ? inserted[0].photo_url : null };
+
+        // Broadcast to webapp clients
+        socketIO.to(room).emit('chat:message', chatMsg);
+
+        // Touch activity timestamp
+        await dbQuery('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [hangoutId]);
+
+        logger.info(`[TG→App Bridge] ${firstName} in hangout ${hangoutId}: ${textContent?.slice(0, 50) || '[media]'}`);
+      } catch (err) {
+        logger.error('[TG→App Bridge] Error', { error: err.message, chatId });
+      }
+      return next();
+    });
+    // ── End Telegram → Webapp bridge ───────────────────────────────────────────
+
     // Register handlers
 
     // Generic message handler for private chats to route to support

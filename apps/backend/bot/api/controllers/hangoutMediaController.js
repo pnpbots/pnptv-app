@@ -120,6 +120,36 @@ const uploadHangoutMedia = async (req, res) => {
       io.to(room).emit('chat:message', msg);
     }
 
+    // ── Webapp → Telegram bridge: forward media to linked Telegram group ──
+    (async () => {
+      try {
+        const { rows: tgRows } = await query(
+          'SELECT telegram_chat_id FROM hangout_groups WHERE id = $1 AND telegram_chat_id IS NOT NULL',
+          [groupId]
+        );
+        if (tgRows.length === 0) return;
+        const tgChatId = tgRows[0].telegram_chat_id;
+        const { getBotInstance } = require('../../core/bot');
+        const bot = getBotInstance();
+        if (!bot) return;
+        const senderName = user.firstName || user.first_name || user.username || 'User';
+        const mediaCaption = caption ? `${senderName}: ${caption}` : senderName;
+        const fullMediaUrl = mediaResult.mediaUrl?.startsWith('/') ? `${APP_PUBLIC_URL}${mediaResult.mediaUrl}` : mediaResult.mediaUrl;
+
+        if (mediaResult.mediaType === 'image' && fullMediaUrl) {
+          await bot.telegram.sendPhoto(tgChatId, fullMediaUrl, { caption: mediaCaption });
+        } else if (mediaResult.mediaType === 'video' && fullMediaUrl) {
+          await bot.telegram.sendVideo(tgChatId, fullMediaUrl, { caption: mediaCaption });
+        } else if (mediaResult.mediaType === 'audio' && fullMediaUrl) {
+          await bot.telegram.sendVoice(tgChatId, fullMediaUrl, { caption: mediaCaption });
+        } else if (fullMediaUrl) {
+          await bot.telegram.sendMessage(tgChatId, `${senderName} sent a file: ${fullMediaUrl}`);
+        }
+      } catch (bridgeErr) {
+        logger.warn('[App→TG Bridge] REST media forward failed', { error: bridgeErr.message, groupId });
+      }
+    })();
+
     // Push notifications to offline members (fire-and-forget)
     const firstName = user.firstName || user.first_name || null;
     (async () => {
