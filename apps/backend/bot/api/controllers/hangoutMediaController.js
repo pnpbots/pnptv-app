@@ -49,6 +49,14 @@ const uploadHangoutMedia = async (req, res) => {
   }
 
   try {
+    // Auto-join main group if not already a member
+    await query(
+      `INSERT INTO hangout_group_members (group_id, user_id, role)
+       SELECT id, $1, 'member' FROM hangout_groups WHERE is_main = true
+       ON CONFLICT DO NOTHING`,
+      [user.id]
+    );
+
     // Membership check (exclude banned users)
     const { rows: memberRows } = await query(
       'SELECT is_banned FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',

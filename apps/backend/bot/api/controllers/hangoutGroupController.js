@@ -188,6 +188,8 @@ const getGroup = async (req, res) => {
   if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
+    // Auto-join main group if not already a member
+    await ensureMainGroupMembership(user.id);
     const { rows: groupRows } = await query(
       `SELECT g.*,
               g.slow_mode_seconds, g.is_read_only, g.allow_media, g.allow_member_invites,
@@ -717,6 +719,9 @@ const getMessages = async (req, res) => {
   }
 
   try {
+    // Auto-join main group if not already a member
+    await ensureMainGroupMembership(user.id);
+
     // Check membership
     if (!(await isMember(groupId, user.id))) {
       return res.status(403).json({ error: 'Not a member of this group' });
@@ -794,6 +799,9 @@ const sendMessage = async (req, res) => {
   if (!content?.trim()) return res.status(400).json({ error: 'Content required' });
 
   try {
+    // Auto-join main group if not already a member
+    await ensureMainGroupMembership(user.id);
+
     if (!(await isMember(groupId, user.id))) {
       return res.status(403).json({ error: 'Not a member of this group' });
     }
