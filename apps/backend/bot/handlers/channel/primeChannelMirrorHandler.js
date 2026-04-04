@@ -23,8 +23,8 @@ async function isMirrorEnabled() {
   }
 }
 
-async function processAndSaveImage(buffer, ts) {
-  const filename = `img-${ADMIN_USER_ID}-${ts}.webp`;
+async function processAndSaveImage(buffer, userId, ts) {
+  const filename = `img-${userId}-${ts}.webp`;
   const filePath = path.join(UPLOAD_DIR, filename);
   await fs.promises.mkdir(UPLOAD_DIR, { recursive: true });
   await sharp(buffer)
@@ -34,42 +34,37 @@ async function processAndSaveImage(buffer, ts) {
   return { mediaUrl: `/uploads/posts/${filename}`, mediaType: 'image' };
 }
 
-async function processAndSaveVideo(buffer, mimetype, ts) {
+async function processAndSaveVideo(buffer, userId, mimetype, ts) {
   const ext = mimetype && mimetype.includes('webm') ? 'webm' : 'mp4';
-  const filename = `vid-${ADMIN_USER_ID}-${ts}.${ext}`;
+  const filename = `vid-${userId}-${ts}.${ext}`;
   const filePath = path.join(UPLOAD_DIR, filename);
   await fs.promises.mkdir(UPLOAD_DIR, { recursive: true });
   await fs.promises.writeFile(filePath, buffer);
   return { mediaUrl: `/uploads/posts/${filename}`, mediaType: 'video' };
 }
 
+async function downloadMedia(ctx, mediaInfo, userId, ts) {
+  const fileLink = await ctx.telegram.getFileLink(mediaInfo.fileId);
+  const response = await axios.get(fileLink.href, { responseType: 'arraybuffer', timeout: 60000 });
+  const buffer = Buffer.from(response.data);
+  if (mediaInfo.mediaType === 'image') {
+    return processAndSaveImage(buffer, userId, ts);
+  }
+  return processAndSaveVideo(buffer, userId, mediaInfo.mimetype, ts);
+}
+
 function registerPrimeChannelMirrorHandler(bot) {
   const PRIME_CHANNEL_ID = process.env.PRIME_CHANNEL_ID;
 
   if (!PRIME_CHANNEL_ID) {
-    logger.warn('[PrimeMirror] PRIME_CHANNEL_ID not set — mirror handler disabled');
-    return;
+    logger.warn('[PrimeMirror] PRIME_CHANNEL_ID not set — prime mirror disabled, but creator bridge still active');
   }
 
   bot.on('channel_post', async (ctx) => {
     try {
       const chatId = ctx.chat?.id?.toString();
-      if (chatId !== PRIME_CHANNEL_ID) return;
-
-      const enabled = await isMirrorEnabled();
-      if (!enabled) return;
-
       const msg = ctx.channelPost;
       if (!msg) return;
-
-      const messageId = msg.message_id;
-
-      // Deduplication: check if already mirrored
-      const { rows: existing } = await query(
-        'SELECT 1 FROM social_posts WHERE telegram_message_id = $1 LIMIT 1',
-        [messageId]
-      );
-      if (existing.length > 0) return;
 
       // Skip service messages
       if (msg.new_chat_members || msg.left_chat_member || msg.pinned_message ||
@@ -77,80 +72,118 @@ function registerPrimeChannelMirrorHandler(bot) {
         return;
       }
 
-      // Album deduplication via Redis
-      if (msg.media_group_id) {
-        try {
-          const redis = getRedis();
-          const key = `prime_mirror:album:${msg.media_group_id}`;
-          const seen = await redis.get(key);
-          if (seen) return;
-          await redis.set(key, '1', 'EX', 5);
-        } catch (redisErr) {
-          logger.warn(`[PrimeMirror] Redis album check failed, continuing: ${redisErr.message}`);
-        }
-      }
-
-      // Extract content
+      const messageId = msg.message_id;
       const text = msg.text || msg.caption || '';
       const entities = msg.entities || msg.caption_entities || [];
       const content = entitiesToPlainText(text, entities);
-
-      // Extract media
       const mediaInfo = extractMedia(msg);
 
-      // Skip if no content and no media
+      // Skip posts with no content and no media
       if (!content.trim() && !mediaInfo) return;
 
       const originalDate = new Date(msg.date * 1000);
       const ts = Date.now();
 
-      let mediaUrl = null;
-      let mediaType = null;
+      // ── Prime channel mirror ──────────────────────────────────────────────
+      if (PRIME_CHANNEL_ID && chatId === PRIME_CHANNEL_ID) {
+        const enabled = await isMirrorEnabled();
+        if (enabled) {
+          // Deduplication
+          const { rows: existing } = await query(
+            'SELECT 1 FROM social_posts WHERE telegram_message_id = $1 LIMIT 1',
+            [messageId]
+          );
+          if (existing.length === 0) {
+            // Album deduplication via Redis
+            if (msg.media_group_id) {
+              try {
+                const redis = getRedis();
+                const key = `prime_mirror:album:${msg.media_group_id}`;
+                const seen = await redis.get(key);
+                if (seen) return;
+                await redis.set(key, '1', 'EX', 5);
+              } catch (redisErr) {
+                logger.warn(`[PrimeMirror] Redis album check failed, continuing: ${redisErr.message}`);
+              }
+            }
 
-      if (mediaInfo) {
-        const fileLink = await ctx.telegram.getFileLink(mediaInfo.fileId);
-        const response = await axios.get(fileLink.href, {
-          responseType: 'arraybuffer',
-          timeout: 60000,
-        });
-        const buffer = Buffer.from(response.data);
+            let mediaUrl = null;
+            let mediaType = null;
+            if (mediaInfo) {
+              ({ mediaUrl, mediaType } = await downloadMedia(ctx, mediaInfo, ADMIN_USER_ID, ts));
+            }
 
-        if (mediaInfo.mediaType === 'image') {
-          ({ mediaUrl, mediaType } = await processAndSaveImage(buffer, ts));
-        } else {
-          ({ mediaUrl, mediaType } = await processAndSaveVideo(buffer, mediaInfo.mimetype, ts));
+            const { rows } = await query(
+              `INSERT INTO social_posts
+                 (user_id, content, media_url, media_type, telegram_message_id, source_channel,
+                  is_wof, is_exclusive, is_shareable, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, 'prime_channel', false, false, true, $6, $6)
+               ON CONFLICT (telegram_message_id) WHERE telegram_message_id IS NOT NULL DO NOTHING
+               RETURNING id`,
+              [ADMIN_USER_ID, content || '', mediaUrl, mediaType, messageId, originalDate]
+            );
+
+            const postId = rows[0]?.id;
+            if (postId) {
+              await query(
+                `INSERT INTO prime_channel_migration_log (message_id, status, post_id, media_type)
+                 VALUES ($1, 'success', $2, $3)
+                 ON CONFLICT (message_id) DO UPDATE SET status='success', post_id=$2`,
+                [messageId, postId, mediaType]
+              );
+              logger.info(`[PrimeMirror] Mirrored channel_post ${messageId} → social post #${postId}`);
+            }
+          }
         }
       }
 
-      // Insert into social_posts
-      const { rows } = await query(
-        `INSERT INTO social_posts
-           (user_id, content, media_url, media_type, telegram_message_id, source_channel,
-            is_wof, is_exclusive, is_shareable, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, 'prime_channel', false, false, true, $6, $6)
-         ON CONFLICT (telegram_message_id) WHERE telegram_message_id IS NOT NULL DO NOTHING
-         RETURNING id`,
-        [ADMIN_USER_ID, content || '', mediaUrl, mediaType, messageId, originalDate]
+      // ── Creator channel bridge ────────────────────────────────────────────
+      // Look up any active creator channel linked to this Telegram channel.
+      // Bridge posts use NULL telegram_message_id to avoid conflicts with prime posts.
+      const { rows: linked } = await query(
+        `SELECT id, creator_id FROM creator_channels
+         WHERE telegram_channel_id = $1 AND bridge_enabled = true AND is_active = true
+         LIMIT 1`,
+        [chatId]
       );
 
-      const postId = rows[0]?.id;
+      if (linked.length > 0) {
+        const { id: creatorChannelId, creator_id: creatorId } = linked[0];
+        const bridgeTs = ts + 1; // distinct timestamp from prime
 
-      if (postId) {
-        // Log to migration table
-        await query(
-          `INSERT INTO prime_channel_migration_log (message_id, status, post_id, media_type)
-           VALUES ($1, 'success', $2, $3)
-           ON CONFLICT (message_id) DO UPDATE SET status='success', post_id=$2`,
-          [messageId, postId, mediaType]
+        let bridgeMediaUrl = null;
+        let bridgeMediaType = null;
+        if (mediaInfo) {
+          try {
+            ({ mediaUrl: bridgeMediaUrl, mediaType: bridgeMediaType } = await downloadMedia(ctx, mediaInfo, creatorId, bridgeTs));
+          } catch (mediaErr) {
+            logger.warn(`[ChannelBridge] Media download failed for channel ${creatorChannelId}: ${mediaErr.message}`);
+          }
+        }
+
+        const { rows: bridgeRows } = await query(
+          `INSERT INTO social_posts
+             (user_id, content, media_url, media_type, channel_id,
+              source_channel, is_wof, is_exclusive, is_shareable, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, 'channel_bridge', false, false, true, $6, $6)
+           RETURNING id`,
+          [creatorId, content || '', bridgeMediaUrl, bridgeMediaType, creatorChannelId, originalDate]
         );
-        logger.info(`[PrimeMirror] Mirrored channel_post ${messageId} → social post #${postId}`);
+
+        if (bridgeRows[0]?.id) {
+          await query(
+            `UPDATE creator_channels SET post_count = post_count + 1, updated_at = NOW() WHERE id = $1`,
+            [creatorChannelId]
+          );
+          logger.info(`[ChannelBridge] Bridged TG ${chatId} → app channel #${creatorChannelId} post #${bridgeRows[0].id}`);
+        }
       }
     } catch (err) {
-      logger.error(`[PrimeMirror] Error mirroring channel_post:`, err.message);
+      logger.error(`[PrimeMirror] Error handling channel_post:`, err.message);
     }
   });
 
-  logger.info('[PrimeMirror] PRIME channel mirror handler registered');
+  logger.info('[PrimeMirror] Channel post handler registered (prime mirror + creator bridge)');
 }
 
 module.exports = { registerPrimeChannelMirrorHandler };

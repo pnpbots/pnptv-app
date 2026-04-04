@@ -433,11 +433,31 @@ const createChannel = async (req, res) => {
       return res.status(403).json({ error: 'Active creator status required' });
     }
 
-    const { name, description, tags, isPremium, collaborators } = req.body;
+    const { name, description, tags, isPremium, collaborators, telegramChannelId, bridgeEnabled } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'Channel name is required' });
     }
     const trimmedName = name.trim().slice(0, 100);
+
+    // Validate and sanitize telegramChannelId
+    let safeTelegramChannelId = null;
+    if (telegramChannelId && typeof telegramChannelId === 'string') {
+      const tgId = telegramChannelId.trim().slice(0, 50);
+      if (tgId && !(/^(-100\d+|@[a-zA-Z][a-zA-Z0-9_]{3,})$/.test(tgId))) {
+        return res.status(400).json({ error: 'Invalid Telegram channel ID. Use numeric ID (e.g. -1001234567890) or @username.' });
+      }
+      if (tgId) {
+        const dupCheck = await query(
+          `SELECT id FROM creator_channels WHERE telegram_channel_id = $1 AND is_active = true`,
+          [tgId]
+        );
+        if (dupCheck.rows.length) {
+          return res.status(409).json({ error: 'This Telegram channel is already linked to another app channel.' });
+        }
+        safeTelegramChannelId = tgId;
+      }
+    }
+    const safeBridgeEnabled = safeTelegramChannelId ? (bridgeEnabled === true) : false;
 
     // Generate slug
     let slug = req.body.slug
@@ -467,10 +487,10 @@ const createChannel = async (req, res) => {
     }
 
     const result = await query(
-      `INSERT INTO creator_channels (creator_id, name, slug, description, tags, is_premium, collaborators)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO creator_channels (creator_id, name, slug, description, tags, is_premium, collaborators, telegram_channel_id, bridge_enabled)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [req.user.id, trimmedName, slug, (description || '').slice(0, 2000), safeTags, isPremium === true, safeCollaborators]
+      [req.user.id, trimmedName, slug, (description || '').slice(0, 2000), safeTags, isPremium === true, safeCollaborators, safeTelegramChannelId, safeBridgeEnabled]
     );
     return res.json({ success: true, channel: result.rows[0] });
   } catch (err) {
@@ -494,7 +514,7 @@ const updateChannel = async (req, res) => {
     const params = [];
     let idx = 1;
 
-    const { name, slug, description, coverImageUrl, tags, isPremium, sortOrder, collaborators } = req.body;
+    const { name, slug, description, coverImageUrl, tags, isPremium, sortOrder, collaborators, telegramChannelId, bridgeEnabled } = req.body;
     if (name !== undefined) { updates.push(`name = $${idx++}`); params.push(String(name).trim().slice(0, 100)); }
     if (slug !== undefined) {
       const cleanSlug = String(slug).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 100);
@@ -527,6 +547,29 @@ const updateChannel = async (req, res) => {
         }
       }
       updates.push(`collaborators = $${idx++}`); params.push(safeCollaborators);
+    }
+    if (telegramChannelId !== undefined) {
+      if (telegramChannelId === null || telegramChannelId === '') {
+        // Unlink Telegram channel
+        updates.push(`telegram_channel_id = $${idx++}`); params.push(null);
+        updates.push(`bridge_enabled = $${idx++}`); params.push(false);
+      } else {
+        const tgId = String(telegramChannelId).trim().slice(0, 50);
+        if (!(/^(-100\d+|@[a-zA-Z][a-zA-Z0-9_]{3,})$/.test(tgId))) {
+          return res.status(400).json({ error: 'Invalid Telegram channel ID. Use numeric ID (e.g. -1001234567890) or @username.' });
+        }
+        const dupCheck = await query(
+          `SELECT id FROM creator_channels WHERE telegram_channel_id = $1 AND is_active = true AND id != $2`,
+          [tgId, channelId]
+        );
+        if (dupCheck.rows.length) {
+          return res.status(409).json({ error: 'This Telegram channel is already linked to another app channel.' });
+        }
+        updates.push(`telegram_channel_id = $${idx++}`); params.push(tgId);
+      }
+    }
+    if (bridgeEnabled !== undefined) {
+      updates.push(`bridge_enabled = $${idx++}`); params.push(bridgeEnabled === true);
     }
 
     if (!updates.length) return res.status(400).json({ error: 'No fields to update' });

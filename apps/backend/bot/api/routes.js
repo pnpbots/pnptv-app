@@ -5023,6 +5023,8 @@ app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
           creatorUsername: ch.username,
           creatorPhotoUrl: photo,
           creatorVerified: ch.creator_verified === true,
+          telegramChannelId: ch.telegram_channel_id || null,
+          bridgeEnabled: ch.bridge_enabled === true,
         };
       });
 
@@ -5214,6 +5216,10 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       ? (ch.photo_file_id.startsWith('/') || ch.photo_file_id.startsWith('http') ? ch.photo_file_id : `/${ch.photo_file_id}`)
       : null;
 
+    const viewerId = req.user?.id || req.session?.user?.id || null;
+    const isOwner = viewerId !== null && String(viewerId) === String(ch.creator_id);
+    const isCollaborator = !isOwner && Array.isArray(ch.collaborators) && ch.collaborators.includes(String(viewerId));
+
     const channel = {
       id: ch.id,
       creatorId: ch.creator_id,
@@ -5229,13 +5235,16 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       creatorUsername: ch.username,
       creatorPhotoUrl: photo,
       creatorVerified: ch.creator_verified === true,
+      telegramChannelId: ch.telegram_channel_id || null,
+      bridgeEnabled: ch.bridge_enabled === true,
+      isOwner,
+      isCollaborator,
     };
 
     // Check premium access
     let locked = false;
     if (ch.is_premium) {
-      const viewerId = req.user?.id || req.session?.user?.id;
-      if (!viewerId || viewerId !== ch.creator_id) {
+      if (!viewerId || !isOwner) {
         if (viewerId) {
           const subRes = await getPool().query(
             `SELECT id FROM creator_subscriptions WHERE creator_id = $1 AND subscriber_id = $2 AND expires_at > NOW()`,
@@ -5254,6 +5263,7 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       const postsRes = await getPool().query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls,
                 sp.video_thumbnail_url, sp.likes_count, sp.replies_count, sp.created_at,
+                sp.user_id AS author_id,
                 u.username AS author_username, u.first_name AS author_first_name, u.photo_file_id AS author_photo
          FROM social_posts sp
          JOIN users u ON sp.user_id = u.id

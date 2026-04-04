@@ -2644,6 +2644,12 @@ export interface CreatorChannel {
   creatorPhotoUrl?: string | null;
   creatorVerified?: boolean;
   collaborators?: string[];
+  subscriberCount?: number;
+  isSubscribed?: boolean;
+  isOwner?: boolean;
+  isCollaborator?: boolean;
+  telegramChannelId?: string | null;
+  bridgeEnabled?: boolean;
 }
 
 export function getOwnChannels(): Promise<{ success: boolean; channels: CreatorChannel[] }> {
@@ -2656,13 +2662,15 @@ export function createCreatorChannel(data: {
   description?: string;
   tags?: string[];
   isPremium?: boolean;
+  telegramChannelId?: string | null;
+  bridgeEnabled?: boolean;
 }): Promise<{ success: boolean; channel: CreatorChannel }> {
   return request("/api/webapp/creator/channels", { method: "POST", body: data });
 }
 
 export function updateCreatorChannel(
   id: number,
-  data: Partial<{ name: string; slug: string; description: string; tags: string[]; isPremium: boolean; sortOrder: number; coverImageUrl: string }>
+  data: Partial<{ name: string; slug: string; description: string; tags: string[]; isPremium: boolean; sortOrder: number; coverImageUrl: string; telegramChannelId: string | null; bridgeEnabled: boolean }>
 ): Promise<{ success: boolean; channel: CreatorChannel }> {
   return request(`/api/webapp/creator/channels/${id}`, { method: "PATCH", body: data });
 }

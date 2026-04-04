@@ -54,7 +54,9 @@ export function ContentTab({ t }: ContentTabProps) {
     description: string;
     tags: string;
     isPremium: boolean;
-  }>({ name: "", description: "", tags: "", isPremium: false });
+    telegramChannelId: string;
+    bridgeEnabled: boolean;
+  }>({ name: "", description: "", tags: "", isPremium: false, telegramChannelId: "", bridgeEnabled: false });
   const [channelFormSaving, setChannelFormSaving] = useState(false);
   const [channelFormError, setChannelFormError] = useState<string | null>(null);
   const [editingChannelId, setEditingChannelId] = useState<number | null>(null);
@@ -276,7 +278,7 @@ export function ContentTab({ t }: ContentTabProps) {
 
   const openChannelCreate = () => {
     setEditingChannelId(null);
-    setChannelForm({ name: "", description: "", tags: "", isPremium: false });
+    setChannelForm({ name: "", description: "", tags: "", isPremium: false, telegramChannelId: "", bridgeEnabled: false });
     setChannelFormError(null);
     setShowChannelForm(true);
   };
@@ -288,6 +290,8 @@ export function ContentTab({ t }: ContentTabProps) {
       description: ch.description || "",
       tags: (ch.tags || []).join(", "),
       isPremium: ch.isPremium,
+      telegramChannelId: ch.telegramChannelId || "",
+      bridgeEnabled: ch.bridgeEnabled === true,
     });
     setChannelFormError(null);
     setShowChannelForm(true);
@@ -311,6 +315,8 @@ export function ContentTab({ t }: ContentTabProps) {
           description: channelForm.description.trim() || undefined,
           tags,
           isPremium: channelForm.isPremium,
+          telegramChannelId: channelForm.telegramChannelId.trim() || null,
+          bridgeEnabled: channelForm.bridgeEnabled,
         });
         if (res.success) {
           setOwnChannels((prev) =>
@@ -323,6 +329,8 @@ export function ContentTab({ t }: ContentTabProps) {
           description: channelForm.description.trim() || undefined,
           tags,
           isPremium: channelForm.isPremium,
+          telegramChannelId: channelForm.telegramChannelId.trim() || null,
+          bridgeEnabled: channelForm.bridgeEnabled,
         });
         if (res.success) {
           setOwnChannels((prev) => [res.channel, ...prev]);
@@ -960,6 +968,32 @@ export function ContentTab({ t }: ContentTabProps) {
                 />
                 <span className="text-sm text-white/80">Premium channel (subscribers only)</span>
               </label>
+
+              {/* Telegram Bridge */}
+              <div className="pt-1 border-t border-white/10">
+                <p className="text-xs font-semibold text-white/60 uppercase tracking-wider mb-2">Telegram Bridge</p>
+                <div className="mb-2">
+                  <label className="block text-xs text-white/50 mb-1">Telegram Channel ID or @username</label>
+                  <input
+                    value={channelForm.telegramChannelId}
+                    onChange={(e) => setChannelForm((p) => ({ ...p, telegramChannelId: e.target.value, bridgeEnabled: p.bridgeEnabled && !!e.target.value.trim() }))}
+                    placeholder="-1001234567890 or @mychannel"
+                    className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent font-mono"
+                  />
+                  <p className="text-[10px] text-white/30 mt-1">The bot must be an admin of your Telegram channel. To find the numeric ID, forward a message to @username_to_id_bot.</p>
+                </div>
+                {channelForm.telegramChannelId.trim() && (
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={channelForm.bridgeEnabled}
+                      onChange={(e) => setChannelForm((p) => ({ ...p, bridgeEnabled: e.target.checked }))}
+                      className="w-4 h-4 rounded accent-[#D4007A]"
+                    />
+                    <span className="text-sm text-white/80">Enable auto-mirror (posts bridged to this channel)</span>
+                  </label>
+                )}
+              </div>
 
               {channelFormError && (
                 <div className="px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>

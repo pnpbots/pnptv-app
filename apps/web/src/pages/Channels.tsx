@@ -7,6 +7,9 @@ import {
   getChannels,
   browseCreatorChannels,
   getChannelDetail,
+  createCreatorChannel,
+  updateCreatorChannel,
+  deleteCreatorChannel,
   type Channel,
   type CreatorChannel,
   type SocialPostItem,
@@ -155,9 +158,13 @@ function CreatorChannelCard({
 function ChannelDetailView({
   channelId,
   onBack,
+  onUpdated,
+  onDeleted,
 }: {
   channelId: number;
   onBack: () => void;
+  onUpdated?: (channel: CreatorChannel) => void;
+  onDeleted?: (channelId: number) => void;
 }) {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -165,6 +172,69 @@ function ChannelDetailView({
   const [posts, setPosts] = useState<SocialPostItem[]>([]);
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ── Edit ──
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [editForm, setEditForm] = useState({ name: "", description: "", tags: "", isPremium: false, telegramChannelId: "", bridgeEnabled: false });
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const openEdit = () => {
+    if (!channel) return;
+    setEditForm({
+      name: channel.name,
+      description: channel.description || "",
+      tags: (channel.tags || []).join(", "),
+      isPremium: channel.isPremium,
+      telegramChannelId: channel.telegramChannelId || "",
+      bridgeEnabled: channel.bridgeEnabled === true,
+    });
+    setEditError(null);
+    setShowEditForm(true);
+  };
+
+  const saveEdit = async () => {
+    if (!channel || !editForm.name.trim()) { setEditError("Channel name is required"); return; }
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const tags = editForm.tags.split(",").map((t) => t.trim()).filter(Boolean);
+      const res = await updateCreatorChannel(channel.id, {
+        name: editForm.name.trim(),
+        description: editForm.description.trim() || undefined,
+        tags,
+        isPremium: editForm.isPremium,
+        telegramChannelId: editForm.telegramChannelId.trim() || null,
+        bridgeEnabled: editForm.bridgeEnabled,
+      });
+      if (res.success) {
+        setChannel((prev) => prev ? { ...prev, ...res.channel } : res.channel);
+        setShowEditForm(false);
+        onUpdated?.(res.channel);
+      }
+    } catch (err: unknown) {
+      setEditError(err instanceof Error ? err.message : "Failed to save changes");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  // ── Delete ──
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const handleDelete = async () => {
+    if (!channel) return;
+    setDeleteLoading(true);
+    try {
+      await deleteCreatorChannel(channel.id);
+      onDeleted?.(channel.id);
+      onBack();
+    } catch {
+      setDeleteLoading(false);
+      setShowDeleteConfirm(false);
+    }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -268,10 +338,144 @@ function ChannelDetailView({
                 <p className="text-sm text-pnp-textSecondary mt-1 leading-relaxed">{channel.description}</p>
               )}
             </div>
-            <span className="text-sm text-pnp-textSecondary flex-shrink-0">
-              {channel.postCount} post{channel.postCount !== 1 ? "s" : ""}
-            </span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className="text-sm text-pnp-textSecondary">
+                {channel.postCount} post{channel.postCount !== 1 ? "s" : ""}
+              </span>
+              {channel.isOwner && (
+                <>
+                  <button
+                    onClick={openEdit}
+                    className="p-1.5 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/8 transition-colors"
+                    title="Edit channel"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="p-1.5 rounded-lg text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    title="Delete channel"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                    </svg>
+                  </button>
+                </>
+              )}
+            </div>
           </div>
+
+          {/* Edit form */}
+          {showEditForm && channel.isOwner && (
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+              <p className="text-sm font-semibold text-pnp-textPrimary">Edit Channel</p>
+              <div>
+                <label className="block text-xs text-white/50 mb-1">Channel Name *</label>
+                <input
+                  value={editForm.name}
+                  onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-white/50 mb-1">Description</label>
+                <textarea
+                  rows={2}
+                  value={editForm.description}
+                  onChange={(e) => setEditForm((p) => ({ ...p, description: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent resize-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-white/50 mb-1">Tags (comma-separated)</label>
+                <input
+                  value={editForm.tags}
+                  onChange={(e) => setEditForm((p) => ({ ...p, tags: e.target.value }))}
+                  placeholder="e.g. exclusive, photos, bts"
+                  className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                />
+              </div>
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editForm.isPremium}
+                  onChange={(e) => setEditForm((p) => ({ ...p, isPremium: e.target.checked }))}
+                  className="w-4 h-4 rounded accent-[#D4007A]"
+                />
+                <span className="text-sm text-white/80">Premium channel</span>
+              </label>
+              {/* Telegram Bridge */}
+              <div className="pt-1 border-t border-white/10">
+                <p className="text-xs font-semibold text-white/60 uppercase tracking-wider mb-2">Telegram Bridge</p>
+                <div className="mb-2">
+                  <label className="block text-xs text-white/50 mb-1">Telegram Channel ID or @username</label>
+                  <input
+                    value={editForm.telegramChannelId}
+                    onChange={(e) => setEditForm((p) => ({ ...p, telegramChannelId: e.target.value, bridgeEnabled: p.bridgeEnabled && !!e.target.value.trim() }))}
+                    placeholder="-1001234567890 or @mychannel"
+                    className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent font-mono"
+                  />
+                </div>
+                {editForm.telegramChannelId.trim() && (
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editForm.bridgeEnabled}
+                      onChange={(e) => setEditForm((p) => ({ ...p, bridgeEnabled: e.target.checked }))}
+                      className="w-4 h-4 rounded accent-[#D4007A]"
+                    />
+                    <span className="text-sm text-white/80">Enable auto-mirror</span>
+                  </label>
+                )}
+              </div>
+              {editError && (
+                <div className="px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+                  {editError}
+                </div>
+              )}
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={saveEdit}
+                  disabled={editSaving || !editForm.name.trim()}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  {editSaving ? "Saving..." : "Save Changes"}
+                </button>
+                <button
+                  onClick={() => setShowEditForm(false)}
+                  className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Delete confirmation */}
+          {showDeleteConfirm && (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 space-y-3">
+              <p className="text-sm font-semibold text-red-300">Delete this channel?</p>
+              <p className="text-xs text-white/50">This will permanently delete <span className="text-white/80 font-medium">{channel.name}</span> and remove all its posts. This cannot be undone.</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleDelete}
+                  disabled={deleteLoading}
+                  className="flex-1 py-2 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 transition-colors"
+                >
+                  {deleteLoading ? "Deleting..." : "Yes, Delete"}
+                </button>
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="px-4 py-2 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Tags */}
           {channel.tags && channel.tags.length > 0 && (
@@ -404,23 +608,38 @@ function ChannelDetailView({
               <>
                 {mediaPosts.length > 0 && (
                   <div className="grid grid-cols-3 gap-1 rounded-xl overflow-hidden">
-                    {mediaPosts.map((p) => (
-                      <div key={p.id} className="aspect-square bg-pnp-surfaceHover relative overflow-hidden group">
-                        <img
-                          src={p.media_url!}
-                          alt=""
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                        />
-                        {p.media_type === "video" && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                            <svg className="w-6 h-6 text-white drop-shadow" fill="currentColor" viewBox="0 0 24 24">
-                              <path d="M8 5v14l11-7z" />
-                            </svg>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                    {mediaPosts.map((p) => {
+                      const isVideo = p.media_type === "video";
+                      const thumbSrc = isVideo
+                        ? (isValidPhotoUrl(p.video_thumbnail_url) ? p.video_thumbnail_url : null)
+                        : p.media_url;
+                      return (
+                        <div key={p.id} className="aspect-square bg-pnp-surfaceHover relative overflow-hidden group">
+                          {thumbSrc ? (
+                            <img
+                              src={thumbSrc!}
+                              alt=""
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                            />
+                          ) : isVideo ? (
+                            <div
+                              className="w-full h-full"
+                              style={{ background: `linear-gradient(135deg, hsl(${(p.id * 53) % 360},50%,15%), hsl(${(p.id * 53 + 120) % 360},50%,10%))` }}
+                            />
+                          ) : null}
+                          {isVideo && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 group-hover:bg-black/50 transition-colors">
+                              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "rgba(255,255,255,0.15)", backdropFilter: "blur(4px)" }}>
+                                <svg className="w-5 h-5 text-white drop-shadow ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M8 5v14l11-7z" />
+                                </svg>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
                 {textPosts.map((p) => (
@@ -596,6 +815,39 @@ export default function Channels() {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const channelsSentinelRef = useRef<HTMLDivElement>(null);
 
+  // ── Create channel form (Channels page shortcut) ──
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createForm, setCreateForm] = useState({ name: "", description: "", tags: "", isPremium: false, telegramChannelId: "", bridgeEnabled: false });
+  const [createFormSaving, setCreateFormSaving] = useState(false);
+  const [createFormError, setCreateFormError] = useState<string | null>(null);
+
+  const handleQuickCreate = async () => {
+    if (!createForm.name.trim()) { setCreateFormError("Channel name is required"); return; }
+    setCreateFormSaving(true);
+    setCreateFormError(null);
+    try {
+      const tags = createForm.tags.split(",").map((t) => t.trim()).filter(Boolean);
+      const res = await createCreatorChannel({
+        name: createForm.name.trim(),
+        description: createForm.description.trim() || undefined,
+        tags,
+        isPremium: createForm.isPremium,
+        telegramChannelId: createForm.telegramChannelId.trim() || null,
+        bridgeEnabled: createForm.bridgeEnabled,
+      });
+      if (res.success) {
+        setCreatorChannels((prev) => [res.channel, ...prev]);
+        setShowCreateForm(false);
+        setCreateForm({ name: "", description: "", tags: "", isPremium: false, telegramChannelId: "", bridgeEnabled: false });
+        setSelectedChannelId(res.channel.id);
+      }
+    } catch (err: unknown) {
+      setCreateFormError(err instanceof Error ? err.message : "Failed to create channel");
+    } finally {
+      setCreateFormSaving(false);
+    }
+  };
+
   // ── Debounce search (creators) ──
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300);
@@ -742,6 +994,14 @@ export default function Channels() {
           <ChannelDetailView
             channelId={selectedChannelId}
             onBack={() => setSelectedChannelId(null)}
+            onUpdated={(updated) =>
+              setCreatorChannels((prev) =>
+                prev.map((ch) => (ch.id === updated.id ? { ...ch, ...updated } : ch))
+              )
+            }
+            onDeleted={(id) =>
+              setCreatorChannels((prev) => prev.filter((ch) => ch.id !== id))
+            }
           />
         </div>
       </>
@@ -954,25 +1214,129 @@ export default function Channels() {
         {/* ── CHANNELS VIEW ── */}
         {viewMode === "channels" && (
           <>
-            {/* Search */}
-            <div className="relative">
-              <svg
-                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pnp-textSecondary"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                type="text"
-                value={channelsSearch}
-                onChange={(e) => setChannelsSearch(e.target.value)}
-                placeholder="Search channels..."
-                className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent/50 transition-colors"
-              />
+            {/* Search + Create button row */}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <svg
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pnp-textSecondary"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                  type="text"
+                  value={channelsSearch}
+                  onChange={(e) => setChannelsSearch(e.target.value)}
+                  placeholder="Search channels..."
+                  className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent/50 transition-colors"
+                />
+              </div>
+              {user?.creator_status === "active" && (
+                <button
+                  onClick={() => { setShowCreateForm((v) => !v); setCreateFormError(null); }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white flex-shrink-0 transition-all"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                  New Channel
+                </button>
+              )}
             </div>
+
+            {/* Inline create channel form */}
+            {showCreateForm && user?.creator_status === "active" && (
+              <div className="rounded-xl border border-pnp-border bg-pnp-surface p-4 space-y-3">
+                <p className="text-sm font-semibold text-pnp-textPrimary">Create New Channel</p>
+                <div>
+                  <label className="block text-xs text-white/50 mb-1">Channel Name *</label>
+                  <input
+                    value={createForm.name}
+                    onChange={(e) => setCreateForm((p) => ({ ...p, name: e.target.value }))}
+                    placeholder="e.g. Behind the Scenes"
+                    className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-white/50 mb-1">Description</label>
+                  <textarea
+                    rows={2}
+                    value={createForm.description}
+                    onChange={(e) => setCreateForm((p) => ({ ...p, description: e.target.value }))}
+                    placeholder="What's this channel about?"
+                    className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent resize-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-white/50 mb-1">Tags (comma-separated)</label>
+                  <input
+                    value={createForm.tags}
+                    onChange={(e) => setCreateForm((p) => ({ ...p, tags: e.target.value }))}
+                    placeholder="e.g. exclusive, photos, bts"
+                    className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                  />
+                </div>
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={createForm.isPremium}
+                    onChange={(e) => setCreateForm((p) => ({ ...p, isPremium: e.target.checked }))}
+                    className="w-4 h-4 rounded accent-[#D4007A]"
+                  />
+                  <span className="text-sm text-white/80">Premium channel</span>
+                </label>
+                {/* Telegram Bridge */}
+                <div className="pt-1 border-t border-white/10">
+                  <p className="text-xs font-semibold text-white/60 uppercase tracking-wider mb-2">Telegram Bridge</p>
+                  <div className="mb-2">
+                    <label className="block text-xs text-white/50 mb-1">Telegram Channel ID or @username</label>
+                    <input
+                      value={createForm.telegramChannelId}
+                      onChange={(e) => setCreateForm((p) => ({ ...p, telegramChannelId: e.target.value, bridgeEnabled: p.bridgeEnabled && !!e.target.value.trim() }))}
+                      placeholder="-1001234567890 or @mychannel"
+                      className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent font-mono"
+                    />
+                    <p className="text-[10px] text-white/30 mt-1">The bot must be an admin of your Telegram channel.</p>
+                  </div>
+                  {createForm.telegramChannelId.trim() && (
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={createForm.bridgeEnabled}
+                        onChange={(e) => setCreateForm((p) => ({ ...p, bridgeEnabled: e.target.checked }))}
+                        className="w-4 h-4 rounded accent-[#D4007A]"
+                      />
+                      <span className="text-sm text-white/80">Enable auto-mirror</span>
+                    </label>
+                  )}
+                </div>
+                {createFormError && (
+                  <div className="px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+                    {createFormError}
+                  </div>
+                )}
+                <div className="flex gap-3 pt-1">
+                  <button
+                    onClick={handleQuickCreate}
+                    disabled={createFormSaving || !createForm.name.trim()}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                  >
+                    {createFormSaving ? "Creating..." : "Create Channel"}
+                  </button>
+                  <button
+                    onClick={() => { setShowCreateForm(false); setCreateFormError(null); }}
+                    className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Total count */}
             {!channelsLoading && (
