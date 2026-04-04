@@ -121,7 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const handleLogin = useCallback(async () => {
     // Studio is browser-only — redirect to main app for login
-    window.location.href = "https://app.pnptv.app/login";
+    window.location.href = "https://pnptv.app/login";
   }, []);
 
   const handleLogout = useCallback(async () => {

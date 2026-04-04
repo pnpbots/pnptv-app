@@ -5,6 +5,7 @@ import SocialPostCard from "@/components/social/SocialPostCard";
 import {
   getSocialFeedPosts,
   getPostsByHashtag,
+  getHangoutFeed,
   togglePostLike,
   deleteSocialPost,
   updateProfile,
@@ -26,6 +27,8 @@ export interface SocialFeedTabsProps {
   showComposer?: boolean;
   /** When set, the feed only shows posts containing this hashtag (without #) */
   hashtagFilter?: string;
+  /** When set, the feed only shows posts from this hangout group */
+  hangoutGroupId?: number;
 }
 
 function FeedSkeleton() {
@@ -59,6 +62,7 @@ export default function SocialFeedTabs({
   onNavigate,
   showComposer = true,
   hashtagFilter,
+  hangoutGroupId,
 }: SocialFeedTabsProps) {
   const navigate = useNavigate();
   const { feed: t } = useI18n();
@@ -90,9 +94,11 @@ export default function SocialFeedTabs({
 
   const loadFeed = useCallback(async (cursor?: string) => {
     try {
-      const res = hashtagFilter
-        ? await getPostsByHashtag(hashtagFilter, cursor, 20)
-        : await getSocialFeedPosts(cursor, 20);
+      const res = hangoutGroupId
+        ? await getHangoutFeed(hangoutGroupId, cursor, 20)
+        : hashtagFilter
+          ? await getPostsByHashtag(hashtagFilter, cursor, 20)
+          : await getSocialFeedPosts(cursor, 20);
       if (res.success) {
         if (cursor) {
           setPosts((prev) => [...prev, ...res.posts]);
@@ -107,7 +113,7 @@ export default function SocialFeedTabs({
       setIsLoading(false);
       setLoadingMore(false);
     }
-  }, [hashtagFilter]);
+  }, [hashtagFilter, hangoutGroupId]);
 
   // Reset and reload whenever the hashtag filter changes
   useEffect(() => {

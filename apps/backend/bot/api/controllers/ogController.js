@@ -13,7 +13,7 @@ const { query } = require('../../../config/postgres');
 const ogService = require('../../../services/ogService');
 const logger = require('../../../utils/logger');
 
-const APP_BASE_URL = 'https://app.pnptv.app';
+const APP_BASE_URL = 'https://pnptv.app';
 
 // Known CMS page slugs that map to /page/:slug OG lookup
 const CMS_SLUGS = new Set([

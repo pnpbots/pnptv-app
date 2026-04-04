@@ -94,27 +94,6 @@ async function revalidateSession(socket) {
 // (catching revoked sessions promptly) and Redis load.
 const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
 
-// ── Rate limiting ─────────────────────────────────────────────────────────────
-
-// In-process rate limit: allow maxCount per windowMs per key
-const rateLimitCounters = new Map();
-function rateLimit(key, maxCount, windowMs) {
-  const now = Date.now();
-  const entry = rateLimitCounters.get(key) || { count: 0, reset: now + windowMs };
-  if (now > entry.reset) { entry.count = 0; entry.reset = now + windowMs; }
-  entry.count++;
-  rateLimitCounters.set(key, entry);
-  return entry.count <= maxCount;
-}
-
-// Periodically purge expired rate-limit entries to prevent memory leak
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of rateLimitCounters) {
-    if (now > entry.reset) rateLimitCounters.delete(key);
-  }
-}, 5 * 60 * 1000);
-
 // ── Message SELECT columns helper ─────────────────────────────────────────────
 
 // All the columns we return for every chat message — text or media.
@@ -263,8 +242,6 @@ function initSocketIO(io) {
     // ── Nearby Real-Time ────────────────────────────────────────────────────
 
     socket.on('nearby:join-grid', ({ lat, lng } = {}) => {
-      // N5: Rate-limit grid joins to 10 per 60 seconds per user
-      if (!rateLimit(`nearby:join-grid:${user.id}`, 10, 60000)) return;
       if (typeof lat !== 'number' || typeof lng !== 'number') return;
       if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
       const gridLat = Math.floor(lat * 10) / 10;
@@ -308,27 +285,6 @@ function initSocketIO(io) {
         socket.join(room);
 
         // Messages live in PG chat_messages — frontend fetches via REST API.
-
-        // Send active call info if any
-        const { rows: activeCall } = await query(
-          `SELECT hvc.id, hvc.room_name, hvc.creator_id, hvc.created_at,
-                  (SELECT COUNT(*)::int
-                   FROM hangout_call_participants hcp
-                   WHERE hcp.call_id = hvc.id AND hcp.left_at IS NULL) AS participant_count
-           FROM hangout_video_calls hvc
-           WHERE hvc.group_id = $1 AND hvc.status = 'active'
-           LIMIT 1`,
-          [gid]
-        );
-        if (activeCall.length > 0) {
-          socket.emit('hangout:call:active', {
-            callId: activeCall[0].id,
-            roomName: activeCall[0].room_name,
-            creatorId: activeCall[0].creator_id,
-            createdAt: activeCall[0].created_at,
-            participantCount: activeCall[0].participant_count,
-          });
-        }
 
         // Send current music state to joining user
         const musicState = hangoutMusicState.get(gid);
@@ -390,11 +346,6 @@ function initSocketIO(io) {
       const gid = parseInt(groupId, 10);
       if (!Number.isFinite(gid)) return;
 
-      if (!rateLimit(`hangout:${user.id}:${gid}`, 30, 60000)) {
-        socket.emit('hangout:error', { message: 'Too many messages. Slow down.' });
-        return;
-      }
-
       const userRole = (user.role || '').toLowerCase();
       const isAdminUser = userRole === 'admin' || userRole === 'superadmin';
       if (!isAdminUser) {
@@ -446,18 +397,6 @@ function initSocketIO(io) {
             const isAdminRole = (user.role || '').toLowerCase() === 'admin' || (user.role || '').toLowerCase() === 'superadmin';
             if (!isAdminRole) {
               socket.emit('hangout:error', { message: 'This group is in read-only mode', code: 'READ_ONLY' });
-              return;
-            }
-          }
-        }
-
-        // Slow mode check (in addition to existing rate limit)
-        const slowMode = groupSettings[0]?.slow_mode_seconds || 0;
-        if (slowMode > 0) {
-          const memberRole = memberInfo[0].role;
-          if (memberRole !== 'owner' && memberRole !== 'moderator') {
-            if (!rateLimit(`hangout:slow:${user.id}:${gid}`, 1, slowMode * 1000)) {
-              socket.emit('hangout:error', { message: `Slow mode: wait ${slowMode}s between messages`, code: 'SLOW_MODE' });
               return;
             }
           }
@@ -607,8 +546,6 @@ function initSocketIO(io) {
         return;
       }
 
-      // Rate limit: max 1 typing event per 2s per user per group
-      if (!rateLimit(`typing:${user.id}:${gid}`, 1, 2000)) return;
       socket.to(`hangout:${gid}`).emit('hangout:typing', {
         userId: user.id,
         firstName: user.firstName || user.first_name || user.username || 'Someone',
@@ -621,7 +558,6 @@ function initSocketIO(io) {
       if (!Number.isFinite(gid)) return;
       if (targetUserId === user.id) return;
 
-      if (!rateLimit(`hangout:invite:${user.id}`, 10, 60000)) return;
 
       try {
         // Verify sender is a member
@@ -675,8 +611,6 @@ function initSocketIO(io) {
       const gid = parseInt(groupId, 10);
       if (!Number.isFinite(gid)) return;
 
-      // Rate limit: 1 read receipt per 5s per user per group
-      if (!rateLimit(`hangout:read:${user.id}:${gid}`, 1, 5000)) return;
 
       try {
         // Verify membership
@@ -723,10 +657,6 @@ function initSocketIO(io) {
         return;
       }
 
-      if (!rateLimit(`edit:${user.id}`, 10, 60000)) {
-        socket.emit('hangout:error', { message: 'Too many edits. Slow down.', code: 'RATE_LIMITED' });
-        return;
-      }
 
       try {
         const { rows: memberRows } = await query(
@@ -838,10 +768,6 @@ function initSocketIO(io) {
       const emojiStr = emoji.trim();
       if (emojiStr.length > 10) return;
 
-      if (!rateLimit(`react:${user.id}`, 30, 60000)) {
-        socket.emit('hangout:error', { message: 'Too many reactions. Slow down.', code: 'RATE_LIMITED' });
-        return;
-      }
 
       try {
         const { rows: memberRows } = await query(
@@ -906,7 +832,6 @@ function initSocketIO(io) {
       const msgId = parseInt(messageId, 10);
       if (!Number.isFinite(gid) || !Number.isFinite(msgId)) return;
 
-      if (!rateLimit(`read:${user.id}:${gid}`, 5, 5000)) return;
 
       try {
         await query(
@@ -925,65 +850,7 @@ function initSocketIO(io) {
       }
     });
 
-    // ── Hangout Call Screen Share (relay from Jitsi to group) ──────────────────
-
-    socket.on('hangout:call:screenshare', async ({ groupId, sharing } = {}) => {
-      if (!groupId || typeof sharing !== 'boolean') return;
-      const gid = parseInt(groupId, 10);
-      if (!Number.isFinite(gid)) return;
-
-      // Rate limit: 5 per 30s per user
-      if (!rateLimit(`hangout:screenshare:${user.id}:${gid}`, 5, 30000)) return;
-
-      try {
-        const { rows: memberRows } = await query(
-          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
-          [gid, user.id]
-        );
-        if (memberRows.length === 0) return;
-
-        // Broadcast to all in the hangout room
-        io.to(`hangout:${gid}`).emit('hangout:call:screenshare', {
-          userId: user.id,
-          sharing,
-        });
-      } catch (err) {
-        logger.error('hangout:call:screenshare error', { userId: user.id, groupId: gid, error: err.message });
-      }
-    });
-
-    // ── Hangout Call Participants (snapshot on join/leave) ─────────────────────
-
-    socket.on('hangout:call:request-participants', async ({ groupId } = {}) => {
-      if (!groupId) return;
-      const gid = parseInt(groupId, 10);
-      if (!Number.isFinite(gid)) return;
-
-      // Rate limit: 5 per 10s
-      if (!rateLimit(`hangout:participants:${user.id}:${gid}`, 5, 10000)) return;
-
-      try {
-        const { rows: memberRows } = await query(
-          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
-          [gid, user.id]
-        );
-        if (memberRows.length === 0) return;
-
-        // Get active call participants from DB
-        const { rows: participants } = await query(
-          `SELECT cp.user_id AS "userId", u.first_name AS name, u.photo_url AS "photoUrl"
-           FROM hangout_call_participants cp
-           JOIN hangout_video_calls vc ON vc.id = cp.call_id
-           JOIN users u ON u.id = cp.user_id
-           WHERE vc.group_id = $1 AND vc.status = 'active' AND cp.left_at IS NULL`,
-          [gid]
-        );
-
-        socket.emit('hangout:call:participants', { participants });
-      } catch (err) {
-        logger.error('hangout:call:request-participants error', { userId: user.id, groupId: gid, error: err.message });
-      }
-    });
+    // ── Hangout Call socket handlers removed — calls now use Telegram native ─────
 
     // ── Hangout Music Sync ───────────────────────────────────────────────────
 
@@ -1005,7 +872,6 @@ function initSocketIO(io) {
       if (!groupId || !trackId || !trackUrl) return;
       const gid = parseInt(groupId, 10);
       if (!Number.isFinite(gid)) return;
-      if (!rateLimit(`music:${user.id}:${gid}`, 10, 60000)) return;
       try {
         const isMod = await isHangoutMod(user.id, gid);
         if (!isMod) { socket.emit('hangout:error', { message: 'Not a moderator', code: 'NOT_MOD' }); return; }
@@ -1099,7 +965,6 @@ function initSocketIO(io) {
       if (!groupId) return;
       const gid = parseInt(groupId, 10);
       if (!Number.isFinite(gid)) return;
-      if (!rateLimit(`music-ended:${user.id}:${gid}`, 5, 10000)) return;
       try {
         const existing = hangoutMusicState.get(gid);
         if (!existing || !existing.isPlaying) return;
@@ -1117,7 +982,6 @@ function initSocketIO(io) {
       if (!groupId) return;
       const gid = parseInt(groupId, 10);
       if (!Number.isFinite(gid)) return;
-      if (!rateLimit(`music-shuffle:${user.id}:${gid}`, 5, 10000)) return;
       try {
         const isMod = await isHangoutMod(user.id, gid);
         if (!isMod) { socket.emit('hangout:error', { message: 'Not a moderator', code: 'NOT_MOD' }); return; }
@@ -1166,10 +1030,6 @@ function initSocketIO(io) {
         }
       }
 
-      if (!rateLimit(`dm:${user.id}`, 100, 3600000)) {
-        socket.emit('dm:error', { message: 'Too many messages.' });
-        return;
-      }
 
       try {
         // ── PG insert via DmService (handles blocks, privacy, thread upsert, push) ──
@@ -1214,10 +1074,6 @@ function initSocketIO(io) {
       if (!messageId || !content || !content.trim()) return;
       if (content.length > 4000) {
         socket.emit('dm:error', { message: 'Message too long', code: 'MSG_TOO_LONG' });
-        return;
-      }
-      if (!rateLimit(`dm:edit:${user.id}`, 30, 60000)) {
-        socket.emit('dm:error', { message: 'Editing too fast. Slow down.', code: 'RATE_LIMITED' });
         return;
       }
 
@@ -1278,10 +1134,6 @@ function initSocketIO(io) {
     // Delete a DM (soft-delete; sender only)
     socket.on('dm:message:delete', async ({ messageId } = {}) => {
       if (!messageId) return;
-      if (!rateLimit(`dm:delete:${user.id}`, 20, 60000)) {
-        socket.emit('dm:error', { message: 'Deleting too fast. Slow down.', code: 'RATE_LIMITED' });
-        return;
-      }
 
       try {
         const { rows } = await query(
@@ -1360,10 +1212,6 @@ function initSocketIO(io) {
     socket.on('live:join', async ({ streamId } = {}) => {
       if (!streamId || !STREAM_ID_RE.test(String(streamId))) {
         socket.emit('live:error', { message: 'Invalid stream ID' });
-        return;
-      }
-      if (!rateLimit(`live:join:${user.id}`, 5, 60000)) {
-        socket.emit('live:error', { message: 'Too many join attempts. Please slow down.' });
         return;
       }
       try {
@@ -1516,9 +1364,6 @@ function initSocketIO(io) {
     socket.on('live:leave', async ({ streamId } = {}) => {
       if (!streamId || !STREAM_ID_RE.test(String(streamId))) return;
 
-      // SOCK-H5: Rate-limit leave events (max 10 per minute per user) to prevent
-      // flooding that could artificially thrash the viewer-count counter.
-      if (!rateLimit(`live:leave:${user.id}`, 10, 60000)) return;
 
       // SOCK-H5: Only process leave if the user actually joined this stream room.
       // This prevents a client from decrementing the viewer count for a stream
@@ -1551,10 +1396,6 @@ function initSocketIO(io) {
       }
       if (String(content).length > 500) {
         socket.emit('live:error', { message: 'Message too long (max 500 characters)' });
-        return;
-      }
-      if (!rateLimit(`live:msg:${user.id}`, 20, 60000)) {
-        socket.emit('live:error', { message: 'Too many messages. Slow down.' });
         return;
       }
       if (!socket.data.liveRooms?.has(streamId)) {
@@ -1616,11 +1457,6 @@ function initSocketIO(io) {
       }
       if (String(streamId) === String(targetChannelRef)) {
         socket.emit('live:error', { message: 'Cannot raid your own stream' });
-        return;
-      }
-      // Rate-limit: 1 raid per 5 minutes per user
-      if (!rateLimit(`live:raid:${user.id}`, 1, 5 * 60 * 1000)) {
-        socket.emit('live:error', { message: 'Raid on cooldown. Wait before raiding again.' });
         return;
       }
       try {
@@ -1881,13 +1717,6 @@ function initSocketIO(io) {
     });
 
     socket.on('stream:data', (data) => {
-      // 30 chunks × 512 KB = ~15 MB/sec max throughput, which is more than
-      // sufficient for a 6 Mbps H.264 stream with headroom.  The previous
-      // limit of 300 chunks/sec (150 MB/sec) was excessively high and could
-      // allow a single client to overwhelm the server's memory and I/O.
-      if (!rateLimit(`stream:data:${user.id}`, 30, 1000)) {
-        return;
-      }
       const MAX_CHUNK_BYTES = 512 * 1024;
 
       const ffmpeg = socket.data.ffmpegProcess;
@@ -1980,16 +1809,6 @@ function initSocketIO(io) {
     socket.on('randomcall:initiate', async ({ context } = {}) => {
       if (!user) return;
       const userId = String(user.id);
-
-      // Rate limit: 1 per 30s
-      const rlKey = `randomcall:initiate:${userId}`;
-      if (rateLimitCounters.has(rlKey)) {
-        const rl = rateLimitCounters.get(rlKey);
-        if (rl.count >= 1 && Date.now() < rl.reset) {
-          return socket.emit('randomcall:error', { message: 'Please wait before trying again' });
-        }
-      }
-      rateLimitCounters.set(rlKey, { count: 1, reset: Date.now() + 30000 });
 
       try {
         // Check caller is Prime
@@ -2261,21 +2080,11 @@ function initSocketIO(io) {
     // ── Main Stage Events ────────────────────────────────────────────────────
 
     socket.on('mainstage:join', () => {
-      // Rate-limit: 5 join attempts per 30 seconds per user
-      if (!rateLimit(`mainstage:join:${user.id}`, 5, 30000)) {
-        logger.warn('mainstage:join rate-limited', { userId: user.id });
-        return;
-      }
       socket.join('mainstage');
       logger.debug('Socket joined mainstage room', { socketId: socket.id, userId: user.id });
     });
 
     socket.on('mainstage:leave', () => {
-      // Rate-limit: 5 leave attempts per 30 seconds per user
-      if (!rateLimit(`mainstage:leave:${user.id}`, 5, 30000)) {
-        logger.warn('mainstage:leave rate-limited', { userId: user.id });
-        return;
-      }
       socket.leave('mainstage');
       logger.debug('Socket left mainstage room', { socketId: socket.id, userId: user.id });
     });

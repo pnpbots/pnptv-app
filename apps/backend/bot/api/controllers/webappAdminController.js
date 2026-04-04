@@ -251,6 +251,31 @@ const updateUser = async (req, res) => {
       }
     }
 
+    // ── Enforce chk_tier_status_consistency — prevent raw DB constraint errors ───────
+    // If updating tier or status, we must ensure they remain valid in relation to each other.
+    if (tier !== undefined || subscriptionStatus !== undefined) {
+      const current = await query('SELECT tier, subscription_status FROM users WHERE id = $1', [userId]);
+      if (current.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      
+      const finalTier = tier !== undefined ? tier : current.rows[0].tier;
+      const finalStatus = subscriptionStatus !== undefined ? subscriptionStatus : current.rows[0].subscription_status;
+
+      const isPrimeOrMember = ['PRIME', 'member'].includes(finalTier);
+      if (isPrimeOrMember && finalStatus !== 'active') {
+        return res.status(400).json({
+          error: `Consistency Error: Tier '${finalTier}' requires status 'active', but current status is '${finalStatus}'. Please update BOTH simultaneously.`
+        });
+      }
+      if (finalTier === 'free' && !['free', 'churned'].includes(finalStatus)) {
+        return res.status(400).json({
+          error: `Consistency Error: Tier 'free' requires status 'free' or 'churned', but current status is '${finalStatus}'. Please update BOTH simultaneously.`
+        });
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────────────
+
     const queryParts = [];
     const values = [userId];
     let paramIndex = 2;
@@ -924,7 +949,7 @@ const sendPushNotification = async (req, res) => {
       const emailService = require('../../../services/emailService');
       const usersWithEmail = targetUsers.filter((u) => u.email);
 
-      const appUrl = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
+      const appUrl = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
       const actionUrl = url
         ? (url.startsWith('http') ? url : `${appUrl}${url}`)
         : appUrl;

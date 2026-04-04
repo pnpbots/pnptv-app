@@ -177,15 +177,25 @@ const createPlaylist = async (req, res) => {
 };
 
 /**
- * Add video to playlist
+ * Add video to playlist (owner only)
  */
 const addToPlaylist = async (req, res) => {
   try {
+    const userId = req.user?.id || req.user?.userId;
     const { playlistId } = req.params;
     const { videoId } = req.body;
 
     if (!videoId) {
       return res.status(400).json({ error: 'Video ID is required' });
+    }
+
+    // Ownership check
+    const ownerCheck = await db.query('SELECT user_id FROM user_playlists WHERE id = $1', [playlistId]);
+    if (ownerCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Playlist not found' });
+    }
+    if (String(ownerCheck.rows[0].user_id) !== String(userId)) {
+      return res.status(403).json({ error: 'Only the playlist owner can add videos' });
     }
 
     const success = await MediaPlayerModel.addToPlaylist(playlistId, videoId);
@@ -202,11 +212,21 @@ const addToPlaylist = async (req, res) => {
 };
 
 /**
- * Remove video from playlist
+ * Remove video from playlist (owner only)
  */
 const removeFromPlaylist = async (req, res) => {
   try {
+    const userId = req.user?.id || req.user?.userId;
     const { playlistId, videoId } = req.params;
+
+    // Ownership check
+    const ownerCheck = await db.query('SELECT user_id FROM user_playlists WHERE id = $1', [playlistId]);
+    if (ownerCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Playlist not found' });
+    }
+    if (String(ownerCheck.rows[0].user_id) !== String(userId)) {
+      return res.status(403).json({ error: 'Only the playlist owner can remove videos' });
+    }
 
     const success = await MediaPlayerModel.removeFromPlaylist(playlistId, videoId);
 
@@ -222,11 +242,77 @@ const removeFromPlaylist = async (req, res) => {
 };
 
 /**
- * Delete playlist
+ * Update playlist metadata (owner only)
+ */
+const updatePlaylist = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?.userId;
+    const { playlistId } = req.params;
+    const { title, description, category, icon, isPublic } = req.body;
+
+    // Ownership check
+    const ownerCheck = await db.query('SELECT user_id FROM user_playlists WHERE id = $1', [playlistId]);
+    if (ownerCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Playlist not found' });
+    }
+    if (String(ownerCheck.rows[0].user_id) !== String(userId)) {
+      return res.status(403).json({ error: 'Only the playlist owner can edit it' });
+    }
+
+    const sets = [];
+    const vals = [];
+    let idx = 1;
+
+    if (title !== undefined) {
+      if (!title || typeof title !== 'string' || title.trim().length === 0) {
+        return res.status(400).json({ error: 'Title cannot be empty' });
+      }
+      sets.push(`title = $${idx++}`); vals.push(title.trim());
+    }
+    if (description !== undefined) { sets.push(`description = $${idx++}`); vals.push(description || ''); }
+    if (category !== undefined) { sets.push(`category = $${idx++}`); vals.push(category); }
+    if (icon !== undefined) { sets.push(`icon = $${idx++}`); vals.push(icon); }
+    if (isPublic !== undefined) { sets.push(`is_public = $${idx++}`); vals.push(Boolean(isPublic)); }
+
+    if (sets.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    vals.push(playlistId);
+    const result = await db.query(
+      `UPDATE user_playlists SET ${sets.join(', ')} WHERE id = $${idx} RETURNING *`,
+      vals
+    );
+
+    const row = result.rows[0];
+    res.json({
+      id: row.id, title: row.title, description: row.description,
+      category: row.category, icon: row.icon, thumbnail: row.thumbnail,
+      videos: row.videos, videoCount: row.video_count, isPublic: row.is_public,
+      creator: row.creator_name, creatorBadge: row.creator_badge, createdAt: row.created_at,
+    });
+  } catch (error) {
+    logger.error('Error updating playlist:', error);
+    res.status(500).json({ error: 'Failed to update playlist' });
+  }
+};
+
+/**
+ * Delete playlist (owner only)
  */
 const deletePlaylist = async (req, res) => {
   try {
+    const userId = req.user?.id || req.user?.userId;
     const { playlistId } = req.params;
+
+    // Ownership check
+    const ownerCheck = await db.query('SELECT user_id FROM user_playlists WHERE id = $1', [playlistId]);
+    if (ownerCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Playlist not found' });
+    }
+    if (String(ownerCheck.rows[0].user_id) !== String(userId)) {
+      return res.status(403).json({ error: 'Only the playlist owner can delete it' });
+    }
 
     const success = await MediaPlayerModel.deletePlaylist(playlistId);
 
@@ -247,5 +333,6 @@ module.exports = {
   createPlaylist,
   addToPlaylist,
   removeFromPlaylist,
+  updatePlaylist,
   deletePlaylist,
 };

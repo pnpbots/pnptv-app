@@ -169,7 +169,7 @@ class UserModel {
           telegram, pnptv_id, created_at, updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-          $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $30, $35, NOW(), NOW()
+          $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $34, NOW(), NOW()
         )
       ON CONFLICT (id) DO UPDATE SET
         username = COALESCE(EXCLUDED.username, ${TABLE}.username),
@@ -177,10 +177,10 @@ class UserModel {
         last_name = COALESCE(EXCLUDED.last_name, ${TABLE}.last_name),
         telegram = COALESCE(EXCLUDED.telegram, ${TABLE}.telegram),
         pnptv_id = COALESCE(EXCLUDED.pnptv_id, ${TABLE}.pnptv_id),
-        onboarding_complete = CASE WHEN $31 THEN EXCLUDED.onboarding_complete ELSE ${TABLE}.onboarding_complete END,
-        age_verified = CASE WHEN $32 THEN EXCLUDED.age_verified ELSE ${TABLE}.age_verified END,
-        terms_accepted = CASE WHEN $33 THEN EXCLUDED.terms_accepted ELSE ${TABLE}.terms_accepted END,
-        privacy_accepted = CASE WHEN $34 THEN EXCLUDED.privacy_accepted ELSE ${TABLE}.privacy_accepted END,
+        onboarding_complete = CASE WHEN $30 THEN EXCLUDED.onboarding_complete ELSE ${TABLE}.onboarding_complete END,
+        age_verified = CASE WHEN $31 THEN EXCLUDED.age_verified ELSE ${TABLE}.age_verified END,
+        terms_accepted = CASE WHEN $32 THEN EXCLUDED.terms_accepted ELSE ${TABLE}.terms_accepted END,
+        privacy_accepted = CASE WHEN $33 THEN EXCLUDED.privacy_accepted ELSE ${TABLE}.privacy_accepted END,
         language = COALESCE(EXCLUDED.language, ${TABLE}.language),
         updated_at = NOW()
       RETURNING *

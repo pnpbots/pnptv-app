@@ -43,6 +43,11 @@ const eventsController = {
       }
     }
 
+    const parsedDuration = parseInt(durationMinutes, 10) || 60;
+    if (parsedDuration < 15 || parsedDuration > 2880) {
+      return res.status(400).json({ error: 'Duration must be between 15 minutes and 48 hours' });
+    }
+
     const event = await EventModel.create({
       creatorId: userId,
       type,
@@ -50,7 +55,7 @@ const eventsController = {
       description: description?.trim() || null,
       coverImage: coverImage || null,
       scheduledAt,
-      durationMinutes: parseInt(durationMinutes, 10) || 60,
+      durationMinutes: parsedDuration,
       maxAttendees: maxAttendees ? parseInt(maxAttendees, 10) : null,
       hangoutGroupId: hangoutGroupId || null,
       tags: Array.isArray(tags) ? tags : [],
@@ -100,6 +105,12 @@ const eventsController = {
 
     if (scheduledAt && new Date(scheduledAt) < new Date()) {
       return res.status(400).json({ error: 'Scheduled date must be in the future' });
+    }
+    if (durationMinutes) {
+      const parsedDur = parseInt(durationMinutes, 10);
+      if (parsedDur < 15 || parsedDur > 2880) {
+        return res.status(400).json({ error: 'Duration must be between 15 minutes and 48 hours' });
+      }
     }
 
     const event = await EventModel.update(id, userId, {

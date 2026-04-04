@@ -6,7 +6,7 @@ const { getPool } = require('../../../config/postgres');
 const EntitlementModel = require('../../../models/entitlementModel');
 const logger = require('../../../utils/logger');
 
-const APP_URL = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
+const APP_URL = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
 
 /**
  * Resolve DB user row by internal UUID id.

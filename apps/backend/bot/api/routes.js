@@ -69,8 +69,7 @@ const courtesyInviteRoutes = require('./routes/courtesyInviteRoutes');
 // Community Room (Haus) — 24/7 open video room powered by JaaS
 const communityRoomController = require('./controllers/communityRoomController');
 
-// JaaS token generation (viewer, moderator, live streaming)
-const jaasController = require('./controllers/jaasController');
+// JaaS token generation (viewer, moderator, live streaming) — handled by jaasStreamController
 
 const SoundCloudService = require('../../services/soundCloudService');
 const AuthentikService = require('../../services/authentikService');
@@ -478,7 +477,7 @@ app.use(conditionalMiddleware(helmet({
         "https://3ds-green.epayco.com",
         "https://oauth.telegram.org",
         "https://telegram.org",
-        "https://8x8.vc",
+        // 8x8.vc removed — video calls use Telegram native
       ],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
@@ -1785,6 +1784,7 @@ app.get('/api/playlists/public', asyncHandler(playlistController.getPublicPlayli
 app.post('/api/playlists', authenticateUser, asyncHandler(playlistController.createPlaylist));
 app.post('/api/playlists/:playlistId/videos', authenticateUser, asyncHandler(playlistController.addToPlaylist));
 app.delete('/api/playlists/:playlistId/videos/:videoId', authenticateUser, asyncHandler(playlistController.removeFromPlaylist));
+app.patch('/api/playlists/:playlistId', authenticateUser, asyncHandler(playlistController.updatePlaylist));
 app.delete('/api/playlists/:playlistId', authenticateUser, asyncHandler(playlistController.deletePlaylist));
 
 
@@ -2943,13 +2943,7 @@ app.put('/api/webapp/notifications/preferences', requireSessionAuth, notificatio
 // Web App Mastodon Feed
 app.get('/api/webapp/mastodon/feed', requireSessionAuth, asyncHandler(webAppController.getMastodonFeed));
 
-// Web App Hangouts (session auth)
-const webappHangoutsController = require('./controllers/webappHangoutsController');
-app.get('/api/webapp/hangouts/public', requireSessionAuth, asyncHandler(webappHangoutsController.listPublic));
-app.post('/api/webapp/hangouts/create', requireSessionAuth, requireMemberTier, asyncHandler(webappHangoutsController.createRoom));
-app.post('/api/webapp/hangouts/join/:callId', requireSessionAuth, asyncHandler(webappHangoutsController.joinRoom));
-app.post('/api/webapp/hangouts/leave/:callId', requireSessionAuth, asyncHandler(webappHangoutsController.leaveRoom));
-app.delete('/api/webapp/hangouts/:callId', requireSessionAuth, asyncHandler(webappHangoutsController.endRoom));
+// Web App Hangouts — video calls use Telegram native
 
 // Live Rules Acknowledgment Gate
 const liveRulesController = require('./controllers/liveRulesController');
@@ -2984,14 +2978,7 @@ app.put('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSe
 const streamBridgeController = require('./controllers/streamBridgeController');
 app.get('/api/webapp/live/my-channel', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamBridgeController.getMyChannel));
 
-// JaaS WebRTC Streaming — replaces Restreamer pipeline
-const jaasStreamController = require('./controllers/jaasStreamController');
-app.get('/api/webapp/live/webrtc/config', requireSessionAuth, asyncHandler(jaasStreamController.getStreamerConfig));
-app.get('/api/webapp/live/webrtc/viewer-token/:channelRef', requireSessionAuth, requireMemberTier, asyncHandler(jaasStreamController.getViewerToken));
-app.get('/api/webapp/live/webrtc/streams', requireSessionAuth, requireMemberTier, asyncHandler(jaasStreamController.listStreams));
-app.get('/api/webapp/live/webrtc/status/:channelRef', requireSessionAuth, asyncHandler(jaasStreamController.getStreamStatus));
-app.post('/api/webapp/live/webrtc/end', requireSessionAuth, asyncHandler(jaasStreamController.endStream));
-app.post('/api/webapp/live/webrtc/heartbeat', requireSessionAuth, asyncHandler(jaasStreamController.streamHeartbeat));
+// JaaS WebRTC Streaming removed — live streaming uses Restreamer HLS exclusively
 
 // Stream Auto-Chat (Grok-generated messages that post to live chat at intervals)
 const streamAutoController = require('./controllers/streamAutoController');
@@ -4235,8 +4222,7 @@ const chatController = require('./controllers/chatController');
 const chatMediaController = require('./controllers/chatMediaController');
 const hangoutGroupController = require('./controllers/hangoutGroupController');
 const hangoutMediaController = require('./controllers/hangoutMediaController');
-const hangoutVideoCallRoutes = require('./routes/hangoutVideoCallRoutes');
-const hangoutVideoCallController = require('./controllers/hangoutVideoCallController');
+// hangoutVideoCallRoutes + hangoutVideoCallController removed — calls use Telegram native
 const dmController = require('./controllers/dmController');
 const socialController = require('./controllers/socialController');
 const promotedPostController = require('./controllers/promotedPostController');
@@ -4282,6 +4268,9 @@ app.get('/api/webapp/hangouts/groups/:id/messages/search', requireSessionAuth, r
 app.patch('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.editMessage));
 app.delete('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.deleteMessage));
 app.post('/api/webapp/hangouts/groups/:id/messages/:msgId/react', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.toggleReaction));
+app.post('/api/webapp/hangouts/groups/:id/link-telegram', requireSessionAuth, asyncHandler(hangoutGroupController.linkTelegramGroup));
+app.post('/api/webapp/hangouts/groups/:id/unlink-telegram', requireSessionAuth, asyncHandler(hangoutGroupController.unlinkTelegramGroup));
+app.get('/api/webapp/hangouts/groups/:id/video-chat-status', requireSessionAuth, asyncHandler(hangoutGroupController.getVideoChatStatus));
 app.get('/api/webapp/hangouts/groups/:id/messages/:msgId/reactions', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.getReactions));
 app.post('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.sendMessage));
 // Media upload for hangout group chat (images 10 MB / videos 50 MB, per-hangout dirs)
@@ -4318,15 +4307,9 @@ app.post('/api/webapp/hangouts/groups/:id/call', requireSessionAuth, asyncHandle
 app.get('/api/webapp/hangouts/groups/:id/feed', requireSessionAuth, asyncHandler(socialController.getHangoutFeed));
 app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, asyncHandler(socialController.dropToFeed));
 
-// ── Hangout Video Calls (JaaS) ──────────────────────────────────────────────
-app.use('/api/webapp/hangouts/groups', requireSessionAuth, hangoutVideoCallRoutes);
+// Hangout video calls now use Telegram native — startCall endpoint in hangoutGroupController
 
-// ── DM Video Calls (JaaS) ───────────────────────────────────────────────────
-// active MUST be registered before :partnerId/call/end to prevent route collision
-
-app.get('/api/webapp/dm/:partnerId/call/active', requireSessionAuth, asyncHandler(hangoutVideoCallController.getActiveDmCall));
-app.post('/api/webapp/dm/:partnerId/call', requireSessionAuth, asyncHandler(hangoutVideoCallController.startDmCall));
-app.post('/api/webapp/dm/:partnerId/call/end', requireSessionAuth, asyncHandler(hangoutVideoCallController.endDmCall));
+// DM Video Calls — removed (dead code, never called from frontend)
 
 // ── DM Media ────────────────────────────────────────────────────────────────
 // Send an image or video as a direct message
@@ -4434,6 +4417,7 @@ app.get('/api/webapp/nearby/hangout-members/:groupId', requireSessionAuth, async
 app.get('/api/webapp/nearby/stream-viewers/:streamId', requireSessionAuth, asyncHandler((req, res) => NearbyController.streamViewers(req, res)));
 app.get('/api/webapp/nearby/event-attendees/:eventId', requireSessionAuth, asyncHandler((req, res) => NearbyController.eventAttendees(req, res)));
 app.get('/api/webapp/nearby/all-users', requireSessionAuth, asyncHandler((req, res) => NearbyController.allUsers(req, res)));
+app.get('/api/webapp/nearby/online-users', requireSessionAuth, asyncHandler((req, res) => NearbyController.onlineUsers(req, res)));
 
 // Referral: get my code + stats
 app.get('/api/webapp/me/referral', asyncHandler(async (req, res) => {
@@ -4801,188 +4785,7 @@ app.get('/api/proxy/live/streams', requireSessionAuth, requireMemberTier, asyncH
 // Directus CMS internal URL (used by live performers and other CMS-backed routes)
 const DIRECTUS_INTERNAL_URL = process.env.DIRECTUS_URL || 'http://172.20.0.18:8055';
 
-// --- Hangouts Proxy (Jitsi rooms for React SPA) ---
-const JitsiService = require('../services/jitsiService');
-
-// GET /api/proxy/hangouts/rooms — List active public rooms
-app.get('/api/proxy/hangouts/rooms', asyncHandler(async (req, res) => {
-  try {
-    const rooms = await JitsiService.getActiveRooms();
-    res.json({ success: true, rooms: (rooms || []).map(r => ({
-      id: r.id,
-      room_code: r.room_code,
-      title: r.title || 'Hangout Room',
-      tier: r.tier || 'mini',
-      host_name: r.host_name || 'Host',
-      host_user_id: r.host_user_id,
-      is_public: r.is_public !== false,
-      max_participants: r.max_participants || 10,
-      current_participants: r.current_participants || 0,
-      status: r.status || 'active',
-      join_url: JitsiService.generateJoinUrl(r),
-      created_at: r.created_at,
-    }))});
-  } catch (error) {
-    logger.error(`Hangouts proxy list error: ${error.message}`);
-    res.json({ success: true, rooms: [] });
-  }
-}));
-
-// POST /api/proxy/hangouts/rooms — Create a room (auth required)
-app.post('/api/proxy/hangouts/rooms', asyncHandler(async (req, res) => {
-  const user = req.session?.user;
-  if (!user) {
-    return res.status(401).json({ success: false, error: 'Authentication required' });
-  }
-
-  const { title, tier = 'mini', isPublic = true, password } = req.body;
-  if (!title || typeof title !== 'string' || title.trim().length === 0) {
-    return res.status(400).json({ success: false, error: 'Title is required' });
-  }
-
-  try {
-    const result = await JitsiService.createRoom({
-      userId: user.id,
-      telegramId: user.telegram_id,
-      displayName: user.display_name || user.first_name || user.username || 'User',
-      tier: ['mini', 'medium', 'unlimited'].includes(tier) ? tier : 'mini',
-      title: title.trim().slice(0, 80),
-      isPublic: Boolean(isPublic),
-      password: password || undefined,
-    });
-
-    res.json({
-      success: true,
-      room: {
-        id: result.room.id,
-        room_code: result.room.room_code,
-        title: result.room.title,
-        tier: result.room.tier,
-        host_name: result.room.host_name,
-        max_participants: result.room.max_participants,
-        current_participants: 0,
-        status: 'active',
-        join_url: result.joinUrl,
-        created_at: result.room.created_at,
-      },
-      joinUrl: result.joinUrl,
-    });
-  } catch (error) {
-    logger.error(`Hangouts proxy create error: ${error.message}`);
-    res.status(400).json({ success: false, error: error.message || 'Failed to create room' });
-  }
-}));
-
-// GET /api/proxy/hangouts/rooms/:code — Get room details by code (auth required)
-app.get('/api/proxy/hangouts/rooms/:code', requireSessionAuth, asyncHandler(async (req, res) => {
-  try {
-    const room = await JitsiService.getRoom(req.params.code);
-    if (!room) {
-      return res.status(404).json({ success: false, error: 'Room not found' });
-    }
-
-    const userId = req.session.user?.id;
-    const isPublic = room.is_public !== false;
-    const isHost = room.host_user_id && String(room.host_user_id) === String(userId);
-
-    // For private rooms, verify the requesting user is the host or a member
-    if (!isPublic && !isHost) {
-      const isMember = await JitsiService.isRoomMember(room.id, userId).catch(() => false);
-      if (!isMember) {
-        return res.status(403).json({ success: false, error: 'Access denied' });
-      }
-    }
-
-    res.json({
-      success: true,
-      room: {
-        id: room.id,
-        room_code: room.room_code,
-        title: room.title || 'Hangout Room',
-        tier: room.tier,
-        host_name: room.host_name,
-        host_user_id: room.host_user_id,
-        is_public: isPublic,
-        max_participants: room.max_participants,
-        current_participants: room.current_participants || 0,
-        status: room.status,
-        join_url: JitsiService.generateJoinUrl(room),
-        created_at: room.created_at,
-      },
-    });
-  } catch (error) {
-    logger.error(`Hangouts proxy get room error: ${error.message}`);
-    res.status(500).json({ success: false, error: 'Failed to get room' });
-  }
-}));
-
-// POST /api/proxy/hangouts/rooms/:code/join — Join a room (auth required)
-app.post('/api/proxy/hangouts/rooms/:code/join', asyncHandler(async (req, res) => {
-  const user = req.session?.user;
-  if (!user) {
-    return res.status(401).json({ success: false, error: 'Authentication required' });
-  }
-
-  try {
-    const result = await JitsiService.joinRoom(req.params.code, {
-      userId: user.id,
-      displayName: user.display_name || user.first_name || user.username || 'User',
-      password: req.body.password,
-    });
-    res.json({ success: true, joinUrl: result.joinUrl });
-  } catch (error) {
-    logger.error(`Hangouts proxy join error: ${error.message}`);
-    const status = error.message?.includes('full') ? 409
-      : error.message?.includes('password') ? 403
-      : error.message?.includes('ended') ? 410
-      : 400;
-    res.status(status).json({ success: false, error: error.message || 'Failed to join room' });
-  }
-}));
-
-// POST /api/proxy/hangouts/rooms/:id/end — End a room (host only, auth required)
-app.post('/api/proxy/hangouts/rooms/:id/end', asyncHandler(async (req, res) => {
-  const user = req.session?.user;
-  if (!user) {
-    return res.status(401).json({ success: false, error: 'Authentication required' });
-  }
-
-  try {
-    await JitsiService.endRoom(parseInt(req.params.id, 10), user.id);
-    res.json({ success: true });
-  } catch (error) {
-    logger.error(`Hangouts proxy end error: ${error.message}`);
-    const status = error.message?.includes('host') || error.message?.includes('Only') ? 403 : 400;
-    res.status(status).json({ success: false, error: error.message || 'Failed to end room' });
-  }
-}));
-
-// GET /api/proxy/hangouts/my-rooms — User's created rooms (auth required)
-app.get('/api/proxy/hangouts/my-rooms', asyncHandler(async (req, res) => {
-  const user = req.session?.user;
-  if (!user) {
-    return res.status(401).json({ success: false, error: 'Authentication required' });
-  }
-
-  try {
-    const rooms = await JitsiService.getUserRooms(user.id, { status: 'active' });
-    res.json({ success: true, rooms: (rooms || []).map(r => ({
-      id: r.id,
-      room_code: r.room_code,
-      title: r.title || 'Hangout Room',
-      tier: r.tier,
-      host_name: r.host_name,
-      max_participants: r.max_participants,
-      current_participants: r.current_participants || 0,
-      status: r.status,
-      join_url: JitsiService.generateJoinUrl(r),
-      created_at: r.created_at,
-    }))});
-  } catch (error) {
-    logger.error(`Hangouts proxy my-rooms error: ${error.message}`);
-    res.json({ success: true, rooms: [] });
-  }
-}));
+// Hangouts Proxy — removed (dead code, replaced by hangout group calls)
 
 // --- Performers (Directus CMS-backed) ---
 const PerformerModel = require('../../models/performerModel'); // still used by tips endpoint
@@ -7244,24 +7047,7 @@ app.post('/api/community-room/knock/approve', requireSessionAuth, asyncHandler(c
 app.post('/api/community-room/knock/deny', requireSessionAuth, asyncHandler(communityRoomController.denyKnock));
 app.post('/api/community-room/clip', requireSessionAuth, asyncHandler(communityRoomController.clipMoment));
 
-// ── JaaS Token Endpoints (DISABLED) ─────────────────────────────────────────
-/*
-const jaasTokenLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 10,
-  keyGenerator: (req) => String(req.session?.user?.id || req.ip),
-  handler: (req, res) => res.status(429).json({ error: 'Too many token requests. Please wait before generating another token.' }),
-  standardHeaders: true,
-  legacyHeaders: false,
-  skipFailedRequests: false,
-});
-
-app.get('/api/jaas/status', requireSessionAuth, asyncHandler(jaasController.getStatus));
-app.post('/api/jaas/token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.generateToken));
-app.post('/api/jaas/moderator-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.generateModeratorToken));
-app.post('/api/jaas/live-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.generateLiveToken));
-app.post('/api/jaas/refresh-token', requireSessionAuth, jaasTokenLimiter, asyncHandler(jaasController.refreshToken));
-*/
+// JaaS Token Endpoints — removed (dead code, jaasController deleted)
 
 
 // ── Book a Call ──────────────────────────────────────────────────────────────

@@ -48,7 +48,7 @@ const TYPE_EMOJI = {
 };
 
 function buildUrl(type, entityType, entityId) {
-  const base = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
+  const base = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
   switch (type) {
     case 'follow':
       return entityId ? `${base}/profile/${entityId}` : base;

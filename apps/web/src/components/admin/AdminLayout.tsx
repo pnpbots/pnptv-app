@@ -37,12 +37,32 @@ export function AdminLayout() {
     );
   }
 
-  if (!isAuthenticated || !isAdmin) {
+  if (!isAuthenticated) {
+    // Not logged in — redirect to Authentik OIDC login, then back to /admin
+    const handleAdminLogin = async () => {
+      localStorage.setItem("pnptv:adminRedirect", "1");
+      const { login: oidcLogin } = await import("@/lib/auth");
+      await oidcLogin();
+    };
+    return (
+      <div className="min-h-screen bg-pnp-background flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-xl font-bold text-pnp-textPrimary mb-2">Admin Panel</h1>
+          <p className="text-sm text-pnp-textSecondary mb-4">Sign in with your Authentik admin account to continue.</p>
+          <button onClick={handleAdminLogin} className="px-4 py-2 rounded-lg bg-pnp-accent text-white text-sm">
+            Sign in with Authentik
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
     return (
       <div className="min-h-screen bg-pnp-background flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-xl font-bold text-pnp-textPrimary mb-2">Access Denied</h1>
-          <p className="text-sm text-pnp-textSecondary mb-4">Admin privileges required.</p>
+          <p className="text-sm text-pnp-textSecondary mb-4">Your Authentik account does not have admin privileges.</p>
           <button onClick={() => navigate("/")} className="px-4 py-2 rounded-lg bg-pnp-accent text-white text-sm">
             Go Home
           </button>

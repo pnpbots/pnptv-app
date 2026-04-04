@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
-import { Badge, Button } from "@pnptv/ui-kit";
+import { Button } from "@pnptv/ui-kit";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useAuth } from "@/hooks/useAuth";
@@ -16,206 +16,131 @@ import {
   trackPlaceView,
   reportPlace,
   getPlaceFavorites,
+  blockUser,
+  getOnlineUsers,
+  browseCreatorChannels,
+  getAllPerformers,
+  getPublicProfile,
   type NearbyUser,
   type NearbyPlace,
   type NearbySearchResponse,
+  type OnlineUser,
   type SubmitPlacePayload,
+  type CreatorChannel,
+  type FeaturedPerformer,
+  type SocialPostItem,
 } from "@/lib/api";
-import { getSocket, connectSocket } from "@/lib/socket";
-import { MapContainer, TileLayer, Marker, Circle, useMap } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { connectSocket } from "@/lib/socket";
+// Inline SVG icon helpers (no lucide-react dependency)
+const IcoMapPin = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+  </svg>
+);
+const IcoGlobe = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <circle cx="12" cy="12" r="10" /><path strokeLinecap="round" strokeLinejoin="round" d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+  </svg>
+);
+const IcoEye = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+  </svg>
+);
+const IcoEyeOff = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+  </svg>
+);
+const IcoShield = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+  </svg>
+);
+const IcoX = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+  </svg>
+);
+const IcoMessage = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+  </svg>
+);
+const IcoUser = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+  </svg>
+);
+const IcoSlash = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <circle cx="12" cy="12" r="10" /><path strokeLinecap="round" strokeLinejoin="round" d="M4.93 4.93l14.14 14.14" />
+  </svg>
+);
+const IcoAlert = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <circle cx="12" cy="12" r="10" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4M12 16h.01" />
+  </svg>
+);
+const IcoSpinner = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+  </svg>
+);
+const IcoPlus = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+  </svg>
+);
+const IcoChevronDown = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+  </svg>
+);
+const IcoHeart = ({ className, filled }: { className?: string; filled?: boolean }) => (
+  <svg className={className} viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+  </svg>
+);
+const IcoMap = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+  </svg>
+);
 
-const RADIUS_OPTIONS = [1, 5, 10, 25];
-const REFRESH_INTERVAL = 15_000;
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const RADIUS_OPTIONS_KM = [5, 10, 25, 50] as const;
+type RadiusKm = (typeof RADIUS_OPTIONS_KM)[number];
+
+// Miles approximations for display (5km≈3mi, 10km≈6mi, 25km≈15mi, 50km≈31mi)
+const KM_TO_MI_LABEL: Record<RadiusKm, string> = {
+  5: "3 mi",
+  10: "6 mi",
+  25: "15 mi",
+  50: "31 mi",
+};
+
+const DEFAULT_RADIUS: RadiusKm = 25;
+const ONLINE_REFRESH_INTERVAL = 30_000;
+const REALWORLD_REFRESH_INTERVAL = 15_000;
 const LAST_POS_KEY = "pnptv:nearbyLastPos";
 const FAV_PLACES_KEY = "pnptv:favPlaces";
+const SAFETY_BANNER_KEY = "pnptv:nearbyBannerDismissed";
 
-// ─── Filter types ───────────────────────────────────────────────────────────
+type Mode = "realworld" | "online";
+type PageState = "loading" | "denied" | "ready";
 
-type FilterSegment = "all" | "users" | "places";
-
-const PLACE_CATEGORY_CHIPS = [
-  { slug: null, emoji: "All", label: "All" },
-  { slug: "wellness", emoji: "🧘", label: "Wellness" },
-  { slug: "cruising-spots", emoji: "🌙", label: "Cruising" },
-  { slug: "adult-entertainment", emoji: "🔞", label: "+18" },
-  { slug: "pnp-friendly", emoji: "💨", label: "PNP" },
-  { slug: "saunas", emoji: "🧖", label: "Saunas" },
-  { slug: "bars-clubs", emoji: "🍸", label: "Bars" },
-  { slug: "community-businesses", emoji: "🏪", label: "Community" },
-  { slug: "hotels-lodging", emoji: "🏨", label: "Hotels" },
-] as const;
-
-// ─── Custom marker icons ────────────────────────────────────────────────────
-
-/** Escape a string for safe injection into an HTML attribute or text node. */
-function esc(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-/** Sanitize a phone number to only allow digits, +, -, spaces, and parentheses. */
-function sanitizePhone(phone: string): string {
-  return phone.replace(/[^0-9+\-\s()]/g, "");
-}
-
-function createUserAvatarIcon(photoUrl: string | null | undefined, displayName: string): L.DivIcon {
-  const safeInitials = esc((displayName || "?")[0].toUpperCase());
-  const inner = photoUrl
-    ? `<img src="${esc(photoUrl)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'" />`
-    : `<span style="font-size:11px;font-weight:700;color:#FFB454;">${safeInitials}</span>`;
-  return L.divIcon({
-    className: "",
-    iconSize: [38, 44],
-    iconAnchor: [19, 44],
-    popupAnchor: [0, -44],
-    html: `
-      <div style="position:relative;width:38px;height:44px;">
-        <div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:10px solid #FFB454;"></div>
-        <div style="position:absolute;top:0;left:0;width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#D4007A,#E69138);padding:2px;overflow:hidden;display:flex;align-items:center;justify-content:center;border:2px solid #FFB454;box-shadow:0 2px 8px rgba(0,0,0,0.5);">
-          <div style="width:100%;height:100%;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#2C2C2E;">
-            ${inner}
-          </div>
-        </div>
-      </div>`,
-  });
-}
-
-function createMyIcon() {
-  return L.divIcon({
-    className: "",
-    iconSize: [18, 18],
-    iconAnchor: [9, 9],
-    html: `<div style="width:18px;height:18px;border-radius:50%;background:#4A90D9;border:3px solid #fff;box-shadow:0 0 8px rgba(74,144,217,0.6);"></div>`,
-  });
-}
-
-function createMyIconOffline() {
-  return L.divIcon({
-    className: "",
-    iconSize: [18, 18],
-    iconAnchor: [9, 9],
-    html: `<div style="width:18px;height:18px;border-radius:50%;background:#555;border:2px dashed #888;opacity:0.75;"></div>`,
-  });
-}
-
-function createPlaceIcon(emoji = "📍"): L.DivIcon {
-  return L.divIcon({
-    className: "",
-    iconSize: [36, 42],
-    iconAnchor: [18, 42],
-    popupAnchor: [0, -42],
-    html: `
-      <div style="position:relative;width:36px;height:42px;">
-        <div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid #34C85A;"></div>
-        <div style="position:absolute;top:0;left:0;width:32px;height:32px;border-radius:50%;background:#1C2E1C;border:2px solid #34C85A;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 2px 8px rgba(0,0,0,0.5);">${emoji}</div>
-      </div>`,
-  });
-}
-
-// Component that moves map to new center when position changes
-function MapRecenter({ lat, lng }: { lat: number; lng: number }) {
-  const map = useMap();
-  useEffect(() => {
-    map.setView([lat, lng], map.getZoom());
-  }, [lat, lng, map]);
-  return null;
-}
-
-// ─── Utility helpers ────────────────────────────────────────────────────────
+// ─── Utility helpers ──────────────────────────────────────────────────────────
 
 function isValidPhotoUrl(url: string | null | undefined): url is string {
   return !!url && (url.startsWith("/") || url.startsWith("http"));
 }
 
-// ─── Discovery Strip ─────────────────────────────────────────────────────────
-
-interface DiscoveryStripProps {
-  users: NearbyUser[];
-  places: NearbyPlace[];
-}
-
-function DiscoveryStrip({ users, places }: DiscoveryStripProps) {
-  const cards: { emoji: string; title: string; subtitle: string }[] = [];
-
-  // Community nudge card
-  if (users.length > 0) {
-    const count = users.length;
-    const nudges = [
-      `${count === 1 ? "Someone in the community is" : `${count} community members are`} nearby right now — go say hi!`,
-      `${count} ${count === 1 ? "member is" : "members are"} around you today. Maybe make a new friend?`,
-      `You're not alone — ${count} ${count === 1 ? "person from" : "people from"} the community ${count === 1 ? "is" : "are"} close by.`,
-    ];
-    cards.push({
-      emoji: "👋",
-      title: count === 1 ? "1 member nearby" : `${count} members nearby`,
-      subtitle: nudges[count % nudges.length],
-    });
-  }
-
-  // Nearest place per emoji (up to 3 unique places)
-  const seenEmojis = new Set<string>();
-  [...places]
-    .filter((p) => p.location !== null)
-    .sort((a, b) => a.distance - b.distance)
-    .slice(0, 8)
-    .forEach((p) => {
-      const emoji = p.categoryEmoji || "📍";
-      if (seenEmojis.has(emoji)) return;
-      seenEmojis.add(emoji);
-      const dist = p.distance < 1
-        ? `${Math.round(p.distance * 1000)}m`
-        : `${p.distance.toFixed(1)}km`;
-      const slug = p.categorySlug || "";
-      let subtitle = `${p.name} is ${dist} away`;
-      if (slug === "saunas") subtitle = `${p.name} is ${dist} away — a hot spot in the community`;
-      else if (slug === "bars-clubs") subtitle = `${p.name} is ${dist} away — PNP-friendly vibes nearby`;
-      else if (slug === "wellness") subtitle = `${p.name} is ${dist} away — take a moment for yourself`;
-      else if (slug === "pnp-friendly") subtitle = `${p.name} is ${dist} away — community-approved spot`;
-      else if (slug === "hotels-lodging") subtitle = `${p.name} is ${dist} away — a great local option`;
-      cards.push({
-        emoji,
-        title: `${p.name} · ${dist}`,
-        subtitle,
-      });
-      if (cards.length >= 5) return;
-    });
-
-  if (cards.length === 0) return null;
-
-  return (
-    <div
-      className="flex gap-2 overflow-x-auto pb-1 mb-2 scrollbar-none"
-      style={{ scrollbarWidth: "none", msOverflowStyle: "none" } as React.CSSProperties}
-    >
-      {cards.map((card, i) => (
-        <div
-          key={i}
-          className="flex-shrink-0 rounded-xl p-3 border border-white/10 backdrop-blur-md"
-          style={{ background: "rgba(28,28,30,0.85)", minWidth: 200, maxWidth: 240 }}
-        >
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-lg">{card.emoji}</span>
-            <p className="text-xs font-semibold text-pnp-textPrimary truncate">{card.title}</p>
-          </div>
-          <p className="text-[11px] text-pnp-textSecondary leading-relaxed line-clamp-2">{card.subtitle}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── Detail sheet for tapped items ──────────────────────────────────────────
-
-interface UserDetailSheetProps {
-  user: NearbyUser;
-  onClose: () => void;
-  onNavigate: (path: string) => void;
+function sanitizePhone(phone: string): string {
+  return phone.replace(/[^0-9+\-\s()]/g, "");
 }
 
 function formatLastSeen(iso: string | null | undefined): string {
@@ -229,91 +154,341 @@ function formatLastSeen(iso: string | null | undefined): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function UserDetailSheet({ user, onClose, onNavigate }: UserDetailSheetProps) {
-  const t = useI18n();
-  const displayName = user.name || user.username || `User #${user.user_id}`;
-  const isOffline = user.status === "offline";
-
-  function formatUserDist(u: NearbyUser): string {
-    if (u.distance_m !== undefined && u.distance_m < 1000) {
-      return t.booking.metersAway(Math.round(u.distance_m));
-    }
-    if (u.distance_km !== undefined) {
-      return t.booking.kmAway(u.distance_km.toFixed(1));
-    }
-    return t.booking.nearbyFallback;
+function formatUserDistMi(u: NearbyUser): string {
+  const km = u.distance_km;
+  const m = u.distance_m;
+  if (m !== undefined && m < 1609) return "< 1 mi";
+  if (km !== undefined) {
+    const mi = km * 0.621371;
+    if (mi < 1) return "< 1 mi";
+    return `${Math.round(mi)} mi`;
   }
+  return "nearby";
+}
+
+function formatOnlineTime(iso: string | undefined): string {
+  if (!iso) return "online";
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 2) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+// ─── Place categories ────────────────────────────────────────────────────────
+
+const PLACE_CATEGORY_CHIPS = [
+  { slug: null, emoji: "All", label: "All" },
+  { slug: "wellness", emoji: "🧘", label: "Wellness" },
+  { slug: "cruising-spots", emoji: "🌙", label: "Cruising" },
+  { slug: "adult-entertainment", emoji: "🔞", label: "+18" },
+  { slug: "pnp-friendly", emoji: "💨", label: "PNP" },
+  { slug: "saunas", emoji: "🧖", label: "Saunas" },
+  { slug: "bars-clubs", emoji: "🍸", label: "Bars" },
+  { slug: "community-businesses", emoji: "🏪", label: "Community" },
+  { slug: "hotels-lodging", emoji: "🏨", label: "Hotels" },
+] as const;
+
+const PLACE_CATEGORIES_IDS = [
+  { id: 1,  key: "categoryWellness" as const,           emoji: "🧘" },
+  { id: 2,  key: "categoryCruisingSpots" as const,      emoji: "🌙" },
+  { id: 3,  key: "categoryAdultBusinesses" as const,    emoji: "🔞" },
+  { id: 4,  key: "categoryPnpFriendly" as const,        emoji: "💨" },
+  { id: 5,  key: "categoryHelpCenters" as const,        emoji: "🏥" },
+  { id: 6,  key: "categorySaunas" as const,             emoji: "🧖" },
+  { id: 7,  key: "categoryBarsClubs" as const,          emoji: "🍸" },
+  { id: 8,  key: "categoryCommunityBusinesses" as const,emoji: "🏪" },
+  { id: 25, key: "categoryHotelsLodging" as const,      emoji: "🏨" },
+];
+
+// ─── UserCard (grid cell) ─────────────────────────────────────────────────────
+
+interface UserCardProps {
+  name: string;
+  photoUrl?: string | null;
+  label: string;
+  labelColor?: string;
+  isOnline?: boolean;
+  onClick: () => void;
+}
+
+const UserCard = React.memo(function UserCard({
+  name,
+  photoUrl,
+  label,
+  labelColor = "#8E8E93",
+  isOnline = false,
+  onClick,
+}: UserCardProps) {
+  const initial = (name || "?")[0].toUpperCase();
+  return (
+    <button
+      onClick={onClick}
+      className="aspect-square relative overflow-hidden rounded-lg focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-1 focus-visible:ring-offset-pnp-background active:scale-[0.97] transition-transform"
+      aria-label={`View profile of ${name}`}
+    >
+      {isValidPhotoUrl(photoUrl) ? (
+        <img
+          src={photoUrl}
+          alt=""
+          className="w-full h-full object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <div
+          className="w-full h-full flex items-center justify-center text-2xl font-bold text-white"
+          style={{ background: "linear-gradient(135deg, #2C1654, #4A1932)" }}
+          aria-hidden="true"
+        >
+          {initial}
+        </div>
+      )}
+
+      {/* Bottom gradient + labels */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
+
+      {/* Name — bottom-left */}
+      <span className="absolute bottom-1 left-1.5 text-[10px] font-semibold text-white truncate max-w-[70%] leading-tight drop-shadow-sm">
+        {name}
+      </span>
+
+      {/* Distance / city label — bottom-right */}
+      <span
+        className="absolute bottom-1 right-1.5 text-[9px] font-medium leading-tight drop-shadow-sm"
+        style={{ color: labelColor }}
+      >
+        {label}
+      </span>
+
+      {/* Online dot — top-right */}
+      {isOnline && (
+        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-green-500 ring-2 ring-black" aria-label="Online" />
+      )}
+    </button>
+  );
+});
+
+// ─── PlaceCard (horizontal scroll strip) ─────────────────────────────────────
+
+interface PlaceCardProps {
+  place: NearbyPlace;
+  isFavorited: boolean;
+  onClick: () => void;
+}
+
+const PlaceCard = React.memo(function PlaceCard({ place, isFavorited, onClick }: PlaceCardProps) {
+  const emoji = place.categoryEmoji || "📍";
+  const distKm = place.distance;
+  const distMi = distKm * 0.621371;
+  const distLabel = distMi < 0.1
+    ? `${Math.round(distKm * 1000)}m`
+    : distMi < 1
+    ? "< 1 mi"
+    : `${Math.round(distMi)} mi`;
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-[1100] animate-slide-up">
+    <button
+      onClick={onClick}
+      className="flex-shrink-0 w-40 rounded-xl overflow-hidden border border-white/10 text-left active:scale-[0.97] transition-transform focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-1 focus-visible:ring-offset-pnp-background"
+      style={{ background: "rgba(28,28,30,0.85)" }}
+      aria-label={`View details for ${place.name}`}
+    >
+      {/* Photo or emoji bg */}
+      <div className="relative h-20 flex items-center justify-center overflow-hidden"
+        style={{ background: "linear-gradient(135deg, #1C2E1C, #2C1654)" }}>
+        {isValidPhotoUrl(place.photoUrl) ? (
+          <img src={place.photoUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+        ) : (
+          <span className="text-3xl" aria-hidden="true">{emoji}</span>
+        )}
+        {isFavorited && (
+          <span className="absolute top-1.5 right-1.5">
+            <IcoHeart className="w-3.5 h-3.5 text-pnp-accent" filled />
+          </span>
+        )}
+      </div>
+
+      {/* Info */}
+      <div className="p-2">
+        <p className="text-[11px] font-semibold text-pnp-textPrimary truncate leading-tight">{place.name}</p>
+        {place.categoryName && (
+          <span className="inline-block mt-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 font-medium truncate max-w-full">
+            {place.categoryName}
+          </span>
+        )}
+        <div className="flex items-center justify-between mt-1">
+          <span className="text-[10px]" style={{ color: "#34C85A" }}>{distLabel}</span>
+          {place.favoriteCount !== undefined && place.favoriteCount > 0 && (
+            <span className="text-[9px] text-pnp-textSecondary flex items-center gap-0.5">
+              <IcoHeart className="w-2.5 h-2.5" />
+              {place.favoriteCount}
+            </span>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+});
+
+// ─── UserQuickView (bottom sheet) ─────────────────────────────────────────────
+
+interface UserQuickViewProps {
+  user: NearbyUser | null;
+  onlineUser: OnlineUser | null;
+  onClose: () => void;
+  onNavigate: (path: string) => void;
+  onBlock: (userId: string) => void;
+}
+
+function UserQuickView({ user, onlineUser, onClose, onNavigate, onBlock }: UserQuickViewProps) {
+  const t = useI18n();
+  const [blocking, setBlocking] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const backdropRef = useRef<HTMLDivElement>(null);
+
+  const name = user
+    ? (user.name || user.username || `User #${user.user_id}`)
+    : (onlineUser?.name || onlineUser?.username || "User");
+
+  const photoUrl = user?.photo_url ?? onlineUser?.photo_url;
+  const username = user?.username ?? onlineUser?.username;
+  const isOnline = user ? user.status !== "offline" : (onlineUser?.is_online ?? false);
+  const userId = user ? String(user.user_id) : (onlineUser?.user_id ?? "");
+
+  const sublabel = user
+    ? (user.status === "offline" && user.last_seen
+        ? `Last seen ${formatLastSeen(user.last_seen)}`
+        : formatUserDistMi(user))
+    : onlineUser
+    ? [onlineUser.city, onlineUser.country].filter(Boolean).join(", ")
+    : "";
+
+  const handleBlock = async () => {
+    if (!userId || blocking || blocked) return;
+    setBlocking(true);
+    try {
+      await blockUser(userId);
+      setBlocked(true);
+      onBlock(userId);
+      setTimeout(onClose, 800);
+    } catch {
+      // silent
+    } finally {
+      setBlocking(false);
+    }
+  };
+
+  return (
+    <div
+      ref={backdropRef}
+      className="fixed inset-0 z-[1100] flex items-end"
+      style={{ backdropFilter: "blur(4px)", backgroundColor: "rgba(0,0,0,0.5)" }}
+      onClick={(e) => { if (e.target === backdropRef.current) onClose(); }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Profile of ${name}`}
+    >
       <div
-        className="mx-3 mb-3 rounded-2xl border border-white/10 overflow-hidden"
-        style={{ background: "rgba(28,28,30,0.95)", backdropFilter: "blur(16px)" }}
+        className="w-full max-w-lg mx-auto rounded-t-2xl border border-white/10 overflow-hidden animate-slide-up"
+        style={{ background: "rgba(28,28,30,0.98)", backdropFilter: "blur(20px)" }}
+        onClick={(e) => e.stopPropagation()}
       >
-        {/* Handle bar */}
-        <div className="flex justify-center pt-2 pb-1">
-          <div className="w-8 h-1 rounded-full bg-white/20" />
+        {/* Drag handle */}
+        <div className="flex justify-center pt-2.5 pb-1">
+          <div className="w-9 h-1 rounded-full bg-white/20" />
         </div>
 
-        <div className="px-4 pb-4">
-          {/* User info */}
-          <div className="flex items-center gap-3 mb-3">
-            {isValidPhotoUrl(user.photo_url) ? (
-              <img
-                src={user.photo_url}
-                className="w-12 h-12 rounded-full object-cover flex-shrink-0"
-                alt={`${user.name || user.username || "User"}'s avatar`}
-                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-              />
-            ) : (
-              <div
-                className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold flex-shrink-0"
-                style={{ background: "rgba(255,180,84,0.2)", color: "#FFB454" }}
-              >
-                {displayName[0].toUpperCase()}
-              </div>
-            )}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <p className="font-semibold text-sm text-pnp-textPrimary truncate">{displayName}</p>
-                {isOffline ? (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/10 text-white/40 font-medium flex-shrink-0">offline</span>
-                ) : (
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
-                )}
-              </div>
-              {user.username && (
-                <p className="text-xs text-pnp-textSecondary">@{user.username}</p>
+        {/* Close button */}
+        <div className="absolute top-3 right-4">
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/15 active:scale-95 transition-all"
+            aria-label={t.booking.close}
+          >
+            <IcoX className="w-4 h-4 text-white/70" />
+          </button>
+        </div>
+
+        <div className="px-5 pb-6 pt-2">
+          {/* Avatar + info */}
+          <div className="flex flex-col items-center text-center mb-5">
+            <div className="relative mb-3">
+              {isValidPhotoUrl(photoUrl) ? (
+                <img
+                  src={photoUrl}
+                  alt={name}
+                  className="w-20 h-20 rounded-2xl object-cover"
+                />
+              ) : (
+                <div
+                  className="w-20 h-20 rounded-2xl flex items-center justify-center text-3xl font-bold text-white"
+                  style={{ background: "linear-gradient(135deg, #2C1654, #4A1932)" }}
+                  aria-hidden="true"
+                >
+                  {(name || "?")[0].toUpperCase()}
+                </div>
               )}
-              <p className="text-xs mt-0.5" style={{ color: isOffline ? "#555" : "#FFB454" }}>
-                {isOffline && user.last_seen
-                  ? `Last seen ${formatLastSeen(user.last_seen)} · ${formatUserDist(user)}`
-                  : formatUserDist(user)}
-              </p>
+              {isOnline && (
+                <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-green-500 ring-2 ring-[#1C1C1E]" aria-label="Online now" />
+              )}
             </div>
+
+            <p className="text-base font-bold text-pnp-textPrimary">{name}</p>
+            {username && (
+              <p className="text-sm text-pnp-textSecondary mt-0.5">@{username}</p>
+            )}
+            {sublabel && (
+              <p className="text-xs mt-1.5 font-medium" style={{ color: isOnline ? "#FFB454" : "#555" }}>
+                {sublabel}
+              </p>
+            )}
           </div>
 
-          {/* Actions */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => onNavigate(`/dm/${user.user_id}`)}
-              className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white active:scale-[0.98] transition-transform"
-              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-            >
-              {t.booking.message || "Message"}
-            </button>
-            <button
-              onClick={() => onNavigate(`/profile/${user.user_id}`)}
-              className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white/80 border border-white/10 hover:bg-white/5 active:scale-[0.98] transition-all"
-            >
-              {t.booking.viewProfile}
-            </button>
-          </div>
+          {/* Action buttons */}
+          {blocked ? (
+            <p className="text-center text-sm text-red-400 font-medium py-2">User blocked</p>
+          ) : (
+            <div className="flex gap-2">
+              <button
+                onClick={() => onNavigate(`/dm/${userId}`)}
+                className="flex-1 min-h-[44px] rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                <IcoMessage className="w-4 h-4" />
+                Message
+              </button>
+
+              <button
+                onClick={() => onNavigate(`/profile/${userId}`)}
+                className="flex-1 min-h-[44px] rounded-xl text-sm font-semibold text-white/80 border border-white/10 hover:bg-white/5 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+              >
+                <IcoUser className="w-4 h-4" />
+                {t.booking.viewProfile}
+              </button>
+
+              <button
+                onClick={handleBlock}
+                disabled={blocking}
+                className="min-h-[44px] px-4 rounded-xl text-sm font-semibold text-red-400 border border-red-500/30 hover:bg-red-500/10 active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center"
+                aria-label="Block this user"
+              >
+                {blocking ? (
+                  <IcoSpinner className="w-4 h-4 animate-spin" />
+                ) : (
+                  <IcoSlash className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
+
+// ─── PlaceDetailSheet ─────────────────────────────────────────────────────────
 
 interface PlaceDetailSheetProps {
   place: NearbyPlace;
@@ -326,51 +501,52 @@ function PlaceDetailSheet({ place, onClose, isFavorited, onToggleFavorite }: Pla
   const t = useI18n();
   const [reportSent, setReportSent] = useState(false);
   const [showReportConfirm, setShowReportConfirm] = useState(false);
+  const backdropRef = useRef<HTMLDivElement>(null);
 
   function formatPlaceDist(p: NearbyPlace): string {
-    if (p.distance < 1) {
-      return t.booking.metersAway(Math.round(p.distance * 1000));
-    }
-    return t.booking.kmAway(p.distance.toFixed(1));
+    const mi = p.distance * 0.621371;
+    if (mi < 0.1) return t.booking.metersAway(Math.round(p.distance * 1000));
+    if (mi < 1) return "< 1 mi";
+    return `${Math.round(mi)} mi`;
   }
 
-  // Check if place is currently open
   const isOpenNow = React.useMemo(() => {
     const hours = place.hoursOfOperation;
     if (!hours || Object.keys(hours).length === 0) return null;
     const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-    const now = new Date();
-    const dayKey = days[now.getDay()];
+    const dayKey = days[new Date().getDay()];
     const todayHours = hours[dayKey];
     if (!todayHours || todayHours.toLowerCase() === "closed") return false;
-    return true; // Simplified — has hours for today
+    return true;
   }, [place.hoursOfOperation]);
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-[1100] animate-slide-up">
+    <div
+      ref={backdropRef}
+      className="fixed inset-0 z-[1100] flex items-end"
+      style={{ backdropFilter: "blur(4px)", backgroundColor: "rgba(0,0,0,0.5)" }}
+      onClick={(e) => { if (e.target === backdropRef.current) onClose(); }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Details for ${place.name}`}
+    >
       <div
-        className="mx-3 mb-3 rounded-2xl border border-white/10 overflow-hidden max-h-[70vh] overflow-y-auto"
-        style={{ background: "rgba(28,28,30,0.95)", backdropFilter: "blur(16px)" }}
+        className="w-full max-w-lg mx-auto rounded-t-2xl border border-white/10 overflow-hidden max-h-[75vh] overflow-y-auto animate-slide-up"
+        style={{ background: "rgba(28,28,30,0.98)", backdropFilter: "blur(20px)" }}
+        onClick={(e) => e.stopPropagation()}
       >
-        {/* Handle bar */}
-        <div className="flex justify-center pt-2 pb-1">
-          <div className="w-8 h-1 rounded-full bg-white/20" />
+        <div className="flex justify-center pt-2.5 pb-1">
+          <div className="w-9 h-1 rounded-full bg-white/20" />
         </div>
 
-        <div className="px-4 pb-4">
+        <div className="px-4 pb-5">
           {/* Place header */}
           <div className="flex items-center gap-3 mb-3">
             {isValidPhotoUrl(place.photoUrl) ? (
-              <img
-                src={place.photoUrl}
-                className="w-12 h-12 rounded-xl object-cover flex-shrink-0"
-                alt={place.name}
-              />
+              <img src={place.photoUrl} className="w-12 h-12 rounded-xl object-cover flex-shrink-0" alt={place.name} />
             ) : (
-              <div
-                className="w-12 h-12 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
-                style={{ background: "rgba(52,200,90,0.15)" }}
-              >
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
+                style={{ background: "rgba(52,200,90,0.15)" }}>
                 {place.categoryEmoji || "📍"}
               </div>
             )}
@@ -380,9 +556,7 @@ function PlaceDetailSheet({ place, onClose, isFavorited, onToggleFavorite }: Pla
                 <p className="text-xs text-pnp-textSecondary">{place.categoryName}</p>
               )}
               <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xs" style={{ color: "#34C85A" }}>
-                  {formatPlaceDist(place)}
-                </span>
+                <span className="text-xs" style={{ color: "#34C85A" }}>{formatPlaceDist(place)}</span>
                 {isOpenNow !== null && (
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                     isOpenNow ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
@@ -392,15 +566,13 @@ function PlaceDetailSheet({ place, onClose, isFavorited, onToggleFavorite }: Pla
                 )}
               </div>
             </div>
-            {/* Favorite button */}
             <button
               onClick={() => onToggleFavorite(place.id)}
               className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform"
               style={{ background: isFavorited ? "rgba(230,145,56,0.2)" : "rgba(255,255,255,0.05)" }}
+              aria-label={isFavorited ? "Remove from favorites" : "Add to favorites"}
             >
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill={isFavorited ? "#E69138" : "none"} stroke={isFavorited ? "#E69138" : "#888"} strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-              </svg>
+              <IcoHeart className="w-5 h-5" filled={isFavorited} />
             </button>
           </div>
 
@@ -411,10 +583,7 @@ function PlaceDetailSheet({ place, onClose, isFavorited, onToggleFavorite }: Pla
             )}
             {place.address && (
               <div className="flex items-start gap-2">
-                <svg className="w-3.5 h-3.5 text-pnp-textSecondary flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
+                <IcoMapPin className="w-3.5 h-3.5 text-pnp-textSecondary flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-pnp-textSecondary">{place.address}{place.city ? `, ${place.city}` : ""}</p>
               </div>
             )}
@@ -428,7 +597,7 @@ function PlaceDetailSheet({ place, onClose, isFavorited, onToggleFavorite }: Pla
             )}
           </div>
 
-          {/* Hours of operation */}
+          {/* Hours */}
           {place.hoursOfOperation && Object.keys(place.hoursOfOperation).length > 0 && (
             <div className="mb-3 bg-white/5 rounded-lg p-2.5">
               <p className="text-[10px] font-semibold text-pnp-textSecondary uppercase tracking-wider mb-1.5">Horario</p>
@@ -448,77 +617,50 @@ function PlaceDetailSheet({ place, onClose, isFavorited, onToggleFavorite }: Pla
           )}
 
           {/* Action buttons */}
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             {place.website && /^https?:\/\//i.test(place.website) && (
-              <a
-                href={place.website}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white text-center active:scale-[0.98] transition-transform"
-                style={{ background: "linear-gradient(135deg, #34C85A, #2EA04A)" }}
-              >
+              <a href={place.website} target="_blank" rel="noopener noreferrer"
+                className="flex-1 min-h-[44px] py-2.5 rounded-xl text-sm font-semibold text-white text-center active:scale-[0.98] transition-transform flex items-center justify-center"
+                style={{ background: "linear-gradient(135deg, #34C85A, #2EA04A)" }}>
                 {t.booking.visitWebsite}
               </a>
             )}
             {place.instagram && (
-              <a
-                href={`https://instagram.com/${place.instagram.replace("@", "")}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white text-center active:scale-[0.98] transition-transform"
-                style={{ background: "linear-gradient(135deg, #833AB4, #E1306C)" }}
-              >
+              <a href={`https://instagram.com/${place.instagram.replace("@", "")}`} target="_blank" rel="noopener noreferrer"
+                className="min-h-[44px] px-4 py-2.5 rounded-xl text-sm font-semibold text-white text-center active:scale-[0.98] transition-transform flex items-center justify-center"
+                style={{ background: "linear-gradient(135deg, #833AB4, #E1306C)" }}>
                 Instagram
               </a>
             )}
             {place.telegramUsername && (
-              <a
-                href={`https://t.me/${place.telegramUsername.replace("@", "")}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white text-center active:scale-[0.98] transition-transform"
-                style={{ background: "linear-gradient(135deg, #0088CC, #229ED9)" }}
-              >
+              <a href={`https://t.me/${place.telegramUsername.replace("@", "")}`} target="_blank" rel="noopener noreferrer"
+                className="min-h-[44px] px-4 py-2.5 rounded-xl text-sm font-semibold text-white text-center active:scale-[0.98] transition-transform flex items-center justify-center"
+                style={{ background: "linear-gradient(135deg, #0088CC, #229ED9)" }}>
                 Telegram
               </a>
             )}
-            <button
-              onClick={onClose}
-              className="px-4 py-2.5 rounded-xl text-sm text-pnp-textSecondary border border-white/10 hover:bg-white/5 active:scale-[0.98] transition-all"
-            >
+            <button onClick={onClose}
+              className="min-h-[44px] px-4 py-2.5 rounded-xl text-sm text-pnp-textSecondary border border-white/10 hover:bg-white/5 active:scale-[0.98] transition-all">
               {t.booking.close}
             </button>
           </div>
 
-          {/* Report link */}
+          {/* Report */}
           <div className="mt-3 text-center">
             {reportSent ? (
               <p className="text-[11px] text-green-400">Reporte enviado. Gracias.</p>
             ) : showReportConfirm ? (
               <div className="flex items-center justify-center gap-2">
-                <span className="text-[11px] text-pnp-textSecondary">Reportar como inapropiado?</span>
+                <span className="text-[11px] text-pnp-textSecondary">¿Reportar como inapropiado?</span>
+                <button onClick={() => setShowReportConfirm(false)} className="text-[11px] text-pnp-textSecondary underline">Cancelar</button>
                 <button
-                  onClick={() => { setShowReportConfirm(false); }}
-                  className="text-[11px] text-pnp-textSecondary underline"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => {
-                    reportPlace(place.id).catch(() => {});
-                    setReportSent(true);
-                    setShowReportConfirm(false);
-                  }}
-                  className="text-[11px] text-red-400 underline font-medium"
-                >
+                  onClick={() => { reportPlace(place.id).catch(() => {}); setReportSent(true); setShowReportConfirm(false); }}
+                  className="text-[11px] text-red-400 underline font-medium">
                   Reportar
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => setShowReportConfirm(true)}
-                className="text-[11px] text-pnp-textSecondary/60 hover:text-pnp-textSecondary"
-              >
+              <button onClick={() => setShowReportConfirm(true)} className="text-[11px] text-pnp-textSecondary/60 hover:text-pnp-textSecondary">
                 Reportar lugar
               </button>
             )}
@@ -529,19 +671,7 @@ function PlaceDetailSheet({ place, onClose, isFavorited, onToggleFavorite }: Pla
   );
 }
 
-// ─── Submit Place Modal ──────────────────────────────────────────────────────
-
-const PLACE_CATEGORIES_IDS = [
-  { id: 1,  key: "categoryWellness" as const,           emoji: "🧘" },
-  { id: 2,  key: "categoryCruisingSpots" as const,      emoji: "🌙" },
-  { id: 3,  key: "categoryAdultBusinesses" as const,    emoji: "🔞" },
-  { id: 4,  key: "categoryPnpFriendly" as const,        emoji: "💨" },
-  { id: 5,  key: "categoryHelpCenters" as const,        emoji: "🏥" },
-  { id: 6,  key: "categorySaunas" as const,             emoji: "🧖" },
-  { id: 7,  key: "categoryBarsClubs" as const,          emoji: "🍸" },
-  { id: 8,  key: "categoryCommunityBusinesses" as const,emoji: "🏪" },
-  { id: 25, key: "categoryHotelsLodging" as const,      emoji: "🏨" },
-];
+// ─── SubmitPlaceModal ─────────────────────────────────────────────────────────
 
 function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: number } | null; onClose: () => void }) {
   const t = useI18n();
@@ -580,11 +710,14 @@ function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: numbe
       <div
         className="relative w-full max-w-lg bg-pnp-background border-t border-pnp-border rounded-t-2xl p-5 pb-8 animate-slide-up"
         onClick={e => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t.booking.addAPlace}
       >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-bold text-pnp-textPrimary">{t.booking.addAPlace}</h2>
-          <button onClick={onClose} className="text-pnp-textSecondary hover:text-pnp-textPrimary">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          <button onClick={onClose} className="text-pnp-textSecondary hover:text-pnp-textPrimary min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label={t.booking.close}>
+            <IcoX className="w-5 h-5" />
           </button>
         </div>
         {done ? (
@@ -596,69 +729,34 @@ function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: numbe
           </div>
         ) : (
           <div className="space-y-3">
-            <input
-              placeholder={t.booking.placeName}
-              value={form.name}
-              onChange={e => set("name", e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
-            />
-            <select
-              value={form.categoryId ?? ""}
-              onChange={e => set("categoryId", e.target.value ? Number(e.target.value) : undefined)}
-              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
-            >
+            <input placeholder={t.booking.placeName} value={form.name} onChange={e => set("name", e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
+            <select value={form.categoryId ?? ""} onChange={e => set("categoryId", e.target.value ? Number(e.target.value) : undefined)}
+              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary focus:outline-none focus:border-pnp-accent">
               <option value="">{t.booking.selectCategory}</option>
               {PLACE_CATEGORIES_IDS.map(c => (
                 <option key={c.id} value={c.id}>{c.emoji} {t.booking[c.key]}</option>
               ))}
             </select>
-            <input
-              placeholder={t.booking.address}
-              value={form.address ?? ""}
-              onChange={e => set("address", e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
-            />
+            <input placeholder={t.booking.address} value={form.address ?? ""} onChange={e => set("address", e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
             <div className="flex gap-2">
-              <input
-                placeholder={t.booking.city}
-                value={form.city ?? ""}
-                onChange={e => set("city", e.target.value)}
-                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
-              />
-              <input
-                placeholder={t.booking.country}
-                value={form.country ?? ""}
-                onChange={e => set("country", e.target.value)}
-                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
-              />
+              <input placeholder={t.booking.city} value={form.city ?? ""} onChange={e => set("city", e.target.value)}
+                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
+              <input placeholder={t.booking.country} value={form.country ?? ""} onChange={e => set("country", e.target.value)}
+                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
             </div>
-            <textarea
-              placeholder={t.booking.descriptionOptional}
-              value={form.description ?? ""}
-              onChange={e => set("description", e.target.value)}
-              rows={2}
-              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent resize-none"
-            />
+            <textarea placeholder={t.booking.descriptionOptional} value={form.description ?? ""} onChange={e => set("description", e.target.value)}
+              rows={2} className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent resize-none" />
             <div className="flex gap-2">
-              <input
-                placeholder={t.booking.instagramOptional}
-                value={form.instagram ?? ""}
-                onChange={e => set("instagram", e.target.value)}
-                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
-              />
-              <input
-                placeholder={t.booking.websiteOptional}
-                value={form.website ?? ""}
-                onChange={e => set("website", e.target.value)}
-                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
-              />
+              <input placeholder={t.booking.instagramOptional} value={form.instagram ?? ""} onChange={e => set("instagram", e.target.value)}
+                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
+              <input placeholder={t.booking.websiteOptional} value={form.website ?? ""} onChange={e => set("website", e.target.value)}
+                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
             </div>
             {err && <p className="text-xs text-red-400">{err}</p>}
-            <button
-              onClick={submit}
-              disabled={loading}
-              className="w-full py-2.5 rounded-xl bg-pnp-accent text-white text-sm font-semibold hover:bg-pnp-accent/80 disabled:opacity-40 transition-colors"
-            >
+            <button onClick={submit} disabled={loading}
+              className="w-full min-h-[44px] py-2.5 rounded-xl bg-pnp-accent text-white text-sm font-semibold hover:bg-pnp-accentHover disabled:opacity-40 transition-colors">
               {loading ? t.booking.submitting : t.booking.submitForReview}
             </button>
           </div>
@@ -668,17 +766,56 @@ function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: numbe
   );
 }
 
-// ─── Main Component ─────────────────────────────────────────────────────────
+// ─── Safety Banner ────────────────────────────────────────────────────────────
 
-type PageState = "loading" | "denied" | "ready";
+function SafetyBanner({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div
+      className="mx-3 mt-2 mb-0 rounded-xl border border-white/10 flex items-start gap-3 px-3 py-2.5"
+      style={{ background: "rgba(28,28,30,0.85)", backdropFilter: "blur(12px)" }}
+      role="note"
+      aria-label="Safety reminder"
+    >
+      <IcoShield className="w-4 h-4 text-pnp-accent flex-shrink-0 mt-0.5" />
+      <p className="text-[11px] text-pnp-textSecondary leading-relaxed flex-1 min-w-0">
+        Meeting someone? Share your plans with a trusted friend before you go.
+      </p>
+      <button
+        onClick={onDismiss}
+        className="flex-shrink-0 text-pnp-textSecondary/50 hover:text-pnp-textSecondary transition-colors min-h-[28px] min-w-[28px] flex items-center justify-center"
+        aria-label="Dismiss safety banner"
+      >
+        <IcoX className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+}
+
+// ─── Grid Skeleton ────────────────────────────────────────────────────────────
+
+function GridSkeleton() {
+  return (
+    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-0.5 px-0">
+      {Array.from({ length: 12 }).map((_, i) => (
+        <div key={i} className="aspect-square rounded-lg bg-pnp-surface animate-pulse" />
+      ))}
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Nearby() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  useAuth(); // ensure auth context is mounted (tier-gating handled by route guards)
   const t = useI18n();
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("nearby");
 
+  // ── Mode & Page state ──────────────────────────────────────────────────────
+  const [mode, setMode] = useState<Mode>("realworld");
   const [pageState, setPageState] = useState<PageState>("loading");
+
+  // ── Location ───────────────────────────────────────────────────────────────
   const [locationStatus, setLocationStatus] = useState<"online" | "offline">("offline");
   const [lastPosSavedAt, setLastPosSavedAt] = useState<number | null>(null);
   const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(() => {
@@ -691,43 +828,57 @@ export default function Nearby() {
     } catch { /* ignore */ }
     return null;
   });
+
+  // ── Real World state ───────────────────────────────────────────────────────
   const [nearbyUsers, setNearbyUsers] = useState<NearbyUser[]>([]);
   const [nearbyPlaces, setNearbyPlaces] = useState<NearbyPlace[]>([]);
-  // Free-tier: count of nearby users returned from API
   const [nearbyCount, setNearbyCount] = useState(0);
-  const [radius, setRadius] = useState(5);
+  const [radius, setRadius] = useState<RadiusKm>(DEFAULT_RADIUS);
   const radiusRef = useRef(radius);
   radiusRef.current = radius;
   const [incognito, setIncognito] = useState(false);
+  const [placeCategory, setPlaceCategory] = useState<string | null>(null);
+  const [showSafetyBanner, setShowSafetyBanner] = useState(() => {
+    try { return !localStorage.getItem(SAFETY_BANNER_KEY); } catch { return true; }
+  });
+
+  // ── Online state ───────────────────────────────────────────────────────────
+  const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
+  const [onlineRegion, setOnlineRegion] = useState<string>("");
+  const [onlineRegions, setOnlineRegions] = useState<string[]>([]);
+
+  // ── Shared UI state ────────────────────────────────────────────────────────
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<FilterSegment>("all");
   const [selectedUser, setSelectedUser] = useState<NearbyUser | null>(null);
+  const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<NearbyPlace | null>(null);
   const [submitPlaceOpen, setSubmitPlaceOpen] = useState(false);
-  const [placeCategory, setPlaceCategory] = useState<string | null>(null);
-  const [showUserList, setShowUserList] = useState(false);
   const [favoritedPlaces, setFavoritedPlaces] = useState<Set<number>>(() => {
     try {
       const cached = localStorage.getItem(FAV_PLACES_KEY);
       return cached ? new Set(JSON.parse(cached)) : new Set();
     } catch { return new Set(); }
   });
+
+  // ── Explore: Channels & Performers ─────────────────────────────────────────
+  const [exploreChannels, setExploreChannels] = useState<CreatorChannel[]>([]);
+  const [explorePerformers, setExplorePerformers] = useState<FeaturedPerformer[]>([]);
+  const [performerVideos, setPerformerVideos] = useState<Record<string, SocialPostItem[]>>({});
+
   const watchIdRef = useRef<number | null>(null);
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const myIconRef = useRef(createMyIcon());
-  const myIconOfflineRef = useRef(createMyIconOffline());
 
-  // Computed filtered counts
-  const showUsers = filter === "all" || filter === "users";
-  const showPlaces = filter === "all" || filter === "places";
-
-  // Category-filtered places
+  // ── Derived data ───────────────────────────────────────────────────────────
   const filteredPlaces = placeCategory
     ? nearbyPlaces.filter((p) => p.categorySlug === placeCategory)
     : nearbyPlaces;
 
-  // Favorite toggle handler
+  const filteredOnlineUsers = onlineRegion
+    ? onlineUsers.filter((u) => u.country === onlineRegion || u.city === onlineRegion)
+    : onlineUsers;
+
+  // ── Favorites ──────────────────────────────────────────────────────────────
   const handleToggleFavorite = useCallback((placeId: number) => {
     setFavoritedPlaces((prev) => {
       const next = new Set(prev);
@@ -741,67 +892,73 @@ export default function Nearby() {
 
   // Track view when place detail opens
   useEffect(() => {
-    if (selectedPlace) {
-      trackPlaceView(selectedPlace.id).catch(() => {});
-    }
+    if (selectedPlace) trackPlaceView(selectedPlace.id).catch(() => {});
   }, [selectedPlace]);
 
-  // Fetch nearby users and places
-  const fetchNearby = useCallback(
-    async (lat: number, lng: number, rad: number) => {
-      try {
-        setIsSearching(true);
-        const [usersData, placesData] = await Promise.allSettled([
-          searchNearby(lat, lng, rad, 50),
-          searchNearbyPlaces(lat, lng, rad),
-        ]);
-        if (usersData.status === "fulfilled") {
-          const result = usersData.value as NearbySearchResponse & { tier?: string; count?: number };
-          // Free-tier API response: { tier: 'free', count: N } — no users array
-          if (result.tier === "free" && typeof result.count === "number") {
-            setNearbyCount(result.count);
-            setNearbyUsers([]);
-          } else {
-            setNearbyUsers(result.users || []);
-            setNearbyCount(result.users?.length ?? 0);
-          }
+  // ── Fetch nearby (Real World) ─────────────────────────────────────────────
+  const fetchNearby = useCallback(async (lat: number, lng: number, rad: number) => {
+    try {
+      setIsSearching(true);
+      const [usersData, placesData] = await Promise.allSettled([
+        searchNearby(lat, lng, rad, 60),
+        searchNearbyPlaces(lat, lng, rad),
+      ]);
+      if (usersData.status === "fulfilled") {
+        const result = usersData.value as NearbySearchResponse & { tier?: string; count?: number };
+        if (result.tier === "free" && typeof result.count === "number") {
+          setNearbyCount(result.count);
+          setNearbyUsers([]);
+        } else {
+          setNearbyUsers(result.users || []);
+          setNearbyCount(result.users?.length ?? 0);
         }
-        if (placesData.status === "fulfilled") {
-          const places = placesData.value.places || [];
-          if (places.length > 0) {
-            setNearbyPlaces(places);
-          } else {
-            // No places in radius — load nearest 1-5 as fallback so map is never empty
-            getFallbackNearbyPlaces(lat, lng).then(fb => {
-              setNearbyPlaces(fb.places || []);
-            }).catch(() => {});
-          }
+      }
+      if (placesData.status === "fulfilled") {
+        const places = placesData.value.places || [];
+        if (places.length > 0) {
+          setNearbyPlaces(places);
+        } else {
+          getFallbackNearbyPlaces(lat, lng).then(fb => {
+            setNearbyPlaces(fb.places || []);
+          }).catch(() => {});
         }
-        setError(null);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Search failed";
-        setError(msg);
-      } finally {
-        setIsSearching(false);
       }
-    },
-    []
-  );
+      setError(null);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Search failed");
+    } finally {
+      setIsSearching(false);
+    }
+  }, []);
 
-  // Send my location to backend
-  const sendLocation = useCallback(
-    async (lat: number, lng: number, accuracy: number) => {
-      if (incognito) return;
-      try {
-        await updateNearbyLocation(lat, lng, accuracy);
-      } catch {
-        // Rate limited or error — silent
-      }
-    },
-    [incognito]
-  );
+  // ── Fetch online users ────────────────────────────────────────────────────
+  const fetchOnline = useCallback(async (region?: string) => {
+    try {
+      setIsSearching(true);
+      const data = await getOnlineUsers(region || undefined, 100);
+      setOnlineUsers(data.users || []);
+      // Extract unique regions (countries) from response for filter dropdown
+      const regions = Array.from(
+        new Set((data.users || []).map((u) => u.country).filter((c): c is string => !!c))
+      ).sort();
+      setOnlineRegions(regions);
+      setError(null);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load online users");
+    } finally {
+      setIsSearching(false);
+    }
+  }, []);
 
-  // Load favorites from server on mount
+  // ── Send my location to backend ───────────────────────────────────────────
+  const sendLocation = useCallback(async (lat: number, lng: number, accuracy: number) => {
+    if (incognito) return;
+    try {
+      await updateNearbyLocation(lat, lng, accuracy);
+    } catch { /* silent */ }
+  }, [incognito]);
+
+  // ── Load favorites from server on mount ───────────────────────────────────
   useEffect(() => {
     getPlaceFavorites().then((data) => {
       if (data.placeIds?.length) {
@@ -811,7 +968,7 @@ export default function Nearby() {
     }).catch(() => {});
   }, []);
 
-  // If we have a cached position, show map immediately as "offline"
+  // ── Restore cached position ───────────────────────────────────────────────
   useEffect(() => {
     try {
       const cached = localStorage.getItem(LAST_POS_KEY);
@@ -826,13 +983,9 @@ export default function Nearby() {
     } catch { /* ignore */ }
   }, []);
 
-  // Start geolocation watch
+  // ── Geolocation watch ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (!navigator.geolocation) {
-      setPageState("denied");
-      return;
-    }
-
+    if (!navigator.geolocation) { setPageState("denied"); return; }
     setPageState("loading");
 
     watchIdRef.current = navigator.geolocation.watchPosition(
@@ -850,7 +1003,6 @@ export default function Nearby() {
         fetchNearby(latitude, longitude, radiusRef.current);
       },
       () => {
-        // Keep "ready" if we have a cached position, otherwise go to denied
         setMyPos((prev) => {
           if (!prev) setPageState("denied");
           return prev;
@@ -861,15 +1013,13 @@ export default function Nearby() {
     );
 
     return () => {
-      if (watchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(watchIdRef.current);
-      }
+      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
     };
   }, [sendLocation, fetchNearby]);
 
-  // Auto-refresh with Page Visibility API (pause when tab hidden)
+  // ── Auto-refresh: Real World ──────────────────────────────────────────────
   useEffect(() => {
-    if (!myPos || pageState !== "ready") return;
+    if (mode !== "realworld" || !myPos || pageState !== "ready") return;
 
     const doRefresh = () => {
       fetchNearby(myPos.lat, myPos.lng, radius);
@@ -878,30 +1028,38 @@ export default function Nearby() {
 
     const startInterval = () => {
       if (refreshRef.current) clearInterval(refreshRef.current);
-      refreshRef.current = setInterval(doRefresh, REFRESH_INTERVAL);
+      refreshRef.current = setInterval(doRefresh, REALWORLD_REFRESH_INTERVAL);
     };
 
     const onVisChange = () => {
-      if (document.visibilityState === "visible") {
-        doRefresh(); // immediate refresh on return
-        startInterval();
-      } else {
-        if (refreshRef.current) { clearInterval(refreshRef.current); refreshRef.current = null; }
-      }
+      if (document.visibilityState === "visible") { doRefresh(); startInterval(); }
+      else { if (refreshRef.current) { clearInterval(refreshRef.current); refreshRef.current = null; } }
     };
 
     startInterval();
     document.addEventListener("visibilitychange", onVisChange);
-
     return () => {
       if (refreshRef.current) clearInterval(refreshRef.current);
       document.removeEventListener("visibilitychange", onVisChange);
     };
-  }, [myPos, radius, incognito, pageState, fetchNearby, sendLocation]);
+  }, [mode, myPos, radius, incognito, pageState, fetchNearby, sendLocation]);
 
-  // Socket.IO: join nearby grid room + listen for real-time updates
+  // ── Auto-refresh: Online ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!myPos) return;
+    if (mode !== "online") return;
+
+    fetchOnline(onlineRegion || undefined);
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") fetchOnline(onlineRegion || undefined);
+    }, ONLINE_REFRESH_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [mode, onlineRegion, fetchOnline]);
+
+  // ── Socket.IO: Real World grid room ──────────────────────────────────────
+  useEffect(() => {
+    if (!myPos || mode !== "realworld") return;
     const socket = connectSocket();
     socket.emit("nearby:join-grid", { lat: myPos.lat, lng: myPos.lng });
 
@@ -909,9 +1067,8 @@ export default function Nearby() {
     const handler = () => {
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
-        if (document.visibilityState === "visible" && myPos) {
+        if (document.visibilityState === "visible" && myPos)
           fetchNearby(myPos.lat, myPos.lng, radius);
-        }
       }, 2000);
     };
 
@@ -921,378 +1078,578 @@ export default function Nearby() {
       if (debounce) clearTimeout(debounce);
       socket.emit("nearby:leave");
     };
-  }, [myPos, radius, fetchNearby]);
+  }, [myPos, radius, fetchNearby, mode]);
 
-  // Close detail sheet when filter changes
+  // ── Fetch Explore: Channels & Performers (once on mount) ────────────────
   useEffect(() => {
+    browseCreatorChannels({ limit: 12 })
+      .then((res) => { if (res.success) setExploreChannels(res.channels); })
+      .catch(() => {});
+    getAllPerformers()
+      .then((res) => { if (res.success) setExplorePerformers(res.performers.slice(0, 12)); })
+      .catch(() => {});
+  }, []);
+
+  // Fetch recent videos for each performer once they're loaded
+  useEffect(() => {
+    if (explorePerformers.length === 0) return;
+    explorePerformers.forEach((p) => {
+      const uid = p.userId || p.id;
+      if (!uid) return;
+      getPublicProfile(uid, undefined, 6)
+        .then((res) => {
+          if (!res.success) return;
+          const videos = res.posts.filter(
+            (post) => post.media_type === "video" && (post.video_thumbnail_url || post.media_url)
+          );
+          if (videos.length > 0) {
+            setPerformerVideos((prev) => ({ ...prev, [uid]: videos.slice(0, 3) }));
+          }
+        })
+        .catch(() => {});
+    });
+  }, [explorePerformers]);
+
+  // ── Mode switch ───────────────────────────────────────────────────────────
+  const handleModeSwitch = (newMode: Mode) => {
+    setMode(newMode);
     setSelectedUser(null);
+    setSelectedOnlineUser(null);
     setSelectedPlace(null);
-  }, [filter]);
+    setError(null);
+  };
 
-  const handleNavigate = useCallback(
-    (path: string) => navigate(path),
-    [navigate]
-  );
+  // ── Block handler (removes user from grid) ────────────────────────────────
+  const handleBlock = useCallback((userId: string) => {
+    setNearbyUsers((prev) => prev.filter((u) => String(u.user_id) !== userId));
+    setOnlineUsers((prev) => prev.filter((u) => u.user_id !== userId));
+  }, []);
 
-  // ─── Loading state (only show if no cached position) ───────────
-  if (pageState === "loading" && !myPos) {
+  const handleNavigate = useCallback((path: string) => navigate(path), [navigate]);
+
+  // ─── Loading state ─────────────────────────────────────────────────────────
+  if (pageState === "loading" && !myPos && mode === "realworld") {
     return (
       <div className="page-container flex flex-col items-center justify-center min-h-[60vh]">
         <div className="relative w-20 h-20 mb-6">
           <div className="absolute inset-0 border-2 border-pnp-accent/30 rounded-full animate-ping" />
           <div className="absolute inset-2 border-2 border-pnp-accent/50 rounded-full animate-ping" style={{ animationDelay: "0.3s" }} />
           <div className="absolute inset-4 border-2 border-pnp-accent rounded-full animate-pulse" />
-          <svg className="absolute inset-0 w-20 h-20 text-pnp-accent p-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
+          <IcoMapPin className="absolute inset-0 w-20 h-20 text-pnp-accent p-5" />
         </div>
         <p className="text-pnp-textPrimary font-medium">{t.booking.findingLocation}</p>
-        <p className="text-sm text-pnp-textSecondary mt-1">
-          {t.booking.grantLocationAccess}
-        </p>
+        <p className="text-sm text-pnp-textSecondary mt-1 text-center px-8">{t.booking.grantLocationAccess}</p>
       </div>
     );
   }
 
-  // ─── Permission denied state ────────────────────────────────────
-  if (pageState === "denied") {
+  // ─── Permission denied ─────────────────────────────────────────────────────
+  if (pageState === "denied" && mode === "realworld") {
     return (
-      <div className="page-container flex flex-col items-center justify-center min-h-[60vh]">
-        <svg className="w-16 h-16 text-pnp-textSecondary mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-        </svg>
-        <p className="text-pnp-textPrimary font-medium text-lg mb-2">{t.booking.locationAccessNeeded}</p>
-        <p className="text-sm text-pnp-textSecondary text-center max-w-xs mb-6">
-          {t.booking.locationAccessBody}
-        </p>
-        <Button
-          variant="primary"
-          onClick={() => {
-            setPageState("loading");
-            navigator.geolocation.getCurrentPosition(
-              (pos) => {
-                setMyPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-                setPageState("ready");
-              },
-              () => setPageState("denied"),
-              { enableHighAccuracy: true }
-            );
-          }}
-        >
+      <div className="page-container flex flex-col items-center justify-center min-h-[60vh] px-6">
+        <IcoAlert className="w-16 h-16 text-pnp-textSecondary mb-4" />
+        <p className="text-pnp-textPrimary font-medium text-lg mb-2 text-center">{t.booking.locationAccessNeeded}</p>
+        <p className="text-sm text-pnp-textSecondary text-center max-w-xs mb-6">{t.booking.locationAccessBody}</p>
+        <Button variant="primary" onClick={() => {
+          setPageState("loading");
+          navigator.geolocation.getCurrentPosition(
+            (pos) => { setMyPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setPageState("ready"); },
+            () => setPageState("denied"),
+            { enableHighAccuracy: true }
+          );
+        }}>
           {t.booking.tryAgain}
         </Button>
       </div>
     );
   }
 
-  // ─── Map ready state ────────────────────────────────────────────
+  // ─── Main render ───────────────────────────────────────────────────────────
   return (
-    <div className="page-container !p-0 relative h-full">
+    <div className="page-container !p-0 flex flex-col min-h-full" style={{ background: "#121212" }}>
       <Helmet>
         <title>{t.booking.pageTitle}</title>
         <meta name="description" content={t.booking.pageDescription} />
       </Helmet>
-      {showTutorial && <TutorialOverlay section="nearby" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
-      {/* Map */}
-      {myPos && (
-        <div className="absolute inset-0">
-          <style>{`
-            .leaflet-tile-pane { filter: brightness(0.5) saturate(0.5) contrast(1.1); }
-            .leaflet-container { background: #1C1C1E; }
-            .leaflet-control-zoom a { background: #2C2C2E !important; color: #FFB454 !important; border-color: #3C3C3E !important; }
-            .leaflet-control-attribution { display: none !important; }
-            @keyframes slide-up { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-            .animate-slide-up { animation: slide-up 0.25s ease-out; }
-          `}</style>
-          <MapContainer
-            center={[myPos.lat, myPos.lng]}
-            zoom={14}
-            style={{ width: "100%", height: "100%" }}
-            zoomControl={false}
-          >
-            <TileLayer
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution=""
-            />
-            <MapRecenter lat={myPos.lat} lng={myPos.lng} />
 
-            {/* Radius circle */}
-            <Circle
-              center={[myPos.lat, myPos.lng]}
-              radius={radius * 1000}
-              pathOptions={{
-                color: "#E69138",
-                fillColor: "#E69138",
-                fillOpacity: 0.08,
-                weight: 1.5,
-                dashArray: "6 4",
-              }}
-            />
+      {/* Inline animation keyframes */}
+      <style>{`
+        @keyframes slide-up { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .animate-slide-up { animation: slide-up 0.25s ease-out; }
+      `}</style>
 
-            {/* My position */}
-            <Marker
-              position={[myPos.lat, myPos.lng]}
-              icon={locationStatus === "online" ? myIconRef.current : myIconOfflineRef.current}
-            />
-
-            {/* Nearby users — avatar markers (online=bright, offline=dimmed) */}
-            {showUsers && nearbyUsers.map((u) => {
-              const displayName = u.name || u.username || "?";
-              const icon = u.status === "offline"
-                ? createUserAvatarIcon(null, displayName)   // no photo = initials only, dimmer
-                : createUserAvatarIcon(u.photo_url, displayName);
-              return (
-                <Marker
-                  key={u.user_id}
-                  position={[u.latitude, u.longitude]}
-                  icon={icon}
-                  eventHandlers={{
-                    click: () => {
-                      setSelectedPlace(null);
-                      setSelectedUser(u);
-                    },
-                  }}
-                />
-              );
-            })}
-
-            {/* Nearby places — category emoji markers (filtered by category) */}
-            {showPlaces && filteredPlaces.filter((p) => p.location !== null).map((p) => {
-              const emoji = p.categoryEmoji || "📍";
-              return (
-                <Marker
-                  key={`place-${p.id}`}
-                  position={[p.location!.lat, p.location!.lng]}
-                  icon={createPlaceIcon(emoji)}
-                  eventHandlers={{
-                    click: () => {
-                      setSelectedUser(null);
-                      setSelectedPlace(p);
-                    },
-                  }}
-                />
-              );
-            })}
-          </MapContainer>
-        </div>
+      {showTutorial && (
+        <TutorialOverlay section="nearby" onDismiss={dismissTutorial} onDismissForever={dismissForever} />
       )}
 
-      {/* Top overlay — title + filter + badges */}
-      <div className="absolute top-0 left-0 right-0 z-[1000] pointer-events-none">
-        <div className="flex items-center justify-between px-4 pt-3 pb-2">
-          <div className="pointer-events-auto bg-pnp-surface/80 backdrop-blur-md rounded-xl px-3 py-1.5 border border-white/5">
-            <h1 className="text-sm font-bold text-pnp-textPrimary">{t.booking.nearby}</h1>
-          </div>
-          <div className="pointer-events-auto flex items-center gap-2">
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      <div className="flex-shrink-0 px-3 pt-3 pb-0">
+        {/* Title row */}
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-lg font-bold text-pnp-textPrimary">{t.booking.nearby}</h1>
+          <div className="flex items-center gap-2">
+            {/* Location status */}
+            {mode === "realworld" && (
+              locationStatus === "online" ? (
+                <div className="flex items-center gap-1 bg-green-500/20 border border-green-500/30 rounded-full px-2 py-0.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                  <span className="text-[10px] text-green-400 font-medium">{t.booking.locationOnline}</span>
+                </div>
+              ) : myPos ? (
+                <div className="flex items-center gap-1 bg-pnp-surface/80 border border-white/10 rounded-full px-2 py-0.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                  <span className="text-[10px] text-pnp-textSecondary font-medium">
+                    {lastPosSavedAt
+                      ? `${t.booking.locationLastSeen} ${t.booking.minutesAgo(Math.round((Date.now() - lastPosSavedAt) / 60000))}`
+                      : t.booking.locationLastKnown}
+                  </span>
+                </div>
+              ) : null
+            )}
+
+            {/* Incognito toggle — Real World only */}
+            {mode === "realworld" && (
+              <button
+                onClick={() => setIncognito(!incognito)}
+                className={`min-h-[36px] min-w-[36px] rounded-xl flex items-center justify-center border transition-all ${
+                  incognito
+                    ? "border-pnp-accent/40 text-white"
+                    : "bg-pnp-surface border-white/10 text-pnp-textSecondary hover:text-pnp-textPrimary"
+                }`}
+                style={incognito ? { background: "rgba(212,0,122,0.15)" } : undefined}
+                aria-label={incognito ? t.booking.incognitoOn : t.booking.incognitoOff}
+                aria-pressed={incognito}
+              >
+                {incognito ? <IcoEyeOff className="w-4 h-4" /> : <IcoEye className="w-4 h-4" />}
+              </button>
+            )}
+
+            {/* Searching spinner */}
             {isSearching && (
-              <div className="w-2 h-2 rounded-full animate-pulse dot-gradient" />
-            )}
-            {/* Location status badge */}
-            {locationStatus === "online" ? (
-              <div className="flex items-center gap-1 bg-green-500/20 border border-green-500/30 rounded-full px-2 py-0.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                <span className="text-[10px] text-green-400 font-medium">{t.booking.locationOnline}</span>
-              </div>
-            ) : myPos ? (
-              <div className="flex items-center gap-1 bg-pnp-surface/80 border border-white/10 rounded-full px-2 py-0.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-                <span className="text-[10px] text-pnp-textSecondary font-medium">
-                  {lastPosSavedAt
-                    ? `${t.booking.locationLastSeen} ${t.booking.minutesAgo(Math.round((Date.now() - lastPosSavedAt) / 60000))}`
-                    : t.booking.locationLastKnown}
-                </span>
-              </div>
-            ) : null}
-            {showUsers && (
-              <Badge variant="accent">
-                {nearbyUsers.length} {nearbyUsers.length === 1 ? t.booking.userSingular : t.booking.userPlural}
-              </Badge>
-            )}
-            {showPlaces && filteredPlaces.length > 0 && (
-              <Badge variant="default">
-                {filteredPlaces.length} {filteredPlaces.length === 1 ? t.booking.placeSingular : t.booking.placePlural}
-              </Badge>
+              <IcoSpinner className="w-3.5 h-3.5 text-pnp-accent animate-spin" />
             )}
           </div>
         </div>
 
-        {/* Filter segment control */}
-        <div className="flex justify-center px-4 pb-1">
-          <div className="pointer-events-auto inline-flex gap-1 bg-pnp-surface/80 backdrop-blur-md rounded-xl p-1 border border-white/5">
-            {(
-              [
-                { key: "all" as const,    label: t.booking.filterAll },
-                { key: "users" as const,  label: t.booking.filterUsers },
-                { key: "places" as const, label: t.booking.filterPlaces },
-              ]
-            ).map((seg) => (
+        {/* Mode toggle: pill segmented control */}
+        <div className="flex rounded-xl p-0.5 mb-3" style={{ background: "rgba(255,255,255,0.05)" }}>
+          <button
+            onClick={() => handleModeSwitch("realworld")}
+            className={`flex-1 min-h-[36px] rounded-[10px] flex items-center justify-center gap-1.5 text-sm font-semibold transition-all ${
+              mode === "realworld" ? "text-white shadow-sm" : "text-pnp-textSecondary hover:text-pnp-textPrimary"
+            }`}
+            style={mode === "realworld" ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
+            aria-pressed={mode === "realworld"}
+          >
+            <IcoMapPin className="w-3.5 h-3.5" />
+            Real World
+          </button>
+          <button
+            onClick={() => handleModeSwitch("online")}
+            className={`flex-1 min-h-[36px] rounded-[10px] flex items-center justify-center gap-1.5 text-sm font-semibold transition-all ${
+              mode === "online" ? "text-white shadow-sm" : "text-pnp-textSecondary hover:text-pnp-textPrimary"
+            }`}
+            style={mode === "online" ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
+            aria-pressed={mode === "online"}
+          >
+            <IcoGlobe className="w-3.5 h-3.5" />
+            Online
+          </button>
+        </div>
+
+        {/* Filter row */}
+        {mode === "realworld" ? (
+          /* Radius chips */
+          <div className="flex gap-1.5 mb-1 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
+            {RADIUS_OPTIONS_KM.map((r) => (
               <button
-                key={seg.key}
-                onClick={() => setFilter(seg.key)}
-                className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                  filter === seg.key
-                    ? "text-white"
-                    : "text-pnp-textSecondary hover:text-pnp-textPrimary"
+                key={r}
+                onClick={() => {
+                  setRadius(r);
+                  if (myPos) fetchNearby(myPos.lat, myPos.lng, r);
+                }}
+                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                  radius === r
+                    ? "text-white border-transparent"
+                    : "text-pnp-textSecondary border-white/10 hover:text-pnp-textPrimary hover:border-white/20"
                 }`}
-                style={
-                  filter === seg.key
-                    ? { background: "linear-gradient(135deg, #D4007A, #E69138)" }
-                    : undefined
-                }
+                style={radius === r ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : { background: "rgba(255,255,255,0.05)" }}
+                aria-pressed={radius === r}
               >
-                {seg.label}
-                {seg.key === "users" && ` (${nearbyUsers.length})`}
-                {seg.key === "places" && ` (${nearbyPlaces.length})`}
+                {KM_TO_MI_LABEL[r]}
               </button>
             ))}
           </div>
-        </div>
+        ) : (
+          /* Region dropdown */
+          <div className="mb-1">
+            <div className="relative">
+              <select
+                value={onlineRegion}
+                onChange={(e) => setOnlineRegion(e.target.value)}
+                className="w-full pl-3 pr-8 py-2 rounded-xl text-sm text-pnp-textPrimary border border-white/10 appearance-none focus:outline-none focus:border-pnp-accent transition-colors"
+                style={{ background: "rgba(255,255,255,0.05)" }}
+                aria-label="Filter by region"
+              >
+                <option value="">All regions ({onlineUsers.length} online)</option>
+                {onlineRegions.map((r) => (
+                  <option key={r} value={r}>
+                    {r} ({onlineUsers.filter((u) => u.country === r || u.city === r).length})
+                  </option>
+                ))}
+              </select>
+              <IcoChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-pnp-textSecondary pointer-events-none" />
+            </div>
+          </div>
+        )}
+      </div>
 
-        {/* Category filter chips — shown when places are visible */}
-        {showPlaces && nearbyPlaces.length > 0 && (
-          <div className="flex justify-center px-4 pb-1">
-            <div
-              className="pointer-events-auto flex gap-1 overflow-x-auto scrollbar-none py-1 px-1"
-              style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+      {/* ── Safety banner (Real World only) ─────────────────────────────────── */}
+      {mode === "realworld" && showSafetyBanner && (
+        <SafetyBanner onDismiss={() => {
+          setShowSafetyBanner(false);
+          try { localStorage.setItem(SAFETY_BANNER_KEY, "1"); } catch {}
+        }} />
+      )}
+
+      {/* ── Scrollable content area ──────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto pb-4">
+
+        {/* ── Error state ────────────────────────────────────────────────────── */}
+        {error && (
+          <div className="mx-3 mt-3 flex items-start gap-3 px-3 py-2.5 rounded-xl border border-red-500/20 bg-red-900/30" role="alert">
+            <IcoAlert className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-red-300 leading-relaxed">{error}</p>
+            </div>
+            <button
+              onClick={() => {
+                setError(null);
+                if (mode === "realworld" && myPos) fetchNearby(myPos.lat, myPos.lng, radius);
+                else if (mode === "online") fetchOnline(onlineRegion || undefined);
+              }}
+              className="flex-shrink-0 text-xs text-red-400 font-medium underline hover:text-red-300 transition-colors"
             >
-              {PLACE_CATEGORY_CHIPS.map((chip) => (
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* ── Real World mode ─────────────────────────────────────────────────── */}
+        {mode === "realworld" && (
+          <>
+            {/* User grid */}
+            <div className="mt-3 px-3">
+              {isSearching && nearbyUsers.length === 0 ? (
+                <GridSkeleton />
+              ) : nearbyUsers.length === 0 && !isSearching ? (
+                /* Empty state */
+                <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                  <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4"
+                    style={{ background: "rgba(212,0,122,0.1)" }}>
+                    <IcoMap className="w-8 h-8 text-pnp-accent" />
+                  </div>
+                  <p className="text-pnp-textPrimary font-semibold mb-1">
+                    {nearbyCount > 0
+                      ? `${nearbyCount} ${nearbyCount === 1 ? t.booking.personSingular : t.booking.personPlural} ${t.booking.nearYou}`
+                      : t.booking.nobodyNearbyYet}
+                  </p>
+                  <p className="text-sm text-pnp-textSecondary">
+                    {nearbyCount > 0
+                      ? t.booking.freeUpgradeBody
+                      : t.booking.nobodyNearbyHint}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-0.5">
+                  {nearbyUsers.map((u) => {
+                    const name = u.name || u.username || `User #${u.user_id}`;
+                    const isOnline = u.status !== "offline";
+                    return (
+                      <UserCard
+                        key={u.user_id}
+                        name={name}
+                        photoUrl={u.photo_url}
+                        label={formatUserDistMi(u)}
+                        labelColor={isOnline ? "#FFB454" : "#555"}
+                        isOnline={isOnline}
+                        onClick={() => { setSelectedUser(u); setSelectedOnlineUser(null); setSelectedPlace(null); }}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Nearby Places strip */}
+            {nearbyPlaces.length > 0 && (
+              <div className="mt-5 px-3">
+                {/* Section header */}
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-sm font-bold text-pnp-textPrimary">Nearby Places</h2>
+                  <span className="text-xs text-pnp-textSecondary">{nearbyPlaces.length} found</span>
+                </div>
+
+                {/* Category chips */}
+                <div className="flex gap-1.5 mb-2.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
+                  {PLACE_CATEGORY_CHIPS.map((chip) => (
+                    <button
+                      key={chip.slug ?? "all"}
+                      onClick={() => setPlaceCategory(chip.slug)}
+                      className={`flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors whitespace-nowrap ${
+                        placeCategory === chip.slug
+                          ? "bg-amber-500/20 border-amber-500/50 text-amber-400"
+                          : "border-white/10 text-pnp-textSecondary hover:text-pnp-textPrimary"
+                      }`}
+                      style={placeCategory !== chip.slug ? { background: "rgba(255,255,255,0.05)" } : undefined}
+                      aria-pressed={placeCategory === chip.slug}
+                    >
+                      {chip.emoji} {chip.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Horizontal scroll strip */}
+                <div className="flex gap-2.5 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
+                  {filteredPlaces.length > 0 ? (
+                    <>
+                      {filteredPlaces.map((p) => (
+                        <PlaceCard
+                          key={p.id}
+                          place={p}
+                          isFavorited={favoritedPlaces.has(p.id)}
+                          onClick={() => { setSelectedPlace(p); setSelectedUser(null); setSelectedOnlineUser(null); }}
+                        />
+                      ))}
+                      {/* Suggest a Place button */}
+                      <button
+                        onClick={() => setSubmitPlaceOpen(true)}
+                        className="flex-shrink-0 w-40 rounded-xl border border-dashed border-white/20 flex flex-col items-center justify-center gap-2 py-6 hover:border-pnp-accent/50 hover:bg-pnp-accent/5 transition-all active:scale-[0.97]"
+                        aria-label={t.booking.addPlace}
+                      >
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center"
+                          style={{ background: "rgba(212,0,122,0.15)" }}>
+                          <IcoPlus className="w-4 h-4 text-pnp-accent" />
+                        </div>
+                        <span className="text-[11px] text-pnp-textSecondary font-medium text-center leading-tight">
+                          Suggest a Place
+                        </span>
+                      </button>
+                    </>
+                  ) : (
+                    <p className="text-xs text-pnp-textSecondary py-4">No places in this category nearby.</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* No places yet — show suggest button */}
+            {nearbyPlaces.length === 0 && !isSearching && (
+              <div className="mt-4 mx-3">
                 <button
-                  key={chip.slug ?? "all"}
-                  onClick={() => setPlaceCategory(chip.slug)}
-                  className={`flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors whitespace-nowrap ${
-                    placeCategory === chip.slug
-                      ? "bg-amber-500/20 border-amber-500/50 text-amber-400"
-                      : "bg-pnp-surface/70 border-white/10 text-pnp-textSecondary hover:text-pnp-textPrimary"
-                  }`}
+                  onClick={() => setSubmitPlaceOpen(true)}
+                  className="w-full py-3 rounded-xl border border-dashed border-white/15 flex items-center justify-center gap-2 hover:border-pnp-accent/40 hover:bg-pnp-accent/5 transition-all text-pnp-textSecondary hover:text-pnp-textPrimary active:scale-[0.98]"
                 >
-                  {chip.emoji} {chip.label}
-                  {chip.slug && ` (${nearbyPlaces.filter(p => p.categorySlug === chip.slug).length})`}
+                  <IcoPlus className="w-4 h-4 text-pnp-accent" />
+                  <span className="text-xs font-medium">Know a PNP-friendly place? Add it</span>
+                </button>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Online mode ─────────────────────────────────────────────────────── */}
+        {mode === "online" && (
+          <div className="mt-3 px-3">
+            {isSearching && onlineUsers.length === 0 ? (
+              <GridSkeleton />
+            ) : filteredOnlineUsers.length === 0 && !isSearching ? (
+              <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4"
+                  style={{ background: "rgba(212,0,122,0.1)" }}>
+                  <IcoGlobe className="w-8 h-8 text-pnp-accent" />
+                </div>
+                <p className="text-pnp-textPrimary font-semibold mb-1">Nobody online right now</p>
+                <p className="text-sm text-pnp-textSecondary">
+                  {onlineRegion ? "Try selecting a different region." : "Check back soon — the community is always active."}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-0.5">
+                {filteredOnlineUsers.map((u) => {
+                  const name = u.name || u.username || "User";
+                  return (
+                    <UserCard
+                      key={u.user_id}
+                      name={name}
+                      photoUrl={u.photo_url}
+                      label={formatOnlineTime(u.last_active)}
+                      labelColor="#8E8E93"
+                      isOnline={u.is_online}
+                      onClick={() => { setSelectedOnlineUser(u); setSelectedUser(null); setSelectedPlace(null); }}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Prime Channels strip ───────────────────────────────────────────── */}
+        {exploreChannels.length > 0 && (
+          <div className="mt-5 px-3">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-bold text-pnp-textPrimary">Prime Channels</h2>
+              <button
+                onClick={() => navigate("/channels")}
+                className="text-xs text-pnp-accent font-medium hover:underline"
+              >
+                See all
+              </button>
+            </div>
+            <div className="flex gap-2.5 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
+              {exploreChannels.map((ch) => (
+                <button
+                  key={ch.id}
+                  onClick={() => navigate(`/channels?id=${ch.id}`)}
+                  className="flex-shrink-0 w-36 rounded-xl overflow-hidden border border-white/10 text-left active:scale-[0.97] transition-transform focus-visible:ring-2 focus-visible:ring-pnp-accent"
+                  style={{ background: "rgba(28,28,30,0.85)" }}
+                  aria-label={`View channel ${ch.name}`}
+                >
+                  <div
+                    className="relative h-20 flex items-center justify-center overflow-hidden"
+                    style={{ background: "linear-gradient(135deg, #2C1654, #4A1932)" }}
+                  >
+                    {ch.coverImageUrl ? (
+                      <img src={ch.coverImageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    ) : (
+                      <span className="text-2xl" aria-hidden="true">📺</span>
+                    )}
+                    {ch.isPremium && (
+                      <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold text-white bg-amber-500/90">
+                        PRIME
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-2">
+                    <p className="text-xs font-semibold text-pnp-textPrimary truncate">{ch.name}</p>
+                    <p className="text-[10px] text-pnp-textSecondary truncate mt-0.5">
+                      {ch.creatorName || ch.creatorUsername || "Creator"}
+                      {ch.postCount > 0 ? ` · ${ch.postCount} posts` : ""}
+                    </p>
+                  </div>
                 </button>
               ))}
             </div>
           </div>
         )}
 
-        {/* List view toggle */}
-        {showUsers && nearbyUsers.length > 0 && (
-          <div className="flex justify-end px-4 pb-1">
-            <button
-              onClick={() => setShowUserList(!showUserList)}
-              className="pointer-events-auto p-1.5 rounded-lg bg-pnp-surface/80 border border-white/10 backdrop-blur-md"
-              title={showUserList ? "Map view" : "List view"}
-            >
-              {showUserList ? (
-                <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-                </svg>
-              )}
-            </button>
+        {/* ── Performers strip ───────────────────────────────────────────────── */}
+        {explorePerformers.length > 0 && (
+          <div className="mt-5 px-3">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-bold text-pnp-textPrimary">Performers</h2>
+              <button
+                onClick={() => navigate("/live")}
+                className="text-xs text-pnp-accent font-medium hover:underline"
+              >
+                See all
+              </button>
+            </div>
+            <div className="flex gap-2.5 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
+              {explorePerformers.map((p) => {
+                const uid = p.userId || p.id;
+                const videos = performerVideos[uid] || [];
+                return (
+                  <div
+                    key={p.id}
+                    className={`flex-shrink-0 w-36 rounded-xl overflow-hidden border text-left ${
+                      p.isLive ? "border-red-500/60" : "border-white/10"
+                    }`}
+                    style={{ background: "rgba(28,28,30,0.85)" }}
+                  >
+                    {/* Performer photo */}
+                    <button
+                      onClick={() => p.isLive && p.hlsUrl ? navigate(`/live/${p.live_channel || p.id}`) : navigate(`/profile/${uid}`)}
+                      className="w-full active:scale-[0.97] transition-transform focus-visible:ring-2 focus-visible:ring-pnp-accent"
+                      aria-label={`View ${p.displayName || p.name}`}
+                    >
+                      <div
+                        className="relative aspect-square flex items-center justify-center overflow-hidden"
+                        style={{ background: "linear-gradient(135deg, #2C1654, #4A1932)" }}
+                      >
+                        {p.photoUrl ? (
+                          <img src={p.photoUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                        ) : (
+                          <span className="text-2xl font-bold text-white" aria-hidden="true">
+                            {(p.displayName || p.name || "?")[0].toUpperCase()}
+                          </span>
+                        )}
+                        {p.isLive && (
+                          <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold text-white bg-red-600 animate-pulse">
+                            LIVE
+                          </span>
+                        )}
+                        {p.isFeatured && !p.isLive && (
+                          <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold text-white bg-purple-600/90">
+                            Featured
+                          </span>
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent pointer-events-none" />
+                        <span className="absolute bottom-1 left-1.5 text-[10px] font-semibold text-white truncate max-w-[90%] drop-shadow-sm">
+                          {p.displayName || p.name}
+                        </span>
+                      </div>
+                    </button>
+
+                    {/* Video thumbnails row */}
+                    {videos.length > 0 && (
+                      <div className="flex gap-0.5 p-1">
+                        {videos.map((v) => (
+                          <button
+                            key={v.id}
+                            onClick={() => navigate(`/profile/${uid}`)}
+                            className="relative flex-1 aspect-[4/3] rounded overflow-hidden active:scale-[0.95] transition-transform focus-visible:ring-1 focus-visible:ring-pnp-accent"
+                            aria-label={v.video_title || "Video"}
+                          >
+                            <img
+                              src={v.video_thumbnail_url || v.media_url || ""}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                            {/* Play icon overlay */}
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                              <svg className="w-3.5 h-3.5 text-white/90" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M8 5v14l11-7z" />
+                              </svg>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
-
-        {/* Nearest place ambient pill */}
-        {showPlaces && filteredPlaces.length > 0 && (() => {
-          const nearest = [...filteredPlaces]
-            .filter((p) => p.location !== null)
-            .sort((a, b) => a.distance - b.distance)[0];
-          if (!nearest) return null;
-          const dist = nearest.distance < 1
-            ? `${Math.round(nearest.distance * 1000)}m`
-            : `${nearest.distance.toFixed(1)}km`;
-          const emoji = nearest.categoryEmoji || "📍";
-          return (
-            <div className="flex justify-center pb-2 pointer-events-none">
-              <div className="pointer-events-auto inline-flex items-center gap-1.5 bg-pnp-surface/80 backdrop-blur-md rounded-full px-3 py-1.5 border border-white/10 shadow-lg">
-                <span className="text-sm">{emoji}</span>
-                <span className="text-xs text-pnp-textPrimary font-medium truncate max-w-[160px]">{nearest.name}</span>
-                <span className="text-xs text-pnp-textSecondary">· {dist}</span>
-              </div>
-            </div>
-          );
-        })()}
       </div>
 
-      {/* User list panel (below map overlay) */}
-      {showUserList && showUsers && nearbyUsers.length > 0 && !selectedUser && !selectedPlace && (
-        <div className="absolute bottom-44 left-0 right-0 z-[1001] max-h-[40vh] overflow-y-auto px-3">
-          <div className="bg-pnp-surface/90 backdrop-blur-md rounded-xl border border-white/10 p-2 space-y-1.5">
-            {nearbyUsers.slice(0, 20).map((u) => {
-              const displayName = u.name || u.username || `User #${u.user_id}`;
-              const dist = u.distance_m !== undefined && u.distance_m < 1000
-                ? `${Math.round(u.distance_m)}m`
-                : u.distance_km !== undefined ? `${u.distance_km.toFixed(1)}km` : "";
-              return (
-                <div
-                  key={u.user_id}
-                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 cursor-pointer active:bg-white/10 transition-colors"
-                  onClick={() => { setSelectedUser(u); setShowUserList(false); }}
-                >
-                  {isValidPhotoUrl(u.photo_url) ? (
-                    <img src={u.photo_url} className="w-9 h-9 rounded-full object-cover flex-shrink-0" alt="" />
-                  ) : (
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                      style={{ background: "rgba(255,180,84,0.2)", color: "#FFB454" }}>
-                      {displayName[0].toUpperCase()}
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-xs font-semibold text-pnp-textPrimary truncate">{displayName}</p>
-                      {u.status !== "offline" && <span className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />}
-                      {u.is_followed && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 font-medium">Following</span>
-                      )}
-                    </div>
-                    {u.status === "offline" && u.last_seen
-                      ? <p className="text-[11px] text-white/30">Last seen {formatLastSeen(u.last_seen)}</p>
-                      : u.username && <p className="text-[11px] text-pnp-textSecondary">@{u.username}</p>
-                    }
-                  </div>
-                  {dist && <span className="text-[11px] flex-shrink-0" style={{ color: u.status === "offline" ? "#555" : "#FFB454" }}>{dist}</span>}
-                </div>
-              );
-            })}
-            {nearbyUsers.length > 20 && (
-              <p className="text-center text-[11px] text-pnp-textSecondary py-1">+{nearbyUsers.length - 20} more</p>
-            )}
-          </div>
-        </div>
-      )}
+      {/* ── Modals & sheets ─────────────────────────────────────────────────── */}
 
-      {/* Submit place FAB */}
-      {!submitPlaceOpen && (
-        <button
-          onClick={() => setSubmitPlaceOpen(true)}
-          className="absolute bottom-32 right-4 z-[1001] w-11 h-11 rounded-full bg-pnp-accent text-white flex items-center justify-center shadow-lg hover:bg-pnp-accent/80 active:scale-95 transition-all"
-          title={t.booking.addPlace}
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-        </button>
-      )}
-
-      {/* Submit place modal */}
-      {submitPlaceOpen && (
-        <SubmitPlaceModal
-          myPos={myPos}
-          onClose={() => setSubmitPlaceOpen(false)}
-        />
-      )}
-
-      {/* Detail sheets */}
-      {selectedUser && (
-        <UserDetailSheet
+      {/* User Quick View */}
+      {(selectedUser || selectedOnlineUser) && (
+        <UserQuickView
           user={selectedUser}
-          onClose={() => setSelectedUser(null)}
+          onlineUser={selectedOnlineUser}
+          onClose={() => { setSelectedUser(null); setSelectedOnlineUser(null); }}
           onNavigate={handleNavigate}
+          onBlock={handleBlock}
         />
       )}
+
+      {/* Place Detail Sheet */}
       {selectedPlace && (
         <PlaceDetailSheet
           place={selectedPlace}
@@ -1302,77 +1659,12 @@ export default function Nearby() {
         />
       )}
 
-      {/* Bottom overlay — controls (hidden when detail sheet is open) */}
-      {!selectedUser && !selectedPlace && (
-        <div className="absolute bottom-0 left-0 right-0 z-[1000] pointer-events-none">
-          <div className="px-4 pb-4 pt-2 pointer-events-auto">
-            {/* Error banner */}
-            {error && (
-              <div className="mb-2 bg-red-900/50 backdrop-blur-md rounded-lg px-3 py-2 text-xs text-red-300 border border-red-500/20">
-                {error}
-              </div>
-            )}
-
-            {/* Discovery strip — shown when results exist */}
-            {!isSearching && (nearbyUsers.length > 0 || nearbyPlaces.length > 0) && (
-              <DiscoveryStrip users={nearbyUsers} places={nearbyPlaces} />
-            )}
-
-            {/* No results card */}
-            {!isSearching && nearbyUsers.length === 0 && nearbyPlaces.length === 0 && (
-              <div className="mb-3 bg-pnp-surface/80 backdrop-blur-md rounded-xl p-3 border border-white/5">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">🌍</span>
-                  <div>
-                    <p className="text-sm font-semibold text-pnp-textPrimary">The community is out there</p>
-                    <p className="text-xs text-pnp-textSecondary mt-0.5">Try expanding your radius — members could be just a little further away</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Controls row */}
-            <div className="flex items-center gap-2">
-              {/* Radius selector */}
-              <div className="flex-1 flex gap-1.5 bg-pnp-surface/80 backdrop-blur-md rounded-xl p-1.5 border border-white/5">
-                {RADIUS_OPTIONS.map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => setRadius(r)}
-                    className={`flex-1 text-xs font-medium py-1.5 rounded-lg transition-colors ${
-                      radius === r
-                        ? "text-white"
-                        : "text-pnp-textSecondary hover:text-pnp-textPrimary"
-                    }`}
-                    style={radius === r ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
-                  >
-                    {t.booking.radiusKm(r)}
-                  </button>
-                ))}
-              </div>
-
-              {/* Incognito toggle */}
-              <button
-                onClick={() => setIncognito(!incognito)}
-                className={`flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center border transition-colors backdrop-blur-md ${
-                  incognito
-                    ? "border-transparent text-white"
-                    : "bg-pnp-surface/80 border-white/5 text-pnp-textSecondary"
-                }`}
-                style={incognito ? { background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))", borderColor: "rgba(212,0,122,0.4)" } : undefined}
-                title={incognito ? t.booking.incognitoOn : t.booking.incognitoOff}
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  {incognito ? (
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                  ) : (
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  )}
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Submit Place Modal */}
+      {submitPlaceOpen && (
+        <SubmitPlaceModal
+          myPos={myPos}
+          onClose={() => setSubmitPlaceOpen(false)}
+        />
       )}
     </div>
   );

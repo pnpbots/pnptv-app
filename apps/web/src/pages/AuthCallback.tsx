@@ -47,7 +47,14 @@ export default function AuthCallback() {
           redeemReferralCode(refCode).catch(() => {});
         }
 
-        navigate("/", { replace: true });
+        // If the user came from the admin panel, redirect back there
+        const adminRedirect = localStorage.getItem("pnptv:adminRedirect");
+        if (adminRedirect) {
+          localStorage.removeItem("pnptv:adminRedirect");
+          navigate("/admin", { replace: true });
+        } else {
+          navigate("/media", { replace: true });
+        }
       })
       .catch((err) => {
         console.error("[AuthCallback] OIDC callback error:", err);

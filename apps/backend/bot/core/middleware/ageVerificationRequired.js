@@ -10,7 +10,7 @@ const UserModel = require('../../../models/userModel');
  * - Profile (show_profile)
  * - Members Area (show_members_area)
  * - Subscription Plans (show_subscription_plans)
- * - Video Calls (show_jitsi, etc.)
+ * - Video Calls (Telegram native)
  */
 
 const FEATURES_REQUIRING_AGE_VERIFICATION = [
@@ -18,7 +18,6 @@ const FEATURES_REQUIRING_AGE_VERIFICATION = [
   'show_profile',
   'show_members_area',
   'show_subscription_plans',
-  'show_jitsi',
   'show_video_rooms',
   'video_call_start',
   'join_video_room',

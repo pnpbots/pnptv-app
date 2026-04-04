@@ -9,12 +9,12 @@ const AUTHENTIK_TOKEN = process.env.AUTHENTIK_API_TOKEN;
 // AUTHENTIK_OIDC_CLIENT_ID     — OAuth2 application Client ID registered in Authentik
 // AUTHENTIK_OIDC_CLIENT_SECRET — Client secret (used server-side only, never sent to browser)
 // AUTHENTIK_OIDC_REDIRECT_URI  — Must exactly match the Redirect URI in the Authentik application config
-//                                Default: https://app.pnptv.app/auth/oidc/callback
+//                                Default: https://pnptv.app/auth/oidc/callback
 // AUTHENTIK_OIDC_ISSUER        — Authentik application issuer slug URL
 //                                Default: https://auth.pnptv.app/application/o/pnptv-app/
 const OIDC_CLIENT_ID = process.env.AUTHENTIK_OIDC_CLIENT_ID;
 const OIDC_CLIENT_SECRET = process.env.AUTHENTIK_OIDC_CLIENT_SECRET;
-const OIDC_REDIRECT_URI = process.env.AUTHENTIK_OIDC_REDIRECT_URI || 'https://app.pnptv.app/api/webapp/auth/oidc/callback';
+const OIDC_REDIRECT_URI = process.env.AUTHENTIK_OIDC_REDIRECT_URI || 'https://pnptv.app/api/webapp/auth/oidc/callback';
 const OIDC_ISSUER = process.env.AUTHENTIK_OIDC_ISSUER || 'https://auth.pnptv.app/application/o/pnptv-app/';
 
 // Authentik OIDC endpoints — NOT relative to issuer slug, but to /application/o/ root
@@ -97,10 +97,76 @@ function decodeIdToken(idToken) {
 
 class AuthentikService {
   /**
+   * Generate a secure random password (16 chars, mixed case + digits + symbols).
+   * @returns {string}
+   */
+  static generatePassword() {
+    const charset = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%&*';
+    const bytes = crypto.randomBytes(16);
+    let password = '';
+    for (let i = 0; i < 16; i++) {
+      password += charset[bytes[i] % charset.length];
+    }
+    return password;
+  }
+
+  /**
+   * Set a password on an Authentik user via the Admin API.
+   * @param {number} userPk — Authentik user PK (integer)
+   * @param {string} password — plaintext password to set
+   * @returns {boolean} true if set successfully
+   */
+  static async setUserPassword(userPk, password) {
+    if (!AUTHENTIK_TOKEN) return false;
+    try {
+      await axios.post(`${AUTHENTIK_URL}/api/v3/core/users/${userPk}/set_password/`, {
+        password,
+      }, {
+        headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` },
+        timeout: 10000,
+      });
+      logger.info(`[Authentik] Password set for user pk=${userPk}`);
+      return true;
+    } catch (err) {
+      logger.error('[Authentik] setUserPassword failed:', err.response?.data || err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Update the email on an Authentik user (replaces virtual email with real one).
+   * @param {number} userPk — Authentik user PK
+   * @param {string} email — real email address
+   * @returns {boolean}
+   */
+  static async updateUserEmail(userPk, email) {
+    if (!AUTHENTIK_TOKEN || !email) return false;
+    try {
+      await axios.patch(`${AUTHENTIK_URL}/api/v3/core/users/${userPk}/`, {
+        email,
+      }, {
+        headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` },
+        timeout: 10000,
+      });
+      logger.info(`[Authentik] Email updated for user pk=${userPk} to ${email}`);
+      return true;
+    } catch (err) {
+      logger.error('[Authentik] updateUserEmail failed:', err.response?.data || err.message);
+      return false;
+    }
+  }
+
+  /**
    * Sync a Telegram user with Authentik.
    * Ensures the user exists in Authentik and returns their UUID (sub).
+   * On first creation, generates a password and returns it for credential delivery.
+   *
+   * @param {object} telegramUser — Telegram user object
+   * @param {object} [opts] — Options
+   * @param {string} [opts.realEmail] — Real email to set on the Authentik user
+   * @returns {{ uuid: string, isNew: boolean, password: string|null, username: string }} | null
    */
-  static async syncTelegramUser(telegramUser) {
+  static async syncTelegramUser(telegramUser, opts = {}) {
     if (!AUTHENTIK_TOKEN) {
       logger.error('AUTHENTIK_API_TOKEN is not configured');
       return null;
@@ -109,20 +175,21 @@ class AuthentikService {
     try {
       const telegramId = String(telegramUser.id);
       const username = telegramUser.username || `tg_${telegramId}`;
-      const email = `${telegramId}@telegram.pnptv.app`; // Virtual email for Authentik
+      const email = opts.realEmail || `${telegramId}@telegram.pnptv.app`;
 
-      // 1. Check if user exists in Authentik using a filter
-      // Note: We use the telegram_id as a custom attribute or username in Authentik
+      // 1. Check if user exists in Authentik
       const searchRes = await axios.get(`${AUTHENTIK_URL}/api/v3/core/users/`, {
         params: { username: username },
         headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` }
       });
 
       let authentikUser = searchRes.data.results.find(u => u.username === username);
+      let isNew = false;
+      let password = null;
 
       if (authentikUser) {
         logger.debug(`Found existing Authentik user: ${username}`);
-        // Update user if needed (e.g., first_name changed)
+        // Update name if changed
         if (authentikUser.name !== telegramUser.first_name) {
           await axios.patch(`${AUTHENTIK_URL}/api/v3/core/users/${authentikUser.pk}/`, {
             name: telegramUser.first_name || username
@@ -130,31 +197,112 @@ class AuthentikService {
             headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` }
           });
         }
+        // If a real email is provided and the current one is the virtual email, update it
+        if (opts.realEmail && authentikUser.email && authentikUser.email.endsWith('@telegram.pnptv.app')) {
+          await AuthentikService.updateUserEmail(authentikUser.pk, opts.realEmail);
+        }
       } else {
         logger.info(`Creating new Authentik user for Telegram ID: ${telegramId}`);
+        isNew = true;
+        password = AuthentikService.generatePassword();
+
         // 2. Create user in Authentik
         const createRes = await axios.post(`${AUTHENTIK_URL}/api/v3/core/users/`, {
           username: username,
           name: telegramUser.first_name || username,
           email: email,
           type: 'internal',
+          is_active: true,
           path: 'users/telegram',
           attributes: {
-            telegram_id: telegramId
+            telegram_id: telegramId,
+            provisioned_via: 'telegram_bot',
+            provisioned_at: new Date().toISOString(),
           }
         }, {
           headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` }
         });
         authentikUser = createRes.data;
+
+        // 3. Set the generated password
+        await AuthentikService.setUserPassword(authentikUser.pk, password);
+
+        // 4. Add to default Users group if it exists
+        try {
+          const groupRes = await axios.get(`${AUTHENTIK_URL}/api/v3/core/groups/`, {
+            params: { name: 'Users' },
+            headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` },
+            timeout: 10000,
+          });
+          const usersGroup = groupRes.data.results.find(g => g.name === 'Users');
+          if (usersGroup) {
+            await axios.post(
+              `${AUTHENTIK_URL}/api/v3/core/groups/${usersGroup.pk}/add_user/`,
+              { pk: authentikUser.pk },
+              { headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` }, timeout: 10000 }
+            );
+          }
+        } catch (groupErr) {
+          logger.warn('[Authentik] Failed to add user to Users group (non-fatal):', groupErr.message);
+        }
       }
 
-      // Authentik 'pk' is the UUID if configured correctly, or we might need to get the 'sub'
-      // In Authentik v3, 'pk' is often the ID, and 'uuid' is also available.
-      return authentikUser.uuid || authentikUser.pk;
+      return {
+        uuid: authentikUser.uuid || authentikUser.pk,
+        isNew,
+        password,
+        username,
+        pk: authentikUser.pk,
+      };
 
     } catch (error) {
       logger.error('Error syncing user with Authentik:', error.response?.data || error.message);
       return null;
+    }
+  }
+
+  /**
+   * Assign Authentik groups based on PNPtv role/tier.
+   * Maps: admin → Admins, moderator → Moderators, creator → Creators, prime → Prime Members
+   * @param {string} authentikSub — UUID
+   * @param {object} opts — { role, tier, creatorStatus }
+   */
+  static async syncUserGroups(authentikSub, { role, tier, creatorStatus } = {}) {
+    if (!AUTHENTIK_TOKEN || !authentikSub) return;
+    try {
+      const userPk = await AuthentikService._getUserPkBySub(authentikSub);
+      if (!userPk) return;
+
+      const groupMappings = [
+        { name: 'Admins', condition: role === 'admin' || role === 'superadmin' },
+        { name: 'Moderators', condition: role === 'moderator' },
+        { name: 'Creators', condition: creatorStatus === 'approved' },
+        { name: 'Prime Members', condition: (tier || '').toLowerCase() === 'prime' },
+      ];
+
+      for (const mapping of groupMappings) {
+        try {
+          const groupRes = await axios.get(`${AUTHENTIK_URL}/api/v3/core/groups/`, {
+            params: { name: mapping.name },
+            headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` },
+            timeout: 10000,
+          });
+          const group = groupRes.data.results.find(g => g.name === mapping.name);
+          if (!group) continue;
+
+          if (mapping.condition) {
+            await axios.post(
+              `${AUTHENTIK_URL}/api/v3/core/groups/${group.pk}/add_user/`,
+              { pk: userPk },
+              { headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` }, timeout: 10000 }
+            ).catch(() => {}); // ignore if already in group
+          }
+        } catch {
+          // Group may not exist yet — non-fatal
+        }
+      }
+    } catch (err) {
+      logger.warn('[Authentik] syncUserGroups failed (non-fatal):', err.message);
     }
   }
 
@@ -552,6 +700,40 @@ class AuthentikService {
       const status = err.response?.status;
       const detail = err.response?.data?.detail || err.message;
       logger.error('[Authentik] isUserInCreatorsGroup failed', { authentikSub, status, detail });
+      return false;
+    }
+  }
+
+  /**
+   * Check if a user belongs to the Admins group in Authentik.
+   * @param {string} authentikSub — Authentik UUID
+   * @returns {boolean} true if the user is in the Admins group
+   */
+  static async isUserInAdminsGroup(authentikSub) {
+    if (!AUTHENTIK_TOKEN || !authentikSub) return false;
+
+    try {
+      const groupName = process.env.AUTHENTIK_ADMINS_GROUP_NAME || 'Admins';
+
+      const res = await axios.get(`${AUTHENTIK_URL}/api/v3/core/users/`, {
+        params: { uuid: authentikSub },
+        headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+        timeout: 10000,
+      });
+
+      const user = res.data.results.find(u => u.uuid === authentikSub);
+      if (!user) {
+        logger.warn('[Authentik] isUserInAdminsGroup: user not found', { authentikSub });
+        return false;
+      }
+
+      const inGroup = (user.groups_obj || []).some(g => g.name === groupName);
+      logger.debug('[Authentik] isUserInAdminsGroup result', { authentikSub, inGroup, groupName });
+      return inGroup;
+    } catch (err) {
+      const status = err.response?.status;
+      const detail = err.response?.data?.detail || err.message;
+      logger.error('[Authentik] isUserInAdminsGroup failed', { authentikSub, status, detail });
       return false;
     }
   }

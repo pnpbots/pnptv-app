@@ -3,7 +3,7 @@
 /**
  * OG (Open Graph) Service
  * Fetches content metadata for Open Graph / Twitter Card meta tags.
- * All returned image/video URLs are absolute (https://app.pnptv.app prefix).
+ * All returned image/video URLs are absolute (https://pnptv.app prefix).
  * Results are cached in Redis with appropriate TTLs.
  */
 
@@ -12,7 +12,7 @@ const { query } = require('../config/postgres');
 const { getRedis } = require('../config/redis');
 const logger = require('../utils/logger');
 
-const APP_BASE_URL = 'https://app.pnptv.app';
+const APP_BASE_URL = 'https://pnptv.app';
 const DIRECTUS_URL = process.env.DIRECTUS_URL || 'http://directus:8055';
 
 // Cache TTLs in seconds
@@ -105,8 +105,6 @@ const getPostOG = async (postId) => {
          sp.media_type,
          sp.media_urls,
          sp.video_thumbnail_url,
-         sp.media_width,
-         sp.media_height,
          u.username,
          u.first_name,
          u.photo_file_id AS author_photo
@@ -167,8 +165,8 @@ const getPostOG = async (postId) => {
         type: 'video.other',
         video: absoluteMediaUrl,
         videoType,
-        videoWidth: post.media_width || 1280,
-        videoHeight: post.media_height || 720,
+        videoWidth: 1280,
+        videoHeight: 720,
         twitterCard: 'player',
         playerUrl: `${APP_BASE_URL.replace('app.', 'api.')}/og/player/${id}`,
       };
@@ -470,7 +468,7 @@ const getVideoPreviewOG = async (postId) => {
   try {
     const result = await query(
       `SELECT sp.id, sp.media_url, sp.media_type, sp.media_urls,
-              sp.video_thumbnail_url, sp.media_width, sp.media_height
+              sp.video_thumbnail_url
        FROM social_posts sp
        WHERE sp.id = $1
          AND sp.is_deleted = false
@@ -519,8 +517,8 @@ const getVideoPreviewOG = async (postId) => {
         type: 'video.other',
         video: absoluteMediaUrl,
         videoType,
-        videoWidth: post.media_width || 1280,
-        videoHeight: post.media_height || 720,
+        videoWidth: 1280,
+        videoHeight: 720,
         twitterCard: 'player',
         playerUrl: `${APP_BASE_URL.replace('app.', 'api.')}/og/player/${id}`,
       };

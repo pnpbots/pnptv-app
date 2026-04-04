@@ -859,6 +859,67 @@ class NearbyController {
   }
 
   /**
+   * GET /api/webapp/nearby/online-users
+   * Returns users who have been active in the last 5 minutes.
+   * Excludes blocked users in both directions.
+   * Optional query params: region (country code/name), limit (default 100, max 200).
+   */
+  static async onlineUsers(req, res) {
+    try {
+      const userId = req.session?.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+      const region = req.query.region ? String(req.query.region).trim() : null;
+      const limit = Math.min(parseInt(req.query.limit, 10) || 100, 200);
+
+      const queryParams = [userId];
+      let regionClause = '';
+      if (region) {
+        queryParams.push(region);
+        regionClause = `AND u.country = $${queryParams.length}`;
+      }
+
+      const { rows } = await dbQuery(
+        `SELECT u.id AS user_id, u.username, u.first_name AS name,
+                u.photo_file_id AS photo_url, u.city, u.country,
+                u.last_active, u.telegram
+         FROM users u
+         WHERE u.last_active > NOW() - INTERVAL '5 minutes'
+           AND u.is_deleted = false
+           AND u.id != $1
+           ${regionClause}
+           AND NOT EXISTS (
+             SELECT 1 FROM blocked_users b
+             WHERE (b.user_id = $1 AND b.blocked_user_id = u.id)
+                OR (b.user_id = u.id AND b.blocked_user_id = $1)
+           )
+         ORDER BY u.last_active DESC
+         LIMIT ${limit}`,
+        queryParams
+      );
+
+      const users = rows.map((r) => ({
+        user_id: r.user_id,
+        username: r.username || null,
+        name: r.name || null,
+        photo_url: r.photo_url && (r.photo_url.startsWith('/') || r.photo_url.startsWith('http'))
+          ? r.photo_url
+          : null,
+        city: r.city || null,
+        country: r.country || null,
+        last_active: r.last_active,
+        is_online: true,
+        telegram: r.telegram || null,
+      }));
+
+      return res.status(200).json({ success: true, total: users.length, users });
+    } catch (error) {
+      logger.error('❌ onlineUsers error:', error);
+      return res.status(500).json({ error: 'Failed to fetch online users' });
+    }
+  }
+
+  /**
    * GET /api/nearby/distance/:userId
    * Get distance between authenticated user and target user
    */

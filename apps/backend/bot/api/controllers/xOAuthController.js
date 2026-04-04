@@ -109,7 +109,7 @@ const handleCallback = async (req, res) => {
     const stored = req.session.xOAuth;
     delete req.session.xOAuth;
 
-    const canonicalAppUrl = 'https://app.pnptv.app';
+    const canonicalAppUrl = 'https://pnptv.app';
     const canonicalErrorUrl = (process.env.WEBAPP_ORIGIN || process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app').replace(/\/+$/, '') + '/?error=auth_failed';
 
     if (xError || !code || !state || !stored || stored.state !== state) {
@@ -453,11 +453,11 @@ const callbackOAuth1 = async (req, res) => {
       consumerKeyRef: appRef,
     });
 
-    const webBase = (process.env.WEB_APP_URL || 'https://app.pnptv.app').replace(/\/+$/, '');
+    const webBase = (process.env.WEB_APP_URL || 'https://pnptv.app').replace(/\/+$/, '');
     return res.redirect(`${webBase}/admin/x-campaigns?oauth1=success`);
   } catch (err) {
     logger.error('OAuth 1.0a callback failed:', err);
-    const webBase = (process.env.WEB_APP_URL || 'https://app.pnptv.app').replace(/\/+$/, '');
+    const webBase = (process.env.WEB_APP_URL || 'https://pnptv.app').replace(/\/+$/, '');
     return res.redirect(`${webBase}/admin/x-campaigns?oauth1=error&msg=${encodeURIComponent(err.message)}`);
   }
 };

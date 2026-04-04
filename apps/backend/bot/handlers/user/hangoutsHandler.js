@@ -5,8 +5,7 @@ const logger = require('../../../utils/logger');
 const { hasFullAccess, safeReplyOrEdit } = require('../../utils/helpers');
 const { consumeRateLimit, getRateLimitInfo } = require('../../core/middleware/rateLimitGranular');
 const { buildHangoutsWebAppUrl } = require('../../utils/hangoutsWebApp');
-const { buildJitsiHangoutsUrl, buildJitsiRoomConfig } = require('../../utils/jitsiHangoutsWebApp');
-const jaasService = require('../../services/jaasService');
+// Video calls use Agora (bot menu) or Telegram native (webapp hangouts)
 const FeatureUrlService = require('../../services/featureUrlService');
 
 /**
@@ -210,18 +209,8 @@ const registerHangoutsHandlers = (bot) => {
 
       const displayName = ctx.from.first_name || ctx.from.username || 'User';
 
-      // Generate Jitsi URL with JAAS authentication (primary)
-      const jitsiUrl = buildJitsiHangoutsUrl({
-        roomName: call.channelName,
-        userId: ctx.from.id,
-        userName: displayName,
-        isModerator: true,
-        callId: call.id,
-        type: call.isPublic ? 'public' : 'private',
-      });
-
-      // Generate Agora WebApp URL (fallback)
-      const agoraUrl = buildHangoutsWebAppUrl({
+      // Generate WebApp URL for the hangout
+      const webAppUrl = buildHangoutsWebAppUrl({
         baseUrl: HANGOUTS_WEB_APP_URL,
         room: call.channelName,
         token: call.rtcToken,
@@ -238,17 +227,16 @@ const registerHangoutsHandlers = (bot) => {
         ? `✅ *¡Videollamada Creada!*\n\n` +
           `👥 Capacidad: 0/10 personas\n` +
           `🔗 Comparte: \`${joinLink}\`\n\n` +
-          `Elige cómo quieres entrar:`
+          `Usa el botón para entrar:`
         : `✅ *Video Call Created!*\n\n` +
           `👥 Capacity: 0/10 people\n` +
           `🔗 Share: \`${joinLink}\`\n\n` +
-          `Choose how to join:`;
+          `Use the button below to join:`;
 
       await safeReplyOrEdit(ctx, message, {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.url(lang === 'es' ? '🎥 Entrar (Jitsi)' : '🎥 Join (Jitsi)', jitsiUrl)],
-          [Markup.button.webApp(lang === 'es' ? '📱 Entrar (App)' : '📱 Join (App)', agoraUrl)],
+          [Markup.button.webApp(lang === 'es' ? '📱 Entrar' : '📱 Join Call', webAppUrl)],
           [Markup.button.callback(lang === 'es' ? '❌ Terminar Llamada' : '❌ End Call', `end_call_${call.id}`)],
           [Markup.button.callback(lang === 'es' ? '⬅️ Volver' : '⬅️ Back', 'hangouts_menu')],
         ]),
@@ -401,18 +389,7 @@ const registerHangoutsHandlers = (bot) => {
       // Check if user is creator (moderator)
       const isModerator = call.creatorId === ctx.from.id;
 
-      // Generate Jitsi URL with appropriate permissions
-      const jitsiUrl = buildJitsiHangoutsUrl({
-        roomName: call.channelName,
-        userId: ctx.from.id,
-        userName: displayName,
-        isModerator,
-        callId: call.id,
-        type: call.isPublic ? 'public' : 'private',
-      });
-
-      // Generate Agora WebApp URL (fallback)
-      const agoraUrl = buildHangoutsWebAppUrl({
+      const webAppUrl = buildHangoutsWebAppUrl({
         baseUrl: HANGOUTS_WEB_APP_URL,
         room: call.channelName,
         token: joinResult.rtcToken,
@@ -429,18 +406,17 @@ const registerHangoutsHandlers = (bot) => {
           `👥 Participantes: ${participantCount}/${call.maxParticipants}\n` +
           `📅 Creada: ${new Date(call.createdAt).toLocaleString()}\n` +
           `🔗 Compartir: \`${joinLink}\`\n\n` +
-          `Elige cómo quieres entrar:`
+          `Usa el botón para entrar:`
         : `📞 *Call Details*\n\n` +
           `👥 Participants: ${participantCount}/${call.maxParticipants}\n` +
           `📅 Created: ${new Date(call.createdAt).toLocaleString()}\n` +
           `🔗 Share: \`${joinLink}\`\n\n` +
-          `Choose how to join:`;
+          `Use the button below to join:`;
 
       await safeReplyOrEdit(ctx, message, {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.url(lang === 'es' ? '🎥 Entrar (Jitsi)' : '🎥 Join (Jitsi)', jitsiUrl)],
-          [Markup.button.webApp(lang === 'es' ? '📱 Entrar (App)' : '📱 Join (App)', agoraUrl)],
+          [Markup.button.webApp(lang === 'es' ? '📱 Entrar' : '📱 Join Call', webAppUrl)],
           [Markup.button.callback(lang === 'es' ? '❌ Terminar' : '❌ End', `end_call_${call.id}`)],
           [Markup.button.callback(lang === 'es' ? '🗑️ Eliminar' : '🗑️ Delete', `delete_call_${call.id}`)],
           [Markup.button.callback(lang === 'es' ? '⬅️ Volver' : '⬅️ Back', 'my_active_calls')],
@@ -513,18 +489,7 @@ const registerHangoutsHandlers = (bot) => {
 
       const displayName = ctx.from.first_name || ctx.from.username || 'User';
 
-      // Generate authenticated Jitsi URL using JAAS (primary option)
-      const roomNameForJitsi = `pnptv-main-room-${resolvedRoomId}`;
-      const jitsiUrl = buildJitsiHangoutsUrl({
-        roomName: roomNameForJitsi,
-        userId: ctx.from.id,
-        userName: displayName,
-        isModerator: false, // Main room participants join as viewers
-        type: 'main',
-      });
-
-      // Generate Agora WebApp URL (fallback)
-      const agoraUrl = buildHangoutsWebAppUrl({
+      const webAppUrl = buildHangoutsWebAppUrl({
         baseUrl: HANGOUTS_WEB_APP_URL,
         room: room.channelName,
         token: rtcToken,
@@ -538,17 +503,16 @@ const registerHangoutsHandlers = (bot) => {
         ? `🏠 *${room.name}*\n\n` +
           `${room.description}\n\n` +
           `👥 ${room.currentParticipants}/50 participantes\n\n` +
-          `Elige cómo quieres entrar:`
+          `Usa el botón para entrar:`
         : `🏠 *${room.name}*\n\n` +
           `${room.description}\n\n` +
           `👥 ${room.currentParticipants}/50 participants\n\n` +
-          `Choose how to join:`;
+          `Use the button below to join:`;
 
       await safeReplyOrEdit(ctx, message, {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.url(lang === 'es' ? '🎥 Entrar (Jitsi)' : '🎥 Join (Jitsi)', jitsiUrl)],
-          [Markup.button.webApp(lang === 'es' ? '📱 Entrar (App)' : '📱 Join (App)', agoraUrl)],
+          [Markup.button.webApp(lang === 'es' ? '📱 Entrar' : '📱 Join Room', webAppUrl)],
           [Markup.button.callback(lang === 'es' ? '⬅️ Volver' : '⬅️ Back', 'hangouts_menu')],
         ]),
       });

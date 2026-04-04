@@ -14,7 +14,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getXLoginUrl, getXStatus, sharePostToX, type XStatus } from "@/lib/api";
 
-const APP_BASE = "https://app.pnptv.app";
+const APP_BASE = "https://pnptv.app";
 
 // ── X Logo SVG ────────────────────────────────────────────────────────────────
 

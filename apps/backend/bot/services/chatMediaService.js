@@ -271,8 +271,119 @@ async function processChatMedia(file, userId) {
   }
 }
 
+/**
+ * Unified media processing entry point.
+ * Supports configurable output subdirectory and image dimensions.
+ *
+ * @param {object} file                   Multer file object (memoryStorage)
+ * @param {string} userId                 Authenticated user id
+ * @param {object} [options]
+ * @param {string} [options.subdir='chat']  Subdirectory under /public/uploads/
+ * @param {number} [options.maxDimension=1280]  Max image dimension in px
+ * @param {number} [options.imageQuality=78]
+ * @returns {Promise<object>}  Same shape as processChatMedia
+ */
+async function processMedia(file, userId, options = {}) {
+  const {
+    subdir = 'chat',
+    maxDimension = IMAGE_MAX_DIMENSION,
+    imageQuality = IMAGE_QUALITY,
+  } = options;
+
+  if (!file || !file.buffer || !file.mimetype) {
+    const err = new Error('No file uploaded');
+    err.userMessage = 'No file was received. Please try again.';
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const detected = await FileType.fromBuffer(file.buffer);
+  const detectedMime = detected?.mime;
+  const mediaType = MAGIC_TO_MEDIA_TYPE[detectedMime];
+
+  if (!mediaType) {
+    const err = new Error(`File content rejected: detected ${detectedMime || 'unknown'}`);
+    err.userMessage = 'Only images (jpg, png, webp, gif) and videos (mp4, webm) are allowed.';
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const uploadDir = path.join(__dirname, `../../../../public/uploads/${subdir}`);
+  await fs.mkdir(uploadDir, { recursive: true });
+
+  try {
+    if (mediaType === 'image') {
+      const ts = Date.now();
+      const mainFilename = `img-${userId}-${ts}.webp`;
+      const thumbFilename = `img-${userId}-${ts}-thumb.webp`;
+
+      const meta = await sharp(file.buffer).metadata();
+      const mainInfo = await sharp(file.buffer)
+        .rotate()
+        .withMetadata(false)
+        .resize(maxDimension, maxDimension, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: imageQuality })
+        .toFile(path.join(uploadDir, mainFilename));
+
+      await sharp(file.buffer)
+        .rotate()
+        .withMetadata(false)
+        .resize(IMAGE_THUMB_DIMENSION, IMAGE_THUMB_DIMENSION, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: THUMB_QUALITY })
+        .toFile(path.join(uploadDir, thumbFilename));
+
+      return {
+        mediaType: 'image',
+        mediaMime: detectedMime,
+        mediaUrl: `/uploads/${subdir}/${mainFilename}`,
+        thumbUrl: `/uploads/${subdir}/${thumbFilename}`,
+        width: mainInfo.width || meta.width || null,
+        height: mainInfo.height || meta.height || null,
+      };
+    } else {
+      const ts = Date.now();
+      const ext = detectedMime === 'video/webm' ? 'webm' : 'mp4';
+      const videoFilename = `vid-${userId}-${ts}.${ext}`;
+      const thumbFilename = `vid-${userId}-${ts}-thumb.webp`;
+      const videoPath = path.join(uploadDir, videoFilename);
+      const thumbPath = path.join(uploadDir, thumbFilename);
+
+      await fs.writeFile(videoPath, file.buffer);
+
+      let thumbUrl = null;
+      try {
+        await execFileAsync('ffmpeg', [
+          '-y', '-ss', '00:00:01', '-i', videoPath,
+          '-frames:v', '1', '-vf', 'scale=400:-2', '-q:v', '2', thumbPath,
+        ], { timeout: 30000 });
+        thumbUrl = `/uploads/${subdir}/${thumbFilename}`;
+      } catch (ffmpegErr) {
+        logger.warn('processMedia: ffmpeg thumbnail failed', { error: ffmpegErr.message });
+        await fs.unlink(thumbPath).catch(() => {});
+      }
+
+      return {
+        mediaType: 'video',
+        mediaMime: detectedMime,
+        mediaUrl: `/uploads/${subdir}/${videoFilename}`,
+        thumbUrl,
+        width: null,
+        height: null,
+      };
+    }
+  } catch (processingErr) {
+    if (processingErr.userMessage) throw processingErr;
+    logger.error('processMedia: processing error', processingErr);
+    const err = new Error('Media processing failed');
+    err.userMessage = 'Could not process the uploaded file. Please try a different file.';
+    err.statusCode = 500;
+    throw err;
+  }
+}
+
 module.exports = {
   processChatMedia,
+  processMedia,
   resolveMediaType,
   ALLOWED_IMAGE_MIMES,
   ALLOWED_VIDEO_MIMES,

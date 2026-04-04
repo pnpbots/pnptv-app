@@ -590,7 +590,7 @@ const telegramCallback = async (req, res) => {
 
     logger.info(`Web Telegram callback login: user ${user.id}`);
 
-    // Redirect to the original app if redirect_to was stored in session (e.g. app.pnptv.app)
+    // Redirect to the original app if redirect_to was stored in session (e.g. pnptv.app)
     // Use an explicit allowlist of trusted hostnames to prevent open redirect.
     const ALLOWED_REDIRECT_HOSTS = ['app.pnptv.app', 'pnptv.app', 'www.pnptv.app'];
     const redirectTo = req.session.authRedirectTo;
@@ -932,8 +932,25 @@ const oidcTokenExchange = async (req, res) => {
       [user.id]
     ).catch(() => {});
 
-    // 6. Build session
+    // 6. Check Authentik Admins group to determine effective role
+    let effectiveRole = user.role || 'user';
+    try {
+      const AuthentikService = require('../../../services/authentikService');
+      const isAuthentikAdmin = await AuthentikService.isUserInAdminsGroup(profile.sub);
+      if (isAuthentikAdmin && effectiveRole !== 'superadmin') {
+        effectiveRole = 'admin';
+        // Sync DB role if Authentik says admin but DB doesn't
+        if (user.role !== 'admin' && user.role !== 'superadmin') {
+          query('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2', ['admin', user.id]).catch(() => {});
+        }
+      }
+    } catch (err) {
+      logger.warn('Authentik admin group check failed, falling back to DB role', { error: err.message });
+    }
+
+    // 7. Build session
     const sessionData = buildSession(user, { last_login_method: 'oidc' });
+    sessionData.role = effectiveRole;
 
     await new Promise((resolve, reject) =>
       req.session.regenerate(err => (err ? reject(err) : resolve()))
@@ -943,10 +960,20 @@ const oidcTokenExchange = async (req, res) => {
       req.session.save(err => (err ? reject(err) : resolve()))
     );
 
-    // 7. Provision all services (Matrix, default follows) — fire-and-forget
+    // 8. Provision all services (Matrix, default follows) — fire-and-forget
     provisionAllServices(user);
 
-    logger.info(`OIDC token exchange successful: user ${user.id} (sub: ${profile.sub})`);
+    // 9. Sync Authentik groups based on PNPtv role/tier — fire-and-forget
+    try {
+      const AuthentikService = require('../../../services/authentikService');
+      AuthentikService.syncUserGroups(profile.sub, {
+        role: effectiveRole,
+        tier: user.tier,
+        creatorStatus: user.creator_status,
+      }).catch(() => {});
+    } catch {}
+
+    logger.info(`OIDC token exchange successful: user ${user.id} (sub: ${profile.sub}, role: ${effectiveRole})`);
 
     return res.json({
       authenticated: true,
@@ -963,7 +990,7 @@ const oidcTokenExchange = async (req, res) => {
         subscription_type: user.subscription_status,
         subscription_status: user.subscription_status,
         tier: user.tier || 'free',
-        role: user.role || 'user',
+        role: effectiveRole,
         terms_accepted: user.terms_accepted,
         age_verified: user.age_verified,
         photo_url: user.photo_file_id,
@@ -1655,7 +1682,7 @@ const forgotPassword = async (req, res) => {
       [user.id, token, expiresAt.toISOString()]
     );
 
-    const resetUrl = `${process.env.WEBAPP_URL || 'https://app.pnptv.app'}/reset-password?token=${token}`;
+    const resetUrl = `${process.env.WEBAPP_URL || 'https://pnptv.app'}/reset-password?token=${token}`;
     await emailService.send({
       to: email,
       subject: 'PNPtv – Restablecer contraseña',

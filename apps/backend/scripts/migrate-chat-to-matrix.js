@@ -42,7 +42,7 @@ const DRY_RUN = process.argv.includes('--dry-run');
 
 const SYNAPSE_INTERNAL_URL = process.env.MATRIX_SYNAPSE_URL || 'http://synapse:8008';
 const MATRIX_SERVER_NAME   = process.env.MATRIX_SERVER_NAME || 'matrix.pnptv.app';
-const APP_PUBLIC_URL        = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
+const APP_PUBLIC_URL        = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
 
 // Delay between individual Matrix message sends to avoid overwhelming Synapse
 const MESSAGE_DELAY_MS = 50;

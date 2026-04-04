@@ -19,7 +19,7 @@ const { getPool } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 
 const CRAWLER_UA = /Twitterbot|facebookexternalhit|LinkedInBot|Slackbot|Discordbot|WhatsApp|TelegramBot|Pinterest|Googlebot|bingbot/i;
-const BASE_URL = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
+const BASE_URL = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
 const DEFAULT_IMAGE = `${BASE_URL}/og-image.png`;
 const DEFAULT_TITLE = 'PNPtv!';
 const DEFAULT_DESC = 'PNPtv! is a private social platform for gay men into the party and play lifestyle.';

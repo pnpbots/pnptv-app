@@ -57,7 +57,7 @@ async function createDashInvoice({ usdAmount, userId, orderId, description = 'PN
     },
     checkout: {
       paymentMethods: ['DASH'],
-      redirectURL: redirectUrl || `${process.env.WEBAPP_URL || 'https://app.pnptv.app'}/live`,
+      redirectURL: redirectUrl || `${process.env.WEBAPP_URL || 'https://pnptv.app'}/live`,
       redirectAutomatically: true,
       requiresRefundEmail: false,
     },
@@ -122,7 +122,7 @@ async function createInvoice({ amount, currency = 'USD', orderId, userId, planId
     },
     checkout: {
       paymentMethods,
-      redirectURL: redirectUrl || `${process.env.WEBAPP_URL || 'https://app.pnptv.app'}/subscribe`,
+      redirectURL: redirectUrl || `${process.env.WEBAPP_URL || 'https://pnptv.app'}/subscribe`,
       redirectAutomatically: true,
       requiresRefundEmail: false,
     },

@@ -5,8 +5,6 @@ const logger = require('../../../utils/logger');
 const socketSingleton = require('../../services/socketSingleton');
 const userService = require('../../../services/userService');
 const VideoCallModel = require('../../../models/videoCallModel');
-const { buildJitsiHangoutsUrl } = require('../../utils/jitsiHangoutsWebApp');
-const jaasService = require('../../services/jaasService');
 const NotificationEmitter = require('../../services/notificationEmitter');
 const { hasAccess } = require('../../services/accessService');
 const matrixService = require('../../services/matrixService');
@@ -14,6 +12,13 @@ const BlockedUser = require('../../../models/blockedUser');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
+// getBotInstance is lazy-required inside getVideoChatStatus to avoid circular dependency
+const { invalidateLinkedCache } = require('../../core/middleware/groupSecurityEnforcement');
+
+// In-memory cache for Telegram video chat status (30s TTL)
+const _videoChatCache = new Map();
+const VIDEO_CHAT_CACHE_TTL = 30 * 1000;
+
 // Check if a photo path is a valid web URL (not a Telegram file ID)
 const isValidPhotoUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
 
@@ -60,16 +65,12 @@ const listGroups = async (req, res) => {
     const { rows } = await query(
       `SELECT g.id, g.name, g.description, g.avatar_url, g.creator_id,
               g.is_main, g.is_wall_of_fame, g.is_public, g.max_members, g.created_at, g.feed_visibility,
+              g.telegram_chat_id, g.telegram_invite_link, g.is_paid, g.price_usd,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
               (
-                (SELECT COUNT(*)::int FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true) > 0
-                OR
                 (SELECT COUNT(*)::int FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active') > 0
               ) as has_active_call,
-              COALESCE(
-                (SELECT hvc.id::text FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active' ORDER BY hvc.created_at DESC LIMIT 1),
-                (SELECT v.id::text FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true ORDER BY v.created_at DESC LIMIT 1)
-              ) as active_call_id
+              (SELECT hvc.id::text FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active' ORDER BY hvc.created_at DESC LIMIT 1) as active_call_id
        FROM hangout_groups g
        JOIN hangout_group_members gm ON gm.group_id = g.id AND gm.user_id = $1
        ORDER BY g.is_main DESC, g.created_at DESC`,
@@ -100,6 +101,10 @@ const listGroups = async (req, res) => {
       lastMessage: null, // Messages live in Matrix; frontend renders from Matrix SDK
       unreadCount: parseInt(unreadCounts[i], 10) || 0,
       feedVisibility: r.feed_visibility || 'public',
+      telegramChatId: r.telegram_chat_id || null,
+      telegramInviteLink: r.telegram_invite_link || null,
+      isPaid: !!r.is_paid,
+      priceUsd: Number(r.price_usd) || 0,
     }));
 
     return res.json({ success: true, groups });
@@ -112,37 +117,21 @@ const listGroups = async (req, res) => {
 // POST /api/webapp/hangouts/groups
 const createGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { name, description = '', isPublic = true } = req.body;
+  const { name, description = '', isPublic = true, isPaid = false, priceUsd = 0 } = req.body;
 
   if (!name?.trim()) return res.status(400).json({ error: 'Group name is required' });
 
-  try {
-    // Member+ check via live entitlement (not stale session.tier)
-    const isAdminRole = (user.role || '').toLowerCase() === 'admin' || (user.role || '').toLowerCase() === 'superadmin';
-    if (!isAdminRole) {
-      const EntitlementAccessService = require('../../services/entitlementAccessService');
-      const hasMembership = await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member');
-      if (!hasMembership) {
-        return res.status(403).json({ error: 'Member subscription required to create hangout groups' });
-      }
-    }
+  // Validate price
+  const sanitizedPrice = isPaid ? Math.max(0, Math.min(9999.99, Number(priceUsd) || 0)) : 0;
 
-    // Monthly limit: max 3 user-created hangouts per PRIME user per calendar month
-    // Atomic INSERT...SELECT to prevent race condition where concurrent requests bypass the limit
+  try {
+    // Hangout creation is open to all authenticated users
     const { rows } = await query(
-      `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members)
-       SELECT $1, $2, $3, false, $4, 25
-       WHERE (
-         SELECT COUNT(*)::int FROM hangout_groups
-         WHERE creator_id = $3 AND is_main = false AND is_wall_of_fame = false
-           AND created_at >= date_trunc('month', NOW())
-       ) < 3
+      `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members, is_paid, price_usd)
+       VALUES ($1, $2, $3, false, $4, 200000, $5, $6)
        RETURNING *`,
-      [name.trim().slice(0, 100), description.trim().slice(0, 500), user.id, isPublic !== false]
+      [name.trim().slice(0, 100), description.trim().slice(0, 500), user.id, isPublic !== false, !!isPaid, sanitizedPrice]
     );
-    if (rows.length === 0) {
-      return res.status(403).json({ error: 'Monthly hangout limit reached (3 per month)' });
-    }
 
     const group = rows[0];
 
@@ -182,6 +171,8 @@ const createGroup = async (req, res) => {
         createdAt: group.created_at,
         hasActiveCall: false,
         activeCallId: null,
+        telegramChatId: null,
+        telegramInviteLink: null,
       },
     });
   } catch (err) {
@@ -259,6 +250,10 @@ const getGroup = async (req, res) => {
         tags: g.tags || [],
         inviteCode: g.invite_code,
         feedVisibility: g.feed_visibility || 'public',
+        telegramChatId: g.telegram_chat_id || null,
+        telegramInviteLink: g.telegram_invite_link || null,
+        isPaid: !!g.is_paid,
+        priceUsd: Number(g.price_usd) || 0,
       },
       members: members.map(m => ({ ...m, photo_url: isValidPhotoUrl(m.photo_url) ? m.photo_url : null })),
     });
@@ -278,6 +273,23 @@ const joinGroup = async (req, res) => {
     const { rows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
     if (!rows[0].is_public) return res.status(403).json({ error: 'This group is invite-only' });
+
+    // Paid hangout gate — owner can always join, others need payment confirmation
+    if (rows[0].is_paid && Number(rows[0].price_usd) > 0 && String(rows[0].creator_id) !== String(user.id)) {
+      // Check if user already paid (exists as non-banned member = paid)
+      const { rows: existingMember } = await query(
+        'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND is_banned = false',
+        [groupId, user.id]
+      );
+      if (existingMember.length === 0) {
+        return res.status(402).json({
+          error: 'Payment required',
+          isPaid: true,
+          priceUsd: Number(rows[0].price_usd),
+          groupName: rows[0].name,
+        });
+      }
+    }
 
     // Ban check
     const { rows: banCheck } = await query(
@@ -342,7 +354,7 @@ const joinGroup = async (req, res) => {
       matrix_access_token: user.matrix_access_token || null,
       matrix_device_id:    user.matrix_device_id    || null,
     }).catch((matrixErr) => {
-      logger.warn(`[Matrix] joinGroup sync failed for user ${user.id} / group ${groupId}: ${matrixErr.message}`);
+      logger.error(`[Matrix] joinGroup sync failed for user ${user.id} / group ${groupId}`, { error: matrixErr.message, groupId, userId: user.id });
     });
 
     return res.json({ success: true });
@@ -374,7 +386,7 @@ const leaveGroup = async (req, res) => {
       id:             user.id,
       matrix_user_id: user.matrix_user_id || null,
     }).catch((matrixErr) => {
-      logger.warn(`[Matrix] leaveGroup sync failed for user ${user.id} / group ${groupId}: ${matrixErr.message}`);
+      logger.error(`[Matrix] leaveGroup sync failed for user ${user.id} / group ${groupId}`, { error: matrixErr.message, groupId, userId: user.id });
     });
 
     return res.json({ success: true });
@@ -445,7 +457,7 @@ const updateGroup = async (req, res) => {
       return res.status(403).json({ error: 'Only the group owner can update group details' });
     }
 
-    const { name, description, is_public } = req.body;
+    const { name, description, is_public, is_paid, price_usd } = req.body;
 
     // Build update dynamically — only touch provided fields
     const updates = [];
@@ -469,6 +481,17 @@ const updateGroup = async (req, res) => {
     if (is_public !== undefined) {
       updates.push(`is_public = $${idx++}`);
       values.push(is_public === true || is_public === 'true');
+    }
+
+    if (is_paid !== undefined) {
+      updates.push(`is_paid = $${idx++}`);
+      values.push(is_paid === true || is_paid === 'true');
+    }
+
+    if (price_usd !== undefined) {
+      const price = Math.max(0, Math.min(9999.99, Number(price_usd) || 0));
+      updates.push(`price_usd = $${idx++}`);
+      values.push(price);
     }
 
     if (updates.length === 0) {
@@ -497,6 +520,8 @@ const updateGroup = async (req, res) => {
         maxMembers: g.max_members,
         createdAt: g.created_at,
         updatedAt: g.updated_at,
+        isPaid: !!g.is_paid,
+        priceUsd: Number(g.price_usd) || 0,
       },
     });
   } catch (err) {
@@ -879,7 +904,7 @@ const sendMessage = async (req, res) => {
   }
 };
 
-// POST /api/webapp/hangouts/groups/:id/call
+// POST /api/webapp/hangouts/groups/:id/call — create Telegram video chat
 const startCall = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
@@ -889,51 +914,47 @@ const startCall = async (req, res) => {
       return res.status(403).json({ error: 'Not a member of this group' });
     }
 
-    // Check if there's already an active call for this group
-    const { rows: existing } = await query(
-      'SELECT id, channel_name FROM video_calls WHERE group_id=$1 AND is_active=true LIMIT 1',
+    // Must have a linked Telegram group
+    const { rows: groupRows } = await query(
+      'SELECT telegram_chat_id, telegram_invite_link FROM hangout_groups WHERE id = $1',
       [groupId]
     );
-
-    if (existing.length > 0) {
-      // Join existing call
-      const call = existing[0];
-      const jitsiUrl = buildJitsiHangoutsUrl({
-        roomName: call.channel_name,
-        userId: user.id,
-        userName: user.firstName || user.username || 'User',
-        isModerator: false,
-        callId: call.id,
-        type: 'public',
-      });
-      return res.json({ success: true, jitsiUrl, callId: call.id, isNew: false });
+    if (!groupRows.length || !groupRows[0].telegram_chat_id) {
+      return res.status(400).json({ error: 'Link a Telegram group first to start video calls' });
     }
 
-    // Create new call
-    const creatorName = user.firstName || user.username || 'User';
-    const call = await VideoCallModel.create({
-      creatorId: user.id,
-      creatorName,
-      title: `Group Call`,
-      maxParticipants: 50,
-      allowGuests: false,
-      enforceCamera: false,
-      isPublic: false,
+    const { telegram_chat_id, telegram_invite_link } = groupRows[0];
+    const botToken = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+
+    // Try to create a video chat in the linked Telegram group via Bot API
+    let videoChatLink = telegram_invite_link || `https://t.me/c/${String(telegram_chat_id).replace('-100', '')}`;
+    try {
+      const createResp = await fetch(`https://api.telegram.org/bot${botToken}/createVideoChat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: telegram_chat_id, title: 'Hangout Video Call' }),
+      });
+      const createData = await createResp.json();
+      if (createData.ok) {
+        // Try to get an invite link for the video chat
+        try {
+          const linkResp = await fetch(`https://api.telegram.org/bot${botToken}/exportChatInviteLink`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: telegram_chat_id }),
+          });
+          const linkData = await linkResp.json();
+          if (linkData.ok && linkData.result) videoChatLink = linkData.result;
+        } catch { /* use fallback link */ }
+      }
+    } catch (tgErr) {
+      logger.warn(`startCall: createVideoChat failed for ${telegram_chat_id}: ${tgErr.message}`);
+    }
+
+    return res.json({
+      success: true,
+      telegramInviteLink: videoChatLink,
     });
-
-    // Link to group
-    await query('UPDATE video_calls SET group_id=$1 WHERE id=$2', [groupId, call.id]);
-
-    const jitsiUrl = buildJitsiHangoutsUrl({
-      roomName: call.channelName,
-      userId: user.id,
-      userName: creatorName,
-      isModerator: true,
-      callId: call.id,
-      type: 'public',
-    });
-
-    return res.json({ success: true, jitsiUrl, callId: call.id, isNew: true });
   } catch (err) {
     logger.error('startCall hangout error', err);
     return res.status(500).json({ error: 'Failed to start call' });
@@ -966,7 +987,7 @@ const discoverGroups = async (req, res) => {
   try {
     const { rows } = await query(
       `SELECT g.id, g.name, g.description, g.avatar_url, g.creator_id,
-              g.is_public, g.created_at,
+              g.is_public, g.is_paid, g.price_usd, g.created_at,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
               (SELECT jr.status FROM hangout_join_requests jr
                WHERE jr.group_id = g.id AND jr.user_id = $1
@@ -992,6 +1013,8 @@ const discoverGroups = async (req, res) => {
       memberCount: r.member_count,
       createdAt: r.created_at,
       myRequestStatus: r.my_request_status || null,
+      isPaid: !!r.is_paid,
+      priceUsd: Number(r.price_usd) || 0,
     }));
 
     return res.json({ success: true, groups });
@@ -1955,4 +1978,124 @@ module.exports = {
   searchMessages,
   toggleReaction,
   getReactions,
+  linkTelegramGroup,
+  unlinkTelegramGroup,
+  getVideoChatStatus,
 };
+
+// POST /api/webapp/hangouts/groups/:id/link-telegram
+async function linkTelegramGroup(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  const { telegramChatId, telegramInviteLink } = req.body;
+  if (!telegramChatId) return res.status(400).json({ error: 'telegramChatId is required' });
+
+  try {
+    // Only owner or admin can link
+    const { rows: memberRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
+      [groupId, user.id]
+    );
+    const isAdminRole = (user.role || '').toLowerCase() === 'admin' || (user.role || '').toLowerCase() === 'superadmin';
+    if (!isAdminRole && (!memberRows[0] || memberRows[0].role !== 'owner')) {
+      return res.status(403).json({ error: 'Only the group owner can link a Telegram group' });
+    }
+
+    await query(
+      `UPDATE hangout_groups SET telegram_chat_id = $1, telegram_invite_link = $2 WHERE id = $3`,
+      [telegramChatId, telegramInviteLink || null, groupId]
+    );
+
+    // Invalidate security cache so newly linked group is recognized immediately
+    invalidateLinkedCache();
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('linkTelegramGroup error', err);
+    return res.status(500).json({ error: 'Failed to link Telegram group' });
+  }
+}
+
+// GET /api/webapp/hangouts/groups/:id/video-chat-status
+async function getVideoChatStatus(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    const { rows } = await query(
+      `SELECT telegram_chat_id, telegram_invite_link FROM hangout_groups WHERE id = $1`,
+      [groupId]
+    );
+
+    if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
+
+    const { telegram_chat_id, telegram_invite_link } = rows[0];
+
+    if (!telegram_chat_id) {
+      return res.json({ active: false, inviteLink: null });
+    }
+
+    // Check in-memory cache first (30s TTL)
+    const cacheKey = String(telegram_chat_id);
+    const cached = _videoChatCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < VIDEO_CHAT_CACHE_TTL) {
+      return res.json({ active: cached.active, inviteLink: telegram_invite_link || null });
+    }
+
+    let active = false;
+    try {
+      const botToken = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+      const resp = await fetch(`https://api.telegram.org/bot${botToken}/getChat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: telegram_chat_id }),
+      });
+      const data = await resp.json();
+      active = !!(data.ok && data.result && data.result.video_chat && data.result.video_chat.has_participants);
+    } catch (tgErr) {
+      logger.warn(`getVideoChatStatus: Telegram getChat failed for ${telegram_chat_id}: ${tgErr.message}`);
+      active = false;
+    }
+
+    _videoChatCache.set(cacheKey, { active, ts: Date.now() });
+    return res.json({ active, inviteLink: telegram_invite_link || null });
+  } catch (err) {
+    logger.error('getVideoChatStatus error', err);
+    return res.status(500).json({ error: 'Failed to get video chat status' });
+  }
+}
+
+// POST /api/webapp/hangouts/groups/:id/unlink-telegram
+async function unlinkTelegramGroup(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    // Only owner or admin can unlink
+    const { rows: memberRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
+      [groupId, user.id]
+    );
+    const isAdminRole = (user.role || '').toLowerCase() === 'admin' || (user.role || '').toLowerCase() === 'superadmin';
+    if (!isAdminRole && (!memberRows[0] || memberRows[0].role !== 'owner')) {
+      return res.status(403).json({ error: 'Only the group owner can unlink a Telegram group' });
+    }
+
+    await query(
+      `UPDATE hangout_groups SET telegram_chat_id = NULL, telegram_invite_link = NULL WHERE id = $1`,
+      [groupId]
+    );
+
+    invalidateLinkedCache();
+    _videoChatCache.delete(String(groupId));
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('unlinkTelegramGroup error', err);
+    return res.status(500).json({ error: 'Failed to unlink Telegram group' });
+  }
+}

@@ -47,7 +47,7 @@ const checkNearbyAccess = async (ctx) => {
       {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.url('👑 Upgrade to PRIME', 'https://app.pnptv.app/subscribe')],
+          [Markup.button.url('👑 Upgrade to PRIME', 'https://pnptv.app/subscribe')],
         ]),
       }
     );
@@ -65,7 +65,7 @@ const checkNearbyAccess = async (ctx) => {
     {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
-        [Markup.button.url('⭐ Upgrade to Member', 'https://app.pnptv.app/subscribe')],
+        [Markup.button.url('⭐ Upgrade to Member', 'https://pnptv.app/subscribe')],
       ]),
     }
   );
@@ -122,7 +122,7 @@ const showNearbyMenu = async (ctx, options = {}) => {
         : `🔍 *${count} people are near you right now!*\n\nUpgrade to Member ($4.99/mo) to see who they are.`;
 
       const keyboard = Markup.inlineKeyboard([
-        [Markup.button.url('⭐ Upgrade to Member', 'https://app.pnptv.app/subscribe')],
+        [Markup.button.url('⭐ Upgrade to Member', 'https://pnptv.app/subscribe')],
       ]);
 
       if (isNewMessage || !ctx.callbackQuery) {
@@ -159,7 +159,7 @@ const showNearbyMenu = async (ctx, options = {}) => {
       }
 
       const keyboard = Markup.inlineKeyboard([
-        [Markup.button.url('👑 Upgrade to PRIME', 'https://app.pnptv.app/subscribe')],
+        [Markup.button.url('👑 Upgrade to PRIME', 'https://pnptv.app/subscribe')],
         [Markup.button.callback('🔙 Back', 'back_to_main')],
       ]);
 

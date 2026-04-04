@@ -10,7 +10,8 @@ import { CristinaWidget } from "@/components/CristinaWidget";
 import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
 import { useNearbyToggle } from "@/components/NearbyBadge";
-import { getMessageThreads, getHangoutGroups, markThreadAsRead, type MessageThread, type HangoutGroup } from "@/lib/api";
+import { getMessageThreads, getHangoutGroups, markThreadAsRead, getProfile, type MessageThread, type HangoutGroup } from "@/lib/api";
+import { useTier } from "@/hooks/useTier";
 import { useI18n } from "@/lib/i18n";
 import { LandingPage } from "@/pages/LandingPage";
 import { connectSocket } from "@/lib/socket";
@@ -658,6 +659,7 @@ function SidebarDmChat({ userId, myDbId, onBack }: SidebarDmChatProps) {
 
 export function Layout() {
   const { isAuthenticated, isAdmin, user, isLoading } = useAuth();
+  const { tier, isPrime, isMember } = useTier();
   const { isTelegram } = useTelegram();
   useViewportHeight();
   const navigate = useNavigate();
@@ -672,6 +674,7 @@ export function Layout() {
   const [inlineDmUserId, setInlineDmUserId] = useState<string | null>(null);
   const { enabled: nearbyEnabled, toggle: toggleNearby } = useNearbyToggle();
   const mobileMenuRef = useRef<HTMLDivElement>(null);
+  const [profileData, setProfileData] = useState<any>(null);
   const isLandscape = useOrientation();
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" ? window.innerWidth < 1024 : false);
 
@@ -681,30 +684,42 @@ export function Layout() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const primaryLinks = [
-    { to: "/", label: t.nav.home, end: true },
-    { to: "/?view=hangouts", label: t.nav.hangouts },
-    { to: "/media", label: t.nav.prime },
-    { to: "/live", label: t.nav.live },
-    { to: "/channels", label: "Channels" },
-    { to: "/dm", label: t.nav.messages },
-    { to: "/main-stage", label: t.nav.mainStage },
-    { to: "/creators/apply", label: t.nav.becomeModel },
+  const navSections = [
+    {
+      label: "SOCIAL",
+      links: [
+        { to: "/?view=feed", label: t.nav.feed || "Feed" },
+        { to: "/channels", label: "Channels" },
+      ],
+    },
+    {
+      label: "CONNECT",
+      links: [
+        { to: "/?view=hangouts", label: t.nav.hangouts },
+        { to: "/dm", label: t.nav.messages },
+        { to: "/main-stage", label: t.nav.mainStage },
+      ],
+    },
+    {
+      label: "DISCOVER",
+      links: [
+        { to: "/nearby", label: t.nav.nearby },
+        { to: "/live", label: t.nav.live },
+        { to: "/media", label: t.nav.prime },
+      ],
+    },
   ];
 
   const secondaryLinks = [
-    { to: "/blog", label: "Blog" },
-    { to: "/support", label: "Help" },
-    { to: "/community-resources", label: "Community" },
+    { to: "/support", label: t.nav.help || "Help" },
+    { to: "/settings", label: t.nav.settings || "Settings" },
   ];
 
   const mobileSecondaryLinks = [
-    { to: "/blog", label: "Blog" },
-    { to: "/support", label: "Help" },
-    { to: "/community-resources", label: "Community Resources" },
+    { to: "/support", label: t.nav.help || "Help" },
+    { to: "/settings", label: t.nav.settings || "Settings" },
     { to: "/about", label: "About" },
-    { to: "/careers", label: "Careers" },
-    { to: "/creators/apply", label: t.nav.becomeModel },
+    { to: "/community-resources", label: "Community" },
   ];
 
   // Close mobile menu on route change and reset inline DM
@@ -725,6 +740,12 @@ export function Layout() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [mobileMenuOpen]);
+
+  // Fetch profile data when mobile menu opens
+  useEffect(() => {
+    if (!mobileMenuOpen || profileData) return;
+    getProfile().then((r) => { if (r.success) setProfileData(r.profile); }).catch(() => {});
+  }, [mobileMenuOpen, profileData]);
 
   // Prevent body scroll when mobile menu is open
   useEffect(() => {
@@ -789,82 +810,71 @@ export function Layout() {
       {/* ── Desktop sidebar ─────────────────────────────────────────────────── */}
       <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-72 lg:flex-col border-r border-pnp-border glass-nav">
         {/* Sidebar header */}
-        <div className="flex items-center justify-between px-6 h-16 border-b border-pnp-border">
+        <div className="flex items-center justify-between px-5 h-16 border-b border-pnp-border">
           <img src="/logo-header.png" alt="PNPtv!" className="h-9 w-auto" />
-          <div className="flex items-center gap-2">
-            {isAdmin && (
-              <button
-                onClick={() => navigate("/admin")}
-                className="p-1.5 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors"
-                aria-label="Admin panel"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </button>
-            )}
+          <div className="flex items-center gap-1">
             <button
               onClick={() => navigate("/dm")}
-              className="relative p-1.5 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors"
-              aria-label="Direct messages"
+              className="relative p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors"
+              aria-label="Messages"
+              title="Direct Messages"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
               {dmUnread > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-[#D4007A] rounded-full text-[9px] font-bold text-white flex items-center justify-center">
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-0.5 bg-[#D4007A] rounded-full text-[9px] font-bold text-white flex items-center justify-center">
                   {dmUnread > 9 ? "9+" : dmUnread}
                 </span>
               )}
-            </button>
-            <button
-              onClick={toggleNearby}
-              className="p-1.5 rounded-lg transition-colors"
-              style={{ color: nearbyEnabled ? "#FBFF00" : "#8E8E93" }}
-              aria-label={nearbyEnabled ? "Disable nearby" : "Enable nearby"}
-              title={nearbyEnabled ? "Nearby: ON" : "Nearby: OFF"}
-            >
-              <svg className="w-5 h-5" fill={nearbyEnabled ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
-              </svg>
             </button>
             <NotificationBell />
           </div>
         </div>
 
-        {/* Primary nav */}
-        <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto" aria-label="Primary navigation">
-          {primaryLinks.map((link) => (
-            <NavLink
-              key={link.to}
-              to={link.to}
-              end={link.end}
-              className={({ isActive }: { isActive: boolean }) =>
-                `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  isActive
-                    ? "nav-active"
-                    : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                }`
-              }
-            >
-              {link.label}
-            </NavLink>
+        {/* Primary nav — grouped sections */}
+        <nav className="flex-1 py-4 px-3 overflow-y-auto" aria-label="Primary navigation">
+          {navSections.map((section, idx) => (
+            <div key={section.label} className={idx > 0 ? "mt-4" : ""}>
+              <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">
+                {section.label}
+              </div>
+              <div className="space-y-0.5">
+                {section.links.map((link) => (
+                  <NavLink
+                    key={link.to}
+                    to={link.to}
+                    end={(link as any).end}
+                    className={({ isActive }: { isActive: boolean }) =>
+                      `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        isActive
+                          ? "nav-active"
+                          : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                      }`
+                    }
+                  >
+                    {link.label}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
           ))}
+
           {isAdmin && (
-            <NavLink
-              to="/admin"
-              className={({ isActive }: { isActive: boolean }) =>
-                `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  isActive
-                    ? "nav-active"
-                    : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                }`
-              }
-            >
-              {t.nav.admin}
-            </NavLink>
+            <div className="mt-4">
+              <NavLink
+                to="/admin"
+                className={({ isActive }: { isActive: boolean }) =>
+                  `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    isActive
+                      ? "nav-active"
+                      : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                  }`
+                }
+              >
+                {t.nav.admin}
+              </NavLink>
+            </div>
           )}
 
           {/* Divider before secondary links */}
@@ -921,57 +931,45 @@ export function Layout() {
       </aside>
 
       {/* ── Mobile topbar ────────────────────────────────────────────────────── */}
-      <header className="lg:hidden sticky top-0 z-40 h-14 flex items-center justify-between px-4 glass-nav border-b border-pnp-border">
-        <div className="flex items-center gap-2">
-          {/* Hamburger with unread badge */}
-          <button
-            onClick={() => setMobileMenuOpen(true)}
-            className="relative p-1.5 -ml-1 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
-            aria-label="Open menu"
-            aria-expanded={mobileMenuOpen}
-          >
-            <HamburgerIcon />
-            {(() => {
-              const hangoutUnread = hangoutGroups.reduce((sum, g) => sum + (g.unreadCount ?? 0), 0);
-              const total = dmUnread + hangoutUnread;
-              return total > 0 ? (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-[#D4007A] rounded-full text-[10px] font-bold text-white flex items-center justify-center shadow-lg shadow-[#D4007A]/40">
-                  {total > 99 ? "99+" : total}
-                </span>
-              ) : null;
-            })()}
-          </button>
-          <img src="/logo-header.png" alt="PNPtv!" className="h-9 w-auto" />
-        </div>
+      <header className="lg:hidden sticky top-0 z-40 h-14 flex items-center justify-between px-3 glass-nav border-b border-pnp-border">
+        {/* Left: logo */}
+        <img src="/logo-header.png" alt="PNPtv!" className="h-8 w-auto max-w-[110px] object-contain" />
 
-        <div className="flex items-center gap-2">
+        {/* Right: DM + bell + avatar */}
+        <div className="flex items-center gap-0.5">
           <button
-            onClick={toggleNearby}
-            className="p-1 rounded-lg transition-colors"
-            style={{ color: nearbyEnabled ? "#FBFF00" : "#8E8E93" }}
-            aria-label={nearbyEnabled ? "Disable nearby" : "Enable nearby"}
+            onClick={() => navigate("/dm")}
+            className="relative p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+            aria-label="Messages"
           >
-            <svg className="w-5 h-5" fill={nearbyEnabled ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
+            {dmUnread > 0 && (
+              <span className="absolute top-0.5 right-0.5 min-w-[16px] h-4 px-0.5 bg-[#D4007A] rounded-full text-[9px] font-bold text-white flex items-center justify-center">
+                {dmUnread > 9 ? "9+" : dmUnread}
+              </span>
+            )}
           </button>
           <NotificationBell />
+
+          {/* Profile avatar — opens slide-out menu */}
           <button
-            onClick={() => navigate("/profile")}
-            className="p-0.5 rounded-full transition-colors"
-            aria-label="My profile"
+            onClick={() => setMobileMenuOpen(true)}
+            className="relative ml-0.5 p-0.5 rounded-full transition-all active:scale-95"
+            aria-label="Open menu"
+            aria-expanded={mobileMenuOpen}
           >
             {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
               <img
                 src={user.photoUrl}
                 alt=""
-                className="w-7 h-7 rounded-full object-cover"
+                className="w-8 h-8 rounded-full object-cover ring-2 ring-pnp-border"
                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }}
               />
             ) : null}
             <div
-              className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold"
+              className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
               style={{
                 background: "linear-gradient(135deg, #D4007A, #E69138)",
                 color: "#fff",
@@ -980,13 +978,22 @@ export function Layout() {
             >
               {(user?.displayName || "U")[0].toUpperCase()}
             </div>
+            {/* Unread badge — hangouts only (DMs have their own icon now) */}
+            {(() => {
+              const hangoutUnread = hangoutGroups.reduce((sum, g) => sum + (g.unreadCount ?? 0), 0);
+              return hangoutUnread > 0 ? (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-0.5 bg-[#D4007A] rounded-full text-[9px] font-bold text-white flex items-center justify-center shadow-lg shadow-[#D4007A]/40">
+                  {hangoutUnread > 99 ? "99+" : hangoutUnread}
+                </span>
+              ) : null;
+            })()}
           </button>
         </div>
       </header>
 
       {/* ── Mobile slide-out menu ─────────────────────────────────────────────── */}
       {mobileMenuOpen && (
-        <div className="fixed inset-0 z-50 flex lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
+        <div className="fixed inset-0 z-50 flex justify-end lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
           {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -994,10 +1001,10 @@ export function Layout() {
             aria-hidden="true"
           />
 
-          {/* Panel — slides in from left */}
+          {/* Panel — slides in from right */}
           <div
             ref={mobileMenuRef}
-            className="relative w-72 h-full flex flex-col glass-nav border-r border-pnp-border animate-fade-in-up"
+            className="relative w-72 h-full flex flex-col glass-nav border-l border-pnp-border animate-fade-in-up"
             style={{ animationDuration: "0.18s" }}
           >
             {/* Header */}
@@ -1009,6 +1016,47 @@ export function Layout() {
                 aria-label="Close menu"
               >
                 <CloseIcon />
+              </button>
+            </div>
+
+            {/* Profile card */}
+            <div className="px-3 pt-3 pb-2 border-b border-pnp-border flex-shrink-0">
+              <div className="flex items-center gap-3 mb-2">
+                {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
+                  <img src={user.photoUrl} alt="" className="w-12 h-12 rounded-full object-cover ring-2 ring-[#D4007A]/30 flex-shrink-0" />
+                ) : (
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
+                    {(user?.displayName || "U")[0].toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-white truncate">{user?.displayName || "Member"}</p>
+                  {user?.username && <p className="text-[11px] text-pnp-textSecondary truncate">@{user.username}</p>}
+                  <span
+                    className="inline-block mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
+                    style={{
+                      background: isPrime ? "linear-gradient(135deg, #D4007A, #E69138)" : isMember ? "rgba(94,209,196,0.2)" : "rgba(255,255,255,0.08)",
+                      color: isPrime ? "#fff" : isMember ? "#5ED1C4" : "#8E8E93",
+                    }}
+                  >
+                    {tier || "free"}
+                  </span>
+                </div>
+              </div>
+              {profileData?.subscriptionExpires && (
+                <div className="flex items-center justify-between px-2 py-1 rounded-lg bg-white/5 mb-2">
+                  <span className="text-[11px] text-pnp-textSecondary">Next payment</span>
+                  <span className="text-[11px] font-medium text-white">
+                    {new Date(profileData.subscriptionExpires).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                  </span>
+                </div>
+              )}
+              <button
+                onClick={() => { setMobileMenuOpen(false); navigate("/profile"); }}
+                className="w-full py-1.5 rounded-xl text-[11px] font-bold text-white transition-all active:scale-98"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                View Full Profile
               </button>
             </div>
 
@@ -1121,36 +1169,7 @@ export function Layout() {
                     )}
                   </div>
 
-                  {/* User profile card */}
-                  <div className="px-3 pb-3 pt-1">
-                    <button
-                      onClick={() => {
-                        setMobileMenuOpen(false);
-                        navigate("/profile");
-                      }}
-                      className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors"
-                    >
-                      {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
-                        <img
-                          src={user.photoUrl}
-                          alt={user.displayName || "Profile"}
-                          className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }}
-                        />
-                      ) : null}
-                      <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", display: (user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http"))) ? "none" : undefined }}
-                      >
-                        {(user?.displayName || t.nav.user)[0].toUpperCase()}
-                      </div>
-                      <div className="text-left min-w-0">
-                        <div className="text-sm font-medium text-pnp-textPrimary truncate">
-                          {user?.displayName || t.nav.user}
-                        </div>
-                      </div>
-                    </button>
-                  </div>
+                  <div className="pb-2" />
                 </div>
               </>
             )}

@@ -15,7 +15,7 @@ import type { EventItem } from "@/components/events/EventCard";
 import { CallPackageCards } from "@/components/creators/CallPackageCards";
 import { SpotlightStrip, type SpotlightItem } from "@/components/SpotlightStrip";
 import { BuyTokensModal } from "@/components/BuyTokensModal";
-import { getUpcomingEvents } from "@/lib/api";
+import { getUpcomingEvents, getCastingStatus, submitCastingApplication, type CastingStatus } from "@/lib/api";
 import {
   getFeaturedPerformers,
   getLiveStreams,
@@ -125,6 +125,10 @@ export default function Live() {
   const [liveEvents, setLiveEvents] = useState<EventItem[]>([]);
   const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
 
+  // Casting application
+  const [castingStatus, setCastingStatus] = useState<CastingStatus | null>(null);
+  const [castingSubmitting, setCastingSubmitting] = useState(false);
+
   // Performers & streams
   const [performers, setPerformers] = useState<FeaturedPerformer[]>([]);
   const [performersLoading, setPerformersLoading] = useState(true);
@@ -233,6 +237,12 @@ export default function Live() {
     if (socketBalance !== null) setTokenBalance(socketBalance);
   }, [socketBalance]);
 
+  // Load casting status
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    getCastingStatus().then(setCastingStatus).catch(() => {});
+  }, [isAuthenticated]);
+
   // Booking iframe timeout — show error if still not loaded after 15 seconds.
   // The effect re-runs when bookingLoaded flips true; the cleanup cancels the
   // pending timer, so setBookingError is never called on a successful load.
@@ -320,6 +330,20 @@ export default function Live() {
     handleLoadWalletHistory();
   };
 
+  const handleCastingApply = async () => {
+    setCastingSubmitting(true);
+    try {
+      const res = await submitCastingApplication();
+      if (res.success) {
+        setCastingStatus((prev) => prev ? { ...prev, application: res.application } : prev);
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to submit application");
+    } finally {
+      setCastingSubmitting(false);
+    }
+  };
+
   // Match a performer to their live stream by hlsUrl (injected by backend) or
   // exact userId. Fuzzy name/slug matching is intentionally excluded — it
   // caused false positives when multiple performers had similar display names.
@@ -363,6 +387,59 @@ export default function Live() {
           >
             {t.live.upgradeToMember}
           </button>
+
+          {/* Casting banner for free users */}
+          {castingStatus && (
+            <div
+              className="mt-8 w-full max-w-sm rounded-2xl p-4 text-left"
+              style={{
+                background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(94,209,196,0.08))",
+                border: "1px solid rgba(212,0,122,0.25)",
+              }}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                <h3 className="text-sm font-bold text-white">We are casting now!</h3>
+              </div>
+              <p className="text-xs mb-3" style={{ color: "rgba(255,255,255,0.65)" }}>
+                Want to perform on PNP Live? You need a profile picture and {castingStatus.requiredPosts} posts to apply.
+              </p>
+              <div className="space-y-1.5 mb-3">
+                <div className="flex items-center gap-2 text-xs" style={{ color: castingStatus.hasPhoto ? "#34C759" : "#FF3B30" }}>
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                    {castingStatus.hasPhoto ? (
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    ) : (
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    )}
+                  </svg>
+                  Profile picture
+                </div>
+                <div className="flex items-center gap-2 text-xs" style={{ color: castingStatus.postCount >= castingStatus.requiredPosts ? "#34C759" : "#FF3B30" }}>
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                    {castingStatus.postCount >= castingStatus.requiredPosts ? (
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    ) : (
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    )}
+                  </svg>
+                  {castingStatus.postCount}/{castingStatus.requiredPosts} posts
+                </div>
+              </div>
+              {castingStatus.application?.status === "pending" ? (
+                <span className="text-xs font-medium" style={{ color: "#FFB340" }}>Application pending review</span>
+              ) : castingStatus.eligible ? (
+                <button
+                  onClick={handleCastingApply}
+                  disabled={castingSubmitting}
+                  className="px-5 py-2 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-90 active:scale-95 disabled:opacity-50"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  {castingSubmitting ? "Submitting..." : "Apply Now"}
+                </button>
+              ) : null}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -391,6 +468,86 @@ export default function Live() {
           </button>
         </div>
       )}
+      {/* ── Casting Banner ── */}
+      {isAuthenticated && castingStatus && (
+        <div
+          className="rounded-2xl p-4 mb-4 relative overflow-hidden"
+          style={{
+            background: "linear-gradient(135deg, rgba(212,0,122,0.12) 0%, rgba(94,209,196,0.08) 100%)",
+            border: "1px solid rgba(212,0,122,0.25)",
+          }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            <h3 className="text-sm font-bold text-white">We are casting now!</h3>
+          </div>
+          <p className="text-xs mb-3" style={{ color: "rgba(255,255,255,0.65)" }}>
+            Join PNP Live as a performer. Apply now and start streaming.
+          </p>
+
+          {castingStatus.application?.status === "pending" ? (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "rgba(255,179,64,0.1)", border: "1px solid rgba(255,179,64,0.25)" }}>
+              <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#FFB340" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-xs font-medium" style={{ color: "#FFB340" }}>Application pending review</span>
+            </div>
+          ) : castingStatus.application?.status === "approved" ? (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "rgba(52,199,89,0.1)", border: "1px solid rgba(52,199,89,0.25)" }}>
+              <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#34C759" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-xs font-medium" style={{ color: "#34C759" }}>Approved! Welcome to the team.</span>
+            </div>
+          ) : castingStatus.application?.status === "rejected" ? (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "rgba(255,59,48,0.1)", border: "1px solid rgba(255,59,48,0.25)" }}>
+              <span className="text-xs" style={{ color: "#FF3B30" }}>Not approved this time. Keep posting and try again!</span>
+            </div>
+          ) : castingStatus.eligible ? (
+            <button
+              onClick={handleCastingApply}
+              disabled={castingSubmitting}
+              className="px-5 py-2 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-90 active:scale-95 disabled:opacity-50"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              {castingSubmitting ? "Submitting..." : "Apply Now"}
+            </button>
+          ) : (
+            <div>
+              <div className="space-y-1.5 mb-3">
+                <div className="flex items-center gap-2 text-xs" style={{ color: castingStatus.hasPhoto ? "#34C759" : "#FF3B30" }}>
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                    {castingStatus.hasPhoto ? (
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    ) : (
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    )}
+                  </svg>
+                  Profile picture
+                </div>
+                <div className="flex items-center gap-2 text-xs" style={{ color: castingStatus.postCount >= castingStatus.requiredPosts ? "#34C759" : "#FF3B30" }}>
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                    {castingStatus.postCount >= castingStatus.requiredPosts ? (
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    ) : (
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    )}
+                  </svg>
+                  {castingStatus.postCount}/{castingStatus.requiredPosts} posts
+                </div>
+              </div>
+              <button
+                disabled
+                className="px-5 py-2 rounded-xl text-sm font-bold text-white/40 cursor-not-allowed"
+                style={{ background: "rgba(255,255,255,0.08)" }}
+              >
+                Apply Now
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── SpotlightStrip — active streams pinned + upcoming live events ── */}
       <SpotlightStrip
         items={[

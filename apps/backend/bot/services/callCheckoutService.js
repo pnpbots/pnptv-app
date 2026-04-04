@@ -19,7 +19,7 @@ const emailService = require('./emailservice');
 const logger = require('../../utils/logger');
 
 const CHECKOUT_DOMAIN = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
-const WEB_APP_URL = process.env.WEB_APP_URL || 'https://app.pnptv.app';
+const WEB_APP_URL = process.env.WEB_APP_URL || 'https://pnptv.app';
 
 /**
  * Escape user-supplied values before interpolation into HTML templates.
@@ -318,7 +318,7 @@ async function onCallPaymentSuccess(paymentId) {
     <p><strong>SKU:</strong> ${escapeHtml(pkg.sku || '')}</p>
   </div>
   <p>Visit the creator's profile and click <strong>Book a Call</strong> to schedule your session.</p>
-  <div style="text-align:center;margin:20px 0;"><a href="${process.env.APP_PUBLIC_URL || 'https://app.pnptv.app'}" class="btn">Open PNPtv</a></div>
+  <div style="text-align:center;margin:20px 0;"><a href="${process.env.APP_PUBLIC_URL || 'https://pnptv.app'}" class="btn">Open PNPtv</a></div>
   <div class="footer"><p>PNPtv | noreply@pnptv.app</p><p>This is an automated message. Please do not reply.</p></div>
 </div></body></html>`.trim(),
             }).catch((emailErr) => {

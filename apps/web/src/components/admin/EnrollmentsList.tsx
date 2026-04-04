@@ -245,7 +245,7 @@ export default function EnrollmentsList() {
                     {enrollment.id_document_path && (
                       <div className="mb-2">
                         <a
-                          href={`https://app.pnptv.app${enrollment.id_document_path}`}
+                          href={`https://pnptv.app${enrollment.id_document_path}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1.5 text-xs px-3 py-1 rounded-lg transition-colors"

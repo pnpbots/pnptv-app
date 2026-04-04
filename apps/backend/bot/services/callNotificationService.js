@@ -14,7 +14,7 @@ const { sendNotificationViaTelegram } = require('./notificationBotDelivery');
 const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 
-const APP_URL = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
+const APP_URL = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
 
 // ---------------------------------------------------------------------------
 // Helpers

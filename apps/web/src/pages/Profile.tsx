@@ -1278,10 +1278,29 @@ export default function Profile() {
                 )}
                 <button
                   onClick={() => navigate(`/dm/${profile.id || paramUserId}`)}
-                  className="flex-1 py-2 rounded-lg text-white text-sm font-semibold border border-white/20 hover:border-white/40 transition-colors"
+                  className="flex-1 py-2 rounded-lg text-white text-sm font-semibold border border-white/20 hover:border-white/40 transition-colors flex items-center justify-center gap-1.5"
                 >
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
                   {p.message}
                 </button>
+                {profile.username && (
+                  <button
+                    onClick={() => window.open(`https://t.me/${profile.username}`, "_blank")}
+                    title="Message on Telegram"
+                    className="p-2 rounded-lg text-white border border-white/20 hover:border-white/40 transition-colors flex items-center justify-center flex-shrink-0"
+                  >
+                    <svg
+                      className="w-4 h-4 flex-shrink-0"
+                      style={{ color: "#29B6F6" }}
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
+                    </svg>
+                  </button>
+                )}
                 {profile.creatorStatus === "active" && isAuthenticated && (() => {
                   const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
                   return (

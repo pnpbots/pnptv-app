@@ -794,7 +794,7 @@ class EmailService {
                             <p>${getStarted}</p>
 
                             <div style="text-align: center; margin-top: 20px;">
-                                <a href="https://app.pnptv.app" class="button-primary">${isSpanish ? 'Abrir PNPtv!' : 'Open PNPtv!'}</a>
+                                <a href="https://pnptv.app" class="button-primary">${isSpanish ? 'Abrir PNPtv!' : 'Open PNPtv!'}</a>
                             </div>
                             
                             <p style="text-align: center; margin-top: 30px;">${excitedMessage}</p>

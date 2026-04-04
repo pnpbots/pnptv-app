@@ -74,9 +74,6 @@ function storeMenuMessage(ctx, messageId) {
 function buildGroupMenuPayload(ctx) {
   const lang = getLanguage(ctx);
   const botUsername = ctx.botInfo?.username || process.env.BOT_USERNAME || 'pnplatinotv_bot';
-  const displayName = ctx.from?.first_name || ctx.from?.username || 'User';
-  const jitsiUrl = `https://meet.jit.si/pnptv-main-room-1#config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&userInfo.displayName=${encodeURIComponent(displayName)}`;
-
   const text = lang === 'es'
     ? `📱 *Menú PNPtv*\n\nSelecciona una opción:`
     : `📱 *PNPtv Menu*\n\nChoose an option:`;
@@ -151,10 +148,6 @@ Tap the buttons below and enjoy everything we've prepared for you — videos, Ne
 *Cristina*, our AI assistant, is here to guide you and answer questions.
 
 \`That's so hot! 🔥\``;
-
-        // Get user's display name for Jitsi
-        const displayName = ctx.from?.first_name || ctx.from?.username || 'User';
-        const jitsiUrl = `https://meet.jit.si/pnptv-main-room-1#config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&userInfo.displayName=${encodeURIComponent(displayName)}`;
 
         buttons = [
           [

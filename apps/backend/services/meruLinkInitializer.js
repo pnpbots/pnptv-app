@@ -121,31 +121,12 @@ class MeruLinkInitializer {
     try {
       // These links are for both lifetime100 and lifetimepass products.
       const knownLinks = [
-        { code: '9x9bhA', url: 'https://pay.getmeru.com/9x9bhA' },
-        { code: 'QrHN40', url: 'https://pay.getmeru.com/QrHN40' },
-        { code: 'AhWBch', url: 'https://pay.getmeru.com/AhWBch' },
-        { code: 'ONYdvU', url: 'https://pay.getmeru.com/ONYdvU' },
-        { code: 'YNLiew', url: 'https://pay.getmeru.com/YNLiew' },
-        { code: 'ke-46U', url: 'https://pay.getmeru.com/ke-46U' },
-        { code: 'FpKln2', url: 'https://pay.getmeru.com/FpKln2' },
-        { code: 'hfFBA-', url: 'https://pay.getmeru.com/hfFBA-' },
-        { code: 'gnXNVP', url: 'https://pay.getmeru.com/gnXNVP' },
-        { code: 'eS8-wC', url: 'https://pay.getmeru.com/eS8-wC' },
-        { code: 'fllJfg', url: 'https://pay.getmeru.com/fllJfg' },
-        { code: 'UV0ZQo', url: 'https://pay.getmeru.com/UV0ZQo' },
-        { code: 'W1zWVq', url: 'https://pay.getmeru.com/W1zWVq' },
-        { code: '9hwKaF', url: 'https://pay.getmeru.com/9hwKaF' },
-        { code: '1EVaWX', url: 'https://pay.getmeru.com/1EVaWX' },
-        { code: 'KJYYNr', url: 'https://pay.getmeru.com/KJYYNr' },
-        { code: 'RTUt9o', url: 'https://pay.getmeru.com/RTUt9o' },
-        { code: 'uD8-u_', url: 'https://pay.getmeru.com/uD8-u_' },
-        { code: 'nDVlJs', url: 'https://pay.getmeru.com/nDVlJs' },
-        { code: 'Xhrw5x', url: 'https://pay.getmeru.com/Xhrw5x' },
-        { code: 'AwBwet', url: 'https://pay.getmeru.com/AwBwet' },
-        { code: 'kssYDk', url: 'https://pay.getmeru.com/kssYDk' },
-        { code: 'JdPPdS', url: 'https://pay.getmeru.com/JdPPdS' },
-        { code: 'Y-yqKP', url: 'https://pay.getmeru.com/Y-yqKP' },
-        { code: 'zIYUW2', url: 'https://pay.getmeru.com/zIYUW2' },
+        { code: 'MoXzNM', url: 'https://pay.getmeru.com/MoXzNM' },
+        { code: 'Gps_Vx', url: 'https://pay.getmeru.com/Gps_Vx' },
+        { code: 'xJP7mm', url: 'https://pay.getmeru.com/xJP7mm' },
+        { code: 'EPYR_E', url: 'https://pay.getmeru.com/EPYR_E' },
+        { code: '7KHOXg', url: 'https://pay.getmeru.com/7KHOXg' },
+        { code: 'h5Zt7O', url: 'https://pay.getmeru.com/h5Zt7O' },
       ];
 
       let addedCount = 0;

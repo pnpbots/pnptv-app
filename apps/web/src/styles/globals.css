@@ -189,6 +189,16 @@
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
   }
 
+  /* Chat overlay: sit above the bottom nav + safe area on mobile, flush on desktop */
+  .chat-overlay-safe {
+    bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+  }
+  @media (min-width: 1024px) {
+    .chat-overlay-safe {
+      bottom: 0;
+    }
+  }
+
   /* Hide scrollbar while keeping scroll behaviour */
   .no-scrollbar::-webkit-scrollbar {
     display: none;

@@ -129,7 +129,7 @@ function generateEmailHtml({ customerName, planName, expiryDate, isPaid, languag
       </div>
 
       <p style="text-align: center;">
-        <a href="https://app.pnptv.app" class="button">${isSpanish ? 'Abrir PNPtv!' : 'Open PNPtv!'}</a>
+        <a href="https://pnptv.app" class="button">${isSpanish ? 'Abrir PNPtv!' : 'Open PNPtv!'}</a>
       </p>
 
       <p>${isSpanish
@@ -194,7 +194,7 @@ function generateEmailHtml({ customerName, planName, expiryDate, isPaid, languag
         : 'Enjoy Videorama, Hangouts, Nearby and all PRIME content. If you like it, subscribe to keep enjoying!'}</p>
 
       <p style="text-align: center;">
-        <a href="https://app.pnptv.app" class="button">${isSpanish ? 'Explorar PNPtv!' : 'Explore PNPtv!'}</a>
+        <a href="https://pnptv.app" class="button">${isSpanish ? 'Explorar PNPtv!' : 'Explore PNPtv!'}</a>
       </p>
 
       <p>${isSpanish ? 'Con amor' : 'With love'},<br><strong>PNPtv Team</strong></p>
@@ -215,12 +215,12 @@ function generateTelegramMessage({ customerName, planName, expiryDate, isPaid, l
 
   if (isPaid) {
     return isSpanish
-      ? `🎬 <b>PNPtv! - Tu Acceso Ha Sido Restaurado</b>\n\nHola ${customerName}!\n\nLa app PNPtv! ya esta disponible y tu suscripcion <b>${planName}</b> ha sido restaurada desde hoy.\n\nSabemos que compraste tu plan y no pudiste disfrutarlo. Ahora tu tiempo corre completo desde hoy.\n\n📋 <b>Plan:</b> ${planName}\n📅 <b>Acceso hasta:</b> ${formattedExpiry}\n✅ <b>Estado:</b> PRIME Activo\n\n👉 <a href="https://app.pnptv.app">Abrir PNPtv!</a>\n\nGracias por tu paciencia, papi! 💜`
-      : `🎬 <b>PNPtv! - Your Access Has Been Restored</b>\n\nHey ${customerName}!\n\nThe PNPtv! app is now live and your <b>${planName}</b> subscription has been restored starting today.\n\nWe know you purchased your plan and couldn't enjoy it. Now your full plan duration counts from today.\n\n📋 <b>Plan:</b> ${planName}\n📅 <b>Access until:</b> ${formattedExpiry}\n✅ <b>Status:</b> PRIME Active\n\n👉 <a href="https://app.pnptv.app">Open PNPtv!</a>\n\nThank you for your patience! 💜`;
+      ? `🎬 <b>PNPtv! - Tu Acceso Ha Sido Restaurado</b>\n\nHola ${customerName}!\n\nLa app PNPtv! ya esta disponible y tu suscripcion <b>${planName}</b> ha sido restaurada desde hoy.\n\nSabemos que compraste tu plan y no pudiste disfrutarlo. Ahora tu tiempo corre completo desde hoy.\n\n📋 <b>Plan:</b> ${planName}\n📅 <b>Acceso hasta:</b> ${formattedExpiry}\n✅ <b>Estado:</b> PRIME Activo\n\n👉 <a href="https://pnptv.app">Abrir PNPtv!</a>\n\nGracias por tu paciencia, papi! 💜`
+      : `🎬 <b>PNPtv! - Your Access Has Been Restored</b>\n\nHey ${customerName}!\n\nThe PNPtv! app is now live and your <b>${planName}</b> subscription has been restored starting today.\n\nWe know you purchased your plan and couldn't enjoy it. Now your full plan duration counts from today.\n\n📋 <b>Plan:</b> ${planName}\n📅 <b>Access until:</b> ${formattedExpiry}\n✅ <b>Status:</b> PRIME Active\n\n👉 <a href="https://pnptv.app">Open PNPtv!</a>\n\nThank you for your patience! 💜`;
   } else {
     return isSpanish
-      ? `🎬 <b>PNPtv! - 3 Dias Gratis de PRIME</b>\n\nHola ${customerName}!\n\nLa app PNPtv! ya esta disponible! Te hemos dado <b>3 dias de acceso PRIME gratis</b> para que explores todo.\n\n📋 <b>Plan:</b> 3-Day PRIME Trial\n📅 <b>Acceso hasta:</b> ${formattedExpiry}\n\nDisfruta Videorama, Hangouts, Nearby y todo el contenido PRIME!\n\n👉 <a href="https://app.pnptv.app">Explorar PNPtv!</a>\n\n💜 Si te gusta, suscribete en <a href="https://app.pnptv.app/subscribe">app.pnptv.app/subscribe</a>`
-      : `🎬 <b>PNPtv! - 3-Day Free PRIME Trial</b>\n\nHey ${customerName}!\n\nThe PNPtv! app is now live! We've given you <b>3 free days of PRIME access</b> to explore everything.\n\n📋 <b>Plan:</b> 3-Day PRIME Trial\n📅 <b>Access until:</b> ${formattedExpiry}\n\nEnjoy Videorama, Hangouts, Nearby and all PRIME content!\n\n👉 <a href="https://app.pnptv.app">Explore PNPtv!</a>\n\n💜 If you like it, subscribe at <a href="https://app.pnptv.app/subscribe">app.pnptv.app/subscribe</a>`;
+      ? `🎬 <b>PNPtv! - 3 Dias Gratis de PRIME</b>\n\nHola ${customerName}!\n\nLa app PNPtv! ya esta disponible! Te hemos dado <b>3 dias de acceso PRIME gratis</b> para que explores todo.\n\n📋 <b>Plan:</b> 3-Day PRIME Trial\n📅 <b>Acceso hasta:</b> ${formattedExpiry}\n\nDisfruta Videorama, Hangouts, Nearby y todo el contenido PRIME!\n\n👉 <a href="https://pnptv.app">Explorar PNPtv!</a>\n\n💜 Si te gusta, suscribete en <a href="https://pnptv.app/subscribe">pnptv.app/subscribe</a>`
+      : `🎬 <b>PNPtv! - 3-Day Free PRIME Trial</b>\n\nHey ${customerName}!\n\nThe PNPtv! app is now live! We've given you <b>3 free days of PRIME access</b> to explore everything.\n\n📋 <b>Plan:</b> 3-Day PRIME Trial\n📅 <b>Access until:</b> ${formattedExpiry}\n\nEnjoy Videorama, Hangouts, Nearby and all PRIME content!\n\n👉 <a href="https://pnptv.app">Explore PNPtv!</a>\n\n💜 If you like it, subscribe at <a href="https://pnptv.app/subscribe">pnptv.app/subscribe</a>`;
   }
 }
 

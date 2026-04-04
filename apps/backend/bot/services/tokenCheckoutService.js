@@ -38,7 +38,7 @@ const { cache } = require('../../config/redis');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const WEB_APP_URL = process.env.WEB_APP_URL || 'https://app.pnptv.app';
+const WEB_APP_URL = process.env.WEB_APP_URL || 'https://pnptv.app';
 const EPAYCO_WEBHOOK_DOMAIN = process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://pnptv.app';
 const BOT_WEBHOOK_DOMAIN = process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
 

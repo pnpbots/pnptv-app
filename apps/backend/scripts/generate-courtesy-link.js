@@ -2,7 +2,7 @@ require('dotenv').config({ path: require('path').resolve(__dirname, '../../../.e
 const crypto = require('crypto');
 const { query, closePool } = require('../config/postgres');
 
-const APP_URL = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
+const APP_URL = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
 
 async function generateCourtesyLink() {
   try {

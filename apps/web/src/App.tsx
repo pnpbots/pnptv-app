@@ -7,7 +7,6 @@ import { MusicPlayerProvider } from "@/hooks/useMusicPlayer";
 import { router } from "@/router";
 import { useI18n } from "@/lib/i18n";
 import ErrorBoundary from "@/components/ErrorBoundary";
-import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
 import { PermissionOnboarding } from "@/components/PermissionOnboarding";
 import { useAuth } from "@/hooks/useAuth";
@@ -127,7 +126,6 @@ function AppOverlays() {
   return (
     <>
       <UpdateBanner />
-      <PWAInstallBanner />
       <PermissionOnboarding isAuthenticated={isAuthenticated} />
       <NotificationPermissionPrompt isAuthenticated={isAuthenticated} />
     </>

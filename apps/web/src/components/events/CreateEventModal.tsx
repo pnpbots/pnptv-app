@@ -11,7 +11,7 @@ interface CreateEventModalProps {
   userGroups?: HangoutGroup[];
 }
 
-const DURATIONS = [30, 60, 90, 120, 180, 240];
+const DURATIONS = [30, 60, 90, 120, 180, 240, 360, 480, 720, 1440, 2160, 2880];
 
 function pad(n: number) { return String(n).padStart(2, "0"); }
 
@@ -242,7 +242,7 @@ export function CreateEventModal({ onClose, onCreated, defaultType, canCreateLiv
               >
                 {DURATIONS.map((d) => (
                   <option key={d} value={d}>
-                    {d < 60 ? `${d}min` : `${d / 60}h${d % 60 > 0 ? ` ${d % 60}m` : ""}`}
+                    {d < 60 ? `${d}min` : d < 1440 ? `${Math.floor(d / 60)}h${d % 60 > 0 ? ` ${d % 60}m` : ""}` : `${Math.floor(d / 1440)}d ${Math.floor((d % 1440) / 60)}h`}
                   </option>
                 ))}
               </select>

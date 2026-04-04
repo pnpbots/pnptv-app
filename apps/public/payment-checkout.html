@@ -485,8 +485,15 @@
 
     <!-- jQuery (required by ePayco SDK) -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    <!-- ePayco SDK for frontend card tokenization -->
-    <script src="https://cdn.epayco.co/sdk/epayco-2.0.0.min.js"></script>
+    <!-- ePayco SDK for frontend card tokenization (primary + fallback) -->
+    <script src="https://checkout.epayco.co/epayco.min.js"></script>
+    <script>
+        if (typeof ePayco === 'undefined') {
+            var s = document.createElement('script');
+            s.src = 'https://cdn.epayco.co/sdk/epayco-2.0.0.min.js';
+            document.head.appendChild(s);
+        }
+    </script>
     <!-- ePayco 3DS 2.0 validation (Cardinal Commerce DDC + challenge) -->
     <script src="https://multimedia.epayco.co/general/3DS/validateThreeds.min.js"></script>
 
@@ -774,6 +781,26 @@
 
         // ── ePayco card tokenization ──────────────────────────────
         async function tokenizeCard(number, year, month, cvc) {
+            // Attempt dynamic SDK load if not available
+            if (typeof ePayco === 'undefined') {
+                await new Promise(function(res, rej) {
+                    var urls = [
+                        'https://checkout.epayco.co/epayco.min.js',
+                        'https://cdn.epayco.co/sdk/epayco-2.0.0.min.js',
+                        'https://s3-us-west-2.amazonaws.com/epayco/v1.0/epayco.min.js',
+                    ];
+                    var idx = 0;
+                    function tryNext() {
+                        if (idx >= urls.length) { rej(new Error('Payment SDK unavailable')); return; }
+                        var s = document.createElement('script');
+                        s.src = urls[idx++];
+                        s.onload = function() { typeof ePayco !== 'undefined' ? res() : tryNext(); };
+                        s.onerror = tryNext;
+                        document.head.appendChild(s);
+                    }
+                    tryNext();
+                });
+            }
             return new Promise(function(resolve, reject) {
                 // Check if ePayco SDK is loaded
                 if (typeof ePayco === 'undefined') {

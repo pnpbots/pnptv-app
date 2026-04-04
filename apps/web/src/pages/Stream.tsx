@@ -6,7 +6,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 import { useI18n } from "@/lib/i18n";
 import { LivePlayer } from "@/components/LivePlayer";
-import { JitsiMeetComponent } from "@/components/hangouts";
 import { LiveRulesModal } from "@/components/LiveRulesModal";
 import { BuyTokensModal } from "@/components/BuyTokensModal";
 import { connectSocket } from "@/lib/socket";
@@ -16,7 +15,6 @@ import {
   getAllPerformers,
   getWebRTCStreams,
   getWebRTCStreamStatus,
-  getWebRTCViewerToken,
   streamHeartbeat,
   sendTip,
   TIP_AMOUNTS,
@@ -48,8 +46,6 @@ export default function Stream() {
 
   const [stream, setStream] = useState<LiveStream | null>(null);
   const [useWebRTC, setUseWebRTC] = useState(false);
-  const [jaasUrl, setJaasUrl] = useState<string | null>(null);
-  const [jaasError, setJaasError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<StreamOverlay | null>(null);
@@ -289,36 +285,9 @@ export default function Stream() {
     return () => clearInterval(interval);
   }, [loadStream]);
 
-  // Fetch JaaS meeting URL when the stream is WebRTC-based
-  useEffect(() => {
-    if (!useWebRTC || !stream) {
-      setJaasUrl(null);
-      setJaasError(null);
-      return;
-    }
-    const channelRef = extractChannelRef(stream.id) || stream.id;
-    setJaasUrl(null);
-    setJaasError(null);
-    getWebRTCViewerToken(channelRef)
-      .then((data) => {
-        if (data.meetingUrl) {
-          setJaasUrl(data.meetingUrl);
-        } else if (data.token) {
-          // Legacy wsUrl path — not expected after migration but guard against it
-          setJaasError("Stream requires a viewer token but no meeting URL was returned.");
-        } else {
-          setJaasError(data.error as string | undefined ?? "Unable to connect to stream.");
-        }
-      })
-      .catch((err: any) => {
-        setJaasError(err?.message || "Failed to load stream connection.");
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useWebRTC, stream?.id]);
-
   // Heartbeat for token deduction while watching a WebRTC stream
   useEffect(() => {
-    if (!useWebRTC || !stream || !jaasUrl) return;
+    if (!useWebRTC || !stream) return;
     const channelRef = extractChannelRef(stream.id) || stream.id;
     const interval = setInterval(async () => {
       try {
@@ -329,14 +298,13 @@ export default function Stream() {
       } catch (err: any) {
         if (err?.status === 402 || err?.response?.status === 402) {
           setShowTopUp(true);
-          setJaasUrl(null);
-          setJaasError("Insufficient tokens to continue watching.");
+          setUseWebRTC(false);
         }
       }
     }, 60000);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useWebRTC, stream?.id, jaasUrl]);
+  }, [useWebRTC, stream?.id]);
 
   // Fallback poll: refresh viewer count from the streams endpoint every 30s
   // when Socket.IO is disconnected so the displayed count does not freeze.
@@ -957,44 +925,7 @@ export default function Stream() {
 
       {/* Video Player */}
       <div ref={videoContainerRef} className="relative -mx-4 sm:-mx-6">
-        {useWebRTC ? (
-          jaasError ? (
-            <div className="relative aspect-video overflow-hidden rounded-xl bg-pnp-surface border border-pnp-border flex items-center justify-center">
-              <div className="text-center px-6">
-                <p className="text-pnp-error font-bold mb-2">Unable to Connect</p>
-                <p className="text-sm text-pnp-textSecondary mb-4">{jaasError}</p>
-                <button
-                  onClick={() => {
-                    setJaasError(null);
-                    setJaasUrl(null);
-                    setUseWebRTC(false);
-                    setLoading(true);
-                    loadStream().finally(() => setLoading(false));
-                  }}
-                  className="px-5 py-2.5 rounded-lg text-xs font-semibold text-white btn-gradient"
-                >
-                  Try Again
-                </button>
-              </div>
-            </div>
-          ) : jaasUrl ? (
-            <JitsiMeetComponent
-              meetingUrl={jaasUrl}
-              roomName={stream.name}
-              onCallEnd={() => {
-                setJaasUrl(null);
-                setUseWebRTC(false);
-              }}
-              className="w-full aspect-video"
-            />
-          ) : (
-            <div className="relative aspect-video overflow-hidden rounded-xl bg-pnp-surface border border-pnp-border flex items-center justify-center">
-              <div className="w-10 h-10 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
-            </div>
-          )
-        ) : (
-          <LivePlayer src={stream.hlsUrl} title={stream.name} overlay={overlay} />
-        )}
+        <LivePlayer src={stream.hlsUrl} title={stream.name} overlay={overlay} />
         {streamError && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-30 rounded-xl">
             <div className="text-center">

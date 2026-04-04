@@ -219,7 +219,7 @@ const registerLiveHandlers = (bot) => {
         }
 
         // Fix #12: Use actual app domain, not dead stream.pnptv.com domain
-        const streamUrl = `${process.env.WEB_APP_URL || 'https://app.pnptv.app'}/live`;
+        const streamUrl = `${process.env.WEB_APP_URL || 'https://pnptv.app'}/live`;
 
         const categoryEmoji = LiveStreamModel.getCategoryEmoji(stream.category);
 
@@ -1082,7 +1082,7 @@ const createLiveStream = async (ctx) => {
 
     // Generate stream URL with host token
     // Fix #12: Use actual app domain for stream URL
-    const streamUrl = `${process.env.WEB_APP_URL || 'https://app.pnptv.app'}/live`;
+    const streamUrl = `${process.env.WEB_APP_URL || 'https://pnptv.app'}/live`;
 
     // Store show type before clearing session
     const showType = ctx.session.temp.liveStreamShowType;

@@ -1,18 +1,15 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+// Note: joining state removed — call now opens Telegram directly
 import { useParams, useNavigate } from "react-router-dom";
 import { getCallBooking } from "@/lib/api";
-import { JitsiMeetComponent } from "@/components/hangouts";
 import { PostCallSurveyModal } from "@/components/creators/PostCallSurveyModal";
 
 export default function BookingConfirmation() {
   const { bookingId } = useParams<{ bookingId: string }>();
   const navigate = useNavigate();
   const [booking, setBooking] = useState<any>(null);
-  const [meetingData, setMeetingData] = useState<{ meetingUrl: string; roomName: string } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [inCall, setInCall] = useState(false);
   const [showSurvey, setShowSurvey] = useState(false);
 
   useEffect(() => {
@@ -34,26 +31,14 @@ export default function BookingConfirmation() {
       .finally(() => setLoading(false));
   }, [bookingId]);
 
-  // BC-H-03: Fetch fresh JaaS token on "Join Call" click, not at page load
-  const handleJoinCall = useCallback(async () => {
-    if (!bookingId || !/^\d+$/.test(bookingId)) return;
-    setJoining(true);
-    try {
-      // API returns { booking } where booking.jaas contains { meetingUrl, roomName, token }
-      const res = await getCallBooking(Number(bookingId));
-      const callData = (res.booking as any).jaas ?? (res as any).jaas ?? null;
-      if (callData?.meetingUrl) {
-        setMeetingData({ meetingUrl: callData.meetingUrl, roomName: callData.roomName });
-        setInCall(true);
-      } else {
-        setError("Unable to generate call token. Please try again.");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to join call");
-    } finally {
-      setJoining(false);
-    }
-  }, [bookingId]);
+  // Open Telegram DM with the creator to start the video call
+  const handleJoinCall = useCallback(() => {
+    const creatorUsername = booking?.creator_username;
+    const telegramUrl = creatorUsername
+      ? `https://t.me/${creatorUsername}`
+      : "https://t.me/pnptvapp";
+    window.open(telegramUrl, "_blank", "noopener,noreferrer");
+  }, [booking?.creator_username]);
 
   const startTime = booking?.start_at ? new Date(booking.start_at) : null;
   const [canJoin, setCanJoin] = useState(() => {
@@ -88,7 +73,6 @@ export default function BookingConfirmation() {
   }, [startTime]);
 
   const handleCallEnd = () => {
-    setInCall(false);
     setShowSurvey(true);
   };
 
@@ -115,19 +99,6 @@ export default function BookingConfirmation() {
         >
           Go Back
         </button>
-      </div>
-    );
-  }
-
-  if (inCall && meetingData) {
-    return (
-      <div className="h-screen" style={{ background: "#111113" }}>
-        <JitsiMeetComponent
-          meetingUrl={meetingData.meetingUrl}
-          roomName={meetingData.roomName}
-          onCallEnd={handleCallEnd}
-          fullScreen
-        />
       </div>
     );
   }
@@ -183,14 +154,14 @@ export default function BookingConfirmation() {
           </div>
         </div>
 
-        {/* Join call button */}
+        {/* Join call button — opens Telegram DM with creator */}
         <button
           onClick={handleJoinCall}
-          disabled={!canJoin || joining}
+          disabled={!canJoin}
           className="w-full py-3.5 rounded-xl font-semibold text-white text-sm transition-opacity disabled:opacity-40"
           style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
         >
-          {joining ? "Connecting..." : canJoin ? "Join Call" : timeUntilStart}
+          {canJoin ? "Join Call on Telegram" : timeUntilStart}
         </button>
 
         {/* Tutorial / Rules */}
@@ -206,9 +177,9 @@ export default function BookingConfirmation() {
               <p className="font-medium text-white mb-1">How to Join</p>
               <ol className="list-decimal list-inside space-y-1">
                 <li>Return to this page 15 minutes before your call.</li>
-                <li>Click "Join Call" — your camera & mic will activate.</li>
-                <li>Allow browser permissions for camera and microphone.</li>
-                <li>Test your audio/video before the call starts.</li>
+                <li>Click "Join Call on Telegram" — Telegram opens to the creator's DM.</li>
+                <li>The creator will start a Telegram video call at the scheduled time.</li>
+                <li>Accept the incoming video call in Telegram.</li>
               </ol>
             </div>
             <div>

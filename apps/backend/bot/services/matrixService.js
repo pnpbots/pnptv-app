@@ -533,8 +533,18 @@ async function getOrCreateDmRoom(userA, userB) {
 
     if (existing.rows.length > 0) {
       await client.query('COMMIT');
-      logger.debug(`[Matrix] Reusing DM room for ${small.id}<->${large.id}: ${existing.rows[0].matrix_room_id}`);
-      return existing.rows[0].matrix_room_id;
+      const roomId = existing.rows[0].matrix_room_id;
+      logger.debug(`[Matrix] Reusing DM room for ${small.id}<->${large.id}: ${roomId}`);
+      // Ensure caller is joined (room may be a bridge portal)
+      try {
+        const callerCreds = await provisionMatrixUser(userA);
+        if (callerCreds && callerCreds.accessToken) {
+          await synapsePost(`/_matrix/client/v3/join/${encodeURIComponent(roomId)}`, {}, callerCreds.accessToken).catch(() => {});
+        }
+      } catch (joinErr) {
+        logger.debug(`[Matrix] Auto-join DM room: ${joinErr.message}`);
+      }
+      return roomId;
     }
     await client.query('COMMIT');
   } catch (lockErr) {
@@ -542,6 +552,43 @@ async function getOrCreateDmRoom(userA, userB) {
     throw lockErr;
   } finally {
     client.release();
+  }
+
+  // Check if mautrix-telegram bridge has a portal for the partner's Telegram DM
+  // If so, use that bridged room instead of creating a new one
+  const partner = userA.id === small.id ? large : small;
+  if (partner.telegram) {
+    try {
+      const { Pool } = require('pg');
+      const bridgePool = new Pool({
+        host: 'pg-mautrix-telegram', port: 5432,
+        database: 'mautrix_telegram', user: 'mautrix_tg', password: 'mautrix_tg_secret_2026',
+        max: 2, idleTimeoutMillis: 5000,
+      });
+      const bridgePortal = await bridgePool.query(
+        `SELECT mxid FROM portal WHERE id = $1 AND mxid IS NOT NULL LIMIT 1`,
+        [`user:${partner.telegram}`]
+      );
+      await bridgePool.end();
+      if (bridgePortal.rows.length > 0) {
+        const bridgeRoomId = bridgePortal.rows[0].mxid;
+        logger.info(`[Matrix] Using bridge portal DM room for ${partner.telegram}: ${bridgeRoomId}`);
+        // Ensure caller is joined
+        const callerCreds = await provisionMatrixUser(userA);
+        if (callerCreds && callerCreds.accessToken) {
+          await synapsePost(`/_matrix/client/v3/join/${encodeURIComponent(bridgeRoomId)}`, {}, callerCreds.accessToken).catch(() => {});
+        }
+        // Persist mapping so next time we skip the bridge DB lookup
+        await query(
+          `INSERT INTO dm_matrix_rooms (user_a, user_b, matrix_room_id) VALUES ($1, $2, $3)
+           ON CONFLICT (user_a, user_b) DO UPDATE SET matrix_room_id = EXCLUDED.matrix_room_id`,
+          [small.id, large.id, bridgeRoomId]
+        );
+        return bridgeRoomId;
+      }
+    } catch (bridgeErr) {
+      logger.debug(`[Matrix] Bridge portal lookup failed: ${bridgeErr.message}`);
+    }
   }
 
   // Provision both users
@@ -642,9 +689,27 @@ async function getOrCreateHangoutRoom(hangoutGroupId, creatorUser, groupName) {
 
     if (existing.rows.length > 0) {
       await lockClient.query('COMMIT');
-      lockClient.release();
-      logger.debug(`[Matrix] Reusing hangout room for group ${hangoutGroupId}: ${existing.rows[0].matrix_room_id}`);
-      return existing.rows[0].matrix_room_id;
+      const roomId = existing.rows[0].matrix_room_id;
+      logger.debug(`[Matrix] Reusing hangout room for group ${hangoutGroupId}: ${roomId}`);
+      // Ensure the caller is joined to the room (they may not be if it's a bridge portal)
+      try {
+        const userCreds = await provisionMatrixUser(creatorUser);
+        if (userCreds && userCreds.accessToken) {
+          // Try direct join first (works for public rooms / bridge portals)
+          await synapsePost(`/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
+            {}, userCreds.accessToken).catch(async () => {
+            // If direct join fails, try admin invite then join
+            const adminToken = await getAdminToken();
+            await synapsePost(`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
+              { user_id: userCreds.matrixUserId }, adminToken).catch(() => {});
+            await synapsePost(`/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
+              {}, userCreds.accessToken).catch(() => {});
+          });
+        }
+      } catch (joinErr) {
+        logger.debug(`[Matrix] Auto-join attempt for user in hangout room: ${joinErr.message}`);
+      }
+      return roomId;
     }
 
   const creatorCreds = await provisionMatrixUser(creatorUser);
@@ -823,8 +888,8 @@ async function getMatrixToken(userId) {
     `SELECT id, telegram, username, first_name,
             matrix_user_id, matrix_access_token, matrix_device_id
      FROM users
-     WHERE id = $1 AND is_deleted = false`,
-    [userId]
+     WHERE id::text = $1 AND is_deleted = false`,
+    [String(userId)]
   );
 
   const user = result.rows[0];
@@ -965,6 +1030,37 @@ async function setUserPowerLevel(hangoutGroupId, matrixUserId, powerLevel) {
   }
 }
 
+/**
+ * Generate a LiveKit access token for Element Call.
+ * @param {string} identity — Matrix user ID or display name
+ * @param {string} roomName — LiveKit room name (use Matrix room ID)
+ * @returns {string} signed JWT
+ */
+function generateLivekitToken(identity, roomName) {
+  const jwt = require('jsonwebtoken');
+  const apiKey = process.env.LIVEKIT_API_KEY;
+  const apiSecret = process.env.LIVEKIT_API_SECRET;
+  if (!apiKey || !apiSecret) {
+    throw new Error('LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be configured');
+  }
+  const at = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: apiKey,
+    sub: identity,
+    iat: at,
+    nbf: at,
+    exp: at + 3600,
+    video: {
+      room: roomName,
+      roomJoin: true,
+      canPublish: true,
+      canSubscribe: true,
+      canPublishData: true,
+    },
+  };
+  return jwt.sign(payload, apiSecret, { algorithm: 'HS256' });
+}
+
 module.exports = {
   provisionMatrixUser,
   getOrCreateDmRoom,
@@ -980,4 +1076,5 @@ module.exports = {
   syncRoomSettings,
   setUserPowerLevel,
   syncMatrixAvatar,
+  generateLivekitToken,
 };

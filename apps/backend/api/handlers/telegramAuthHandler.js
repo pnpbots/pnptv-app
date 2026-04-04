@@ -92,16 +92,19 @@ const handleTelegramAuth = async (req, res) => {
     const telegramUser = validation.data;
     logger.info(`Telegram auth attempt for user: ${telegramUser.id} (${telegramUser.username || 'no username'})`);
 
-    // --- Phase 1: Identity Consolidation via Authentik ---
-    // Ensure user has a persistent UUID (pnptv_id) in Authentik SSO
-    const pnptvId = await AuthentikService.syncTelegramUser(telegramUser);
-    if (!pnptvId) {
+    // --- Phase 1: Identity Consolidation via Authentik (Single Source of Truth) ---
+    // Ensure user has a persistent UUID (pnptv_id) in Authentik SSO.
+    // On first login, Authentik provisions the user with a generated password
+    // and returns it so we can send credentials via Telegram DM + email.
+    const authentikResult = await AuthentikService.syncTelegramUser(telegramUser);
+    if (!authentikResult) {
       logger.error('Failed to sync user with Authentik SSO, aborting login');
       return res.status(500).json({
         error: 'Authentication sync failed',
         message: 'No pudimos sincronizar tu cuenta con el sistema de identidad centralizado.'
       });
     }
+    const pnptvId = authentikResult.uuid;
 
     // Check if user exists in our database
     let userQuery = await query(
@@ -130,7 +133,7 @@ const handleTelegramAuth = async (req, res) => {
           [
             String(telegramUser.id),
             pnptvId,
-            (telegramUser.username || '').toUpperCase(),
+            telegramUser.username ? telegramUser.username.toUpperCase() : null,
             telegramUser.first_name || '',
             telegramUser.language_code || 'en'
           ]
@@ -155,12 +158,37 @@ const handleTelegramAuth = async (req, res) => {
         });
       }
     } else {
-      // User exists, ensure pnptv_id is updated if missing
+      // User exists — sync pnptv_id, username, and first_name from Telegram
       const dbUser = userQuery.rows[0];
+      const tgUsername = telegramUser.username ? telegramUser.username.toUpperCase() : null;
+      const tgFirstName = telegramUser.first_name || null;
+
+      // Always sync username + first_name from Telegram on login
+      if (tgUsername !== dbUser.username || (tgFirstName && tgFirstName !== dbUser.first_name)) {
+        query(
+          `UPDATE users SET username = $1, first_name = COALESCE($2, first_name), updated_at = NOW() WHERE id = $3`,
+          [tgUsername, tgFirstName, dbUser.id]
+        ).catch(err => logger.warn('Username sync on login failed (non-blocking)', { userId: dbUser.id, error: err.message }));
+      }
+
       if (!dbUser.pnptv_id || dbUser.pnptv_id !== pnptvId) {
         logger.info(`Updating pnptv_id for user ${dbUser.id} to Authentik UUID ${pnptvId}`);
-        await query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2', [pnptvId, dbUser.id]);
-        dbUser.pnptv_id = pnptvId;
+        try {
+          await query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2', [pnptvId, dbUser.id]);
+          dbUser.pnptv_id = pnptvId;
+        } catch (updateError) {
+          if (updateError.code === '23505' && updateError.constraint === 'users_pnptv_id_unique') {
+            logger.warn('Telegram auth: Authentik identity already linked to another user', {
+              userId: dbUser.id,
+              pnptvId
+            });
+            return res.status(409).json({
+              error: 'identity_already_linked',
+              message: 'Esta cuenta de Authentik ya está vinculada a otro usuario de Telegram. Por favor, usa la misma cuenta de Telegram vinculada originalmente o contacta a soporte.'
+            });
+          }
+          throw updateError; // rethrow other errors
+        }
       }
     }
 
@@ -262,7 +290,66 @@ const handleTelegramAuth = async (req, res) => {
 
     // ASYNC: Provision all services in background (don't block login)
     setImmediate(async () => {
-      // 1. Matrix — DMs and hangout chat rooms
+      // 0. Authentik credential delivery — send login credentials to new users
+      if (authentikResult.isNew && authentikResult.password) {
+        try {
+          const emailService = require('../../bot/services/emailservice');
+          const loginUrl = 'https://pnptv.app';
+          const authentikUsername = authentikResult.username;
+          const generatedPassword = authentikResult.password;
+
+          // Send credentials via email (if user has a real email)
+          if (user.email && !user.email.endsWith('@telegram.pnptv.app')) {
+            await emailService.sendCredentialsEmail({
+              to: user.email,
+              customerName: user.first_name || authentikUsername,
+              username: authentikUsername,
+              password: generatedPassword,
+              loginUrl,
+              language: user.language || 'es',
+            });
+            // Also update Authentik with the real email
+            await AuthentikService.updateUserEmail(authentikResult.pk, user.email);
+          }
+
+          // Send credentials via Telegram DM
+          try {
+            const bot = require('../../bot/config/botConfig').bot;
+            if (bot) {
+              const isSpanish = (user.language || 'es') === 'es';
+              const msg = isSpanish
+                ? `🔐 *Tus credenciales de PNPtv*\n\n` +
+                  `Tu cuenta SSO ha sido creada automáticamente. Usa estas credenciales para iniciar sesión en pnptv.app y acceder a TODOS los servicios:\n\n` +
+                  `👤 *Usuario:* \`${authentikUsername}\`\n` +
+                  `🔑 *Contraseña:* \`${generatedPassword}\`\n\n` +
+                  `🌐 *Iniciar sesión:* [pnptv.app](${loginUrl})\n\n` +
+                  `_Guarda estas credenciales en un lugar seguro. Con este login accedes a PNPtv, chat, radio, reservas y todos los servicios._`
+                : `🔐 *Your PNPtv Credentials*\n\n` +
+                  `Your SSO account has been created automatically. Use these credentials to log in at pnptv.app and access ALL services:\n\n` +
+                  `👤 *Username:* \`${authentikUsername}\`\n` +
+                  `🔑 *Password:* \`${generatedPassword}\`\n\n` +
+                  `🌐 *Login:* [pnptv.app](${loginUrl})\n\n` +
+                  `_Save these credentials in a safe place. This single login gives you access to PNPtv, chat, radio, booking, and all services._`;
+
+              await bot.telegram.sendMessage(telegramUser.id, msg, { parse_mode: 'Markdown' });
+              logger.info(`[Auth] Credentials sent via Telegram DM to user ${user.id}`);
+            }
+          } catch (dmErr) {
+            logger.warn(`[Auth] Failed to send credentials via Telegram DM (non-blocking): ${dmErr.message}`);
+          }
+        } catch (credErr) {
+          logger.warn(`[Auth] Credential delivery failed (non-blocking): ${credErr.message}`);
+        }
+      }
+
+      // 1. Authentik group sync — map PNPtv role/tier to Authentik groups
+      AuthentikService.syncUserGroups(pnptvId, {
+        role: user.role,
+        tier: user.tier,
+        creatorStatus: user.creator_status,
+      }).catch(() => {});
+
+      // 2. Matrix — DMs and hangout chat rooms
       try {
         const matrixService = require('../../bot/services/matrixService');
         await matrixService.provisionMatrixUser(user);
@@ -271,7 +358,7 @@ const handleTelegramAuth = async (req, res) => {
         logger.warn(`[Auth] Matrix provisioning failed (non-blocking): ${err.message}`);
       }
 
-      // 2. PDS / Bluesky — ATProto identity (optional service, non-blocking)
+      // 3. PDS / Bluesky — ATProto identity (optional service, non-blocking)
       try {
         let pdsPath;
         try { pdsPath = require.resolve('../../bot/services/PDSProvisioningService'); } catch { pdsPath = null; }
@@ -284,7 +371,7 @@ const handleTelegramAuth = async (req, res) => {
         logger.warn(`[Auth] PDS provisioning failed (non-blocking): ${err.message}`);
       }
 
-      // 3. Default follows (idempotent)
+      // 4. Default follows (idempotent)
       enforceDefaultFollows(user.id).catch(() => {});
     });
 

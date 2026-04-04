@@ -147,8 +147,23 @@ app.get('/api/monitor/run-tests', telegramAuth, requireAdmin, runAuthTests);
 app.get('/api/monitor/auth-activity', telegramAuth, requireAdmin, getAuthActivity);
 app.get('/api/monitor/system-metrics', telegramAuth, requireAdmin, getSystemMetrics);
 
-// Logout endpoint
-app.post('/api/logout', (req, res) => {
+// Logout endpoint — destroys session and revokes Authentik OIDC tokens
+app.post('/api/logout', async (req, res) => {
+  // Attempt to revoke OIDC tokens if this was an OIDC session
+  if (req.session?.user?.last_login_method === 'oidc' || req.session?.oidcAccessToken) {
+    try {
+      const AuthentikService = require('../services/authentikService');
+      if (req.session.oidcAccessToken) {
+        await AuthentikService.revokeToken(req.session.oidcAccessToken);
+      }
+      if (req.session.oidcRefreshToken) {
+        await AuthentikService.revokeToken(req.session.oidcRefreshToken);
+      }
+    } catch (revokeErr) {
+      logger.warn('OIDC token revocation failed (non-fatal):', revokeErr.message);
+    }
+  }
+
   req.session.destroy(err => {
     if (err) {
       logger.error('Logout error:', err);

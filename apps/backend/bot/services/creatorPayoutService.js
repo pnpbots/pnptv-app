@@ -467,7 +467,7 @@ class CreatorPayoutService {
         throw new Error(daimoResult.error || 'Daimo session creation failed');
       }
 
-      const webAppUrl = process.env.WEB_APP_URL || 'https://app.pnptv.app';
+      const webAppUrl = process.env.WEB_APP_URL || 'https://pnptv.app';
       checkoutUrl = `${webAppUrl}/checkout/${newPaymentId}`;
 
       await PaymentModel.updateStatus(newPaymentId, 'pending', {

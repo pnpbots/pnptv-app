@@ -6,9 +6,15 @@ import {
   approveCreatorApplication,
   rejectCreatorApplication,
   type CreatorApplication,
+  type CastingStatus,
 } from "@/lib/api";
 import ActiveCreatorsTab from "@/components/admin/ActiveCreatorsTab";
 import EnrollmentsList from "@/components/admin/EnrollmentsList";
+import {
+  getCastingApplications,
+  reviewCastingApplication,
+  type CastingApplication,
+} from "@/lib/api";
 
 function resolvePhotoUrl(photo: string | null | undefined): string | null {
   if (!photo || typeof photo !== "string") return null;
@@ -27,7 +33,7 @@ const TYPE_LABELS: Record<string, string> = {
   full_time: "Full Time",
 };
 
-type MainTab = "applications" | "active" | "enrollments";
+type MainTab = "applications" | "active" | "enrollments" | "casting";
 
 export default function CreatorApplications() {
   const { isAdmin } = useAuth();
@@ -40,6 +46,13 @@ export default function CreatorApplications() {
   const [filter, setFilter] = useState<string>("pending");
   const [actionNotes, setActionNotes] = useState<Record<string, string>>({});
   const [processing, setProcessing] = useState<string | null>(null);
+
+  // Casting tab state
+  const [castingApps, setCastingApps] = useState<CastingApplication[]>([]);
+  const [castingCounts, setCastingCounts] = useState<Record<string, number>>({});
+  const [castingLoading, setCastingLoading] = useState(true);
+  const [castingFilter, setCastingFilter] = useState("pending");
+  const [castingNotes, setCastingNotes] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -58,6 +71,33 @@ export default function CreatorApplications() {
   useEffect(() => {
     if (isAdmin && mainTab === "applications") load();
   }, [isAdmin, load, mainTab]);
+
+  const loadCasting = useCallback(async () => {
+    setCastingLoading(true);
+    try {
+      const res = await getCastingApplications(castingFilter || undefined);
+      setCastingApps(res.applications);
+      if (res.statusCounts) setCastingCounts(res.statusCounts);
+    } catch { /* silent */ }
+    finally { setCastingLoading(false); }
+  }, [castingFilter]);
+
+  useEffect(() => {
+    if (isAdmin && mainTab === "casting") loadCasting();
+  }, [isAdmin, loadCasting, mainTab]);
+
+  const handleCastingReview = async (appId: string, decision: "approved" | "rejected") => {
+    if (processing) return;
+    setProcessing(appId);
+    try {
+      await reviewCastingApplication(appId, decision, castingNotes[appId]);
+      await loadCasting();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setProcessing(null);
+    }
+  };
 
   const handleApprove = async (id: string) => {
     if (processing) return;
@@ -116,6 +156,7 @@ export default function CreatorApplications() {
         {(
           [
             { value: "applications", label: "Applications" },
+            { value: "casting",      label: "Casting" },
             { value: "active",       label: "Active Creators" },
             { value: "enrollments",  label: "Enrollments" },
           ] as { value: MainTab; label: string }[]
@@ -143,6 +184,125 @@ export default function CreatorApplications() {
         <ActiveCreatorsTab />
       ) : mainTab === "enrollments" ? (
         <EnrollmentsList />
+      ) : mainTab === "casting" ? (
+        <>
+          {/* Casting filter tabs */}
+          <div className="flex gap-2 mb-4 overflow-x-auto">
+            {[
+              { value: "pending", label: "Pending" },
+              { value: "approved", label: "Approved" },
+              { value: "rejected", label: "Rejected" },
+              { value: "", label: "All" },
+            ].map((tab) => {
+              const count = tab.value ? castingCounts[tab.value] : Object.values(castingCounts).reduce((a, b) => a + b, 0);
+              return (
+                <button
+                  key={tab.value}
+                  onClick={() => setCastingFilter(tab.value)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0 flex items-center gap-1.5"
+                  style={
+                    castingFilter === tab.value
+                      ? { background: "rgba(212,0,122,0.15)", color: "#D4007A" }
+                      : { background: "rgba(255,255,255,0.05)", color: "#8E8E93" }
+                  }
+                >
+                  {tab.label}
+                  {count != null && count > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "rgba(255,255,255,0.1)" }}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {castingLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-24 bg-white/5 rounded-lg animate-pulse" />
+              ))}
+            </div>
+          ) : castingApps.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-white/40 text-sm">No casting applications found</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {castingApps.map((app) => (
+                <div key={app.id} className="glass-card-sm p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0">
+                      {resolvePhotoUrl(app.photo_file_id) ? (
+                        <img src={resolvePhotoUrl(app.photo_file_id)!} alt="" className="w-10 h-10 rounded-full object-cover" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
+                          {(app.first_name || app.username || "?")[0].toUpperCase()}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <button onClick={() => navigate(`/profile/${app.user_id}`)} className="text-sm font-semibold text-white hover:underline">
+                          {app.first_name || app.username}
+                        </button>
+                        {app.username && <span className="text-xs" style={{ color: "#8E8E93" }}>@{app.username}</span>}
+                        <span
+                          className="text-xs px-2 py-0.5 rounded-full font-medium"
+                          style={{
+                            background: app.status === "pending" ? "rgba(255,180,84,0.15)" : app.status === "approved" ? "rgba(94,209,196,0.15)" : "rgba(239,68,68,0.15)",
+                            color: app.status === "pending" ? "#FFB454" : app.status === "approved" ? "#5ED1C4" : "#EF4444",
+                          }}
+                        >
+                          {app.status}
+                        </span>
+                      </div>
+                      <p className="text-xs mb-1" style={{ color: "#8E8E93" }}>
+                        Tier: <strong className="text-white">{app.tier}</strong>
+                        {" \u00b7 "}
+                        Posts: <strong className="text-white">{app.post_count}</strong>
+                        {" \u00b7 "}
+                        Applied: {new Date(app.created_at).toLocaleDateString()}
+                      </p>
+                      {app.admin_notes && (
+                        <p className="text-xs text-white/50 italic mb-2">Notes: {app.admin_notes}</p>
+                      )}
+                      {app.status === "pending" && (
+                        <div className="mt-2 space-y-2">
+                          <input
+                            type="text"
+                            placeholder="Notes (optional)"
+                            value={castingNotes[app.id] || ""}
+                            onChange={(e) => setCastingNotes((prev) => ({ ...prev, [app.id]: e.target.value }))}
+                            className="w-full bg-white/5 text-white text-xs rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 placeholder:text-white/20"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleCastingReview(app.id, "approved")}
+                              disabled={processing === app.id}
+                              className="flex-1 py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
+                              style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.3)" }}
+                            >
+                              {processing === app.id ? "..." : "Approve"}
+                            </button>
+                            <button
+                              onClick={() => handleCastingReview(app.id, "rejected")}
+                              disabled={processing === app.id}
+                              className="flex-1 py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
+                              style={{ background: "rgba(239,68,68,0.1)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.2)" }}
+                            >
+                              {processing === app.id ? "..." : "Reject"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       ) : (
         <>
           {error && (

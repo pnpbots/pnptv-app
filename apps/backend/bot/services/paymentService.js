@@ -503,7 +503,7 @@ class PaymentService {
 
           if (daimoResult.success && daimoResult.daimoPaymentId) {
             // Use our React app checkout page with Daimo SDK modal
-            const webAppUrl = process.env.WEB_APP_URL || 'https://app.pnptv.app';
+            const webAppUrl = process.env.WEB_APP_URL || 'https://pnptv.app';
             paymentUrl = `${webAppUrl}/checkout/${payment.id}`;
             await PaymentModel.updateStatus(payment.id, 'pending', {
               paymentUrl,

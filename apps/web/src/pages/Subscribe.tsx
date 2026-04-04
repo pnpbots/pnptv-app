@@ -50,61 +50,16 @@ function getPlanLabel(plan: SubscriptionPlan, isMemberPlan: boolean): 'PRIME' | 
   return isMemberPlan ? 'BASIC' : 'PRIME';
 }
 
+function isLifetimePlan(plan: SubscriptionPlan): boolean {
+  return !!(plan.isLifetime || (plan.duration_days ?? plan.duration ?? 0) >= 36500);
+}
+
 export default function Subscribe() {
   const navigate = useNavigate();
-  const { refreshUser } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("subscribe");
   const t = useI18n();
   const s = t.subscribe;
-
-  const PLAN_FEATURES: Record<string, string[]> = {
-    "member-monthly": [
-      s.featureMember1,
-      s.featureMember2,
-      s.featureMember3,
-    ],
-    "week_pass": [
-      s.featureWeek1,
-      s.featureWeek2,
-      s.featureWeek3,
-      s.featureWeek4,
-    ],
-    "three_months_pass": [
-      s.featureThreeMonths1,
-      s.featureThreeMonths2,
-      s.featureThreeMonths3,
-      s.featureThreeMonths4,
-      s.featureThreeMonths5,
-    ],
-    "crystal_pass": [
-      s.featureCrystal1,
-      s.featureCrystal2,
-      s.featureCrystal3,
-      s.featureCrystal4,
-      s.featureCrystal5,
-    ],
-    "yearly_pass": [
-      s.featureYearly1,
-      s.featureYearly2,
-      s.featureYearly3,
-      s.featureYearly4,
-      s.featureYearly5,
-    ],
-    "lifetime_pass": [
-      s.featureLifetime1,
-      s.featureLifetime2,
-      s.featureLifetime3,
-      s.featureLifetime4,
-      s.featureLifetime5,
-    ],
-  };
-
-  const MEMBER_EXCLUDED = [
-    s.excludedMember1,
-    s.excludedMember2,
-    s.excludedMember3,
-    s.excludedMember4,
-  ];
 
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -394,6 +349,63 @@ export default function Subscribe() {
     }
   }
 
+  // Derive current tier display from user object
+  function renderTierBanner() {
+    if (!user) return null;
+    const tier = (user.tier || "free").toLowerCase();
+    if (tier === "prime") {
+      return (
+        <div className="mb-5 rounded-xl px-4 py-3 border border-[#FFB454]/30 bg-[#FFB454]/8 flex items-center gap-3">
+          <span className="text-[#FFB454] text-lg">★</span>
+          <div>
+            <p className="text-sm font-semibold text-[#FFB454]">{s.currentTierPrime}</p>
+            <p className="text-xs text-pnp-textSecondary">{s.extendCta}</p>
+          </div>
+        </div>
+      );
+    }
+    if (tier === "member") {
+      return (
+        <div className="mb-5 rounded-xl px-4 py-3 border border-blue-400/30 bg-blue-400/8 flex items-center gap-3">
+          <span className="text-blue-400 text-lg">◆</span>
+          <div>
+            <p className="text-sm font-semibold text-blue-400">{s.currentTierMember}</p>
+            <p className="text-xs text-pnp-textSecondary">{s.extendCta}</p>
+          </div>
+        </div>
+      );
+    }
+    // free / unknown
+    return (
+      <div className="mb-5 rounded-xl px-4 py-3 border border-white/10 bg-white/5 flex items-center gap-3">
+        <span className="text-pnp-textSecondary text-lg">○</span>
+        <div>
+          <p className="text-sm font-medium text-pnp-textPrimary">{s.currentTierFree}</p>
+          <p className="text-xs text-pnp-textSecondary">{s.upgradeCta}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Build feature list for a plan from server-driven data
+  function getPlanFeatures(plan: SubscriptionPlan, isMemberPlan: boolean): string[] {
+    if (plan.features && plan.features.length > 0) {
+      return plan.features;
+    }
+    return isMemberPlan ? [s.platformAccess] : [s.primeAccess];
+  }
+
+  // Resolve an add-on to a display label
+  function addOnLabel(addOnId: string | undefined, name?: string): string {
+    if (!addOnId) return name || "";
+    const id = addOnId.toLowerCase();
+    if (id === "pnp-member" || id === "member" || id === "basic") return s.addonMember;
+    if (id === "prime") return s.addonPrime;
+    if (id === "creator-subscription" || id === "creator") return s.addonCreator;
+    if (id.includes("private") || id.includes("call")) return s.addonPrivateCalls;
+    return name || addOnId;
+  }
+
   // Loading state
   if (loading) {
     return (
@@ -455,6 +467,9 @@ export default function Subscribe() {
     );
   }
 
+  const memberPlans = plans.filter((p) => MEMBER_PLAN_IDS.has(p.id));
+  const primePlans = plans.filter((p) => !MEMBER_PLAN_IDS.has(p.id));
+
   return (
     <div className="page-container py-6 px-4 max-w-2xl mx-auto">
       {showTutorial && <TutorialOverlay section="subscribe" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
@@ -462,13 +477,15 @@ export default function Subscribe() {
         <title>{s.pageTitle}</title>
         <meta name="description" content={s.pageDescription} />
       </Helmet>
+
       {/* Header */}
       <div className="text-center mb-6">
         <h1 className="text-2xl font-bold text-pnp-textPrimary mb-1">{s.chooseYourPlan}</h1>
-        <p className="text-sm text-pnp-textSecondary">
-          {s.subtitle}
-        </p>
+        <p className="text-sm text-pnp-textSecondary">{s.subtitle}</p>
       </div>
+
+      {/* Current tier status banner */}
+      {renderTierBanner()}
 
       {/* Currency toggle */}
       <div className="flex justify-center mb-4">
@@ -482,8 +499,9 @@ export default function Subscribe() {
 
       {/* Plan cards */}
       <div className="space-y-3 mb-6">
+
         {/* Member tier plans */}
-        {plans.some((p) => MEMBER_PLAN_IDS.has(p.id)) && (
+        {memberPlans.length > 0 && (
           <div className="mb-1">
             <div className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary">
               {s.communityMember}
@@ -493,11 +511,12 @@ export default function Subscribe() {
             </p>
           </div>
         )}
-        {plans.filter((p) => MEMBER_PLAN_IDS.has(p.id)).map((plan) => {
+        {memberPlans.map((plan) => {
           const isSelected = selectedPlan === plan.id;
-          const features = PLAN_FEATURES[plan.id] || ["Member access"];
+          const features = getPlanFeatures(plan, true);
           const displayPrice = showCOP ? formatPrice(plan.priceCOP, "COP") : formatPrice(plan.priceUSD, "USD");
           const planLabel = getPlanLabel(plan, true);
+          const hasAddOns = plan.addOns && plan.addOns.length > 0;
 
           return (
             <button
@@ -518,14 +537,19 @@ export default function Subscribe() {
                     <span className={`inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${getLabelColor(planLabel)}`}>
                       {planLabel}
                     </span>
+                    {isLifetimePlan(plan) && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider bg-[#FFB454] text-[#1C1C1E] px-2 py-0.5 rounded-full">
+                        {s.lifetime}
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-pnp-textSecondary">{s.monthly}</div>
                 </div>
                 <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
               </div>
               <ul className="space-y-1">
-                {features.map((f) => (
-                  <li key={f} className="flex items-center gap-2 text-xs text-pnp-textSecondary">
+                {features.map((f, i) => (
+                  <li key={i} className="flex items-center gap-2 text-xs text-pnp-textSecondary">
                     <svg className="w-3 h-3 text-[#D4007A] flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
@@ -533,22 +557,26 @@ export default function Subscribe() {
                   </li>
                 ))}
               </ul>
-              <ul className="space-y-1 mt-2 pt-2 border-t border-white/5">
-                {MEMBER_EXCLUDED.map((f) => (
-                  <li key={f} className="flex items-center gap-2 text-xs text-red-400/70">
-                    <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
-                    {f}
-                  </li>
-                ))}
-              </ul>
+              {hasAddOns && (
+                <div className="mt-2 pt-2 border-t border-white/5 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] text-pnp-textSecondary/70">{s.includesAddOns}</span>
+                  {plan.addOns!.map((ao) => (
+                    <span
+                      key={ao.id || ao.add_on_id}
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-white/10 text-pnp-textSecondary border border-white/10"
+                    >
+                      {addOnLabel(ao.id || ao.add_on_id, ao.name)}
+                      {ao.is_lifetime && " ∞"}
+                    </span>
+                  ))}
+                </div>
+              )}
             </button>
           );
         })}
 
         {/* PRIME tier plans */}
-        {plans.some((p) => !MEMBER_PLAN_IDS.has(p.id)) && (
+        {primePlans.length > 0 && (
           <div className="mt-4 mb-1">
             <div className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary">
               {s.prime}
@@ -558,12 +586,14 @@ export default function Subscribe() {
             </p>
           </div>
         )}
-        {plans.filter((p) => !MEMBER_PLAN_IDS.has(p.id)).map((plan) => {
+        {primePlans.map((plan) => {
           const isSelected = selectedPlan === plan.id;
           const isRecommended = plan.id === RECOMMENDED_PLAN || plan.sku === RECOMMENDED_PLAN;
-          const features = PLAN_FEATURES[plan.sku] || PLAN_FEATURES[plan.id] || ["PRIME access", "Exclusive content"];
+          const features = getPlanFeatures(plan, false);
           const displayPrice = showCOP ? formatPrice(plan.priceCOP, "COP") : formatPrice(plan.priceUSD, "USD");
           const planLabel = getPlanLabel(plan, false);
+          const hasAddOns = plan.addOns && plan.addOns.length > 0;
+          const planDays = plan.duration_days || plan.duration || 30;
 
           return (
             <button
@@ -589,26 +619,35 @@ export default function Subscribe() {
                         {s.bestValue}
                       </span>
                     )}
+                    {isLifetimePlan(plan) && !isRecommended && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider bg-[#FFB454] text-[#1C1C1E] px-2 py-0.5 rounded-full">
+                        {s.lifetime}
+                      </span>
+                    )}
                   </div>
                   <span className="text-xs text-pnp-textSecondary">
-                    {durationLabel(plan.duration_days || plan.duration || 30)}
+                    {durationLabel(planDays)}
                   </span>
                 </div>
                 <div className="text-right">
                   <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
-                  {(plan.duration_days || plan.duration || 0) >= 30 && (plan.duration_days || plan.duration || 0) < 36500 && (
+                  {planDays >= 30 && planDays < 36500 && (
                     <div className="text-[10px] text-pnp-textSecondary">
                       {showCOP
-                        ? formatPrice(plan.priceCOP / Math.max(1, Math.round((plan.duration_days || plan.duration || 30) / 30)), "COP")
-                        : formatPrice(plan.priceUSD / Math.max(1, Math.round((plan.duration_days || plan.duration || 30) / 30)), "USD")
+                        ? formatPrice(plan.priceCOP / Math.max(1, Math.round(planDays / 30)), "COP")
+                        : formatPrice(plan.priceUSD / Math.max(1, Math.round(planDays / 30)), "USD")
                       }{s.perMonth}
                     </div>
                   )}
                 </div>
               </div>
+
+              {/* "Everything in Member plus:" header for PRIME plans */}
+              <p className="text-[10px] text-pnp-textSecondary/70 mb-1.5">{s.everythingInMemberPlus}</p>
+
               <ul className="space-y-1">
-                {features.map((f) => (
-                  <li key={f} className="flex items-center gap-2 text-xs text-pnp-textSecondary">
+                {features.map((f, i) => (
+                  <li key={i} className="flex items-center gap-2 text-xs text-pnp-textSecondary">
                     <svg className="w-3 h-3 text-[#D4007A] flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
@@ -616,6 +655,21 @@ export default function Subscribe() {
                   </li>
                 ))}
               </ul>
+
+              {hasAddOns && (
+                <div className="mt-2 pt-2 border-t border-white/5 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] text-pnp-textSecondary/70">{s.includesAddOns}</span>
+                  {plan.addOns!.map((ao) => (
+                    <span
+                      key={ao.id || ao.add_on_id}
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-white/10 text-pnp-textSecondary border border-white/10"
+                    >
+                      {addOnLabel(ao.id || ao.add_on_id, ao.name)}
+                      {ao.is_lifetime && " ∞"}
+                    </span>
+                  ))}
+                </div>
+              )}
             </button>
           );
         })}
@@ -731,18 +785,17 @@ export default function Subscribe() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <p className="text-base font-semibold text-green-400">Payment confirmed!</p>
-              <p className="text-xs text-pnp-textSecondary">Activating your subscription...</p>
+              <p className="text-base font-semibold text-green-400">{s.dashPaymentConfirmed}</p>
+              <p className="text-xs text-pnp-textSecondary">{s.subscriptionNowActive}</p>
             </div>
           ) : dashSecondsLeft === 0 ? (
             <div className="flex flex-col items-center gap-3 py-6">
-              <p className="text-sm font-medium text-red-400">Invoice expired</p>
-              <p className="text-xs text-pnp-textSecondary text-center">The 15-minute payment window has closed.</p>
+              <p className="text-sm font-medium text-red-400">{s.dashExpired}</p>
               <button
                 onClick={() => { setDashInvoice(null); setDashPolling(false); setDashCopied(false); setDashSecondsLeft(900); }}
                 className="mt-1 px-4 py-2 rounded-lg bg-[#008DE4] text-white text-xs font-semibold hover:bg-[#0070b8] transition-colors"
               >
-                Try Again
+                {s.retry}
               </button>
             </div>
           ) : dashInvoice.destination && dashInvoice.amount ? (
@@ -782,10 +835,7 @@ export default function Subscribe() {
               {/* Address + Copy */}
               <div className="w-full">
                 <p className="text-[10px] text-pnp-textSecondary mb-1">{s.dashToAddress}</p>
-                <div
-                  className="flex items-center gap-2 rounded-lg px-3 py-2"
-                  style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
-                >
+                <div className="flex items-center gap-2 rounded-lg px-3 py-2 bg-white/5 border border-white/10">
                   <code className="flex-1 text-xs text-white/80 break-all font-mono">
                     {dashInvoice.destination}
                   </code>
@@ -795,8 +845,7 @@ export default function Subscribe() {
                       setDashCopied(true);
                       setTimeout(() => setDashCopied(false), 2000);
                     }}
-                    className="flex-shrink-0 text-xs font-semibold px-2 py-1 rounded transition-colors"
-                    style={{ color: dashCopied ? "#34C759" : "#008DE4" }}
+                    className={`flex-shrink-0 text-xs font-semibold px-2 py-1 rounded transition-colors ${dashCopied ? "text-green-400" : "text-[#008DE4]"}`}
                   >
                     {dashCopied ? s.dashCopied : s.dashCopyAddress}
                   </button>
@@ -812,8 +861,7 @@ export default function Subscribe() {
                 href={dashInvoice.checkoutUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs hover:underline transition-colors"
-                style={{ color: "#008DE4" }}
+                className="text-xs text-[#008DE4] hover:underline transition-colors"
               >
                 {s.dashOpenExternal}
               </a>

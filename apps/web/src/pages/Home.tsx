@@ -1,15 +1,34 @@
-import React, { useState, useCallback, lazy, Suspense } from "react";
+import React, { useState, useCallback, useEffect, lazy, Suspense } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
-import { updateProfile } from "@/lib/api";
+import { updateProfile, getHangoutGroups, getSocialFeedPosts, type HangoutGroup, type SocialPostItem } from "@/lib/api";
 import { SocialFeedTabs } from "@/components/social";
+import { UpcomingEvents } from "@/components/events/UpcomingEvents";
 import { NearbyWidget } from "@/components/NearbyWidget";
 
 const ChatEmbedded = lazy(() => import("@/pages/Chat"));
+
+const TIER_BENEFITS: Record<string, string[]> = {
+  free: ["Browse the community", "View public posts"],
+  member: [
+    "Social feed & reactions",
+    "DMs & messaging",
+    "Hangouts video rooms",
+    "PNP Live & Radio",
+    "Nearby discovery",
+  ],
+  prime: [
+    "Everything in Member +",
+    "PRIME exclusive live shows",
+    "PRIME-only VOD & posts",
+    "Early access & priority",
+    "Private video calls",
+  ],
+};
 
 export default function Home() {
   const { user, isAuthenticated } = useAuth();
@@ -19,22 +38,44 @@ export default function Home() {
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("home");
 
   const [contentDisclaimer, setContentDisclaimer] = useState(user?.contentDisclaimer || false);
+  const [myHangouts, setMyHangouts] = useState<HangoutGroup[]>([]);
+  const [previewPosts, setPreviewPosts] = useState<SocialPostItem[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const username = user?.username || user?.displayName || "user";
+  const tierLabel = isPrime ? "PRIME" : isMember ? "Member" : "Free";
+  const benefits = TIER_BENEFITS[tier] || TIER_BENEFITS["free"];
+
+  // Fetch user's hangout groups for the channel strip
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    getHangoutGroups()
+      .then((r) => { if (r.success) setMyHangouts(r.groups); })
+      .catch(() => {});
+  }, [isAuthenticated]);
+
+  // Fetch preview posts for dashboard
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    setPreviewLoading(true);
+    getSocialFeedPosts(undefined, 3)
+      .then((r) => { if (r.success) setPreviewPosts(r.posts || []); })
+      .catch(() => {})
+      .finally(() => setPreviewLoading(false));
+  }, [isAuthenticated]);
 
   const searchParams = new URLSearchParams(location.search);
-  const viewMode = searchParams.get("view") === "hangouts" ? "hangouts" : "feed";
+  const rawView = searchParams.get("view");
+  const viewMode = rawView === "hangouts" ? "hangouts" : rawView === "home" ? "home" : "feed";
 
   // Read optional hashtag filter from ?tag= query param (only applies in feed mode)
   const hashtagFilter = viewMode === "feed" ? (searchParams.get("tag") || undefined) : undefined;
+  // Read optional hangout filter from ?hangout= query param
+  const hangoutFilter = viewMode === "feed" ? (searchParams.get("hangout") || undefined) : undefined;
 
-  const handleSetView = (mode: "feed" | "hangouts") => {
-    const params = new URLSearchParams(location.search);
-    if (mode === "hangouts") {
-      params.set("view", "hangouts");
-    } else {
-      params.delete("view");
-    }
+  const handleSetView = (mode: "home" | "feed" | "hangouts") => {
+    const params = new URLSearchParams();
+    params.set("view", mode);
     navigate(`/?${params.toString()}`, { replace: true });
   };
 
@@ -47,28 +88,125 @@ export default function Home() {
     <div className="max-w-5xl mx-auto px-4 py-6">
       <Helmet>
         <title>Home — PNPtv!</title>
-        <meta name="description" content="Your PNPtv feed. Browse announcements, featured performers, and community posts." />
+        <meta name="description" content="Your PNPtv home. Browse your feed, upcoming events, and community posts." />
       </Helmet>
       {showTutorial && viewMode === "feed" && <TutorialOverlay section="home" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
 
-      {/* Slim hero bar */}
-      <div className="flex items-center justify-between px-4 py-2.5 glass-card-sm mb-3 animate-fade-in-up">
-        <h1 className="text-sm font-bold text-white">
-          High <span role="img" aria-label="wind">🌬️</span>{" "}
-          <span className="text-gradient">@{username}</span>
-        </h1>
-        <span
-          className="text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex-shrink-0"
-          style={
-            isPrime
-              ? { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }
-              : { background: "rgba(255,255,255,0.06)", color: "#555" }
-          }
-        >
-          {tier}
-        </span>
-      </div>
+      {/* Dashboard: Welcome + Latest Posts + Events — only in home view */}
+      {isAuthenticated && viewMode === "home" && (
+        <div className="mb-6">
+          {/* Welcome + Posts — side-by-side on desktop */}
+          <div className="lg:grid lg:grid-cols-2 lg:gap-4 mb-4">
+            {/* Welcome Card */}
+            <div
+              className="rounded-2xl p-5 mb-4 lg:mb-0"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <h2 className="text-lg font-bold text-white">Welcome, @{username}</h2>
+                <span
+                  className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+                  style={
+                    isPrime
+                      ? { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }
+                      : isMember
+                        ? { background: "rgba(59,130,246,0.15)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.3)" }
+                        : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
+                  }
+                >
+                  {tierLabel}
+                </span>
+              </div>
+              <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>Your {tierLabel} benefits:</p>
+              <ul className="space-y-1.5">
+                {benefits.map((b) => (
+                  <li key={b} className="text-xs text-white/70 flex items-center gap-1.5">
+                    <span style={{ color: "#D4007A" }}>&#10003;</span> {b}
+                  </li>
+                ))}
+              </ul>
+              {!isPrime && (
+                <button
+                  onClick={() => navigate("/subscribe")}
+                  className="mt-3 text-xs font-semibold transition-opacity hover:opacity-80"
+                  style={{ color: "#D4007A" }}
+                >
+                  Upgrade to {isMember ? "PRIME" : "Member"} &rarr;
+                </button>
+              )}
+            </div>
 
+            {/* Latest Posts Preview */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider">Latest Posts</h3>
+                <button
+                  onClick={() => handleSetView("feed")}
+                  className="text-xs font-semibold transition-opacity hover:opacity-80"
+                  style={{ color: "#D4007A" }}
+                >
+                  View all
+                </button>
+              </div>
+              {previewLoading ? (
+                <div className="space-y-3">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="rounded-xl p-4 animate-pulse" style={{ background: "rgba(255,255,255,0.03)" }}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-8 h-8 rounded-full" style={{ background: "rgba(255,255,255,0.06)" }} />
+                        <div className="h-3 w-24 rounded" style={{ background: "rgba(255,255,255,0.06)" }} />
+                      </div>
+                      <div className="h-3 w-full rounded mb-1" style={{ background: "rgba(255,255,255,0.04)" }} />
+                      <div className="h-3 w-2/3 rounded" style={{ background: "rgba(255,255,255,0.04)" }} />
+                    </div>
+                  ))}
+                </div>
+              ) : previewPosts.length > 0 ? (
+                <div className="space-y-3">
+                  {previewPosts.map((post) => (
+                    <button
+                      key={post.id}
+                      onClick={() => navigate(`/social/post/${post.id}`)}
+                      className="w-full rounded-xl p-3 text-left transition-all hover:brightness-110"
+                      style={{ background: "rgba(255,255,255,0.03)" }}
+                    >
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <div className="w-7 h-7 rounded-full overflow-hidden flex-shrink-0" style={{ background: "rgba(255,255,255,0.06)" }}>
+                          {post.author_photo && (
+                            <img src={post.author_photo} alt="" className="w-full h-full object-cover" />
+                          )}
+                        </div>
+                        <span className="text-xs font-semibold text-white truncate">
+                          {post.author_first_name || post.author_username}
+                        </span>
+                      </div>
+                      <p className="text-xs text-white/60 line-clamp-2 leading-relaxed">{post.content}</p>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl p-6 text-center" style={{ background: "rgba(255,255,255,0.03)" }}>
+                  <p className="text-xs" style={{ color: "#8E8E93" }}>No posts yet. Be the first to share!</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Upcoming Events */}
+          <UpcomingEvents
+            limit={5}
+            title="Upcoming Events"
+            currentUserId={user?.dbId ? String(user.dbId) : ""}
+            isAdmin={isAdmin}
+          />
+        </div>
+      )}
+
+      {/* Below sections only show in feed/hangouts mode (not home dashboard) */}
+      {viewMode !== "home" && <>
       {/* Desktop: Nearby widget + quick cards */}
       <div className="hidden lg:block mb-6 space-y-4">
         <NearbyWidget />
@@ -211,8 +349,69 @@ export default function Home() {
         </button>
       </div>
 
+      {/* Channel strip — hashtag quick filters */}
+      {viewMode === "feed" && isAuthenticated && (
+        <div className="flex gap-1.5 overflow-x-auto pb-2 mb-3 -mx-1 px-1 scrollbar-hide">
+          {/* All */}
+          <button
+            onClick={() => navigate("/?view=feed", { replace: true })}
+            className="flex-shrink-0 px-3 py-1 rounded-full text-[11px] font-semibold transition-all active:scale-95"
+            style={
+              !hashtagFilter && !hangoutFilter
+                ? { background: "#D4007A", color: "#fff" }
+                : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.08)" }
+            }
+          >
+            All
+          </button>
+          {/* User's own posts */}
+          <button
+            onClick={() => navigate(`/?view=feed&tag=${encodeURIComponent(username)}`, { replace: true })}
+            className="flex-shrink-0 px-3 py-1 rounded-full text-[11px] font-semibold transition-all active:scale-95"
+            style={
+              hashtagFilter === username
+                ? { background: "#D4007A", color: "#fff" }
+                : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.08)" }
+            }
+          >
+            #{username}
+          </button>
+          {/* Hangout channels */}
+          {myHangouts.filter(h => !h.isWallOfFame).map((h) => (
+            <button
+              key={h.id}
+              onClick={() => navigate(`/?view=feed&hangout=${h.id}`, { replace: true })}
+              className="flex-shrink-0 px-3 py-1 rounded-full text-[11px] font-semibold transition-all active:scale-95"
+              style={
+                hangoutFilter === String(h.id)
+                  ? { background: "linear-gradient(135deg, #7B61FF, #D4007A)", color: "#fff" }
+                  : { background: "rgba(123,97,255,0.08)", color: "#7B61FF", border: "1px solid rgba(123,97,255,0.15)" }
+              }
+            >
+              #{h.name.replace(/\s+/g, "")}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* View content */}
       {viewMode === "feed" ? (
+        hangoutFilter ? (
+          /* Hangout-scoped feed */
+          <SocialFeedTabs
+            currentUserId={user?.dbId ? String(user.dbId) : ""}
+            isAdmin={isAdmin}
+            isAuthenticated={isAuthenticated}
+            userLang={user?.language}
+            viewerCity={user?.city}
+            viewerCountry={user?.country}
+            contentDisclaimerAccepted={contentDisclaimer}
+            onAcceptDisclaimer={handleAcceptDisclaimer}
+            onNavigate={navigate}
+            showComposer={false}
+            hangoutGroupId={parseInt(hangoutFilter, 10)}
+          />
+        ) : (
         <SocialFeedTabs
           currentUserId={user?.dbId ? String(user.dbId) : ""}
           isAdmin={isAdmin}
@@ -226,6 +425,7 @@ export default function Home() {
           showComposer={!hashtagFilter}
           hashtagFilter={hashtagFilter}
         />
+        )
       ) : (
         <Suspense
           fallback={
@@ -237,6 +437,7 @@ export default function Home() {
           <ChatEmbedded embeddedMode />
         </Suspense>
       )}
+      </>}
     </div>
   );
 }

@@ -76,7 +76,7 @@ function buildTelegramMessage(firstName, language) {
 Aprende como comprar tokens y enviar propinas en vivo:
 
 <b>🪙 Paso 1: Ve a la pagina Live</b>
-Abre <a href="https://app.pnptv.app/live">app.pnptv.app/live</a> y explora las transmisiones en vivo.
+Abre <a href="https://pnptv.app/live">pnptv.app/live</a> y explora las transmisiones en vivo.
 
 <b>🔐 Paso 2: Inicia sesion</b>
 Debes estar logueado para comprar tokens y enviar propinas.
@@ -106,7 +106,7 @@ Toca la tarjeta de un performer en vivo para seleccionarlo.
 
 🌟 <b>Proximamente nuevos creadores y performers en PNPtv! Live</b> — ten tus tokens listos para ser el primero en apoyarlos!
 
-👉 <a href="https://app.pnptv.app/live">Ir a PNPtv! Live</a>
+👉 <a href="https://pnptv.app/live">Ir a PNPtv! Live</a>
 
 Con amor,
 <b>El equipo de PNPtv!</b>`;
@@ -119,7 +119,7 @@ Con amor,
 Learn how to buy tokens and send tips during live streams:
 
 <b>🪙 Step 1: Go to the Live page</b>
-Open <a href="https://app.pnptv.app/live">app.pnptv.app/live</a> and browse live streams.
+Open <a href="https://pnptv.app/live">pnptv.app/live</a> and browse live streams.
 
 <b>🔐 Step 2: Log in</b>
 You must be logged in to buy tokens and send tips.
@@ -149,7 +149,7 @@ Tap on a live performer's card to select them.
 
 🌟 <b>New creators and performers are joining PNPtv! Live soon</b> — get your tokens ready to be the first to show them love!
 
-👉 <a href="https://app.pnptv.app/live">Go to PNPtv! Live</a>
+👉 <a href="https://pnptv.app/live">Go to PNPtv! Live</a>
 
 With love,
 <b>The PNPtv! Team</b>`;
@@ -209,7 +209,7 @@ function buildEmailHtml(firstName, language) {
 
       <div class="step">
         <h3>🪙 Paso 1: Ve a la pagina Live</h3>
-        <p>Abre <a href="https://app.pnptv.app/live" style="color:#D4007A">app.pnptv.app/live</a> y explora las transmisiones en vivo.</p>
+        <p>Abre <a href="https://pnptv.app/live" style="color:#D4007A">pnptv.app/live</a> y explora las transmisiones en vivo.</p>
       </div>
 
       <div class="step">
@@ -254,7 +254,7 @@ function buildEmailHtml(firstName, language) {
       </div>
 
       <div style="text-align:center; margin:30px 0;">
-        <a href="https://app.pnptv.app/live" class="button">Ir a PNPtv! Live &rarr;</a>
+        <a href="https://pnptv.app/live" class="button">Ir a PNPtv! Live &rarr;</a>
       </div>
 
       <p>Con amor,<br><strong style="color:#E69138">El equipo de PNPtv!</strong></p>
@@ -292,7 +292,7 @@ function buildEmailHtml(firstName, language) {
 
       <div class="step">
         <h3>🪙 Step 1: Go to the Live page</h3>
-        <p>Open <a href="https://app.pnptv.app/live" style="color:#D4007A">app.pnptv.app/live</a> and browse live streams.</p>
+        <p>Open <a href="https://pnptv.app/live" style="color:#D4007A">pnptv.app/live</a> and browse live streams.</p>
       </div>
 
       <div class="step">
@@ -337,7 +337,7 @@ function buildEmailHtml(firstName, language) {
       </div>
 
       <div style="text-align:center; margin:30px 0;">
-        <a href="https://app.pnptv.app/live" class="button">Go to PNPtv! Live &rarr;</a>
+        <a href="https://pnptv.app/live" class="button">Go to PNPtv! Live &rarr;</a>
       </div>
 
       <p>With love,<br><strong style="color:#E69138">The PNPtv! Team</strong></p>

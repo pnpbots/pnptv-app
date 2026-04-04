@@ -316,6 +316,132 @@ async function addTicketMessage(req, res) {
   }
 }
 
+/**
+ * POST /api/webapp/support/verify-payment
+ * Admin-only: use Grok AI to analyze payment evidence and optionally activate membership
+ */
+async function verifyPayment(req, res) {
+  const user = req.session?.user;
+  if (!user?.id) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+
+  const { userId, provider, reference, amount, planId, notes, activate } = req.body;
+
+  // Validate required fields
+  if (!userId || !provider || !reference || !amount || !planId) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required fields: userId, provider, reference, amount, planId',
+    });
+  }
+
+  const validProviders = ['epayco', 'daimo', 'btcpay', 'visa'];
+  if (!validProviders.includes(provider)) {
+    return res.status(400).json({ success: false, error: `Invalid provider. Must be one of: ${validProviders.join(', ')}` });
+  }
+
+  const parsedAmount = parseFloat(amount);
+  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    return res.status(400).json({ success: false, error: 'Amount must be a positive number' });
+  }
+
+  try {
+    const { analyzePayment } = require('../../services/cristinaAIService');
+
+    // Step 1: Run Grok analysis
+    const analysis = await analyzePayment({
+      userId: String(userId),
+      provider,
+      reference: String(reference),
+      amount: parsedAmount,
+      planId: String(planId),
+      notes: notes || '',
+    });
+
+    logger.info('Payment verification analysis completed', {
+      adminId: user.id,
+      targetUserId: userId,
+      provider,
+      reference,
+      verdict: analysis.valid,
+      confidence: analysis.confidence,
+      recommendation: analysis.recommendation,
+    });
+
+    // Step 2: If admin requested activation and analysis says valid
+    let activationResult = null;
+    if (activate === true) {
+      if (!analysis.valid) {
+        return res.json({
+          success: true,
+          analysis,
+          activation: { success: false, error: 'Cannot activate: payment verification failed' },
+        });
+      }
+
+      try {
+        const PaymentService = require('../../services/paymentService');
+        const grantResult = await PaymentService.grantEntitlementsForPlan(
+          String(userId),
+          String(planId),
+          'admin'
+        );
+
+        // Write audit log
+        const pool = getPool();
+        await pool.query(
+          `INSERT INTO subscription_audit_log (user_id, actor_id, actor_type, action, reason, new_values)
+           VALUES ($1, $2, 'admin', 'grant', $3, $4)`,
+          [
+            String(userId),
+            String(user.id),
+            `Cristina AI payment verification: ${analysis.reason}`,
+            JSON.stringify({
+              planId,
+              provider,
+              reference,
+              amount: parsedAmount,
+              grokVerdict: analysis.valid,
+              grokConfidence: analysis.confidence,
+            }),
+          ]
+        );
+
+        activationResult = {
+          success: grantResult.granted > 0,
+          granted: grantResult.granted,
+          errors: grantResult.errors,
+          warning: grantResult.warning || null,
+        };
+
+        logger.info('Payment verification: membership activated', {
+          adminId: user.id,
+          targetUserId: userId,
+          planId,
+          granted: grantResult.granted,
+        });
+      } catch (actErr) {
+        logger.error('Payment verification: activation failed', {
+          error: actErr.message,
+          userId,
+          planId,
+        });
+        activationResult = { success: false, error: actErr.message };
+      }
+    }
+
+    return res.json({
+      success: true,
+      analysis,
+      activation: activationResult,
+    });
+  } catch (error) {
+    logger.error('Payment verification error', { error: error.message, stack: error.stack });
+    return res.status(500).json({ success: false, error: 'Payment verification failed. Please try again.' });
+  }
+}
+
 module.exports = {
   chat,
   suggestions,
@@ -324,4 +450,5 @@ module.exports = {
   getTicket,
   getTicketMessages,
   addTicketMessage,
+  verifyPayment,
 };

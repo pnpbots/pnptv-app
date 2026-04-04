@@ -36,8 +36,7 @@ module.exports = {
   moderation: {
     registerModerationHandlers: require('./moderation'),
     registerModerationAdminHandlers: require('./moderation/adminCommands'),
-    registerAccessControlHandlers: require('./moderation/accessControlCommands'),
-    registerJitsiModerator: require('./moderation/jitsiModerator')
+    registerAccessControlHandlers: require('./moderation/accessControlCommands')
   },
 
   support: {

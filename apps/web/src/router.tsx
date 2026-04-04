@@ -38,7 +38,7 @@ const ShopPage = lazy(() => import("@/pages/ShopPage"));
 const DownloadPage = lazy(() => import("@/pages/DownloadPage"));
 const DashBankPage = lazy(() => import("@/pages/DashBankPage"));
 const MainStage = lazy(() => import("@/pages/MainStage"));
-const DaHaus = lazy(() => import("@/pages/DaHaus"));
+
 const PostDetail = lazy(() => import("@/pages/PostDetail"));
 const Settings = lazy(() => import("@/pages/Settings"));
 const BookingConfirmation = lazy(() => import("@/pages/BookingConfirmation"));
@@ -95,9 +95,7 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <VerificationGate>
-              <TierGate required="prime">
-                <Media />
-              </TierGate>
+              <Media />
             </VerificationGate>
           </ModuleLoader>
         ),
@@ -131,6 +129,10 @@ export const router = createBrowserRouter([
             </VerificationGate>
           </ModuleLoader>
         ),
+      },
+      {
+        path: "explore",
+        element: <Navigate to="/nearby" replace />,
       },
       {
         path: "channels",
@@ -172,16 +174,6 @@ export const router = createBrowserRouter([
           <ModuleLoader>
             <VerificationGate>
               <MainStage />
-            </VerificationGate>
-          </ModuleLoader>
-        ),
-      },
-      {
-        path: "da-haus",
-        element: (
-          <ModuleLoader>
-            <VerificationGate>
-              <DaHaus />
             </VerificationGate>
           </ModuleLoader>
         ),
@@ -296,8 +288,9 @@ export const router = createBrowserRouter([
       { path: "creator", element: <Navigate to="/creators" replace /> },
       { path: "hangouts", element: <Navigate to="/?view=hangouts" replace /> },
       { path: "pnplive", element: <Navigate to="/live" replace /> },
-      { path: "pnptv-haus", element: <Navigate to="/da-haus" replace /> },
-      { path: "community-room", element: <Navigate to="/da-haus" replace /> },
+      { path: "pnptv-haus", element: <Navigate to="/main-stage" replace /> },
+      { path: "community-room", element: <Navigate to="/main-stage" replace /> },
+      { path: "da-haus", element: <Navigate to="/main-stage" replace /> },
       { path: "portal", element: <Navigate to="/" replace /> },
     ],
   },

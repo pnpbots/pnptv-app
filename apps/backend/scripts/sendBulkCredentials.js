@@ -98,10 +98,10 @@ function buildEmailHtml(email, password, tier, isEs) {
   </table>
   <p style="font-size:13px;color:#A1A1A6;">Puedes cambiar tu contrase&ntilde;a y actualizar tu email desde tu perfil.</p>
   <div style="margin-top:20px;">
-    <a href="https://app.pnptv.app/login" style="display:inline-block;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Iniciar sesi&oacute;n</a>
+    <a href="https://pnptv.app/login" style="display:inline-block;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Iniciar sesi&oacute;n</a>
   </div>
   <div style="margin-top:12px;">
-    <a href="https://app.pnptv.app/profile" style="display:inline-block;padding:10px 20px;background:#2C2C2E;color:#D4007A;text-decoration:none;border-radius:8px;font-weight:bold;border:1px solid #D4007A;">Actualizar email</a>
+    <a href="https://pnptv.app/profile" style="display:inline-block;padding:10px 20px;background:#2C2C2E;color:#D4007A;text-decoration:none;border-radius:8px;font-weight:bold;border:1px solid #D4007A;">Actualizar email</a>
   </div>
 </div>`;
   }
@@ -116,10 +116,10 @@ function buildEmailHtml(email, password, tier, isEs) {
   </table>
   <p style="font-size:13px;color:#A1A1A6;">You can change your password and update your email from your profile.</p>
   <div style="margin-top:20px;">
-    <a href="https://app.pnptv.app/login" style="display:inline-block;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Log in</a>
+    <a href="https://pnptv.app/login" style="display:inline-block;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Log in</a>
   </div>
   <div style="margin-top:12px;">
-    <a href="https://app.pnptv.app/profile" style="display:inline-block;padding:10px 20px;background:#2C2C2E;color:#D4007A;text-decoration:none;border-radius:8px;font-weight:bold;border:1px solid #D4007A;">Update email</a>
+    <a href="https://pnptv.app/profile" style="display:inline-block;padding:10px 20px;background:#2C2C2E;color:#D4007A;text-decoration:none;border-radius:8px;font-weight:bold;border:1px solid #D4007A;">Update email</a>
   </div>
 </div>`;
 }

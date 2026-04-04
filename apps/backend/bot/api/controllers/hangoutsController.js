@@ -3,8 +3,7 @@ const { query } = require('../../../config/postgres');
 const VideoCallModel = require('../../../models/videoCallModel');
 const { validateTelegramWebAppInitData } = require('../../services/telegramWebAppAuth');
 const { consumeRateLimit, getRateLimitInfo } = require('../../core/middleware/rateLimitGranular');
-const { buildJitsiHangoutsUrl } = require('../../utils/jitsiHangoutsWebApp');
-const jaasService = require('../../services/jaasService');
+// Legacy video call endpoints (Agora-based, used by bot menu)
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -191,35 +190,15 @@ class HangoutsController {
         isPublic,
       });
 
-      // Generate Jitsi URL if JAAS is configured
-      let jitsiUrl = null;
-      if (jaasService.isConfigured()) {
-        try {
-          jitsiUrl = buildJitsiHangoutsUrl({
-            roomName: call.channelName,
-            userId: creatorId,
-            userName: creatorName,
-            isModerator: true,
-            callId: call.id,
-            type: isPublic ? 'public' : 'private',
-          });
-        } catch (error) {
-          logger.warn(`Failed to generate Jitsi URL: ${error.message}`);
-        }
-      }
-
       res.json({
         success: true,
         id: call.id,
         callId: call.id,
         room: call.channelName,
-        // Agora credentials (fallback)
         token: call.rtcToken,
         uid: String(creatorId),
         appId: call.appId || process.env.AGORA_APP_ID,
-        // Jitsi URL (primary)
-        jitsiUrl,
-        platform: jitsiUrl ? 'jitsi' : 'agora',
+        platform: 'telegram',
         isPublic: call.isPublic,
         maxParticipants: call.maxParticipants,
       });
@@ -311,34 +290,15 @@ class HangoutsController {
         false
       );
 
-      // Generate Jitsi URL if JAAS is configured
       const isModerator = joinResult.call.creatorId === userId;
-      let jitsiUrl = null;
-      if (jaasService.isConfigured()) {
-        try {
-          jitsiUrl = buildJitsiHangoutsUrl({
-            roomName: joinResult.call.channelName,
-            userId,
-            userName,
-            isModerator,
-            callId: joinResult.call.id,
-            type: joinResult.call.isPublic ? 'public' : 'private',
-          });
-        } catch (error) {
-          logger.warn(`Failed to generate Jitsi URL: ${error.message}`);
-        }
-      }
 
       res.json({
         success: true,
         room: joinResult.call.channelName,
-        // Agora credentials (fallback)
         token: joinResult.rtcToken,
         uid: String(userId),
         appId: joinResult.appId || process.env.AGORA_APP_ID,
-        // Jitsi URL (primary)
-        jitsiUrl,
-        platform: jitsiUrl ? 'jitsi' : 'agora',
+        platform: 'telegram',
         callId: joinResult.call.id,
         isPublic: joinResult.call.isPublic,
         isModerator,

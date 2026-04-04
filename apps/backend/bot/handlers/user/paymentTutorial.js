@@ -69,7 +69,7 @@ Select a method to see the full tutorial:`;
       )],
       [Markup.button.url(
         lang === 'es' ? '🌐 Ir a Suscribirse' : '🌐 Go to Subscribe',
-        'https://app.pnptv.app/subscribe'
+        'https://pnptv.app/subscribe'
       )],
     ]);
 
@@ -168,7 +168,7 @@ Example: $24.99 USD = ~$99,960 COP`;
       ...Markup.inlineKeyboard([
         [Markup.button.url(
           lang === 'es' ? '🌐 Suscribirse Ahora' : '🌐 Subscribe Now',
-          'https://app.pnptv.app/subscribe'
+          'https://pnptv.app/subscribe'
         )],
         [Markup.button.callback(lang === 'es' ? '🔙 Volver al Menu' : '🔙 Back to Menu', 'pay_menu')],
       ]),
@@ -195,7 +195,7 @@ Pasarela de pagos colombiana que acepta tarjetas internacionales, PSE (transfere
 *Paso a Paso:*
 
 *1.* Abre la pagina de suscripcion:
-   app.pnptv.app/subscribe
+   pnptv.app/subscribe
 
 *2.* Selecciona tu plan (Member, PRIME, etc.)
 
@@ -249,7 +249,7 @@ Colombian payment gateway that accepts international cards, PSE (bank transfers)
 *Step by Step:*
 
 *1.* Open the subscription page:
-   app.pnptv.app/subscribe
+   pnptv.app/subscribe
 
 *2.* Select your plan (Member, PRIME, etc.)
 
@@ -300,7 +300,7 @@ Visa, Mastercard, American Express
       ...Markup.inlineKeyboard([
         [Markup.button.url(
           lang === 'es' ? '🌐 Pagar con ePayco' : '🌐 Pay with ePayco',
-          'https://app.pnptv.app/subscribe'
+          'https://pnptv.app/subscribe'
         )],
         [Markup.button.callback(lang === 'es' ? '🔙 Volver al Menu' : '🔙 Back to Menu', 'pay_menu')],
       ]),
@@ -327,7 +327,7 @@ Plataforma de pago con USDC (dolar digital) en la red Optimism. Acepta crypto wa
 *Paso a Paso:*
 
 *1.* Abre la pagina de suscripcion:
-   app.pnptv.app/subscribe
+   pnptv.app/subscribe
 
 *2.* Selecciona tu plan
 
@@ -383,7 +383,7 @@ Payment platform using USDC (digital dollar) on the Optimism network. Accepts cr
 *Step by Step:*
 
 *1.* Open the subscription page:
-   app.pnptv.app/subscribe
+   pnptv.app/subscribe
 
 *2.* Select your plan
 
@@ -436,7 +436,7 @@ MetaMask, Coinbase Wallet, Trust Wallet, Daimo, Rainbow, and more
       ...Markup.inlineKeyboard([
         [Markup.button.url(
           lang === 'es' ? '🌐 Pagar con Daimo' : '🌐 Pay with Daimo',
-          'https://app.pnptv.app/subscribe'
+          'https://pnptv.app/subscribe'
         )],
         [Markup.button.callback(lang === 'es' ? '🔙 Volver al Menu' : '🔙 Back to Menu', 'pay_menu')],
       ]),
@@ -463,7 +463,7 @@ Criptomoneda enfocada en privacidad y velocidad. Tus pagos son anonimos — no s
 *Paso a Paso:*
 
 *1.* Abre la pagina de suscripcion:
-   app.pnptv.app/subscribe
+   pnptv.app/subscribe
 
 *2.* Selecciona tu plan
 
@@ -523,7 +523,7 @@ Cryptocurrency focused on privacy and speed. Your payments are anonymous — not
 *Step by Step:*
 
 *1.* Open the subscription page:
-   app.pnptv.app/subscribe
+   pnptv.app/subscribe
 
 *2.* Select your plan
 
@@ -580,7 +580,7 @@ Cryptocurrency focused on privacy and speed. Your payments are anonymous — not
       ...Markup.inlineKeyboard([
         [Markup.button.url(
           lang === 'es' ? '🌐 Pagar con Dash' : '🌐 Pay with Dash',
-          'https://app.pnptv.app/subscribe'
+          'https://pnptv.app/subscribe'
         )],
         [Markup.button.callback(lang === 'es' ? '🔙 Volver al Menu' : '🔙 Back to Menu', 'pay_menu')],
       ]),
@@ -615,7 +615,7 @@ Plataforma de links de pago. Recibes un link para pagar y luego activas con un c
    → Sigue las instrucciones en la pagina de Meru
 
 *3.* Una vez pagado, abre la pagina de suscripcion:
-   app.pnptv.app/subscribe
+   pnptv.app/subscribe
 
 *4.* Escribe tu email arriba del formulario
    ⚠️ Usa un email real — ahi recibiras tus credenciales
@@ -655,7 +655,7 @@ Payment link platform. You receive a link to pay, then activate with a code on P
    → Follow the instructions on the Meru page
 
 *3.* Once paid, open the subscription page:
-   app.pnptv.app/subscribe
+   pnptv.app/subscribe
 
 *4.* Enter your email at the top of the form
    ⚠️ Use a real email — your login credentials will be sent there
@@ -684,7 +684,7 @@ Payment link platform. You receive a link to pay, then activate with a code on P
       ...Markup.inlineKeyboard([
         [Markup.button.url(
           lang === 'es' ? '🌐 Activar Codigo Meru' : '🌐 Activate Meru Code',
-          'https://app.pnptv.app/subscribe'
+          'https://pnptv.app/subscribe'
         )],
         [Markup.button.callback(lang === 'es' ? '🔙 Volver al Menu' : '🔙 Back to Menu', 'pay_menu')],
       ]),

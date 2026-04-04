@@ -17,7 +17,6 @@ const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { processHangoutMedia } = require('../../services/hangoutMediaService');
 const BlockedUser = require('../../../models/blockedUser');
-const matrixService = require('../../services/matrixService');
 const NotificationEmitter = require('../../services/notificationEmitter');
 const { getRedis } = require('../../../config/redis');
 
@@ -32,7 +31,7 @@ const authGuard = (req, res) => {
   return user;
 };
 
-const APP_PUBLIC_URL = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
+const APP_PUBLIC_URL = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
 
 // ── POST /api/webapp/hangouts/groups/:id/media ──────────────────────────────
 
@@ -89,68 +88,40 @@ const uploadHangoutMedia = async (req, res) => {
     const mediaResult = await processHangoutMedia(req.file, groupId, user.id);
     const caption = (req.body?.content || '').trim().slice(0, 500) || null;
 
-    // ── Send to Matrix (the ONLY message store) ──
-    const userRow = await query(
-      `SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
-       FROM users WHERE id = $1 AND is_deleted = false`,
-      [user.id]
+    // ── Insert into PG + broadcast via Socket.IO ──
+    const isValidPhoto = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
+    const photoResult = await query('SELECT photo_file_id FROM users WHERE id = $1', [user.id]);
+    const rawPhoto = photoResult.rows[0]?.photo_file_id || user.photoUrl || null;
+    const photoUrl = isValidPhoto(rawPhoto) ? rawPhoto : null;
+
+    const room = `hangout:${groupId}`;
+    const { rows: insertedRows } = await query(
+      `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content,
+         media_url, media_type, media_mime, media_thumb_url, media_width, media_height, media_metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       RETURNING id, room, user_id, username, first_name, photo_url, content,
+                 media_url, media_type, media_mime, media_thumb_url,
+                 media_width, media_height, media_metadata, reply_to_id, created_at`,
+      [
+        room, user.id, user.username || null, user.firstName || user.first_name || null, photoUrl, caption,
+        mediaResult.mediaUrl, mediaResult.mediaType, mediaResult.mediaMime,
+        mediaResult.thumbUrl || null, mediaResult.width || null, mediaResult.height || null,
+        mediaResult.metadata ? JSON.stringify(mediaResult.metadata) : null,
+      ]
     );
-    if (!userRow.rows[0]) {
-      return res.status(401).json({ error: 'User not found' });
-    }
-
-    const userCreds = await matrixService.provisionMatrixUser(userRow.rows[0]);
-    const matrixRoomId = await matrixService.getOrCreateHangoutRoom(groupId, userRow.rows[0], groupName);
-    await matrixService.ensureUserInRoom(matrixRoomId, userCreds);
-
-    // Upload media to Matrix content repository (mxc:// URL)
-    const fs = require('fs').promises;
-    const path = require('path');
-    const PUBLIC_ROOT = path.join(__dirname, '../../../../../public');
-    const localPath = path.join(PUBLIC_ROOT, mediaResult.mediaUrl);
-    const fileBuffer = await fs.readFile(localPath);
-
-    const filename = caption || (mediaResult.mediaType === 'video' ? 'video.mp4' : mediaResult.mediaType === 'audio' ? 'voice-message.webm' : 'image.webp');
-    const mimetype = mediaResult.mediaMime || (mediaResult.mediaType === 'video' ? 'video/mp4' : mediaResult.mediaType === 'audio' ? 'audio/webm' : 'image/webp');
-
-    const mxcUrl = await matrixService.uploadMedia(fileBuffer, filename, mimetype, userCreds.accessToken);
-
-    // Upload thumbnail if available
-    let thumbMxcUrl;
-    if (mediaResult.thumbUrl) {
-      const thumbLocalPath = path.join(PUBLIC_ROOT, mediaResult.thumbUrl);
-      try {
-        const thumbBuffer = await fs.readFile(thumbLocalPath);
-        thumbMxcUrl = await matrixService.uploadMedia(thumbBuffer, 'thumbnail.webp', 'image/webp', userCreds.accessToken);
-      } catch (thumbErr) {
-        logger.warn('Failed to upload thumbnail to Matrix', { error: thumbErr.message });
-      }
-    }
-
-    const msgtype = mediaResult.mediaType === 'video' ? 'm.video' : mediaResult.mediaType === 'audio' ? 'm.audio' : 'm.image';
-
-    const resp = await matrixService.sendRoomMediaMessage(matrixRoomId, userCreds.accessToken, {
-      url: mxcUrl,
-      msgtype,
-      body: filename,
-      info: {
-        mimetype,
-        w: mediaResult.width || undefined,
-        h: mediaResult.height || undefined,
-        duration: mediaResult.metadata?.duration ? Math.round(mediaResult.metadata.duration * 1000) : undefined,
-        thumbnail_url: thumbMxcUrl,
-      },
-    });
-
-    const matrixEventId = resp.event_id || null;
+    const msg = { ...insertedRows[0], photo_url: isValidPhoto(insertedRows[0].photo_url) ? insertedRows[0].photo_url : null };
 
     // Touch activity timestamp
     await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
 
+    // Broadcast via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(room).emit('chat:message', msg);
+    }
+
     // Push notifications to offline members (fire-and-forget)
     const firstName = user.firstName || user.first_name || null;
-    const room = `hangout:${groupId}`;
-    const io = req.app.get('io');
     (async () => {
       try {
         const membersResult = await query(
@@ -201,7 +172,7 @@ const uploadHangoutMedia = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      matrixEventId,
+      message: msg,
     });
   } catch (err) {
     if (err.statusCode) {

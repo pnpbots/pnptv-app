@@ -86,6 +86,12 @@ volumes:
       type: none
       o: bind
       device: /opt/pnptvapp/infrastructure/data/synapse/postgres
+  vol_pg_mautrix_telegram:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/pnptvapp/infrastructure/data/mautrix-telegram/postgres
   vol_pg_pnptv_walg_backups:
     driver: local
     driver_opts:
@@ -703,6 +709,49 @@ services:
       retries: 3
       start_period: 60s
 
+  pg-mautrix-telegram:
+    image: postgres:16-alpine
+    container_name: pg-mautrix-telegram
+    restart: unless-stopped
+    volumes:
+      - vol_pg_mautrix_telegram:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: mautrix_telegram
+      POSTGRES_USER: mautrix_tg
+      POSTGRES_PASSWORD: mautrix_tg_secret_2026
+    networks:
+      - pnptvapp_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mautrix_tg -d mautrix_telegram"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  mautrix-telegram:
+    image: dock.mau.dev/mautrix/telegram:latest
+    container_name: mautrix-telegram
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/data/mautrix-telegram/data:/data
+    networks:
+      - pnptvapp_net
+    depends_on:
+      synapse:
+        condition: service_healthy
+      pg-mautrix-telegram:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512m
+
   element-web:
     image: vectorim/element-web:v1.12.8
     container_name: element-web
@@ -723,6 +772,53 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: livekit-pnptv
+    restart: unless-stopped
+    ports:
+      - "7881:7881"
+      - "50000-50060:50000-50060/udp"
+      - "3478:3478/udp"
+    volumes:
+      - ./infrastructure/configs/livekit/livekit.yaml:/etc/livekit.yaml:ro
+    command: ["--config", "/etc/livekit.yaml"]
+    networks:
+      - pnptvapp_net
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048m
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "pnptvapp_pnptvapp_net"
+      traefik.http.routers.livekit.rule: "Host(`livekit.pnptv.app`)"
+      traefik.http.routers.livekit.entrypoints: "websecure"
+      traefik.http.routers.livekit.tls.certresolver: "letsencrypt"
+      traefik.http.services.livekit.loadbalancer.server.port: "7880"
+
+  element-call:
+    image: ghcr.io/element-hq/element-call:latest
+    container_name: element-call-pnptv
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/configs/element-call/config.json:/app/config.json:ro
+    networks:
+      - pnptvapp_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256m
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "pnptvapp_pnptvapp_net"
+      traefik.http.routers.element-call.rule: "Host(`call.pnptv.app`)"
+      traefik.http.routers.element-call.entrypoints: "websecure"
+      traefik.http.routers.element-call.tls.certresolver: "letsencrypt"
+      traefik.http.services.element-call.loadbalancer.server.port: "8080"
 
   # ===========================================
   # BLOCK H - Live Streaming (Restreamer)

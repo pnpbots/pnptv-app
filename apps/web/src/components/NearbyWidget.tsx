@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useNearbyToggle, getTier, toggleNearby } from "@/components/NearbyBadge";
+import { useTier } from "@/hooks/useTier";
+import { getSocket } from "@/lib/socket";
 import {
   searchNearby,
   searchNearbyPlaces,
@@ -88,25 +90,6 @@ type GridItem =
   | { kind: "user"; data: NearbyMember }
   | { kind: "place"; data: NearbyPlace }
   | { kind: "community"; data: CommunityCard };
-
-// ── Shared stagger helper ─────────────────────────────────────────────────────
-const WIDGET_KEYS = [
-  { key: "radio_fab_corner", order: 0, defaultCorner: "bl" },
-  { key: "nearby_fab_corner", order: 1, defaultCorner: "br" },
-  { key: "cristina_fab_corner", order: 2, defaultCorner: "tr" },
-] as const;
-
-function getCornerOffset(myOrder: number, myCorner: string): number {
-  let count = 0;
-  for (const { key, order, defaultCorner } of WIDGET_KEYS) {
-    if (order >= myOrder) continue;
-    try {
-      const otherCorner = localStorage.getItem(key) || defaultCorner;
-      if (otherCorner === myCorner) count++;
-    } catch {}
-  }
-  return count;
-}
 
 // ── DM chat sub-view ──────────────────────────────────────────────────────────
 // ── Element iframe chat sub-view (used for group chat during video calls) ────
@@ -401,10 +384,11 @@ function UserCard({
   );
 }
 
-// ── Main NearbyWidget ─────────────────────────────────────────────────────────
+// ── Main widget view type ─────────────────────────────────────────────────────
 type WidgetView = "grid" | "profile" | "dm" | "place" | "groupChat";
 
-export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
+// ── NearbyPanel — inner content only (no FAB, no modal overlay shell) ─────────
+export function NearbyPanel({ onClose }: { onClose: () => void }) {
   const { enabled, position } = useNearbyToggle();
   const navigate = useNavigate();
   const location = useLocation();
@@ -428,8 +412,7 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
     return match ? match[1] : null;
   }, [location.pathname]);
 
-  // ── Widget state ──────────────────────────────────────────────────────────
-  const [open, setOpen] = useState(false);
+  // ── Panel state ────────────────────────────────────────────────────────────
   const [members, setMembers] = useState<NearbyMember[]>([]);
   const [places, setPlaces] = useState<NearbyPlace[]>([]);
   const [loading, setLoading] = useState(false);
@@ -451,86 +434,152 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileIndex, setProfileIndex] = useState(0);
 
-  // DM state
-
   // Group chat popup state (used when in a video call to avoid navigating away)
   const [groupChatRoomId, setGroupChatRoomId] = useState<string | null>(null);
   const [groupChatLoading, setGroupChatLoading] = useState(false);
   const [groupChatName, setGroupChatName] = useState<string>("Group Chat");
   const [matrixCreds, setMatrixCreds] = useState<{ userId: string; accessToken: string; deviceId?: string; homeserver: string } | null>(null);
 
+  // ── Random Video Call ───────────────────────────────────────────────────────
+  const { isPrime } = useTier();
+  type CallState = 'idle' | 'searching' | 'ringing' | 'incoming' | 'connected';
+  const [callState, setCallState] = useState<CallState>('idle');
+  const [callId, setCallId] = useState<string | null>(null);
+  const [callPeer, setCallPeer] = useState<{ userId: string; name: string; photoUrl: string | null } | null>(null);
+  const [callUrl, setCallUrl] = useState<string | null>(null);
+  const [callMatrixRoomId, setCallMatrixRoomId] = useState<string | null>(null);
+  const [callCountdown, setCallCountdown] = useState(30);
+  const callTimeoutRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Detect if user is in a video call (Main Stage or active hangout call)
   const inVideoCall = location.pathname === "/main-stage" || location.pathname.startsWith("/chat/");
 
-  // ── FAB corner drag ───────────────────────────────────────────────────────
-  type Corner = "tl" | "tr" | "bl" | "br";
-  const [fabCorner, setFabCorner] = useState<Corner>(() => {
-    try { return (localStorage.getItem("nearby_fab_corner") as Corner) || "br"; } catch { return "br"; }
-  });
-  const fabRef = useRef<HTMLDivElement>(null);
-  const dragState = useRef<{ startX: number; startY: number; dragging: boolean; moved: boolean }>({ startX: 0, startY: 0, dragging: false, moved: false });
-
-  const handleFabPointerDown = useCallback((e: React.PointerEvent) => {
-    dragState.current = { startX: e.clientX, startY: e.clientY, dragging: true, moved: false };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, []);
-
-  const handleFabPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragState.current.dragging) return;
-    const dx = e.clientX - dragState.current.startX;
-    const dy = e.clientY - dragState.current.startY;
-    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) dragState.current.moved = true;
-    if (!dragState.current.moved || !fabRef.current) return;
-    fabRef.current.style.transition = "none";
-    fabRef.current.style.transform = `translate(${dx}px, ${dy}px)`;
-  }, []);
-
-  const handleFabPointerUp = useCallback((e: React.PointerEvent) => {
-    if (!dragState.current.dragging) return;
-    const wasDragged = dragState.current.moved;
-    dragState.current.dragging = false;
-    if (!wasDragged) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (fabRef.current) { fabRef.current.style.transition = ""; fabRef.current.style.transform = ""; }
-    const isLeftSide = e.clientX < window.innerWidth / 2;
-    const isTopSide = e.clientY < window.innerHeight / 2;
-    const newCorner: Corner = isTopSide ? (isLeftSide ? "tl" : "tr") : (isLeftSide ? "bl" : "br");
-    setFabCorner(newCorner);
-    try { localStorage.setItem("nearby_fab_corner", newCorner); } catch {}
-  }, []);
-
-  // ── Reset on route change ─────────────────────────────────────────────────
+  // ── Reset on route change ──────────────────────────────────────────────────
   useEffect(() => {
-    setOpen(false);
     setView("grid");
     setSelectedUser(null);
     setSelectedPlace(null);
     setProfile(null);
-
-
     setPage(0);
     setProfileIndex(0);
     setMembers([]);
     setPlaces([]);
   }, [location.pathname]);
 
-  // ── Close modal ───────────────────────────────────────────────────────────
+  // ── Close panel ────────────────────────────────────────────────────────────
   const closeModal = useCallback(() => {
-    setOpen(false);
+    onClose();
     setView("grid");
     setSelectedUser(null);
     setSelectedPlace(null);
     setProfile(null);
-
-
     setPage(0);
     setProfileIndex(0);
+  }, [onClose]);
+
+  // ── Random call socket listeners ────────────────────────────────────────────
+  useEffect(() => {
+    const socket = getSocket();
+
+    const onRinging = ({ callId: cid, peer }: any) => {
+      setCallId(cid);
+      setCallPeer(peer);
+      setCallState('ringing');
+    };
+
+    const onIncoming = ({ callId: cid, caller }: any) => {
+      setCallId(cid);
+      setCallPeer(caller);
+      setCallState('incoming');
+      setCallCountdown(30);
+      if (callTimeoutRef.current) clearInterval(callTimeoutRef.current);
+      callTimeoutRef.current = setInterval(() => {
+        setCallCountdown(prev => {
+          if (prev <= 1) {
+            if (callTimeoutRef.current) clearInterval(callTimeoutRef.current);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    };
+
+    const onAccepted = ({ callId: cid, callUrl: url, peer, matrixRoomId: rid }: any) => {
+      if (callTimeoutRef.current) clearInterval(callTimeoutRef.current);
+      setCallId(cid);
+      setCallPeer(peer);
+      setCallUrl(url);
+      setCallMatrixRoomId(rid);
+      setCallState('connected');
+    };
+
+    const onDeclined = () => {
+      if (callTimeoutRef.current) clearInterval(callTimeoutRef.current);
+      setCallState('idle');
+      setCallId(null);
+      setCallPeer(null);
+    };
+
+    const onTimeout = () => {
+      if (callTimeoutRef.current) clearInterval(callTimeoutRef.current);
+      setCallState('idle');
+      setCallId(null);
+      setCallPeer(null);
+    };
+
+    const onNoMatch = () => {
+      setCallState('idle');
+      setCallId(null);
+    };
+
+    const onEnded = () => {
+      if (callTimeoutRef.current) clearInterval(callTimeoutRef.current);
+      setCallState('idle');
+      setCallId(null);
+      setCallPeer(null);
+      setCallUrl(null);
+      setCallMatrixRoomId(null);
+    };
+
+    const onCancelled = () => {
+      if (callTimeoutRef.current) clearInterval(callTimeoutRef.current);
+      setCallState('idle');
+      setCallId(null);
+      setCallPeer(null);
+    };
+
+    const onError = ({ message }: any) => {
+      setCallState('idle');
+      setCallId(null);
+      console.warn('[RandomCall]', message);
+    };
+
+    socket.on('randomcall:ringing', onRinging);
+    socket.on('randomcall:incoming', onIncoming);
+    socket.on('randomcall:accepted', onAccepted);
+    socket.on('randomcall:declined', onDeclined);
+    socket.on('randomcall:timeout', onTimeout);
+    socket.on('randomcall:no-match', onNoMatch);
+    socket.on('randomcall:ended', onEnded);
+    socket.on('randomcall:cancelled', onCancelled);
+    socket.on('randomcall:error', onError);
+
+    return () => {
+      socket.off('randomcall:ringing', onRinging);
+      socket.off('randomcall:incoming', onIncoming);
+      socket.off('randomcall:accepted', onAccepted);
+      socket.off('randomcall:declined', onDeclined);
+      socket.off('randomcall:timeout', onTimeout);
+      socket.off('randomcall:no-match', onNoMatch);
+      socket.off('randomcall:ended', onEnded);
+      socket.off('randomcall:cancelled', onCancelled);
+      socket.off('randomcall:error', onError);
+      if (callTimeoutRef.current) clearInterval(callTimeoutRef.current);
+    };
   }, []);
 
-  // ── Fetch data when panel opens, based on context ─────────────────────────
+  // ── Fetch data on mount and when context/IDs change ────────────────────────
   useEffect(() => {
-    if (!open) return;
     let cancelled = false;
     setLoading(true);
     setMembers([]);
@@ -651,9 +700,9 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
     fetchContextData();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, context, hangoutGroupId, streamId, eventId, enabled, position?.lat, position?.lng]);
+  }, [context, hangoutGroupId, streamId, eventId, enabled, position?.lat, position?.lng]);
 
-  // ── Build paged grid items ─────────────────────────────────────────────────
+  // ── Build paged grid items ──────────────────────────────────────────────────
   const allGridItems: GridItem[] = React.useMemo(() => {
     const showCommunity = context === "feed" || context === "default";
     const showHangoutChat = context === "hangouts" && hangoutGroupId;
@@ -692,7 +741,7 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
   const totalPages = Math.ceil(allGridItems.length / GRID_SIZE);
   const gridItems = allGridItems.slice(page * GRID_SIZE, (page + 1) * GRID_SIZE);
 
-  // ── Open user profile ──────────────────────────────────────────────────────
+  // ── Open user profile ───────────────────────────────────────────────────────
   const openUserProfile = useCallback(async (member: NearbyMember, indexInMembers?: number) => {
     const idx = indexInMembers !== undefined ? indexInMembers : members.findIndex((m) => m.user_id === member.user_id);
     setSelectedUser(member);
@@ -724,7 +773,7 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
     finally { setProfileLoading(false); }
   }, [members]);
 
-  // ── Open DM — navigate to full Element-based DM page ────────────────────────
+  // ── Open DM — navigate to full Element-based DM page ───────────────────────
   const openDm = useCallback((member: NearbyMember) => {
     closeModal();
     navigate(`/dm/${member.user_id}`);
@@ -771,491 +820,611 @@ export function NearbyWidget({ compact = false }: { compact?: boolean } = {}) {
     navigate(`/chat/${targetGroup}`);
   }, [closeModal, navigate, context, hangoutGroupId, hangoutGroupName, inVideoCall]);
 
-  // ── FAB position ───────────────────────────────────────────────────────────
-  const MY_ORDER = 1;
-  const offset = getCornerOffset(MY_ORDER, fabCorner);
-  const isTop = fabCorner.startsWith("t");
-  const isLeft = fabCorner.endsWith("l");
-  const posStyle = {
-    [isTop ? "top" : "bottom"]: `calc(5rem + ${offset * 56}px)`,
-    [isLeft ? "left" : "right"]: "0.75rem",
-    touchAction: "none" as const,
-  };
+  // ── Random call actions ─────────────────────────────────────────────────────
+  const initiateRandomCall = useCallback(() => {
+    if (callState !== 'idle') return;
+    setCallState('searching');
+    const socket = getSocket();
+    socket.emit('randomcall:initiate', { context });
+    setTimeout(() => {
+      setCallState(prev => prev === 'searching' ? 'idle' : prev);
+    }, 5000);
+  }, [callState, context]);
+
+  const acceptCall = useCallback(() => {
+    if (!callId) return;
+    const socket = getSocket();
+    socket.emit('randomcall:accept', { callId });
+  }, [callId]);
+
+  const declineCall = useCallback(() => {
+    if (!callId) return;
+    const socket = getSocket();
+    socket.emit('randomcall:decline', { callId });
+    if (callTimeoutRef.current) clearInterval(callTimeoutRef.current);
+    setCallState('idle');
+    setCallId(null);
+    setCallPeer(null);
+  }, [callId]);
+
+  const cancelCall = useCallback(() => {
+    if (!callId) return;
+    const socket = getSocket();
+    socket.emit('randomcall:cancel', { callId });
+    setCallState('idle');
+    setCallId(null);
+    setCallPeer(null);
+  }, [callId]);
+
+  const endCall = useCallback(() => {
+    if (!callId) return;
+    const socket = getSocket();
+    socket.emit('randomcall:end', { callId });
+    if (callTimeoutRef.current) clearInterval(callTimeoutRef.current);
+    setCallState('idle');
+    setCallId(null);
+    setCallPeer(null);
+    setCallUrl(null);
+    setCallMatrixRoomId(null);
+  }, [callId]);
 
   const totalCount = members.length + places.length;
 
-  // Live context: only show Nearby for users who have tokens
-  if (context === "live" && (tokenBalance === null || tokenBalance <= 0)) return null;
-
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <>
-      {/* FAB */}
-      {compact ? (
-        <button
-          onClick={() => setOpen(true)}
-          className="relative w-9 h-9 rounded-full shadow-lg flex items-center justify-center transition-transform active:scale-90"
-          style={{ background: LEMON, boxShadow: `0 4px 20px ${LEMON}40` }}
-          aria-label="Nearby members"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#0a0a14" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
-          </svg>
-          {totalCount > 0 && (
-            <span
-              className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] text-[7px] flex items-center justify-center rounded-full font-bold px-1"
-              style={{ background: LEMON, color: "#0a0a14" }}
-            >
-              {totalCount}
-            </span>
-          )}
-        </button>
-      ) : (
-        <div
-          ref={fabRef}
-          className="fixed z-[38]"
-          style={posStyle}
-          onPointerDown={handleFabPointerDown}
-          onPointerMove={handleFabPointerMove}
-          onPointerUp={handleFabPointerUp}
-        >
-          <button
-            onClick={() => { if (!dragState.current.moved) setOpen(true); }}
-            className={`${inHangout ? "w-9 h-9" : "w-12 h-12"} rounded-full flex items-center justify-center shadow-lg transition-transform active:scale-90`}
-            style={{ background: LEMON, boxShadow: `0 4px 20px ${LEMON}40` }}
-            aria-label="Nearby members"
-          >
-            <svg className={inHangout ? "w-4 h-4" : "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="#0a0a14" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
-            </svg>
-            {totalCount > 0 && (
-              <span
-                className={`absolute ${inHangout ? "-top-0.5 -right-0.5 min-w-[14px] h-[14px] text-[7px]" : "-top-1 -right-1 min-w-[18px] h-[18px] text-[9px]"} flex items-center justify-center rounded-full font-bold px-1`}
-                style={{ background: LEMON, color: "#0a0a14" }}
+      <div className="flex flex-col" style={{ maxHeight: "calc(85vh - 6rem)" }}>
+
+        {/* ── GRID VIEW ──────────────────────────────────────────────────── */}
+        {view === "grid" && (
+          <>
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+              <div className="flex items-center gap-2">
+                <span className="text-base">📍</span>
+                <h3 className="text-sm font-bold" style={{ color: LEMON }}>
+                  {getContextLabel(context)}
+                </h3>
+                {totalCount > 0 && (
+                  <span className="text-[10px] font-medium" style={{ color: "rgba(251,255,0,0.6)" }}>
+                    {context === "default"
+                      ? `${members.length} people · ${places.length} places`
+                      : `${members.length} people`}
+                  </span>
+                )}
+                {isPrime && members.length > 0 && (
+                  <button
+                    onClick={initiateRandomCall}
+                    disabled={callState !== 'idle'}
+                    className="ml-auto w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90"
+                    style={{
+                      background: callState !== 'idle' ? 'rgba(251,255,0,0.2)' : PINK,
+                      opacity: callState !== 'idle' ? 0.5 : 1,
+                    }}
+                    aria-label="Random video call"
+                    title="Random video call"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={closeModal}
+                className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+                aria-label="Close"
               >
-                {totalCount}
-              </span>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#8E8E93" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Random call searching/ringing overlay */}
+            {(callState === 'searching' || callState === 'ringing') && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl" style={{ background: 'rgba(28,28,30,0.95)', backdropFilter: 'blur(8px)' }}>
+                {callState === 'searching' ? (
+                  <>
+                    <div className="w-16 h-16 rounded-full border-4 border-t-transparent animate-spin mb-4" style={{ borderColor: `${LEMON}40`, borderTopColor: 'transparent' }} />
+                    <p className="text-sm font-semibold" style={{ color: LEMON }}>Finding someone nearby...</p>
+                    <button
+                      onClick={cancelCall}
+                      className="mt-6 px-5 py-2 rounded-full text-sm font-bold transition-all active:scale-95"
+                      style={{ background: 'rgba(255,255,255,0.1)', color: '#fff' }}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : callPeer ? (
+                  <>
+                    <div className="w-20 h-20 rounded-full overflow-hidden border-2 mb-3" style={{ borderColor: LEMON }}>
+                      {callPeer.photoUrl ? (
+                        <img src={callPeer.photoUrl} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-2xl font-bold" style={{ background: PINK, color: '#fff' }}>
+                          {(callPeer.name || '?')[0]}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-sm font-semibold text-white">Calling {callPeer.name}...</p>
+                    <div className="flex gap-2 mt-1">
+                      <div className="w-2 h-2 rounded-full animate-bounce" style={{ background: LEMON, animationDelay: '0ms' }} />
+                      <div className="w-2 h-2 rounded-full animate-bounce" style={{ background: LEMON, animationDelay: '150ms' }} />
+                      <div className="w-2 h-2 rounded-full animate-bounce" style={{ background: LEMON, animationDelay: '300ms' }} />
+                    </div>
+                    <button
+                      onClick={cancelCall}
+                      className="mt-6 px-5 py-2 rounded-full text-sm font-bold transition-all active:scale-95"
+                      style={{ background: '#FF3B30', color: '#fff' }}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : null}
+              </div>
             )}
-            {inHangout && (
-              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 ring-2 ring-pnp-background animate-pulse" />
-            )}
-          </button>
-        </div>
-      )}
 
-      {/* Modal Overlay */}
-      {open && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={closeModal}
-        >
-          <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)" }} />
-
-          <div
-            className="relative w-full max-w-[380px] rounded-2xl overflow-hidden animate-fade-in-up flex flex-col"
-            style={{ background: "#1C1C1E", border: `1px solid rgba(251,255,0,0.20)`, maxHeight: "85vh" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-
-            {/* ── GRID VIEW ─────────────────────────────────────────────── */}
-            {view === "grid" && (
-              <>
-                {/* Header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-base">📍</span>
-                    <h3 className="text-sm font-bold" style={{ color: LEMON }}>
-                      {getContextLabel(context)}
-                    </h3>
-                    {totalCount > 0 && (
-                      <span className="text-[10px] font-medium" style={{ color: "rgba(251,255,0,0.6)" }}>
-                        {context === "default"
-                          ? `${members.length} people · ${places.length} places`
-                          : `${members.length} people`}
-                      </span>
+            {/* Incoming call overlay */}
+            {callState === 'incoming' && callPeer && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl" style={{ background: 'rgba(28,28,30,0.95)', backdropFilter: 'blur(8px)' }}>
+                <div className="relative mb-4">
+                  <div className="absolute inset-0 rounded-full animate-ping opacity-20" style={{ background: LEMON }} />
+                  <div className="relative w-24 h-24 rounded-full overflow-hidden border-3" style={{ borderColor: LEMON }}>
+                    {callPeer.photoUrl ? (
+                      <img src={callPeer.photoUrl} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-3xl font-bold" style={{ background: PINK, color: '#fff' }}>
+                        {(callPeer.name || '?')[0]}
+                      </div>
                     )}
                   </div>
+                </div>
+                <p className="text-base font-bold text-white">{callPeer.name}</p>
+                <p className="text-xs mt-1" style={{ color: LEMON }}>wants to video chat</p>
+                <p className="text-xs mt-2" style={{ color: '#8E8E93' }}>{callCountdown}s</p>
+                <div className="flex gap-6 mt-6">
                   <button
-                    onClick={closeModal}
-                    className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
-                    aria-label="Close"
+                    onClick={declineCall}
+                    className="w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-90"
+                    style={{ background: '#FF3B30' }}
+                    aria-label="Decline"
                   >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#8E8E93" strokeWidth={2}>
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
+                  <button
+                    onClick={acceptCall}
+                    className="w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-90"
+                    style={{ background: '#34C759' }}
+                    aria-label="Accept"
+                  >
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                    </svg>
+                  </button>
                 </div>
+              </div>
+            )}
 
-                {/* Grid content */}
-                <div className="p-3 overflow-y-auto flex-1">
-                  {/* Location not ready states (only relevant for default context fallback) */}
-                  {(context === "default" || context === "hangouts" || context === "live" || context === "events") && !enabled && !hangoutGroupId && !streamId && !eventId ? (
-                    <div className="text-center py-12 px-4">
-                      <div className="text-3xl mb-3">📍</div>
-                      <p className="text-sm font-semibold" style={{ color: LEMON }}>Nearby is off</p>
-                      <p className="text-xs mt-2" style={{ color: "#8E8E93" }}>
-                        Turn on location access to discover members near you
-                      </p>
+            {/* Grid content */}
+            <div className="p-3 overflow-y-auto flex-1">
+              {/* Location not ready states (only relevant for default context fallback) */}
+              {(context === "default" || context === "hangouts" || context === "live" || context === "events") && !enabled && !hangoutGroupId && !streamId && !eventId ? (
+                <div className="text-center py-12 px-4">
+                  <div className="text-3xl mb-3">📍</div>
+                  <p className="text-sm font-semibold" style={{ color: LEMON }}>Nearby is off</p>
+                  <p className="text-xs mt-2" style={{ color: "#8E8E93" }}>
+                    Turn on location access to discover members near you
+                  </p>
+                  <button
+                    onClick={() => toggleNearby()}
+                    className="mt-4 px-5 py-2 rounded-full text-sm font-bold transition-all active:scale-95 hover:brightness-110"
+                    style={{ background: LEMON, color: "#0a0a14" }}
+                  >
+                    Enable Location
+                  </button>
+                </div>
+              ) : loading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="w-6 h-6 border-2 rounded-full animate-spin" style={{ borderColor: `${LEMON}30`, borderTopColor: LEMON }} />
+                </div>
+              ) : gridItems.length === 0 ? (
+                <div className="text-center py-12">
+                  <p className="text-sm" style={{ color: "#8E8E93" }}>No nearby people found</p>
+                  <p className="text-xs mt-1" style={{ color: "#8E8E9366" }}>Keep your location on to discover others</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  {gridItems.map((item, idx) => {
+                    if (item.kind === "community") {
+                      return (
+                        <CommunityCardButton
+                          key="community"
+                          onClick={openCommunityChat}
+                        />
+                      );
+                    }
+                    if (item.kind === "user") {
+                      const m = item.data;
+                      // Find the original index in members array for profile nav
+                      const memberIdx = members.findIndex((mem) => mem.user_id === m.user_id);
+                      return (
+                        <UserCard
+                          key={`user-${m.user_id}`}
+                          member={m}
+                          context={context}
+                          onTap={(member) => openUserProfile(member, memberIdx)}
+                          onDirectDm={(context === "hangouts" || context === "live") ? handleDirectDm : undefined}
+                        />
+                      );
+                    }
+
+                    // Place card (default context only)
+                    const p = item.data;
+                    const placeDistLabel = p.distance < 1
+                      ? `${Math.round(p.distance * 1000)}m`
+                      : `${Math.round(p.distance)}km`;
+                    const placeInitial = (p.categoryEmoji || p.name[0] || "📍");
+
+                    return (
                       <button
-                        onClick={() => toggleNearby()}
-                        className="mt-4 px-5 py-2 rounded-full text-sm font-bold transition-all active:scale-95 hover:brightness-110"
-                        style={{ background: LEMON, color: "#0a0a14" }}
+                        key={`place-${p.id}`}
+                        onClick={() => { setSelectedPlace(p); setView("place"); }}
+                        className="w-full rounded-xl overflow-hidden hover:ring-1 hover:ring-yellow-400/20 active:scale-[0.97] transition-all"
+                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(251,255,0,0.10)" }}
                       >
-                        Enable Location
-                      </button>
-                    </div>
-                  ) : loading ? (
-                    <div className="flex items-center justify-center py-12">
-                      <div className="w-6 h-6 border-2 rounded-full animate-spin" style={{ borderColor: `${LEMON}30`, borderTopColor: LEMON }} />
-                    </div>
-                  ) : gridItems.length === 0 ? (
-                    <div className="text-center py-12">
-                      <p className="text-sm" style={{ color: "#8E8E93" }}>No nearby people found</p>
-                      <p className="text-xs mt-1" style={{ color: "#8E8E9366" }}>Keep your location on to discover others</p>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-3 gap-2">
-                      {gridItems.map((item, idx) => {
-                        if (item.kind === "community") {
-                          return (
-                            <CommunityCardButton
-                              key="community"
-                              onClick={openCommunityChat}
+                        <div className="relative h-16 w-full">
+                          {p.photoUrl ? (
+                            <img
+                              src={p.photoUrl}
+                              alt={p.name}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                const el = e.target as HTMLImageElement;
+                                el.style.display = "none";
+                                const sibling = el.nextElementSibling as HTMLElement | null;
+                                if (sibling) sibling.style.display = "flex";
+                              }}
                             />
-                          );
-                        }
-                        if (item.kind === "user") {
-                          const m = item.data;
-                          // Find the original index in members array for profile nav
-                          const memberIdx = members.findIndex((mem) => mem.user_id === m.user_id);
-                          return (
-                            <UserCard
-                              key={`user-${m.user_id}`}
-                              member={m}
-                              context={context}
-                              onTap={(member) => openUserProfile(member, memberIdx)}
-                              onDirectDm={(context === "hangouts" || context === "live") ? handleDirectDm : undefined}
-                            />
-                          );
-                        }
-
-                        // Place card (default context only)
-                        const p = item.data;
-                        const placeDistLabel = p.distance < 1
-                          ? `${Math.round(p.distance * 1000)}m`
-                          : `${Math.round(p.distance)}km`;
-                        const placeInitial = (p.categoryEmoji || p.name[0] || "📍");
-
-                        return (
-                          <button
-                            key={`place-${p.id}`}
-                            onClick={() => { setSelectedPlace(p); setView("place"); }}
-                            className="w-full rounded-xl overflow-hidden hover:ring-1 hover:ring-yellow-400/20 active:scale-[0.97] transition-all"
-                            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(251,255,0,0.10)" }}
-                          >
-                            <div className="relative h-16 w-full">
-                              {p.photoUrl ? (
-                                <img
-                                  src={p.photoUrl}
-                                  alt={p.name}
-                                  className="w-full h-full object-cover"
-                                  onError={(e) => {
-                                    const el = e.target as HTMLImageElement;
-                                    el.style.display = "none";
-                                    const sibling = el.nextElementSibling as HTMLElement | null;
-                                    if (sibling) sibling.style.display = "flex";
-                                  }}
-                                />
-                              ) : null}
-                              <div
-                                className="absolute inset-0 flex items-center justify-center text-2xl"
-                                style={{
-                                  background: "linear-gradient(135deg, #2a2a40, #1a2a40)",
-                                  display: p.photoUrl ? "none" : undefined,
-                                }}
-                              >
-                                {placeInitial}
-                              </div>
-                              <span
-                                className="absolute top-0.5 right-0.5 text-[7px] font-bold px-1 rounded"
-                                style={{ background: "rgba(251,255,0,0.15)", color: LEMON }}
-                              >
-                                PLACE
-                              </span>
-                            </div>
-                            <div className="px-1.5 py-1.5">
-                              <p className="text-[10px] font-bold text-white truncate leading-tight">{p.name}</p>
-                              <p className="text-[8px] truncate leading-tight mt-0.5" style={{ color: "#8E8E93" }}>
-                                {placeDistLabel} · {p.categoryName || p.placeType || "Place"}
-                              </p>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Pagination */}
-                <PaginationRow
-                  page={page}
-                  totalPages={totalPages}
-                  onPrev={() => setPage((p) => Math.max(0, p - 1))}
-                  onNext={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                />
-              </>
-            )}
-
-            {/* ── PROFILE VIEW ──────────────────────────────────────────── */}
-            {view === "profile" && selectedUser && (
-              <>
-                {/* Header */}
-                <div className="flex items-center gap-2 px-3 py-2.5 border-b flex-shrink-0" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-                  <button
-                    onClick={() => { setView("grid"); setProfile(null); setSelectedUser(null); }}
-                    className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
-                    aria-label="Back"
-                  >
-                    <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
-                  <span className="text-sm font-bold flex-1" style={{ color: LEMON }}>
-                    {getContextLabel(context)}
-                  </span>
-                  <button
-                    onClick={closeModal}
-                    className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
-                    aria-label="Close"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#8E8E93" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-
-                <div className="overflow-y-auto flex-1">
-                  {profileLoading ? (
-                    <div className="flex items-center justify-center py-16">
-                      <div className="w-6 h-6 border-2 rounded-full animate-spin" style={{ borderColor: `${PINK}30`, borderTopColor: PINK }} />
-                    </div>
-                  ) : (
-                    <div className="px-5 py-5 flex flex-col items-center text-center gap-3">
-                      {/* Avatar */}
-                      <div className="w-20 h-20 rounded-full overflow-hidden flex-shrink-0">
-                        {selectedUser.photo_url ? (
-                          <img
-                            src={selectedUser.photo_url}
-                            alt=""
-                            className="w-full h-full object-cover"
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                          />
-                        ) : (
+                          ) : null}
                           <div
-                            className="w-full h-full flex items-center justify-center text-2xl font-bold"
-                            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                            className="absolute inset-0 flex items-center justify-center text-2xl"
+                            style={{
+                              background: "linear-gradient(135deg, #2a2a40, #1a2a40)",
+                              display: p.photoUrl ? "none" : undefined,
+                            }}
                           >
-                            {(profile?.firstName || selectedUser.name || selectedUser.username || "?")[0].toUpperCase()}
+                            {placeInitial}
                           </div>
-                        )}
-                      </div>
-
-                      {/* Name + username */}
-                      <div>
-                        <p className="text-base font-bold text-white">
-                          {profile?.firstName
-                            ? `${profile.firstName}${profile.lastName ? " " + profile.lastName : ""}`
-                            : selectedUser.name || selectedUser.username || "Anonymous"}
-                        </p>
-                        {(profile?.username || selectedUser.username) && (
-                          <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
-                            @{profile?.username || selectedUser.username}
+                          <span
+                            className="absolute top-0.5 right-0.5 text-[7px] font-bold px-1 rounded"
+                            style={{ background: "rgba(251,255,0,0.15)", color: LEMON }}
+                          >
+                            PLACE
+                          </span>
+                        </div>
+                        <div className="px-1.5 py-1.5">
+                          <p className="text-[10px] font-bold text-white truncate leading-tight">{p.name}</p>
+                          <p className="text-[8px] truncate leading-tight mt-0.5" style={{ color: "#8E8E93" }}>
+                            {placeDistLabel} · {p.categoryName || p.placeType || "Place"}
                           </p>
-                        )}
-                      </div>
-
-                      {/* Distance */}
-                      <div className="flex items-center gap-1 text-xs" style={{ color: "#8E8E93" }}>
-                        <span>📍</span>
-                        <span>
-                          {selectedUser.distance_km < 1
-                            ? `${Math.round(selectedUser.distance_km * 1000)}m`
-                            : `${Math.round(selectedUser.distance_km)}km`} ·{" "}
-                          {getTier(selectedUser.distance_km).short}
-                        </span>
-                      </div>
-
-                      {/* Bio */}
-                      {profile?.bio && (
-                        <p className="text-sm text-white/70 max-w-[260px] leading-relaxed">{profile.bio}</p>
-                      )}
-
-                      {/* Location */}
-                      {profile?.city && (
-                        <p className="text-xs" style={{ color: "#8E8E93" }}>
-                          {[profile.city, profile.country].filter(Boolean).join(", ")}
-                        </p>
-                      )}
-
-                      {/* Action buttons */}
-                      <div className="flex items-center gap-3 mt-2 w-full">
-                        <button
-                          onClick={() => openDm(selectedUser)}
-                          className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95 flex items-center justify-center gap-1.5"
-                          style={{ background: PINK }}
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                          </svg>
-                          Message
-                        </button>
-                        <button
-                          onClick={() => { closeModal(); navigate(`/profile/${selectedUser.user_id}`); }}
-                          className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95 flex items-center justify-center gap-1.5"
-                          style={{ background: "rgba(255,255,255,0.10)" }}
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-                          </svg>
-                          Profile
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
+              )}
+            </div>
 
-                {/* Profile prev/next arrows */}
-                <ProfileNavRow
-                  index={profileIndex}
-                  total={members.length}
-                  onPrev={() => navigateProfile(profileIndex - 1)}
-                  onNext={() => navigateProfile(profileIndex + 1)}
-                />
-              </>
-            )}
+            {/* Pagination */}
+            <PaginationRow
+              page={page}
+              totalPages={totalPages}
+              onPrev={() => setPage((p) => Math.max(0, p - 1))}
+              onNext={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            />
+          </>
+        )}
 
-            {/* ── GROUP CHAT VIEW (video call overlay — Element iframe) ─ */}
-            {view === "groupChat" && (
-              <ElementChatView
-                roomId={groupChatRoomId}
-                chatName={groupChatName}
-                matrixCreds={matrixCreds}
-                loading={groupChatLoading}
-                onBack={() => { setView("grid"); setGroupChatRoomId(null); setMatrixCreds(null); }}
-              />
-            )}
+        {/* ── PROFILE VIEW ─────────────────────────────────────────────────── */}
+        {view === "profile" && selectedUser && (
+          <>
+            {/* Header */}
+            <div className="flex items-center gap-2 px-3 py-2.5 border-b flex-shrink-0" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+              <button
+                onClick={() => { setView("grid"); setProfile(null); setSelectedUser(null); }}
+                className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
+                aria-label="Back"
+              >
+                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <span className="text-sm font-bold flex-1" style={{ color: LEMON }}>
+                {getContextLabel(context)}
+              </span>
+              <button
+                onClick={closeModal}
+                className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
+                aria-label="Close"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#8E8E93" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
 
-            {/* ── PLACE VIEW ────────────────────────────────────────────── */}
-            {view === "place" && selectedPlace && (
-              <>
-                <div className="flex items-center gap-2 px-3 py-2.5 border-b flex-shrink-0" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-                  <button
-                    onClick={() => { setView("grid"); setSelectedPlace(null); }}
-                    className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
-                    aria-label="Back"
-                  >
-                    <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
-                  <span className="text-sm font-bold flex-1" style={{ color: LEMON }}>Nearby</span>
-                  <button
-                    onClick={closeModal}
-                    className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
-                    aria-label="Close"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#8E8E93" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+            <div className="overflow-y-auto flex-1">
+              {profileLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <div className="w-6 h-6 border-2 rounded-full animate-spin" style={{ borderColor: `${PINK}30`, borderTopColor: PINK }} />
                 </div>
-
-                <div className="overflow-y-auto flex-1">
-                  <div className="relative w-full h-36 overflow-hidden flex-shrink-0">
-                    {selectedPlace.photoUrl ? (
+              ) : (
+                <div className="px-5 py-5 flex flex-col items-center text-center gap-3">
+                  {/* Avatar */}
+                  <div className="w-20 h-20 rounded-full overflow-hidden flex-shrink-0">
+                    {selectedUser.photo_url ? (
                       <img
-                        src={selectedPlace.photoUrl}
-                        alt={selectedPlace.name}
+                        src={selectedUser.photo_url}
+                        alt=""
                         className="w-full h-full object-cover"
                         onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                       />
                     ) : (
                       <div
-                        className="w-full h-full flex items-center justify-center text-5xl"
-                        style={{ background: "linear-gradient(135deg, #2a2a40, #1a2a40)" }}
+                        className="w-full h-full flex items-center justify-center text-2xl font-bold"
+                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
                       >
-                        {selectedPlace.categoryEmoji || "📍"}
+                        {(profile?.firstName || selectedUser.name || selectedUser.username || "?")[0].toUpperCase()}
                       </div>
                     )}
                   </div>
 
-                  <div className="px-4 py-4 space-y-3">
-                    <h3 className="text-lg font-bold text-white">{selectedPlace.name}</h3>
-                    <div className="flex flex-wrap gap-3">
-                      {selectedPlace.categoryName && (
-                        <span className="text-sm" style={{ color: LEMON }}>
-                          {selectedPlace.categoryEmoji && `${selectedPlace.categoryEmoji} `}{selectedPlace.categoryName}
-                        </span>
-                      )}
-                      <span className="text-sm" style={{ color: "#8E8E93" }}>
-                        📍 {selectedPlace.distance < 1
-                          ? `${Math.round(selectedPlace.distance * 1000)}m`
-                          : `${selectedPlace.distance.toFixed(1)}km`} away
-                      </span>
-                    </div>
-                    {selectedPlace.description && (
-                      <p className="text-sm text-white/70 leading-relaxed">{selectedPlace.description}</p>
+                  {/* Name + username */}
+                  <div>
+                    <p className="text-base font-bold text-white">
+                      {profile?.firstName
+                        ? `${profile.firstName}${profile.lastName ? " " + profile.lastName : ""}`
+                        : selectedUser.name || selectedUser.username || "Anonymous"}
+                    </p>
+                    {(profile?.username || selectedUser.username) && (
+                      <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                        @{profile?.username || selectedUser.username}
+                      </p>
                     )}
-                    <div className="space-y-2">
-                      {selectedPlace.address && (
-                        <div className="flex items-start gap-2 text-sm text-white/70">
-                          <span className="flex-shrink-0">📍</span>
-                          <span>{selectedPlace.address}{selectedPlace.city ? `, ${selectedPlace.city}` : ""}</span>
-                        </div>
-                      )}
-                      {selectedPlace.website && (
-                        <a
-                          href={selectedPlace.website.startsWith("http") ? selectedPlace.website : `https://${selectedPlace.website}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 text-sm hover:opacity-80 transition-opacity"
-                          style={{ color: LEMON }}
-                        >
-                          <span>🌐</span>
-                          <span className="truncate">{selectedPlace.website}</span>
-                        </a>
-                      )}
-                      {selectedPlace.phone && (
-                        <a
-                          href={`tel:${selectedPlace.phone}`}
-                          className="flex items-center gap-2 text-sm text-white/70 hover:opacity-80 transition-opacity"
-                        >
-                          <span>📞</span>
-                          <span>{selectedPlace.phone}</span>
-                        </a>
-                      )}
-                      {selectedPlace.instagram && (
-                        <a
-                          href={`https://instagram.com/${selectedPlace.instagram.replace(/^@/, "")}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 text-sm hover:opacity-80 transition-opacity"
-                          style={{ color: PINK }}
-                        >
-                          <span>📸</span>
-                          <span>@{selectedPlace.instagram.replace(/^@/, "")}</span>
-                        </a>
-                      )}
-                    </div>
+                  </div>
+
+                  {/* Distance */}
+                  <div className="flex items-center gap-1 text-xs" style={{ color: "#8E8E93" }}>
+                    <span>📍</span>
+                    <span>
+                      {selectedUser.distance_km < 1
+                        ? `${Math.round(selectedUser.distance_km * 1000)}m`
+                        : `${Math.round(selectedUser.distance_km)}km`} ·{" "}
+                      {getTier(selectedUser.distance_km).short}
+                    </span>
+                  </div>
+
+                  {/* Bio */}
+                  {profile?.bio && (
+                    <p className="text-sm text-white/70 max-w-[260px] leading-relaxed">{profile.bio}</p>
+                  )}
+
+                  {/* Location */}
+                  {profile?.city && (
+                    <p className="text-xs" style={{ color: "#8E8E93" }}>
+                      {[profile.city, profile.country].filter(Boolean).join(", ")}
+                    </p>
+                  )}
+
+                  {/* Action buttons */}
+                  <div className="flex items-center gap-3 mt-2 w-full">
+                    <button
+                      onClick={() => openDm(selectedUser)}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                      style={{ background: PINK }}
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                      Message
+                    </button>
+                    <button
+                      onClick={() => { closeModal(); navigate(`/profile/${selectedUser.user_id}`); }}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                      style={{ background: "rgba(255,255,255,0.10)" }}
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                      </svg>
+                      Profile
+                    </button>
                   </div>
                 </div>
-              </>
-            )}
+              )}
+            </div>
+
+            {/* Profile prev/next arrows */}
+            <ProfileNavRow
+              index={profileIndex}
+              total={members.length}
+              onPrev={() => navigateProfile(profileIndex - 1)}
+              onNext={() => navigateProfile(profileIndex + 1)}
+            />
+          </>
+        )}
+
+        {/* ── GROUP CHAT VIEW (video call overlay — Element iframe) ─────────── */}
+        {view === "groupChat" && (
+          <ElementChatView
+            roomId={groupChatRoomId}
+            chatName={groupChatName}
+            matrixCreds={matrixCreds}
+            loading={groupChatLoading}
+            onBack={() => { setView("grid"); setGroupChatRoomId(null); setMatrixCreds(null); }}
+          />
+        )}
+
+        {/* ── PLACE VIEW ───────────────────────────────────────────────────── */}
+        {view === "place" && selectedPlace && (
+          <>
+            <div className="flex items-center gap-2 px-3 py-2.5 border-b flex-shrink-0" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+              <button
+                onClick={() => { setView("grid"); setSelectedPlace(null); }}
+                className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
+                aria-label="Back"
+              >
+                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <span className="text-sm font-bold flex-1" style={{ color: LEMON }}>Nearby</span>
+              <button
+                onClick={closeModal}
+                className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
+                aria-label="Close"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#8E8E93" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1">
+              <div className="relative w-full h-36 overflow-hidden flex-shrink-0">
+                {selectedPlace.photoUrl ? (
+                  <img
+                    src={selectedPlace.photoUrl}
+                    alt={selectedPlace.name}
+                    className="w-full h-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                ) : (
+                  <div
+                    className="w-full h-full flex items-center justify-center text-5xl"
+                    style={{ background: "linear-gradient(135deg, #2a2a40, #1a2a40)" }}
+                  >
+                    {selectedPlace.categoryEmoji || "📍"}
+                  </div>
+                )}
+              </div>
+
+              <div className="px-4 py-4 space-y-3">
+                <h3 className="text-lg font-bold text-white">{selectedPlace.name}</h3>
+                <div className="flex flex-wrap gap-3">
+                  {selectedPlace.categoryName && (
+                    <span className="text-sm" style={{ color: LEMON }}>
+                      {selectedPlace.categoryEmoji && `${selectedPlace.categoryEmoji} `}{selectedPlace.categoryName}
+                    </span>
+                  )}
+                  <span className="text-sm" style={{ color: "#8E8E93" }}>
+                    📍 {selectedPlace.distance < 1
+                      ? `${Math.round(selectedPlace.distance * 1000)}m`
+                      : `${selectedPlace.distance.toFixed(1)}km`} away
+                  </span>
+                </div>
+                {selectedPlace.description && (
+                  <p className="text-sm text-white/70 leading-relaxed">{selectedPlace.description}</p>
+                )}
+                <div className="space-y-2">
+                  {selectedPlace.address && (
+                    <div className="flex items-start gap-2 text-sm text-white/70">
+                      <span className="flex-shrink-0">📍</span>
+                      <span>{selectedPlace.address}{selectedPlace.city ? `, ${selectedPlace.city}` : ""}</span>
+                    </div>
+                  )}
+                  {selectedPlace.website && (
+                    <a
+                      href={selectedPlace.website.startsWith("http") ? selectedPlace.website : `https://${selectedPlace.website}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-sm hover:opacity-80 transition-opacity"
+                      style={{ color: LEMON }}
+                    >
+                      <span>🌐</span>
+                      <span className="truncate">{selectedPlace.website}</span>
+                    </a>
+                  )}
+                  {selectedPlace.phone && (
+                    <a
+                      href={`tel:${selectedPlace.phone}`}
+                      className="flex items-center gap-2 text-sm text-white/70 hover:opacity-80 transition-opacity"
+                    >
+                      <span>📞</span>
+                      <span>{selectedPlace.phone}</span>
+                    </a>
+                  )}
+                  {selectedPlace.instagram && (
+                    <a
+                      href={`https://instagram.com/${selectedPlace.instagram.replace(/^@/, "")}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-sm hover:opacity-80 transition-opacity"
+                      style={{ color: PINK }}
+                    >
+                      <span>📸</span>
+                      <span>@{selectedPlace.instagram.replace(/^@/, "")}</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Floating Video Call Window — renders outside panel, at fixed position ── */}
+      {callState === 'connected' && callUrl && callPeer && (
+        <div
+          className="fixed z-[60] rounded-xl overflow-hidden shadow-2xl"
+          style={{
+            bottom: 80,
+            right: 16,
+            width: 320,
+            height: 260,
+            border: `2px solid ${LEMON}40`,
+            background: '#1C1C1E',
+          }}
+        >
+          {/* Header */}
+          <div className="flex items-center gap-2 px-3 py-2" style={{ background: 'rgba(0,0,0,0.6)' }}>
+            <div className="w-6 h-6 rounded-full overflow-hidden flex-shrink-0">
+              {callPeer.photoUrl ? (
+                <img src={callPeer.photoUrl} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-xs font-bold" style={{ background: PINK, color: '#fff' }}>
+                  {(callPeer.name || '?')[0]}
+                </div>
+              )}
+            </div>
+            <span className="text-xs font-semibold text-white truncate flex-1">{callPeer.name}</span>
+            <button
+              onClick={endCall}
+              className="w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90 flex-shrink-0"
+              style={{ background: '#FF3B30' }}
+              aria-label="End call"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
+          {/* Element Call iframe */}
+          <iframe
+            src={callUrl}
+            className="w-full border-0"
+            style={{ height: 'calc(100% - 40px)' }}
+            allow="microphone; camera; clipboard-write; encrypted-media; display-capture; autoplay; speaker-selection"
+          />
         </div>
       )}
     </>
   );
+}
+
+// ── NearbyWidget — backward-compatible no-op export ───────────────────────────
+export function NearbyWidget(_props?: { compact?: boolean }) {
+  return null;
 }

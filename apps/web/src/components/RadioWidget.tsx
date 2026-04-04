@@ -35,14 +35,6 @@ function extractArtistUrl(trackUrl: string): string | null {
 
 // ── Inline SVG icon components ────────────────────────────────────────────────
 
-function RadioIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M20 6h-2.18c.07-.31.18-.62.18-.94C18 3.37 16.63 2 14.94 2c-.87 0-1.65.36-2.22.94L12 3.66l-.72-.72C10.71 2.36 9.93 2 9.06 2 7.37 2 6 3.37 6 5.06c0 .32.1.63.18.94H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zM14.94 4c.59 0 1.06.47 1.06 1.06 0 .59-.47 1.06-1.06 1.06-.59 0-1.06-.47-1.06-1.06C13.88 4.47 14.35 4 14.94 4zM9.06 4c.59 0 1.06.47 1.06 1.06 0 .59-.47 1.06-1.06 1.06C8.47 6.12 8 5.65 8 5.06 8 4.47 8.47 4 9.06 4zM20 19H4V8h16v11zm-8-2c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z" />
-    </svg>
-  );
-}
-
 function CloseIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
@@ -130,9 +122,9 @@ function AlertTriangleIcon({ className }: { className?: string }) {
 }
 
 // ── Equalizer bars (animated) ─────────────────────────────────────────────────
-// These live inside the FAB when playing, and on active playlist rows.
+// Exported so CristinaWidget and other callers can reuse the FAB indicator.
 
-function EqualizerBars({ color = "#fff", size = "sm" }: { color?: string; size?: "sm" | "xs" }) {
+export function EqualizerBars({ color = "#fff", size = "sm" }: { color?: string; size?: "sm" | "xs" }) {
   const h = size === "xs" ? { a: "8px", b: "12px", c: "6px" } : { a: "10px", b: "16px", c: "8px" };
   const w = size === "xs" ? "w-px" : "w-0.5";
   return (
@@ -263,7 +255,6 @@ function PendingRequestsPanel({ onAutoImport }: { onAutoImport: (url: string) =>
       const res = await updateRadioRequest(req.id, "approved");
       if (res.success) {
         setFeedback({ id: req.id, type: "approved" });
-        // Auto-import: resolve + import in one step
         if (req.url) {
           onAutoImport(req.url);
         }
@@ -409,28 +400,11 @@ function PendingRequestsPanel({ onAutoImport }: { onAutoImport: (url: string) =>
   );
 }
 
-// ── Shared stagger helper (all 3 widgets share these keys) ──────────────────
-const WIDGET_KEYS = [
-  { key: "radio_fab_corner", order: 0, defaultCorner: "bl" },
-  { key: "nearby_fab_corner", order: 1, defaultCorner: "br" },
-  { key: "cristina_fab_corner", order: 2, defaultCorner: "tr" },
-] as const;
+// ── RadioPanel ────────────────────────────────────────────────────────────────
+// Inner panel content only — no FAB, no modal overlay shell.
+// Parent is responsible for the modal wrapper / backdrop.
 
-function getCornerOffset(myOrder: number, myCorner: string): number {
-  let count = 0;
-  for (const { key, order, defaultCorner } of WIDGET_KEYS) {
-    if (order >= myOrder) continue;
-    try {
-      const otherCorner = localStorage.getItem(key) || defaultCorner;
-      if (otherCorner === myCorner) count++;
-    } catch {}
-  }
-  return count;
-}
-
-// ── Main RadioWidget component ────────────────────────────────────────────────
-
-export function RadioWidget({ compact = false }: { compact?: boolean } = {}) {
+export function RadioPanel({ onClose }: { onClose: () => void }) {
   const {
     tracks,
     currentTrack,
@@ -545,47 +519,6 @@ export function RadioWidget({ compact = false }: { compact?: boolean } = {}) {
     } catch { /* silent */ }
   };
 
-  // Panel open/close
-  const [isOpen, setIsOpen] = useState(false);
-
-  // FAB corner: tl/tr/bl/br — draggable to any corner
-  type Corner = "tl" | "tr" | "bl" | "br";
-  const [fabCorner, setFabCorner] = useState<Corner>(() => {
-    try { return (localStorage.getItem("radio_fab_corner") as Corner) || "bl"; } catch { return "bl"; }
-  });
-  const fabRef = useRef<HTMLDivElement>(null);
-  const dragState = useRef<{ startX: number; startY: number; dragging: boolean; moved: boolean }>({ startX: 0, startY: 0, dragging: false, moved: false });
-
-  const handleFabPointerDown = useCallback((e: React.PointerEvent) => {
-    dragState.current = { startX: e.clientX, startY: e.clientY, dragging: true, moved: false };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, []);
-
-  const handleFabPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragState.current.dragging) return;
-    const dx = e.clientX - dragState.current.startX;
-    const dy = e.clientY - dragState.current.startY;
-    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) dragState.current.moved = true;
-    if (!dragState.current.moved || !fabRef.current) return;
-    fabRef.current.style.transition = "none";
-    fabRef.current.style.transform = `translate(${dx}px, ${dy}px)`;
-  }, []);
-
-  const handleFabPointerUp = useCallback((e: React.PointerEvent) => {
-    if (!dragState.current.dragging) return;
-    const wasDragged = dragState.current.moved;
-    dragState.current.dragging = false;
-    if (!wasDragged) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (fabRef.current) { fabRef.current.style.transition = ""; fabRef.current.style.transform = ""; }
-    const isLeft = e.clientX < window.innerWidth / 2;
-    const isTop = e.clientY < window.innerHeight / 2;
-    const newCorner: Corner = isTop ? (isLeft ? "tl" : "tr") : (isLeft ? "bl" : "br");
-    setFabCorner(newCorner);
-    try { localStorage.setItem("radio_fab_corner", newCorner); } catch {}
-  }, []);
-
   // Playlist infinite scroll
   const playlistRef = useRef<HTMLDivElement>(null);
   const handlePlaylistScroll = useCallback(() => {
@@ -608,103 +541,14 @@ export function RadioWidget({ compact = false }: { compact?: boolean } = {}) {
     [duration, seek]
   );
 
-  // Close on Escape
-  useEffect(() => {
-    if (!isOpen) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setIsOpen(false);
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [isOpen]);
-
   const hasTrack = !!currentTrack;
   const progressPct = duration ? (progress / duration) * 100 : 0;
   const artistName = getArtistName(currentTrack?.artist);
 
-  // ── Corner position styles (with stagger offset for FAB overlap prevention) ─
-  const MY_ORDER = 0;
-  const offset = getCornerOffset(MY_ORDER, fabCorner);
-  const isTop = fabCorner.startsWith("t");
-  const isLeft = fabCorner.endsWith("l");
-  const fabPosStyle = {
-    [isTop ? "top" : "bottom"]: `calc(5rem + ${offset * 56}px)`,
-    [isLeft ? "left" : "right"]: "0.75rem",
-    touchAction: "none" as const,
-  };
-  // Panel is now a centered modal overlay (same style as NearbyWidget)
+  return (
+    <div className="flex flex-col" style={{ maxHeight: "calc(85vh - 6rem)" }}>
 
-  // ── FAB (closed) ─────────────────────────────────────────────────────────────
-  const fab = (
-    <div
-      ref={fabRef}
-      className="fixed z-[38]"
-      style={fabPosStyle}
-      onPointerDown={handleFabPointerDown}
-      onPointerMove={handleFabPointerMove}
-      onPointerUp={handleFabPointerUp}
-    >
-      {/* Ping ring — only when playing */}
-      {isPlaying && (
-        <span
-          className="absolute inset-0 rounded-full animate-ping pointer-events-none"
-          style={{
-            background: "linear-gradient(135deg, #8B5CF6, #D946EF)",
-            opacity: 0.25,
-            animationDuration: "2s",
-          }}
-          aria-hidden="true"
-        />
-      )}
-
-      <button
-        onClick={() => { if (!dragState.current.moved) setIsOpen(true); }}
-        className={[
-          "relative w-12 h-12 rounded-full shadow-lg flex items-center justify-center",
-          "transition-transform hover:scale-110 active:scale-95",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background",
-        ].join(" ")}
-        style={{ background: "linear-gradient(135deg, #8B5CF6, #D946EF)" }}
-        aria-label="Open PNP Radio player"
-      >
-        {/* Glow halo */}
-        <span
-          className="absolute -inset-1 rounded-full pointer-events-none"
-          style={{
-            background: "linear-gradient(135deg, #8B5CF6, #D946EF)",
-            opacity: 0.2,
-            filter: "blur(8px)",
-          }}
-          aria-hidden="true"
-        />
-
-        {/* Icon: equalizer when playing, emoji when paused/idle */}
-        <span className="relative flex items-center justify-center w-full h-full">
-          {isPlaying ? (
-            <EqualizerBars color="#fff" size="sm" />
-          ) : (
-            <span className="text-xl">🎧</span>
-          )}
-        </span>
-      </button>
-    </div>
-  );
-
-  // ── Panel (open) ──────────────────────────────────────────────────────────────
-  const panel = isOpen ? (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      onClick={() => setIsOpen(false)}
-    >
-      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)" }} />
-    <div
-      className="relative w-full max-w-[380px] flex flex-col overflow-hidden rounded-2xl shadow-2xl border border-white/10"
-      style={{ background: "rgba(15, 12, 25, 0.97)", maxHeight: "85vh" }}
-      role="dialog"
-      aria-label="PNP Radio player"
-      onClick={(e) => e.stopPropagation()}
-    >
-      {/* ── Header ───────────────────────────────────────────────────────────── */}
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div
         className="flex items-center justify-between px-4 py-3 flex-shrink-0 border-b border-white/8"
         style={{ borderBottomColor: "rgba(255,255,255,0.08)" }}
@@ -725,7 +569,7 @@ export function RadioWidget({ compact = false }: { compact?: boolean } = {}) {
           </div>
         </div>
         <button
-          onClick={() => setIsOpen(false)}
+          onClick={onClose}
           className={[
             "p-1.5 rounded-lg transition-colors",
             "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10",
@@ -738,7 +582,7 @@ export function RadioWidget({ compact = false }: { compact?: boolean } = {}) {
         </button>
       </div>
 
-      {/* ── Body ─────────────────────────────────────────────────────────────── */}
+      {/* ── Body ───────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex flex-col">
 
         {/* SoundCloud Import Bar (Admin Only) */}
@@ -1080,7 +924,7 @@ export function RadioWidget({ compact = false }: { compact?: boolean } = {}) {
               </div>
             </div>
 
-            {/* ── Playlist section ────────────────────────────────────────────── */}
+            {/* ── Playlist section ──────────────────────────────────────────── */}
             <div className="border-t border-white/8 flex-shrink-0" style={{ borderTopColor: "rgba(255,255,255,0.08)" }}>
               <div className="flex items-center justify-between px-4 py-2">
                 <span className="text-[10px] font-semibold text-pnp-textSecondary uppercase tracking-wider">
@@ -1127,39 +971,13 @@ export function RadioWidget({ compact = false }: { compact?: boolean } = {}) {
         )}
       </div>
     </div>
-    </div>
-  ) : null;
-
-  // ── Compact mode (strip icon) ──────────────────────────────────────────────
-  if (compact) {
-    return (
-      <>
-        {panel}
-        <button
-          onClick={() => setIsOpen(true)}
-          className="relative w-9 h-9 rounded-full shadow-lg flex items-center justify-center transition-transform active:scale-90"
-          style={{ background: "linear-gradient(135deg, #8B5CF6, #D946EF)" }}
-          aria-label="Open PNP Radio player"
-        >
-          <span className="relative flex items-center justify-center w-full h-full">
-            {isPlaying ? (
-              <EqualizerBars color="#fff" size="sm" />
-            ) : (
-              <span className="text-sm">🎧</span>
-            )}
-          </span>
-          {isPlaying && (
-            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 ring-1 ring-black" />
-          )}
-        </button>
-      </>
-    );
-  }
-
-  return (
-    <>
-      {panel}
-      {fab}
-    </>
   );
+}
+
+// ── RadioWidget — backward-compat no-op stub ──────────────────────────────────
+// The FAB and modal overlay are now owned by CristinaWidget (or another parent).
+// This export is kept so existing import sites don't break at compile time.
+
+export function RadioWidget(_props?: { compact?: boolean }) {
+  return null;
 }

@@ -8,6 +8,13 @@ const strings = {
     chooseYourPlan: "Choose Your Plan",
     subtitle: "Unlock exclusive content and features with PNPTV PRIME",
 
+    // ── Current tier status banner ────────────────────────────────────────────
+    currentTierFree: "You're on the free tier",
+    currentTierMember: "You're a PNP Member",
+    currentTierPrime: "You have PRIME access",
+    upgradeCta: "Upgrade to unlock more features",
+    extendCta: "Extend or upgrade your plan below",
+
     // ── Currency toggle ───────────────────────────────────────────────────────
     showPricesInUSD: "Show prices in USD",
     showPricesInCOP: "Show prices in COP",
@@ -26,50 +33,15 @@ const strings = {
     // ── Plan badge ────────────────────────────────────────────────────────────
     bestValue: "Best Value",
 
-    // ── Plan features — member-monthly ─────────────────────────────────────────
-    featureMember1: "Full app access",
-    featureMember2: "Social feed & hangout rooms",
-    featureMember3: "Nearby users discovery",
-
-    // ── Plan features — week_pass ─────────────────────────────────────────────
-    featureWeek1: "7 days of full PRIME access",
-    featureWeek2: "Exclusive PRIME content",
-    featureWeek3: "Nearby Premium features",
-    featureWeek4: "Community hangouts",
-
-    // ── Plan features — three_months_pass ────────────────────────────────────
-    featureThreeMonths1: "3 months of full PRIME access",
-    featureThreeMonths2: "Full PRIME media library access",
-    featureThreeMonths3: "Nearby Premium features",
-    featureThreeMonths4: "Community hangouts",
-    featureThreeMonths5: "Priority support",
-
-    // ── Plan features — crystal_pass ──────────────────────────────────────────
-    featureCrystal1: "6 months of full PRIME access",
-    featureCrystal2: "Unlimited PRIME content + early releases",
-    featureCrystal3: "Nearby Premium features",
-    featureCrystal4: "VIP community status",
-    featureCrystal5: "Priority support",
-
-    // ── Plan features — yearly_pass ───────────────────────────────────────────
-    featureYearly1: "1 year of full PRIME access",
-    featureYearly2: "Unlimited PRIME content + exclusives",
-    featureYearly3: "Nearby Premium features",
-    featureYearly4: "VIP badge + priority support",
-    featureYearly5: "Access to exclusive events",
-
-    // ── Plan features — lifetime_pass ─────────────────────────────────────────
-    featureLifetime1: "Lifetime PRIME access — pay once",
-    featureLifetime2: "Everything in Yearly, forever",
-    featureLifetime3: "Founder badge",
-    featureLifetime4: "Priority feature requests",
-    featureLifetime5: "Never pay again",
-
-    // ── Member plan excluded features ─────────────────────────────────────────
-    excludedMember1: "No PRIME access",
-    excludedMember2: "No exclusive content or videos",
-    excludedMember3: "No Telegram PRIME channel",
-    excludedMember4: "No VIP badge or priority support",
+    // ── Entitlement-driven features ───────────────────────────────────────────
+    everythingInMemberPlus: "Everything in Member, plus:",
+    platformAccess: "Platform access",
+    primeAccess: "Full PRIME access",
+    includesAddOns: "Includes:",
+    addonMember: "Member",
+    addonPrime: "PRIME",
+    addonCreator: "Creator",
+    addonPrivateCalls: "Private Call",
 
     // ── Email section ─────────────────────────────────────────────────────────
     emailAddress: "Email address",
@@ -154,84 +126,46 @@ const strings = {
   },
 
   es: {
-    // ── Page head ─────────────────────────────────────────────────────────────
     pageTitle: "Suscribirse — PNPtv!",
     pageDescription: "Elige tu plan de PNPtv. Desbloquea contenido exclusivo, acceso a PRIME, descubrimiento cercano y mucho más.",
 
-    // ── Header ────────────────────────────────────────────────────────────────
     chooseYourPlan: "Elige tu plan",
     subtitle: "Desbloquea contenido exclusivo y funciones con PNPTV PRIME",
 
-    // ── Currency toggle ───────────────────────────────────────────────────────
+    currentTierFree: "Estás en el plan gratuito",
+    currentTierMember: "Eres Miembro PNP",
+    currentTierPrime: "Tienes acceso PRIME",
+    upgradeCta: "Mejora tu plan para desbloquear más funciones",
+    extendCta: "Extiende o mejora tu plan abajo",
+
     showPricesInUSD: "Ver precios en USD",
     showPricesInCOP: "Ver precios en COP",
 
-    // ── Plan tier section labels ──────────────────────────────────────────────
     communityMember: "Miembro de comunidad",
     communityMemberDesc: "Acceso a la app y funciones sociales — no incluye PRIME ni contenido exclusivo",
     prime: "PRIME",
     primeDesc: "Acceso completo — media PRIME, Nearby Premium, hangouts, contenido exclusivo y más",
 
-    // ── Plan duration labels ──────────────────────────────────────────────────
     lifetime: "De por vida",
     monthly: "Mensual",
     perMonth: "/mes",
 
-    // ── Plan badge ────────────────────────────────────────────────────────────
     bestValue: "Mejor precio",
 
-    // ── Plan features — member-monthly ─────────────────────────────────────────
-    featureMember1: "Acceso completo a la app",
-    featureMember2: "Feed social y salas de hangout",
-    featureMember3: "Descubrimiento de usuarios cercanos",
+    everythingInMemberPlus: "Todo lo del plan Miembro, más:",
+    platformAccess: "Acceso a la plataforma",
+    primeAccess: "Acceso PRIME completo",
+    includesAddOns: "Incluye:",
+    addonMember: "Miembro",
+    addonPrime: "PRIME",
+    addonCreator: "Creador",
+    addonPrivateCalls: "Llamada privada",
 
-    // ── Plan features — week_pass ─────────────────────────────────────────────
-    featureWeek1: "7 días de acceso PRIME completo",
-    featureWeek2: "Contenido PRIME exclusivo",
-    featureWeek3: "Funciones Nearby Premium",
-    featureWeek4: "Hangouts comunitarios",
-
-    // ── Plan features — three_months_pass ────────────────────────────────────
-    featureThreeMonths1: "3 meses de acceso PRIME completo",
-    featureThreeMonths2: "Acceso completo a la biblioteca de media PRIME",
-    featureThreeMonths3: "Funciones Nearby Premium",
-    featureThreeMonths4: "Hangouts comunitarios",
-    featureThreeMonths5: "Soporte prioritario",
-
-    // ── Plan features — crystal_pass ──────────────────────────────────────────
-    featureCrystal1: "6 meses de acceso PRIME completo",
-    featureCrystal2: "Contenido PRIME ilimitado + lanzamientos anticipados",
-    featureCrystal3: "Funciones Nearby Premium",
-    featureCrystal4: "Estatus VIP en la comunidad",
-    featureCrystal5: "Soporte prioritario",
-
-    // ── Plan features — yearly_pass ───────────────────────────────────────────
-    featureYearly1: "1 año de acceso PRIME completo",
-    featureYearly2: "Contenido PRIME ilimitado + exclusivos",
-    featureYearly3: "Funciones Nearby Premium",
-    featureYearly4: "Insignia VIP + soporte prioritario",
-    featureYearly5: "Acceso a eventos exclusivos",
-
-    // ── Plan features — lifetime_pass ─────────────────────────────────────────
-    featureLifetime1: "Acceso PRIME de por vida — pago único",
-    featureLifetime2: "Todo lo del plan Anual, para siempre",
-    featureLifetime3: "Insignia de fundador",
-    featureLifetime4: "Solicitudes de funciones prioritarias",
-    featureLifetime5: "No vuelves a pagar nunca",
-
-    // ── Member plan excluded features ─────────────────────────────────────────
-    excludedMember1: "Sin acceso PRIME",
-    excludedMember2: "Sin contenido exclusivo ni videos",
-    excludedMember3: "Sin canal PRIME de Telegram",
-    excludedMember4: "Sin insignia VIP ni soporte prioritario",
-
-    // ── Email section ─────────────────────────────────────────────────────────
     emailAddress: "Correo electrónico",
     emailDesc: "Te enviaremos tus credenciales de acceso e información de membresía",
     emailPlaceholder: "tu@ejemplo.com",
     invalidEmail: "Por favor ingresa un correo electrónico válido",
 
-    // ── Payment methods ───────────────────────────────────────────────────────
     paymentMethod: "Método de pago",
     cardPse: "Tarjeta / PSE",
     cardPseDesc: "Crédito, Débito",
@@ -243,13 +177,11 @@ const strings = {
     dashComingSoon: "Próximamente",
     dashAnonBadge: "ANON",
 
-    // ── Dash info panel ───────────────────────────────────────────────────────
     dashInfoText: "Paga de forma anónima con Dash — sin tarjeta de crédito, sin identidad requerida. Recibirás una dirección de pago + código QR para enviar desde cualquier billetera Dash.",
     getDashWallet: "Obtener billetera Dash ↗",
     buyOnKraken: "Comprar en Kraken ↗",
     buyOnUphold: "Comprar en Uphold ↗",
 
-    // ── Dash invoice panel ────────────────────────────────────────────────────
     waitingForDashPayment: "Esperando pago Dash —",
     dashInvoiceDesc: "Envía el monto exacto a la dirección indicada. Esta página se actualiza automáticamente.",
     openDashCheckout: "Abrir pago Dash",
@@ -265,7 +197,6 @@ const strings = {
     dashAmountDue: "Monto a pagar",
     cancel: "Cancelar",
 
-    // ── Promo / Meru code section ─────────────────────────────────────────────
     or: "o",
     wantBestDeal: "¿Quieres la mejor oferta?",
     lifetime100Desc: "Obtén nuestra promo Lifetime100 — un solo pago de $100 por acceso PRIME de por vida. Sin suscripciones, sin renovaciones, tuyo para siempre.",
@@ -279,21 +210,17 @@ const strings = {
     activationError: "Error al activar",
     pleaseEnterValidEmailAbove: "Por favor ingresa un correo electrónico válido arriba",
 
-    // ── Payment polling ───────────────────────────────────────────────────────
     waitingForPayment: "Procesando tu pago...",
     completePaymentInWindow: "Completa el pago en la página de pago. Esta página se actualizará automáticamente.",
 
-    // ── Subscribe button ──────────────────────────────────────────────────────
     subscribeNow: "Suscribirme ahora",
     processingPayment: "Procesando...",
     goBack: "Volver",
 
-    // ── Success screen ────────────────────────────────────────────────────────
     paymentConfirmed: "¡Pago confirmado!",
     subscriptionNowActive: "Tu suscripción ya está activa. Revisa tu correo para tu factura y guía de bienvenida.",
     goToPNPtv: "Ir a PNPtv!",
 
-    // ── Error states ──────────────────────────────────────────────────────────
     noPlansAvailable: "No hay planes disponibles",
     failedToLoadPlans: "Error al cargar los planes",
     retry: "Reintentar",
@@ -314,6 +241,12 @@ const strings = {
     chooseYourPlan: "Escolha Seu Plano",
     subtitle: "Desbloqueie conteúdo exclusivo e recursos com PNPTV PRIME",
 
+    currentTierFree: "Você está no plano gratuito",
+    currentTierMember: "Você é Membro PNP",
+    currentTierPrime: "Você tem acesso PRIME",
+    upgradeCta: "Atualize para desbloquear mais recursos",
+    extendCta: "Estenda ou atualize seu plano abaixo",
+
     showPricesInUSD: "Ver preços em USD",
     showPricesInCOP: "Ver preços em COP",
 
@@ -328,43 +261,14 @@ const strings = {
 
     bestValue: "Melhor Custo-Benefício",
 
-    featureMember1: "Acesso completo ao app",
-    featureMember2: "Feed social e salas de hangout",
-    featureMember3: "Descoberta de usuários próximos",
-
-    featureWeek1: "7 dias de acesso PRIME completo",
-    featureWeek2: "Conteúdo PRIME exclusivo",
-    featureWeek3: "Recursos Nearby Premium",
-    featureWeek4: "Hangouts comunitários",
-
-    featureThreeMonths1: "3 meses de acesso PRIME completo",
-    featureThreeMonths2: "Acesso completo à biblioteca de mídia PRIME",
-    featureThreeMonths3: "Recursos Nearby Premium",
-    featureThreeMonths4: "Hangouts comunitários",
-    featureThreeMonths5: "Suporte prioritário",
-
-    featureCrystal1: "6 meses de acesso PRIME completo",
-    featureCrystal2: "Conteúdo PRIME ilimitado + lançamentos antecipados",
-    featureCrystal3: "Recursos Nearby Premium",
-    featureCrystal4: "Status VIP na comunidade",
-    featureCrystal5: "Suporte prioritário",
-
-    featureYearly1: "1 ano de acesso PRIME completo",
-    featureYearly2: "Conteúdo PRIME ilimitado + exclusivos",
-    featureYearly3: "Recursos Nearby Premium",
-    featureYearly4: "Badge VIP + suporte prioritário",
-    featureYearly5: "Acesso a eventos exclusivos",
-
-    featureLifetime1: "Acesso PRIME vitalício — pague uma vez",
-    featureLifetime2: "Tudo do plano Anual, para sempre",
-    featureLifetime3: "Badge de Fundador",
-    featureLifetime4: "Solicitações de recursos prioritárias",
-    featureLifetime5: "Nunca mais pague",
-
-    excludedMember1: "Sem acesso PRIME",
-    excludedMember2: "Sem conteúdo exclusivo ou vídeos",
-    excludedMember3: "Sem canal PRIME do Telegram",
-    excludedMember4: "Sem badge VIP nem suporte prioritário",
+    everythingInMemberPlus: "Tudo do plano Membro, mais:",
+    platformAccess: "Acesso à plataforma",
+    primeAccess: "Acesso PRIME completo",
+    includesAddOns: "Inclui:",
+    addonMember: "Membro",
+    addonPrime: "PRIME",
+    addonCreator: "Criador",
+    addonPrivateCalls: "Chamada privada",
 
     emailAddress: "Endereço de e-mail",
     emailDesc: "Enviaremos suas credenciais de acesso e informações de assinatura",
@@ -446,6 +350,12 @@ const strings = {
     chooseYourPlan: "选择您的方案",
     subtitle: "使用 PNPTV PRIME 解锁独家内容和功能",
 
+    currentTierFree: "您目前使用免费版",
+    currentTierMember: "您是 PNP 会员",
+    currentTierPrime: "您拥有 PRIME 访问权限",
+    upgradeCta: "升级以解锁更多功能",
+    extendCta: "在下方延长或升级您的方案",
+
     showPricesInUSD: "以美元显示价格",
     showPricesInCOP: "以哥伦比亚比索显示价格",
 
@@ -460,43 +370,14 @@ const strings = {
 
     bestValue: "最超值",
 
-    featureMember1: "完整应用访问",
-    featureMember2: "社交动态和聚会房间",
-    featureMember3: "附近用户发现",
-
-    featureWeek1: "7 天完整 PRIME 访问",
-    featureWeek2: "独家 PRIME 内容",
-    featureWeek3: "Nearby Premium 功能",
-    featureWeek4: "社区 Hangouts",
-
-    featureThreeMonths1: "3 个月完整 PRIME 访问",
-    featureThreeMonths2: "完整 PRIME 媒体库访问",
-    featureThreeMonths3: "Nearby Premium 功能",
-    featureThreeMonths4: "社区 Hangouts",
-    featureThreeMonths5: "优先支持",
-
-    featureCrystal1: "6 个月完整 PRIME 访问",
-    featureCrystal2: "无限 PRIME 内容 + 早期发布",
-    featureCrystal3: "Nearby Premium 功能",
-    featureCrystal4: "VIP 社区身份",
-    featureCrystal5: "优先支持",
-
-    featureYearly1: "1 年完整 PRIME 访问",
-    featureYearly2: "无限 PRIME 内容 + 独家内容",
-    featureYearly3: "Nearby Premium 功能",
-    featureYearly4: "VIP 徽章 + 优先支持",
-    featureYearly5: "独家活动访问",
-
-    featureLifetime1: "终身 PRIME 访问 — 一次付款",
-    featureLifetime2: "年度方案的一切，永久有效",
-    featureLifetime3: "创始人徽章",
-    featureLifetime4: "优先功能请求",
-    featureLifetime5: "永不再付费",
-
-    excludedMember1: "无 PRIME 访问",
-    excludedMember2: "无独家内容或视频",
-    excludedMember3: "无 Telegram PRIME 频道",
-    excludedMember4: "无 VIP 徽章或优先支持",
+    everythingInMemberPlus: "包含会员所有功能，另外还有：",
+    platformAccess: "平台访问",
+    primeAccess: "完整 PRIME 访问",
+    includesAddOns: "包含：",
+    addonMember: "会员",
+    addonPrime: "PRIME",
+    addonCreator: "创作者",
+    addonPrivateCalls: "私人通话",
 
     emailAddress: "电子邮件地址",
     emailDesc: "我们将发送您的登录凭证和会员信息",
@@ -578,6 +459,12 @@ const strings = {
     chooseYourPlan: "選擇您的方案",
     subtitle: "使用 PNPTV PRIME 解鎖獨家內容和功能",
 
+    currentTierFree: "您目前使用免費版",
+    currentTierMember: "您是 PNP 會員",
+    currentTierPrime: "您擁有 PRIME 存取權限",
+    upgradeCta: "升級以解鎖更多功能",
+    extendCta: "在下方延長或升級您的方案",
+
     showPricesInUSD: "以美元顯示價格",
     showPricesInCOP: "以哥倫比亞披索顯示價格",
 
@@ -592,43 +479,14 @@ const strings = {
 
     bestValue: "最超值",
 
-    featureMember1: "完整應用存取",
-    featureMember2: "社交動態和聚會房間",
-    featureMember3: "附近用戶探索",
-
-    featureWeek1: "7 天完整 PRIME 存取",
-    featureWeek2: "獨家 PRIME 內容",
-    featureWeek3: "Nearby Premium 功能",
-    featureWeek4: "社群 Hangouts",
-
-    featureThreeMonths1: "3 個月完整 PRIME 存取",
-    featureThreeMonths2: "完整 PRIME 媒體庫存取",
-    featureThreeMonths3: "Nearby Premium 功能",
-    featureThreeMonths4: "社群 Hangouts",
-    featureThreeMonths5: "優先支援",
-
-    featureCrystal1: "6 個月完整 PRIME 存取",
-    featureCrystal2: "無限 PRIME 內容 + 早期發布",
-    featureCrystal3: "Nearby Premium 功能",
-    featureCrystal4: "VIP 社群身份",
-    featureCrystal5: "優先支援",
-
-    featureYearly1: "1 年完整 PRIME 存取",
-    featureYearly2: "無限 PRIME 內容 + 獨家內容",
-    featureYearly3: "Nearby Premium 功能",
-    featureYearly4: "VIP 徽章 + 優先支援",
-    featureYearly5: "獨家活動存取",
-
-    featureLifetime1: "終身 PRIME 存取 — 一次付款",
-    featureLifetime2: "年度方案的一切，永久有效",
-    featureLifetime3: "創始人徽章",
-    featureLifetime4: "優先功能請求",
-    featureLifetime5: "永不再付費",
-
-    excludedMember1: "無 PRIME 存取",
-    excludedMember2: "無獨家內容或影片",
-    excludedMember3: "無 Telegram PRIME 頻道",
-    excludedMember4: "無 VIP 徽章或優先支援",
+    everythingInMemberPlus: "包含會員所有功能，另外還有：",
+    platformAccess: "平台存取",
+    primeAccess: "完整 PRIME 存取",
+    includesAddOns: "包含：",
+    addonMember: "會員",
+    addonPrime: "PRIME",
+    addonCreator: "創作者",
+    addonPrivateCalls: "私人通話",
 
     emailAddress: "電子郵件地址",
     emailDesc: "我們將傳送您的登入憑證和會員資訊",
@@ -710,6 +568,12 @@ const strings = {
     chooseYourPlan: "Choisissez Votre Plan",
     subtitle: "Débloquez du contenu exclusif et des fonctionnalités avec PNPTV PRIME",
 
+    currentTierFree: "Vous êtes sur le plan gratuit",
+    currentTierMember: "Vous êtes Membre PNP",
+    currentTierPrime: "Vous avez l'accès PRIME",
+    upgradeCta: "Passez à un plan supérieur pour plus de fonctionnalités",
+    extendCta: "Prolongez ou améliorez votre plan ci-dessous",
+
     showPricesInUSD: "Voir les prix en USD",
     showPricesInCOP: "Voir les prix en COP",
 
@@ -724,43 +588,14 @@ const strings = {
 
     bestValue: "Meilleur Rapport Qualité-Prix",
 
-    featureMember1: "Accès complet à l'app",
-    featureMember2: "Fil social et salons de hangout",
-    featureMember3: "Découverte des utilisateurs proches",
-
-    featureWeek1: "7 jours d'accès PRIME complet",
-    featureWeek2: "Contenu PRIME exclusif",
-    featureWeek3: "Fonctionnalités Nearby Premium",
-    featureWeek4: "Hangouts communautaires",
-
-    featureThreeMonths1: "3 mois d'accès PRIME complet",
-    featureThreeMonths2: "Accès complet à la médiathèque PRIME",
-    featureThreeMonths3: "Fonctionnalités Nearby Premium",
-    featureThreeMonths4: "Hangouts communautaires",
-    featureThreeMonths5: "Support prioritaire",
-
-    featureCrystal1: "6 mois d'accès PRIME complet",
-    featureCrystal2: "Contenu PRIME illimité + sorties anticipées",
-    featureCrystal3: "Fonctionnalités Nearby Premium",
-    featureCrystal4: "Statut VIP dans la communauté",
-    featureCrystal5: "Support prioritaire",
-
-    featureYearly1: "1 an d'accès PRIME complet",
-    featureYearly2: "Contenu PRIME illimité + exclusivités",
-    featureYearly3: "Fonctionnalités Nearby Premium",
-    featureYearly4: "Badge VIP + support prioritaire",
-    featureYearly5: "Accès aux événements exclusifs",
-
-    featureLifetime1: "Accès PRIME à vie — paiement unique",
-    featureLifetime2: "Tout du plan Annuel, pour toujours",
-    featureLifetime3: "Badge Fondateur",
-    featureLifetime4: "Demandes de fonctionnalités prioritaires",
-    featureLifetime5: "Ne payez plus jamais",
-
-    excludedMember1: "Pas d'accès PRIME",
-    excludedMember2: "Pas de contenu exclusif ni vidéos",
-    excludedMember3: "Pas de canal PRIME Telegram",
-    excludedMember4: "Pas de badge VIP ni de support prioritaire",
+    everythingInMemberPlus: "Tout du plan Membre, plus :",
+    platformAccess: "Accès à la plateforme",
+    primeAccess: "Accès PRIME complet",
+    includesAddOns: "Inclut :",
+    addonMember: "Membre",
+    addonPrime: "PRIME",
+    addonCreator: "Créateur",
+    addonPrivateCalls: "Appel privé",
 
     emailAddress: "Adresse e-mail",
     emailDesc: "Nous vous enverrons vos identifiants de connexion et vos informations d'adhésion",
@@ -842,6 +677,12 @@ const strings = {
     chooseYourPlan: "Wähle Deinen Plan",
     subtitle: "Schalte exklusive Inhalte und Funktionen mit PNPTV PRIME frei",
 
+    currentTierFree: "Du bist im kostenlosen Plan",
+    currentTierMember: "Du bist PNP-Mitglied",
+    currentTierPrime: "Du hast PRIME-Zugang",
+    upgradeCta: "Upgrade um mehr Funktionen freizuschalten",
+    extendCta: "Verlängere oder verbessere deinen Plan unten",
+
     showPricesInUSD: "Preise in USD anzeigen",
     showPricesInCOP: "Preise in COP anzeigen",
 
@@ -856,43 +697,14 @@ const strings = {
 
     bestValue: "Bestes Angebot",
 
-    featureMember1: "Vollständiger App-Zugang",
-    featureMember2: "Social-Feed und Hangout-Räume",
-    featureMember3: "Nutzer in der Nähe entdecken",
-
-    featureWeek1: "7 Tage vollständiger PRIME-Zugang",
-    featureWeek2: "Exklusive PRIME-Inhalte",
-    featureWeek3: "Nearby-Premium-Funktionen",
-    featureWeek4: "Community-Hangouts",
-
-    featureThreeMonths1: "3 Monate vollständiger PRIME-Zugang",
-    featureThreeMonths2: "Vollständiger Zugang zur PRIME-Medienbibliothek",
-    featureThreeMonths3: "Nearby-Premium-Funktionen",
-    featureThreeMonths4: "Community-Hangouts",
-    featureThreeMonths5: "Prioritätssupport",
-
-    featureCrystal1: "6 Monate vollständiger PRIME-Zugang",
-    featureCrystal2: "Unbegrenzte PRIME-Inhalte + Early-Access-Releases",
-    featureCrystal3: "Nearby-Premium-Funktionen",
-    featureCrystal4: "VIP-Community-Status",
-    featureCrystal5: "Prioritätssupport",
-
-    featureYearly1: "1 Jahr vollständiger PRIME-Zugang",
-    featureYearly2: "Unbegrenzte PRIME-Inhalte + Exklusives",
-    featureYearly3: "Nearby-Premium-Funktionen",
-    featureYearly4: "VIP-Badge + Prioritätssupport",
-    featureYearly5: "Zugang zu exklusiven Events",
-
-    featureLifetime1: "Lebenslanger PRIME-Zugang — einmalige Zahlung",
-    featureLifetime2: "Alles aus dem Jahresplan, für immer",
-    featureLifetime3: "Gründer-Badge",
-    featureLifetime4: "Prioritäre Feature-Anfragen",
-    featureLifetime5: "Nie wieder zahlen",
-
-    excludedMember1: "Kein PRIME-Zugang",
-    excludedMember2: "Keine exklusiven Inhalte oder Videos",
-    excludedMember3: "Kein Telegram-PRIME-Kanal",
-    excludedMember4: "Kein VIP-Badge oder Prioritätssupport",
+    everythingInMemberPlus: "Alles aus dem Mitglied-Plan, plus:",
+    platformAccess: "Plattformzugang",
+    primeAccess: "Vollständiger PRIME-Zugang",
+    includesAddOns: "Enthält:",
+    addonMember: "Mitglied",
+    addonPrime: "PRIME",
+    addonCreator: "Creator",
+    addonPrivateCalls: "Privatanruf",
 
     emailAddress: "E-Mail-Adresse",
     emailDesc: "Wir senden dir deine Login-Daten und Mitgliedschaftsinformationen",
@@ -974,6 +786,12 @@ const strings = {
     chooseYourPlan: "เลือกแผนของคุณ",
     subtitle: "ปลดล็อกเนื้อหาพิเศษและฟีเจอร์ด้วย PNPTV PRIME",
 
+    currentTierFree: "You're on the free tier",
+    currentTierMember: "You're a PNP Member",
+    currentTierPrime: "You have PRIME access",
+    upgradeCta: "Upgrade to unlock more features",
+    extendCta: "Extend or upgrade your plan below",
+
     showPricesInUSD: "แสดงราคาเป็น USD",
     showPricesInCOP: "แสดงราคาเป็น COP",
 
@@ -988,43 +806,14 @@ const strings = {
 
     bestValue: "คุ้มที่สุด",
 
-    featureMember1: "เข้าถึงแอปเต็มรูปแบบ",
-    featureMember2: "ฟีดสังคมและห้อง Hangout",
-    featureMember3: "ค้นหาผู้ใช้ใกล้เคียง",
-
-    featureWeek1: "เข้าถึง PRIME เต็มรูปแบบ 7 วัน",
-    featureWeek2: "เนื้อหา PRIME พิเศษ",
-    featureWeek3: "ฟีเจอร์ Nearby Premium",
-    featureWeek4: "Hangouts ชุมชน",
-
-    featureThreeMonths1: "เข้าถึง PRIME เต็มรูปแบบ 3 เดือน",
-    featureThreeMonths2: "เข้าถึงคลังสื่อ PRIME ครบถ้วน",
-    featureThreeMonths3: "ฟีเจอร์ Nearby Premium",
-    featureThreeMonths4: "Hangouts ชุมชน",
-    featureThreeMonths5: "ซัพพอร์ตพิเศษ",
-
-    featureCrystal1: "เข้าถึง PRIME เต็มรูปแบบ 6 เดือน",
-    featureCrystal2: "เนื้อหา PRIME ไม่จำกัด + เปิดตัวก่อนใคร",
-    featureCrystal3: "ฟีเจอร์ Nearby Premium",
-    featureCrystal4: "สถานะ VIP ในชุมชน",
-    featureCrystal5: "ซัพพอร์ตพิเศษ",
-
-    featureYearly1: "เข้าถึง PRIME เต็มรูปแบบ 1 ปี",
-    featureYearly2: "เนื้อหา PRIME ไม่จำกัด + เนื้อหาพิเศษ",
-    featureYearly3: "ฟีเจอร์ Nearby Premium",
-    featureYearly4: "แบดจ์ VIP + ซัพพอร์ตพิเศษ",
-    featureYearly5: "เข้าถึงอีเวนต์พิเศษ",
-
-    featureLifetime1: "เข้าถึง PRIME ตลอดชีพ — จ่ายครั้งเดียว",
-    featureLifetime2: "ทุกอย่างในแผนรายปี ตลอดไป",
-    featureLifetime3: "แบดจ์ผู้ก่อตั้ง",
-    featureLifetime4: "คำขอฟีเจอร์แบบพิเศษ",
-    featureLifetime5: "ไม่ต้องจ่ายอีกเลย",
-
-    excludedMember1: "ไม่มีการเข้าถึง PRIME",
-    excludedMember2: "ไม่มีเนื้อหาพิเศษหรือวิดีโอ",
-    excludedMember3: "ไม่มีช่อง PRIME ของ Telegram",
-    excludedMember4: "ไม่มีแบดจ์ VIP หรือซัพพอร์ตพิเศษ",
+    everythingInMemberPlus: "Everything in Member, plus:",
+    platformAccess: "Platform access",
+    primeAccess: "Full PRIME access",
+    includesAddOns: "Includes:",
+    addonMember: "Member",
+    addonPrime: "PRIME",
+    addonCreator: "Creator",
+    addonPrivateCalls: "Private Call",
 
     emailAddress: "ที่อยู่อีเมล",
     emailDesc: "เราจะส่งข้อมูลล็อกอินและข้อมูลสมาชิกของคุณ",
@@ -1106,6 +895,12 @@ const strings = {
     chooseYourPlan: "Scegli Il Tuo Piano",
     subtitle: "Sblocca contenuti esclusivi e funzionalità con PNPTV PRIME",
 
+    currentTierFree: "Sei sul piano gratuito",
+    currentTierMember: "Sei un Membro PNP",
+    currentTierPrime: "Hai l'accesso PRIME",
+    upgradeCta: "Passa a un piano superiore per sbloccare più funzionalità",
+    extendCta: "Estendi o migliora il tuo piano qui sotto",
+
     showPricesInUSD: "Mostra prezzi in USD",
     showPricesInCOP: "Mostra prezzi in COP",
 
@@ -1120,43 +915,14 @@ const strings = {
 
     bestValue: "Miglior Rapporto Qualità-Prezzo",
 
-    featureMember1: "Accesso completo all'app",
-    featureMember2: "Feed social e stanze hangout",
-    featureMember3: "Scoperta utenti nelle vicinanze",
-
-    featureWeek1: "7 giorni di accesso PRIME completo",
-    featureWeek2: "Contenuti PRIME esclusivi",
-    featureWeek3: "Funzionalità Nearby Premium",
-    featureWeek4: "Hangout comunitari",
-
-    featureThreeMonths1: "3 mesi di accesso PRIME completo",
-    featureThreeMonths2: "Accesso completo alla mediateca PRIME",
-    featureThreeMonths3: "Funzionalità Nearby Premium",
-    featureThreeMonths4: "Hangout comunitari",
-    featureThreeMonths5: "Supporto prioritario",
-
-    featureCrystal1: "6 mesi di accesso PRIME completo",
-    featureCrystal2: "Contenuti PRIME illimitati + uscite anticipate",
-    featureCrystal3: "Funzionalità Nearby Premium",
-    featureCrystal4: "Status VIP nella community",
-    featureCrystal5: "Supporto prioritario",
-
-    featureYearly1: "1 anno di accesso PRIME completo",
-    featureYearly2: "Contenuti PRIME illimitati + esclusivi",
-    featureYearly3: "Funzionalità Nearby Premium",
-    featureYearly4: "Badge VIP + supporto prioritario",
-    featureYearly5: "Accesso a eventi esclusivi",
-
-    featureLifetime1: "Accesso PRIME a vita — pagamento unico",
-    featureLifetime2: "Tutto del piano Annuale, per sempre",
-    featureLifetime3: "Badge Fondatore",
-    featureLifetime4: "Richieste di funzionalità prioritarie",
-    featureLifetime5: "Non paghi mai più",
-
-    excludedMember1: "Nessun accesso PRIME",
-    excludedMember2: "Nessun contenuto esclusivo o video",
-    excludedMember3: "Nessun canale PRIME Telegram",
-    excludedMember4: "Nessun badge VIP né supporto prioritario",
+    everythingInMemberPlus: "Tutto del piano Membro, più:",
+    platformAccess: "Accesso alla piattaforma",
+    primeAccess: "Accesso PRIME completo",
+    includesAddOns: "Include:",
+    addonMember: "Membro",
+    addonPrime: "PRIME",
+    addonCreator: "Creator",
+    addonPrivateCalls: "Chiamata privata",
 
     emailAddress: "Indirizzo e-mail",
     emailDesc: "Ti invieremo le credenziali di accesso e le informazioni sull'abbonamento",
@@ -1238,6 +1004,12 @@ const strings = {
     chooseYourPlan: "Planını Seç",
     subtitle: "PNPTV PRIME ile özel içeriklerin ve özelliklerin kilidini aç",
 
+    currentTierFree: "Ücretsiz plandası",
+    currentTierMember: "PNP Üyesisin",
+    currentTierPrime: "PRIME erişimine sahipsin",
+    upgradeCta: "Daha fazla özellik için yükselt",
+    extendCta: "Planını aşağıdan uzat veya yükselt",
+
     showPricesInUSD: "Fiyatları USD olarak göster",
     showPricesInCOP: "Fiyatları COP olarak göster",
 
@@ -1252,43 +1024,14 @@ const strings = {
 
     bestValue: "En İyi Değer",
 
-    featureMember1: "Tam uygulama erişimi",
-    featureMember2: "Sosyal akış ve hangout odaları",
-    featureMember3: "Yakındaki kullanıcı keşfi",
-
-    featureWeek1: "7 gün tam PRIME erişimi",
-    featureWeek2: "Özel PRIME içeriği",
-    featureWeek3: "Nearby Premium özellikleri",
-    featureWeek4: "Topluluk hangoutları",
-
-    featureThreeMonths1: "3 ay tam PRIME erişimi",
-    featureThreeMonths2: "Tam PRIME medya kütüphanesi erişimi",
-    featureThreeMonths3: "Nearby Premium özellikleri",
-    featureThreeMonths4: "Topluluk hangoutları",
-    featureThreeMonths5: "Öncelikli destek",
-
-    featureCrystal1: "6 ay tam PRIME erişimi",
-    featureCrystal2: "Sınırsız PRIME içeriği + erken yayınlar",
-    featureCrystal3: "Nearby Premium özellikleri",
-    featureCrystal4: "VIP topluluk statüsü",
-    featureCrystal5: "Öncelikli destek",
-
-    featureYearly1: "1 yıl tam PRIME erişimi",
-    featureYearly2: "Sınırsız PRIME içeriği + özel içerikler",
-    featureYearly3: "Nearby Premium özellikleri",
-    featureYearly4: "VIP rozeti + öncelikli destek",
-    featureYearly5: "Özel etkinliklere erişim",
-
-    featureLifetime1: "Ömür boyu PRIME erişimi — tek seferlik ödeme",
-    featureLifetime2: "Yıllık plandaki her şey, sonsuza kadar",
-    featureLifetime3: "Kurucu rozeti",
-    featureLifetime4: "Öncelikli özellik talepleri",
-    featureLifetime5: "Bir daha asla ödeme yapma",
-
-    excludedMember1: "PRIME erişimi yok",
-    excludedMember2: "Özel içerik veya videolar yok",
-    excludedMember3: "Telegram PRIME kanalı yok",
-    excludedMember4: "VIP rozeti veya öncelikli destek yok",
+    everythingInMemberPlus: "Üye planındaki her şey, artı:",
+    platformAccess: "Platform erişimi",
+    primeAccess: "Tam PRIME erişimi",
+    includesAddOns: "İçerir:",
+    addonMember: "Üye",
+    addonPrime: "PRIME",
+    addonCreator: "Creator",
+    addonPrivateCalls: "Özel Arama",
 
     emailAddress: "E-posta adresi",
     emailDesc: "Giriş bilgilerini ve üyelik bilgilerini e-posta ile göndereceğiz",
@@ -1370,6 +1113,12 @@ const strings = {
     chooseYourPlan: "Выбери Свой План",
     subtitle: "Разблокируй эксклюзивный контент и функции с PNPTV PRIME",
 
+    currentTierFree: "Вы на бесплатном плане",
+    currentTierMember: "Вы являетесь участником PNP",
+    currentTierPrime: "У вас есть доступ PRIME",
+    upgradeCta: "Обновите план, чтобы разблокировать больше функций",
+    extendCta: "Продлите или обновите план ниже",
+
     showPricesInUSD: "Показать цены в USD",
     showPricesInCOP: "Показать цены в COP",
 
@@ -1384,43 +1133,14 @@ const strings = {
 
     bestValue: "Лучшая Цена",
 
-    featureMember1: "Полный доступ к приложению",
-    featureMember2: "Социальная лента и hangout-комнаты",
-    featureMember3: "Поиск пользователей рядом",
-
-    featureWeek1: "7 дней полного PRIME-доступа",
-    featureWeek2: "Эксклюзивный PRIME-контент",
-    featureWeek3: "Функции Nearby Premium",
-    featureWeek4: "Communal hangout'ы",
-
-    featureThreeMonths1: "3 месяца полного PRIME-доступа",
-    featureThreeMonths2: "Полный доступ к PRIME-медиатеке",
-    featureThreeMonths3: "Функции Nearby Premium",
-    featureThreeMonths4: "Communal hangout'ы",
-    featureThreeMonths5: "Приоритетная поддержка",
-
-    featureCrystal1: "6 месяцев полного PRIME-доступа",
-    featureCrystal2: "Безлимитный PRIME-контент + ранний доступ",
-    featureCrystal3: "Функции Nearby Premium",
-    featureCrystal4: "VIP-статус в сообществе",
-    featureCrystal5: "Приоритетная поддержка",
-
-    featureYearly1: "1 год полного PRIME-доступа",
-    featureYearly2: "Безлимитный PRIME-контент + эксклюзивы",
-    featureYearly3: "Функции Nearby Premium",
-    featureYearly4: "VIP-значок + приоритетная поддержка",
-    featureYearly5: "Доступ к эксклюзивным мероприятиям",
-
-    featureLifetime1: "Пожизненный PRIME-доступ — разовый платёж",
-    featureLifetime2: "Всё из годового плана, навсегда",
-    featureLifetime3: "Значок основателя",
-    featureLifetime4: "Приоритетные запросы функций",
-    featureLifetime5: "Больше никогда не платить",
-
-    excludedMember1: "Нет доступа к PRIME",
-    excludedMember2: "Нет эксклюзивного контента или видео",
-    excludedMember3: "Нет Telegram PRIME-канала",
-    excludedMember4: "Нет VIP-значка или приоритетной поддержки",
+    everythingInMemberPlus: "Всё из плана Участник, плюс:",
+    platformAccess: "Доступ к платформе",
+    primeAccess: "Полный PRIME-доступ",
+    includesAddOns: "Включает:",
+    addonMember: "Участник",
+    addonPrime: "PRIME",
+    addonCreator: "Creator",
+    addonPrivateCalls: "Личный звонок",
 
     emailAddress: "Адрес электронной почты",
     emailDesc: "Мы отправим твои данные для входа и информацию о членстве",
@@ -1502,6 +1222,12 @@ const strings = {
     chooseYourPlan: "Kies Je Plan",
     subtitle: "Ontgrendel exclusieve content en functies met PNPTV PRIME",
 
+    currentTierFree: "Je bent op het gratis plan",
+    currentTierMember: "Je bent PNP-lid",
+    currentTierPrime: "Je hebt PRIME-toegang",
+    upgradeCta: "Upgrade om meer functies te ontgrendelen",
+    extendCta: "Verleng of verbeter je plan hieronder",
+
     showPricesInUSD: "Prijzen in USD weergeven",
     showPricesInCOP: "Prijzen in COP weergeven",
 
@@ -1516,43 +1242,14 @@ const strings = {
 
     bestValue: "Beste Prijs-Kwaliteit",
 
-    featureMember1: "Volledige app-toegang",
-    featureMember2: "Sociale feed en hangout-kamers",
-    featureMember3: "Gebruikers in de buurt ontdekken",
-
-    featureWeek1: "7 dagen volledige PRIME-toegang",
-    featureWeek2: "Exclusieve PRIME-content",
-    featureWeek3: "Nearby-Premium-functies",
-    featureWeek4: "Community-hangouts",
-
-    featureThreeMonths1: "3 maanden volledige PRIME-toegang",
-    featureThreeMonths2: "Volledige toegang tot de PRIME-mediabibliotheek",
-    featureThreeMonths3: "Nearby-Premium-functies",
-    featureThreeMonths4: "Community-hangouts",
-    featureThreeMonths5: "Prioriteitsondersteuning",
-
-    featureCrystal1: "6 maanden volledige PRIME-toegang",
-    featureCrystal2: "Onbeperkte PRIME-content + vroege releases",
-    featureCrystal3: "Nearby-Premium-functies",
-    featureCrystal4: "VIP-communitystatus",
-    featureCrystal5: "Prioriteitsondersteuning",
-
-    featureYearly1: "1 jaar volledige PRIME-toegang",
-    featureYearly2: "Onbeperkte PRIME-content + exclusives",
-    featureYearly3: "Nearby-Premium-functies",
-    featureYearly4: "VIP-badge + prioriteitsondersteuning",
-    featureYearly5: "Toegang tot exclusieve evenementen",
-
-    featureLifetime1: "Levenslange PRIME-toegang — eenmalige betaling",
-    featureLifetime2: "Alles uit het jaarplan, voor altijd",
-    featureLifetime3: "Oprichterbadge",
-    featureLifetime4: "Prioriteitsverzoeken voor functies",
-    featureLifetime5: "Nooit meer betalen",
-
-    excludedMember1: "Geen PRIME-toegang",
-    excludedMember2: "Geen exclusieve content of video's",
-    excludedMember3: "Geen Telegram PRIME-kanaal",
-    excludedMember4: "Geen VIP-badge of prioriteitsondersteuning",
+    everythingInMemberPlus: "Alles van het Lid-plan, plus:",
+    platformAccess: "Platformtoegang",
+    primeAccess: "Volledige PRIME-toegang",
+    includesAddOns: "Bevat:",
+    addonMember: "Lid",
+    addonPrime: "PRIME",
+    addonCreator: "Creator",
+    addonPrivateCalls: "Privégesprek",
 
     emailAddress: "E-mailadres",
     emailDesc: "We sturen je inloggegevens en lidmaatschapsinformatie",
@@ -1634,6 +1331,12 @@ const strings = {
     chooseYourPlan: "Chọn Gói Của Bạn",
     subtitle: "Mở khóa nội dung độc quyền và tính năng với PNPTV PRIME",
 
+    currentTierFree: "Bạn đang dùng gói miễn phí",
+    currentTierMember: "Bạn là Thành viên PNP",
+    currentTierPrime: "Bạn có quyền truy cập PRIME",
+    upgradeCta: "Nâng cấp để mở khóa thêm tính năng",
+    extendCta: "Gia hạn hoặc nâng cấp gói bên dưới",
+
     showPricesInUSD: "Hiển thị giá bằng USD",
     showPricesInCOP: "Hiển thị giá bằng COP",
 
@@ -1648,43 +1351,14 @@ const strings = {
 
     bestValue: "Giá Trị Nhất",
 
-    featureMember1: "Truy cập đầy đủ ứng dụng",
-    featureMember2: "Bảng tin xã hội và phòng hangout",
-    featureMember3: "Khám phá người dùng lân cận",
-
-    featureWeek1: "7 ngày truy cập PRIME đầy đủ",
-    featureWeek2: "Nội dung PRIME độc quyền",
-    featureWeek3: "Tính năng Nearby Premium",
-    featureWeek4: "Hangouts cộng đồng",
-
-    featureThreeMonths1: "3 tháng truy cập PRIME đầy đủ",
-    featureThreeMonths2: "Truy cập đầy đủ thư viện phương tiện PRIME",
-    featureThreeMonths3: "Tính năng Nearby Premium",
-    featureThreeMonths4: "Hangouts cộng đồng",
-    featureThreeMonths5: "Hỗ trợ ưu tiên",
-
-    featureCrystal1: "6 tháng truy cập PRIME đầy đủ",
-    featureCrystal2: "Nội dung PRIME không giới hạn + phát hành sớm",
-    featureCrystal3: "Tính năng Nearby Premium",
-    featureCrystal4: "Trạng thái VIP trong cộng đồng",
-    featureCrystal5: "Hỗ trợ ưu tiên",
-
-    featureYearly1: "1 năm truy cập PRIME đầy đủ",
-    featureYearly2: "Nội dung PRIME không giới hạn + độc quyền",
-    featureYearly3: "Tính năng Nearby Premium",
-    featureYearly4: "Huy hiệu VIP + hỗ trợ ưu tiên",
-    featureYearly5: "Truy cập sự kiện độc quyền",
-
-    featureLifetime1: "Truy cập PRIME trọn đời — thanh toán một lần",
-    featureLifetime2: "Mọi thứ trong gói Hàng năm, mãi mãi",
-    featureLifetime3: "Huy hiệu Người sáng lập",
-    featureLifetime4: "Yêu cầu tính năng ưu tiên",
-    featureLifetime5: "Không bao giờ phải trả thêm",
-
-    excludedMember1: "Không có truy cập PRIME",
-    excludedMember2: "Không có nội dung độc quyền hoặc video",
-    excludedMember3: "Không có kênh PRIME Telegram",
-    excludedMember4: "Không có huy hiệu VIP hay hỗ trợ ưu tiên",
+    everythingInMemberPlus: "Tất cả gói Thành viên, cộng thêm:",
+    platformAccess: "Truy cập nền tảng",
+    primeAccess: "Truy cập PRIME đầy đủ",
+    includesAddOns: "Bao gồm:",
+    addonMember: "Thành viên",
+    addonPrime: "PRIME",
+    addonCreator: "Creator",
+    addonPrivateCalls: "Cuộc gọi riêng",
 
     emailAddress: "Địa chỉ email",
     emailDesc: "Chúng tôi sẽ gửi thông tin đăng nhập và thông tin thành viên của bạn",
@@ -1766,6 +1440,12 @@ const strings = {
     chooseYourPlan: "プランを選択",
     subtitle: "PNPTV PRIME で限定コンテンツと機能をアンロック",
 
+    currentTierFree: "無料プランをご利用中です",
+    currentTierMember: "PNP メンバーです",
+    currentTierPrime: "PRIME アクセスをお持ちです",
+    upgradeCta: "アップグレードしてさらに多くの機能を解放",
+    extendCta: "以下でプランを延長またはアップグレード",
+
     showPricesInUSD: "USD で価格を表示",
     showPricesInCOP: "COP で価格を表示",
 
@@ -1780,43 +1460,14 @@ const strings = {
 
     bestValue: "最もお得",
 
-    featureMember1: "アプリへのフルアクセス",
-    featureMember2: "ソーシャルフィードとハングアウトルーム",
-    featureMember3: "近くのユーザー検索",
-
-    featureWeek1: "7 日間の完全 PRIME アクセス",
-    featureWeek2: "限定 PRIME コンテンツ",
-    featureWeek3: "Nearby Premium 機能",
-    featureWeek4: "コミュニティハングアウト",
-
-    featureThreeMonths1: "3 ヶ月間の完全 PRIME アクセス",
-    featureThreeMonths2: "PRIME メディアライブラリへの完全アクセス",
-    featureThreeMonths3: "Nearby Premium 機能",
-    featureThreeMonths4: "コミュニティハングアウト",
-    featureThreeMonths5: "優先サポート",
-
-    featureCrystal1: "6 ヶ月間の完全 PRIME アクセス",
-    featureCrystal2: "無制限 PRIME コンテンツ + 早期リリース",
-    featureCrystal3: "Nearby Premium 機能",
-    featureCrystal4: "コミュニティ VIP ステータス",
-    featureCrystal5: "優先サポート",
-
-    featureYearly1: "1 年間の完全 PRIME アクセス",
-    featureYearly2: "無制限 PRIME コンテンツ + 限定コンテンツ",
-    featureYearly3: "Nearby Premium 機能",
-    featureYearly4: "VIP バッジ + 優先サポート",
-    featureYearly5: "限定イベントへのアクセス",
-
-    featureLifetime1: "生涯 PRIME アクセス — 一回払い",
-    featureLifetime2: "年間プランのすべて、永久に",
-    featureLifetime3: "創設者バッジ",
-    featureLifetime4: "優先機能リクエスト",
-    featureLifetime5: "二度と支払い不要",
-
-    excludedMember1: "PRIME アクセスなし",
-    excludedMember2: "限定コンテンツや動画なし",
-    excludedMember3: "Telegram PRIME チャンネルなし",
-    excludedMember4: "VIP バッジまたは優先サポートなし",
+    everythingInMemberPlus: "メンバープランの全て、さらに：",
+    platformAccess: "プラットフォームアクセス",
+    primeAccess: "完全 PRIME アクセス",
+    includesAddOns: "含まれる：",
+    addonMember: "メンバー",
+    addonPrime: "PRIME",
+    addonCreator: "Creator",
+    addonPrivateCalls: "プライベート通話",
 
     emailAddress: "メールアドレス",
     emailDesc: "ログイン情報とメンバーシップ情報をお送りします",
@@ -1898,6 +1549,12 @@ const strings = {
     chooseYourPlan: "Pilih Paketmu",
     subtitle: "Buka kunci konten eksklusif dan fitur dengan PNPTV PRIME",
 
+    currentTierFree: "Kamu berada di paket gratis",
+    currentTierMember: "Kamu adalah Anggota PNP",
+    currentTierPrime: "Kamu memiliki akses PRIME",
+    upgradeCta: "Tingkatkan untuk membuka lebih banyak fitur",
+    extendCta: "Perpanjang atau tingkatkan paketmu di bawah",
+
     showPricesInUSD: "Tampilkan harga dalam USD",
     showPricesInCOP: "Tampilkan harga dalam COP",
 
@@ -1912,43 +1569,14 @@ const strings = {
 
     bestValue: "Nilai Terbaik",
 
-    featureMember1: "Akses penuh ke aplikasi",
-    featureMember2: "Feed sosial dan ruang hangout",
-    featureMember3: "Penemuan pengguna terdekat",
-
-    featureWeek1: "7 hari akses PRIME penuh",
-    featureWeek2: "Konten PRIME eksklusif",
-    featureWeek3: "Fitur Nearby Premium",
-    featureWeek4: "Hangout komunitas",
-
-    featureThreeMonths1: "3 bulan akses PRIME penuh",
-    featureThreeMonths2: "Akses penuh perpustakaan media PRIME",
-    featureThreeMonths3: "Fitur Nearby Premium",
-    featureThreeMonths4: "Hangout komunitas",
-    featureThreeMonths5: "Dukungan prioritas",
-
-    featureCrystal1: "6 bulan akses PRIME penuh",
-    featureCrystal2: "Konten PRIME tak terbatas + rilis awal",
-    featureCrystal3: "Fitur Nearby Premium",
-    featureCrystal4: "Status VIP di komunitas",
-    featureCrystal5: "Dukungan prioritas",
-
-    featureYearly1: "1 tahun akses PRIME penuh",
-    featureYearly2: "Konten PRIME tak terbatas + eksklusif",
-    featureYearly3: "Fitur Nearby Premium",
-    featureYearly4: "Lencana VIP + dukungan prioritas",
-    featureYearly5: "Akses acara eksklusif",
-
-    featureLifetime1: "Akses PRIME seumur hidup — bayar sekali",
-    featureLifetime2: "Semua dari paket Tahunan, selamanya",
-    featureLifetime3: "Lencana Pendiri",
-    featureLifetime4: "Permintaan fitur prioritas",
-    featureLifetime5: "Tidak perlu bayar lagi",
-
-    excludedMember1: "Tidak ada akses PRIME",
-    excludedMember2: "Tidak ada konten eksklusif atau video",
-    excludedMember3: "Tidak ada saluran PRIME Telegram",
-    excludedMember4: "Tidak ada lencana VIP atau dukungan prioritas",
+    everythingInMemberPlus: "Semua dari paket Anggota, plus:",
+    platformAccess: "Akses platform",
+    primeAccess: "Akses PRIME penuh",
+    includesAddOns: "Termasuk:",
+    addonMember: "Anggota",
+    addonPrime: "PRIME",
+    addonCreator: "Creator",
+    addonPrivateCalls: "Panggilan privat",
 
     emailAddress: "Alamat email",
     emailDesc: "Kami akan mengirim kredensial login dan informasi keanggotaan kamu",
@@ -2030,6 +1658,12 @@ const strings = {
     chooseYourPlan: "اختر خطتك",
     subtitle: "افتح المحتوى الحصري والميزات مع PNPTV PRIME",
 
+    currentTierFree: "أنت على الخطة المجانية",
+    currentTierMember: "أنت عضو PNP",
+    currentTierPrime: "لديك وصول PRIME",
+    upgradeCta: "قم بالترقية لإتاحة المزيد من الميزات",
+    extendCta: "قم بتمديد خطتك أو ترقيتها أدناه",
+
     showPricesInUSD: "عرض الأسعار بالدولار الأمريكي",
     showPricesInCOP: "عرض الأسعار بالبيزو الكولومبي",
 
@@ -2044,43 +1678,14 @@ const strings = {
 
     bestValue: "أفضل قيمة",
 
-    featureMember1: "وصول كامل للتطبيق",
-    featureMember2: "التغذية الاجتماعية وغرف Hangout",
-    featureMember3: "اكتشاف المستخدمين القريبين",
-
-    featureWeek1: "7 أيام من الوصول الكامل إلى PRIME",
-    featureWeek2: "محتوى PRIME حصري",
-    featureWeek3: "ميزات Nearby Premium",
-    featureWeek4: "Hangouts المجتمعية",
-
-    featureThreeMonths1: "3 أشهر من الوصول الكامل إلى PRIME",
-    featureThreeMonths2: "الوصول الكامل إلى مكتبة وسائط PRIME",
-    featureThreeMonths3: "ميزات Nearby Premium",
-    featureThreeMonths4: "Hangouts المجتمعية",
-    featureThreeMonths5: "دعم ذو أولوية",
-
-    featureCrystal1: "6 أشهر من الوصول الكامل إلى PRIME",
-    featureCrystal2: "محتوى PRIME غير محدود + إصدارات مبكرة",
-    featureCrystal3: "ميزات Nearby Premium",
-    featureCrystal4: "مكانة VIP في المجتمع",
-    featureCrystal5: "دعم ذو أولوية",
-
-    featureYearly1: "سنة كاملة من الوصول إلى PRIME",
-    featureYearly2: "محتوى PRIME غير محدود + حصريات",
-    featureYearly3: "ميزات Nearby Premium",
-    featureYearly4: "شارة VIP + دعم ذو أولوية",
-    featureYearly5: "الوصول إلى فعاليات حصرية",
-
-    featureLifetime1: "وصول PRIME مدى الحياة — دفعة واحدة",
-    featureLifetime2: "كل ما في الخطة السنوية، إلى الأبد",
-    featureLifetime3: "شارة المؤسس",
-    featureLifetime4: "طلبات ميزات ذات أولوية",
-    featureLifetime5: "لن تدفع أبداً مجدداً",
-
-    excludedMember1: "لا وصول إلى PRIME",
-    excludedMember2: "لا محتوى حصري أو فيديو",
-    excludedMember3: "لا قناة PRIME على Telegram",
-    excludedMember4: "لا شارة VIP ولا دعم ذو أولوية",
+    everythingInMemberPlus: "كل ما في خطة العضو، بالإضافة إلى:",
+    platformAccess: "الوصول إلى المنصة",
+    primeAccess: "وصول PRIME كامل",
+    includesAddOns: "يتضمن:",
+    addonMember: "عضو",
+    addonPrime: "PRIME",
+    addonCreator: "Creator",
+    addonPrivateCalls: "مكالمة خاصة",
 
     emailAddress: "عنوان البريد الإلكتروني",
     emailDesc: "سنرسل لك بيانات تسجيل الدخول ومعلومات العضوية",

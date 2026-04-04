@@ -35,7 +35,7 @@ const X_TOKEN_URL_ALT = 'https://api.x.com/2/oauth2/token';
 const X_TOKEN_EXPIRY_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
 const X_MAX_TEXT_LENGTH = 280;
 const CROSS_POST_DAILY_LIMIT = 25;
-const PNPTV_APP_URL = 'https://app.pnptv.app';
+const PNPTV_APP_URL = 'https://pnptv.app';
 
 // ---------------------------------------------------------------------------
 // AES-256-GCM helpers — identical to those in xOAuthRoutes.js

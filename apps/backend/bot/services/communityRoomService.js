@@ -1,5 +1,7 @@
 const logger = require('../../utils/logger');
 const JaasService = require('./jaasService');
+const { getRedis } = require('../../config/redis');
+const EntitlementAccessService = require('./entitlementAccessService');
 
 /**
  * PNPtv Haus Service
@@ -56,27 +58,31 @@ class CommunityRoomService {
   }
 
   /**
-   * Generate a token for the community room
+   * Generate a token for the community room.
+   * Accepts a permissions object from resolvePermissionsForTier() to produce
+   * tier-specific JaaS JWTs.
    */
-  async generateCommunityToken(userId, displayName, email = '', isModerator = false, avatar = '') {
+  async generateCommunityToken(userId, displayName, email = '', permissions = {}, avatar = '') {
     try {
-      if (isModerator) {
-        return JaasService.generateModeratorToken(
-          this.COMMUNITY_ROOM_NAME,
-          userId,
-          displayName,
-          email,
-          avatar
-        );
-      } else {
-        return JaasService.generateViewerToken(
-          this.COMMUNITY_ROOM_NAME,
-          userId,
-          displayName,
-          email,
-          avatar
-        );
-      }
+      const {
+        isModerator = false,
+        enableScreensharing = false,
+        enableLivestreaming = false,
+        expiresIn = '30m',
+      } = permissions;
+
+      return JaasService.generateToken({
+        roomName: this.COMMUNITY_ROOM_NAME,
+        userId,
+        userName: displayName,
+        userEmail: email,
+        userAvatar: avatar,
+        isModerator,
+        enableLivestreaming: false,
+        enableRecording: false,
+        enableScreensharing,
+        expiresIn,
+      });
     } catch (error) {
       logger.error('Error generating community token:', error);
       throw error;
@@ -86,11 +92,13 @@ class CommunityRoomService {
   /**
    * Track user joining the community room
    */
-  trackUserJoin(userId, displayName, role = 'member') {
+  trackUserJoin(userId, displayName, role = 'member', tier = 'free', avatarUrl = '') {
     this.activeUsers.set(userId, {
       userId,
       displayName,
       role,
+      tier,
+      avatarUrl,
       joinedAt: new Date(),
       isActive: true
     });
@@ -98,6 +106,7 @@ class CommunityRoomService {
     logger.info('User joined community room', {
       userId,
       displayName,
+      tier,
       totalActive: this.activeUsers.size
     });
   }
@@ -209,6 +218,223 @@ class CommunityRoomService {
     this.messageHistory = [];
     logger.info('Chat history cleared', { count });
     return count;
+  }
+
+  /**
+   * Resolve Jitsi permissions for a given user based on their subscription tier.
+   * Returns a permissions object used by generateCommunityToken() and the join response.
+   */
+  async resolvePermissionsForTier(userId) {
+    try {
+      const UserModel = require('../../models/userModel');
+      const user = await UserModel.getById(userId);
+      const label = await EntitlementAccessService.getUserLabel(userId);
+      const isAdmin = user && (user.role === 'admin' || user.role === 'superadmin');
+
+      if (isAdmin) {
+        return {
+          role: 'admin',
+          isModerator: true,
+          enableScreensharing: true,
+          enableLivestreaming: true,
+          startAudioMuted: false,
+          startVideoMuted: false,
+          expiresIn: '4h',
+          canClip: true,
+          canKnock: false,
+          canToggleAudio: true,
+          canToggleVideo: true,
+        };
+      }
+
+      if (label === 'PRIME') {
+        return {
+          role: 'prime',
+          isModerator: false,
+          enableScreensharing: true,
+          enableLivestreaming: false,
+          startAudioMuted: false,
+          startVideoMuted: false,
+          expiresIn: '30m',
+          canClip: true,
+          canKnock: false,
+          canToggleAudio: true,
+          canToggleVideo: true,
+        };
+      }
+
+      if (label === 'BASIC') {
+        return {
+          role: 'member',
+          isModerator: false,
+          enableScreensharing: false,
+          enableLivestreaming: false,
+          startAudioMuted: true,
+          startVideoMuted: true,
+          expiresIn: '30m',
+          canClip: false,
+          canKnock: true,
+          canToggleAudio: true,
+          canToggleVideo: false,
+        };
+      }
+
+      // FREE tier (default)
+      return {
+        role: 'free',
+        isModerator: false,
+        enableScreensharing: false,
+        enableLivestreaming: false,
+        startAudioMuted: true,
+        startVideoMuted: true,
+        expiresIn: '30m',
+        canClip: false,
+        canKnock: false,
+        canToggleAudio: false,
+        canToggleVideo: false,
+      };
+    } catch (error) {
+      logger.error('Error resolving permissions for tier:', { userId, error: error.message });
+      // Fail-safe: return free-tier permissions on error
+      return {
+        role: 'free',
+        isModerator: false,
+        enableScreensharing: false,
+        enableLivestreaming: false,
+        startAudioMuted: true,
+        startVideoMuted: true,
+        expiresIn: '30m',
+        canClip: false,
+        canKnock: false,
+        canToggleAudio: false,
+        canToggleVideo: false,
+      };
+    }
+  }
+
+  /**
+   * Get the current stage mode from Redis.
+   * Defaults to 'ambient' if not set.
+   */
+  async getStageMode() {
+    try {
+      const redis = getRedis();
+      const mode = await redis.get('mainstage:mode');
+      return mode || 'ambient';
+    } catch (error) {
+      logger.error('Error getting stage mode:', error);
+      return 'ambient';
+    }
+  }
+
+  /**
+   * Set the stage mode in Redis.
+   * If mode is 'dj-live' and masterInfo is provided, also persists master data.
+   * Clears master data when switching away from 'dj-live'.
+   */
+  async setStageMode(mode, masterInfo = null) {
+    try {
+      const redis = getRedis();
+      await redis.set('mainstage:mode', mode);
+      if (mode === 'dj-live' && masterInfo) {
+        await redis.set('mainstage:master', JSON.stringify(masterInfo));
+      } else {
+        await redis.del('mainstage:master');
+      }
+      logger.info('Stage mode updated', { mode, hasMaster: !!masterInfo });
+    } catch (error) {
+      logger.error('Error setting stage mode:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the current stage master (DJ/VJ info) from Redis.
+   * Returns null if not set.
+   */
+  async getStageMaster() {
+    try {
+      const redis = getRedis();
+      const raw = await redis.get('mainstage:master');
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (error) {
+      logger.error('Error getting stage master:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get the full stage state: mode, master, and room occupancy.
+   */
+  async getStageState() {
+    try {
+      const [mode, master, occupancy] = await Promise.all([
+        this.getStageMode(),
+        this.getStageMaster(),
+        this.getRoomOccupancy(),
+      ]);
+      return { mode, master, occupancy };
+    } catch (error) {
+      logger.error('Error getting stage state:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Add a knock-to-speak request to the Redis queue.
+   */
+  async addKnockRequest(userId, displayName) {
+    try {
+      const redis = getRedis();
+      const entry = JSON.stringify({ userId, displayName, requestedAt: Date.now() });
+      await redis.rpush('mainstage:knock-queue', entry);
+      logger.info('Knock request added', { userId, displayName });
+    } catch (error) {
+      logger.error('Error adding knock request:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all pending knock-to-speak requests from Redis.
+   */
+  async getKnockQueue() {
+    try {
+      const redis = getRedis();
+      const entries = await redis.lrange('mainstage:knock-queue', 0, -1);
+      return entries.map(e => {
+        try { return JSON.parse(e); } catch { return null; }
+      }).filter(Boolean);
+    } catch (error) {
+      logger.error('Error getting knock queue:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Remove a specific user's knock request from the Redis queue.
+   */
+  async removeKnockRequest(userId) {
+    try {
+      const redis = getRedis();
+      const entries = await redis.lrange('mainstage:knock-queue', 0, -1);
+      for (const entry of entries) {
+        try {
+          const parsed = JSON.parse(entry);
+          if (String(parsed.userId) === String(userId)) {
+            await redis.lrem('mainstage:knock-queue', 1, entry);
+            logger.info('Knock request removed', { userId });
+            return;
+          }
+        } catch {
+          // skip malformed entries
+        }
+      }
+    } catch (error) {
+      logger.error('Error removing knock request:', error);
+      throw error;
+    }
   }
 
   /**

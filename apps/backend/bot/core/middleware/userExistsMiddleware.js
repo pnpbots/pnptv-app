@@ -1,5 +1,6 @@
 const UserModel = require('../../../models/userModel');
 const { cache } = require('../../../config/redis');
+const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 
 /**
@@ -69,10 +70,22 @@ const userExistsMiddleware = () => async (ctx, next) => {
       } catch (createError) {
         logger.error('Error creating user record:', createError);
       }
-    } else if (!user.onboardingComplete) {
-      // User exists but hasn't completed onboarding
-      if (ctx.session) {
-        ctx.session.forceOnboarding = true;
+    } else {
+      // User exists — sync username and first_name from Telegram if changed
+      const tgUsername = ctx.from.username || null;
+      const tgFirstName = ctx.from.first_name || null;
+      if (tgUsername !== user.username || (tgFirstName && tgFirstName !== user.first_name)) {
+        query(
+          `UPDATE users SET username = $1, first_name = COALESCE($2, first_name), updated_at = NOW() WHERE id = $3`,
+          [tgUsername, tgFirstName, userId]
+        ).catch(err => logger.warn('Username sync failed (non-blocking)', { userId, error: err.message }));
+      }
+
+      if (!user.onboardingComplete) {
+        // User exists but hasn't completed onboarding
+        if (ctx.session) {
+          ctx.session.forceOnboarding = true;
+        }
       }
     }
 

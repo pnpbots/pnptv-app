@@ -36,6 +36,20 @@ function isValidUrl(url: string | undefined | null): url is string {
   return !!url && (url.startsWith("/") || url.startsWith("http"));
 }
 
+function pad(n: number) { return String(n).padStart(2, "0"); }
+
+function toLocalDatetimeValue(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+const EDIT_DURATIONS = [30, 60, 90, 120, 180, 240, 360, 480, 720, 1440, 2160, 2880];
+
+function formatDurationLabel(d: number): string {
+  if (d < 60) return `${d}min`;
+  if (d < 1440) return `${Math.floor(d / 60)}h${d % 60 > 0 ? ` ${d % 60}m` : ""}`;
+  return `${Math.floor(d / 1440)}d ${Math.floor((d % 1440) / 60)}h`;
+}
+
 // ── Inline Edit Form ──────────────────────────────────────────────────────────
 
 interface EditFormProps {
@@ -47,6 +61,10 @@ interface EditFormProps {
 function EditForm({ event, onSaved, onCancel }: EditFormProps) {
   const [title, setTitle] = useState(event.title);
   const [description, setDescription] = useState(event.description || "");
+  const [scheduledAt, setScheduledAt] = useState(
+    event.scheduledAt ? toLocalDatetimeValue(new Date(event.scheduledAt)) : ""
+  );
+  const [duration, setDuration] = useState(event.durationMinutes || 60);
   const [hangoutGroupId, setHangoutGroupId] = useState<string>(
     event.hangoutGroupId ? String(event.hangoutGroupId) : ""
   );
@@ -95,10 +113,19 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
         }
       }
 
+      const parsedScheduledAt = scheduledAt ? new Date(scheduledAt).toISOString() : undefined;
+      if (parsedScheduledAt && new Date(parsedScheduledAt) < new Date()) {
+        setError("Event must be scheduled in the future");
+        setSubmitting(false);
+        return;
+      }
+
       const res = await updateEvent(event.id, {
         title: title.trim(),
         description: description.trim() || undefined,
         coverImage,
+        scheduledAt: parsedScheduledAt,
+        durationMinutes: duration,
         hangoutGroupId: event.type === "hangout_event"
           ? (hangoutGroupId ? parseInt(hangoutGroupId, 10) : null)
           : undefined,
@@ -160,6 +187,34 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
           className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none resize-none"
           style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}
         />
+      </div>
+
+      {/* Date & Time + Duration */}
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-xs font-medium text-white/60 mb-1">Date & Time</label>
+          <input
+            type="datetime-local"
+            value={scheduledAt}
+            min={toLocalDatetimeValue(new Date(Date.now() + 15 * 60 * 1000))}
+            onChange={(e) => setScheduledAt(e.target.value)}
+            className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
+            style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark" }}
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-white/60 mb-1">Duration</label>
+          <select
+            value={duration}
+            onChange={(e) => setDuration(parseInt(e.target.value, 10))}
+            className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
+            style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark" }}
+          >
+            {EDIT_DURATIONS.map((d) => (
+              <option key={d} value={d}>{formatDurationLabel(d)}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Hangout group link — only for hangout events */}
@@ -366,7 +421,7 @@ export function EventDetailModal({ event: initialEvent, onClose, onRsvp, onUpdat
               <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <span>{event.durationMinutes} minutes</span>
+              <span>{formatDurationLabel(event.durationMinutes)}</span>
             </div>
             {event.maxAttendees && (
               <div className="flex items-center gap-2 text-sm" style={{ color: "#8E8E93" }}>

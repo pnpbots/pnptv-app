@@ -4,10 +4,6 @@ import React, {
   useRef,
   useCallback,
 } from "react";
-import { connectSocket } from "@/lib/socket";
-import { MediaMessage } from "@/components/hangouts/MediaMessage";
-import { VideoCallOverlay } from "@/components/hangouts/VideoCallOverlay";
-import { VideoCallBanner } from "@/components/hangouts/VideoCallBanner";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -35,8 +31,6 @@ import {
   unmuteHangoutMember,
   promoteHangoutMember,
   demoteHangoutMember,
-  unpinHangoutMessage,
-  getHangoutPins,
   updateHangoutSettings,
   getHangoutInviteLink,
   updateHangoutNotification,
@@ -44,26 +38,23 @@ import {
   uploadGroupAvatar,
   kickGroupMember,
   updateMemberRole,
+  getHangoutFeed,
+  getVideoChatStatus,
+  togglePostLike,
+  deleteSocialPost,
   getGroupMessages,
   sendGroupMessage,
   sendGroupMediaMessage,
   editGroupMessage,
   deleteGroupMessage,
-  searchGroupMessages,
   toggleMessageReaction,
-  startGroupCall,
-  getActiveGroupCall,
-  getHangoutFeed,
-  dropToFeed,
-  togglePostLike,
-  deleteSocialPost,
   type HangoutGroup,
+  type GroupMessage,
   type GroupMember,
   type DiscoverGroup,
   type JoinRequest,
-  type GroupMessage,
-  type MessageReaction,
   type SocialPostItem,
+  type MessageReaction,
 } from "@/lib/api";
 import SocialPostCard from "@/components/social/SocialPostCard";
 import { PostComposer } from "@/components/PostComposer";
@@ -74,8 +65,677 @@ import { getUpcomingEvents } from "@/lib/api";
 import type { EventItem } from "@/components/events/EventCard";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
 import { EventDetailModal } from "@/components/events";
+import { connectSocket } from "@/lib/socket";
+import { MediaMessage } from "@/components/hangouts/MediaMessage";
 
 type View = "list" | "chat";
+
+// ─── Telegram helpers ────────────────────────────────────────────────────────
+
+function getTelegramDeepLink(inviteLink: string): string {
+  // https://t.me/+HASH → tg://join?invite=HASH
+  const match = inviteLink.match(/t\.me\/\+(.+)/);
+  return match ? `tg://join?invite=${match[1]}` : inviteLink;
+}
+
+// ─── HangoutChatPanel (PostgreSQL + Socket.IO) ──────────────────────────────
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+
+function HangoutChatPanel({
+  activeGroup,
+  isOwnerOrMod,
+}: {
+  activeGroup: HangoutGroup;
+  isOwnerOrMod: boolean;
+}) {
+  const { user } = useAuth();
+  const myId = user?.dbId ?? user?.id ?? "";
+  const groupId = activeGroup.id;
+  const [messages, setMessages] = useState<GroupMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [inputText, setInputText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [typingNames, setTypingNames] = useState<string[]>([]);
+
+  // Enhanced UX state
+  const [replyTo, setReplyTo] = useState<GroupMessage | null>(null);
+  const [editingMsg, setEditingMsg] = useState<GroupMessage | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ msg: GroupMessage; x: number; y: number } | null>(null);
+  const [showScrollFab, setShowScrollFab] = useState(false);
+  const [unreadBelow, setUnreadBelow] = useState(0);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastTypingEmit = useRef(0);
+  const hasFetched = useRef<number | null>(null);
+  const isNearBottom = useRef(true);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "😮", "😢"];
+
+  // Date separator helper
+  const formatDateLabel = (dateStr: string): string => {
+    const d = new Date(dateStr);
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) return "Today";
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+    return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  };
+
+  // Message grouping — same user within 2 min
+  const isSameGroup = (curr: GroupMessage, prev: GroupMessage | undefined): boolean => {
+    if (!prev) return false;
+    if (String(curr.user_id) !== String(prev.user_id)) return false;
+    if (curr.is_deleted || prev.is_deleted) return false;
+    return new Date(curr.created_at).getTime() - new Date(prev.created_at).getTime() < 120000;
+  };
+
+  // Fetch messages on group change
+  useEffect(() => {
+    if (hasFetched.current === groupId) return;
+    hasFetched.current = groupId;
+    setIsLoading(true);
+    setChatError(null);
+    getGroupMessages(groupId)
+      .then((data) => {
+        if (data.success) {
+          setMessages(data.messages || []);
+          setHasMore((data.messages || []).length >= 30);
+        }
+      })
+      .catch(() => setChatError("Failed to load messages"))
+      .finally(() => setIsLoading(false));
+  }, [groupId]);
+
+  // Auto-scroll on load
+  useEffect(() => {
+    if (!isLoading && messages.length > 0) {
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }), 50);
+    }
+  }, [isLoading]);
+
+  // Socket.IO real-time messages
+  useEffect(() => {
+    const socket = connectSocket();
+    const room = `hangout:${groupId}`;
+
+    const onChatMessage = (msg: GroupMessage) => {
+      if (msg.room !== room) return;
+      setMessages((prev) => prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]);
+      if (isNearBottom.current) {
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+      } else {
+        setUnreadBelow((c) => c + 1);
+      }
+    };
+
+    const onTyping = (data: { userId: string; name: string }) => {
+      if (String(data.userId) === String(myId)) return;
+      setTypingNames((prev) => prev.includes(data.name) ? prev : [...prev, data.name]);
+      setTimeout(() => setTypingNames((prev) => prev.filter((n) => n !== data.name)), 3000);
+    };
+
+    const onMessageEdited = (data: { messageId: number; content: string; editedAt: string; editCount: number }) => {
+      setMessages((prev) => prev.map((m) => m.id === data.messageId ? { ...m, content: data.content, edited_at: data.editedAt, edit_count: data.editCount } : m));
+    };
+
+    const onMessageDeleted = (data: { messageId: number }) => {
+      setMessages((prev) => prev.map((m) => m.id === data.messageId ? { ...m, is_deleted: true, content: null } : m));
+    };
+
+    const onReactionUpdated = (data: { messageId: number; reactions: MessageReaction[] }) => {
+      setMessages((prev) => prev.map((m) => m.id === data.messageId ? { ...m, reactions: data.reactions } : m));
+    };
+
+    socket.on("chat:message", onChatMessage);
+    socket.on("hangout:typing", onTyping);
+    socket.on("hangout:message:edited", onMessageEdited);
+    socket.on("hangout:message:deleted", onMessageDeleted);
+    socket.on("hangout:reaction:updated", onReactionUpdated);
+    return () => {
+      socket.off("chat:message", onChatMessage);
+      socket.off("hangout:typing", onTyping);
+      socket.off("hangout:message:edited", onMessageEdited);
+      socket.off("hangout:message:deleted", onMessageDeleted);
+      socket.off("hangout:reaction:updated", onReactionUpdated);
+    };
+  }, [groupId, myId]);
+
+  const emitTyping = () => {
+    const now = Date.now();
+    if (now - lastTypingEmit.current < 2000) return;
+    lastTypingEmit.current = now;
+    connectSocket().emit("hangout:typing", { groupId });
+  };
+
+  const handleSend = async () => {
+    if (!inputText.trim() && !mediaFile) return;
+    if (sending) return;
+    setSending(true);
+    setChatError(null);
+    try {
+      if (editingMsg) {
+        await editGroupMessage(groupId, editingMsg.id, inputText.trim());
+        setEditingMsg(null);
+      } else if (mediaFile) {
+        await sendGroupMediaMessage(groupId, mediaFile, inputText.trim() || undefined);
+        setMediaFile(null);
+        if (mediaPreview) { URL.revokeObjectURL(mediaPreview); setMediaPreview(null); }
+      } else {
+        await sendGroupMessage(groupId, inputText.trim(), replyTo?.id ?? null);
+      }
+      setInputText("");
+      setReplyTo(null);
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Failed to send message");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleMediaSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setMediaFile(file);
+    setMediaPreview(file.type.startsWith("image/") ? URL.createObjectURL(file) : null);
+    e.target.value = "";
+  };
+
+  const cancelMedia = () => {
+    setMediaFile(null);
+    if (mediaPreview) { URL.revokeObjectURL(mediaPreview); setMediaPreview(null); }
+  };
+
+  const loadMore = async () => {
+    if (loadingMore || !hasMore || messages.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const oldest = messages[0];
+      const data = await getGroupMessages(groupId, oldest.created_at);
+      if (data.success) {
+        setMessages((prev) => [...(data.messages || []), ...prev]);
+        setHasMore((data.messages || []).length >= 30);
+      }
+    } catch { /* silent */ }
+    finally { setLoadingMore(false); }
+  };
+
+  // Scroll tracking
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isNearBottom.current = distFromBottom < 200;
+    setShowScrollFab(distFromBottom > 300);
+    if (isNearBottom.current) setUnreadBelow(0);
+    if (el.scrollTop < 60 && hasMore && !loadingMore) loadMore();
+  };
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    setUnreadBelow(0);
+    setShowScrollFab(false);
+  };
+
+  // Context menu handlers
+  const handleContextMenu = (msg: GroupMessage, e: React.MouseEvent) => {
+    if (msg.is_deleted) return;
+    e.preventDefault();
+    setContextMenu({ msg, x: e.clientX, y: e.clientY });
+  };
+
+  const handleTouchStart = (msg: GroupMessage, e: React.TouchEvent) => {
+    if (msg.is_deleted) return;
+    const touch = e.touches[0];
+    longPressTimer.current = setTimeout(() => {
+      setContextMenu({ msg, x: touch.clientX, y: touch.clientY });
+    }, 500);
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  // Message actions
+  const startReply = (msg: GroupMessage) => {
+    setContextMenu(null);
+    setEditingMsg(null);
+    setReplyTo(msg);
+    inputRef.current?.focus();
+  };
+
+  const startEdit = (msg: GroupMessage) => {
+    setContextMenu(null);
+    setReplyTo(null);
+    setEditingMsg(msg);
+    setInputText(msg.content || "");
+    inputRef.current?.focus();
+  };
+
+  const cancelEdit = () => {
+    setEditingMsg(null);
+    setInputText("");
+  };
+
+  const handleDeleteMsg = async (msg: GroupMessage) => {
+    setContextMenu(null);
+    try {
+      await deleteGroupMessage(groupId, msg.id);
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Failed to delete");
+    }
+  };
+
+  const handleReaction = async (msgId: number, emoji: string) => {
+    setContextMenu(null);
+    try {
+      await toggleMessageReaction(groupId, msgId, emoji);
+    } catch { /* silent */ }
+  };
+
+  const isValidPhoto = (p: string | null | undefined) => p && (p.startsWith("/") || p.startsWith("http"));
+
+  return (
+    <div className="flex flex-col h-full relative">
+      {chatError && (
+        <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 flex-shrink-0 flex items-center justify-between gap-2">
+          <p className="text-xs text-red-400 flex-1">{chatError}</p>
+          <button onClick={() => setChatError(null)} className="text-red-400/60 hover:text-red-400 flex-shrink-0 p-1">
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
+
+      {/* Messages */}
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-0.5"
+        onScroll={handleScroll}
+      >
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="w-8 h-8 border-2 border-white/20 border-t-pnp-accent rounded-full animate-spin" />
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center px-6">
+              <p className="text-3xl mb-2">💬</p>
+              <p className="text-sm text-pnp-textSecondary">No messages yet. Start the conversation!</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            {loadingMore && (
+              <div className="flex justify-center py-2">
+                <div className="w-5 h-5 border-2 border-white/20 border-t-pnp-accent rounded-full animate-spin" />
+              </div>
+            )}
+            {messages.map((msg, idx) => {
+              const prev = idx > 0 ? messages[idx - 1] : undefined;
+              const isMe = String(msg.user_id) === String(myId);
+              const timeStr = formatTime(new Date(msg.created_at).getTime());
+              const grouped = isSameGroup(msg, prev);
+              const showDate = !prev || new Date(msg.created_at).toDateString() !== new Date(prev.created_at).toDateString();
+
+              return (
+                <React.Fragment key={msg.id}>
+                  {/* Date separator */}
+                  {showDate && (
+                    <div className="flex items-center justify-center py-2 my-1">
+                      <span className="px-3 py-0.5 rounded-full text-[10px] font-semibold text-pnp-textSecondary bg-white/5">
+                        {formatDateLabel(msg.created_at)}
+                      </span>
+                    </div>
+                  )}
+
+                  {msg.is_deleted ? (
+                    <div className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${grouped ? "" : "mt-2"}`}>
+                      {!isMe && <div className="w-6 flex-shrink-0" />}
+                      <div className="max-w-[75%] rounded-2xl px-3 py-1.5 text-xs italic text-pnp-textSecondary/50 bg-white/5">
+                        Message deleted
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${grouped ? "" : "mt-2"} group/msg`}
+                      onContextMenu={(e) => handleContextMenu(msg, e)}
+                      onTouchStart={(e) => handleTouchStart(msg, e)}
+                      onTouchEnd={handleTouchEnd}
+                      onTouchMove={handleTouchEnd}
+                    >
+                      {/* Avatar — only for first message in group */}
+                      {!isMe && (
+                        <div className="flex-shrink-0 mt-auto w-6">
+                          {!grouped ? (
+                            isValidPhoto(msg.photo_url) ? (
+                              <img src={msg.photo_url!} alt="" className="w-6 h-6 rounded-full object-cover" />
+                            ) : (
+                              <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A" }}>
+                                {(msg.first_name || msg.username || "?")[0].toUpperCase()}
+                              </div>
+                            )
+                          ) : null}
+                        </div>
+                      )}
+                      <div className={`max-w-[80%] sm:max-w-[75%] flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+                        {/* Name — only for first in group */}
+                        {!isMe && !grouped && (
+                          <p className="text-[10px] text-pnp-textSecondary mb-0.5 px-1">{msg.first_name || msg.username || "User"}</p>
+                        )}
+                        <div
+                          className={`rounded-2xl px-3 py-2 text-sm ${isMe ? "text-white rounded-br-md" : "bg-white/10 text-white rounded-bl-md"}`}
+                          style={isMe ? { background: "linear-gradient(135deg, #D4007A, #E69138)", overflowWrap: "anywhere" as const } : { overflowWrap: "anywhere" as const }}
+                        >
+                          {msg.media_url && msg.media_type && (
+                            <div className="mb-1">
+                              <MediaMessage
+                                mediaUrl={msg.media_url}
+                                mediaType={msg.media_type}
+                                thumbUrl={msg.media_thumb_url}
+                                onExpandImage={(url) => setLightboxUrl(url)}
+                                isMe={isMe}
+                              />
+                            </div>
+                          )}
+                          {msg.reply_to && (
+                            <div className="mb-1 pl-2 border-l-2 border-white/30 text-[10px] text-white/60">
+                              <span className="font-semibold">{msg.reply_to.name}</span>: {msg.reply_to.content?.slice(0, 80)}
+                            </div>
+                          )}
+                          {msg.content && <p>{msg.content}</p>}
+                          <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
+                            <span className={`text-[10px] ${isMe ? "text-white/60" : "text-pnp-textSecondary"}`}>{timeStr}</span>
+                            {msg.edited_at && <span className={`text-[10px] ${isMe ? "text-white/40" : "text-pnp-textSecondary/60"}`}>(edited)</span>}
+                          </div>
+                        </div>
+
+                        {/* Reactions display */}
+                        {msg.reactions && (msg.reactions as MessageReaction[]).length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-0.5 px-1">
+                            {(msg.reactions as MessageReaction[]).map((r) => (
+                              <button
+                                key={r.emoji}
+                                onClick={() => handleReaction(msg.id, r.emoji)}
+                                className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] transition-all active:scale-95 ${
+                                  r.reacted_by_me
+                                    ? "bg-pnp-accent/20 ring-1 ring-pnp-accent/40"
+                                    : "bg-white/5 hover:bg-white/10"
+                                }`}
+                              >
+                                <span>{r.emoji}</span>
+                                <span className="text-[10px] text-pnp-textSecondary">{r.count}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Quick reaction row — visible on hover (desktop) */}
+                        <div className={`hidden group-hover/msg:flex items-center gap-0.5 mt-0.5 px-1 ${isMe ? "flex-row-reverse" : ""}`}>
+                          {QUICK_REACTIONS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              onClick={() => handleReaction(msg.id, emoji)}
+                              className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-xs"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => startReply(msg)}
+                            className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all"
+                            title="Reply"
+                          >
+                            <svg className="w-3 h-3 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
+            <div ref={messagesEndRef} />
+          </>
+        )}
+      </div>
+
+      {/* Scroll-to-bottom FAB */}
+      {showScrollFab && (
+        <button
+          onClick={scrollToBottom}
+          className="absolute bottom-20 right-3 w-10 h-10 rounded-full bg-pnp-surface border border-pnp-border shadow-lg flex items-center justify-center hover:bg-white/15 active:scale-90 transition-all z-10"
+          aria-label="Scroll to bottom"
+        >
+          <svg className="w-5 h-5 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+          </svg>
+          {unreadBelow > 0 && (
+            <span
+              className="absolute -top-1.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold text-white flex items-center justify-center"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              {unreadBelow > 99 ? "99+" : unreadBelow}
+            </span>
+          )}
+        </button>
+      )}
+
+      {/* Context menu */}
+      {contextMenu && (
+        <>
+          <div className="fixed inset-0 z-50" onClick={() => setContextMenu(null)} />
+          <div
+            className="fixed z-50 rounded-xl overflow-hidden shadow-xl py-1 min-w-[160px] animate-fade-in-up"
+            style={{
+              background: "#2C2C2E",
+              border: "1px solid rgba(255,255,255,0.1)",
+              left: Math.min(contextMenu.x, window.innerWidth - 180),
+              top: Math.min(contextMenu.y, window.innerHeight - 280),
+            }}
+          >
+            {/* Quick reactions in context menu */}
+            <div className="flex items-center justify-center gap-1 px-2 py-2 border-b border-white/5">
+              {QUICK_REACTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  onClick={() => handleReaction(contextMenu.msg.id, emoji)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-base"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => startReply(contextMenu.msg)}
+              className="w-full px-4 py-2.5 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
+            >
+              <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+              </svg>
+              Reply
+            </button>
+            {String(contextMenu.msg.user_id) === String(myId) && (
+              <>
+                <button
+                  onClick={() => startEdit(contextMenu.msg)}
+                  className="w-full px-4 py-2.5 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
+                >
+                  <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                  </svg>
+                  Edit
+                </button>
+                <div className="border-t border-white/5" />
+                <button
+                  onClick={() => handleDeleteMsg(contextMenu.msg)}
+                  className="w-full px-4 py-2.5 text-sm text-left text-red-400 hover:bg-white/10 transition-colors flex items-center gap-3"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Delete
+                </button>
+              </>
+            )}
+            {isOwnerOrMod && String(contextMenu.msg.user_id) !== String(myId) && (
+              <>
+                <div className="border-t border-white/5" />
+                <button
+                  onClick={() => handleDeleteMsg(contextMenu.msg)}
+                  className="w-full px-4 py-2.5 text-sm text-left text-red-400 hover:bg-white/10 transition-colors flex items-center gap-3"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Delete
+                </button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Typing indicator */}
+      {typingNames.length > 0 && (
+        <div className="px-4 py-1 flex-shrink-0">
+          <p className="text-xs text-pnp-textSecondary italic">
+            {typingNames.join(", ")} {typingNames.length === 1 ? "is" : "are"} typing...
+          </p>
+        </div>
+      )}
+
+      {/* Reply bar */}
+      {replyTo && !editingMsg && (
+        <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-2 flex-shrink-0 bg-white/5">
+          <div className="w-1 h-8 rounded-full flex-shrink-0" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }} />
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-semibold text-pnp-accent">{replyTo.first_name || replyTo.username || "User"}</p>
+            <p className="text-xs text-pnp-textSecondary truncate">{replyTo.content?.slice(0, 80) || (replyTo.media_type ? "Media" : "")}</p>
+          </div>
+          <button onClick={() => setReplyTo(null)} className="text-pnp-textSecondary hover:text-white p-1 flex-shrink-0">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
+
+      {/* Edit bar */}
+      {editingMsg && (
+        <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-2 flex-shrink-0 bg-blue-500/5">
+          <div className="w-1 h-8 rounded-full bg-blue-400 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-semibold text-blue-400">Editing message</p>
+            <p className="text-xs text-pnp-textSecondary truncate">{editingMsg.content?.slice(0, 80)}</p>
+          </div>
+          <button onClick={cancelEdit} className="text-pnp-textSecondary hover:text-white p-1 flex-shrink-0">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
+
+      {/* Media preview */}
+      {mediaFile && !editingMsg && (
+        <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-3 flex-shrink-0">
+          {mediaPreview ? <img src={mediaPreview} alt="" className="w-12 h-12 rounded-lg object-cover" /> : (
+            <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center">
+              <svg className="w-5 h-5 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+              </svg>
+            </div>
+          )}
+          <span className="text-xs text-pnp-textSecondary flex-1 truncate">{mediaFile.name}</span>
+          <button onClick={cancelMedia} className="text-red-400 text-xs font-semibold">Remove</button>
+        </div>
+      )}
+
+      {/* Input bar */}
+      <div className="flex items-end gap-1.5 px-2 py-1.5 border-t border-pnp-border flex-shrink-0 bg-pnp-background">
+        {!editingMsg && (
+          <>
+            <input ref={mediaInputRef} type="file" accept="image/*,video/*,audio/*" className="hidden" onChange={handleMediaSelect} />
+            <button type="button" onClick={() => mediaInputRef.current?.click()} className="w-10 h-10 flex items-center justify-center rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 active:scale-90 transition-all flex-shrink-0 mb-0.5" aria-label="Attach media">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+              </svg>
+            </button>
+          </>
+        )}
+        <textarea
+          ref={(el) => {
+            inputRef.current = el;
+            if (el) {
+              el.style.height = "auto";
+              el.style.height = Math.min(el.scrollHeight, 120) + "px";
+            }
+          }}
+          value={inputText}
+          onChange={(e) => {
+            setInputText(e.target.value);
+            if (!editingMsg) emitTyping();
+            const el = e.target;
+            el.style.height = "auto";
+            el.style.height = Math.min(el.scrollHeight, 120) + "px";
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+            if (e.key === "Escape" && editingMsg) cancelEdit();
+            if (e.key === "Escape" && replyTo) setReplyTo(null);
+          }}
+          placeholder={editingMsg ? "Edit message..." : "Type a message..."}
+          className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary/50 rounded-2xl px-4 py-2 resize-none outline-none focus:ring-1 focus:ring-pnp-accent/40 transition-shadow leading-snug"
+          rows={1}
+          style={{ fontSize: "16px", minHeight: "40px", maxHeight: "120px" }}
+        />
+        <button
+          type="button"
+          onClick={handleSend}
+          disabled={sending || (!inputText.trim() && !mediaFile)}
+          className="w-10 h-10 flex items-center justify-center rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30 mb-0.5"
+          style={{ background: editingMsg ? "#3B82F6" : "linear-gradient(135deg, #D4007A, #E69138)" }}
+          aria-label={editingMsg ? "Save edit" : "Send message"}
+        >
+          {sending ? (
+            <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+          ) : editingMsg ? (
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+          ) : (
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
+          )}
+        </button>
+      </div>
+
+      {/* Lightbox */}
+      {lightboxUrl && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 pt-safe pb-safe" onClick={() => setLightboxUrl(null)}>
+          <button className="absolute top-4 right-4 mt-safe w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-white hover:bg-white/20 transition-colors z-10" onClick={() => setLightboxUrl(null)} aria-label="Close">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+          <img src={lightboxUrl} alt="" className="max-w-full max-h-full object-contain rounded-lg" />
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
@@ -99,6 +759,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [newIsPublic, setNewIsPublic] = useState(true);
   const [creating, setCreating] = useState(false);
   const [newTags, setNewTags] = useState<string[]>([]);
+  const [newIsPaid, setNewIsPaid] = useState(false);
+  const [newPrice, setNewPrice] = useState("");
   const [createSuccess, setCreateSuccess] = useState<{ id: number; name: string } | null>(null);
 
   // Discover groups
@@ -118,40 +780,13 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Group members (loaded on chat open for member management panels)
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
 
-  // Native chat messages state
-  const [messages, setMessages] = useState<GroupMessage[]>([]);
-  const [messagesLoading, setMessagesLoading] = useState(false);
-  const [hasMoreMessages, setHasMoreMessages] = useState(true);
-  const [messageInput, setMessageInput] = useState("");
-  const [sendingMessage, setSendingMessage] = useState(false);
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
-  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const mediaInputRef = useRef<HTMLInputElement>(null);
-
-  // Socket hook — presence + real-time messages
+  // Socket hook — presence + socket connection state (video calls now handled natively in Telegram)
   const {
     isConnected,
     onlineMembers,
-    emitTyping,
-    typingUsers,
-    callState,
-    callStartedAt,
-    callParticipants,
-    screenShareUser,
-    emitEditMessage,
-    emitDeleteMessage,
-    emitReaction,
-    emitReadMessage,
-    onMessageEdit,
-    onMessageDelete,
-    onReactionUpdate,
-    onReadReceipt,
   } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId);
 
-  // Error feedback
+  // Video call / general chat error
   const [chatError, setChatError] = useState<string | null>(null);
 
   // Create group error
@@ -185,16 +820,13 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [hangoutFeedNextCursor, setHangoutFeedNextCursor] = useState<string | null>(null);
   const [hangoutFeedLoadingMore, setHangoutFeedLoadingMore] = useState(false);
 
-  // Pinned messages
-  const [pinnedMessages, setPinnedMessages] = useState<any[]>([]);
-  const [showPins, setShowPins] = useState(false);
-
   // Invite link
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviteCopied, setInviteCopied] = useState(false);
 
   // Member action loading
   const [memberActionLoading, setMemberActionLoading] = useState<string | null>(null);
+  const [memberActionMenu, setMemberActionMenu] = useState<string | null>(null);
 
   const [showGroupSettings, setShowGroupSettings] = useState(false);
   const [settingsMembers, setSettingsMembers] = useState<GroupMember[]>([]);
@@ -211,10 +843,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Dedicated error states for non-upload errors
   const [discoverError, setDiscoverError] = useState<string | null>(null);
 
-  // Video call state — per-group JaaS integration
-  const [callMeetingUrl, setCallMeetingUrl] = useState<string | null>(null);
-  const [callLoading, setCallLoading] = useState(false);
-  const [inCall, setInCall] = useState(false);
+  // Telegram video chat status — polled (15s when active, 30s when idle)
+  const [telegramCallActive, setTelegramCallActive] = useState(false);
+  // Popover for the disabled call button (no telegramChatId)
+  const [showNoTgPopover, setShowNoTgPopover] = useState(false);
+  // Toast shown when user clicks "Start Call"
+  const [showCallToast, setShowCallToast] = useState(false);
 
   // SpotlightStrip — hangout events
   const [hangoutEvents, setHangoutEvents] = useState<EventItem[]>([]);
@@ -222,34 +856,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
   const [eventKey, setEventKey] = useState(0);
 
-  // ─── Telegram-style chat features ──────────────────────────────────────
-  // Reply-to-send
-  const [replyingTo, setReplyingTo] = useState<GroupMessage | null>(null);
-  // Message editing
-  const [editingMessage, setEditingMessage] = useState<GroupMessage | null>(null);
-  // Context menu
-  const [contextMenu, setContextMenu] = useState<{ msg: GroupMessage; x: number; y: number } | null>(null);
-  // Quick reaction picker
-  const [reactionPickerMsgId, setReactionPickerMsgId] = useState<number | null>(null);
-  // Message search
-  const [showSearch, setShowSearch] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<GroupMessage[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
-  // Scroll-to-bottom FAB
-  const [showScrollFab, setShowScrollFab] = useState(false);
-  const [unreadBelowCount, setUnreadBelowCount] = useState(0);
-  // Read receipts
-  const [readReceipts, setReadReceipts] = useState<Map<string, number>>(new Map());
-  // Local deletions (delete-for-me, stored in memory)
-  const [localDeletedIds, setLocalDeletedIds] = useState<Set<number>>(new Set());
-  // Long-press timer for mobile
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Pinned message cycling
-  const [currentPinIndex, setCurrentPinIndex] = useState(0);
-
-  // Quick reaction emojis
-  const QUICK_REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F44E}"];
 
   // ─── Group list loading ─────────────────────────────────────────────
 
@@ -273,274 +879,47 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     } catch { /* silent */ }
   }, []);
 
-  const loadPins = useCallback(async (groupId: number) => {
-    try {
-      const data = await getHangoutPins(groupId);
-      if (data.success) setPinnedMessages(data.pins || []);
-    } catch { /* silent */ }
-  }, []);
-
   const loadHangoutEvents = useCallback(() => {
     getUpcomingEvents({ type: "hangout_event", limit: 8 })
       .then((res) => { if (res.success) setHangoutEvents(res.events); })
       .catch(() => {});
   }, []);
 
-  // ─── Real-time incoming messages via Socket.IO ───────────────────────
+  // ─── Telegram video chat status polling ─────────────────────────────────
 
   useEffect(() => {
-    if (!activeGroup) return;
-    const socket = connectSocket();
-    const room = `hangout:${activeGroup.id}`;
+    if (!activeGroup?.id || !activeGroup.telegramChatId) {
+      setTelegramCallActive(false);
+      return;
+    }
+    let cancelled = false;
 
-    const onMessage = (msg: GroupMessage) => {
-      if (msg.room !== room) return;
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        return [...prev, msg];
-      });
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    const poll = async () => {
+      try {
+        const res = await getVideoChatStatus(activeGroup.id);
+        if (!cancelled) setTelegramCallActive(res.active);
+      } catch {
+        // silent — stale value is acceptable
+      }
     };
 
-    socket.on("chat:message", onMessage);
+    poll();
+    // 15s when a call is live, 30s when idle — re-schedules on state change
+    const intervalMs = telegramCallActive ? 15000 : 30000;
+    const interval = setInterval(poll, intervalMs);
+
     return () => {
-      socket.off("chat:message", onMessage);
+      cancelled = true;
+      clearInterval(interval);
     };
-  }, [activeGroup?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeGroup?.id, activeGroup?.telegramChatId, telegramCallActive]);
 
-  // ─── Telegram-style socket event callbacks ───────────────────────────
+  // Reset poll state when switching groups
   useEffect(() => {
-    onMessageEdit((data) => {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === data.messageId
-            ? { ...m, content: data.content, edited_at: data.editedAt, edit_count: data.editCount }
-            : m
-        )
-      );
-    });
-    onMessageDelete((data) => {
-      if (data.forAll) {
-        setMessages((prev) =>
-          prev.map((m) => (m.id === data.messageId ? { ...m, is_deleted: true, content: null } : m))
-        );
-      }
-    });
-    onReactionUpdate((data) => {
-      const myId = String(user?.dbId);
-      const enriched = (data.reactions || []).map((r: any) => ({
-        emoji: r.emoji,
-        count: r.count,
-        users: r.users || [],
-        reacted_by_me: Array.isArray(r.users) && r.users.map(String).includes(myId),
-      }));
-      setMessages((prev) =>
-        prev.map((m) => (m.id === data.messageId ? { ...m, reactions: enriched } : m))
-      );
-    });
-    onReadReceipt((data) => {
-      setReadReceipts((prev) => {
-        const next = new Map(prev);
-        next.set(data.userId, data.lastReadMessageId);
-        return next;
-      });
-    });
-    return () => {
-      onMessageEdit(null);
-      onMessageDelete(null);
-      onReactionUpdate(null);
-      onReadReceipt(null);
-    };
-  }, [onMessageEdit, onMessageDelete, onReactionUpdate, onReadReceipt]);
-
-  // ─── Message sending handlers ────────────────────────────────────────
-
-  const handleSendMessage = async () => {
-    if (!activeGroup || sendingMessage) return;
-
-    // Editing an existing message
-    if (editingMessage) {
-      if (!messageInput.trim()) return;
-      setSendingMessage(true);
-      try {
-        await editGroupMessage(activeGroup.id, editingMessage.id, messageInput.trim());
-        setMessageInput("");
-        setEditingMessage(null);
-      } catch (err) {
-        setChatError(err instanceof Error ? err.message : "Failed to edit message");
-      } finally {
-        setSendingMessage(false);
-      }
-      return;
-    }
-
-    if (mediaFile) {
-      setSendingMessage(true);
-      try {
-        await sendGroupMediaMessage(activeGroup.id, mediaFile, messageInput.trim() || undefined);
-        setMessageInput("");
-        setMediaFile(null);
-        setMediaPreview(null);
-        setReplyingTo(null);
-      } catch (err) {
-        setChatError(err instanceof Error ? err.message : "Failed to send media");
-      } finally {
-        setSendingMessage(false);
-      }
-      return;
-    }
-
-    if (!messageInput.trim()) return;
-    setSendingMessage(true);
-    try {
-      await sendGroupMessage(activeGroup.id, messageInput.trim(), replyingTo?.id || null);
-      setMessageInput("");
-      setReplyingTo(null);
-    } catch (err) {
-      setChatError(err instanceof Error ? err.message : "Failed to send message");
-    } finally {
-      setSendingMessage(false);
-    }
-  };
-
-  const handleMediaSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setMediaFile(file);
-    if (file.type.startsWith("image/")) {
-      setMediaPreview(URL.createObjectURL(file));
-    } else {
-      setMediaPreview(null);
-    }
-  };
-
-  const cancelMedia = () => {
-    setMediaFile(null);
-    if (mediaPreview) {
-      URL.revokeObjectURL(mediaPreview);
-      setMediaPreview(null);
-    }
-  };
-
-  // ─── Telegram-style message action handlers ──────────────────────────
-
-  const handleContextMenu = useCallback((e: React.MouseEvent | React.TouchEvent, msg: GroupMessage) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const x = "clientX" in e ? e.clientX : e.touches?.[0]?.clientX ?? 0;
-    const y = "clientY" in e ? e.clientY : e.touches?.[0]?.clientY ?? 0;
-    setContextMenu({ msg, x, y });
-  }, []);
-
-  const handleLongPressStart = useCallback((e: React.TouchEvent, msg: GroupMessage) => {
-    longPressTimer.current = setTimeout(() => {
-      handleContextMenu(e, msg);
-    }, 500);
-  }, [handleContextMenu]);
-
-  const handleLongPressEnd = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  }, []);
-
-  const handleReply = useCallback((msg: GroupMessage) => {
-    setReplyingTo(msg);
-    setContextMenu(null);
-  }, []);
-
-  const handleEditStart = useCallback((msg: GroupMessage) => {
-    setEditingMessage(msg);
-    setMessageInput(msg.content || "");
-    setContextMenu(null);
-  }, []);
-
-  const handleDeleteMessage = useCallback(async (msg: GroupMessage, forAll: boolean) => {
-    if (!activeGroup) return;
-    try {
-      if (forAll) {
-        await deleteGroupMessage(activeGroup.id, msg.id, true);
-      } else {
-        setLocalDeletedIds((prev) => new Set(prev).add(msg.id));
-      }
-    } catch (err) {
-      setChatError(err instanceof Error ? err.message : "Failed to delete message");
-    }
-    setContextMenu(null);
-  }, [activeGroup]);
-
-  const handleReaction = useCallback(async (msgId: number, emoji: string) => {
-    if (!activeGroup) return;
-    try {
-      await toggleMessageReaction(activeGroup.id, msgId, emoji);
-    } catch { /* silent */ }
-    setContextMenu(null);
-    setReactionPickerMsgId(null);
-  }, [activeGroup]);
-
-  const handleSearch = useCallback(async (q: string) => {
-    if (!activeGroup || !q.trim() || q.length < 2) return;
-    setSearchLoading(true);
-    try {
-      const res = await searchGroupMessages(activeGroup.id, q);
-      setSearchResults(res.messages || []);
-    } catch {
-      setSearchResults([]);
-    } finally {
-      setSearchLoading(false);
-    }
-  }, [activeGroup]);
-
-  const handleCopyMessage = useCallback((msg: GroupMessage) => {
-    if (msg.content) navigator.clipboard.writeText(msg.content).catch(() => {});
-    setContextMenu(null);
-  }, []);
-
-  const cancelEdit = useCallback(() => {
-    setEditingMessage(null);
-    setMessageInput("");
-  }, []);
-
-  // ─── Video call handlers ─────────────────────────────────────────────
-
-  const handleJoinHangout = async () => {
-    if (!activeGroup || callLoading) return;
-    setCallLoading(true);
-    setChatError(null);
-    try {
-      const res = await startGroupCall(activeGroup.id);
-      if (res.jaas?.meetingUrl) {
-        setCallMeetingUrl(res.jaas.meetingUrl);
-        setInCall(true);
-      } else {
-        setChatError("Video room is temporarily unavailable. Please try again.");
-      }
-    } catch (err) {
-      setChatError(err instanceof Error ? err.message : "Failed to join video call");
-    } finally {
-      setCallLoading(false);
-    }
-  };
-
-  const handleCloseCall = () => {
-    setInCall(false);
-    setCallMeetingUrl(null);
-  };
-
-  const loadMoreMessages = async () => {
-    if (!activeGroup || messagesLoading || !hasMoreMessages || messages.length === 0) return;
-    const oldest = messages[0];
-    setMessagesLoading(true);
-    try {
-      const res = await getGroupMessages(activeGroup.id, oldest.created_at);
-      if (res.success) {
-        setMessages((prev) => [...res.messages, ...prev]);
-        setHasMoreMessages(res.messages.length >= 50);
-      }
-    } catch { /* silent */ }
-    finally { setMessagesLoading(false); }
-  };
+    setTelegramCallActive(false);
+    setShowNoTgPopover(false);
+    setShowCallToast(false);
+  }, [activeGroup?.id]);
 
   useEffect(() => {
     setIsLoading(true);
@@ -566,7 +945,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     setCreating(true);
     setCreateError(null);
     try {
-      const result = await createHangoutGroup(newName.trim(), newDesc.trim(), newIsPublic);
+      const paidPrice = newIsPaid ? parseFloat(newPrice) || 0 : 0;
+      const result = await createHangoutGroup(newName.trim(), newDesc.trim(), newIsPublic, newIsPaid, paidPrice);
       const createdGroup = result?.group;
       // If tags were selected, apply them after creation
       if (newTags.length > 0 && createdGroup?.id) {
@@ -579,6 +959,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setNewName("");
       setNewDesc("");
       setNewIsPublic(true);
+      setNewIsPaid(false);
+      setNewPrice("");
       setNewTags([]);
       loadGroups();
     } catch (err) {
@@ -613,8 +995,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         await requestJoinGroup(group.id);
         loadDiscover();
       }
-    } catch (err) {
-      setDiscoverError(err instanceof Error ? err.message : "Failed to join group");
+    } catch (err: any) {
+      if (err?.isPaid || err?.message?.includes("Payment required")) {
+        setDiscoverError(`This hangout costs $${Number(group.priceUsd || 0).toFixed(2)} to join. Payment checkout coming soon.`);
+      } else {
+        setDiscoverError(err instanceof Error ? err.message : "Failed to join group");
+      }
     }
   };
 
@@ -655,35 +1041,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
     markGroupAsRead(group.id).catch(() => {});
     loadGroupDetail(group.id);
-
-    setMessages([]);
-    setHasMoreMessages(true);
-    setMessageInput("");
-    setMediaFile(null);
-    setMediaPreview(null);
-    setInCall(false);
-    setCallMeetingUrl(null);
-
-    setMessagesLoading(true);
-    getGroupMessages(group.id)
-      .then((res) => {
-        if (res.success) {
-          setMessages(res.messages);
-          setHasMoreMessages(res.messages.length >= 50);
-        }
-      })
-      .catch(() => setChatError("Failed to load messages"))
-      .finally(() => setMessagesLoading(false));
   };
 
   const closeChat = () => {
     setView("list");
     navigate("/chat", { replace: true });
     setActiveGroup(null);
-    setMessages([]);
-    setMessageInput("");
-    setMediaFile(null);
-    setMediaPreview(null);
     setShowOnline(false);
     setShowGroupSettings(false);
     loadGroups();
@@ -848,194 +1211,220 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       isAdmin;
 
     return (
-      <div className="fixed inset-x-0 top-0 bottom-16 lg:bottom-0 lg:left-72 flex flex-col bg-pnp-background z-[30]">
-        {/* Chat header */}
-        <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
-          <button
-            onClick={closeChat}
-            className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent flex-shrink-0"
-            aria-label={t.chat.backToGroupList}
-          >
-            <svg className="w-4.5 h-4.5 sm:w-5 sm:h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
+      <div className="fixed inset-x-0 top-0 lg:left-72 flex flex-col bg-pnp-background z-[30] chat-overlay-safe">
+        {/* Chat header — clean two-section layout: left (nav+info) / right (actions) */}
+        <div className="flex items-center px-1.5 sm:px-3 py-1.5 sm:py-2 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
+          {/* Left: back + avatar + info */}
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <button
+              onClick={closeChat}
+              className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent flex-shrink-0 -ml-1"
+              aria-label={t.chat.backToGroupList}
+            >
+              <svg className="w-5 h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
 
-          {/* Group avatar in header */}
-          <div className="relative flex-shrink-0">
-            {activeGroup.avatarUrl && !activeGroup.isMain && !activeGroup.isWallOfFame ? (
-              <img
-                src={activeGroup.avatarUrl}
-                alt=""
-                className="w-8 h-8 rounded-full object-cover ring-1 ring-white/10"
-              />
-            ) : (
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
-                style={{
-                  background: activeGroup.isMain
-                    ? "linear-gradient(135deg, #D4007A, #E69138)"
-                    : activeGroup.isWallOfFame
-                      ? "linear-gradient(135deg, #FFD700, #E69138)"
-                      : "linear-gradient(135deg, rgba(212,0,122,0.3), rgba(123,97,255,0.3))",
-                  color: activeGroup.isMain || activeGroup.isWallOfFame ? "#fff" : "#D4007A",
-                }}
-              >
-                {activeGroup.isMain ? "P" : activeGroup.isWallOfFame ? "\u{1F3C6}" : (activeGroup.name?.[0] || "?").toUpperCase()}
-              </div>
-            )}
-            {isConnected && (
-              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 ring-2 ring-pnp-background" />
-            )}
-          </div>
-
-          <div className="flex-1 min-w-0">
-            <h2 className="text-[13px] sm:text-sm font-bold text-pnp-textPrimary truncate">{activeGroup.name}</h2>
-            <div className="flex items-center gap-1 text-[10px] sm:text-xs text-pnp-textSecondary">
-              <span>{activeGroup.memberCount} {activeGroup.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}</span>
-              {onlineMembers.length > 0 && (
-                <>
-                  <span className="text-pnp-textSecondary/40">&middot;</span>
-                  <span className="text-green-400 font-medium">{onlineMembers.length} online</span>
-                </>
+            {/* Avatar with online indicator */}
+            <button
+              onClick={() => setShowOnline((v) => !v)}
+              className="relative flex-shrink-0 active:scale-95 transition-transform"
+              aria-label={t.chat.showOnlineMembers}
+            >
+              {activeGroup.avatarUrl && !activeGroup.isMain && !activeGroup.isWallOfFame ? (
+                <img src={activeGroup.avatarUrl} alt="" className="w-10 h-10 rounded-full object-cover ring-1 ring-white/10" />
+              ) : (
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+                  style={{
+                    background: activeGroup.isMain
+                      ? "linear-gradient(135deg, #D4007A, #E69138)"
+                      : activeGroup.isWallOfFame
+                        ? "linear-gradient(135deg, #FFD700, #E69138)"
+                        : "linear-gradient(135deg, rgba(212,0,122,0.3), rgba(123,97,255,0.3))",
+                    color: activeGroup.isMain || activeGroup.isWallOfFame ? "#fff" : "#D4007A",
+                  }}
+                >
+                  {activeGroup.isMain ? "P" : activeGroup.isWallOfFame ? "\u{1F3C6}" : (activeGroup.name?.[0] || "?").toUpperCase()}
+                </div>
               )}
+              {isConnected && (
+                <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 ring-2 ring-pnp-background" />
+              )}
+              {/* Online count badge */}
+              {onlineMembers.length > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-green-500 text-[10px] font-bold text-white flex items-center justify-center ring-2 ring-pnp-background">
+                  {onlineMembers.length}
+                </span>
+              )}
+            </button>
+
+            {/* Name + member count */}
+            <div className="flex-1 min-w-0">
+              <h2 className="text-sm font-bold text-pnp-textPrimary truncate leading-tight">{activeGroup.name}</h2>
+              <p className="text-xs text-pnp-textSecondary truncate leading-tight">
+                {activeGroup.memberCount} {activeGroup.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}
+                {activeGroup.isPaid && (activeGroup.priceUsd ?? 0) > 0 && (
+                  <span className="text-amber-400 font-medium"> · ${Number(activeGroup.priceUsd).toFixed(2)}</span>
+                )}
+              </p>
             </div>
           </div>
 
-          {/* Online members — only icon on mobile */}
-          <button
-            onClick={() => setShowOnline((v) => !v)}
-            className="hidden sm:flex items-center gap-1 px-1.5 py-1 rounded-lg transition-colors hover:bg-white/5 min-h-[28px] justify-center flex-shrink-0"
-            title={t.chat.onlineNow}
-            aria-label={t.chat.showOnlineMembers}
-          >
-            <span className="relative flex h-2 w-2 flex-shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-60" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
-            </span>
-            <span className="text-[11px] font-medium text-green-400">{onlineMembers.length}</span>
-          </button>
-
-          {/* Join Hangout — per-group JaaS video call */}
-          <button
-            onClick={handleJoinHangout}
-            disabled={callLoading}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all hover:opacity-90 active:scale-95 flex-shrink-0 disabled:opacity-50"
-            style={{ background: "linear-gradient(135deg, rgba(94,209,196,0.3), rgba(212,0,122,0.25))", color: "#5ED1C4" }}
-            title="Join Hangout!"
-            aria-label="Join hangout video call"
-          >
-            {callLoading ? (
-              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            ) : (
-              <>
-                {callState.isActive && (
-                  <span className="relative flex h-2 w-2 flex-shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
-                  </span>
+          {/* Right: call + menu — 44px min touch targets */}
+          <div className="flex items-center flex-shrink-0">
+            {/* Video call button — single icon, 3 states */}
+            {!activeGroup.telegramChatId ? (
+              <div className="relative">
+                <button
+                  onClick={() => setShowNoTgPopover((v) => !v)}
+                  className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all opacity-40"
+                  aria-label="No Telegram group linked"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                  </svg>
+                </button>
+                {showNoTgPopover && (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setShowNoTgPopover(false)} />
+                    <div
+                      className="absolute right-0 top-10 z-40 rounded-xl p-3 shadow-xl w-64"
+                      style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}
+                    >
+                      <p className="text-xs font-semibold text-white mb-1">Link a Telegram group first</p>
+                      <p className="text-[11px] text-pnp-textSecondary leading-relaxed">
+                        Add <span className="text-white font-semibold">@PNPLatinoTV_Bot</span> to your Telegram group as an admin, then send:
+                      </p>
+                      <p className="mt-1.5 px-2 py-1 rounded text-[11px] font-mono font-semibold text-pnp-accent" style={{ background: "rgba(212,0,122,0.12)" }}>
+                        /link {activeGroup.id}
+                      </p>
+                    </div>
+                  </>
                 )}
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </div>
+            ) : telegramCallActive ? (
+              <a
+                href={activeGroup.telegramInviteLink ? getTelegramDeepLink(activeGroup.telegramInviteLink) : `https://t.me/${activeGroup.telegramChatId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-11 h-11 flex items-center justify-center rounded-full active:scale-95 transition-all relative"
+                style={{ background: "rgba(52,199,89,0.2)" }}
+                title="Join active Telegram video call"
+                aria-label="Join active Telegram video call"
+              >
+                <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
                 </svg>
-              </>
+                <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+              </a>
+            ) : (
+              <a
+                href={activeGroup.telegramInviteLink ? getTelegramDeepLink(activeGroup.telegramInviteLink) : `https://t.me/${activeGroup.telegramChatId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => { setShowCallToast(true); setTimeout(() => setShowCallToast(false), 4000); }}
+                className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all"
+                title="Start a video call from Telegram"
+                aria-label="Start Telegram video call"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="#29A8E2" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+              </a>
             )}
-            <span className="hidden sm:inline">{callState.isActive ? "Join Call" : "Join Hangout!"}</span>
-          </button>
 
-          {/* Three-dot overflow menu */}
-          <div className="relative flex-shrink-0">
-            <button
-              onClick={() => setShowGroupMenu(v => !v)}
-              className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
-              style={{ color: "#8E8E93" }}
-              aria-label="Group options"
-              aria-expanded={showGroupMenu}
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" />
-              </svg>
-            </button>
-            {showGroupMenu && (
-              <>
-                <div className="fixed inset-0 z-30" onClick={() => setShowGroupMenu(false)} />
-                <div className="absolute right-0 top-10 z-40 rounded-xl overflow-hidden shadow-xl min-w-[160px]" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
-                  <button
-                    onClick={() => { setShowGroupMenu(false); setShowOnline(true); }}
-                    className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
-                  >
-                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                    Members
-                  </button>
-                  <button
-                    onClick={async () => {
-                      setShowGroupMenu(false);
-                      setShowSettings(true);
-                      setSettingsLoading(true);
-                      await Promise.all([
-                        loadGroupDetail(activeGroup.id),
-                        loadPins(activeGroup.id),
-                      ]);
-                      setSettingsLoading(false);
-                    }}
-                    className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
-                  >
-                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                    Settings
-                  </button>
-                  <button
-                    onClick={() => { setShowGroupMenu(false); setShowSearch(true); }}
-                    className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
-                  >
-                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
-                    Search Messages
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowGroupMenu(false);
-                      setShowPins(!showPins);
-                      if (!showPins && activeGroup) loadPins(activeGroup.id);
-                    }}
-                    className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
-                  >
-                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
-                    Pinned Messages
-                  </button>
-                  {!activeGroup.isWallOfFame && (isAdmin || String(activeGroup.creatorId) === String(user?.dbId)) && (
+            {/* Telegram quick-link — merged into menu on mobile, shown on sm+ */}
+            {activeGroup.telegramInviteLink && (
+              <a
+                href={getTelegramDeepLink(activeGroup.telegramInviteLink)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hidden sm:flex w-11 h-11 items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all"
+                title="Open in Telegram"
+                aria-label="Open Telegram group"
+              >
+                <svg className="w-4.5 h-4.5" viewBox="0 0 24 24" fill="#29A8E2">
+                  <path d="M21.8 2.3L2.1 9.7c-1.2.5-1.2 1.7-.2 2l4.8 1.5 1.8 5.6c.2.7 1 .9 1.5.4l2.7-2.7 5.3 3.9c1 .7 1.8.3 2-1L22.8 3.7c.3-1.3-.5-1.8-1-.4z" />
+                </svg>
+              </a>
+            )}
+
+            {/* Overflow menu */}
+            <div className="relative">
+              <button
+                onClick={() => setShowGroupMenu(v => !v)}
+                className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+                aria-label="Group options"
+                aria-expanded={showGroupMenu}
+              >
+                <svg className="w-5 h-5 text-pnp-textSecondary" fill="currentColor" viewBox="0 0 24 24">
+                  <circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" />
+                </svg>
+              </button>
+              {showGroupMenu && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setShowGroupMenu(false)} />
+                  <div className="absolute right-0 top-10 z-40 rounded-xl overflow-hidden shadow-xl min-w-[180px]" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
                     <button
-                      onClick={() => openGroupSettings(activeGroup)}
+                      onClick={() => { setShowGroupMenu(false); setShowOnline(true); }}
                       className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
                     >
-                      <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                      Group Settings
+                      <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      Members
                     </button>
-                  )}
-                  {!activeGroup.isMain && (
+                    {/* Open in Telegram — shown in menu on mobile */}
+                    {activeGroup.telegramInviteLink && (
+                      <a
+                        href={getTelegramDeepLink(activeGroup.telegramInviteLink)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => setShowGroupMenu(false)}
+                        className="sm:hidden w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
+                      >
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="#29A8E2"><path d="M21.8 2.3L2.1 9.7c-1.2.5-1.2 1.7-.2 2l4.8 1.5 1.8 5.6c.2.7 1 .9 1.5.4l2.7-2.7 5.3 3.9c1 .7 1.8.3 2-1L22.8 3.7c.3-1.3-.5-1.8-1-.4z" /></svg>
+                        Open in Telegram
+                      </a>
+                    )}
                     <button
-                      onClick={() => { setShowGroupMenu(false); handleLeaveGroup(activeGroup.id); }}
-                      className="w-full px-4 py-3 text-sm text-left hover:bg-white/10 transition-colors flex items-center gap-3"
-                      style={{ color: "#FF6B6B" }}
+                      onClick={async () => {
+                        setShowGroupMenu(false);
+                        setShowSettings(true);
+                        setSettingsLoading(true);
+                        await loadGroupDetail(activeGroup.id);
+                        setSettingsLoading(false);
+                      }}
+                      className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
                     >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                      Leave Group
+                      <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      Settings
                     </button>
-                  )}
-                  {isAdmin && (
-                    <button
-                      onClick={() => { setShowGroupMenu(false); handleDeleteGroup(activeGroup.id); }}
-                      className="w-full px-4 py-3 text-sm text-left hover:bg-white/10 transition-colors flex items-center gap-3"
-                      style={{ color: "#FF6B6B" }}
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                      Delete Group
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
+                    <div className="border-t border-white/5" />
+                    {!activeGroup.isMain && (
+                      <button
+                        onClick={() => { setShowGroupMenu(false); handleLeaveGroup(activeGroup.id); }}
+                        className="w-full px-4 py-3 text-sm text-left hover:bg-white/10 transition-colors flex items-center gap-3"
+                        style={{ color: "#FF6B6B" }}
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                        Leave Group
+                      </button>
+                    )}
+                    {isAdmin && (
+                      <button
+                        onClick={() => { setShowGroupMenu(false); handleDeleteGroup(activeGroup.id); }}
+                        className="w-full px-4 py-3 text-sm text-left hover:bg-white/10 transition-colors flex items-center gap-3"
+                        style={{ color: "#FF6B6B" }}
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        Delete Group
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1054,22 +1443,44 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           </div>
         )}
 
-        {/* Active call banner — shown when someone else started a call */}
-        {!inCall && (
-          <VideoCallBanner
-            isActive={callState.isActive}
-            participantCount={callState.participantCount}
-            participants={callParticipants.map((p) => ({
-              userId: p.userId,
-              name: p.name,
-              photoUrl: p.photoUrl || null,
-            }))}
-            onJoin={handleJoinHangout}
-            isJoining={callLoading}
-            callId={callState.callId}
-            callStartedAt={callStartedAt}
-            isSomeoneSharing={!!screenShareUser}
-          />
+        {/* "Opening Telegram" context toast — shown briefly after Start Call click */}
+        {showCallToast && (
+          <div
+            className="mx-3 mt-2 px-3 py-2 rounded-xl flex items-center gap-2 flex-shrink-0 animate-fade-in-up"
+            style={{ background: "rgba(41,168,226,0.12)", border: "1px solid rgba(41,168,226,0.25)" }}
+          >
+            <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="#29A8E2">
+              <path d="M21.8 2.3L2.1 9.7c-1.2.5-1.2 1.7-.2 2l4.8 1.5 1.8 5.6c.2.7 1 .9 1.5.4l2.7-2.7 5.3 3.9c1 .7 1.8.3 2-1L22.8 3.7c.3-1.3-.5-1.8-1-.4z" />
+            </svg>
+            <p className="flex-1 text-xs" style={{ color: "#29A8E2" }}>
+              Opening Telegram — tap the video icon in the group to start a call
+            </p>
+          </div>
+        )}
+
+        {/* Active Telegram call banner — shown when a call is live */}
+        {telegramCallActive && activeGroup?.telegramInviteLink && (
+          <div
+            className="flex items-center gap-3 px-4 py-2.5 flex-shrink-0"
+            style={{ background: "rgba(52,199,89,0.12)", borderBottom: "1px solid rgba(52,199,89,0.2)" }}
+          >
+            <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-400" />
+            </span>
+            <p className="flex-1 text-xs font-medium" style={{ color: "#34C759" }}>
+              Video call is live in Telegram
+            </p>
+            <a
+              href={getTelegramDeepLink(activeGroup.telegramInviteLink)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-bold px-3 py-1 rounded-lg transition-all hover:opacity-90 active:scale-95 flex-shrink-0"
+              style={{ background: "#34C759", color: "#fff" }}
+            >
+              Join
+            </a>
+          </div>
         )}
 
         {/* Online Members Panel */}
@@ -1080,8 +1491,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             onClick={(e) => { if (e.target === e.currentTarget) setShowOnline(false); }}
           >
             <div
-              className="rounded-t-2xl w-full max-h-[60vh] flex flex-col"
-              style={{ background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}
+              className="rounded-t-2xl w-full flex flex-col"
+              style={{ maxHeight: "60dvh", background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}
             >
               {/* Drag handle */}
               <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
@@ -1095,7 +1506,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                 </div>
                 <button
                   onClick={() => setShowOnline(false)}
-                  className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+                  className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
                   style={{ color: "#8E8E93" }}
                   aria-label={t.chat.closeOnlinePanel}
                 >
@@ -1108,118 +1519,42 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               <div className="overflow-y-auto flex-1 px-4 pb-6">
                 {onlineMembers.length === 0 ? (
                   <p className="text-center text-sm py-6" style={{ color: "#8E8E93" }}>{t.chat.noOtherMembersOnline}</p>
-                ) : !activeGroup.isMain ? (
-                  /* ── Member-created hangouts: 3×3 grid with promo placeholders ── */
-                  (() => {
-                    const GRID = 9;
-                    const shown = onlineMembers.slice(0, GRID);
-                    const promoCards = [
-                      { label: "Learn DashPay", icon: "💳", color: "#5ED1C4" },
-                      { label: "Buy Tokens", icon: "🪙", color: "#E69138" },
-                      { label: "Upgrade to Prime", icon: "⭐", color: "#D4007A" },
-                      { label: "Invite Friends", icon: "🔗", color: "#7B61FF" },
-                      { label: "Earn Rewards", icon: "🎁", color: "#00D4E8" },
-                      { label: "PNPtv! Studio", icon: "🎬", color: "#FF6B6B" },
-                      { label: "Create Hangout", icon: "🏠", color: "#48c774" },
-                      { label: "Explore Nearby", icon: "📍", color: "#FBFF00" },
-                      { label: "Get Verified", icon: "✅", color: "#1DA1F2" },
-                    ];
-                    const placeholders = promoCards.slice(0, GRID - shown.length);
-                    return (
-                      <div className="grid grid-cols-3 gap-2">
-                        {shown.map((member) => {
-                          const isMe = member.userId === user?.dbId;
-                          return (
-                            <button
-                              key={member.userId}
-                              onClick={() => { setShowOnline(false); navigate(`/profile/${member.userId}`); }}
-                              className="w-full rounded-xl overflow-hidden hover:ring-1 hover:ring-white/20 active:scale-[0.97] transition-all"
-                              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
-                            >
-                              <div className="relative h-16 w-full">
-                                {member.photoUrl ? (
-                                  <img
-                                    src={member.photoUrl}
-                                    alt={member.name}
-                                    className="w-full h-full object-cover"
-                                    onError={(e) => {
-                                      (e.target as HTMLImageElement).style.display = "none";
-                                      const sib = (e.target as HTMLElement).nextElementSibling as HTMLElement | null;
-                                      if (sib) sib.style.display = "flex";
-                                    }}
-                                  />
-                                ) : null}
-                                <div
-                                  className="absolute inset-0 flex items-center justify-center text-lg font-bold"
-                                  style={{
-                                    background: "linear-gradient(135deg, #D4007A, #E69138)",
-                                    color: "#fff",
-                                    display: member.photoUrl ? "none" : undefined,
-                                  }}
-                                >
-                                  {(member.name || "?")[0].toUpperCase()}
-                                </div>
-                                <span className="absolute bottom-0.5 left-0.5 w-2 h-2 rounded-full bg-green-400 ring-1 ring-black/30" />
-                              </div>
-                              <div className="px-1.5 py-1.5">
-                                <p className="text-[10px] font-bold text-white truncate leading-tight">
-                                  {member.name}{isMe ? " (You)" : ""}
-                                </p>
-                                <p className="text-[8px] truncate leading-tight mt-0.5" style={{ color: "#8E8E93" }}>Online</p>
-                              </div>
-                            </button>
-                          );
-                        })}
-                        {placeholders.map((promo, i) => (
-                          <div
-                            key={`promo-${i}`}
-                            className="w-full rounded-xl overflow-hidden opacity-70 hover:opacity-100 transition-opacity cursor-default"
-                            style={{ background: "rgba(255,255,255,0.03)", border: "1px dashed rgba(255,255,255,0.10)" }}
-                          >
-                            <div
-                              className="h-16 w-full flex items-center justify-center text-2xl"
-                              style={{ background: `${promo.color}15` }}
-                            >
-                              {promo.icon}
-                            </div>
-                            <div className="px-1.5 py-1.5">
-                              <p className="text-[10px] font-bold truncate leading-tight" style={{ color: promo.color }}>{promo.label}</p>
-                              <p className="text-[8px] truncate leading-tight mt-0.5" style={{ color: "#8E8E9366" }}>Coming soon</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()
                 ) : (
-                  /* ── Main/community hangouts: original list view ── */
-                  <div className="space-y-2">
+                  <div className="space-y-1">
                     {onlineMembers.map((member) => {
                       const isMe = member.userId === user?.dbId;
                       return (
-                        <div key={member.userId} className="flex items-center gap-3 py-2">
-                          {member.photoUrl ? (
-                            <img src={member.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0 cursor-pointer" onClick={() => navigate(`/profile/${member.userId}`)} />
-                          ) : (
-                            <div
-                              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 cursor-pointer"
-                              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
-                              onClick={() => navigate(`/profile/${member.userId}`)}
-                            >
-                              {(member.name || "?")[0].toUpperCase()}
-                            </div>
-                          )}
+                        <button
+                          key={member.userId}
+                          onClick={() => { setShowOnline(false); navigate(`/profile/${member.userId}`); }}
+                          className="w-full flex items-center gap-3 py-2.5 px-1 rounded-xl hover:bg-white/5 active:scale-[0.98] transition-all text-left"
+                        >
+                          <div className="relative flex-shrink-0">
+                            {member.photoUrl ? (
+                              <img src={member.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover" />
+                            ) : (
+                              <div
+                                className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+                                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                              >
+                                {(member.name || "?")[0].toUpperCase()}
+                              </div>
+                            )}
+                            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-400 ring-2 ring-pnp-background" />
+                          </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-white truncate">
                               {member.name}{isMe ? ` ${t.chat.you}` : ""}
                             </p>
                             <div className="flex items-center gap-1 mt-0.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                              <span className="text-xs" style={{ color: "#8E8E93" }}>{t.chat.online}</span>
+                              <span className="text-xs text-pnp-textSecondary">{t.chat.online}</span>
                               <NearbyBadge distanceKm={(member as any).distance_km} variant="compact" />
                             </div>
                           </div>
-                        </div>
+                          <svg className="w-4 h-4 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                        </button>
                       );
                     })}
                   </div>
@@ -1251,19 +1586,19 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             onClick={(e) => { if (e.target === e.currentTarget) setShowSettings(false); }}
           >
             <div
-              className="rounded-t-2xl w-full max-h-[80vh] flex flex-col"
-              style={{ background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}
+              className="rounded-t-2xl w-full flex flex-col"
+              style={{ maxHeight: "80dvh", background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}
             >
               <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
                 <div className="w-10 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.2)" }} />
               </div>
               <div className="flex items-center justify-between px-5 pt-2 pb-3 flex-shrink-0">
                 <p className="text-sm font-semibold text-white">Group Settings</p>
-                <button onClick={() => setShowSettings(false)} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10" style={{ color: "#8E8E93" }}>
+                <button onClick={() => setShowSettings(false)} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10" style={{ color: "#8E8E93" }}>
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
-              <div className="overflow-y-auto flex-1 px-5 pb-6 space-y-4">
+              <div className="overflow-y-auto flex-1 px-5 pb-6 pb-safe space-y-4">
                 {settingsLoading ? (
                   <div className="py-8 text-center text-pnp-textSecondary text-sm">Loading...</div>
                 ) : (
@@ -1537,98 +1872,41 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                                     </p>
                                   </div>
                                   {canManage && (
-                                    <div className="flex gap-1 flex-shrink-0">
-                                      {!isMod && !m.is_banned && (
-                                        <button
-                                          onClick={async () => {
-                                            setMemberActionLoading(m.user_id);
-                                            await promoteHangoutMember(activeGroup.id, m.user_id).catch(() => {});
-                                            loadGroupDetail(activeGroup.id);
-                                            setMemberActionLoading(null);
-                                          }}
-                                          className="px-1.5 py-1 rounded text-[9px] font-semibold bg-blue-500/20 text-blue-400"
-                                          title="Promote to Mod"
-                                        >Mod</button>
-                                      )}
-                                      {isMod && (
-                                        <button
-                                          onClick={async () => {
-                                            setMemberActionLoading(m.user_id);
-                                            await demoteHangoutMember(activeGroup.id, m.user_id).catch(() => {});
-                                            loadGroupDetail(activeGroup.id);
-                                            setMemberActionLoading(null);
-                                          }}
-                                          className="px-1.5 py-1 rounded text-[9px] font-semibold bg-yellow-500/20 text-yellow-400"
-                                          title="Demote"
-                                        >Demote</button>
-                                      )}
-                                      {!m.is_muted && !m.is_banned && (
-                                        <button
-                                          onClick={async () => {
-                                            setMemberActionLoading(m.user_id);
-                                            await muteHangoutMember(activeGroup.id, m.user_id, 60).catch(() => {});
-                                            loadGroupDetail(activeGroup.id);
-                                            setMemberActionLoading(null);
-                                          }}
-                                          className="px-1.5 py-1 rounded text-[9px] font-semibold bg-orange-500/20 text-orange-400"
-                                          title="Mute 1h"
-                                        >Mute</button>
-                                      )}
-                                      {m.is_muted && (
-                                        <button
-                                          onClick={async () => {
-                                            setMemberActionLoading(m.user_id);
-                                            await unmuteHangoutMember(activeGroup.id, m.user_id).catch(() => {});
-                                            loadGroupDetail(activeGroup.id);
-                                            setMemberActionLoading(null);
-                                          }}
-                                          className="px-1.5 py-1 rounded text-[9px] font-semibold bg-green-500/20 text-green-400"
-                                          title="Unmute"
-                                        >Unmute</button>
-                                      )}
+                                    <div className="relative flex-shrink-0">
                                       <button
-                                        onClick={async () => {
-                                          setConfirmAction({
-                                            title: "Kick Member",
-                                            message: `Remove ${m.first_name || m.username} from the group?`,
-                                            isDanger: true,
-                                            onConfirm: async () => {
-                                              await kickHangoutMember(activeGroup.id, m.user_id);
-                                              loadGroupDetail(activeGroup.id);
-                                              loadGroups();
-                                            },
-                                          });
-                                        }}
-                                        className="px-1.5 py-1 rounded text-[9px] font-semibold bg-red-500/20 text-red-400"
-                                        title="Kick"
-                                      >Kick</button>
-                                      {!m.is_banned ? (
-                                        <button
-                                          onClick={async () => {
-                                            setConfirmAction({
-                                              title: "Ban Member",
-                                              message: `Ban ${m.first_name || m.username}? They won't be able to rejoin.`,
-                                              isDanger: true,
-                                              onConfirm: async () => {
-                                                await banHangoutMember(activeGroup.id, m.user_id);
-                                                loadGroupDetail(activeGroup.id);
-                                              },
-                                            });
-                                          }}
-                                          className="px-1.5 py-1 rounded text-[9px] font-semibold bg-red-700/30 text-red-500"
-                                          title="Ban"
-                                        >Ban</button>
-                                      ) : (
-                                        <button
-                                          onClick={async () => {
-                                            setMemberActionLoading(m.user_id);
-                                            await unbanHangoutMember(activeGroup.id, m.user_id).catch(() => {});
-                                            loadGroupDetail(activeGroup.id);
-                                            setMemberActionLoading(null);
-                                          }}
-                                          className="px-1.5 py-1 rounded text-[9px] font-semibold bg-green-500/20 text-green-400"
-                                          title="Unban"
-                                        >Unban</button>
+                                        onClick={() => setMemberActionMenu(memberActionMenu === m.user_id ? null : m.user_id)}
+                                        className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all"
+                                        aria-label="Member actions"
+                                      >
+                                        <svg className="w-4 h-4 text-pnp-textSecondary" fill="currentColor" viewBox="0 0 24 24">
+                                          <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
+                                        </svg>
+                                      </button>
+                                      {memberActionMenu === m.user_id && (
+                                        <>
+                                          <div className="fixed inset-0 z-30" onClick={() => setMemberActionMenu(null)} />
+                                          <div className="absolute right-0 top-8 z-40 rounded-xl overflow-hidden shadow-xl min-w-[140px] py-1" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
+                                            {!isMod && !m.is_banned && (
+                                              <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await promoteHangoutMember(activeGroup.id, m.user_id).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-blue-400 hover:bg-white/10">Promote to Mod</button>
+                                            )}
+                                            {isMod && (
+                                              <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await demoteHangoutMember(activeGroup.id, m.user_id).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-yellow-400 hover:bg-white/10">Demote</button>
+                                            )}
+                                            {!m.is_muted && !m.is_banned && (
+                                              <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await muteHangoutMember(activeGroup.id, m.user_id, 60).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-orange-400 hover:bg-white/10">Mute (1h)</button>
+                                            )}
+                                            {m.is_muted && (
+                                              <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await unmuteHangoutMember(activeGroup.id, m.user_id).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-green-400 hover:bg-white/10">Unmute</button>
+                                            )}
+                                            <div className="border-t border-white/5 my-0.5" />
+                                            <button onClick={() => { setMemberActionMenu(null); setConfirmAction({ title: "Kick Member", message: `Remove ${m.first_name || m.username} from the group?`, isDanger: true, onConfirm: async () => { await kickHangoutMember(activeGroup.id, m.user_id); loadGroupDetail(activeGroup.id); loadGroups(); } }); }} className="w-full px-3 py-2 text-xs text-left text-red-400 hover:bg-white/10">Kick</button>
+                                            {!m.is_banned ? (
+                                              <button onClick={() => { setMemberActionMenu(null); setConfirmAction({ title: "Ban Member", message: `Ban ${m.first_name || m.username}? They won't be able to rejoin.`, isDanger: true, onConfirm: async () => { await banHangoutMember(activeGroup.id, m.user_id); loadGroupDetail(activeGroup.id); } }); }} className="w-full px-3 py-2 text-xs text-left text-red-500 hover:bg-white/10">Ban</button>
+                                            ) : (
+                                              <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await unbanHangoutMember(activeGroup.id, m.user_id).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-green-400 hover:bg-white/10">Unban</button>
+                                            )}
+                                          </div>
+                                        </>
                                       )}
                                     </div>
                                   )}
@@ -1646,52 +1924,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           </div>
         )}
 
-        {/* Pinned Messages Bar */}
-        {pinnedMessages.length > 0 && !showPins && (
-          <button
-            onClick={() => setShowPins(true)}
-            className="w-full px-4 py-2 flex items-center gap-2 text-xs border-b border-pnp-border hover:bg-white/5 transition-colors"
-            style={{ background: "rgba(123,97,255,0.08)" }}
-          >
-            <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-            </svg>
-            <span className="font-semibold" style={{ color: "#7B61FF" }}>{pinnedMessages.length} pinned</span>
-            <span className="text-pnp-textSecondary truncate flex-1 text-left">{pinnedMessages[0]?.message_body || "View pinned messages"}</span>
-          </button>
-        )}
-        {showPins && (
-          <div className="w-full px-4 py-2 border-b border-pnp-border space-y-1 max-h-32 overflow-y-auto" style={{ background: "rgba(123,97,255,0.05)" }}>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-semibold" style={{ color: "#7B61FF" }}>Pinned Messages</span>
-              <button onClick={() => setShowPins(false)} className="text-[10px] text-pnp-textSecondary">Hide</button>
-            </div>
-            {pinnedMessages.map((pin: any) => (
-              <div key={pin.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/5">
-                <p className="text-xs text-white flex-1 truncate">{pin.message_body || "[message]"}</p>
-                <span className="text-[10px] text-pnp-textSecondary flex-shrink-0">by {pin.pinned_by_name || "admin"}</span>
-                {isOwnerOrMod && (
-                  <button
-                    onClick={async () => {
-                      if (activeGroup) {
-                        await unpinHangoutMessage(activeGroup.id, pin.matrix_event_id).catch(() => {});
-                        loadPins(activeGroup.id);
-                      }
-                    }}
-                    className="text-[10px] text-red-400 flex-shrink-0"
-                  >Unpin</button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Hangout event reminder — shown for non-main groups that have upcoming events */}
-        {!activeGroup.isMain && !activeGroup.isWallOfFame && (
+        {/* Hangout event reminder */}
+        {!activeGroup.isWallOfFame && (
           <HangoutEventReminder groupId={activeGroup.id} />
         )}
 
-        {/* Chat / Feed tab bar — only show if group has a feed (not ghost mode) */}
+        {/* Tab bar — Chat + Feed */}
         {activeGroup.feedVisibility !== "ghost" && (
           <div className="flex border-b border-pnp-border flex-shrink-0">
             <button
@@ -1712,7 +1950,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         {/* Hangout Feed Tab */}
         {chatTab === "feed" && activeGroup.feedVisibility !== "ghost" ? (
           <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-3">
-            {/* Hangout PostComposer */}
             <PostComposer
               compact
               hangoutGroupId={activeGroup.id}
@@ -1771,595 +2008,14 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             )}
           </div>
         ) : (
-        <>
-        {/* Native chat messages */}
-        <div
-          ref={messagesContainerRef}
-          className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1"
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            if (el.scrollTop < 60 && hasMoreMessages && !messagesLoading) {
-              loadMoreMessages();
-            }
-            // Show scroll-to-bottom FAB when scrolled up
-            const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-            setShowScrollFab(distFromBottom > 200);
-          }}
-        >
-          {messagesLoading && messages.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <svg className="w-8 h-8 mx-auto mb-3 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                <p className="text-sm text-pnp-textSecondary">Loading messages...</p>
-              </div>
-            </div>
-          ) : messages.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center px-6">
-                <p className="text-2xl mb-2">💬</p>
-                <p className="text-sm text-pnp-textSecondary">No messages yet. Say something!</p>
-              </div>
-            </div>
-          ) : (
-            <>
-              {messagesLoading && (
-                <div className="flex justify-center py-2">
-                  <svg className="w-5 h-5 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                </div>
-              )}
-              {(() => {
-                // Filter out locally deleted messages
-                const visibleMessages = messages.filter((m) => !localDeletedIds.has(m.id));
-                // Group messages by date for date separators
-                let lastDateStr = "";
-                return visibleMessages.map((msg, idx) => {
-                  const isMe = String(msg.user_id) === String(user?.dbId);
-                  const prev = idx > 0 ? visibleMessages[idx - 1] : null;
-                  const next = idx < visibleMessages.length - 1 ? visibleMessages[idx + 1] : null;
-                  const timeStr = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
-                  // Message grouping: same user within 1 minute
-                  const sameUserAsPrev = prev && String(prev.user_id) === String(msg.user_id) &&
-                    (new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime()) < 60000;
-                  const sameUserAsNext = next && String(next.user_id) === String(msg.user_id) &&
-                    (new Date(next.created_at).getTime() - new Date(msg.created_at).getTime()) < 60000;
-
-                  const showAvatar = !isMe && !sameUserAsPrev;
-                  const showName = !isMe && !sameUserAsPrev;
-                  const isLastInGroup = !sameUserAsNext;
-
-                  // Date separator
-                  const msgDate = new Date(msg.created_at);
-                  const dateStr = msgDate.toDateString();
-                  let dateSeparator = null;
-                  if (dateStr !== lastDateStr) {
-                    lastDateStr = dateStr;
-                    const today = new Date().toDateString();
-                    const yesterday = new Date(Date.now() - 86400000).toDateString();
-                    const label = dateStr === today ? "Today" : dateStr === yesterday ? "Yesterday" : msgDate.toLocaleDateString([], { month: "long", day: "numeric" });
-                    dateSeparator = (
-                      <div key={`date-${dateStr}`} className="flex justify-center py-2">
-                        <span className="text-[11px] text-pnp-textSecondary bg-white/5 px-3 py-0.5 rounded-full">{label}</span>
-                      </div>
-                    );
-                  }
-
-                  // Read receipt status for own messages
-                  let readStatus: "sent" | "read" | null = null;
-                  if (isMe) {
-                    const readByOthers = Array.from(readReceipts.values()).some((lastRead) => lastRead >= msg.id);
-                    readStatus = readByOthers ? "read" : "sent";
-                  }
-
-                  // Deleted message display
-                  if (msg.is_deleted) {
-                    return (
-                      <React.Fragment key={msg.id}>
-                        {dateSeparator}
-                        <div className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${!sameUserAsPrev ? "mt-2" : "mt-0.5"}`}>
-                          <div className="w-7 flex-shrink-0" />
-                          <div className={`max-w-[75%] flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-                            <div className="rounded-2xl px-3 py-2 text-sm bg-white/5 border border-white/10 italic text-pnp-textSecondary">
-                              This message was deleted
-                            </div>
-                          </div>
-                        </div>
-                      </React.Fragment>
-                    );
-                  }
-
-                  return (
-                    <React.Fragment key={msg.id}>
-                      {dateSeparator}
-                      <div
-                        data-msg-id={msg.id}
-                        className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${!sameUserAsPrev ? "mt-2" : "mt-0.5"}`}
-                        onContextMenu={(e) => handleContextMenu(e, msg)}
-                        onTouchStart={(e) => handleLongPressStart(e, msg)}
-                        onTouchEnd={handleLongPressEnd}
-                        onTouchMove={handleLongPressEnd}
-                      >
-                        {/* Avatar */}
-                        <div className="w-7 flex-shrink-0 self-end">
-                          {showAvatar && isLastInGroup ? (
-                            <img
-                              src={msg.photo_url || "/default-avatar.svg"}
-                              alt=""
-                              className="w-7 h-7 rounded-full object-cover cursor-pointer"
-                              onClick={() => navigate(`/profile/${msg.user_id}`)}
-                              onError={(e) => { (e.target as HTMLImageElement).src = "/default-avatar.svg"; }}
-                            />
-                          ) : null}
-                        </div>
-
-                        {/* Bubble */}
-                        <div className={`max-w-[75%] flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-                          {/* Sender name */}
-                          {showName && (
-                            <span className="text-[10px] text-pnp-textSecondary ml-1 mb-0.5">
-                              {msg.first_name || msg.username || "User"}
-                            </span>
-                          )}
-
-                          {/* Reply preview */}
-                          {msg.reply_to && (
-                            <div className={`text-[10px] px-2 py-1 mb-0.5 rounded-lg border-l-2 max-w-full ${
-                              isMe ? "bg-white/10 border-white/30" : "bg-white/5 border-pnp-accent/50"
-                            }`}>
-                              <span className="font-semibold text-pnp-accent">{msg.reply_to.name}</span>
-                              <p className="text-pnp-textSecondary truncate">{msg.reply_to.content}</p>
-                            </div>
-                          )}
-
-                          <div
-                            className={`relative px-3 py-2 text-sm break-words ${
-                              isMe
-                                ? `text-white ${isLastInGroup ? "rounded-2xl rounded-br-sm" : "rounded-2xl"}`
-                                : `bg-white/10 text-white ${isLastInGroup ? "rounded-2xl rounded-bl-sm" : "rounded-2xl"}`
-                            }`}
-                            style={isMe ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
-                          >
-                            {/* SVG bubble tail for last message in group */}
-                            {isLastInGroup && (
-                              <svg
-                                className={`absolute bottom-0 w-2 h-3 ${isMe ? "-right-1.5" : "-left-1.5"}`}
-                                viewBox="0 0 8 12"
-                                fill={isMe ? "#E69138" : "rgba(255,255,255,0.1)"}
-                              >
-                                {isMe ? (
-                                  <path d="M0 0 C0 0 0 12 8 12 C3 12 0 8 0 0Z" />
-                                ) : (
-                                  <path d="M8 0 C8 0 8 12 0 12 C5 12 8 8 8 0Z" />
-                                )}
-                              </svg>
-                            )}
-
-                            {/* Media content */}
-                            {msg.media_url && msg.media_type && (
-                              <div className="mb-1">
-                                <MediaMessage
-                                  mediaUrl={msg.media_url}
-                                  mediaType={msg.media_type}
-                                  thumbUrl={msg.media_thumb_url}
-                                  width={msg.media_width}
-                                  height={msg.media_height}
-                                  duration={msg.media_duration}
-                                  onExpandImage={(url) => setLightboxUrl(url)}
-                                  isMe={isMe}
-                                />
-                                {activeGroup.feedVisibility !== "ghost" && (
-                                  <button
-                                    onClick={async (e) => {
-                                      e.stopPropagation();
-                                      try {
-                                        const res = await dropToFeed(activeGroup.id, msg.id);
-                                        if (res.success) {
-                                          setHangoutFeedPosts((prev) => [res.post, ...prev]);
-                                          setChatError(null);
-                                        }
-                                      } catch (err: any) {
-                                        setChatError(err?.message || "Already dropped to feed");
-                                      }
-                                    }}
-                                    className="mt-1 text-[10px] font-medium px-2 py-0.5 rounded-full transition-colors hover:bg-white/10"
-                                    style={{ color: "#7B61FF" }}
-                                    title="Drop to Feed"
-                                  >
-                                    Drop to Feed
-                                  </button>
-                                )}
-                              </div>
-                            )}
-
-                            {/* Text content */}
-                            {msg.content && <p>{msg.content}</p>}
-
-                            {/* Timestamp + edited + read receipts */}
-                            <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
-                              {msg.edited_at && (
-                                <span className={`text-[9px] ${isMe ? "text-white/50" : "text-pnp-textSecondary"}`}>edited</span>
-                              )}
-                              <span className={`text-[10px] ${isMe ? "text-white/60" : "text-pnp-textSecondary"}`}>
-                                {timeStr}
-                              </span>
-                              {isMe && readStatus && (
-                                <span className={`text-[10px] ${readStatus === "read" ? "text-blue-400" : "text-white/40"}`}>
-                                  {readStatus === "read" ? "\u2713\u2713" : "\u2713"}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Reactions row */}
-                          {msg.reactions && msg.reactions.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-0.5 ml-1">
-                              {msg.reactions.map((r) => (
-                                <button
-                                  key={r.emoji}
-                                  onClick={() => handleReaction(msg.id, r.emoji)}
-                                  className={`inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full border transition-colors ${
-                                    r.reacted_by_me
-                                      ? "border-pnp-accent/50 bg-pnp-accent/10"
-                                      : "border-white/10 bg-white/5 hover:bg-white/10"
-                                  }`}
-                                >
-                                  <span>{r.emoji}</span>
-                                  <span className="text-[10px] text-pnp-textSecondary">{r.count}</span>
-                                </button>
-                              ))}
-                              <button
-                                onClick={() => setReactionPickerMsgId(msg.id)}
-                                className="text-xs px-1.5 py-0.5 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-pnp-textSecondary"
-                              >
-                                +
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </React.Fragment>
-                  );
-                });
-              })()}
-
-              {/* Scroll-to-bottom FAB */}
-              {showScrollFab && (
-                <button
-                  onClick={() => {
-                    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-                    setUnreadBelowCount(0);
-                  }}
-                  className="sticky bottom-2 left-1/2 -translate-x-1/2 z-10 w-10 h-10 rounded-full bg-pnp-surface border border-pnp-border shadow-lg flex items-center justify-center hover:bg-white/10 transition-colors"
-                >
-                  <svg className="w-5 h-5 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                  </svg>
-                  {unreadBelowCount > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: "#D4007A" }}>
-                      {unreadBelowCount}
-                    </span>
-                  )}
-                </button>
-              )}
-
-              <div ref={messagesEndRef} />
-            </>
-          )}
-        </div>
-
-        {/* Telegram-style typing indicator */}
-        {typingUsers.length > 0 && (
-          <div className="px-4 py-1 flex items-center gap-2">
-            <div className="bg-white/10 rounded-2xl rounded-bl-sm px-3 py-2 inline-flex items-center gap-1.5">
-              <span className="text-[10px] text-pnp-textSecondary mr-1">{typingUsers.join(", ")}</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-pnp-textSecondary animate-bounce" style={{ animationDelay: "0ms" }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-pnp-textSecondary animate-bounce" style={{ animationDelay: "150ms" }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-pnp-textSecondary animate-bounce" style={{ animationDelay: "300ms" }} />
-            </div>
-          </div>
-        )}
-
-        {/* Media preview */}
-        {mediaFile && (
-          <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-2">
-            {mediaPreview ? (
-              <img src={mediaPreview} alt="" className="w-12 h-12 rounded-lg object-cover" />
-            ) : (
-              <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center">
-                <svg className="w-5 h-5 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
-                </svg>
-              </div>
-            )}
-            <span className="text-xs text-pnp-textSecondary flex-1 truncate">{mediaFile.name}</span>
-            <button onClick={cancelMedia} className="text-red-400 text-xs font-semibold">Remove</button>
-          </div>
-        )}
-
-        {/* Reply/Edit preview bar */}
-        {(replyingTo || editingMessage) && (
-          <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-2" style={{ background: "#1C1C1E" }}>
-            <div className="flex-1 border-l-2 border-pnp-accent pl-2">
-              <p className="text-[10px] font-semibold text-pnp-accent">
-                {editingMessage ? "Editing message" : `Reply to ${replyingTo?.first_name || replyingTo?.username || "User"}`}
-              </p>
-              <p className="text-xs text-pnp-textSecondary truncate">
-                {(editingMessage?.content || replyingTo?.content || "[media]").slice(0, 80)}
-              </p>
-            </div>
-            <button
-              onClick={() => { setReplyingTo(null); cancelEdit(); }}
-              className="p-1 rounded-full hover:bg-white/10 text-pnp-textSecondary"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        )}
-
-        {/* Message input bar */}
-        <div className="flex items-end gap-2 px-3 py-2 border-t border-pnp-border" style={{ background: "#1C1C1E" }}>
-          {/* Media upload button */}
-          <input
-            ref={mediaInputRef}
-            type="file"
-            accept="image/*,video/*,audio/*"
-            className="hidden"
-            onChange={handleMediaSelect}
-          />
-          <button
-            type="button"
-            onClick={() => mediaInputRef.current?.click()}
-            className="p-2 rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 active:scale-90 transition-all flex-shrink-0"
-            aria-label="Attach media"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
-            </svg>
-          </button>
-
-          {/* Text input */}
-          <textarea
-            value={messageInput}
-            onChange={(e) => {
-              setMessageInput(e.target.value);
-              emitTyping();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSendMessage();
-              }
-            }}
-            placeholder="Type a message..."
-            className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-4 py-2.5 text-sm resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-24"
-            rows={1}
-            style={{ minHeight: "40px" }}
-          />
-
-          {/* Send button */}
-          <button
-            type="button"
-            onClick={handleSendMessage}
-            disabled={sendingMessage || (!messageInput.trim() && !mediaFile)}
-            className="p-2 rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-            aria-label="Send message"
-          >
-            {sendingMessage ? (
-              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-              </svg>
-            )}
-          </button>
-        </div>
-        </>
-        )}
-
-        {/* Lightbox for images */}
-        {lightboxUrl && (
-          <div
-            className="fixed inset-0 z-[80] bg-black/90 flex items-center justify-center"
-            onClick={() => setLightboxUrl(null)}
-          >
-            <button
-              onClick={() => setLightboxUrl(null)}
-              className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white/10 text-white"
-              aria-label="Close"
-            >
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-            <img
-              src={lightboxUrl}
-              alt=""
-              className="max-w-full max-h-full object-contain"
-              onClick={(e) => e.stopPropagation()}
-            />
-          </div>
-        )}
-
-        {/* Telegram-style context menu */}
-        {contextMenu && (
-          <div
-            className="fixed inset-0 z-[85]"
-            onClick={() => setContextMenu(null)}
-          >
-            <div
-              className="absolute rounded-xl overflow-hidden shadow-2xl border border-white/10"
-              style={{
-                background: "#2C2C2E",
-                left: Math.min(contextMenu.x, window.innerWidth - 200),
-                top: Math.min(contextMenu.y, window.innerHeight - 300),
-                minWidth: 180,
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Quick reactions bar */}
-              <div className="flex justify-around px-3 py-2 border-b border-white/10">
-                {QUICK_REACTIONS.map((emoji) => (
-                  <button
-                    key={emoji}
-                    onClick={() => handleReaction(contextMenu.msg.id, emoji)}
-                    className="text-lg hover:scale-125 transition-transform active:scale-90"
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-
-              {/* Action items */}
-              <div className="py-1">
-                <button onClick={() => handleReply(contextMenu.msg)} className="w-full text-left px-4 py-2.5 text-sm text-white hover:bg-white/10 flex items-center gap-3">
-                  <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>
-                  Reply
-                </button>
-                {contextMenu.msg.content && (
-                  <button onClick={() => handleCopyMessage(contextMenu.msg)} className="w-full text-left px-4 py-2.5 text-sm text-white hover:bg-white/10 flex items-center gap-3">
-                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
-                    Copy
-                  </button>
-                )}
-                {/* Edit — own messages within 48h */}
-                {String(contextMenu.msg.user_id) === String(user?.dbId) &&
-                 contextMenu.msg.content &&
-                 (Date.now() - new Date(contextMenu.msg.created_at).getTime()) < 48 * 3600 * 1000 && (
-                  <button onClick={() => handleEditStart(contextMenu.msg)} className="w-full text-left px-4 py-2.5 text-sm text-white hover:bg-white/10 flex items-center gap-3">
-                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" /></svg>
-                    Edit
-                  </button>
-                )}
-                {/* Delete for me */}
-                {String(contextMenu.msg.user_id) === String(user?.dbId) && (
-                  <button onClick={() => handleDeleteMessage(contextMenu.msg, false)} className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-white/10 flex items-center gap-3">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                    Delete for me
-                  </button>
-                )}
-                {/* Delete for everyone — own <48h or mod/owner */}
-                {(String(contextMenu.msg.user_id) === String(user?.dbId) &&
-                  (Date.now() - new Date(contextMenu.msg.created_at).getTime()) < 48 * 3600 * 1000) && (
-                  <button onClick={() => handleDeleteMessage(contextMenu.msg, true)} className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-white/10 flex items-center gap-3">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                    Delete for everyone
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Reaction emoji picker (full grid) */}
-        {reactionPickerMsgId && (
-          <div
-            className="fixed inset-0 z-[85] flex items-end justify-center"
-            style={{ background: "rgba(0,0,0,0.5)" }}
-            onClick={() => setReactionPickerMsgId(null)}
-          >
-            <div
-              className="w-full max-w-md rounded-t-2xl p-4"
-              style={{ background: "#2C2C2E" }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex justify-center mb-3"><div className="w-10 h-1 rounded-full bg-white/20" /></div>
-              <div className="grid grid-cols-8 gap-2">
-                {["\u{1F44D}","\u{1F44E}","\u{2764}\u{FE0F}","\u{1F525}","\u{1F389}","\u{1F602}","\u{1F62E}","\u{1F622}",
-                  "\u{1F914}","\u{1F60D}","\u{1F44F}","\u{1F64F}","\u{1F4AF}","\u{1F60E}","\u{1F92F}","\u{1F973}",
-                  "\u{1F60B}","\u{1F611}","\u{1F62D}","\u{1F621}","\u{1F47B}","\u{1F4A9}","\u{1F496}","\u{2B50}",
-                  "\u{1F308}","\u{1F64C}","\u{270C}\u{FE0F}","\u{1F918}","\u{1F440}","\u{1F4AA}","\u{1F37B}","\u{1F381}"].map((emoji) => (
-                  <button
-                    key={emoji}
-                    onClick={() => handleReaction(reactionPickerMsgId, emoji)}
-                    className="text-2xl p-1 hover:scale-125 transition-transform active:scale-90 rounded-lg hover:bg-white/10"
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Search overlay */}
-        {showSearch && (
-          <div className="absolute inset-0 z-[60] flex flex-col" style={{ background: "#1C1C1E" }}>
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-pnp-border">
-              <button onClick={() => { setShowSearch(false); setSearchQuery(""); setSearchResults([]); }} className="p-2 text-pnp-textSecondary">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
-              </button>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  if (e.target.value.length >= 2) handleSearch(e.target.value);
-                }}
-                placeholder="Search messages..."
-                className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-xl px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-pnp-accent/50"
-                autoFocus
-              />
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              {searchLoading ? (
-                <div className="flex justify-center py-8">
-                  <svg className="w-6 h-6 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                </div>
-              ) : searchResults.length === 0 && searchQuery.length >= 2 ? (
-                <p className="text-center text-sm text-pnp-textSecondary py-8">No messages found</p>
-              ) : (
-                searchResults.map((msg) => (
-                  <button
-                    key={msg.id}
-                    onClick={() => {
-                      setShowSearch(false);
-                      setSearchQuery("");
-                      setSearchResults([]);
-                      // Scroll to message if in view
-                      const el = document.querySelector(`[data-msg-id="${msg.id}"]`);
-                      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-                    }}
-                    className="w-full text-left px-4 py-3 border-b border-white/5 hover:bg-white/5"
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-semibold text-pnp-accent">{msg.first_name || msg.username}</span>
-                      <span className="text-[10px] text-pnp-textSecondary">
-                        {new Date(msg.created_at).toLocaleDateString([], { month: "short", day: "numeric" })}
-                      </span>
-                    </div>
-                    <p className="text-sm text-white truncate">{msg.content}</p>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Video call overlay — fullscreen JaaS embed */}
-        {inCall && callMeetingUrl && (
-          <VideoCallOverlay
-            meetingUrl={callMeetingUrl}
-            roomName={callState.roomName || undefined}
-            groupName={activeGroup.name}
-            onClose={handleCloseCall}
-            isAdmin={isAdmin}
-            isModerator={isOwnerOrMod}
-            callStartedAt={callStartedAt}
-            participantCount={callState.participantCount}
+          /* Hangout chat panel (PostgreSQL + Socket.IO) */
+          <HangoutChatPanel
+            activeGroup={activeGroup}
+            isOwnerOrMod={isOwnerOrMod}
           />
         )}
+
+        {/* Video calls are now handled natively in Telegram */}
 
         {/* In-app confirmation modal */}
         {confirmAction && (
@@ -2460,19 +2116,38 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         emptyAction={isPrime ? () => setShowCreateEvent(true) : undefined}
       />
 
-      {/* Create hangout — success state */}
+      {/* Create hangout — success state with Telegram linking instructions */}
       {createSuccess && (
-        <div className="glass-card-sm p-5 mb-4 animate-fade-in-up text-center space-y-4">
-          <div className="w-16 h-16 mx-auto rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(94,209,196,0.2), rgba(0,212,232,0.2))" }}>
-            <svg className="w-8 h-8 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+        <div className="glass-card-sm p-5 mb-4 animate-fade-in-up space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg, rgba(94,209,196,0.2), rgba(0,212,232,0.2))" }}>
+              <svg className="w-6 h-6 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-pnp-textPrimary">Hangout Created!</h3>
+              <p className="text-sm text-pnp-textSecondary">
+                <span className="font-semibold text-pnp-textPrimary">{createSuccess.name}</span> is ready. Now link a Telegram group for chat.
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-base font-bold text-pnp-textPrimary">Hangout Created!</h3>
-            <p className="text-sm text-pnp-textSecondary mt-1">
-              <span className="font-semibold text-pnp-textPrimary">{createSuccess.name}</span> is ready. Your group chat and video room are set up.
-            </p>
+          <div className="rounded-xl p-4 space-y-2" style={{ background: "rgba(40,168,226,0.08)", border: "1px solid rgba(40,168,226,0.15)" }}>
+            <p className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider">Link a Telegram Group</p>
+            <ol className="space-y-1.5 text-xs text-pnp-textSecondary list-none">
+              <li className="flex items-start gap-2">
+                <span className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>1</span>
+                <span>Create a Telegram group or use an existing one</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>2</span>
+                <span>Add <span className="font-semibold text-pnp-textPrimary">@PNPLatinoTV_Bot</span> as an admin</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>3</span>
+                <span>In the group, send: <span className="font-semibold text-pnp-textPrimary font-mono">/link {createSuccess.id}</span></span>
+              </li>
+            </ol>
           </div>
           <div className="flex gap-2">
             <button
@@ -2483,10 +2158,31 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             </button>
             <button
               onClick={() => {
-                const g = groups.find((g) => g.id === createSuccess.id);
+                // Use the freshly-created group data from createSuccess rather than
+                // searching groups[] which may not be updated yet after loadGroups()
+                const freshGroup: HangoutGroup = groups.find((g) => g.id === createSuccess.id) ?? {
+                  id: createSuccess.id,
+                  name: createSuccess.name,
+                  description: "",
+                  avatarUrl: null,
+                  creatorId: user?.dbId ?? "",
+                  isMain: false,
+                  isWallOfFame: false,
+                  isPublic: newIsPublic,
+                  maxMembers: 200000,
+                  memberCount: 1,
+                  createdAt: new Date().toISOString(),
+                  hasActiveCall: false,
+                  activeCallId: null,
+                  lastMessage: null,
+                  unreadCount: 0,
+                  feedVisibility: "public",
+                  telegramChatId: null,
+                  telegramInviteLink: null,
+                };
                 setCreateSuccess(null);
                 setShowCreate(false);
-                if (g) openChat(g);
+                openChat(freshGroup);
               }}
               className="flex-1 btn-gradient py-2.5 rounded-lg text-sm text-white font-semibold active:scale-[0.98] transition-all"
             >
@@ -2503,16 +2199,16 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           <div className="rounded-xl p-3 space-y-2" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.08), rgba(123,97,255,0.08))" }}>
             <h3 className="text-sm font-bold text-pnp-textPrimary">Create a Hangout</h3>
             <p className="text-xs text-pnp-textSecondary leading-relaxed">
-              A hangout is your private space — a <span className="text-pnp-textPrimary font-medium">group chat</span> + <span className="text-pnp-textPrimary font-medium">video room</span> for your crew. Only members can join the call.
+              A hangout is your private space — a <span className="text-pnp-textPrimary font-medium">Telegram group</span> + <span className="text-pnp-textPrimary font-medium">video room</span> for your crew. Only members can join the call.
             </p>
             <div className="flex gap-3 pt-1">
               <div className="flex items-center gap-1.5 text-[11px] text-pnp-textSecondary">
-                <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: "rgba(94,209,196,0.15)" }}>
-                  <svg className="w-3.5 h-3.5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: "rgba(40,168,226,0.15)" }}>
+                  <svg className="w-3.5 h-3.5" style={{ color: "#29A8E2" }} viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M21.8 2.3L2.1 9.7c-1.2.5-1.2 1.7-.2 2l4.8 1.5 1.8 5.6c.2.7 1 .9 1.5.4l2.7-2.7 5.3 3.9c1 .7 1.8.3 2-1L22.8 3.7c.3-1.3-.5-1.8-1-.4z" />
                   </svg>
                 </div>
-                Matrix Chat
+                Telegram Chat
               </div>
               <div className="flex items-center gap-1.5 text-[11px] text-pnp-textSecondary">
                 <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: "rgba(123,97,255,0.15)" }}>
@@ -2624,6 +2320,53 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             </div>
           </button>
 
+          {/* Paid hangout toggle */}
+          <button
+            type="button"
+            onClick={() => setNewIsPaid(!newIsPaid)}
+            className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl bg-white/5 transition-colors hover:bg-white/10"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: newIsPaid ? "rgba(230,145,56,0.15)" : "rgba(255,255,255,0.08)" }}>
+                <svg className="w-4 h-4" style={{ color: newIsPaid ? "#E69138" : "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="text-left">
+                <span className="text-sm text-pnp-textPrimary font-medium block">
+                  {newIsPaid ? "Paid Hangout" : "Free Hangout"}
+                </span>
+                <span className="text-[11px] text-pnp-textSecondary">
+                  {newIsPaid ? "Members pay to join" : "Anyone can join for free"}
+                </span>
+              </div>
+            </div>
+            <div className={`w-10 rounded-full transition-colors relative ${newIsPaid ? "bg-amber-500" : "bg-white/20"}`} style={{ width: 40, height: 22 }}>
+              <div className={`absolute top-0.5 w-[18px] h-[18px] rounded-full bg-white transition-transform shadow-sm ${newIsPaid ? "translate-x-[19px]" : "translate-x-[2px]"}`} />
+            </div>
+          </button>
+
+          {/* Price input — visible when paid */}
+          {newIsPaid && (
+            <div>
+              <label className="text-xs font-medium text-pnp-textSecondary mb-1 block" htmlFor="new-group-price">Entry price (USD)</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-pnp-textSecondary font-medium">$</span>
+                <input
+                  id="new-group-price"
+                  type="number"
+                  min="0.50"
+                  max="9999"
+                  step="0.50"
+                  value={newPrice}
+                  onChange={(e) => setNewPrice(e.target.value)}
+                  placeholder="5.00"
+                  className="w-full bg-white/5 rounded-xl pl-7 pr-3 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-amber-500/50 transition-colors"
+                />
+              </div>
+            </div>
+          )}
+
           {createError && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
               <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -2717,8 +2460,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           {/* What's a hangout explainer */}
           <div className="flex justify-center gap-4 text-[11px] text-pnp-textSecondary/70">
             <span className="flex items-center gap-1">
-              <svg className="w-3.5 h-3.5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-              Group Chat
+              <svg className="w-3.5 h-3.5" style={{ color: "#29A8E2" }} viewBox="0 0 24 24" fill="currentColor"><path d="M21.8 2.3L2.1 9.7c-1.2.5-1.2 1.7-.2 2l4.8 1.5 1.8 5.6c.2.7 1 .9 1.5.4l2.7-2.7 5.3 3.9c1 .7 1.8.3 2-1L22.8 3.7c.3-1.3-.5-1.8-1-.4z" /></svg>
+              Telegram Chat
             </span>
             <span className="flex items-center gap-1">
               <svg className="w-3.5 h-3.5" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" /></svg>
@@ -2796,7 +2539,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     {/* Status badges: main/wof/private/live — always visible */}
                     <div className="flex items-center gap-1 flex-shrink-0">
                       {group.isMain && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>
                           {t.chat.labelMain}
                         </span>
                       )}
@@ -2808,6 +2551,14 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       {!group.isPublic && !group.isMain && !group.isWallOfFame && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-pnp-textSecondary">
                           {t.chat.labelPrivate}
+                        </span>
+                      )}
+                      {group.isPaid && (group.priceUsd ?? 0) > 0 && (
+                        <span
+                          className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                          style={{ background: "rgba(230,145,56,0.15)", color: "#E69138", border: "1px solid rgba(230,145,56,0.25)" }}
+                        >
+                          ${Number(group.priceUsd).toFixed(2)}
                         </span>
                       )}
                       {group.hasActiveCall && (
@@ -2841,21 +2592,41 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     )}
                   </div>
                   {/* Description — hidden on mobile, visible on sm+ */}
-                  {!group.isMain && !group.isWallOfFame && group.description && (
-                    <p className="hidden sm:block text-[10px] text-pnp-textSecondary truncate mt-0.5">{group.description}</p>
+                  {!group.isWallOfFame && group.description && (
+                    <p className="hidden sm:block text-xs text-pnp-textSecondary truncate mt-0.5">{group.description}</p>
                   )}
                   {!group.isMain && !group.isWallOfFame && (group.tags || []).length > 0 && (
                     <div className="hidden sm:flex flex-wrap gap-0.5 mt-0.5">
                       {(group.tags || []).slice(0, 3).map((tag: string) => (
-                        <span key={tag} className="px-1.5 py-0.5 rounded-full text-[9px] bg-white/10 text-pnp-textSecondary">{tag}</span>
+                        <span key={tag} className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/10 text-pnp-textSecondary">{tag}</span>
                       ))}
                     </div>
                   )}
                 </div>
 
-                <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {/* Telegram linked indicator */}
+                  {group.telegramChatId && (
+                    <span title="Telegram group linked">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="#29A8E2" aria-hidden="true">
+                        <path d="M21.8 2.3L2.1 9.7c-1.2.5-1.2 1.7-.2 2l4.8 1.5 1.8 5.6c.2.7 1 .9 1.5.4l2.7-2.7 5.3 3.9c1 .7 1.8.3 2-1L22.8 3.7c.3-1.3-.5-1.8-1-.4z" />
+                      </svg>
+                    </span>
+                  )}
+                  {/* "Link TG" hint — only for group creator/owner when not linked */}
+                  {!group.telegramChatId && !group.isMain && !group.isWallOfFame && String(group.creatorId) === String(user?.dbId) && (
+                    <span
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                      style={{ background: "rgba(41,168,226,0.12)", color: "#29A8E2", border: "1px solid rgba(41,168,226,0.2)" }}
+                      title={`Run /link ${group.id} in your Telegram group`}
+                    >
+                      Link TG
+                    </span>
+                  )}
+                  <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </div>
               </div>
             </button>
           ))}
@@ -2969,6 +2740,11 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                                 {t.chat.labelPrivate}
                               </span>
                             )}
+                            {group.isPaid && (group.priceUsd ?? 0) > 0 && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold flex-shrink-0" style={{ background: "rgba(230,145,56,0.15)", color: "#E69138" }}>
+                                ${Number(group.priceUsd).toFixed(2)}
+                              </span>
+                            )}
                           </div>
                           <p className="text-xs text-pnp-textSecondary truncate mt-0.5">
                             {group.memberCount} {group.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}
@@ -2979,7 +2755,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                           {(group.tags || []).length > 0 && (
                             <div className="flex flex-wrap gap-0.5 mt-1">
                               {(group.tags || []).slice(0, 3).map((tag: string) => (
-                                <span key={tag} className="px-1.5 py-0.5 rounded-full text-[9px] bg-white/10 text-pnp-textSecondary">{tag}</span>
+                                <span key={tag} className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/10 text-pnp-textSecondary">{tag}</span>
                               ))}
                             </div>
                           )}

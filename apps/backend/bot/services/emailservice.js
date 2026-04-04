@@ -189,6 +189,144 @@ class EmailService {
   }
 
   /**
+   * Send SSO credentials email when a new Authentik account is provisioned.
+   * @param {Object} options
+   * @param {string} options.to - Recipient email
+   * @param {string} options.customerName - Display name
+   * @param {string} options.username - Authentik username
+   * @param {string} options.password - Generated password
+   * @param {string} options.loginUrl - Login URL (e.g., https://pnptv.app)
+   * @param {string} [options.language='es'] - Email language (en/es)
+   * @returns {Promise<Object>}
+   */
+  async sendCredentialsEmail({ to, customerName, username, password, loginUrl, language = 'es' }) {
+    try {
+      if (!this.transporters.pnptv) {
+        logger.warn('PNPtv transporter not configured, skipping credentials email');
+        return { success: false, error: 'Transporter not configured' };
+      }
+
+      const isSpanish = language === 'es';
+      const subject = isSpanish
+        ? 'Tus credenciales de acceso a PNPtv'
+        : 'Your PNPtv Access Credentials';
+
+      const mailOptions = {
+        from: '"PNPtv" <noreply@pnptv.app>',
+        to,
+        subject,
+        html: this.generateCredentialsEmailHtml({ customerName, username, password, loginUrl, language }),
+      };
+
+      const result = await this.transporters.pnptv.sendMail(mailOptions);
+
+      logger.info('Credentials email sent successfully', {
+        to,
+        username,
+        messageId: result.messageId,
+      });
+
+      return { success: true, messageId: result.messageId };
+    } catch (error) {
+      logger.error('Error sending credentials email:', { error: error.message, to });
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Generate HTML for SSO credentials email
+   * @private
+   */
+  generateCredentialsEmailHtml({ customerName, username, password, loginUrl, language = 'es' }) {
+    const isSpanish = language === 'es';
+
+    const title = isSpanish ? 'Tus Credenciales PNPtv' : 'Your PNPtv Credentials';
+    const greeting = isSpanish ? `Hola <strong>${customerName}</strong>,` : `Hello <strong>${customerName}</strong>,`;
+    const intro = isSpanish
+      ? 'Tu cuenta SSO de PNPtv ha sido creada automáticamente. Con estas credenciales puedes acceder a <strong>todos los servicios</strong> de la plataforma con un solo inicio de sesión:'
+      : 'Your PNPtv SSO account has been created automatically. With these credentials you can access <strong>all platform services</strong> with a single login:';
+    const userLabel = isSpanish ? 'Usuario' : 'Username';
+    const passLabel = isSpanish ? 'Contraseña' : 'Password';
+    const servicesTitle = isSpanish ? 'Servicios incluidos:' : 'Services included:';
+    const btnText = isSpanish ? 'Iniciar Sesión en PNPtv' : 'Log in to PNPtv';
+    const securityNote = isSpanish
+      ? 'Guarda estas credenciales en un lugar seguro. Puedes cambiar tu contraseña después de iniciar sesión en'
+      : 'Save these credentials in a safe place. You can change your password after logging in at';
+    const footer = isSpanish
+      ? 'Este es un correo automático, por favor no respondas directamente.'
+      : 'This is an automated email, please do not reply directly.';
+
+    return `
+<!DOCTYPE html>
+<html lang="${isSpanish ? 'es' : 'en'}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 20px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .header { text-align: center; padding-bottom: 20px; border-bottom: 3px solid #667eea; }
+    .header h1 { color: #667eea; margin: 0; font-size: 28px; }
+    .credentials-box { background: #1a1a2e; color: #fff; padding: 25px; border-radius: 8px; margin: 25px 0; font-family: monospace; }
+    .credentials-box .label { color: #aaa; font-size: 12px; text-transform: uppercase; margin-bottom: 4px; }
+    .credentials-box .value { font-size: 18px; font-weight: bold; color: #D4007A; margin-bottom: 15px; letter-spacing: 1px; }
+    .services-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 15px 0; }
+    .service-badge { background: #f0f0ff; color: #667eea; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+    .button { display: inline-block; padding: 14px 36px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; }
+    .security-note { background: #fff3e0; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #FFB454; font-size: 13px; }
+    .footer { text-align: center; padding-top: 20px; border-top: 1px solid #ddd; color: #888; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>PNPtv</h1>
+      <p style="color: #666; margin: 8px 0 0;">${title}</p>
+    </div>
+
+    <div style="padding: 20px 0;">
+      <p>${greeting}</p>
+      <p>${intro}</p>
+
+      <div class="credentials-box">
+        <div class="label">${userLabel}</div>
+        <div class="value">${username}</div>
+        <div class="label">${passLabel}</div>
+        <div class="value">${password}</div>
+      </div>
+
+      <p><strong>${servicesTitle}</strong></p>
+      <div class="services-grid">
+        <span class="service-badge">PNPtv App</span>
+        <span class="service-badge">Matrix Chat</span>
+        <span class="service-badge">Videorama</span>
+        <span class="service-badge">PNP Live</span>
+        <span class="service-badge">Hangouts</span>
+        <span class="service-badge">Radio</span>
+        <span class="service-badge">Booking</span>
+        <span class="service-badge">CMS</span>
+      </div>
+
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="${loginUrl}" class="button">${btnText}</a>
+      </div>
+
+      <div class="security-note">
+        <p style="margin: 0;">${securityNote} <a href="https://auth.pnptv.app" style="color: #667eea;">auth.pnptv.app</a></p>
+      </div>
+    </div>
+
+    <div class="footer">
+      <p>PNPtv | noreply@pnptv.app</p>
+      <p>${footer}</p>
+    </div>
+  </div>
+</body>
+</html>
+    `.trim();
+  }
+
+  /**
    * Generate HTML for invoice email
    * @private
    */

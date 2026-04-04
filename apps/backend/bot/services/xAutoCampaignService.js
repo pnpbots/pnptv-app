@@ -291,8 +291,8 @@ class XAutoCampaignService {
       );
       const socialPostId = socialResult.rows[0].id;
       socialPostLink = mediaUrl
-        ? `https://app.pnptv.app/v/${socialPostId}`
-        : `https://app.pnptv.app/social/post/${socialPostId}`;
+        ? `https://pnptv.app/v/${socialPostId}`
+        : `https://pnptv.app/social/post/${socialPostId}`;
     } catch (err) {
       logger.warn('Failed to create social_post for campaign tweet', {
         campaignId: campaign.campaign_id, error: err.message,
@@ -411,8 +411,8 @@ class XAutoCampaignService {
         );
         const abPostId = socialResult.rows[0].id;
         socialPostLink = mediaUrl
-          ? `https://app.pnptv.app/v/${abPostId}`
-          : `https://app.pnptv.app/social/post/${abPostId}`;
+          ? `https://pnptv.app/v/${abPostId}`
+          : `https://pnptv.app/social/post/${abPostId}`;
       } catch (err) {
         logger.warn('Failed to create social_post for A/B variant', {
           campaignId: campaign.campaign_id, variant: i, error: err.message,

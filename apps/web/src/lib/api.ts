@@ -1306,6 +1306,10 @@ export interface HangoutGroup {
   unreadCount?: number;
   tags?: string[];
   feedVisibility?: "public" | "shadow" | "ghost";
+  telegramChatId?: number | null;
+  telegramInviteLink?: string | null;
+  isPaid?: boolean;
+  priceUsd?: number;
 }
 
 export interface MessageReaction {
@@ -1356,11 +1360,13 @@ export function getHangoutGroups(): Promise<{ success: boolean; groups: HangoutG
 export function createHangoutGroup(
   name: string,
   description?: string,
-  isPublic?: boolean
+  isPublic?: boolean,
+  isPaid?: boolean,
+  priceUsd?: number
 ): Promise<{ success: boolean; group: HangoutGroup }> {
   return request("/api/webapp/hangouts/groups", {
     method: "POST",
-    body: { name, description, isPublic },
+    body: { name, description, isPublic, isPaid, priceUsd },
   });
 }
 
@@ -1375,6 +1381,8 @@ export interface DiscoverGroup {
   createdAt: string;
   myRequestStatus: "pending" | "accepted" | "rejected" | null;
   tags?: string[];
+  isPaid?: boolean;
+  priceUsd?: number;
 }
 
 export function discoverHangoutGroups(): Promise<{ success: boolean; groups: DiscoverGroup[] }> {
@@ -1546,41 +1554,7 @@ export async function sendGroupMediaMessage(
   return res.json();
 }
 
-export interface JaasCallInfo {
-  token?: string;
-  meetingUrl: string;
-  domain: string;
-  appId?: string;
-}
-
-export interface ActiveCallInfo {
-  id: string;
-  groupId: number;
-  roomName: string;
-  creatorId: string;
-  createdAt: string;
-  isPersistent?: boolean;
-  isModerator?: boolean;
-  participantCount?: number;
-  participants?: Array<{
-    userId: string;
-    displayName: string;
-    username: string;
-    photoUrl: string | null;
-    joinedAt: string;
-  }>;
-}
-
-export interface StartCallResponse {
-  success: boolean;
-  isNew: boolean;
-  call: ActiveCallInfo;
-  jaas: JaasCallInfo | null;
-}
-
-export function startGroupCall(id: number): Promise<StartCallResponse> {
-  return request(`/api/webapp/hangouts/groups/${id}/calls`, { method: "POST" });
-}
+// JaasCallInfo, ActiveCallInfo, StartCallResponse, startGroupCall removed — calls use Telegram native
 
 export function markGroupAsRead(groupId: number): Promise<{ success: boolean }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/read`, { method: "POST" });
@@ -1701,24 +1675,7 @@ export function deleteHangoutMessage(groupId: number, eventId: string): Promise<
   });
 }
 
-export interface GetActiveCallResponse {
-  success: boolean;
-  call: ActiveCallInfo | null;
-  jaas: JaasCallInfo | null;
-}
-
-export function getActiveGroupCall(groupId: number): Promise<GetActiveCallResponse> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/calls/active`);
-}
-
-export function leaveGroupCall(
-  groupId: number,
-  callId: string
-): Promise<{ success: boolean }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/calls/${callId}/leave`, {
-    method: "POST",
-  });
-}
+// GetActiveCallResponse, getActiveGroupCall, leaveGroupCall removed — calls use Telegram native
 
 // ============================================================================
 // Hangout Feed Integration
@@ -4311,31 +4268,7 @@ export function clipMoment(caption: string): Promise<{ success: boolean; postId?
   });
 }
 
-// ============================================================================
-// JaaS Live Streaming Token
-// ============================================================================
-
-export function getJaasLiveToken(): Promise<{
-  success: boolean;
-  token: string;
-  roomName: string;
-  meetingUrl: string;
-  domain: string;
-  role: string;
-  features: { livestreaming: boolean; recording: boolean };
-  error?: string;
-}> {
-  return request("/api/jaas/live-token", { method: "POST" });
-}
-
-export function refreshJaasToken(): Promise<{
-  success: boolean;
-  token: string;
-  meetingUrl: string;
-  error?: string;
-}> {
-  return request("/api/jaas/refresh-token", { method: "POST" });
-}
+// getJaasLiveToken, refreshJaasToken removed — JaaS live streaming removed
 
 // Live Rules Acknowledgment Gate
 
@@ -4739,6 +4672,20 @@ export function cancelEvent(id: string): Promise<{ success: boolean }> {
   return request(`/api/webapp/events/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+// ── Playlists ────────────────────────────────────────────────────────────────
+
+export function updatePlaylist(playlistId: string | number, data: { title?: string; description?: string; category?: string; icon?: string; isPublic?: boolean }): Promise<Record<string, unknown>> {
+  return request(`/api/playlists/${playlistId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function deletePlaylist(playlistId: string | number): Promise<{ success: boolean }> {
+  return request(`/api/playlists/${playlistId}`, { method: "DELETE" });
+}
+
 export function rsvpEvent(id: string): Promise<{ success: boolean; rsvpCount: number; userRsvpd: boolean }> {
   return request(`/api/webapp/events/${encodeURIComponent(id)}/rsvp`, { method: "POST" });
 }
@@ -5047,12 +4994,6 @@ export function createCallCheckout(
   });
 }
 
-export interface CallBookingJaas {
-  token: string;
-  meetingUrl: string;
-  roomName: string;
-}
-
 export interface CallBooking {
   id: number;
   creator_id: string;
@@ -5066,7 +5007,6 @@ export interface CallBooking {
   creator_username: string;
   creator_photo: string | null;
   member_username: string;
-  jaas?: CallBookingJaas | null;
   created_at: string;
 }
 
@@ -5375,4 +5315,46 @@ export function getCastingApplications(status?: string): Promise<{ success: bool
 
 export function reviewCastingApplication(applicationId: string, decision: "approved" | "rejected", notes?: string): Promise<{ success: boolean }> {
   return request("/api/casting/review", { method: "POST", body: { applicationId, decision, notes } });
+}
+
+// ── Telegram Group Linking & Video Chat ───────────────────────────────────────
+
+export function linkTelegramGroup(
+  groupId: number,
+  telegramChatId: string,
+  telegramInviteLink?: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/link-telegram`, {
+    method: "POST",
+    body: { telegramChatId, telegramInviteLink },
+  });
+}
+
+export function getVideoChatStatus(groupId: number): Promise<{ active: boolean; inviteLink: string | null }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/video-chat-status`);
+}
+
+export function startTelegramVideoCall(groupId: number): Promise<{ success: boolean; telegramInviteLink: string }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/call`, { method: "POST" });
+}
+
+// ── Online Users ──────────────────────────────────────────────────────────────
+
+export interface OnlineUser {
+  user_id: string;
+  username?: string;
+  name?: string;
+  photo_url?: string | null;
+  city?: string | null;
+  country?: string | null;
+  last_active?: string;
+  is_online: boolean;
+  telegram?: string;
+}
+
+export function getOnlineUsers(region?: string, limit = 100): Promise<{ success: boolean; total: number; users: OnlineUser[] }> {
+  const params = new URLSearchParams();
+  if (region) params.append("region", region);
+  params.append("limit", String(limit));
+  return request(`/api/webapp/nearby/online-users?${params}`);
 }

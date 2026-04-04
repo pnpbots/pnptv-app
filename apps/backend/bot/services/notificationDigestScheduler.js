@@ -564,12 +564,12 @@ class NotificationDigestScheduler {
       </table>
 
       <div class="cta-wrap">
-        <a href="https://app.pnptv.app" class="button">${ctaLabel}</a>
+        <a href="https://pnptv.app" class="button">${ctaLabel}</a>
       </div>
     </div>
 
     <div class="footer">
-      <p>PNPtv! &mdash; <a href="https://app.pnptv.app">app.pnptv.app</a></p>
+      <p>PNPtv! &mdash; <a href="https://pnptv.app">pnptv.app</a></p>
       <p>${unsubscribe}</p>
       <p style="color: #bbb; margin-top: 4px;">${footerAuto}</p>
     </div>

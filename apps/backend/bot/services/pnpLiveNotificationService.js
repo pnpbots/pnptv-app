@@ -577,7 +577,7 @@ class PNPLiveNotificationService {
       }
 
       const watchPath = channelRef ? `/live/${channelRef}` : '/live';
-      const appUrl = process.env.APP_PUBLIC_URL || 'https://app.pnptv.app';
+      const appUrl = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
       const watchUrl = `${appUrl}${watchPath}`;
       const safeName = (streamerName || 'A creator').replace(/[*_[\]()~`>#+=|{}.!-]/g, '\\$&');
       const message =

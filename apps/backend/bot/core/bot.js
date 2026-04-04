@@ -426,6 +426,170 @@ const startBot = async () => {
       );
     });
 
+    // /link <hangoutId> — Link a Telegram group to a PNPtv hangout
+    bot.command('link', async (ctx) => {
+      if (ctx.chat.type === 'private') {
+        return ctx.reply('❌ This command must be used inside a Telegram group.');
+      }
+      const args = ctx.message.text.split(' ').slice(1);
+      const hangoutId = parseInt(args[0], 10);
+      if (!Number.isFinite(hangoutId)) {
+        return ctx.reply('Usage: /link <hangout_group_id>\n\nYou can find the hangout ID in the webapp URL.');
+      }
+      try {
+        const { query: dbQuery } = require('../../config/postgres');
+        // Verify caller owns this hangout
+        const { rows: ownerRows } = await dbQuery(
+          `SELECT gm.role FROM hangout_group_members gm WHERE gm.group_id=$1 AND gm.user_id=(SELECT id FROM users WHERE telegram=$2 LIMIT 1) AND gm.role='owner'`,
+          [hangoutId, String(ctx.from.id)]
+        );
+        if (ownerRows.length === 0) {
+          return ctx.reply('❌ You must be the owner of this hangout to link it.');
+        }
+        // Check hangout exists
+        const { rows: groupRows } = await dbQuery('SELECT id, name FROM hangout_groups WHERE id=$1', [hangoutId]);
+        if (groupRows.length === 0) {
+          return ctx.reply('❌ Hangout group not found.');
+        }
+        // Generate invite link
+        let inviteLink = null;
+        try {
+          const linkResult = await ctx.telegram.createChatInviteLink(ctx.chat.id, { creates_join_request: false });
+          inviteLink = linkResult.invite_link;
+        } catch (linkErr) {
+          logger.warn('Failed to create invite link, bot may not be admin', { error: linkErr.message });
+          try {
+            inviteLink = await ctx.telegram.exportChatInviteLink(ctx.chat.id);
+          } catch { /* no invite link available */ }
+        }
+        // Store link
+        await dbQuery(
+          `UPDATE hangout_groups SET telegram_chat_id=$1, telegram_invite_link=$2 WHERE id=$3`,
+          [ctx.chat.id, inviteLink, hangoutId]
+        );
+        // Invalidate security cache so bot stays in newly linked groups
+        try { require('./middleware/groupSecurityEnforcement').invalidateLinkedCache(); } catch {}
+        await ctx.reply(`✅ Linked to hangout "${groupRows[0].name}" (ID: ${hangoutId}).\n\nMembers can now open this Telegram group from the PNPtv app.`);
+
+        // ── Non-fatal: bridge Matrix room to this Telegram group ──────────────
+        try {
+          const matrixService = require('../services/matrixService');
+          const MATRIX_SERVER_NAME = process.env.MATRIX_SERVER_NAME || 'matrix.pnptv.app';
+          const SYNAPSE_INTERNAL_URL = process.env.MATRIX_SYNAPSE_URL || 'http://synapse:8008';
+          const BRIDGE_BOT_MXID = `@telegrambot:${MATRIX_SERVER_NAME}`;
+
+          // Look up the hangout owner's full user record (needed by getOrCreateHangoutRoom)
+          const { rows: creatorRows } = await dbQuery(
+            `SELECT id, telegram, username, first_name, photo_file_id,
+                    matrix_user_id, matrix_access_token, matrix_device_id
+             FROM users WHERE telegram = $1 LIMIT 1`,
+            [String(ctx.from.id)]
+          );
+          if (creatorRows.length === 0) {
+            throw new Error('Creator user record not found for Matrix provisioning');
+          }
+          const creatorUser = creatorRows[0];
+          const groupName = groupRows[0].name;
+
+          // Step 1: Get or create the Matrix room for this hangout
+          const matrixRoomId = await matrixService.getOrCreateHangoutRoom(hangoutId, creatorUser, groupName);
+          logger.info(`[/link] Matrix room resolved for hangout ${hangoutId}: ${matrixRoomId}`);
+
+          // Step 2: Provision creator's Matrix credentials (needed to send invite + message)
+          const creatorCreds = await matrixService.provisionMatrixUser(creatorUser);
+
+          // Step 3: Invite the mautrix-telegram bridge bot to the Matrix room
+          // The creator is the room owner (PL 100), so they can issue invites.
+          const inviteResp = await fetch(
+            `${SYNAPSE_INTERNAL_URL}/_matrix/client/v3/rooms/${encodeURIComponent(matrixRoomId)}/invite`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${creatorCreds.accessToken}`,
+              },
+              body: JSON.stringify({ user_id: BRIDGE_BOT_MXID }),
+            }
+          );
+          if (!inviteResp.ok) {
+            const inviteData = await inviteResp.json().catch(() => ({}));
+            // M_FORBIDDEN / already in room are acceptable — bridge bot may already be present
+            if (inviteData.errcode !== 'M_FORBIDDEN' && inviteData.errcode !== 'M_ALREADY_JOINED') {
+              logger.warn(`[/link] Bridge bot invite returned ${inviteResp.status}: ${inviteData.error || inviteData.errcode}`);
+            } else {
+              logger.info(`[/link] Bridge bot already in room or invite not needed: ${inviteData.errcode}`);
+            }
+          } else {
+            logger.info(`[/link] Bridge bot ${BRIDGE_BOT_MXID} invited to Matrix room ${matrixRoomId}`);
+          }
+
+          // Step 4: Send the mautrix-telegram bridge command in the Matrix room.
+          // The Telegram chat ID is negative for groups; the bridge expects the numeric ID.
+          const telegramChatId = ctx.chat.id;
+          const bridgeCommand = `!tg bridge ${telegramChatId}`;
+          await matrixService.sendRoomMessage(matrixRoomId, creatorCreds.accessToken, bridgeCommand);
+          logger.info(`[/link] Bridge command sent in Matrix room ${matrixRoomId}: "${bridgeCommand}"`);
+        } catch (bridgeErr) {
+          // Bridge setup failure must NOT affect the /link success response already sent
+          logger.error('[/link] Matrix bridge setup failed (non-fatal)', {
+            error: bridgeErr.message,
+            hangoutId,
+            chatId: ctx.chat.id,
+          });
+        }
+        // ─────────────────────────────────────────────────────────────────────
+      } catch (err) {
+        logger.error('/link command error', { error: err.message, chatId: ctx.chat.id });
+        await ctx.reply('❌ Something went wrong. Please try again.');
+      }
+    });
+
+    // /unlink — Unlink this Telegram group from its PNPtv hangout
+    bot.command('unlink', async (ctx) => {
+      if (ctx.chat.type === 'private') {
+        return ctx.reply('❌ This command must be used inside a Telegram group.');
+      }
+      try {
+        const { query: dbQuery } = require('../../config/postgres');
+        const chatId = ctx.chat.id;
+
+        // Find hangout linked to this Telegram group
+        const { rows: groupRows } = await dbQuery(
+          'SELECT id, name FROM hangout_groups WHERE telegram_chat_id = $1',
+          [chatId]
+        );
+        if (groupRows.length === 0) {
+          return ctx.reply('❌ This Telegram group is not linked to any PNPtv hangout.');
+        }
+
+        const hangoutId = groupRows[0].id;
+        const hangoutName = groupRows[0].name;
+
+        // Verify caller owns this hangout
+        const { rows: ownerRows } = await dbQuery(
+          `SELECT gm.role FROM hangout_group_members gm WHERE gm.group_id=$1 AND gm.user_id=(SELECT id FROM users WHERE telegram=$2 LIMIT 1) AND gm.role='owner'`,
+          [hangoutId, String(ctx.from.id)]
+        );
+        if (ownerRows.length === 0) {
+          return ctx.reply('❌ You must be the owner of the linked hangout to unlink it.');
+        }
+
+        // Remove the link
+        await dbQuery(
+          'UPDATE hangout_groups SET telegram_chat_id = NULL, telegram_invite_link = NULL WHERE id = $1',
+          [hangoutId]
+        );
+
+        // Invalidate security cache
+        try { require('./middleware/groupSecurityEnforcement').invalidateLinkedCache(); } catch {}
+
+        await ctx.reply(`✅ Unlinked from hangout "${hangoutName}" (ID: ${hangoutId}).`);
+      } catch (err) {
+        logger.error('/unlink command error', { error: err.message, chatId: ctx.chat.id });
+        await ctx.reply('❌ Something went wrong. Please try again.');
+      }
+    });
+
     // DEBUG: Log all updates
     bot.use(async (ctx, next) => {
       if (ctx.message?.text?.startsWith('/')) {

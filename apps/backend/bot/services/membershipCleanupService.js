@@ -640,8 +640,8 @@ Type /subscribe to view membership plans and reactivate your access!`;
           for (const row of consumeResult.rows) {
             try {
               await query(`
-                INSERT INTO subscription_audit_log (user_id, action, reason)
-                VALUES ($1, 'entitlement_expired', $2)
+                INSERT INTO subscription_audit_log (user_id, actor_id, actor_type, action, reason)
+                VALUES ($1, 'system', 'system', 'expire', $2)
               `, [row.user_id, JSON.stringify({ add_on_id: row.add_on_id, entitlement_id: row.id })]);
             } catch (_) { /* non-critical */ }
           }

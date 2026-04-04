@@ -1,24 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-
-// ── Shared stagger helper (all 3 widgets share these keys) ──────────────────
-const WIDGET_KEYS = [
-  { key: "radio_fab_corner", order: 0, defaultCorner: "bl" },
-  { key: "nearby_fab_corner", order: 1, defaultCorner: "br" },
-  { key: "cristina_fab_corner", order: 2, defaultCorner: "tr" },
-] as const;
-
-function getCornerOffset(myOrder: number, myCorner: string): number {
-  let count = 0;
-  for (const { key, order, defaultCorner } of WIDGET_KEYS) {
-    if (order >= myOrder) continue;
-    try {
-      const otherCorner = localStorage.getItem(key) || defaultCorner;
-      if (otherCorner === myCorner) count++;
-    } catch {}
-  }
-  return count;
-}
-
+import { RadioPanel, EqualizerBars } from "@/components/RadioWidget";
+import { NearbyPanel } from "@/components/NearbyWidget";
+import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
 import { getSocket } from "@/lib/socket";
@@ -30,9 +13,11 @@ import {
   getSupportTicket,
   getTicketMessages,
   addTicketMessage,
+  verifyPaymentWithCristina,
   type SupportTicket,
   type TicketMessage,
   type TicketCategory,
+  type PaymentVerificationResult,
 } from "@/lib/api";
 
 interface SupportSuggestion {
@@ -48,7 +33,8 @@ interface ChatMessage {
   timestamp: number;
 }
 
-type WidgetView = "helpCenter" | "chat" | "tutorial" | "ticketForm" | "ticketView";
+type WidgetView = "helpCenter" | "chat" | "tutorial" | "ticketForm" | "ticketView" | "paymentVerify";
+type CristinaTab = "ai" | "vj" | "nearby";
 
 interface CristinaWidgetProps {
   mode?: "widget" | "page";
@@ -77,7 +63,6 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
       { title: "Add Your Social Links", description: "In your Profile, scroll to the social links section. You can add your X (Twitter), Instagram, TikTok, and YouTube handles. These appear on your profile card and help others find you.", action: "Go to Profile" },
       { title: "Verify Your Age", description: "Go to Profile → Settings (gear icon). Enter your date of birth to verify you're 18+. Age verification is required to view creator content and access certain features.", action: "Go to Settings" },
       { title: "Accept Community Terms", description: "In Profile → Settings, read and accept the Terms & Conditions. This is required to unlock full access to the platform including posting, messaging, and engaging with content.", action: "Go to Settings" },
-      { title: "Install as App (PWA)", description: "PNPtv works as an installable app! On iOS: tap the Share button in Safari → 'Add to Home Screen'. On Android: tap the menu → 'Install app' or 'Add to Home Screen'. This gives you a full-screen app experience." },
     ],
   },
   {
@@ -126,9 +111,9 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     id: "hangouts",
     emoji: "🎥",
     steps: [
-      { title: "What are Hangouts?", description: "Hangouts are live video chat rooms powered by Jitsi. Multiple people can join the same room, see each other on camera, and talk in real time. Think of them as casual video lounges — join, hang out, leave when you want." },
-      { title: "Join a Hangout Room", description: "Go to Hangouts from the bottom navigation. You'll see a list of active rooms with participant counts. Tap a room card to join. Your browser will ask for camera and microphone permissions.", action: "Go to Hangouts" },
-      { title: "Camera & Microphone Setup", description: "When joining a room, allow camera and mic access. If you're asked to choose a device, select your preferred camera and microphone from the dropdowns. You can test them before joining." },
+      { title: "What are Hangouts?", description: "Hangouts are group chats and community spaces. Video calls in Hangouts happen through Telegram — join the group's Telegram chat and start a video call natively in the app." },
+      { title: "Join a Hangout Room", description: "Go to Hangouts from the bottom navigation. You'll see a list of community rooms. Tap a room card to join the chat. Video calls are started via Telegram.", action: "Go to Hangouts" },
+      { title: "Video Calls via Telegram", description: "When someone starts a video call in a hangout, you'll see a notification. Open Telegram and join the call there. Telegram's native video calls support camera, microphone, and screen sharing." },
       { title: "Mute Your Microphone", description: "Inside a Hangout, look for the microphone icon in the video controls bar. Tap it to mute — a line appears through the mic icon. Tap again to unmute. Muting is useful when there's background noise or you're just listening." },
       { title: "Turn Off Your Camera", description: "Tap the camera icon in the controls bar to toggle your camera on/off. When your camera is off, others see your avatar/name instead of your video feed. Useful for saving bandwidth or privacy." },
       { title: "Fullscreen & Picture-in-Picture", description: "Tap the fullscreen icon to expand the video room to fill your screen. Press Escape to exit fullscreen. You can also use Picture-in-Picture (PiP) mode to shrink the video to a small floating window while you use other parts of the app." },
@@ -232,9 +217,25 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
 ];
 
 export function CristinaWidget({ mode = "widget", compact = false }: CristinaWidgetProps) {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { support: t } = useI18n();
+  const { isPlaying: musicIsPlaying } = useMusicPlayer();
   const [isOpen, setIsOpen] = useState(mode === "page");
+  const [activeTab, setActiveTab] = useState<CristinaTab>("ai");
+
+  // FAB auto-cycles through tab colors when closed
+  const FAB_COLORS = [
+    "linear-gradient(135deg, #8B5CF6, #D946EF)",  // purple (VJ)
+    "linear-gradient(135deg, #FBFF00, #F5D800)",  // yellow (Nearby)
+    "linear-gradient(135deg, #5BC8F5, #00D4E8)",  // cyan (AI)
+  ] as const;
+  const [fabColorIdx, setFabColorIdx] = useState(0);
+  useEffect(() => {
+    if (isOpen) return;
+    const timer = setInterval(() => setFabColorIdx((i) => (i + 1) % 3), 3000);
+    return () => clearInterval(timer);
+  }, [isOpen]);
+  const fabGradient = FAB_COLORS[fabColorIdx];
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -251,6 +252,17 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   const [ticketDescription, setTicketDescription] = useState("");
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [hasUnreadReply, setHasUnreadReply] = useState(false);
+
+  // Payment verification state (admin-only)
+  const [pvUserId, setPvUserId] = useState("");
+  const [pvProvider, setPvProvider] = useState("epayco");
+  const [pvReference, setPvReference] = useState("");
+  const [pvAmount, setPvAmount] = useState("");
+  const [pvPlanId, setPvPlanId] = useState("");
+  const [pvNotes, setPvNotes] = useState("");
+  const [pvLoading, setPvLoading] = useState(false);
+  const [pvResult, setPvResult] = useState<PaymentVerificationResult | null>(null);
+  const [pvActivated, setPvActivated] = useState<{ success: boolean; granted?: number; error?: string } | null>(null);
 
   // FAB corner: tl/tr/bl/br — draggable to any corner
   type Corner = "tl" | "tr" | "bl" | "br";
@@ -574,13 +586,16 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
     return (
       <button
         onClick={() => { setIsOpen(true); setHasUnreadReply(false); }}
-        className="relative w-9 h-9 rounded-full shadow-lg flex items-center justify-center text-sm transition-transform active:scale-90"
-        style={{ background: "linear-gradient(135deg, #5BC8F5, #00D4E8)" }}
+        className="relative w-9 h-9 rounded-full shadow-lg flex items-center justify-center text-sm transition-all active:scale-90"
+        style={{ background: fabGradient }}
         aria-label={t.openWidgetAriaLabel}
       >
         <span className="relative">🧜‍♀️</span>
         {hasUnreadReply && (
           <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500 ring-1 ring-black" />
+        )}
+        {musicIsPlaying && !hasUnreadReply && (
+          <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 ring-1 ring-black animate-pulse" />
         )}
       </button>
     );
@@ -588,13 +603,10 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
 
   // FAB button (widget mode only)
   if (mode === "widget" && !isOpen) {
-    // Compute stagger offset so FABs in the same corner don't overlap
-    const MY_ORDER = 2;
-    const offset = getCornerOffset(MY_ORDER, fabCorner);
     const isTopCorner = fabCorner.startsWith("t");
     const isLeftCorner = fabCorner.endsWith("l");
     const fabPosStyle = {
-      [isTopCorner ? "top" : "bottom"]: `calc(5rem + ${offset * 56}px)`,
+      [isTopCorner ? "top" : "bottom"]: "5rem",
       [isLeftCorner ? "left" : "right"]: "0.75rem",
       touchAction: "none" as const,
     };
@@ -609,29 +621,19 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
       >
         <button
           onClick={() => { if (!dragState.current.moved) { setIsOpen(true); setHasUnreadReply(false); } }}
-          className="relative w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-xl transition-transform hover:scale-110 active:scale-95"
-          style={{
-            background: "linear-gradient(135deg, #5BC8F5, #00D4E8)",
-          }}
+          className="relative w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-xl transition-all hover:scale-110 active:scale-95"
+          style={{ background: fabGradient }}
           aria-label={t.openWidgetAriaLabel}
         >
           {/* Pulse ring */}
           <span
             className="absolute inset-0 rounded-full animate-ping"
-            style={{
-              background: "linear-gradient(135deg, #5BC8F5, #00D4E8)",
-              opacity: 0.3,
-              animationDuration: "2.5s",
-            }}
+            style={{ background: fabGradient, opacity: 0.3, animationDuration: "2.5s" }}
           />
           {/* Glow halo */}
           <span
             className="absolute -inset-1 rounded-full"
-            style={{
-              background: "linear-gradient(135deg, #5BC8F5, #00D4E8)",
-              opacity: 0.25,
-              filter: "blur(8px)",
-            }}
+            style={{ background: fabGradient, opacity: 0.25, filter: "blur(8px)" }}
           />
           <span className="relative">🧜‍♀️</span>
           {/* Unread reply notification dot */}
@@ -640,6 +642,10 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-red-500" />
             </span>
+          )}
+          {/* Music playing indicator */}
+          {musicIsPlaying && !hasUnreadReply && (
+            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-500 ring-2 ring-[rgba(20,20,30,0.98)] animate-pulse" />
           )}
         </button>
       </div>
@@ -661,44 +667,28 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
     >
       {/* Header */}
       <div
-        className="flex items-center justify-between px-4 py-3 border-b border-pnp-border flex-shrink-0"
+        className="flex items-center justify-between px-4 py-2.5 border-b border-pnp-border flex-shrink-0"
         style={{ background: "rgba(30, 30, 45, 0.95)" }}
       >
         <div className="flex items-center gap-2">
-          <span className="text-xl">🧜‍♀️</span>
+          <span className="text-lg">🧜‍♀️</span>
           <div>
             <h3 className="text-sm font-semibold text-pnp-textPrimary">{t.widgetName}</h3>
             <p className="text-[10px] text-pnp-textSecondary">
-              {t.widgetSubtitle}
+              {activeTab === "vj" ? "Your VJ" : activeTab === "nearby" ? "Nearby" : t.widgetSubtitle}
             </p>
-            <span
-              className="inline-block mt-0.5 px-1.5 py-0 text-[9px] font-bold rounded-full uppercase tracking-wider"
-              style={{ background: "rgba(91,200,245,0.2)", color: "#5BC8F5", border: "1px solid rgba(91,200,245,0.35)" }}
-            >
-              {t.helpTag}
-            </span>
           </div>
         </div>
         <div className="flex items-center gap-1">
-          {/* Ticket icon button — only visible after 3 turns or if user has an open ticket */}
-          {(canCreateTicket || hasOpenTicket) && (
+          {/* Ticket icon — AI tab only, visible after 3 turns or if user has an open ticket */}
+          {activeTab === "ai" && (canCreateTicket || hasOpenTicket) && (
             <button
               onClick={() => { ticket ? setView("ticketView") : setView("ticketForm"); setHasUnreadReply(false); }}
               className="relative p-1.5 rounded-lg hover:bg-white/10 transition-colors"
               title={t.supportTicketTitle}
             >
-              <svg
-                className="w-4 h-4 text-gray-400"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
+              <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
               {hasOpenTicket && (
                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-cyan-400 rounded-full" />
@@ -706,41 +696,23 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
             </button>
           )}
 
-          <button
-            onClick={handleNewConversation}
-            className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5 transition-colors"
-            title={t.newConversationTitle}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {activeTab === "ai" && (
+            <button
+              onClick={handleNewConversation}
+              className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5 transition-colors"
+              title={t.newConversationTitle}
             >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          )}
           {mode === "widget" && (
             <button
               onClick={() => setIsOpen(false)}
               className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5 transition-colors"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 6 6 18M6 6l12 12" />
               </svg>
             </button>
@@ -748,6 +720,43 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
         </div>
       </div>
 
+      {/* ── Tab bar ────────────────────────────────────────────────────── */}
+      <div className="flex border-b flex-shrink-0" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(25,25,38,0.95)" }}>
+        <button
+          onClick={() => setActiveTab("ai")}
+          className={`flex-1 py-2 text-[11px] font-semibold text-center transition-colors ${activeTab === "ai" ? "text-cyan-400" : "text-gray-500 hover:text-gray-300"}`}
+          style={activeTab === "ai" ? { borderBottom: "2px solid #5BC8F5" } : { borderBottom: "2px solid transparent" }}
+        >
+          🧜‍♀️ AI Chat
+        </button>
+        <button
+          onClick={() => setActiveTab("vj")}
+          className={`flex-1 py-2 text-[11px] font-semibold text-center transition-colors ${activeTab === "vj" ? "text-purple-400" : "text-gray-500 hover:text-gray-300"}`}
+          style={activeTab === "vj" ? { borderBottom: "2px solid #8B5CF6" } : { borderBottom: "2px solid transparent" }}
+        >
+          {musicIsPlaying ? <><EqualizerBars color="#8B5CF6" size="sm" /> VJ</> : "🎧 VJ"}
+        </button>
+        <button
+          onClick={() => setActiveTab("nearby")}
+          className={`flex-1 py-2 text-[11px] font-semibold text-center transition-colors ${activeTab === "nearby" ? "text-yellow-400" : "text-gray-500 hover:text-gray-300"}`}
+          style={activeTab === "nearby" ? { borderBottom: "2px solid #FBFF00" } : { borderBottom: "2px solid transparent" }}
+        >
+          📍 Nearby
+        </button>
+      </div>
+
+      {/* ── VJ Tab (Radio Panel) ──────────────────────────────────────── */}
+      <div style={{ display: activeTab === "vj" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
+        <RadioPanel onClose={() => setIsOpen(false)} />
+      </div>
+
+      {/* ── Travel Tab (Nearby Panel) ─────────────────────────────────── */}
+      <div style={{ display: activeTab === "nearby" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
+        <NearbyPanel onClose={() => setIsOpen(false)} />
+      </div>
+
+      {/* ── AI Chat Tab ───────────────────────────────────────────────── */}
+      <div style={{ display: activeTab === "ai" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
       {/* ------------------------------------------------------------------ */}
       {/* HELP CENTER VIEW                                                     */}
       {/* ------------------------------------------------------------------ */}
@@ -774,7 +783,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
           </div>
 
           {/* 2x2 category grid */}
-          <div className="grid grid-cols-2 gap-2.5 mb-4">
+          <div className="grid grid-cols-3 gap-2 mb-4">
             {/* Membership */}
             <button
               onClick={() => {
@@ -837,6 +846,28 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
               <p className="text-xs font-semibold text-white leading-tight">{t.catWellness}</p>
               <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{t.catWellnessDesc}</p>
             </button>
+
+            {/* VJ / Music */}
+            <button
+              onClick={() => setActiveTab("vj")}
+              className="flex flex-col items-start p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
+              style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)" }}
+            >
+              <span className="text-xl mb-1.5">🎧</span>
+              <p className="text-xs font-semibold text-white leading-tight">{lang === "es" ? "Musica & VJ" : "Music & VJ"}</p>
+              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{lang === "es" ? "Radio, playlists, pedir canciones" : "Radio, playlists, request songs"}</p>
+            </button>
+
+            {/* Travel / Nearby */}
+            <button
+              onClick={() => setActiveTab("nearby")}
+              className="flex flex-col items-start p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
+              style={{ background: "rgba(251,255,0,0.06)", border: "1px solid rgba(251,255,0,0.2)" }}
+            >
+              <span className="text-xl mb-1.5">📍</span>
+              <p className="text-xs font-semibold text-white leading-tight">{lang === "es" ? "Gente Cerca" : "People Nearby"}</p>
+              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{lang === "es" ? "Descubre gente y lugares cerca" : "Discover people & places near you"}</p>
+            </button>
           </div>
 
           {/* Chat with Cristina CTA */}
@@ -847,6 +878,17 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
           >
             {t.helpCenterChatBtn}
           </button>
+
+          {/* Admin-only: Payment Verification Agent */}
+          {isAdmin && (
+            <button
+              onClick={() => { setPvResult(null); setPvActivated(null); setView("paymentVerify"); }}
+              className="w-full mt-2 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98]"
+              style={{ background: "linear-gradient(135deg, #D4007A, #FF6B35)" }}
+            >
+              {lang === "es" ? "Verificar Pago (Admin)" : "Verify Payment (Admin)"}
+            </button>
+          )}
         </div>
       )}
 
@@ -1183,6 +1225,268 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
       )}
 
       {/* ------------------------------------------------------------------ */}
+      {/* PAYMENT VERIFICATION VIEW (admin-only)                               */}
+      {/* ------------------------------------------------------------------ */}
+      {view === "paymentVerify" && isAdmin && (
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {/* Back + title */}
+          <div className="flex items-center gap-2 mb-2">
+            <button
+              onClick={() => setView("helpCenter")}
+              className="text-gray-400 hover:text-white transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <h3 className="text-white font-semibold text-sm">
+              {lang === "es" ? "Verificar Pago con Cristina AI" : "Verify Payment with Cristina AI"}
+            </h3>
+          </div>
+
+          {/* Form */}
+          {!pvResult && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">{lang === "es" ? "ID de Usuario" : "User ID"}</label>
+                <input
+                  value={pvUserId}
+                  onChange={(e) => setPvUserId(e.target.value)}
+                  placeholder={lang === "es" ? "Ej: 1234567890" : "e.g. 1234567890"}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">{lang === "es" ? "Proveedor" : "Provider"}</label>
+                <select
+                  value={pvProvider}
+                  onChange={(e) => setPvProvider(e.target.value)}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500/50"
+                >
+                  <option value="epayco">ePayco (Card)</option>
+                  <option value="daimo">Daimo (USDC)</option>
+                  <option value="btcpay">BTCPay (Dash)</option>
+                  <option value="visa">Visa Cybersource</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">{lang === "es" ? "Referencia / ID Transaccion" : "Reference / Transaction ID"}</label>
+                <input
+                  value={pvReference}
+                  onChange={(e) => setPvReference(e.target.value)}
+                  placeholder={lang === "es" ? "Ej: ref_payco o tx hash" : "e.g. ref_payco or tx hash"}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">{lang === "es" ? "Monto (USD)" : "Amount (USD)"}</label>
+                  <input
+                    value={pvAmount}
+                    onChange={(e) => setPvAmount(e.target.value)}
+                    placeholder="24.99"
+                    type="number"
+                    step="0.01"
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">{lang === "es" ? "ID del Plan" : "Plan ID"}</label>
+                  <input
+                    value={pvPlanId}
+                    onChange={(e) => setPvPlanId(e.target.value)}
+                    placeholder="e.g. monthly-pass"
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">{lang === "es" ? "Notas adicionales (opcional)" : "Additional notes (optional)"}</label>
+                <textarea
+                  value={pvNotes}
+                  onChange={(e) => setPvNotes(e.target.value.slice(0, 500))}
+                  placeholder={lang === "es" ? "Contexto extra, screenshot info, etc." : "Extra context, screenshot info, etc."}
+                  rows={2}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-gray-500 resize-none focus:outline-none focus:border-cyan-500/50"
+                />
+              </div>
+              <button
+                onClick={async () => {
+                  if (!pvUserId || !pvReference || !pvAmount || !pvPlanId) return;
+                  setPvLoading(true);
+                  setPvResult(null);
+                  setPvActivated(null);
+                  try {
+                    const res = await verifyPaymentWithCristina({
+                      userId: pvUserId,
+                      provider: pvProvider,
+                      reference: pvReference,
+                      amount: parseFloat(pvAmount),
+                      planId: pvPlanId,
+                      notes: pvNotes || undefined,
+                    });
+                    if (res.success && res.analysis) {
+                      setPvResult(res.analysis);
+                    }
+                  } catch {
+                    setPvResult({
+                      valid: false,
+                      confidence: "low",
+                      reason: lang === "es" ? "Error al comunicarse con el servidor" : "Failed to communicate with server",
+                      recommendation: "manual_review",
+                      warnings: [],
+                    });
+                  } finally {
+                    setPvLoading(false);
+                  }
+                }}
+                disabled={pvLoading || !pvUserId || !pvReference || !pvAmount || !pvPlanId}
+                className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 active:scale-[0.98]"
+                style={{ background: "linear-gradient(135deg, #D4007A, #FF6B35)" }}
+              >
+                {pvLoading
+                  ? (lang === "es" ? "Analizando con Grok AI..." : "Analyzing with Grok AI...")
+                  : (lang === "es" ? "Verificar Pago" : "Verify Payment")}
+              </button>
+            </div>
+          )}
+
+          {/* Result */}
+          {pvResult && (
+            <div className="space-y-3 animate-fade-in-up">
+              {/* Verdict card */}
+              <div
+                className="rounded-xl p-4 border"
+                style={{
+                  background: pvResult.valid
+                    ? "rgba(52,199,89,0.08)"
+                    : "rgba(255,69,58,0.08)",
+                  borderColor: pvResult.valid
+                    ? "rgba(52,199,89,0.3)"
+                    : "rgba(255,69,58,0.3)",
+                }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">{pvResult.valid ? "\u2705" : "\u274C"}</span>
+                  <div>
+                    <p className="text-sm font-bold text-white">
+                      {pvResult.valid
+                        ? (lang === "es" ? "Pago Valido" : "Payment Valid")
+                        : (lang === "es" ? "Pago No Valido" : "Payment Not Valid")}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {lang === "es" ? "Confianza" : "Confidence"}: <span className={`font-semibold ${pvResult.confidence === "high" ? "text-green-400" : pvResult.confidence === "medium" ? "text-yellow-400" : "text-red-400"}`}>{pvResult.confidence.toUpperCase()}</span>
+                    </p>
+                  </div>
+                </div>
+                <p className="text-sm text-gray-300 leading-relaxed">{pvResult.reason}</p>
+                {pvResult.warnings.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {pvResult.warnings.map((w, i) => (
+                      <p key={i} className="text-xs text-yellow-400">
+                        {"\u26A0\uFE0F"} {w}
+                      </p>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-2">
+                  <span
+                    className={`inline-block px-2 py-0.5 rounded-full text-xs font-bold ${
+                      pvResult.recommendation === "activate"
+                        ? "bg-green-500/20 text-green-400"
+                        : pvResult.recommendation === "reject"
+                        ? "bg-red-500/20 text-red-400"
+                        : "bg-yellow-500/20 text-yellow-400"
+                    }`}
+                  >
+                    {pvResult.recommendation === "activate"
+                      ? (lang === "es" ? "ACTIVAR" : "ACTIVATE")
+                      : pvResult.recommendation === "reject"
+                      ? (lang === "es" ? "RECHAZAR" : "REJECT")
+                      : (lang === "es" ? "REVISION MANUAL" : "MANUAL REVIEW")}
+                  </span>
+                </div>
+              </div>
+
+              {/* Activation result */}
+              {pvActivated && (
+                <div
+                  className="rounded-xl p-3 border"
+                  style={{
+                    background: pvActivated.success ? "rgba(52,199,89,0.1)" : "rgba(255,69,58,0.1)",
+                    borderColor: pvActivated.success ? "rgba(52,199,89,0.3)" : "rgba(255,69,58,0.3)",
+                  }}
+                >
+                  {pvActivated.success ? (
+                    <p className="text-sm text-green-400 font-semibold">
+                      {"\u2705"} {lang === "es"
+                        ? `Membresia activada! ${pvActivated.granted || 0} entitlements otorgados.`
+                        : `Membership activated! ${pvActivated.granted || 0} entitlements granted.`}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-red-400 font-semibold">
+                      {"\u274C"} {lang === "es" ? "Error al activar" : "Activation failed"}: {pvActivated.error || "Unknown error"}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="flex gap-2">
+                {pvResult.valid && !pvActivated && (
+                  <button
+                    onClick={async () => {
+                      setPvLoading(true);
+                      try {
+                        const res = await verifyPaymentWithCristina({
+                          userId: pvUserId,
+                          provider: pvProvider,
+                          reference: pvReference,
+                          amount: parseFloat(pvAmount),
+                          planId: pvPlanId,
+                          notes: pvNotes || undefined,
+                          activate: true,
+                        });
+                        if (res.activation) {
+                          setPvActivated(res.activation);
+                        }
+                      } catch {
+                        setPvActivated({ success: false, error: "Network error" });
+                      } finally {
+                        setPvLoading(false);
+                      }
+                    }}
+                    disabled={pvLoading}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-40"
+                    style={{ background: "linear-gradient(135deg, #34C759, #30D158)" }}
+                  >
+                    {pvLoading
+                      ? (lang === "es" ? "Activando..." : "Activating...")
+                      : (lang === "es" ? "Activar Membresia" : "Activate Membership")}
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setPvResult(null);
+                    setPvActivated(null);
+                    setPvUserId("");
+                    setPvProvider("epayco");
+                    setPvReference("");
+                    setPvAmount("");
+                    setPvPlanId("");
+                    setPvNotes("");
+                  }}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-white/20 text-white/70 hover:border-white/40 transition-colors"
+                >
+                  {lang === "es" ? "Nueva Verificacion" : "New Verification"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------ */}
       {/* CHAT VIEW (AI)                                                       */}
       {/* ------------------------------------------------------------------ */}
       {view === "chat" && (
@@ -1324,8 +1628,8 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
         </div>
       )}
 
-      {/* Input area — hidden in ticketForm, helpCenter, and tutorial views */}
-      {view !== "ticketForm" && view !== "helpCenter" && view !== "tutorial" && (
+      {/* Input area — hidden in ticketForm, helpCenter, tutorial, and paymentVerify views */}
+      {view !== "ticketForm" && view !== "helpCenter" && view !== "tutorial" && view !== "paymentVerify" && (
         <form
           onSubmit={handleSubmit}
           className="flex items-center gap-2 p-3 pb-safe border-t border-pnp-border flex-shrink-0"
@@ -1376,6 +1680,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
           </button>
         </form>
       )}
+      </div>{/* end AI Chat Tab wrapper */}
     </div>
   );
 

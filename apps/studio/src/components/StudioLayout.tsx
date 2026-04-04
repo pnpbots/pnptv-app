@@ -21,7 +21,7 @@ export default function StudioLayout() {
         <h1 className="text-xl font-bold text-white mb-2">PNPtv! Studio</h1>
         <p className="text-sm text-pnp-textSecondary mb-6">{t.notAuthenticated}</p>
         <a
-          href="https://app.pnptv.app/login"
+          href="https://pnptv.app/login"
           className="px-6 py-3 rounded-xl text-sm font-bold text-white btn-gradient"
         >
           {t.goToLogin}
@@ -43,7 +43,7 @@ export default function StudioLayout() {
         <h1 className="text-xl font-bold text-white mb-2">PNPtv! Studio</h1>
         <p className="text-sm text-pnp-textSecondary mb-6">{t.notCreator}</p>
         <a
-          href="https://app.pnptv.app/become-a-model"
+          href="https://pnptv.app/become-a-model"
           className="px-6 py-3 rounded-xl text-sm font-bold text-white btn-gradient"
         >
           {t.applyAsCreator}
@@ -64,10 +64,10 @@ export default function StudioLayout() {
         </button>
         <div className="flex items-center gap-3">
           <a
-            href="https://app.pnptv.app"
+            href="https://pnptv.app"
             className="text-xs text-pnp-textSecondary hover:text-white transition-colors"
           >
-            app.pnptv.app
+            pnptv.app
           </a>
           <div className="flex items-center gap-2">
             {user?.photoUrl && (
