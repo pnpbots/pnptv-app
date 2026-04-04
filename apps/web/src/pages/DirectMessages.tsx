@@ -56,6 +56,7 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [partnerName, setPartnerName] = useState("");
   const [partnerPhoto, setPartnerPhoto] = useState<string | null>(null);
+  const [partnerTelegramId, setPartnerTelegramId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const lastTypingEmit = useRef(0);
@@ -72,6 +73,7 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
         if (data?.success && data.user) {
           setPartnerName(data.user.first_name || data.user.username || "User");
           setPartnerPhoto(data.user.photo_file_id || null);
+          setPartnerTelegramId(data.user.telegram || null);
         }
       })
       .catch(() => {});
@@ -218,6 +220,21 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
           <p className="text-sm font-bold text-pnp-textPrimary truncate leading-tight">{partnerName || "Conversation"}</p>
           <p className="text-[11px] text-pnp-textSecondary leading-tight">Tap to view profile</p>
         </button>
+        {/* Telegram video call button */}
+        {partnerTelegramId && (
+          <a
+            href={`tg://user?id=${partnerTelegramId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all flex-shrink-0"
+            title={`Call ${partnerName} on Telegram`}
+            aria-label="Video call on Telegram"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="#29A8E2" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+          </a>
+        )}
       </div>
 
       {/* Error banner — dismissible */}

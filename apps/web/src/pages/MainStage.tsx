@@ -15,11 +15,19 @@ import {
   approveKnock,
   denyKnock,
   clipMoment,
+  getVideoChatStatus,
+  getHangoutGroups,
   type CommunityRoomInfo,
   type StagePermissions,
   type StageState,
+  type HangoutGroup,
 } from "@/lib/api";
 import { UpcomingEvents } from "@/components/events";
+
+function getTelegramDeepLink(inviteLink: string): string {
+  const match = inviteLink.match(/t\.me\/\+(.+)/);
+  return match ? `tg://join?invite=${match[1]}` : inviteLink;
+}
 
 export default function MainStage() {
   const { user, isAuthenticated } = useAuth();
@@ -42,6 +50,8 @@ export default function MainStage() {
   const [clipCaption, setClipCaption] = useState('');
   const [clipLoading, setClipLoading] = useState(false);
   const [knockQueue, setKnockQueue] = useState<Array<{ userId: string; displayName: string }>>([]);
+  const [mainGroup, setMainGroup] = useState<HangoutGroup | null>(null);
+  const [telegramCallActive, setTelegramCallActive] = useState(false);
 
   useEffect(() => {
     getCommunityRoomOccupancy()
@@ -56,14 +66,35 @@ export default function MainStage() {
     getStageState()
       .then((res) => { if (res.stageState) setStageState(res.stageState); })
       .catch(() => {});
+
+    // Fetch main hangout group (for Telegram call link)
+    getHangoutGroups()
+      .then((res) => {
+        const main = (res.groups || []).find((g: HangoutGroup) => g.isMain);
+        if (main) setMainGroup(main);
+      })
+      .catch(() => {});
   }, []);
+
+  // Poll Telegram video chat status for main group
+  useEffect(() => {
+    if (!mainGroup?.telegramChatId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await getVideoChatStatus(mainGroup.id);
+        if (!cancelled) setTelegramCallActive(res.active);
+      } catch { /* silent */ }
+    };
+    poll();
+    const interval = setInterval(poll, telegramCallActive ? 15000 : 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [mainGroup?.id, mainGroup?.telegramChatId, telegramCallActive]);
 
   const handleJoinClick = () => {
     if (!user) return;
     setShowPermGate(true);
   };
-
-  const ALLOWED_CALL_ORIGINS = ["https://telegram.org/", "https://t.me/"];
 
   const handlePermGranted = useCallback(async () => {
     setShowPermGate(false);
@@ -71,60 +102,32 @@ export default function MainStage() {
     setLoading(true);
     setError("");
     try {
-      const displayName =
-        user.firstName ||
-        user.displayName ||
-        user.username ||
-        "Guest";
-      const res = await joinCommunityRoom(displayName);
-      const src = res.meetingUrl;
-
-      const isValidOrigin = ALLOWED_CALL_ORIGINS.some((prefix) =>
-        src?.startsWith(prefix)
-      );
-      if (!src || !isValidOrigin) {
-        setError("Video room is temporarily unavailable. Please try again.");
+      // Open Telegram group for video calls
+      const tgLink = mainGroup?.telegramInviteLink;
+      if (!tgLink) {
+        setError("No Telegram group linked to Main Stage. Contact admin.");
         return;
       }
+      // Open Telegram deep link
+      window.open(getTelegramDeepLink(tgLink), "_blank");
 
-      setRoomInfo(res);
-      setIframeSrc(src);
-      setPermissions(res.permissions ?? null);
-      setStageState(res.stageState ?? null);
-      setJoined(true);
-
-      // Connect to socket and listen for mainstage events
+      // Also join socket room for stage events
       const socket = getSocket();
       if (socket) {
         socket.emit('mainstage:join');
         socket.on('mainstage:mode-changed', (data: { mode: string; master: any }) => {
           setStageState({ mode: data.mode as StageState['mode'], master: data.master });
         });
-        socket.on('mainstage:knock:approved', () => {
-          setKnockStatus('approved');
-        });
-        socket.on('mainstage:knock:denied', () => {
-          setKnockStatus('denied');
-          setTimeout(() => setKnockStatus('idle'), 3000);
-        });
-        socket.on('mainstage:knock:new', (data: { userId: string; displayName: string }) => {
-          setKnockQueue(prev => [...prev, data]);
-        });
-        socket.on('mainstage:knock:resolved', (data: { targetUserId: string }) => {
-          setKnockQueue(prev => prev.filter(k => k.userId !== data.targetUserId));
-        });
-        socket.on('mainstage:clip-dropped', () => {
-          // Notification can be added here if needed
-        });
       }
+
+      setJoined(true);
+      setIframeSrc("telegram"); // flag that we're in Telegram mode
     } catch (e: unknown) {
-      const message =
-        e instanceof Error ? e.message : "Failed to join room";
-      setError(message);
+      setError(e instanceof Error ? e.message : "Failed to join room");
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, mainGroup]);
 
   const handleLeave = () => {
     // Clean up socket listeners
@@ -164,139 +167,73 @@ export default function MainStage() {
           <title>Main Stage | PNPtv</title>
         </Helmet>
 
-        {/* Center: header + Jitsi */}
+        {/* Center: Telegram video call view */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Header bar */}
-          <div className="flex items-center justify-between px-4 py-2 bg-[#1C1C1E] border-b border-white/5 flex-shrink-0 gap-2 flex-wrap">
-            <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center justify-between px-4 py-2 bg-[#1C1C1E] border-b border-white/5 flex-shrink-0 gap-2">
+            <div className="flex items-center gap-3">
               <svg className="w-5 h-5 text-pnp-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
               <div>
-                <h2 className="text-pnp-textPrimary font-bold text-base leading-tight">
-                  Main Stage
-                </h2>
-                {roomInfo && (
-                  <p className="text-pnp-textSecondary text-xs">
-                    {roomInfo.room.description}
-                  </p>
-                )}
+                <h2 className="text-pnp-textPrimary font-bold text-base leading-tight">Main Stage</h2>
+                <p className="text-pnp-textSecondary text-xs">Video calls via Telegram</p>
               </div>
-
-              {/* DJ Live banner */}
-              {stageState?.mode === 'dj-live' && stageState.master && (
-                <div className="flex items-center gap-2 px-3 py-1 bg-red-500/20 border border-red-500/40 rounded-full">
-                  <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                  <span className="text-red-400 text-xs font-medium">
-                    DJ {stageState.master.displayName} LIVE
-                  </span>
+              {telegramCallActive && (
+                <div className="flex items-center gap-2 px-3 py-1 bg-green-500/20 border border-green-500/40 rounded-full">
+                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                  <span className="text-green-400 text-xs font-medium">LIVE</span>
                 </div>
               )}
-
-              {/* Admin: stage mode selector + knock queue */}
-              {permissions?.isModerator && (
-                <>
-                  <select
-                    value={stageState?.mode || 'ambient'}
-                    onChange={async (e) => {
-                      const mode = e.target.value;
-                      try {
-                        await apiSetStageMode(mode);
-                        setStageState(prev => prev
-                          ? {
-                              ...prev,
-                              mode: mode as StageState['mode'],
-                              master: mode === 'dj-live'
-                                ? {
-                                    userId: user!.id,
-                                    displayName: user!.firstName || user!.username || 'DJ',
-                                    startedAt: Date.now(),
-                                  }
-                                : null,
-                            }
-                          : null
-                        );
-                      } catch {}
-                    }}
-                    className="px-2 py-1 bg-[#2C2C2E] border border-white/10 rounded text-white text-sm"
-                  >
-                    <option value="ambient">Ambient</option>
-                    <option value="dj-live">DJ Live</option>
-                    <option value="community">Community</option>
-                  </select>
-
-                  {knockQueue.length > 0 && (
-                    <div className="flex items-center gap-1 flex-wrap">
-                      <span className="text-yellow-400 text-xs font-medium">
-                        {knockQueue.length} knock{knockQueue.length > 1 ? 's' : ''}
-                      </span>
-                      {knockQueue.map((k) => (
-                        <div
-                          key={k.userId}
-                          className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-full px-2 py-0.5"
-                        >
-                          <span className="text-xs text-yellow-300">{k.displayName}</span>
-                          <button
-                            onClick={() => approveKnock(k.userId).catch(() => {})}
-                            className="text-green-400 hover:text-green-300 text-xs font-bold"
-                          >
-                            ✓
-                          </button>
-                          <button
-                            onClick={() => denyKnock(k.userId).catch(() => {})}
-                            className="text-red-400 hover:text-red-300 text-xs font-bold"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
             </div>
-
-            <div className="flex items-center gap-2">
-              {/* Clip button for Prime/Admin users */}
-              {permissions?.canClipMoment && (
-                <Button variant="secondary" size="sm" onClick={() => setShowClipModal(true)}>
-                  Clip
-                </Button>
-              )}
-              <Button variant="secondary" size="sm" onClick={handleLeave}>
-                Leave Room
-              </Button>
-            </div>
+            <Button variant="secondary" size="sm" onClick={handleLeave}>
+              Back
+            </Button>
           </div>
 
-          {/* Telegram video call area */}
+          {/* Telegram call area */}
           <div className="flex-1 w-full relative flex flex-col items-center justify-center gap-4 p-8 bg-pnp-background">
-            <div className="flex flex-col items-center gap-3 max-w-xs text-center">
-              <div className="w-16 h-16 rounded-full flex items-center justify-center bg-pnp-accent/10">
-                <svg className="w-8 h-8 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-              </div>
-              <h3 className="text-pnp-textPrimary font-bold text-lg">Video Call on Telegram</h3>
-              <p className="text-pnp-textSecondary text-sm">
-                Main Stage video calls happen in the PNPtv Telegram group. Open Telegram to join the live call.
-              </p>
-              <a
-                href={roomInfo?.telegramUrl || "https://t.me/pnptvapp"}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
-                style={{ background: "linear-gradient(135deg, #5ED1C4, #00D4E8)" }}
-              >
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+            <div className="flex flex-col items-center gap-4 max-w-sm text-center">
+              <div className="w-20 h-20 rounded-full flex items-center justify-center" style={{ background: "rgba(41,168,226,0.15)" }}>
+                <svg className="w-10 h-10" viewBox="0 0 24 24" fill="#29A8E2">
                   <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z"/>
                 </svg>
-                Open in Telegram
-              </a>
+              </div>
+
+              {telegramCallActive ? (
+                <>
+                  <h3 className="text-pnp-textPrimary font-bold text-lg">Call is Live!</h3>
+                  <p className="text-pnp-textSecondary text-sm">
+                    A video call is happening right now in the PNPtv Telegram group. Tap below to join.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-pnp-textPrimary font-bold text-lg">Main Stage on Telegram</h3>
+                  <p className="text-pnp-textSecondary text-sm">
+                    Open the PNPtv Telegram group and tap the video icon to start or join a call.
+                  </p>
+                </>
+              )}
+
+              {mainGroup?.telegramInviteLink && (
+                <a
+                  href={getTelegramDeepLink(mainGroup.telegramInviteLink)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white text-sm transition-all active:scale-95"
+                  style={{ background: telegramCallActive ? "#34C759" : "linear-gradient(135deg, #29A8E2, #0088CC)" }}
+                >
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z"/>
+                  </svg>
+                  {telegramCallActive ? "Join Live Call" : "Open in Telegram"}
+                </a>
+              )}
             </div>
 
             {/* Knock-to-speak overlay buttons */}
-            {permissions?.canKnockToSpeak && knockStatus === 'idle' && (
+            {knockStatus === 'idle' && isMember && !isPrime && !isAdmin && (
               <button
                 onClick={async () => {
                   setKnockStatus('pending');
@@ -579,13 +516,38 @@ export default function MainStage() {
             </p>
           )}
 
+          {/* Active Telegram call banner */}
+          {telegramCallActive && mainGroup?.telegramInviteLink && (
+            <div
+              className="flex items-center gap-3 px-4 py-2.5 rounded-xl"
+              style={{ background: "rgba(52,199,89,0.12)", border: "1px solid rgba(52,199,89,0.2)" }}
+            >
+              <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-400" />
+              </span>
+              <p className="flex-1 text-xs font-medium" style={{ color: "#34C759" }}>
+                Video call is live in Telegram
+              </p>
+              <a
+                href={getTelegramDeepLink(mainGroup.telegramInviteLink)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-bold px-3 py-1 rounded-lg transition-all hover:opacity-90 active:scale-95 flex-shrink-0"
+                style={{ background: "#34C759", color: "#fff" }}
+              >
+                Join
+              </a>
+            </div>
+          )}
+
           {isAuthenticated ? (
             <Button
               onClick={handleJoinClick}
               disabled={loading}
               className="w-full"
             >
-              {loading ? "Connecting..." : occupancy > 0 ? `Join ${occupancy} on Main Stage` : "Join Main Stage"}
+              {loading ? "Opening Telegram..." : telegramCallActive ? "Join Live Call on Telegram" : occupancy > 0 ? `Join ${occupancy} on Main Stage` : "Open Main Stage on Telegram"}
             </Button>
           ) : (
             <p className="text-pnp-textSecondary text-sm text-center py-2">

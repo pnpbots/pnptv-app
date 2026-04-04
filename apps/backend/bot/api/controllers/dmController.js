@@ -71,7 +71,7 @@ const getPartnerInfo = async (req, res) => {
   const partnerId = await resolveUserId(req.params.partnerId);
   try {
     const { rows } = await query(
-      `SELECT id, username, first_name, last_name, photo_file_id, pnptv_id FROM users WHERE id=$1`,
+      `SELECT id, telegram, username, first_name, last_name, photo_file_id, pnptv_id FROM users WHERE id=$1`,
       [partnerId]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
