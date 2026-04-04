@@ -1211,7 +1211,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       isAdmin;
 
     return (
-      <div className="fixed inset-x-0 top-0 lg:left-72 flex flex-col bg-pnp-background z-[30] chat-overlay-safe">
+      <div className="fixed inset-x-0 lg:left-72 flex flex-col bg-pnp-background z-[30] chat-overlay-safe overflow-hidden">
         {/* Chat header — clean two-section layout: left (nav+info) / right (actions) */}
         <div className="flex items-center px-1.5 sm:px-3 py-1.5 sm:py-2 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
           {/* Left: back + avatar + info */}
