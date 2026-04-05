@@ -176,29 +176,39 @@ function groupBehaviorMiddleware() {
     const chatId = ctx.chat?.id;
     const chatIdStr = chatId?.toString();
 
-    // Only apply to configured group
-    if (!isGroup || (GROUP_ID && chatIdStr !== GROUP_ID)) {
-      return next();
-    }
+    if (!isGroup) return next();
 
     const messageText = ctx.message?.text || '';
     if (CRISTINA_INVOCATION_REGEX.test(messageText)) {
       return next();
     }
 
-    // Store original sendMessage function for private messages
-    const originalSendMessage = ctx.telegram.sendMessage.bind(ctx.telegram);
-
-    // Check if user is admin (admins' messages not redirected)
     const userId = ctx.from?.id;
     const isAdmin = userId && (
       PermissionService.isEnvSuperAdmin(userId) ||
       PermissionService.isEnvAdmin(userId)
     );
+    const incomingText = messageText.toLowerCase();
+    const isCommand = incomingText.startsWith('/');
+    const botUsername = ctx.botInfo?.username || 'PNPLatinoTV_bot';
+    const userLang = ctx.session?.language || ctx.from?.language_code || 'en';
+    const displayName = ctx.from?.username || ctx.from?.first_name || 'friend';
+
+    // ── Check if this group is linked to a hangout ──────────────────────────
+    const linkedHangout = await getLinkedHangout(chatId);
+
+    // For groups that are neither GROUP_ID nor a linked hangout group, skip entirely
+    const isMainGroup = GROUP_ID && chatIdStr === GROUP_ID;
+    if (!isMainGroup && !linkedHangout) {
+      return next();
+    }
+
+    // Store original sendMessage for private fallback
+    const originalSendMessage = ctx.telegram.sendMessage.bind(ctx.telegram);
 
     // Admins can use bot normally in group, but still delete their commands
     if (isAdmin) {
-      if (messageText.startsWith('/') && ctx.message?.message_id) {
+      if (isCommand && ctx.message?.message_id) {
         try {
           await ctx.deleteMessage();
         } catch (e) {
@@ -213,15 +223,6 @@ function groupBehaviorMiddleware() {
       }
       return next();
     }
-
-    const incomingText = (ctx.message?.text || '').toLowerCase();
-    const isCommand = incomingText.startsWith('/');
-    const botUsername = ctx.botInfo?.username || 'PNPLatinoTV_bot';
-    const userLang = ctx.session?.language || ctx.from?.language_code || 'en';
-    const displayName = ctx.from?.username || ctx.from?.first_name || 'friend';
-
-    // ── Check if this group is linked to a hangout ──────────────────────────
-    const linkedHangout = await getLinkedHangout(chatId);
 
     if (linkedHangout) {
       // ── GROUP IS LINKED TO A HANGOUT ──────────────────────────────────────

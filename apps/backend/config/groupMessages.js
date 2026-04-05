@@ -49,7 +49,7 @@ const getHangoutChatRedirectMessage = ({ username, lang, hangoutId = null, hango
     : 'https://app.pnptv.app';
 
   const hangoutUrl = hangoutId
-    ? `${appUrl}/chat?group=${hangoutId}`
+    ? `${appUrl}/chat/${hangoutId}`
     : `${appUrl}/?view=hangouts`;
 
   const groupLabel = hangoutName ? ` *${hangoutName}*` : '';
@@ -76,7 +76,7 @@ const getHangoutCommandRedirectMessage = ({ lang, hangoutId = null, hangoutName 
     : 'https://app.pnptv.app';
 
   const hangoutUrl = hangoutId
-    ? `${appUrl}/chat?group=${hangoutId}`
+    ? `${appUrl}/chat/${hangoutId}`
     : `${appUrl}/?view=hangouts`;
 
   const groupLabel = hangoutName ? ` *${hangoutName}*` : '';
