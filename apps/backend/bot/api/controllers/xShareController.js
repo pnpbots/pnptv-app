@@ -226,14 +226,31 @@ const getXStatus = async (req, res) => {
 
   try {
     const { rows } = await query(
-      'SELECT x_username, x_user_id, x_oauth_scopes FROM users WHERE id = $1',
+      `SELECT x_username, x_user_id, x_oauth_scopes, x_access_token_encrypted,
+              twitter, x_id
+       FROM users WHERE id = $1`,
       [sessionUser.id],
       { cache: false }
     );
 
     const user = rows[0];
-    if (!user || !user.x_user_id) {
+    // Not linked at all (neither new nor legacy columns)
+    if (!user || (!user.x_user_id && !user.x_id && !user.twitter)) {
       return res.json({ success: true, status: { linked: false, hasWriteScope: false, handle: null } });
+    }
+
+    // Linked but token not saved yet (legacy users who connected before migration 125
+    // or before token-save code was deployed) — prompt reconnect
+    if (!user.x_access_token_encrypted) {
+      return res.json({
+        success: true,
+        status: {
+          linked: true,
+          hasWriteScope: false,
+          handle: user.x_username || user.twitter || null,
+          scopesUnknown: true,
+        },
+      });
     }
 
     const write = hasWriteScope(user.x_oauth_scopes);
@@ -243,8 +260,7 @@ const getXStatus = async (req, res) => {
       status: {
         linked: true,
         hasWriteScope: write,
-        handle: user.x_username || null,
-        // Null scopes means legacy connection before migration 125 — tell UI to reconnect
+        handle: user.x_username || user.twitter || null,
         scopesUnknown: user.x_oauth_scopes === null,
       },
     });
@@ -366,7 +382,8 @@ const shareToX = async (req, res) => {
     let accessToken;
     try {
       const expiresAt = dbUser.x_token_expires_at ? new Date(dbUser.x_token_expires_at) : null;
-      const isExpired = expiresAt && (expiresAt.getTime() - Date.now() <= X_TOKEN_EXPIRY_BUFFER_MS);
+      // Treat missing expiry as expired so we attempt a refresh (safer than using a potentially stale token)
+      const isExpired = !expiresAt || (expiresAt.getTime() - Date.now() <= X_TOKEN_EXPIRY_BUFFER_MS);
 
       if (isExpired) {
         if (!dbUser.x_refresh_token_encrypted) {

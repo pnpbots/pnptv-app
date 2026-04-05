@@ -1536,7 +1536,7 @@ const xLoginCallback = async (req, res) => {
       ? new Date(Date.now() + tokenRes.data.expires_in * 1000)
       : new Date(Date.now() + 7200 * 1000);
     const scopesLogin = tokenRes.data.scope || null;
-    query(
+    await query(
       `UPDATE users
        SET x_username                = $1,
            x_user_id                 = COALESCE(x_user_id, $2),

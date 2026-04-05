@@ -1,9 +1,21 @@
 const XOAuthService = require('../../services/xOAuthService');
 const logger = require('../../../utils/logger');
 const axios = require('axios');
+const crypto = require('crypto');
 const { query } = require('../../../config/postgres');
 const { enforceDefaultFollows } = require('../../services/followService');
 const { v4: uuidv4 } = require('uuid');
+
+function encryptToken(plaintext) {
+  const raw = process.env.ENCRYPTION_KEY;
+  if (!raw || !/^[0-9a-fA-F]{64}$/.test(raw)) throw new Error('ENCRYPTION_KEY misconfigured');
+  const key = Buffer.from(raw, 'hex');
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  let enc = cipher.update(plaintext, 'utf8', 'hex');
+  enc += cipher.final('hex');
+  return JSON.stringify({ data: enc, iv: iv.toString('hex'), authTag: cipher.getAuthTag().toString('hex') });
+}
 
 const sanitizeBotUsername = (value) => String(value || '').replace(/^@/, '').trim();
 
@@ -286,6 +298,31 @@ const handleCallback = async (req, res) => {
       }
 
       enforceDefaultFollows(user.id).catch(() => {});
+
+      // Save encrypted tokens + scopes so share-to-X works immediately
+      try {
+        const encAccess = encryptToken(accessToken);
+        const rawRefresh = tokenRes.data.refresh_token || null;
+        const encRefresh = rawRefresh ? encryptToken(rawRefresh) : null;
+        const expiresIn = tokenRes.data.expires_in || 7200;
+        const expiresAt = new Date(Date.now() + expiresIn * 1000);
+        const scopes = tokenRes.data.scope || null;
+        await query(
+          `UPDATE users
+           SET x_user_id                  = COALESCE(x_user_id, $1),
+               x_username                 = $2,
+               x_access_token_encrypted   = $3,
+               x_refresh_token_encrypted  = COALESCE($4, x_refresh_token_encrypted),
+               x_token_expires_at         = $5,
+               x_oauth_scopes             = COALESCE($6, x_oauth_scopes),
+               updated_at                 = NOW()
+           WHERE id = $7`,
+          [xId, xHandle, encAccess, encRefresh, expiresAt, scopes, user.id]
+        );
+        logger.info(`[X OAuth] Saved encrypted tokens for user ${user.id} (@${xHandle}), scopes: ${scopes}`);
+      } catch (tokenSaveErr) {
+        logger.error('[X OAuth] Failed to save X tokens (non-fatal for login):', tokenSaveErr.message);
+      }
 
       // Build complete session matching webAppController.buildSession
       req.session.user = {
