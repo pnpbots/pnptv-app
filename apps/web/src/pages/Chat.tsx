@@ -97,7 +97,9 @@ function HangoutChatPanel({
   groupMembers: any[];
 }) {
   const { user } = useAuth();
-  const myId = user?.dbId ?? user?.id ?? "";
+  // Only use dbId (Telegram numeric ID) — user.id is the Authentik UUID and will
+  // never match msg.user_id which is always a Telegram ID.
+  const myId = user?.dbId ?? "";
   const groupId = activeGroup.id;
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -629,7 +631,7 @@ function HangoutChatPanel({
       {showScrollFab && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-20 right-3 w-10 h-10 rounded-full bg-pnp-surface border border-pnp-border shadow-lg flex items-center justify-center hover:bg-white/15 active:scale-90 transition-all z-10"
+          className="absolute bottom-24 right-3 w-10 h-10 rounded-full bg-pnp-surface border border-pnp-border shadow-lg flex items-center justify-center hover:bg-white/15 active:scale-90 transition-all z-20"
           aria-label="Scroll to bottom"
         >
           <svg className="w-5 h-5 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -655,8 +657,8 @@ function HangoutChatPanel({
             style={{
               background: "#2C2C2E",
               border: "1px solid rgba(255,255,255,0.1)",
-              left: Math.min(contextMenu.x, window.innerWidth - 180),
-              top: Math.min(contextMenu.y, window.innerHeight - 280),
+              left: Math.min(contextMenu.x, window.innerWidth - 192),
+              top: Math.min(contextMenu.y, window.innerHeight - 320),
             }}
           >
             {/* Quick reactions in context menu */}
@@ -925,6 +927,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
   // Discover groups
   const [discoverList, setDiscoverList] = useState<DiscoverGroup[]>([]);
+  const [discoverQuery, setDiscoverQuery] = useState("");
   const [showDiscover, setShowDiscover] = useState(false);
   const [discoverLoading, setDiscoverLoading] = useState(false);
   const [discoverTagFilter, setDiscoverTagFilter] = useState<string | null>(null);
@@ -988,7 +991,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [memberActionLoading, setMemberActionLoading] = useState<string | null>(null);
   const [memberActionMenu, setMemberActionMenu] = useState<string | null>(null);
 
-  const [showGroupSettings, setShowGroupSettings] = useState(false);
+  // showGroupSettings was dead state — panel uses showSettings instead
   const [settingsMembers, setSettingsMembers] = useState<GroupMember[]>([]);
   const [settingsMembersLoading, setSettingsMembersLoading] = useState(false);
   const [settingsName, setSettingsName] = useState("");
@@ -1068,8 +1071,16 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // We still do one fetch on mount to restore state if a call was already active.
 
   useEffect(() => {
+    // Always reset all call state when switching groups
+    setTelegramCallActive(false);
+    setCallStartTime(null);
+    setCallStartedBy(null);
+    setCallParticipantCount(0);
+    setCallInviteLink(null);
+    setCallPanelDismissed(false);
+    setCallDuration("0:00");
+
     if (!activeGroup?.id || !activeGroup.telegramChatId) {
-      setTelegramCallActive(false);
       return;
     }
     let cancelled = false;
@@ -1079,7 +1090,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         setTelegramCallActive(res.active);
         if (res.active) {
           // We don't know start time from poll; set to now as approximation
-          setCallStartTime((prev) => prev ?? new Date());
+          setCallStartTime(new Date());
+          setCallPanelDismissed(false);
           if (res.inviteLink) setCallInviteLink(res.inviteLink);
         }
       })
@@ -1108,6 +1120,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setCallStartTime(null);
       setCallStartedBy(null);
       setCallParticipantCount(0);
+      setCallInviteLink(null);
       setCallDuration("0:00");
     };
 
@@ -1305,7 +1318,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     navigate("/chat", { replace: true });
     setActiveGroup(null);
     setShowOnline(false);
-    setShowGroupSettings(false);
+    setShowSettings(false);
     loadGroups();
   };
 
@@ -1318,7 +1331,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     setSettingsError(null);
     setSettingsSuccess(false);
     setShowGroupMenu(false);
-    setShowGroupSettings(true);
     setSettingsMembersLoading(true);
     try {
       const data = await getHangoutGroup(group.id);
@@ -1483,7 +1495,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       isAdmin;
 
     return (
-      <div className="fixed inset-x-0 lg:left-72 flex flex-col bg-pnp-background z-[30] chat-overlay-safe overflow-hidden">
+      <div className="fixed inset-0 lg:left-72 flex flex-col bg-pnp-background z-[30] overflow-hidden chat-overlay-safe">
         {/* Chat header — clean two-section layout: left (nav+info) / right (actions) */}
         <div className="flex items-center px-1.5 sm:px-3 py-1.5 sm:py-2 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
           {/* Left: back + avatar + info */}
@@ -1938,11 +1950,11 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               </div>
               <div className="flex items-center justify-between px-5 pt-2 pb-3 flex-shrink-0">
                 <p className="text-sm font-semibold text-white">Group Settings</p>
-                <button onClick={() => setShowSettings(false)} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10" style={{ color: "#8E8E93" }}>
+                <button onClick={() => setShowSettings(false)} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10" style={{ color: "#8E8E93" }} aria-label="Close settings">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
-              <div className="overflow-y-auto flex-1 px-5 pb-6 pb-safe space-y-4">
+              <div className="overflow-y-auto flex-1 px-5 pb-safe space-y-4" style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }}>
                 {settingsLoading ? (
                   <div className="py-8 text-center text-pnp-textSecondary text-sm">Loading...</div>
                 ) : (
@@ -2385,6 +2397,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         ) : (
           /* Hangout chat panel (PostgreSQL + Socket.IO) */
           <HangoutChatPanel
+            key={activeGroup.id}
             activeGroup={activeGroup}
             isOwnerOrMod={isOwnerOrMod}
             groupMembers={groupMembers}
@@ -2424,7 +2437,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   className="flex-1 py-3 rounded-xl text-sm font-semibold text-white active:scale-98 transition-all disabled:opacity-50"
                   style={{ background: confirmAction.isDanger ? "#C0392B" : "linear-gradient(135deg, #D4007A, #E69138)" }}
                 >
-                  {confirmLoading ? "..." : confirmAction.title}
+                  {confirmLoading ? "Processing…" : confirmAction.title}
                 </button>
               </div>
             </div>
@@ -2862,10 +2875,13 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         /* Group list */
         <div className="space-y-2">
           {groups.map((group) => (
-            <button
+            <div
               key={group.id}
               onClick={() => openChat(group)}
-              className="w-full glass-card-sm p-3 sm:p-4 text-left hover:border-white/20 active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openChat(group); } }}
+              className="w-full glass-card-sm p-3 sm:p-4 text-left hover:border-white/20 active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent cursor-pointer"
             >
               <div className="flex gap-3 items-center">
                 {/* Group avatar */}
@@ -3004,7 +3020,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     <div className="relative" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => setGroupCardMenuId(groupCardMenuId === group.id ? null : group.id)}
-                        className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all"
+                        className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all"
                         aria-label="Group options"
                       >
                         <svg className="w-4 h-4 text-pnp-textSecondary" fill="currentColor" viewBox="0 0 24 24">
@@ -3047,7 +3063,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   </svg>
                 </div>
               </div>
-            </button>
+            </div>
           ))}
         </div>
       )}
@@ -3059,6 +3075,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             const next = !showDiscover;
             setShowDiscover(next);
             if (next && discoverList.length === 0) loadDiscover();
+            if (!next) { setDiscoverQuery(""); setDiscoverTagFilter(null); }
           }}
           className="flex items-center gap-2 mb-3 group"
           aria-expanded={showDiscover}
@@ -3105,16 +3122,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                 <div className="mb-3">
                   <input
                     type="text"
+                    value={discoverQuery}
                     placeholder="Search groups by name..."
                     className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 transition-colors"
-                    onChange={(e) => {
-                      const q = e.target.value.toLowerCase();
-                      if (!q) { loadDiscover(); return; }
-                      setDiscoverList((prev) => prev.filter((g) =>
-                        g.name.toLowerCase().includes(q) ||
-                        (g.description || "").toLowerCase().includes(q)
-                      ));
-                    }}
+                    onChange={(e) => setDiscoverQuery(e.target.value)}
                   />
                 </div>
                 {/* Tag filter row */}
@@ -3134,7 +3145,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   ))}
                 </div>
                 {discoverList
-                  .filter((g) => !discoverTagFilter || (g.tags || []).includes(discoverTagFilter))
+                  .filter((g) => {
+                    const q = discoverQuery.toLowerCase();
+                    const matchesQuery = !q || g.name.toLowerCase().includes(q) || (g.description || "").toLowerCase().includes(q);
+                    const matchesTag = !discoverTagFilter || (g.tags || []).includes(discoverTagFilter);
+                    return matchesQuery && matchesTag;
+                  })
                   .map((group) => (
                     <div key={group.id} className="glass-card-sm p-4">
                       <div className="flex gap-3 items-center">
@@ -3371,7 +3387,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                 className="flex-1 py-3 rounded-xl text-sm font-semibold text-white active:scale-98 transition-all disabled:opacity-50"
                 style={{ background: confirmAction.isDanger ? "#C0392B" : "linear-gradient(135deg, #D4007A, #E69138)" }}
               >
-                {confirmLoading ? "..." : confirmAction.title}
+                {confirmLoading ? "Processing…" : confirmAction.title}
               </button>
             </div>
           </div>

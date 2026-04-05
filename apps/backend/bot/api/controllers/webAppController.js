@@ -34,6 +34,19 @@ function redirectToCanonicalApp(res) {
   return res.redirect('https://pnptv.app');
 }
 
+// AES-256-GCM token encryption — matches xShareController.js
+function encryptXToken(plaintext) {
+  const raw = process.env.ENCRYPTION_KEY;
+  if (!raw || !/^[0-9a-fA-F]{64}$/.test(raw)) return null;
+  const key = Buffer.from(raw, 'hex');
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  let encrypted = cipher.update(plaintext, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag().toString('hex');
+  return JSON.stringify({ data: encrypted, iv: iv.toString('hex'), authTag });
+}
+
 function redirectToCanonicalAuthError(res) {
   return res.redirect('https://pnptv.app/?error=auth_failed');
 }
@@ -1447,9 +1460,27 @@ const xLoginCallback = async (req, res) => {
         );
       }
 
+      // Save handle, ID, and OAuth tokens to the correct columns
+      const encAccessLink = encryptXToken(tokenRes.data.access_token);
+      const encRefreshLink = tokenRes.data.refresh_token ? encryptXToken(tokenRes.data.refresh_token) : null;
+      const expiresAtLink = tokenRes.data.expires_in
+        ? new Date(Date.now() + tokenRes.data.expires_in * 1000)
+        : new Date(Date.now() + 7200 * 1000);
+      const scopesLink = tokenRes.data.scope || null;
+
       await query(
-        `UPDATE users SET twitter = $1, x_id = COALESCE(x_id, $2), updated_at = NOW() WHERE id = $3`,
-        [xHandle, xId, existingId]
+        `UPDATE users
+         SET twitter                   = $1,
+             x_id                      = COALESCE(x_id, $2),
+             x_username                = $1,
+             x_user_id                 = COALESCE(x_user_id, $2),
+             x_access_token_encrypted  = $3,
+             x_refresh_token_encrypted = COALESCE($4, x_refresh_token_encrypted),
+             x_token_expires_at        = $5,
+             x_oauth_scopes            = COALESCE($6, x_oauth_scopes),
+             updated_at                = NOW()
+         WHERE id = $7`,
+        [xHandle, xId, encAccessLink, encRefreshLink, expiresAtLink, scopesLink, existingId]
       );
       // Persist Authentik UUID if available
       if (pnptvId) {
@@ -1498,7 +1529,27 @@ const xLoginCallback = async (req, res) => {
       logger.info(`Existing user login via X: ${user.id} (@${xHandle})`);
     }
 
-    query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'x', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
+    // Save OAuth tokens to the correct columns
+    const encAccessLogin = encryptXToken(tokenRes.data.access_token);
+    const encRefreshLogin = tokenRes.data.refresh_token ? encryptXToken(tokenRes.data.refresh_token) : null;
+    const expiresAtLogin = tokenRes.data.expires_in
+      ? new Date(Date.now() + tokenRes.data.expires_in * 1000)
+      : new Date(Date.now() + 7200 * 1000);
+    const scopesLogin = tokenRes.data.scope || null;
+    query(
+      `UPDATE users
+       SET x_username                = $1,
+           x_user_id                 = COALESCE(x_user_id, $2),
+           x_access_token_encrypted  = $3,
+           x_refresh_token_encrypted = COALESCE($4, x_refresh_token_encrypted),
+           x_token_expires_at        = $5,
+           x_oauth_scopes            = COALESCE($6, x_oauth_scopes),
+           last_login_at             = NOW(),
+           last_login_method         = 'x',
+           updated_at                = NOW()
+       WHERE id = $7`,
+      [xHandle, xId, encAccessLogin, encRefreshLogin, expiresAtLogin, scopesLogin, user.id]
+    ).catch(err => logger.error('[XLogin] Failed to save X tokens:', err.message));
     const xLoginSessionData = buildSession(user, { xHandle, last_login_method: 'x' });
     await new Promise((resolve, reject) =>
       req.session.regenerate(err => (err ? reject(err) : resolve()))
