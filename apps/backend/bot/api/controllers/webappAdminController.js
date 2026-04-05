@@ -95,7 +95,8 @@ const listUsers = async (req, res) => {
 
     let countQuery = 'SELECT COUNT(*) as count FROM users WHERE is_active = true';
     let dataQuery = `SELECT id, username, email, first_name, last_name, role, tier,
-                            subscription_status, plan_id AS subscription_plan, plan_expiry, created_at
+                            subscription_status, plan_id AS subscription_plan, plan_expiry, created_at,
+                            last_login_at, last_login_method, last_active
                      FROM users WHERE is_active = true`;
     const params = [];
     const countParams = [];
@@ -187,7 +188,9 @@ const getUser = async (req, res) => {
     const result = await query(
       `SELECT id, username, email, first_name, last_name, bio, role, tier,
               subscription_status, plan_id AS subscription_plan, plan_expiry, created_at,
-              last_payment_date,
+              last_payment_date, last_payment_method, last_payment_amount,
+              last_login_at, last_login_method, last_active,
+              telegram, twitter, x_username, pnptv_id, language, location_name,
               creator_status, creator_type, creator_price_usd, live_channel
          FROM users WHERE id = $1`,
       [userId]
@@ -1742,6 +1745,42 @@ const revokeCreator = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/webapp/admin/users/:id/payments
+ * Get paginated payment history for a specific user
+ */
+const getUserPayments = async (req, res) => {
+  try {
+    const { id: userId } = req.params;
+    const page = Math.max(1, parseInt(req.query.page || '1'));
+    const limit = 20;
+    const offset = (page - 1) * limit;
+
+    const [countResult, dataResult] = await Promise.all([
+      query('SELECT COUNT(*) as count FROM payment_history WHERE user_id = $1', [userId]),
+      query(
+        `SELECT id, payment_method, amount, currency, plan_id, plan_name, product,
+                payment_reference, provider_transaction_id, status, payment_date, metadata
+         FROM payment_history
+         WHERE user_id = $1
+         ORDER BY payment_date DESC
+         LIMIT $2 OFFSET $3`,
+        [userId, limit, offset]
+      ),
+    ]);
+
+    const total = parseInt(countResult.rows[0]?.count || 0);
+    return res.json({
+      success: true,
+      payments: dataResult.rows,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    logger.error('Error getting user payments:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   getStats,
   getDemographics,
@@ -1779,4 +1818,6 @@ module.exports = {
   // Creator / Live Performer promotion
   makeCreator,
   revokeCreator,
+  // User payment history
+  getUserPayments,
 };

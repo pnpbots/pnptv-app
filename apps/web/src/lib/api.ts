@@ -3386,12 +3386,38 @@ export interface AdminUser {
   plan_expiry?: string;
   created_at: string;
   last_payment_date?: string;
+  last_payment_method?: string;
+  last_payment_amount?: number;
+  last_login_at?: string;
+  last_login_method?: string;
+  last_active?: string;
+  telegram?: string;
+  twitter?: string;
+  x_username?: string;
+  pnptv_id?: string;
+  language?: string;
+  location_name?: string;
   phone_number?: string;
   // Creator / Live Performer fields
   creator_status?: string;
   creator_type?: string;
   creator_price_usd?: number;
   live_channel?: string;
+}
+
+export interface AdminPayment {
+  id: string;
+  payment_method: string;
+  amount: number;
+  currency: string;
+  plan_id?: string;
+  plan_name?: string;
+  product?: string;
+  payment_reference: string;
+  provider_transaction_id?: string;
+  status: string;
+  payment_date: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface PlanAddOnEntry {
@@ -3541,6 +3567,13 @@ export function bulkUpdateMemberships(
     method: "POST",
     body: { userIds, action, planId, expiry },
   });
+}
+
+export function getAdminUserPayments(
+  id: string,
+  page = 1
+): Promise<{ success: boolean; payments: AdminPayment[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
+  return request(`/api/webapp/admin/users/${id}/payments?page=${page}`);
 }
 
 // Admin Posts

@@ -232,6 +232,18 @@ export default function UserManagement() {
       ),
     },
     {
+      key: "last_login_at",
+      header: "Last Login",
+      render: (row: AdminUser) => (
+        <span className="text-pnp-textSecondary text-xs">
+          {row.last_login_at ? formatDateShort(row.last_login_at) : "—"}
+          {row.last_login_method && (
+            <span className="ml-1 text-pnp-textSecondary opacity-60">({row.last_login_method})</span>
+          )}
+        </span>
+      ),
+    },
+    {
       key: "created_at",
       header: "Joined",
       render: (row: AdminUser) => (

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
-import { STATUS_BADGE_VARIANTS } from "@/components/admin/shared";
+import { STATUS_BADGE_VARIANTS, formatDateShort } from "@/components/admin/shared";
 import { Badge } from "@pnptv/ui-kit";
 import { UserEntitlementsSection } from "@/components/admin/UserEntitlementsSection";
 import { UserCreatorSection } from "@/components/admin/UserCreatorSection";
@@ -11,10 +11,12 @@ import {
   updateAdminUser,
   banAdminUser,
   deleteAdminUser,
+  getAdminUserPayments,
   getUserLabel,
   getLabelColor,
   type AdminUser,
   type AdminPlan,
+  type AdminPayment,
 } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
@@ -35,6 +37,29 @@ function IconChevronLeft() {
     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.75 19.5L8.25 12l7.5-7.5" />
     </svg>
+  );
+}
+
+// CopyField — click/tap to copy, long-press selects all text
+function CopyField({ label, value }: { label: string; value?: string | null }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) return null;
+  const copy = () => {
+    navigator.clipboard.writeText(value).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <span className="text-[10px] uppercase tracking-wider text-pnp-textSecondary flex-shrink-0 w-20 text-right">{label}</span>
+      <button
+        onClick={copy}
+        title="Click to copy"
+        className="flex-1 min-w-0 text-left text-xs font-mono text-pnp-textPrimary bg-pnp-background rounded px-2 py-1 truncate hover:bg-pnp-border transition-colors select-all"
+      >
+        {copied ? <span className="text-green-400">Copied!</span> : value}
+      </button>
+    </div>
   );
 }
 
@@ -80,6 +105,13 @@ export default function UserDetail() {
   const [banAction, setBanAction] = useState<"ban" | "unban">("ban");
   const [banLoading, setBanLoading] = useState(false);
 
+  // Payment history
+  const [payments, setPayments] = useState<AdminPayment[]>([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [paymentsPage, setPaymentsPage] = useState(1);
+  const [paymentsTotalPages, setPaymentsTotalPages] = useState(1);
+  const [paymentsTotal, setPaymentsTotal] = useState(0);
+
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
@@ -116,6 +148,23 @@ export default function UserDetail() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadPayments = useCallback(async (p: number) => {
+    if (!userId) return;
+    setPaymentsLoading(true);
+    try {
+      const res = await getAdminUserPayments(userId, p);
+      setPayments(res.payments);
+      setPaymentsTotalPages(res.pagination.totalPages);
+      setPaymentsTotal(res.pagination.total);
+    } catch { /* silent */ } finally {
+      setPaymentsLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    loadPayments(paymentsPage);
+  }, [loadPayments, paymentsPage]);
 
   const handleFormChange = (field: keyof EditForm, value: string) => {
     setEditForm((prev) => ({ ...prev, [field]: value }));
@@ -234,55 +283,74 @@ export default function UserDetail() {
       )}
 
       {/* User header */}
-      <div className="rounded-xl bg-pnp-surface border border-pnp-border p-5 flex items-start gap-4">
-        <div
-          className="w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold text-white flex-shrink-0"
-          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-        >
-          {avatarLetter(user)}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2 mb-1">
-            <h1 className="text-xl font-bold text-pnp-textPrimary">
-              {user.first_name
-                ? `${user.first_name}${user.last_name ? " " + user.last_name : ""}`
-                : user.username || "Unknown"}
-            </h1>
-            {user.tier && (() => {
-              const lbl = getUserLabel(user);
-              const legacyTier = user.tier.toLowerCase();
-              const showLegacy = lbl !== 'FREE' && legacyTier !== lbl.toLowerCase() && legacyTier !== 'banned';
-              return (
-                <>
-                  <span
-                    className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full border ${getLabelColor(lbl)}`}
-                  >
-                    {lbl}
-                  </span>
-                  {showLegacy && (
-                    <span className="text-xs text-pnp-textSecondary">
-                      (legacy: {user.tier})
-                    </span>
-                  )}
-                  {legacyTier === 'banned' && (
-                    <Badge variant="error">banned</Badge>
-                  )}
-                </>
-              );
-            })()}
-            {user.subscription_status && (
-              <Badge variant={STATUS_BADGE_VARIANTS[user.subscription_status] ?? "default"}>
-                {user.subscription_status}
-              </Badge>
-            )}
+      <div className="rounded-xl bg-pnp-surface border border-pnp-border p-5 space-y-4">
+        <div className="flex items-start gap-4">
+          <div
+            className="w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold text-white flex-shrink-0"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            {avatarLetter(user)}
           </div>
-          {user.username && (
-            <p className="text-sm text-pnp-textSecondary">@{user.username}</p>
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <h1 className="text-xl font-bold text-pnp-textPrimary select-all">
+                {user.first_name
+                  ? `${user.first_name}${user.last_name ? " " + user.last_name : ""}`
+                  : user.username || "Unknown"}
+              </h1>
+              {user.tier && (() => {
+                const lbl = getUserLabel(user);
+                const legacyTier = user.tier.toLowerCase();
+                const showLegacy = lbl !== 'FREE' && legacyTier !== lbl.toLowerCase() && legacyTier !== 'banned';
+                return (
+                  <>
+                    <span
+                      className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full border ${getLabelColor(lbl)}`}
+                    >
+                      {lbl}
+                    </span>
+                    {showLegacy && (
+                      <span className="text-xs text-pnp-textSecondary">
+                        (legacy: {user.tier})
+                      </span>
+                    )}
+                    {legacyTier === 'banned' && (
+                      <Badge variant="error">banned</Badge>
+                    )}
+                  </>
+                );
+              })()}
+              {user.subscription_status && (
+                <Badge variant={STATUS_BADGE_VARIANTS[user.subscription_status] ?? "default"}>
+                  {user.subscription_status}
+                </Badge>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-pnp-textSecondary">
+              {user.role && <span className="capitalize">{user.role}</span>}
+              {user.language && <span>🌐 {user.language.toUpperCase()}</span>}
+              {user.location_name && <span>📍 {user.location_name}</span>}
+              {user.last_login_at && (
+                <span>Last login: {formatDateShort(user.last_login_at)}{user.last_login_method ? ` via ${user.last_login_method}` : ""}</span>
+              )}
+              {user.last_active && <span>Last active: {formatDateShort(user.last_active)}</span>}
+            </div>
+          </div>
+        </div>
+
+        {/* Copyable identity fields */}
+        <div className="border-t border-pnp-border pt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+          <CopyField label="ID" value={user.id} />
+          <CopyField label="pnptv_id" value={user.pnptv_id} />
+          <CopyField label="Username" value={user.username} />
+          <CopyField label="Email" value={user.email} />
+          {user.telegram && <CopyField label="Telegram" value={user.telegram} />}
+          {user.twitter && <CopyField label="Twitter/X" value={user.x_username || user.twitter} />}
+          {user.last_payment_date && (
+            <CopyField label="Last paid" value={`${formatDateShort(user.last_payment_date)}${user.last_payment_amount ? ` · $${Number(user.last_payment_amount).toFixed(2)}` : ""}${user.last_payment_method ? ` · ${user.last_payment_method}` : ""}`} />
           )}
-          {user.email && (
-            <p className="text-sm text-pnp-textSecondary">{user.email}</p>
-          )}
-          <p className="text-xs text-pnp-textSecondary mt-1">ID: {user.id}</p>
+          {user.plan_expiry && <CopyField label="Expires" value={formatDateShort(user.plan_expiry)} />}
+          <CopyField label="Joined" value={formatDateShort(user.created_at)} />
         </div>
       </div>
 
@@ -401,6 +469,87 @@ export default function UserDetail() {
           onUpdated={(patch) => setUser((prev) => (prev ? { ...prev, ...patch } : prev))}
         />
       )}
+
+      {/* Payment History */}
+      <div className="rounded-xl bg-pnp-surface border border-pnp-border p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider">
+            Payment History
+          </h2>
+          {paymentsTotal > 0 && (
+            <span className="text-xs text-pnp-textSecondary">{paymentsTotal} transaction{paymentsTotal !== 1 ? "s" : ""}</span>
+          )}
+        </div>
+
+        {paymentsLoading ? (
+          <div className="py-6 text-center text-pnp-textSecondary text-sm">Loading payments…</div>
+        ) : payments.length === 0 ? (
+          <p className="text-sm text-pnp-textSecondary py-4 text-center">No payment history found.</p>
+        ) : (
+          <>
+            <div className="overflow-x-auto -mx-5 px-5">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-pnp-border">
+                    <th className="text-left py-2 pr-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">Date</th>
+                    <th className="text-left py-2 pr-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">Method</th>
+                    <th className="text-left py-2 pr-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">Plan</th>
+                    <th className="text-right py-2 pr-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">Amount</th>
+                    <th className="text-left py-2 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">Status</th>
+                    <th className="text-left py-2 pl-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">Reference</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-pnp-border/50">
+                  {payments.map((p) => (
+                    <tr key={p.id} className="hover:bg-pnp-background/50 transition-colors">
+                      <td className="py-2.5 pr-3 text-pnp-textSecondary whitespace-nowrap">{formatDateShort(p.payment_date)}</td>
+                      <td className="py-2.5 pr-3 text-pnp-textPrimary font-medium capitalize whitespace-nowrap">{p.payment_method}</td>
+                      <td className="py-2.5 pr-3 text-pnp-textSecondary whitespace-nowrap">{p.plan_name || p.product || "—"}</td>
+                      <td className="py-2.5 pr-3 text-pnp-textPrimary font-mono text-right whitespace-nowrap">
+                        {p.currency} {Number(p.amount).toFixed(2)}
+                      </td>
+                      <td className="py-2.5 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                          p.status === "completed" ? "bg-green-500/15 text-green-400" :
+                          p.status === "failed" ? "bg-red-500/15 text-red-400" :
+                          "bg-yellow-500/15 text-yellow-400"
+                        }`}>
+                          {p.status}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pl-3 text-pnp-textSecondary font-mono select-all max-w-[140px] truncate" title={p.payment_reference}>
+                        {p.payment_reference}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {paymentsTotalPages > 1 && (
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  onClick={() => setPaymentsPage((p) => Math.max(1, p - 1))}
+                  disabled={paymentsPage <= 1}
+                  className="px-3 py-1.5 text-xs rounded-lg border border-pnp-border text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface disabled:opacity-40 transition-colors"
+                >
+                  ← Prev
+                </button>
+                <span className="text-xs text-pnp-textSecondary">
+                  Page {paymentsPage} of {paymentsTotalPages}
+                </span>
+                <button
+                  onClick={() => setPaymentsPage((p) => Math.min(paymentsTotalPages, p + 1))}
+                  disabled={paymentsPage >= paymentsTotalPages}
+                  className="px-3 py-1.5 text-xs rounded-lg border border-pnp-border text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface disabled:opacity-40 transition-colors"
+                >
+                  Next →
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Ban / Unban Section */}
       <div className="rounded-xl bg-red-500/5 border border-red-500/20 p-5 space-y-3">
