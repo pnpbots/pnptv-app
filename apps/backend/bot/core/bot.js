@@ -434,7 +434,29 @@ const startBot = async () => {
       const args = ctx.message.text.split(' ').slice(1);
       const hangoutId = parseInt(args[0], 10);
       if (!Number.isFinite(hangoutId)) {
-        return ctx.reply('Usage: /link <hangout_group_id>\n\nYou can find the hangout ID in the webapp URL.');
+        // Try to find a hangout already linked to this Telegram group that the user owns
+        try {
+          const { query: dbQuery } = require('../../config/postgres');
+          const { rows: linkedRows } = await dbQuery(
+            `SELECT hg.id, hg.name
+             FROM hangout_groups hg
+             JOIN hangout_group_members hgm ON hgm.group_id = hg.id
+             JOIN users u ON u.id = hgm.user_id
+             WHERE hg.telegram_chat_id = $1
+               AND u.telegram = $2
+               AND hgm.role = 'owner'
+             LIMIT 1`,
+            [String(ctx.chat.id), String(ctx.from.id)]
+          );
+          if (linkedRows.length > 0) {
+            const g = linkedRows[0];
+            return ctx.reply(
+              `🔗 This group is linked to the hangout *${g.name}*.\n\nOpen it here: https://app.pnptv.app/chat/${g.id}`,
+              { parse_mode: 'Markdown' }
+            );
+          }
+        } catch { /* fall through silently */ }
+        return;
       }
       try {
         const { query: dbQuery } = require('../../config/postgres');

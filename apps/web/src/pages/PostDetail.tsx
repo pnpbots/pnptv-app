@@ -415,6 +415,7 @@ export default function PostDetail() {
             postId={post.id}
             postContent={post.content}
             authorName={post.author_first_name || post.author_username}
+            isOwnPost={post.author_id === 'pnptv-official'}
             isOpen={showShareModal}
             onClose={() => setShowShareModal(false)}
           />

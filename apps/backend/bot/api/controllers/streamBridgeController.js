@@ -46,7 +46,8 @@ const getMyChannel = async (req, res) => {
       channel: {
         ref: channelRef,
         streamKey,
-        rtmpUrl,
+        // rtmpUrl intentionally omitted — contains RESTREAMER_RTMP_TOKEN and is
+        // only needed by the backend FFmpeg bridge, never by the browser client.
       },
     });
   } catch (err) {

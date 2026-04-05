@@ -750,6 +750,7 @@ export default function PostCard({
         postId={post.id}
         isOpen={showShareModal}
         onClose={() => setShowShareModal(false)}
+        isOwnPost={isOwn || post.author_id === 'pnptv-official'}
         contentDisclaimerAccepted={contentDisclaimerAccepted}
         onAcceptDisclaimer={onAcceptDisclaimer}
       />

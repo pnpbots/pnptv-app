@@ -73,8 +73,11 @@ class PNPLiveTimeSlotService {
             const slotEnd = new Date(slotStart);
             slotEnd.setMinutes(slotEnd.getMinutes() + durationMinutes);
 
-            if (slotEnd.getHours() > endHour) {
-              continue; // Skip slots that would end too late
+            // Build the hard boundary for this calendar day (22:00:00 UTC)
+            const endBoundary = new Date(currentDate);
+            endBoundary.setHours(endHour, 0, 0, 0);
+            if (slotEnd > endBoundary) {
+              continue; // Skip slots that would end after 22:00
             }
 
             // Only include slots that are in the future

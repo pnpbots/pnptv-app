@@ -930,7 +930,7 @@ export default function SocialPostCard({
         mediaType={post.media_type}
         videoThumbnailUrl={post.video_thumbnail_url}
         mediaUrl={post.media_url}
-        isOwnPost={isOwn}
+        isOwnPost={isOwn || post.author_id === 'pnptv-official'}
         isOpen={showShareModal}
         onClose={() => setShowShareModal(false)}
       />

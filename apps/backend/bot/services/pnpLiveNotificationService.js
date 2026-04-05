@@ -142,10 +142,19 @@ class PNPLiveNotificationService {
           `• Camera and mic ready\n\n` +
           `🆔 Booking #${bookingId}`;
 
+      const ALLOWED_ROOM_ORIGINS = ['https://meet.jit.si', 'https://8x8.vc', 'https://app.pnptv.app'];
+      let roomUrl = 'https://meet.jit.si';
+      try {
+        const parsed = new URL(booking.video_room_url || '');
+        if (parsed.protocol === 'https:' && ALLOWED_ROOM_ORIGINS.some(o => booking.video_room_url.startsWith(o))) {
+          roomUrl = booking.video_room_url;
+        }
+      } catch { /* invalid URL — fall back to default */ }
+
       const keyboard = Markup.inlineKeyboard([
         [Markup.button.url(
           lang === 'es' ? '🎥 Entrar a la Sala' : '🎥 Join Room',
-          booking.video_room_url || 'https://meet.jit.si'
+          roomUrl
         )]
       ]);
 
@@ -480,32 +489,42 @@ class PNPLiveNotificationService {
       let sent = 0;
       const RATE_LIMIT_DELAY = 50; // 50ms between messages to avoid Telegram limits
 
-      // Process 1-hour reminders
+      // Process 1-hour reminders.
+      // Atomically claim each booking before sending to prevent duplicate dispatch
+      // when multiple workers run concurrently within the same time window.
       for (const booking of oneHourReminders) {
-        const success = await this.sendBookingReminder(booking.id, booking.user_id, 'es');
-        if (success) {
-          await this.markNotificationSent(booking.id, '1h');
-          if (booking.model_telegram_id) {
-            await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
-            await this.sendModelBookingAlert(booking.id, booking.model_telegram_id, 'es');
-          }
-          sent++;
+        const claimed = await query(
+          `UPDATE pnp_bookings SET reminder_1h_sent = TRUE, updated_at = NOW()
+           WHERE id = $1 AND (reminder_1h_sent IS NULL OR reminder_1h_sent = FALSE)`,
+          [booking.id]
+        );
+        if (!claimed.rowCount) continue; // another worker already sent this one
+
+        await this.sendBookingReminder(booking.id, booking.user_id, 'es');
+        if (booking.model_telegram_id) {
+          await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
+          await this.sendModelBookingAlert(booking.id, booking.model_telegram_id, 'es');
         }
+        sent++;
         await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
       }
 
-      // Process 5-minute alerts
+      // Process 5-minute alerts.
       for (const booking of fiveMinuteAlerts) {
-        const success = await this.sendShowStartingSoon(
+        const claimed = await query(
+          `UPDATE pnp_bookings SET reminder_5m_sent = TRUE, updated_at = NOW()
+           WHERE id = $1 AND (reminder_5m_sent IS NULL OR reminder_5m_sent = FALSE)`,
+          [booking.id]
+        );
+        if (!claimed.rowCount) continue; // another worker already sent this one
+
+        await this.sendShowStartingSoon(
           booking.id,
           booking.user_id,
           booking.model_telegram_id,
           'es'
         );
-        if (success) {
-          await this.markNotificationSent(booking.id, '5m');
-          sent++;
-        }
+        sent++;
         await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
       }
 

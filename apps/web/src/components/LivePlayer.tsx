@@ -22,6 +22,7 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
   // FE-H3: track retry setTimeout so it can be cleared on unmount
   const retryTimerRef = useRef<number | undefined>(undefined);
   const reloadTimerRef = useRef<number | undefined>(undefined);
+  const mediaErrorCountRef = useRef(0);
   const t = useI18n();
 
   const initHls = (video: HTMLVideoElement, source: string) => {
@@ -31,6 +32,7 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
     clearTimeout(reloadTimerRef.current);
     reloadTimerRef.current = undefined;
     setShowReload(false);
+    mediaErrorCountRef.current = 0;
 
     hlsRef.current?.destroy();
     hlsRef.current = null;
@@ -81,8 +83,16 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
               }
             }, 10000);
           } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            console.warn("[LivePlayer] Fatal media error, attempting recovery…");
-            hls.recoverMediaError();
+            mediaErrorCountRef.current += 1;
+            if (mediaErrorCountRef.current <= 3) {
+              console.warn(`[LivePlayer] Fatal media error, attempting recovery (${mediaErrorCountRef.current}/3)…`);
+              hls.recoverMediaError();
+            } else {
+              console.warn("[LivePlayer] Media error recovery limit reached, giving up.");
+              hls.destroy();
+              hlsRef.current = null;
+              setStatus("error");
+            }
           } else {
             setStatus("error");
           }

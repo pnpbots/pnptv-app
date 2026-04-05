@@ -484,7 +484,16 @@ class PNPLiveAvailabilityService {
     try {
       await client.query('BEGIN');
 
-      // Check for conflicts (existing bookings or holds)
+      // Serialize concurrent holdSlot calls for the same (model, slot) combination
+      // using a transaction-scoped advisory lock. The lock is auto-released on
+      // COMMIT/ROLLBACK so no manual cleanup is needed.
+      // hashtext returns int4; cast to bigint satisfies pg_advisory_xact_lock's signature.
+      await client.query(
+        `SELECT pg_advisory_xact_lock(abs(hashtext($1::text || ':' || $2::text))::bigint)`,
+        [modelId, slotStart]
+      );
+
+      // Check for conflicts (existing bookings or holds).
       const conflicts = await client.query(
         `SELECT 1 FROM pnp_bookings
          WHERE model_id = $1

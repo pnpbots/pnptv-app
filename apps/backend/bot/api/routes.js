@@ -3010,13 +3010,22 @@ const overlayPublicLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+// Per-user limiter for the connection-test endpoint — 10 req/min to prevent payload abuse
+const connectionTestLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  message: { success: false, error: 'Too many connection tests. Please wait.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 app.get('/api/webapp/live/stream-profile', requireSessionAuth, asyncHandler(streamAutoController.getStreamProfile));
 app.post('/api/webapp/live/stream-profile', requireSessionAuth, grokStreamChatLimiter, asyncHandler(streamAutoController.saveStreamProfile));
 app.post('/api/webapp/live/stream-auto-start', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamAutoController.startAutoMessages));
 app.post('/api/webapp/live/stream-auto-stop', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamAutoController.stopAutoMessages));
 
 // Connection quality test — measures round-trip latency and upload throughput
-app.post('/api/webapp/live/connection-test', requireSessionAuth, asyncHandler(async (req, res) => {
+app.post('/api/webapp/live/connection-test', requireSessionAuth, connectionTestLimiter, asyncHandler(async (req, res) => {
   const start = Date.now();
   const payloadSize = req.body?.payload?.length || 0;
   const latencyMs = Date.now() - start;
@@ -5715,63 +5724,26 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
         }
       }
 
-      const DashTokenService = require('../services/dashTokenService');
-      const debit = await DashTokenService.debitTokens(userId, numAmount);
-      if (!debit.success) {
-        return res.status(402).json({ success: false, error: debit.error || 'Insufficient token balance' });
-      }
-
-      const tip = await PNPLiveTipsService.createTip(
-        userId, null, null,
-        numAmount,
-        (message || '').slice(0, 200),
-        String(resolvedPerformerId)
-      );
-
-      if (!tip) {
-        // Refund tokens on failure
-        await DashTokenService.creditTokens(userId, numAmount, `refund-tip-fail-${Date.now()}`, { usdAmount: numAmount }).catch(() => {});
-        return res.status(500).json({ success: false, error: 'Failed to create tip' });
-      }
-
-      // Mark tip as immediately paid
-      await PNPLiveTipsService.confirmTipPayment(tip.id, `TOKEN-${tip.id}`);
-
-      // Emit real-time tip event
+      // processTipWithTokens atomically debits wallet + inserts tip + emits sockets in one transaction.
+      let tokenTipResult;
       try {
-        const tipInfo = await PNPLiveTipsService.getTipById(tip.id);
-        const socketSingleton = require('../services/socketSingleton');
-        const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
-        if (io && tipInfo) {
-          const tipPayload = {
-            id: tipInfo.id,
-            amount: parseFloat(tipInfo.amount),
-            username: tipInfo.user_username || 'Anonymous',
-            performerName: tipInfo.model_name || 'Performer',
-            message: tipInfo.message || '',
-            createdAt: tipInfo.created_at,
-            paymentMethod: 'tokens',
-          };
-          // Emit to the specific performer's live room; all viewers in that room receive it
-          // Emit to both the resolved performer room and the original stream room
-          io.to(`live:${String(resolvedPerformerId)}`).emit('live:tip', tipPayload);
-          if (resolvedPerformerId !== String(performerId)) {
-            io.to(`live:${String(performerId)}`).emit('live:tip', tipPayload);
-          }
-          // Notify sender of new balance via their user room
-          io.to(`user:${user.id}`).emit('wallet:updated', { balance: debit.newBalance });
+        tokenTipResult = await PNPLiveTipsService.processTipWithTokens(
+          userId, numAmount, (message || '').slice(0, 200), resolvedPerformerId, idempotencyKey || null
+        );
+      } catch (tokenErr) {
+        if (tokenErr.name === 'InsufficientFundsError') {
+          return res.status(402).json({ success: false, error: 'Insufficient token balance' });
         }
-      } catch (emitErr) {
-        logger.warn(`Token tip socket emit failed: ${emitErr.message}`);
+        throw tokenErr;
       }
 
       return res.json({
         success: true,
-        tipId: tip.id,
+        tipId: tokenTipResult.tip.id,
         paymentUrl: null,
         amount: numAmount,
         paymentMethod: 'tokens',
-        newBalance: debit.newBalance,
+        newBalance: tokenTipResult.newBalance,
       });
     }
 

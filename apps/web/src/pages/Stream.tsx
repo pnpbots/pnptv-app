@@ -209,9 +209,14 @@ export default function Stream() {
           return;
         }
 
-        // 4. Fuzzy match in HLS streams
+        // 4. Fuzzy match in HLS streams — check suffix after a delimiter so that
+        // a short streamId like "1" can't accidentally match "pnptv-10" or "pnptv-21".
+        const matchesSuffix = (haystack: string, needle: string) =>
+          haystack === needle ||
+          haystack.endsWith(`:${needle}`) ||
+          haystack.endsWith(`/${needle}`);
         const fuzzyMatch = hlsStreams.find(
-          (s: any) => s.id.includes(streamId) || (channelRef && s.id.includes(channelRef))
+          (s: any) => matchesSuffix(s.id, streamId) || (channelRef && matchesSuffix(s.id, channelRef))
         );
         if (fuzzyMatch) {
           console.log("[Stream] Fuzzy-matched HLS stream:", fuzzyMatch.id);

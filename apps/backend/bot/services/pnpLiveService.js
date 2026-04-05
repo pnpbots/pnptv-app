@@ -262,20 +262,26 @@ class PNPLiveService {
 
       const newBooking = booking.rows && booking.rows[0];
       
-      // Generate JaaS video room for this booking
+      // Generate JaaS video room only when JaaS is fully configured.
+      // If env vars are missing the service throws — guard prevents a misconfigured
+      // environment from failing every booking creation.
       const roomName = `pnp-live-${newBooking.id}-${Date.now()}`;
-      const jaasRoom = JaaSService.generatePNPLiveRoom(
-        roomName,
-        newBooking.id,
-        model.name
-      );
+      let jaasClientUrl = null;
+      let jaasClientToken = null;
+      if (JaaSService.isConfigured()) {
+        const jaasRoom = JaaSService.generatePNPLiveRoom(roomName, newBooking.id, model.name);
+        jaasClientUrl = jaasRoom.clientUrl;
+        jaasClientToken = jaasRoom.tokens.client;
+      } else {
+        logger.warn('JaaS not configured — booking created without video room tokens', { bookingId: newBooking.id });
+      }
 
       // Update booking with video room details
       await client.query(
         `UPDATE pnp_bookings
          SET video_room_name = $1, video_room_url = $2, video_room_token = $3
          WHERE id = $4`,
-        [roomName, jaasRoom.clientUrl, jaasRoom.tokens.client, newBooking.id]
+        [roomName, jaasClientUrl, jaasClientToken, newBooking.id]
       );
 
       await client.query('COMMIT');
@@ -303,7 +309,7 @@ class PNPLiveService {
         ...publicBooking,
         videoRoom: {
           roomName,
-          clientUrl: jaasRoom.clientUrl,
+          clientUrl: jaasClientUrl,
           // modelUrl intentionally omitted from client response
         }
       };
@@ -340,7 +346,11 @@ class PNPLiveService {
   static async getBookingById(bookingId) {
     try {
       const result = await query(
-        `SELECT * FROM pnp_bookings WHERE id = $1`,
+        `SELECT id, user_id, model_id, duration_minutes, price_usd, booking_time,
+                payment_method, payment_status, status, video_room_name, video_room_url,
+                notes, refund_reason, cancelled_at, completed_at,
+                reminder_1h_sent, reminder_5m_sent, created_at, updated_at
+         FROM pnp_bookings WHERE id = $1`,
         [bookingId]
       );
 

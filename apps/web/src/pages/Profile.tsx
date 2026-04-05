@@ -740,6 +740,14 @@ export default function Profile() {
       roleBadge: "Official Account",
       roleStyle: { background: "rgba(192,192,192,0.15)", color: "#D0D0D0", border: "1px solid rgba(192,192,192,0.3)" },
     },
+    "pnptv-official": { // PNPtv! system account — blue verified
+      gradient: "linear-gradient(135deg, #D4007A, #E69138)",
+      color: "#D4007A",
+      border: "rgba(212,0,122,0.4)",
+      borderColor: "rgba(212,0,122,0.25)",
+      roleBadge: "Official Account",
+      roleStyle: { background: "rgba(29,155,240,0.15)", color: "#1D9BF0", border: "1px solid rgba(29,155,240,0.3)" },
+    },
   };
 
   const customTheme = profileThemes[profile.id];
