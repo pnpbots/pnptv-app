@@ -125,6 +125,19 @@ export default function Live() {
   const [liveEvents, setLiveEvents] = useState<EventItem[]>([]);
   const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
 
+  // Category filtering
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const CATEGORIES = [
+    { id: "all", label: "All" },
+    { id: "tagChat", label: t.live.tagChat || "Chat" },
+    { id: "tagMusic", label: t.live.tagMusic || "Music" },
+    { id: "tagGaming", label: t.live.tagGaming || "Gaming" },
+    { id: "tagCooking", label: t.live.tagCooking || "Cooking" },
+    { id: "tagFitness", label: t.live.tagFitness || "Fitness" },
+    { id: "tagArt", label: t.live.tagArt || "Art" },
+    { id: "tagOther", label: t.live.tagOther || "Other" },
+  ];
+
   // Casting application
   const [castingStatus, setCastingStatus] = useState<CastingStatus | null>(null);
   const [castingSubmitting, setCastingSubmitting] = useState(false);
@@ -460,6 +473,26 @@ export default function Live() {
           <p className="text-xs text-pnp-textSecondary mt-0.5">{t.live.liveSubtitle}</p>
         </div>
       </div>
+
+      {/* ── Categories (improvement #9) ── */}
+      <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+        {CATEGORIES.map((cat) => {
+          const isActive = selectedCategory === cat.id;
+          return (
+            <button
+              key={cat.id}
+              onClick={() => setSelectedCategory(cat.id)}
+              className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-bold transition-all border ${
+                isActive
+                  ? "bg-pnp-accent text-white border-pnp-accent"
+                  : "bg-pnp-surface text-pnp-textSecondary border-pnp-border hover:border-pnp-accent/40"
+              }`}
+            >
+              {cat.label}
+            </button>
+          );
+        })}
+      </div>
       {loadError && (
         <div className="mb-4 p-3 rounded-xl bg-pnp-error/10 border border-pnp-error/20 flex items-center justify-between">
           <p className="text-xs text-pnp-error">{t.live.failedToLoadStreams}</p>
@@ -552,7 +585,7 @@ export default function Live() {
       <SpotlightStrip
         items={[
           ...liveStreams
-            .filter((s) => s.isLive)
+            .filter((s) => s.isLive && (selectedCategory === "all" || s.tags?.includes(selectedCategory)))
             .map((s) => ({
               kind: "action" as const,
               id: `stream-${s.id}`,
@@ -586,7 +619,15 @@ export default function Live() {
         </div>
       ) : performers.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
-          {performers.map((p) => {
+          {performers
+            .filter((p) => {
+              if (selectedCategory === "all") return true;
+              const stream = findLiveStream(p);
+              // If live, filter by stream tags. If offline, performers don't have persistent categories in this view yet.
+              // For now, we show all performers in 'all' and only filtered live ones in category tabs.
+              return stream?.tags?.includes(selectedCategory);
+            })
+            .map((p) => {
             // Use the backend-supplied isLive flag first (set when the performer
             // is actively streaming via Restreamer). Fall back to matching by name
             // or userId against the separately-fetched liveStreams list.
@@ -658,7 +699,7 @@ export default function Live() {
           performers.filter((p) => p.isLive).map((p) => String(p.userId)).filter(Boolean)
         );
         const communityStreams = liveStreams.filter(
-          (s) => !matchedStreamIds.has(s.id) && !livePerformerIds.has(s.id)
+          (s) => !matchedStreamIds.has(s.id) && !livePerformerIds.has(s.id) && (selectedCategory === "all" || s.tags?.includes(selectedCategory))
         );
         if (!performersLoading && communityStreams.length === 0 && performers.length === 0) {
           return (

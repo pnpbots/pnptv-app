@@ -356,6 +356,12 @@ export default function BrowserStream() {
           videoRef={videoRef}
           streamTitle={streamTitle}
           setStreamTitle={setStreamTitle}
+          streamDesc={streamDesc}
+          setStreamDesc={setStreamDesc}
+          category={category}
+          setCategory={setCategory}
+          thumbnail={thumbnail}
+          setThumbnail={setThumbnail}
           onStartStream={handleGoLiveClick}
           isConnecting={isConnecting}
           channel={channel}
@@ -375,6 +381,7 @@ export default function BrowserStream() {
           durationSec={durationSec}
           orientation={orientation}
           streamTitle={streamTitle}
+          category={category}
           networkQuality={networkQuality}
           setStreamTitle={setStreamTitle}
           onGoLive={handleGoLiveClick}
@@ -465,6 +472,7 @@ export default function BrowserStream() {
               durationSec={durationSec}
               orientation="landscape"
               streamTitle={streamTitle}
+              category={category}
               networkQuality={networkQuality}
               setStreamTitle={setStreamTitle}
               onGoLive={handleGoLiveClick}
@@ -497,6 +505,7 @@ export default function BrowserStream() {
               durationSec={durationSec}
               viewerCount={viewerCount}
               sessionEarnings={sessionEarnings}
+              channel={channel}
             />
           </div>
         </main>

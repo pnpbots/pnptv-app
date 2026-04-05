@@ -4300,9 +4300,6 @@ app.post('/api/webapp/hangouts/groups/:id/transfer', requireSessionAuth, asyncHa
 app.get('/api/webapp/hangouts/groups/:id/invite-link', requireSessionAuth, asyncHandler(hangoutGroupController.getInviteLink));
 app.put('/api/webapp/hangouts/groups/:id/notification', requireSessionAuth, asyncHandler(hangoutGroupController.updateNotificationMode));
 app.post('/api/webapp/hangouts/groups/:id/delete-message', requireSessionAuth, asyncHandler(hangoutGroupController.adminDeleteMessage));
-// Legacy single-call endpoint (kept for backward compatibility)
-app.post('/api/webapp/hangouts/groups/:id/call', requireSessionAuth, asyncHandler(hangoutGroupController.startCall));
-
 // ── Hangout Feed Integration ────────────────────────────────────────────────
 app.get('/api/webapp/hangouts/groups/:id/feed', requireSessionAuth, asyncHandler(socialController.getHangoutFeed));
 app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, asyncHandler(socialController.dropToFeed));
@@ -4758,18 +4755,35 @@ app.get('/api/proxy/live/streams', requireSessionAuth, requireMemberTier, asyncH
       })
       .filter(Boolean);
 
-    // Enrich each live stream with the viewer count stored in Redis.
+    // Enrich each live stream with the viewer count and metadata stored in Redis.
     // Polling clients (Socket.IO fallback) can use this to keep the count
     // accurate when the WebSocket connection is unavailable.
     const redis = getRedis();
     const streams = await Promise.all(
       rawStreams.map(async (s) => {
         try {
-          const raw = await redis.get(`live:viewers:${s.id}`);
-          const viewerCount = Math.max(0, parseInt(raw, 10) || 0);
-          return { ...s, viewerCount };
+          const [viewerRaw, metaRaw, thumbUrl] = await Promise.all([
+            redis.get(`live:viewers:${s.id}`),
+            redis.get(`stream:meta:${s.id}`),
+            redis.get(`stream:thumb:${s.id}`),
+          ]);
+
+          const viewerCount = Math.max(0, parseInt(viewerRaw, 10) || 0);
+          let metadata = {};
+          if (metaRaw) {
+            try { metadata = JSON.parse(metaRaw); } catch { /* ignore */ }
+          }
+
+          return {
+            ...s,
+            viewerCount,
+            name: metadata.title || s.name,
+            description: metadata.description || s.description,
+            tags: metadata.tags || [],
+            thumbnailUrl: thumbUrl || null,
+          };
         } catch {
-          return { ...s, viewerCount: 0 };
+          return { ...s, viewerCount: 0, tags: [] };
         }
       })
     );
@@ -4935,18 +4949,40 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
           `SELECT id, live_channel FROM users WHERE live_channel IN (${placeholders})`,
           [...liveRefs]
         );
+
+        const redis = getRedis();
         for (const u of channelUsers) {
-          const safeRef = typeof u.live_channel === 'string'
-            ? u.live_channel.replace(/[^a-zA-Z0-9\-_.]/g, '')
+          const channelRef = u.live_channel;
+          const safeRef = typeof channelRef === 'string'
+            ? channelRef.replace(/[^a-zA-Z0-9\-_.]/g, '')
             : null;
           const hlsUrl = safeRef && !safeRef.includes('..')
             ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8`
             : null;
+
+          // Fetch metadata and thumbnail from Redis
+          let metadata = {};
+          let thumbUrl = null;
+          if (redis && safeRef) {
+            try {
+              const [metaRaw, thumbRaw] = await Promise.all([
+                redis.get(`stream:meta:${safeRef}`),
+                redis.get(`stream:thumb:${safeRef}`),
+              ]);
+              if (metaRaw) metadata = JSON.parse(metaRaw);
+              thumbUrl = thumbRaw;
+            } catch { /* ignore */ }
+          }
+
           const uid = String(u.id);
           for (const entry of mapped) {
             if (entry.userId && String(entry.userId) === uid) {
               entry.isLive = true;
               entry.hlsUrl = hlsUrl;
+              if (metadata.title) entry.displayName = metadata.title; // Optional: or use a separate field
+              entry.streamTitle = metadata.title || null;
+              entry.tags = metadata.tags || [];
+              entry.thumbnailUrl = thumbUrl || null;
             }
           }
         }
@@ -5384,19 +5420,13 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
     }
 
     // --- Inject currently-live users ---
-    // Each Restreamer process has a 'reference' slug (e.g. 'pnptv-frank') that is set
-    // when the channel is created via the Restreamer UI. Users are assigned a channel
-    // via the users.live_channel column. We join the running processes against the DB
-    // to resolve which user owns each active channel — no Redis hex lookup needed.
     if (liveProcesses.length > 0) {
       try {
-        // Collect the reference slugs of all currently-running processes.
         const liveRefs = liveProcesses
           .map(p => (typeof p.reference === 'string' && p.reference) ? p.reference : null)
           .filter(Boolean);
 
         if (liveRefs.length > 0) {
-          // Single DB query: find all users whose assigned channel is currently live.
           const placeholders = liveRefs.map((_, i) => `$${i + 1}`).join(',');
           const { rows: channelUsers } = await getPool().query(
             `SELECT id, username, first_name, last_name, photo_file_id, bio, live_channel
@@ -5405,10 +5435,9 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
             liveRefs
           );
 
+          const redis = getRedis();
           for (const u of channelUsers) {
             const channelRef = u.live_channel;
-
-            // Sanitize reference before embedding in URL (prevent path traversal).
             const safeRef = typeof channelRef === 'string'
               ? channelRef.replace(/[^a-zA-Z0-9\-_.]/g, '')
               : null;
@@ -5416,19 +5445,34 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
               ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8`
               : null;
 
+            // Fetch metadata and thumbnail from Redis
+            let metadata = {};
+            let thumbUrl = null;
+            if (redis && safeRef) {
+              try {
+                const [metaRaw, thumbRaw] = await Promise.all([
+                  redis.get(`stream:meta:${safeRef}`),
+                  redis.get(`stream:thumb:${safeRef}`),
+                ]);
+                if (metaRaw) metadata = JSON.parse(metaRaw);
+                thumbUrl = thumbRaw;
+              } catch { /* ignore */ }
+            }
+
             const uid = String(u.id);
 
             if (coveredUserIds.has(uid)) {
-              // User is already in the performers/creators list — mark them live.
               for (const entry of mapped) {
                 if (entry.userId && String(entry.userId) === uid) {
                   entry.isLive = true;
                   if (hlsUrl) entry.hlsUrl = hlsUrl;
+                  entry.streamTitle = metadata.title || null;
+                  entry.tags = metadata.tags || [];
+                  entry.thumbnailUrl = thumbUrl || null;
                   break;
                 }
               }
             } else {
-              // User has a live stream but is not yet in the performers list — inject them.
               const photo = u.photo_file_id
                 ? (u.photo_file_id.startsWith('/') ? u.photo_file_id : `/${u.photo_file_id}`)
                 : null;
@@ -5443,6 +5487,9 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
                 isAvailable: true,
                 isLive: true,
                 hlsUrl,
+                streamTitle: metadata.title || null,
+                tags: metadata.tags || [],
+                thumbnailUrl: thumbUrl || null,
                 basePrice: 0,
                 totalCalls: 0,
                 averageRating: 0,

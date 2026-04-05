@@ -1247,12 +1247,14 @@ class XPostService {
         SET status = 'sending',
             updated_at = CURRENT_TIMESTAMP
         WHERE post_id = (
-            SELECT post_id
-            FROM x_post_jobs
-            WHERE status = 'scheduled'
-              AND scheduled_at <= NOW()
-            ORDER BY scheduled_at ASC
-            FOR UPDATE SKIP LOCKED
+            SELECT j.post_id
+            FROM x_post_jobs j
+            LEFT JOIN x_auto_campaigns c ON c.campaign_id = j.campaign_id
+            WHERE j.status = 'scheduled'
+              AND j.scheduled_at <= NOW()
+              AND (j.campaign_id IS NULL OR c.status = 'active')
+            ORDER BY j.scheduled_at ASC
+            FOR UPDATE OF j SKIP LOCKED
             LIMIT 1
         )
         RETURNING post_id, account_id, text, media_url, admin_id, admin_username, retry_count, campaign_id;

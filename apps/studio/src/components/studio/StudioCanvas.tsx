@@ -7,6 +7,7 @@ import {
   formatDuration,
 } from "./shared";
 import type { NetworkQuality } from "./shared";
+import { useI18n } from "@/lib/i18n";
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,7 @@ export interface StudioCanvasProps {
   durationSec: number;
   orientation: "portrait" | "landscape";
   streamTitle: string;
+  category: string;
   networkQuality: NetworkQuality;
   setStreamTitle: (v: string) => void;
   onGoLive: () => void;
@@ -37,10 +39,12 @@ export function StudioCanvas({
   durationSec,
   orientation,
   streamTitle,
+  category,
   networkQuality,
   setStreamTitle,
   onGoLive,
 }: StudioCanvasProps) {
+  const t = useI18n();
   const isPortraitMobile = orientation === "portrait";
 
   return (
@@ -171,7 +175,25 @@ export function StudioCanvas({
 
       {/* ── Duration — bottom-left (when live) ─────────────────────────────── */}
       {isLive && (
-        <div className="absolute bottom-3 left-3">
+        <div className="absolute bottom-3 left-3 flex flex-col gap-1.5 items-start">
+          <div className="flex items-center gap-1.5">
+            {streamTitle && (
+              <span
+                className="px-2.5 py-1 rounded-lg text-xs font-bold text-white max-w-[200px] truncate"
+                style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
+              >
+                {streamTitle}
+              </span>
+            )}
+            {category && (
+              <span
+                className="px-2 py-0.5 rounded-lg text-[10px] font-bold text-pnp-accent border border-pnp-accent/30"
+                style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
+              >
+                {t[category as keyof typeof t] || category}
+              </span>
+            )}
+          </div>
           <span
             className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-white tabular-nums"
             style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}

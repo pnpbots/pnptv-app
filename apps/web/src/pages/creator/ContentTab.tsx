@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { ConfirmDialog } from "@/components/creators/ConfirmDialog";
+import { useAuth } from "@/hooks/useAuth";
 import {
   getCmsProfile,
   updateCmsProfile,
@@ -19,7 +20,7 @@ import {
   deleteCreatorChannel,
   assignPostToChannel,
   unassignPostFromChannel,
-  getSocialFeedPosts,
+  getPublicProfile,
   uploadChannelCover,
   addChannelCollaborator,
   removeChannelCollaborator,
@@ -36,6 +37,7 @@ interface ContentTabProps {
 }
 
 export function ContentTab({ t }: ContentTabProps) {
+  const { user } = useAuth();
   // CMS data
   const [cmsPerformer, setCmsPerformer] = useState<CmsPerformer | null>(null);
   const [cmsContent, setCmsContent] = useState<CmsContent[]>([]);
@@ -360,7 +362,9 @@ export function ContentTab({ t }: ContentTabProps) {
     setManagingChannelId(channelId);
     setAssignPostsLoading(true);
     try {
-      const res = await getSocialFeedPosts(undefined, 50);
+      const userId = user?.id ? String(user.id) : null;
+      if (!userId) { setAssignPosts([]); return; }
+      const res = await getPublicProfile(userId, undefined, 50);
       if (res.success) setAssignPosts(res.posts);
     } catch {
       setAssignPosts([]);

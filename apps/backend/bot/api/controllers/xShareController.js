@@ -233,18 +233,20 @@ const getXStatus = async (req, res) => {
 
     const user = rows[0];
     if (!user || !user.x_user_id) {
-      return res.json({ success: true, connected: false, hasWriteScope: false, username: null });
+      return res.json({ success: true, status: { linked: false, hasWriteScope: false, handle: null } });
     }
 
     const write = hasWriteScope(user.x_oauth_scopes);
 
     return res.json({
       success: true,
-      connected: true,
-      hasWriteScope: write,
-      // Null scopes means legacy connection before migration 125 — tell UI to reconnect
-      scopesUnknown: user.x_oauth_scopes === null,
-      username: user.x_username || null,
+      status: {
+        linked: true,
+        hasWriteScope: write,
+        handle: user.x_username || null,
+        // Null scopes means legacy connection before migration 125 — tell UI to reconnect
+        scopesUnknown: user.x_oauth_scopes === null,
+      },
     });
   } catch (err) {
     logger.error('[X Share] getXStatus error:', err);
@@ -292,8 +294,8 @@ const shareToX = async (req, res) => {
     if (!dbUser || !dbUser.x_user_id || !dbUser.x_access_token_encrypted) {
       return res.status(400).json({
         success: false,
-        error: 'x_not_connected',
-        message: 'Connect your X account first.',
+        code: 'x_not_connected',
+        error: 'Connect your X account first.',
       });
     }
 
@@ -301,14 +303,14 @@ const shareToX = async (req, res) => {
     if (!hasWriteScope(dbUser.x_oauth_scopes)) {
       return res.status(403).json({
         success: false,
-        error: 'reconnect_required',
-        message: 'Please reconnect X to enable posting. New permissions are required.',
+        code: 'reconnect_required',
+        error: 'Please reconnect X to enable posting. New permissions are required.',
       });
     }
 
     // ── 3. Fetch the social post ───────────────────────────────────────────
     const { rows: postRows } = await query(
-      `SELECT id, user_id, content, media_type, media_url, media_urls FROM social_posts WHERE id = $1 AND is_deleted = false`,
+      `SELECT id, user_id, content, media_type, media_url, media_urls, video_thumbnail_url FROM social_posts WHERE id = $1 AND is_deleted = false`,
       [postId],
       { cache: false }
     );
@@ -346,8 +348,8 @@ const shareToX = async (req, res) => {
     if (!allowed) {
       return res.status(429).json({
         success: false,
-        error: 'rate_limit_exceeded',
-        message: `You can share up to ${CROSS_POST_DAILY_LIMIT} posts per day. Try again tomorrow.`,
+        code: 'rate_limit_exceeded',
+        error: `You can share up to ${CROSS_POST_DAILY_LIMIT} posts per day. Try again tomorrow.`,
       });
     }
 
@@ -388,8 +390,8 @@ const shareToX = async (req, res) => {
       );
       return res.status(401).json({
         success: false,
-        error: 'reconnect_required',
-        message: 'Your X session has expired. Please reconnect your account.',
+        code: 'reconnect_required',
+        error: 'Your X session has expired. Please reconnect your account.',
       });
     }
 
@@ -412,9 +414,16 @@ const shareToX = async (req, res) => {
     // ── 8. Post to X (with media upload if available) ────────────────────
     let xResponse;
     try {
-      // Resolve media URL for native X upload (video/image)
+      // Resolve media URL for native X upload (image or video thumbnail)
+      // For video posts, upload the thumbnail image instead of the full video file —
+      // it is much smaller, posts reliably, and the tweet text already includes the
+      // /v/:id link so viewers can click through to watch on PNPtv.
       let mediaUrl = null;
-      if (post.media_url) {
+      if (post.media_type === 'video' && post.video_thumbnail_url) {
+        mediaUrl = post.video_thumbnail_url.startsWith('http')
+          ? post.video_thumbnail_url
+          : `${PNPTV_APP_URL}${post.video_thumbnail_url}`;
+      } else if (post.media_url) {
         mediaUrl = post.media_url.startsWith('http')
           ? post.media_url
           : `${PNPTV_APP_URL}${post.media_url}`;
@@ -468,8 +477,8 @@ const shareToX = async (req, res) => {
         );
         return res.status(403).json({
           success: false,
-          error: 'reconnect_required',
-          message: 'X posting permission was revoked. Please reconnect your account.',
+          code: 'reconnect_required',
+          error: 'X posting permission was revoked. Please reconnect your account.',
         });
       }
 
@@ -483,8 +492,8 @@ const shareToX = async (req, res) => {
         );
         return res.status(429).json({
           success: false,
-          error: 'x_rate_limited',
-          message: 'X is rate limiting posts right now. Please try again in a few minutes.',
+          code: 'x_rate_limited',
+          error: 'X is rate limiting posts right now. Please try again in a few minutes.',
         });
       }
 
@@ -505,8 +514,8 @@ const shareToX = async (req, res) => {
 
       return res.status(502).json({
         success: false,
-        error: 'x_api_error',
-        message: 'Failed to post to X. Please try again.',
+        code: 'x_api_error',
+        error: 'Failed to post to X. Please try again.',
       });
     }
 
@@ -519,7 +528,7 @@ const shareToX = async (req, res) => {
         ['X response did not include tweet id', postId, sessionUser.id],
         { cache: false }
       );
-      return res.status(502).json({ success: false, error: 'x_api_error', message: 'Failed to post to X. Please try again.' });
+      return res.status(502).json({ success: false, code: 'x_api_error', error: 'Failed to post to X. Please try again.' });
     }
 
     // ── 9. Persist success to log ──────────────────────────────────────────

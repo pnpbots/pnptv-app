@@ -39,6 +39,10 @@ export interface SharePostModalProps {
   postId: number;
   postContent?: string | null;
   authorName?: string | null;
+  mediaType?: string | null;
+  videoThumbnailUrl?: string | null;
+  mediaUrl?: string | null;
+  isOwnPost?: boolean;
   isOpen: boolean;
   onClose: () => void;
   contentDisclaimerAccepted?: boolean;
@@ -54,6 +58,10 @@ export function SharePostModal({
   postId,
   postContent,
   authorName,
+  mediaType,
+  videoThumbnailUrl,
+  mediaUrl,
+  isOwnPost = false,
   isOpen,
   onClose,
 }: SharePostModalProps) {
@@ -67,6 +75,7 @@ export function SharePostModal({
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const [xShareState, setXShareState] = useState<XShareState>("idle");
   const [xShareError, setXShareError] = useState<string | null>(null);
+  const [tweetUrl, setTweetUrl] = useState<string | null>(null);
 
   // Focus management
   const firstButtonRef = useRef<HTMLButtonElement>(null);
@@ -80,6 +89,7 @@ export function SharePostModal({
     setXStatus(null);
     setXShareState("idle");
     setXShareError(null);
+    setTweetUrl(null);
     setCopyState("idle");
 
     getXStatus()
@@ -146,7 +156,8 @@ export function SharePostModal({
     setXShareState("loading");
     setXShareError(null);
     try {
-      await sharePostToX(postId);
+      const res = await sharePostToX(postId);
+      if (res.tweetUrl) setTweetUrl(res.tweetUrl);
       setXShareState("success");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to post to X";
@@ -247,13 +258,72 @@ export function SharePostModal({
       );
     }
 
+    // Linked with write scope, but not the author — can't post to X
+    if (!isOwnPost) {
+      return (
+        <div
+          className="flex items-center gap-3 p-3 rounded-xl"
+          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+        >
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "rgba(255,255,255,0.06)" }}>
+            <XLogo className="w-4 h-4" style={{ color: "#555" } as React.CSSProperties} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-white/40">Share to X</p>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>Only the post author can share to X</p>
+          </div>
+        </div>
+      );
+    }
+
     // Linked with write scope — show the share button
     const isLoading = xShareState === "loading";
     const isSuccess = xShareState === "success";
     const isError = xShareState === "error";
 
+    // Determine whether we have a media preview to show
+    const previewImageUrl =
+      (mediaType === "video" && videoThumbnailUrl)
+        ? videoThumbnailUrl
+        : (mediaType === "image" && (videoThumbnailUrl || mediaUrl))
+        ? (videoThumbnailUrl || mediaUrl)
+        : null;
+
     return (
       <div>
+        {/* Card preview — shown only when media is available and not yet in success state */}
+        {previewImageUrl && !isSuccess && (
+          <div
+            className="rounded-xl overflow-hidden mb-2"
+            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
+          >
+            <div className="relative aspect-video w-full overflow-hidden">
+              <img
+                src={previewImageUrl}
+                alt="Post media preview"
+                className="w-full h-full object-cover"
+              />
+              {mediaType === "video" && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div
+                    className="w-10 h-10 rounded-full flex items-center justify-center"
+                    style={{ background: "rgba(0,0,0,0.6)" }}
+                  >
+                    <svg className="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="px-3 py-2">
+              <p className="text-[11px]" style={{ color: "#8E8E93" }}>
+                pnptv.app · {mediaType === "video" ? "Will post as card with video preview" : "Will post as card with image"}
+              </p>
+            </div>
+          </div>
+        )}
+
         <button
           type="button"
           onClick={handleShareToX}
@@ -299,9 +369,13 @@ export function SharePostModal({
             {isSuccess ? (
               <>
                 <p className="text-sm font-semibold" style={{ color: "#34C759" }}>Posted to X!</p>
-                <p className="text-xs" style={{ color: "#8E8E93" }}>
-                  Your post is now on your X timeline
-                </p>
+                {tweetUrl ? (
+                  <a href={tweetUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline" style={{ color: "#29A8E2" }}>
+                    View on X →
+                  </a>
+                ) : (
+                  <p className="text-xs" style={{ color: "#8E8E93" }}>Your post is now on your X timeline</p>
+                )}
               </>
             ) : isLoading ? (
               <>

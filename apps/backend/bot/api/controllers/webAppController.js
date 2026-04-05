@@ -1232,7 +1232,7 @@ const xLoginStart = async (req, res) => {
       response_mode: 'query',
       client_id: clientId,
       redirect_uri: redirectUri,
-      scope: 'users.read tweet.read',
+      scope: 'users.read tweet.read tweet.write offline.access media.write',
       state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',

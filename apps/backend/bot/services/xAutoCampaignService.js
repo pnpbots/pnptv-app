@@ -127,35 +127,43 @@ class XAutoCampaignService {
   }
 
   /**
-   * Pause a campaign.
+   * Pause a campaign. Idempotent — succeeds if already paused.
    */
   static async pauseCampaign(campaignId) {
-    const result = await db.query(
-      `UPDATE x_auto_campaigns
-       SET status = 'paused', next_run_at = NULL, updated_at = NOW()
-       WHERE campaign_id = $1 AND status = 'active'`,
+    const check = await db.query(
+      `SELECT campaign_id, status FROM x_auto_campaigns WHERE campaign_id = $1`,
       [campaignId]
     );
-    if (result.rowCount === 0) {
-      throw new Error('Campaign not found or not in active status');
-    }
+    if (check.rowCount === 0) throw new Error('Campaign not found');
+    if (check.rows[0].status === 'paused') return; // already paused — no-op
+    await db.query(
+      `UPDATE x_auto_campaigns
+       SET status = 'paused', next_run_at = NULL, updated_at = NOW()
+       WHERE campaign_id = $1`,
+      [campaignId]
+    );
   }
 
   /**
-   * Resume a campaign — set active and schedule next run.
+   * Resume a campaign — set active and schedule next run. Idempotent — succeeds if already active.
    */
   static async resumeCampaign(campaignId) {
-    const result = await db.query(
+    const check = await db.query(
+      `SELECT campaign_id, status FROM x_auto_campaigns WHERE campaign_id = $1`,
+      [campaignId]
+    );
+    if (check.rowCount === 0) throw new Error('Campaign not found');
+    if (check.rows[0].status === 'active') return; // already active — no-op
+    await db.query(
       `UPDATE x_auto_campaigns
        SET status = 'active',
            next_run_at = NOW() + (interval_minutes::integer * INTERVAL '1 minute'),
+           consecutive_failures = 0,
+           paused_reason = NULL,
            updated_at = NOW()
-       WHERE campaign_id = $1 AND status = 'paused'`,
+       WHERE campaign_id = $1`,
       [campaignId]
     );
-    if (result.rowCount === 0) {
-      throw new Error('Campaign not found or not in paused status');
-    }
   }
 
   /**
@@ -487,7 +495,7 @@ class XAutoCampaignService {
     if (row && row.consecutive_failures >= 5) {
       await db.query(
         `UPDATE x_auto_campaigns
-         SET status = 'paused', next_run_at = NULL, updated_at = NOW()
+         SET status = 'paused', next_run_at = NULL, paused_reason = '5 consecutive generation failures', updated_at = NOW()
          WHERE campaign_id = $1 AND status = 'active'`,
         [campaignId]
       );

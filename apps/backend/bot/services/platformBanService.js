@@ -228,6 +228,29 @@ class PlatformBanService {
       return null; // fail open — don't block legitimate users on DB error
     }
   }
+
+  /**
+   * Check if an IP address is in any active platform ban's known_ips list.
+   * Used at registration to block banned users from creating new accounts.
+   *
+   * @param {string} ip
+   * @returns {Promise<object|null>} ban record or null
+   */
+  static async isIpBanned(ip) {
+    if (!ip) return null;
+    try {
+      const res = await query(
+        `SELECT id, reason, banned_at FROM platform_bans
+         WHERE is_active = TRUE AND $1 = ANY(known_ips)
+         LIMIT 1`,
+        [ip]
+      );
+      return res.rows[0] || null;
+    } catch (err) {
+      logger.error('PlatformBanService.isIpBanned error', { error: err.message });
+      return null; // fail open
+    }
+  }
 }
 
 module.exports = PlatformBanService;

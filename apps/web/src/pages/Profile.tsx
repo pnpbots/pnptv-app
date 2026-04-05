@@ -1604,7 +1604,7 @@ export default function Profile() {
                   isOwnProfile={isOwnProfile}
                   isSubscribed={isSubscribed}
                   creatorPriceUsd={profile.creatorPriceUsd}
-                  currentUserId={String(user?.id || "")}
+                  currentUserId={String(user?.dbId || "")}
                   userLang={lang}
                   onLike={handleLike}
                   onDelete={handleDelete}
@@ -1721,7 +1721,7 @@ export default function Profile() {
                     isOwnProfile={isOwnProfile}
                     isSubscribed={isSubscribed}
                     creatorPriceUsd={profile.creatorPriceUsd}
-                    currentUserId={String(user?.id || "")}
+                    currentUserId={String(user?.dbId || "")}
                     userLang={user?.language || "en"}
                     onLike={handleLike}
                     onDelete={handleDelete}

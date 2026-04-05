@@ -4,7 +4,49 @@ const PermissionService = require('../../services/permissionService');
 const {
   getPersonalInfoRedirect,
   getCallbackRedirectText,
+  getHangoutChatRedirectMessage,
+  getHangoutCommandRedirectMessage,
 } = require('../../../config/groupMessages');
+
+// Per-user cooldown for hangout redirect notices (avoids spamming on every message)
+const hangoutRedirectCooldown = {};
+
+/**
+ * Lookup whether a Telegram chat is linked to a hangout group.
+ * Returns { hangoutId, hangoutName } or null if not linked.
+ * Results are cached in Redis for 5 minutes.
+ */
+async function getLinkedHangout(chatId) {
+  try {
+    const { getRedis } = require('../../config/redis');
+    const { query: dbQuery } = require('../../../config/postgres');
+    const redis = getRedis();
+    const cacheKey = `tg-hangout-link:${chatId}`;
+
+    const cached = await redis.get(cacheKey);
+    if (cached === 'none') return null;
+    if (cached) {
+      const [id, ...nameParts] = cached.split(':');
+      return { hangoutId: parseInt(id, 10), hangoutName: nameParts.join(':') || null };
+    }
+
+    const { rows } = await dbQuery(
+      'SELECT id, name FROM hangout_groups WHERE telegram_chat_id = $1 LIMIT 1',
+      [chatId]
+    );
+    if (rows.length === 0) {
+      await redis.set(cacheKey, 'none', 'EX', 300);
+      return null;
+    }
+
+    const { id, name } = rows[0];
+    await redis.set(cacheKey, `${id}:${name || ''}`, 'EX', 300);
+    return { hangoutId: id, hangoutName: name || null };
+  } catch (err) {
+    logger.debug('getLinkedHangout error:', err.message);
+    return null;
+  }
+}
 
 const GROUP_ID = process.env.GROUP_ID;
 const PRIME_CHANNEL_ID = process.env.PRIME_CHANNEL_ID;
@@ -175,25 +217,103 @@ function groupBehaviorMiddleware() {
     const incomingText = (ctx.message?.text || '').toLowerCase();
     const isCommand = incomingText.startsWith('/');
     const botUsername = ctx.botInfo?.username || 'PNPLatinoTV_bot';
+    const userLang = ctx.session?.language || ctx.from?.language_code || 'en';
+    const displayName = ctx.from?.username || ctx.from?.first_name || 'friend';
+
+    // ── Check if this group is linked to a hangout ──────────────────────────
+    const linkedHangout = await getLinkedHangout(chatId);
+
+    if (linkedHangout) {
+      // ── GROUP IS LINKED TO A HANGOUT ──────────────────────────────────────
+      // Commands are disabled; all messages redirect to the webapp hangout.
+
+      if (isCommand && ctx.message?.message_id) {
+        // Delete the command to keep group clean
+        ChatCleanupService.scheduleDelete(
+          ctx.telegram,
+          chatId,
+          ctx.message.message_id,
+          'hangout-group-command-delete',
+          2000
+        );
+
+        // Send webapp redirect with direct hangout link
+        const { text, buttonText, buttonUrl } = getHangoutCommandRedirectMessage({
+          lang: userLang,
+          hangoutId: linkedHangout.hangoutId,
+          hangoutName: linkedHangout.hangoutName,
+        });
+
+        try {
+          const notice = await originalSendMessage(chatId, text, {
+            message_thread_id: ctx.message?.message_thread_id,
+            reply_markup: { inline_keyboard: [[{ text: buttonText, url: buttonUrl }]] },
+          });
+          if (notice) {
+            ChatCleanupService.scheduleDelete(
+              ctx.telegram, chatId, notice.message_id, 'hangout-cmd-notice', 15000
+            );
+          }
+        } catch (err) {
+          logger.debug('Could not send hangout command redirect:', err.message);
+        }
+
+        // Do NOT call next() — suppress all command processing
+        return;
+      }
+
+      // Regular text message in a linked hangout group: rate-limited redirect
+      const isRegularTextMessage = ctx.message?.text && !isCommand;
+      if (isRegularTextMessage && userId) {
+        const HANGOUT_COOLDOWN_MS = 10 * 60 * 1000;
+        const cooldownKey = `u${userId}`;
+        const lastSent = hangoutRedirectCooldown[cooldownKey] || 0;
+
+        if (Date.now() - lastSent > HANGOUT_COOLDOWN_MS) {
+          hangoutRedirectCooldown[cooldownKey] = Date.now();
+
+          const { text, buttonText, buttonUrl } = getHangoutChatRedirectMessage({
+            username: displayName,
+            lang: userLang,
+            hangoutId: linkedHangout.hangoutId,
+            hangoutName: linkedHangout.hangoutName,
+          });
+
+          try {
+            const notice = await originalSendMessage(chatId, text, {
+              message_thread_id: ctx.message?.message_thread_id,
+              reply_to_message_id: ctx.message?.message_id,
+              reply_markup: { inline_keyboard: [[{ text: buttonText, url: buttonUrl }]] },
+            });
+            if (notice) {
+              ChatCleanupService.scheduleDelete(
+                ctx.telegram, chatId, notice.message_id, 'hangout-redirect-notice', AUTO_DELETE_DELAY
+              );
+            }
+            logger.info('Hangout redirect sent (linked group)', { userId, chatId, hangoutId: linkedHangout.hangoutId });
+          } catch (err) {
+            logger.debug('Could not send hangout redirect notice:', err.message);
+          }
+        }
+      }
+
+      // Still call next() so the bridge handler can mirror the message to the webapp
+      return next();
+    }
+
+    // ── GROUP IS NOT LINKED TO A HANGOUT — standard bot redirect behavior ──
 
     // Override ctx.reply to send to private chat instead
     ctx.reply = async (text, extra = {}) => {
       try {
-        // Remove message_thread_id as we're sending to private chat
         const privateExtra = { ...extra };
         delete privateExtra.message_thread_id;
         delete privateExtra.reply_to_message_id;
 
         const message = await originalSendMessage(userId, text, privateExtra);
-
-        logger.debug('Bot response redirected to private chat', {
-          userId,
-          groupChatId: chatId,
-        });
-
+        logger.debug('Bot response redirected to private chat', { userId, groupChatId: chatId });
         return message;
       } catch (error) {
-        // User might have blocked the bot or never started it
         if (error.description && error.description.includes('bot was blocked')) {
           logger.info('User has blocked bot, cannot send private message', { userId });
         } else if (error.description && error.description.includes("bot can't initiate")) {
@@ -205,21 +325,17 @@ function groupBehaviorMiddleware() {
       }
     };
 
-    // Override all reply variants
     ctx.replyWithMarkdown = ctx.reply;
     ctx.replyWithHTML = ctx.reply;
 
-    // Override ctx.telegram.sendMessage for group targets
     ctx.telegram.sendMessage = async (targetChatId, text, extra = {}) => {
       const targetChatIdStr = targetChatId?.toString();
       const isTargetGroup = GROUP_ID ? targetChatIdStr === GROUP_ID : targetChatIdStr?.startsWith('-');
 
-      // If targeting the group, redirect to user's private chat instead
       if (isTargetGroup && userId) {
         const privateExtra = { ...extra };
         delete privateExtra.message_thread_id;
         delete privateExtra.reply_to_message_id;
-
         try {
           return await originalSendMessage(userId, text, privateExtra);
         } catch (error) {
@@ -227,49 +343,65 @@ function groupBehaviorMiddleware() {
           return null;
         }
       }
-
-      // For other targets (including private chats), send normally
       return originalSendMessage(targetChatId, text, extra);
     };
 
-    // Delete user's command in group after processing
     if (isCommand && ctx.message?.message_id) {
-      // Schedule deletion of user command after a short delay
       ChatCleanupService.scheduleDelete(
-        ctx.telegram,
-        chatId,
-        ctx.message.message_id,
-        'group-user-command',
-        5000 // Delete after 5 seconds
+        ctx.telegram, chatId, ctx.message.message_id, 'group-user-command', 5000
       );
     }
 
-    // Send a brief notification in group that redirects to private chat
     if (isCommand) {
-      const userLang = ctx.session?.language || ctx.from?.language_code || 'en';
       const isSpanish = userLang.startsWith('es');
-
       const redirectNotice = isSpanish
-        ? `💬 @${ctx.from?.username || ctx.from?.first_name}, revisa tu chat privado con @${botUsername}`
-        : `💬 @${ctx.from?.username || ctx.from?.first_name}, check your private chat with @${botUsername}`;
+        ? `💬 @${displayName}, revisa tu chat privado con @${botUsername}`
+        : `💬 @${displayName}, check your private chat with @${botUsername}`;
 
       try {
-        // Send brief notice in group using ORIGINAL sendMessage (not overridden)
         const notice = await originalSendMessage(chatId, redirectNotice, {
           message_thread_id: ctx.message?.message_thread_id || NOTIFICATIONS_TOPIC_ID,
         });
-
         if (notice) {
           ChatCleanupService.scheduleDelete(
-            ctx.telegram,
-            chatId,
-            notice.message_id,
-            'group-redirect-notice',
-            10000 // Delete notice after 10 seconds
+            ctx.telegram, chatId, notice.message_id, 'group-redirect-notice', 10000
           );
         }
       } catch (error) {
         logger.debug('Could not send redirect notice:', error.message);
+      }
+    }
+
+    // Regular text in non-linked group: generic hangout redirect
+    const isRegularTextMessage = ctx.message?.text && !isCommand;
+    if (isRegularTextMessage && userId) {
+      const HANGOUT_COOLDOWN_MS = 10 * 60 * 1000;
+      const cooldownKey = `u${userId}`;
+      const lastSent = hangoutRedirectCooldown[cooldownKey] || 0;
+
+      if (Date.now() - lastSent > HANGOUT_COOLDOWN_MS) {
+        hangoutRedirectCooldown[cooldownKey] = Date.now();
+
+        const { text, buttonText, buttonUrl } = getHangoutChatRedirectMessage({
+          username: displayName,
+          lang: userLang,
+        });
+
+        try {
+          const notice = await originalSendMessage(chatId, text, {
+            message_thread_id: ctx.message?.message_thread_id,
+            reply_to_message_id: ctx.message?.message_id,
+            reply_markup: { inline_keyboard: [[{ text: buttonText, url: buttonUrl }]] },
+          });
+          if (notice) {
+            ChatCleanupService.scheduleDelete(
+              ctx.telegram, chatId, notice.message_id, 'hangout-redirect-notice', AUTO_DELETE_DELAY
+            );
+          }
+          logger.info('Hangout redirect sent for group chat message', { userId, chatId });
+        } catch (error) {
+          logger.debug('Could not send hangout redirect notice:', error.message);
+        }
       }
     }
 

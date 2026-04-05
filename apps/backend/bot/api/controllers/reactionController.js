@@ -56,12 +56,13 @@ async function reactToChatMessage(req, res) {
   try {
     const result = await reactionService.toggleChatReaction(user.id, messageId, emoji);
 
-    // Broadcast to the specific chat room
+    // Broadcast to the specific hangout room using the event the frontend already listens to
     const io = req.app.get('io');
     if (io) {
       const msgRow = await query('SELECT room FROM chat_messages WHERE id=$1', [messageId]);
       if (msgRow.rows.length > 0) {
-        io.to(`chat:${msgRow.rows[0].room}`).emit('reaction:chat', { messageId, reactions: result.reactions });
+        // room is stored as e.g. "hangout:42" — emit directly to that room
+        io.to(msgRow.rows[0].room).emit('hangout:reaction:updated', { messageId, reactions: result.reactions });
       }
     }
 
@@ -99,6 +100,21 @@ async function reactToDm(req, res) {
 
   try {
     const result = await reactionService.toggleDmReaction(user.id, messageId, emoji);
+
+    // Broadcast to both participants so reactions sync in real-time
+    const io = req.app.get('io');
+    if (io) {
+      const { rows } = await query(
+        'SELECT sender_id, recipient_id FROM direct_messages WHERE id = $1',
+        [messageId]
+      );
+      if (rows.length > 0) {
+        const { sender_id, recipient_id } = rows[0];
+        io.to(`user:${sender_id}`).to(`user:${recipient_id}`)
+          .emit('dm:reaction:updated', { messageId, reactions: result.reactions });
+      }
+    }
+
     return res.json(result);
   } catch (err) {
     logger.error('[reactionController] reactToDm:', err.message);

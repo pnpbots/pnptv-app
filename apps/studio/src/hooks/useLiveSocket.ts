@@ -31,6 +31,7 @@ export interface LiveRaidEvent {
 
 interface UseLiveSocketResult {
   messages: LiveChatMessage[];
+  tips: LiveTip[];
   viewerCount: number;
   isConnected: boolean;
   reconnecting: boolean;
@@ -52,6 +53,7 @@ interface UseLiveSocketResult {
 
 export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
   const [messages, setMessages] = useState<LiveChatMessage[]>([]);
+  const [tips, setTips] = useState<LiveTip[]>([]);
   const [viewerCount, setViewerCount] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
@@ -134,6 +136,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       }
       hasJoinedRef.current = false;
       setMessages([]);
+      setTips([]);
       setViewerCount(0);
       setRaidEvent(null);
       return;
@@ -151,6 +154,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     // Reset UI state before registering new listeners so stale messages
     // from the previous stream are never visible on the incoming stream
     setMessages([]);
+    setTips([]);
     setViewerCount(0);
     setRaidEvent(null);
 
@@ -190,6 +194,11 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
 
     const onTip = (tip: LiveTip) => {
       setLatestTip(tip);
+      setTips((prev) => {
+        if (prev.some((t) => t.id === tip.id)) return prev;
+        const next = [...prev, tip];
+        return next.length > 50 ? next.slice(next.length - 50) : next;
+      });
     };
 
     // Raid handler — broadcast to all viewers in the source stream room
@@ -252,6 +261,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
 
   return {
     messages,
+    tips,
     viewerCount,
     isConnected,
     reconnecting,

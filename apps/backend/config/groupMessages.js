@@ -42,6 +42,60 @@ const getGroupMenuTitle = (lang) => {
     : 'PNPtv - Choose an option:';
 };
 
+const getHangoutChatRedirectMessage = ({ username, lang, hangoutId = null, hangoutName = null }) => {
+  const language = normalizeLang(lang);
+  const appUrl = process.env.WEB_DOMAIN
+    ? process.env.WEB_DOMAIN.replace(/\/$/, '')
+    : 'https://app.pnptv.app';
+
+  const hangoutUrl = hangoutId
+    ? `${appUrl}/chat?group=${hangoutId}`
+    : `${appUrl}/?view=hangouts`;
+
+  const groupLabel = hangoutName ? ` *${hangoutName}*` : '';
+
+  if (language === 'es') {
+    return {
+      text: `📱 @${username} este grupo está conectado al Hangout${groupLabel} de la app PNPtv.\n\nPor favor usa la app para chatear — los mensajes del grupo no se ven ahí.`,
+      buttonText: hangoutName ? `💬 Abrir ${hangoutName}` : '💬 Abrir Hangout',
+      buttonUrl: hangoutUrl,
+    };
+  }
+
+  return {
+    text: `📱 @${username} this group is connected to the${groupLabel} Hangout in the PNPtv app.\n\nPlease use the app to chat — group messages don't appear there.`,
+    buttonText: hangoutName ? `💬 Open ${hangoutName}` : '💬 Open Hangout',
+    buttonUrl: hangoutUrl,
+  };
+};
+
+const getHangoutCommandRedirectMessage = ({ lang, hangoutId = null, hangoutName = null }) => {
+  const language = normalizeLang(lang);
+  const appUrl = process.env.WEB_DOMAIN
+    ? process.env.WEB_DOMAIN.replace(/\/$/, '')
+    : 'https://app.pnptv.app';
+
+  const hangoutUrl = hangoutId
+    ? `${appUrl}/chat?group=${hangoutId}`
+    : `${appUrl}/?view=hangouts`;
+
+  const groupLabel = hangoutName ? ` *${hangoutName}*` : '';
+
+  if (language === 'es') {
+    return {
+      text: `📱 Este grupo está conectado al Hangout${groupLabel} de la app PNPtv. Los comandos del bot no están disponibles aquí.\n\nUsa la app para todas las funciones.`,
+      buttonText: hangoutName ? `💬 Abrir ${hangoutName}` : '💬 Abrir Hangout',
+      buttonUrl: hangoutUrl,
+    };
+  }
+
+  return {
+    text: `📱 This group is connected to the${groupLabel} Hangout in the PNPtv app. Bot commands are not available here.\n\nUse the app for all features.`,
+    buttonText: hangoutName ? `💬 Open ${hangoutName}` : '💬 Open Hangout',
+    buttonUrl: hangoutUrl,
+  };
+};
+
 const getCristinaRedirectMessage = ({
   username,
   lang,
@@ -75,4 +129,6 @@ module.exports = {
   getCallbackRedirectText,
   getGroupMenuTitle,
   getCristinaRedirectMessage,
+  getHangoutChatRedirectMessage,
+  getHangoutCommandRedirectMessage,
 };

@@ -90,9 +90,11 @@ function formatTime(ts: number): string {
 function HangoutChatPanel({
   activeGroup,
   isOwnerOrMod,
+  groupMembers,
 }: {
   activeGroup: HangoutGroup;
   isOwnerOrMod: boolean;
+  groupMembers: any[];
 }) {
   const { user } = useAuth();
   const myId = user?.dbId ?? user?.id ?? "";
@@ -125,7 +127,69 @@ function HangoutChatPanel({
   const isNearBottom = useRef(true);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "😮", "😢"];
+  const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "😮", "😢", "🙏", "💀"];
+
+  const EMOJI_CATEGORIES = [
+    {
+      label: "Reactions",
+      emojis: ["👍", "❤️", "😂", "🔥", "😮", "😢", "🙏", "💀", "😍", "🤣", "👀", "💯", "🫡", "🤡", "🥵", "💪"],
+    },
+    {
+      label: "Party",
+      emojis: ["🎉", "🎊", "🥳", "🎈", "🎁", "🏆", "🌟", "⭐", "💫", "✨"],
+    },
+    {
+      label: "Naughty",
+      emojis: ["🍆", "🍑", "💦", "👅", "🫦", "🔞", "🌶️", "🫠", "😈", "👿"],
+    },
+    {
+      label: "Nature",
+      emojis: ["🌈", "🦋", "🌺", "🌸", "🐝", "🦊", "🐺", "🌊", "⚡", "🍄"],
+    },
+  ] as const;
+
+  // Emoji picker state
+  const [emojiPickerMsgId, setEmojiPickerMsgId] = useState<number | null>(null);
+  const [emojiPickerPos, setEmojiPickerPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Animated reaction state — key is "${msgId}-${emoji}"
+  const [recentlyReacted, setRecentlyReacted] = useState<Set<string>>(new Set());
+
+  // Build memberMap: userId → displayName
+  const memberMap = React.useMemo<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    for (const m of groupMembers) {
+      const id = String(m.user_id ?? m.userId ?? "");
+      const name = m.first_name || m.username || m.name || "User";
+      if (id) map[id] = name;
+    }
+    return map;
+  }, [groupMembers]);
+
+  const openEmojiPicker = (msgId: number, x: number, y: number) => {
+    setContextMenu(null);
+    setEmojiPickerMsgId(msgId);
+    // Keep panel inside viewport
+    const PANEL_W = 280;
+    const PANEL_H = 260;
+    setEmojiPickerPos({
+      x: Math.min(x, window.innerWidth - PANEL_W - 8),
+      y: Math.max(8, Math.min(y, window.innerHeight - PANEL_H - 8)),
+    });
+  };
+
+  const handleReactionWithAnimation = async (msgId: number, emoji: string) => {
+    const key = `${msgId}-${emoji}`;
+    setRecentlyReacted((prev) => new Set(prev).add(key));
+    setTimeout(() => {
+      setRecentlyReacted((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }, 300);
+    await handleReaction(msgId, emoji);
+  };
 
   // Date separator helper
   const formatDateLabel = (dateStr: string): string => {
@@ -185,10 +249,12 @@ function HangoutChatPanel({
       }
     };
 
-    const onTyping = (data: { userId: string; name: string }) => {
+    const onTyping = (data: { userId: string; firstName?: string; name?: string }) => {
       if (String(data.userId) === String(myId)) return;
-      setTypingNames((prev) => prev.includes(data.name) ? prev : [...prev, data.name]);
-      setTimeout(() => setTypingNames((prev) => prev.filter((n) => n !== data.name)), 3000);
+      // Server emits `firstName`; fall back to `name` for older payloads
+      const displayName = data.firstName || data.name || "Someone";
+      setTypingNames((prev) => prev.includes(displayName) ? prev : [...prev, displayName]);
+      setTimeout(() => setTypingNames((prev) => prev.filter((n) => n !== displayName)), 3000);
     };
 
     const onMessageEdited = (data: { messageId: number; content: string; editedAt: string; editCount: number }) => {
@@ -203,17 +269,28 @@ function HangoutChatPanel({
       setMessages((prev) => prev.map((m) => m.id === data.messageId ? { ...m, reactions: data.reactions } : m));
     };
 
+    const onHangoutError = (data: { message: string; code?: string }) => {
+      setChatError(data.message || "Something went wrong");
+    };
+
     socket.on("chat:message", onChatMessage);
     socket.on("hangout:typing", onTyping);
     socket.on("hangout:message:edited", onMessageEdited);
     socket.on("hangout:message:deleted", onMessageDeleted);
     socket.on("hangout:reaction:updated", onReactionUpdated);
+    socket.on("hangout:error", onHangoutError);
     return () => {
       socket.off("chat:message", onChatMessage);
       socket.off("hangout:typing", onTyping);
       socket.off("hangout:message:edited", onMessageEdited);
       socket.off("hangout:message:deleted", onMessageDeleted);
       socket.off("hangout:reaction:updated", onReactionUpdated);
+      socket.off("hangout:error", onHangoutError);
+      // Clear any pending long-press timer to avoid state updates after unmount
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
     };
   }, [groupId, myId]);
 
@@ -471,20 +548,43 @@ function HangoutChatPanel({
                         {/* Reactions display */}
                         {msg.reactions && (msg.reactions as MessageReaction[]).length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-0.5 px-1">
-                            {(msg.reactions as MessageReaction[]).map((r) => (
-                              <button
-                                key={r.emoji}
-                                onClick={() => handleReaction(msg.id, r.emoji)}
-                                className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] transition-all active:scale-95 ${
-                                  r.reacted_by_me
-                                    ? "bg-pnp-accent/20 ring-1 ring-pnp-accent/40"
-                                    : "bg-white/5 hover:bg-white/10"
-                                }`}
-                              >
-                                <span>{r.emoji}</span>
-                                <span className="text-[10px] text-pnp-textSecondary">{r.count}</span>
-                              </button>
-                            ))}
+                            {(msg.reactions as MessageReaction[]).map((r) => {
+                              const reactorNames = (r.users || [])
+                                .map((uid: string) => memberMap[String(uid)] || "User")
+                                .filter(Boolean);
+                              const tooltipText = reactorNames.length <= 3
+                                ? reactorNames.join(", ")
+                                : `${reactorNames.slice(0, 3).join(", ")} and ${reactorNames.length - 3} more`;
+                              const animKey = `${msg.id}-${r.emoji}`;
+                              return (
+                                <div key={r.emoji} className="relative group/rxn">
+                                  <button
+                                    onClick={() => handleReactionWithAnimation(msg.id, r.emoji)}
+                                    className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] transition-all active:scale-95 ${
+                                      recentlyReacted.has(animKey) ? "scale-110" : ""
+                                    } ${
+                                      r.reacted_by_me
+                                        ? "bg-pnp-accent/20 ring-1 ring-pnp-accent/40"
+                                        : "bg-white/5 hover:bg-white/10"
+                                    }`}
+                                  >
+                                    <span>{r.emoji}</span>
+                                    <span className="text-[10px] text-pnp-textSecondary">{r.count}</span>
+                                  </button>
+                                  {reactorNames.length > 0 && (
+                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover/rxn:block z-50 pointer-events-none">
+                                      <div
+                                        className="rounded-lg px-2 py-1 text-[10px] text-white whitespace-nowrap shadow-xl"
+                                        style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.12)", maxWidth: "200px", whiteSpace: "normal", textAlign: "center" }}
+                                      >
+                                        {tooltipText}
+                                      </div>
+                                      <div className="w-2 h-2 rotate-45 mx-auto -mt-1" style={{ background: "#1C1C1E" }} />
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
 
@@ -493,12 +593,17 @@ function HangoutChatPanel({
                           {QUICK_REACTIONS.map((emoji) => (
                             <button
                               key={emoji}
-                              onClick={() => handleReaction(msg.id, emoji)}
+                              onClick={() => handleReactionWithAnimation(msg.id, emoji)}
                               className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-xs"
                             >
                               {emoji}
                             </button>
                           ))}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openEmojiPicker(msg.id, e.clientX, e.clientY); }}
+                            className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-xs text-pnp-textSecondary font-bold"
+                            title="More emojis"
+                          >+</button>
                           <button
                             onClick={() => startReply(msg)}
                             className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all"
@@ -556,15 +661,20 @@ function HangoutChatPanel({
           >
             {/* Quick reactions in context menu */}
             <div className="flex items-center justify-center gap-1 px-2 py-2 border-b border-white/5">
-              {QUICK_REACTIONS.map((emoji) => (
+              {QUICK_REACTIONS.slice(0, 6).map((emoji) => (
                 <button
                   key={emoji}
-                  onClick={() => handleReaction(contextMenu.msg.id, emoji)}
+                  onClick={() => handleReactionWithAnimation(contextMenu.msg.id, emoji)}
                   className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-base"
                 >
                   {emoji}
                 </button>
               ))}
+              <button
+                onClick={(e) => { e.stopPropagation(); openEmojiPicker(contextMenu.msg.id, e.clientX, e.clientY); }}
+                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-sm text-pnp-textSecondary font-bold"
+                title="More emojis"
+              >+</button>
             </div>
             <button
               onClick={() => startReply(contextMenu.msg)}
@@ -612,6 +722,56 @@ function HangoutChatPanel({
                 </button>
               </>
             )}
+          </div>
+        </>
+      )}
+
+      {/* Full emoji picker */}
+      {emojiPickerMsgId !== null && (
+        <>
+          <div className="fixed inset-0 z-[60]" onClick={() => setEmojiPickerMsgId(null)} />
+          <div
+            className="fixed z-[61] rounded-2xl shadow-2xl overflow-hidden"
+            style={{
+              left: emojiPickerPos.x,
+              top: emojiPickerPos.y,
+              width: 280,
+              background: "#1C1C1E",
+              border: "1px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
+              <p className="text-[11px] font-semibold text-pnp-textSecondary uppercase tracking-wider">Reactions</p>
+              <button
+                onClick={() => setEmojiPickerMsgId(null)}
+                className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10 text-pnp-textSecondary transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto" style={{ maxHeight: 220 }}>
+              {EMOJI_CATEGORIES.map((cat) => (
+                <div key={cat.label} className="px-2 pb-2">
+                  <p className="text-[10px] font-semibold text-pnp-textSecondary/60 px-1 pt-1.5 pb-1 uppercase tracking-wider">{cat.label}</p>
+                  <div className="flex flex-wrap gap-0.5">
+                    {cat.emojis.map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => {
+                          handleReactionWithAnimation(emojiPickerMsgId!, emoji);
+                          setEmojiPickerMsgId(null);
+                        }}
+                        className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-white/10 active:scale-90 transition-all text-xl"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </>
       )}
@@ -839,16 +999,34 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [settingsSuccess, setSettingsSuccess] = useState(false);
   const [settingsAvatarUploading, setSettingsAvatarUploading] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const groupMenuBtnRef = useRef<HTMLButtonElement>(null);
+  const [groupMenuPos, setGroupMenuPos] = useState<{ top: number; right: number }>({ top: 56, right: 8 });
+
+  // Group card context menu (list view)
+  const [groupCardMenuId, setGroupCardMenuId] = useState<number | null>(null);
+  // Inline edit modal for group list
+  const [editingGroup, setEditingGroup] = useState<HangoutGroup | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [editingDesc, setEditingDesc] = useState("");
+  const [editingSaving, setEditingSaving] = useState(false);
+  const [editingError, setEditingError] = useState<string | null>(null);
 
   // Dedicated error states for non-upload errors
   const [discoverError, setDiscoverError] = useState<string | null>(null);
 
-  // Telegram video chat status — polled (15s when active, 30s when idle)
+  // Telegram video chat status — driven by Socket.IO events (real-time)
   const [telegramCallActive, setTelegramCallActive] = useState(false);
   // Popover for the disabled call button (no telegramChatId)
   const [showNoTgPopover, setShowNoTgPopover] = useState(false);
   // Toast shown when user clicks "Start Call"
   const [showCallToast, setShowCallToast] = useState(false);
+  // Embedded call panel state
+  const [callStartedBy, setCallStartedBy] = useState<string | null>(null);
+  const [callStartTime, setCallStartTime] = useState<Date | null>(null);
+  const [callParticipantCount, setCallParticipantCount] = useState<number>(0);
+  const [callPanelDismissed, setCallPanelDismissed] = useState(false);
+  const [callDuration, setCallDuration] = useState("0:00");
+  const [callInviteLink, setCallInviteLink] = useState<string | null>(null);
 
   // SpotlightStrip — hangout events
   const [hangoutEvents, setHangoutEvents] = useState<EventItem[]>([]);
@@ -885,7 +1063,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       .catch(() => {});
   }, []);
 
-  // ─── Telegram video chat status polling ─────────────────────────────────
+  // ─── Telegram video chat status — initial fetch on group open ───────────
+  // Polling replaced by real-time Socket.IO events (hangout:call:started/ended).
+  // We still do one fetch on mount to restore state if a call was already active.
 
   useEffect(() => {
     if (!activeGroup?.id || !activeGroup.telegramChatId) {
@@ -893,33 +1073,110 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       return;
     }
     let cancelled = false;
+    getVideoChatStatus(activeGroup.id)
+      .then((res) => {
+        if (cancelled) return;
+        setTelegramCallActive(res.active);
+        if (res.active) {
+          // We don't know start time from poll; set to now as approximation
+          setCallStartTime((prev) => prev ?? new Date());
+          if (res.inviteLink) setCallInviteLink(res.inviteLink);
+        }
+      })
+      .catch(() => { /* silent */ });
+    return () => { cancelled = true; };
+  }, [activeGroup?.id, activeGroup?.telegramChatId]);
 
-    const poll = async () => {
-      try {
-        const res = await getVideoChatStatus(activeGroup.id);
-        if (!cancelled) setTelegramCallActive(res.active);
-      } catch {
-        // silent — stale value is acceptable
-      }
+  // ─── Socket.IO listeners for Telegram video call events ─────────────────
+  useEffect(() => {
+    if (!activeGroup?.id) return;
+    const socket = connectSocket();
+
+    const onCallStarted = (data: { groupId: number; startedBy?: { firstName?: string; username?: string }; inviteLink?: string | null }) => {
+      if (data.groupId !== activeGroup.id) return;
+      setTelegramCallActive(true);
+      setCallStartTime(new Date());
+      setCallParticipantCount(0);
+      setCallPanelDismissed(false);
+      setCallStartedBy(data.startedBy?.firstName || data.startedBy?.username || null);
+      if (data.inviteLink) setCallInviteLink(data.inviteLink);
     };
 
-    poll();
-    // 15s when a call is live, 30s when idle — re-schedules on state change
-    const intervalMs = telegramCallActive ? 15000 : 30000;
-    const interval = setInterval(poll, intervalMs);
+    const onCallEnded = (data: { groupId: number }) => {
+      if (data.groupId !== activeGroup.id) return;
+      setTelegramCallActive(false);
+      setCallStartTime(null);
+      setCallStartedBy(null);
+      setCallParticipantCount(0);
+      setCallDuration("0:00");
+    };
+
+    const onParticipantJoined = (data: { groupId: number; count?: number }) => {
+      if (data.groupId !== activeGroup.id) return;
+      setCallParticipantCount((prev) => prev + (data.count ?? 1));
+    };
+
+    socket.on("hangout:call:started", onCallStarted);
+    socket.on("hangout:call:ended", onCallEnded);
+    socket.on("hangout:call:participant-joined", onParticipantJoined);
 
     return () => {
-      cancelled = true;
-      clearInterval(interval);
+      socket.off("hangout:call:started", onCallStarted);
+      socket.off("hangout:call:ended", onCallEnded);
+      socket.off("hangout:call:participant-joined", onParticipantJoined);
     };
-  }, [activeGroup?.id, activeGroup?.telegramChatId, telegramCallActive]);
+  }, [activeGroup?.id]);
 
-  // Reset poll state when switching groups
+  // ─── Call duration counter ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!telegramCallActive || !callStartTime) { setCallDuration("0:00"); return; }
+    const iv = setInterval(() => {
+      const secs = Math.floor((Date.now() - callStartTime.getTime()) / 1000);
+      const m = Math.floor(secs / 60), s = secs % 60;
+      setCallDuration(`${m}:${s.toString().padStart(2, "0")}`);
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [telegramCallActive, callStartTime]);
+
+  // Reset call state when switching groups
   useEffect(() => {
     setTelegramCallActive(false);
     setShowNoTgPopover(false);
     setShowCallToast(false);
+    setCallStartedBy(null);
+    setCallStartTime(null);
+    setCallParticipantCount(0);
+    setCallPanelDismissed(false);
+    setCallDuration("0:00");
+    setCallInviteLink(null);
   }, [activeGroup?.id]);
+
+  // ─── Global hangout socket events (invite received, feed posts) ──────────
+  useEffect(() => {
+    const socket = connectSocket();
+
+    const onInviteReceived = (data: { groupId: number; groupName: string; invitedBy: string }) => {
+      // Reload group list so the invited group appears
+      loadGroups();
+      // Show a brief notification via chatError channel (repurposed as info)
+      setChatError(`You were invited to "${data.groupName}" by ${data.invitedBy}`);
+      setTimeout(() => setChatError(null), 5000);
+    };
+
+    const onHangoutFeedPost = (data: { groupId: number }) => {
+      // If we're viewing that group's feed tab, refresh it
+      if (activeGroup?.id === data.groupId && chatTab === "feed") {
+        setHangoutFeedLoaded(false);
+      }
+    };
+
+    socket.on("hangout:invite:received", onInviteReceived);
+    socket.on("hangout:feed:new_post", onHangoutFeedPost);
+    return () => {
+      socket.off("hangout:invite:received", onInviteReceived);
+      socket.off("hangout:feed:new_post", onHangoutFeedPost);
+    };
+  }, [activeGroup?.id, chatTab, loadGroups]);
 
   useEffect(() => {
     setIsLoading(true);
@@ -1149,6 +1406,21 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     });
   }, [groups, activeGroup, t, loadGroups]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const handleSaveInlineEdit = useCallback(async () => {
+    if (!editingGroup || editingSaving || !editingName.trim()) return;
+    setEditingSaving(true);
+    setEditingError(null);
+    try {
+      await updateHangoutGroup(editingGroup.id, { name: editingName.trim(), description: editingDesc.trim() });
+      setGroups((prev) => prev.map((g) => g.id === editingGroup.id ? { ...g, name: editingName.trim(), description: editingDesc.trim() } : g));
+      setEditingGroup(null);
+    } catch (err) {
+      setEditingError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setEditingSaving(false);
+    }
+  }, [editingGroup, editingName, editingDesc, editingSaving]);
+
   const handleDeleteGroup = useCallback((gid: number) => {
     const group = groups.find(g => g.id === gid);
     setConfirmAction({
@@ -1354,7 +1626,14 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             {/* Overflow menu */}
             <div className="relative">
               <button
-                onClick={() => setShowGroupMenu(v => !v)}
+                ref={groupMenuBtnRef}
+                onClick={() => {
+                  if (!showGroupMenu && groupMenuBtnRef.current) {
+                    const r = groupMenuBtnRef.current.getBoundingClientRect();
+                    setGroupMenuPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+                  }
+                  setShowGroupMenu(v => !v);
+                }}
                 className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
                 aria-label="Group options"
                 aria-expanded={showGroupMenu}
@@ -1365,8 +1644,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               </button>
               {showGroupMenu && (
                 <>
-                  <div className="fixed inset-0 z-30" onClick={() => setShowGroupMenu(false)} />
-                  <div className="absolute right-0 top-10 z-40 rounded-xl overflow-hidden shadow-xl min-w-[180px]" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  <div className="fixed inset-0 z-[70]" onClick={() => setShowGroupMenu(false)} />
+                  <div className="fixed z-[71] rounded-xl overflow-hidden shadow-xl min-w-[200px]" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", top: groupMenuPos.top, right: groupMenuPos.right }}>
                     <button
                       onClick={() => { setShowGroupMenu(false); setShowOnline(true); }}
                       className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
@@ -1390,6 +1669,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     <button
                       onClick={async () => {
                         setShowGroupMenu(false);
+                        setSettingsName(activeGroup.name);
+                        setSettingsDesc(activeGroup.description || "");
+                        setSettingsError(null);
+                        setSettingsSuccess(false);
                         setShowSettings(true);
                         setSettingsLoading(true);
                         await loadGroupDetail(activeGroup.id);
@@ -1411,7 +1694,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                         Leave Group
                       </button>
                     )}
-                    {isAdmin && (
+                    {(isAdmin || String(activeGroup.creatorId) === String(user?.dbId) || myMember?.role === "owner") && (
                       <button
                         onClick={() => { setShowGroupMenu(false); handleDeleteGroup(activeGroup.id); }}
                         className="w-full px-4 py-3 text-sm text-left hover:bg-white/10 transition-colors flex items-center gap-3"
@@ -1453,33 +1736,94 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               <path d="M21.8 2.3L2.1 9.7c-1.2.5-1.2 1.7-.2 2l4.8 1.5 1.8 5.6c.2.7 1 .9 1.5.4l2.7-2.7 5.3 3.9c1 .7 1.8.3 2-1L22.8 3.7c.3-1.3-.5-1.8-1-.4z" />
             </svg>
             <p className="flex-1 text-xs" style={{ color: "#29A8E2" }}>
-              Opening Telegram — tap the video icon in the group to start a call
+              Opening Telegram... tap the 📹 video camera icon in the group to start a call. Others in the group will see a notification to join.
             </p>
           </div>
         )}
 
-        {/* Active Telegram call banner — shown when a call is live */}
-        {telegramCallActive && activeGroup?.telegramInviteLink && (
+        {/* Embedded Telegram call panel — shown when a call is live */}
+        {telegramCallActive && !callPanelDismissed && activeGroup?.telegramChatId && (
           <div
-            className="flex items-center gap-3 px-4 py-2.5 flex-shrink-0"
-            style={{ background: "rgba(52,199,89,0.12)", borderBottom: "1px solid rgba(52,199,89,0.2)" }}
+            className="flex-shrink-0 mx-3 mt-2 rounded-2xl overflow-hidden"
+            style={{ background: "#1a1a2e", border: "1px solid rgba(41,168,226,0.3)", borderLeft: "3px solid #29A8E2" }}
           >
-            <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-400" />
-            </span>
-            <p className="flex-1 text-xs font-medium" style={{ color: "#34C759" }}>
-              Video call is live in Telegram
-            </p>
-            <a
-              href={getTelegramDeepLink(activeGroup.telegramInviteLink)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs font-bold px-3 py-1 rounded-lg transition-all hover:opacity-90 active:scale-95 flex-shrink-0"
-              style={{ background: "#34C759", color: "#fff" }}
-            >
-              Join
-            </a>
+            {/* Header row */}
+            <div className="flex items-center gap-2.5 px-3 pt-3 pb-2">
+              {/* Telegram logo SVG */}
+              <svg className="w-7 h-7 flex-shrink-0" viewBox="0 0 36 36" fill="none">
+                <circle cx="18" cy="18" r="18" fill="#29A8E2" />
+                <path d="M27.6 9.4L5.5 17.7c-.8.3-.8 1.1-.1 1.4l5.5 1.7 2.1 6.5c.2.5.7.6 1 .3l3.1-3.1 6.1 4.5c.7.5 1.3.2 1.5-.7l3.3-17.2c.2-.9-.4-1.3-.7-.7z" fill="white" />
+              </svg>
+              {/* LIVE badge with pulsing dot */}
+              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-widest" style={{ background: "rgba(255,59,48,0.15)", color: "#FF3B30" }}>
+                <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+                </span>
+                LIVE
+              </span>
+              {/* Heading + duration */}
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-white leading-tight">Video Call Active</p>
+                <p className="text-[10px] font-mono leading-tight" style={{ color: "#29A8E2" }}>{callDuration}</p>
+              </div>
+              {/* Dismiss */}
+              <button
+                onClick={() => setCallPanelDismissed(true)}
+                className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all flex-shrink-0"
+                aria-label="Dismiss call panel"
+                style={{ color: "rgba(255,255,255,0.4)" }}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Meta row — started by + participant count */}
+            {(callStartedBy || callParticipantCount > 0) && (
+              <div className="flex items-center gap-3 px-3 pb-2">
+                {callStartedBy && (
+                  <p className="text-[11px] text-white/50 truncate">Started by <span className="text-white/70 font-medium">{callStartedBy}</span></p>
+                )}
+                {callParticipantCount > 0 && (
+                  <span className="ml-auto flex-shrink-0 text-[11px] font-medium" style={{ color: "#29A8E2" }}>
+                    {callParticipantCount} in call
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex gap-2 px-3 pb-3">
+              <a
+                href={(() => {
+                  const link = callInviteLink || activeGroup.telegramInviteLink;
+                  return link ? getTelegramDeepLink(link) : `tg://resolve?domain=${String(activeGroup.telegramChatId).replace("-100", "")}`;
+                })()}
+                className="flex-1 min-h-[44px] flex items-center justify-center gap-2 rounded-xl text-sm font-bold transition-all hover:opacity-90 active:scale-95"
+                style={{ background: "#29A8E2", color: "#fff" }}
+                aria-label="Join video call in Telegram app"
+              >
+                <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M21.8 2.3L2.1 9.7c-1.2.5-1.2 1.7-.2 2l4.8 1.5 1.8 5.6c.2.7 1 .9 1.5.4l2.7-2.7 5.3 3.9c1 .7 1.8.3 2-1L22.8 3.7c.3-1.3-.5-1.8-1-.4z" />
+                </svg>
+                Join in Telegram
+              </a>
+              <a
+                href="https://web.telegram.org"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 min-h-[44px] flex items-center justify-center gap-1 rounded-xl text-sm font-bold transition-all hover:bg-white/10 active:scale-95"
+                style={{ border: "1px solid rgba(41,168,226,0.5)", color: "#29A8E2" }}
+                aria-label="Join video call in Telegram Web"
+              >
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+                Join in Browser
+              </a>
+            </div>
           </div>
         )}
 
@@ -1655,6 +1999,37 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       <>
                         <div className="border-t border-white/10 pt-4">
                           <p className="text-xs font-semibold text-pnp-textSecondary mb-3 uppercase tracking-wider">Admin Controls</p>
+
+                          {/* Edit name & description */}
+                          <div className="space-y-2 mb-3">
+                            <input
+                              type="text"
+                              value={settingsName}
+                              onChange={(e) => setSettingsName(e.target.value)}
+                              maxLength={80}
+                              placeholder="Group name"
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors"
+                            />
+                            <textarea
+                              value={settingsDesc}
+                              onChange={(e) => setSettingsDesc(e.target.value)}
+                              maxLength={500}
+                              rows={2}
+                              placeholder="Description (optional)"
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors resize-none"
+                            />
+                            {settingsError && (
+                              <p className="text-xs text-red-400">{settingsError}</p>
+                            )}
+                            <button
+                              onClick={handleSaveGroupSettings}
+                              disabled={settingsSaving || !settingsName.trim()}
+                              className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all active:scale-95 disabled:opacity-50"
+                              style={{ background: "linear-gradient(135deg, #7B61FF, #D4007A)" }}
+                            >
+                              {settingsSaving ? "Saving…" : settingsSuccess ? "Saved!" : "Save Changes"}
+                            </button>
+                          </div>
 
                           {/* Public/Private Toggle */}
                           <button
@@ -2012,6 +2387,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           <HangoutChatPanel
             activeGroup={activeGroup}
             isOwnerOrMod={isOwnerOrMod}
+            groupMembers={groupMembers}
           />
         )}
 
@@ -2623,6 +2999,49 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       Link TG
                     </span>
                   )}
+                  {/* Owner actions — ⋮ menu */}
+                  {!group.isMain && !group.isWallOfFame && (isAdmin || String(group.creatorId) === String(user?.dbId)) && (
+                    <div className="relative" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => setGroupCardMenuId(groupCardMenuId === group.id ? null : group.id)}
+                        className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all"
+                        aria-label="Group options"
+                      >
+                        <svg className="w-4 h-4 text-pnp-textSecondary" fill="currentColor" viewBox="0 0 24 24">
+                          <circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" />
+                        </svg>
+                      </button>
+                      {groupCardMenuId === group.id && (
+                        <>
+                          <div className="fixed inset-0 z-30" onClick={() => setGroupCardMenuId(null)} />
+                          <div className="absolute right-0 top-8 z-40 rounded-xl overflow-hidden shadow-xl min-w-[150px]" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
+                            <button
+                              onClick={() => {
+                                setGroupCardMenuId(null);
+                                setEditingGroup(group);
+                                setEditingName(group.name);
+                                setEditingDesc(group.description || "");
+                                setEditingError(null);
+                              }}
+                              className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
+                            >
+                              <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                              Edit
+                            </button>
+                            <div className="border-t border-white/5" />
+                            <button
+                              onClick={() => { setGroupCardMenuId(null); handleDeleteGroup(group.id); }}
+                              className="w-full px-4 py-3 text-sm text-left hover:bg-white/10 transition-colors flex items-center gap-3"
+                              style={{ color: "#FF6B6B" }}
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                   <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
@@ -2870,6 +3289,55 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           >
             {t.chat.upgradeToPrime}
           </button>
+        </div>
+      )}
+
+      {/* Inline edit group modal */}
+      {editingGroup && (
+        <div
+          className="fixed inset-0 z-[70] flex items-end justify-center"
+          style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setEditingGroup(null); }}
+        >
+          <div className="w-full max-w-lg rounded-t-2xl p-6 space-y-4" style={{ background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+            <div className="flex justify-center -mt-2 mb-2"><div className="w-10 h-1 rounded-full bg-white/20" /></div>
+            <h3 className="text-base font-bold text-white">Edit Group</h3>
+            <div className="space-y-3">
+              <input
+                type="text"
+                value={editingName}
+                onChange={(e) => setEditingName(e.target.value)}
+                maxLength={80}
+                placeholder="Group name"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-sm text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors"
+              />
+              <textarea
+                value={editingDesc}
+                onChange={(e) => setEditingDesc(e.target.value)}
+                maxLength={500}
+                rows={3}
+                placeholder="Description (optional)"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-sm text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors resize-none"
+              />
+              {editingError && <p className="text-xs text-red-400">{editingError}</p>}
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setEditingGroup(null)}
+                className="flex-1 py-3 rounded-xl text-sm font-semibold text-pnp-textSecondary border border-pnp-border hover:bg-white/5 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveInlineEdit}
+                disabled={editingSaving || !editingName.trim()}
+                className="flex-1 py-3 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-50 active:scale-98"
+                style={{ background: "linear-gradient(135deg, #7B61FF, #D4007A)" }}
+              >
+                {editingSaving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

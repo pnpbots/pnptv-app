@@ -748,7 +748,14 @@ export default function XAutoCampaigns() {
       key: "status",
       header: "Status",
       render: (row: XAutoCampaign) => (
-        <Badge variant={STATUS_BADGE[row.status] || "default"}>{row.status}</Badge>
+        <div>
+          <Badge variant={STATUS_BADGE[row.status] || "default"}>{row.status}</Badge>
+          {row.status === "paused" && row.paused_reason && (
+            <p className="text-xs text-yellow-400 mt-0.5" title={row.paused_reason}>
+              {row.paused_reason.length > 30 ? row.paused_reason.slice(0, 28) + "…" : row.paused_reason}
+            </p>
+          )}
+        </div>
       ),
     },
     {
@@ -757,6 +764,7 @@ export default function XAutoCampaigns() {
       render: (row: XAutoCampaign) => (
         <span className="text-xs">
           {row.total_generated} gen / {row.total_posted} posted
+          {row.total_failed > 0 ? ` / ${row.total_failed} failed` : ""}
           {row.max_posts ? ` / ${row.max_posts} max` : ""}
         </span>
       ),

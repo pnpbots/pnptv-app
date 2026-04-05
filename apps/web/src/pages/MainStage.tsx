@@ -118,6 +118,21 @@ export default function MainStage() {
         socket.on('mainstage:mode-changed', (data: { mode: string; master: any }) => {
           setStageState({ mode: data.mode as StageState['mode'], master: data.master });
         });
+        // Knock-to-speak feedback for the requesting user
+        socket.on('mainstage:knock:approved', () => setKnockStatus('approved'));
+        socket.on('mainstage:knock:denied', () => setKnockStatus('denied'));
+        // Admin: incoming knock queue management
+        socket.on('mainstage:knock:new', (data: { userId: string; displayName: string }) => {
+          setKnockQueue((q) => q.some((k) => k.userId === data.userId) ? q : [...q, data]);
+        });
+        socket.on('mainstage:knock:resolved', (data: { targetUserId: string }) => {
+          setKnockQueue((q) => q.filter((k) => k.userId !== data.targetUserId));
+        });
+        // Clip dropped — show a brief notification
+        socket.on('mainstage:clip-dropped', (data: { displayName: string }) => {
+          setError(`🎬 ${data.displayName || 'Someone'} dropped a clip!`);
+          setTimeout(() => setError(''), 4000);
+        });
       }
 
       setJoined(true);

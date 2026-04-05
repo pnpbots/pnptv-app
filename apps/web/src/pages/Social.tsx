@@ -19,7 +19,7 @@ function isValidPhotoUrl(photo: string | null | undefined): photo is string {
 export default function Social() {
   const { user, isAuthenticated, isAdmin } = useAuth();
   const navigate = useNavigate();
-  const currentUserId = String(user?.id || "");
+  const currentUserId = String(user?.dbId || "");
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("social");
   const { feed: t } = useI18n();
 

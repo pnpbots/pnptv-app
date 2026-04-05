@@ -77,6 +77,12 @@ export interface PreStreamSetupProps {
   videoRef: React.RefObject<HTMLVideoElement>;
   streamTitle: string;
   setStreamTitle: (v: string) => void;
+  streamDesc: string;
+  setStreamDesc: (v: string) => void;
+  category: string;
+  setCategory: (v: string) => void;
+  thumbnail: string | null;
+  setThumbnail: (v: string | null) => void;
   onStartStream: () => void;
   isConnecting: boolean;
   channel: { ref: string } | null;
@@ -184,6 +190,12 @@ export function PreStreamSetup({
   videoRef,
   streamTitle,
   setStreamTitle,
+  streamDesc,
+  setStreamDesc,
+  category,
+  setCategory,
+  thumbnail,
+  setThumbnail,
   onStartStream,
   isConnecting,
   channel,
@@ -191,9 +203,6 @@ export function PreStreamSetup({
   const t = useI18n();
 
   // ── Local setup state ──────────────────────────────────────────────────────
-  const [streamDesc, setStreamDesc] = useState("");
-  const [category, setCategory] = useState<CategoryKey>("tagChat");
-  const [thumbnail, setThumbnail] = useState<string | null>(null);
   const [titleError, setTitleError] = useState(false);
   const [connectionRating, setConnectionRating] = useState<ConnectionRating>(null);
   const [isTesting, setIsTesting] = useState(false);

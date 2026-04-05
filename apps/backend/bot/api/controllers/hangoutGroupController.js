@@ -931,63 +931,6 @@ const sendMessage = async (req, res) => {
   }
 };
 
-// POST /api/webapp/hangouts/groups/:id/call — create Telegram video chat
-const startCall = async (req, res) => {
-  const user = authGuard(req, res); if (!user) return;
-  const groupId = parseInt(req.params.id);
-
-  try {
-    if (!(await isMember(groupId, user.id))) {
-      return res.status(403).json({ error: 'Not a member of this group' });
-    }
-
-    // Must have a linked Telegram group
-    const { rows: groupRows } = await query(
-      'SELECT telegram_chat_id, telegram_invite_link FROM hangout_groups WHERE id = $1',
-      [groupId]
-    );
-    if (!groupRows.length || !groupRows[0].telegram_chat_id) {
-      return res.status(400).json({ error: 'Link a Telegram group first to start video calls' });
-    }
-
-    const { telegram_chat_id, telegram_invite_link } = groupRows[0];
-    const botToken = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
-
-    // Try to create a video chat in the linked Telegram group via Bot API
-    let videoChatLink = telegram_invite_link || `https://t.me/c/${String(telegram_chat_id).replace('-100', '')}`;
-    try {
-      const createResp = await fetch(`https://api.telegram.org/bot${botToken}/createVideoChat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: telegram_chat_id, title: 'Hangout Video Call' }),
-      });
-      const createData = await createResp.json();
-      if (createData.ok) {
-        // Try to get an invite link for the video chat
-        try {
-          const linkResp = await fetch(`https://api.telegram.org/bot${botToken}/exportChatInviteLink`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: telegram_chat_id }),
-          });
-          const linkData = await linkResp.json();
-          if (linkData.ok && linkData.result) videoChatLink = linkData.result;
-        } catch { /* use fallback link */ }
-      }
-    } catch (tgErr) {
-      logger.warn(`startCall: createVideoChat failed for ${telegram_chat_id}: ${tgErr.message}`);
-    }
-
-    return res.json({
-      success: true,
-      telegramInviteLink: videoChatLink,
-    });
-  } catch (err) {
-    logger.error('startCall hangout error', err);
-    return res.status(500).json({ error: 'Failed to start call' });
-  }
-};
-
 // POST /api/webapp/hangouts/groups/:id/read
 const markAsRead = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
@@ -1978,7 +1921,7 @@ module.exports = {
   updateMemberRole,
   getMessages,
   sendMessage,
-  startCall,
+
   markAsRead,
   discoverGroups,
   requestJoinGroup,

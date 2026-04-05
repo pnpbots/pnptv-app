@@ -119,7 +119,20 @@ const handleTelegramAuth = async (req, res) => {
     );
 
     if (userQuery.rows.length === 0) {
-      // User not in database - create new user record with Authentik UUID
+      // User not in database — check IP ban before creating a new account
+      const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress;
+      if (clientIp) {
+        const ipBan = await PlatformBanService.isIpBanned(clientIp);
+        if (ipBan) {
+          logger.warn('Telegram auth: IP-banned address attempted new registration', { ip: clientIp, banId: ipBan.id });
+          return res.status(403).json({
+            error: 'account_banned',
+            message: 'Tu cuenta ha sido suspendida permanentemente de la plataforma PNPtv.',
+          });
+        }
+      }
+
+      // Create new user record with Authentik UUID
       logger.info(`User ${telegramUser.id} / ${pnptvId} not in database, creating new user record`);
 
       try {

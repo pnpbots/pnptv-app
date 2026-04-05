@@ -16,15 +16,21 @@ interface LivePlayerProps {
 export function LivePlayer({ src, title, poster, className = "", overlay }: LivePlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<"loading" | "live" | "offline" | "error" | "retrying">("loading");
+  const [showReload, setShowReload] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const hlsRef = useRef<Hls | null>(null);
   // FE-H3: track retry setTimeout so it can be cleared on unmount
   const retryTimerRef = useRef<number | undefined>(undefined);
+  const reloadTimerRef = useRef<number | undefined>(undefined);
   const t = useI18n();
 
   const initHls = (video: HTMLVideoElement, source: string) => {
     // FE-H3: clear any pending retry timer before reinitialising
     clearTimeout(retryTimerRef.current);
     retryTimerRef.current = undefined;
+    clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = undefined;
+    setShowReload(false);
 
     hlsRef.current?.destroy();
     hlsRef.current = null;
@@ -48,6 +54,8 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setStatus("live");
+        clearTimeout(reloadTimerRef.current);
+        setShowReload(false);
         video.play().catch(() => {});
       });
 
@@ -55,16 +63,26 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
         console.warn("[LivePlayer] HLS error:", data.type, data.details, data.fatal ? "(FATAL)" : "");
         if (data.fatal) {
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            // Show retrying spinner immediately, then go offline after 3s if not recovered
+            // Show retrying spinner immediately, then go offline after 10s if not recovered.
+            // 10s aligns better with hls.js internal manifestLoadingMaxRetry=6 * 2s.
             console.warn("[LivePlayer] Fatal network error, attempting recovery…");
             setStatus("retrying");
             hls.startLoad();
+
+            // Show reload button after 5s of retrying
+            reloadTimerRef.current = window.setTimeout(() => {
+              setShowReload(true);
+            }, 5000);
+            
             // FE-H3: track the timer so it can be cleared on unmount
             retryTimerRef.current = window.setTimeout(() => {
-              if (hls.media && hls.media.readyState === 0) {
+              if (hls.media && (hls.media.readyState === 0 || (hls.media as HTMLVideoElement).networkState === 3)) {
                 setStatus("offline");
               }
-            }, 3000);
+            }, 10000);
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            console.warn("[LivePlayer] Fatal media error, attempting recovery…");
+            hls.recoverMediaError();
           } else {
             setStatus("error");
           }
@@ -109,6 +127,8 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
       // FE-H3: cancel any pending retry timer
       clearTimeout(retryTimerRef.current);
       retryTimerRef.current = undefined;
+      clearTimeout(reloadTimerRef.current);
+      reloadTimerRef.current = undefined;
 
       hlsRef.current?.destroy();
       hlsRef.current = null;
@@ -141,15 +161,32 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
     initHls(video, src);
   };
 
+  const handleUnmute = () => {
+    if (videoRef.current) {
+      videoRef.current.muted = false;
+      setIsMuted(false);
+    }
+  };
+
   if (status === "loading" || status === "retrying") {
     return (
-      <div className={`relative aspect-video overflow-hidden rounded-xl ${className}`}>
-        <Skeleton className="w-full h-full" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+      <div className={`relative aspect-video overflow-hidden rounded-xl bg-black ${className}`}>
+        <Skeleton className="w-full h-full opacity-20" />
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
           <div className="w-10 h-10 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
-          {status === "retrying" && (
-            <p className="text-xs text-pnp-textSecondary/80 animate-pulse">Reconnecting…</p>
-          )}
+          <div className="text-center">
+            <p className="text-xs text-white/80 animate-pulse font-medium">
+              {status === "retrying" ? "Reconnecting…" : "Loading stream…"}
+            </p>
+            {showReload && (
+              <button
+                onClick={handleRetry}
+                className="mt-4 px-4 py-2 rounded-lg text-[10px] font-bold text-white bg-pnp-accent/20 border border-pnp-accent/40 hover:bg-pnp-accent/30 transition-colors"
+              >
+                Reload Player
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -196,7 +233,27 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
         controls
         controlsList="nodownload"
         onContextMenu={(e) => e.preventDefault()}
+        onVolumeChange={(e) => {
+          setIsMuted((e.target as HTMLVideoElement).muted || (e.target as HTMLVideoElement).volume === 0);
+        }}
       />
+      {status === "live" && isMuted && (
+        <button
+          onClick={handleUnmute}
+          className="absolute inset-0 z-20 flex items-center justify-center bg-black/20 group hover:bg-black/40 transition-colors"
+          aria-label="Unmute"
+        >
+          <div className="flex flex-col items-center gap-3 bg-black/60 backdrop-blur-md px-6 py-4 rounded-2xl border border-white/10 transform transition-transform group-hover:scale-105">
+            <div className="w-12 h-12 rounded-full bg-pnp-accent flex items-center justify-center shadow-lg shadow-pnp-accent/20">
+              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+              </svg>
+            </div>
+            <p className="text-white text-xs font-bold uppercase tracking-wider">Tap to Unmute</p>
+          </div>
+        </button>
+      )}
       {status === "live" && (
         <div className="absolute top-3 left-3 z-10">
           <Badge variant="error">LIVE</Badge>

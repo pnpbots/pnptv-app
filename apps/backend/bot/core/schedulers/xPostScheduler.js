@@ -124,7 +124,7 @@ class XPostScheduler {
           detail: error.response?.data?.detail || error.message,
         });
         await db.query(
-          `UPDATE x_auto_campaigns SET status = 'paused', next_run_at = NULL, updated_at = NOW() WHERE campaign_id = $1 AND status = 'active'`,
+          `UPDATE x_auto_campaigns SET status = 'paused', total_failed = total_failed + 1, next_run_at = NULL, paused_reason = 'X API credits exhausted (402)', updated_at = NOW() WHERE campaign_id = $1 AND status = 'active'`,
           [post.campaign_id]
         );
       }
@@ -172,6 +172,14 @@ class XPostScheduler {
         status: 'failed',
         errorMessage,
       });
+
+      // Increment campaign total_failed counter (skip 402 — already incremented above)
+      if (post.campaign_id && error.response?.status !== 402) {
+        db.query(
+          `UPDATE x_auto_campaigns SET total_failed = total_failed + 1, updated_at = NOW() WHERE campaign_id = $1`,
+          [post.campaign_id]
+        ).catch(err => logger.error('Failed to increment campaign total_failed:', err));
+      }
 
       // Notify admin about failure
       await this.notifyAdmin(post, 'failed', {

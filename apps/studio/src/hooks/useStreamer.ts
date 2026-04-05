@@ -252,6 +252,12 @@ export interface UseStreamerReturn {
   // Stream title
   streamTitle: string;
   setStreamTitle: React.Dispatch<React.SetStateAction<string>>;
+  streamDesc: string;
+  setStreamDesc: React.Dispatch<React.SetStateAction<string>>;
+  category: string;
+  setCategory: React.Dispatch<React.SetStateAction<string>>;
+  thumbnail: string | null;
+  setThumbnail: React.Dispatch<React.SetStateAction<string | null>>;
 
   // Mobile detection
   isMobileDevice: boolean;
@@ -455,6 +461,9 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     getNetworkQuality((navigator as any).connection)
   );
   const [streamTitle, setStreamTitle] = useState("");
+  const [streamDesc, setStreamDesc] = useState("");
+  const [category, setCategory] = useState("tagChat");
+  const [thumbnail, setThumbnail] = useState<string | null>(null);
 
   // ── Mobile detection ──────────────────────────────────────────────────────
   const isMobileDevice = window.innerWidth < 768 || "ontouchstart" in window;
@@ -804,6 +813,10 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
       videoBitrate: state.selectedPreset.videoBitrate,
       audioBitrate: state.selectedPreset.audioBitrate,
       fps: state.fps,
+      title: streamTitle,
+      description: streamDesc,
+      tags: [category],
+      thumbnailDataUrl: thumbnail,
     });
 
     // Use processed stream (scene→filters→audio) when available, else raw camera
@@ -1100,6 +1113,12 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     // Stream title
     streamTitle,
     setStreamTitle,
+    streamDesc,
+    setStreamDesc,
+    category,
+    setCategory,
+    thumbnail,
+    setThumbnail,
 
     // Mobile detection
     isMobileDevice,

@@ -5,13 +5,19 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useI18n } from "@/lib/i18n";
-import { getMessageThreads, markThreadAsRead, type MessageThread } from "@/lib/api";
+import { getMessageThreads, markThreadAsRead, toggleDmMessageReaction, type MessageThread } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+interface DmReaction {
+  emoji: string;
+  count: number;
+  users: Array<{ id: string; username: string }>;
+}
 
 interface DmMessage {
   id: number;
@@ -23,7 +29,10 @@ interface DmMessage {
   media_mime?: string | null;
   media_thumb_url?: string | null;
   is_read: boolean;
+  is_deleted?: boolean;
   created_at: string;
+  edited_at?: string | null;
+  reactions?: DmReaction[];
 }
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
@@ -38,6 +47,17 @@ function timeAgo(dateStr: string): string {
   if (hrs < 24) return `${hrs}h`;
   return `${Math.floor(hrs / 24)}d`;
 }
+
+// ─── Emoji data ───────────────────────────────────────────────────────────────
+
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "😮", "😢"];
+
+const EMOJI_CATEGORIES = [
+  { label: "Reactions", emojis: ["👍", "❤️", "😂", "🔥", "😮", "😢", "🙏", "💀", "😍", "🤣", "👀", "💯", "🫡", "🤡", "🥵", "💪"] },
+  { label: "Party", emojis: ["🎉", "🎊", "🥳", "🎈", "🎁", "🏆", "🌟", "⭐", "💫", "✨"] },
+  { label: "Naughty", emojis: ["🍆", "🍑", "💦", "👅", "🫦", "🔞", "🌶️", "🫠", "😈", "👿"] },
+  { label: "Nature", emojis: ["🌈", "🦋", "🌺", "🌸", "🐝", "🦊", "🐺", "🌊", "⚡", "🍄"] },
+] as const;
 
 // ─── Chat View (conversation with a specific user) ──────────────────────────
 
@@ -57,10 +77,18 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
   const [partnerName, setPartnerName] = useState("");
   const [partnerPhoto, setPartnerPhoto] = useState<string | null>(null);
   const [partnerTelegramId, setPartnerTelegramId] = useState<string | null>(null);
+
+  // Context menu / emoji picker
+  const [contextMenu, setContextMenu] = useState<{ msg: DmMessage; x: number; y: number } | null>(null);
+  const [emojiPickerMsgId, setEmojiPickerMsgId] = useState<number | null>(null);
+  const [emojiPickerPos, setEmojiPickerPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [recentlyReacted, setRecentlyReacted] = useState<Set<string>>(new Set());
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const lastTypingEmit = useRef(0);
   const hasFetched = useRef(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch partner info + messages
   useEffect(() => {
@@ -104,7 +132,12 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
     const socket = connectSocket();
 
     const onDmMessage = (msg: DmMessage) => {
-      if (String(msg.sender_id) !== String(userId)) return;
+      // Accept messages where userId (the partner) is on either side of the conversation.
+      // Also accept messages the current user sent via Socket.IO dm:send (sender_id === myDbId)
+      // that arrive on the dm:message channel (some server paths emit to sender room too).
+      const involvesPartner = String(msg.sender_id) === String(userId) || String(msg.recipient_id) === String(userId);
+      const isMySend = String(msg.sender_id) === String(myDbId);
+      if (!involvesPartner && !isMySend) return;
       setMessages((prev) => prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]);
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
       markThreadAsRead(userId).catch(() => {});
@@ -122,10 +155,58 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
       setTimeout(() => setIsTyping(false), 3000);
     };
 
+    const onDmEdited = (data: { messageId: number; content: string; editedAt: string; editCount: number }) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.messageId
+            ? { ...m, content: data.content, edited_at: data.editedAt }
+            : m
+        )
+      );
+    };
+
+    const onDmDeleted = (data: { messageId: number; forAll: boolean }) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.messageId ? { ...m, is_deleted: true, content: null } : m
+        )
+      );
+    };
+
+    const onDmReactionUpdated = (data: { messageId: number; reactions: DmReaction[] }) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.messageId ? { ...m, reactions: data.reactions } : m
+        )
+      );
+    };
+
+    const onDmError = (data: { message?: string; error?: string }) => {
+      setChatError(data.message || data.error || "Something went wrong");
+    };
+
     socket.on("dm:message", onDmMessage);
     socket.on("dm:sent", onDmSent);
     socket.on("dm:typing", onDmTyping);
-    return () => { socket.off("dm:message", onDmMessage); socket.off("dm:sent", onDmSent); socket.off("dm:typing", onDmTyping); };
+    socket.on("dm:message:edited", onDmEdited);
+    socket.on("dm:message:deleted", onDmDeleted);
+    socket.on("dm:reaction:updated", onDmReactionUpdated);
+    socket.on("dm:error", onDmError);
+
+    return () => {
+      socket.off("dm:message", onDmMessage);
+      socket.off("dm:sent", onDmSent);
+      socket.off("dm:typing", onDmTyping);
+      socket.off("dm:message:edited", onDmEdited);
+      socket.off("dm:message:deleted", onDmDeleted);
+      socket.off("dm:reaction:updated", onDmReactionUpdated);
+      socket.off("dm:error", onDmError);
+      // Clear any pending long-press timer to avoid state updates after unmount
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+    };
   }, [userId]);
 
   const emitTyping = () => {
@@ -197,6 +278,58 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
     finally { setLoadingMore(false); }
   };
 
+  const handleReaction = useCallback(async (msgId: number, emoji: string) => {
+    const key = `${msgId}-${emoji}`;
+    setRecentlyReacted((prev) => new Set(prev).add(key));
+    setTimeout(() => {
+      setRecentlyReacted((prev) => { const next = new Set(prev); next.delete(key); return next; });
+    }, 300);
+    setContextMenu(null);
+    setEmojiPickerMsgId(null);
+    try {
+      const result = await toggleDmMessageReaction(msgId, emoji);
+      setMessages((prev) => prev.map((m) => m.id === msgId ? { ...m, reactions: result.reactions } : m));
+    } catch { /* silent */ }
+  }, []);
+
+  const openEmojiPicker = (msgId: number, x: number, y: number) => {
+    setContextMenu(null);
+    const PANEL_W = 280, PANEL_H = 280;
+    setEmojiPickerPos({
+      x: Math.min(x, window.innerWidth - PANEL_W - 8),
+      y: Math.max(8, Math.min(y, window.innerHeight - PANEL_H - 8)),
+    });
+    setEmojiPickerMsgId(msgId);
+  };
+
+  const handleContextMenu = (msg: DmMessage, e: React.MouseEvent) => {
+    if (msg.is_deleted) return;
+    e.preventDefault();
+    setContextMenu({ msg, x: e.clientX, y: e.clientY });
+  };
+
+  const handleTouchStart = (msg: DmMessage, e: React.TouchEvent) => {
+    if (msg.is_deleted) return;
+    const touch = e.touches[0];
+    longPressTimer.current = setTimeout(() => {
+      setContextMenu({ msg, x: touch.clientX, y: touch.clientY });
+    }, 500);
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+  };
+
+  const handleDeleteMsg = (msg: DmMessage) => {
+    setContextMenu(null);
+    // Optimistic update — mark message deleted immediately so the UI responds instantly
+    setMessages((prev) =>
+      prev.map((m) => m.id === msg.id ? { ...m, is_deleted: true, content: null } : m)
+    );
+    // Server-side delete + broadcast to both participants via Socket.IO
+    connectSocket().emit("dm:message:delete", { messageId: msg.id });
+  };
+
   const isValidPhoto = (p: string | null | undefined) => p && (p.startsWith("/") || p.startsWith("http"));
 
   return (
@@ -220,7 +353,7 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
           <p className="text-sm font-bold text-pnp-textPrimary truncate leading-tight">{partnerName || "Conversation"}</p>
           <p className="text-[11px] text-pnp-textSecondary leading-tight">Tap to view profile</p>
         </button>
-        {/* Telegram video call button */}
+        {/* Telegram video call — opens partner's Telegram chat for native video call */}
         {partnerTelegramId && (
           <a
             href={`tg://user?id=${partnerTelegramId}`}
@@ -279,21 +412,62 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
               const sameSenderAsPrev = prev && String(prev.sender_id) === String(msg.sender_id);
               const timeDiff = prev ? new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime() : Infinity;
               const isGrouped = sameSenderAsPrev && timeDiff < 60000;
+
               return (
-                <div key={msg.id} className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${isGrouped ? "!mt-0.5" : ""}`}>
+                <div
+                  key={msg.id}
+                  className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${isGrouped ? "!mt-0.5" : ""}`}
+                  onContextMenu={(e) => handleContextMenu(msg, e)}
+                  onTouchStart={(e) => handleTouchStart(msg, e)}
+                  onTouchEnd={handleTouchEnd}
+                  onTouchMove={handleTouchEnd}
+                >
                   <div className={`max-w-[78%] flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-                    <div className={`rounded-2xl px-3 py-2 text-sm break-words ${isMe ? "text-white rounded-br-md" : "bg-white/10 text-white rounded-bl-md"}`} style={isMe ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}>
-                      {msg.media_url && msg.media_type && (
-                        <div className="mb-1">
-                          <MediaMessage mediaUrl={msg.media_url} mediaType={msg.media_type} thumbUrl={msg.media_thumb_url} onExpandImage={(url) => setLightboxUrl(url)} isMe={isMe} />
+                    {msg.is_deleted ? (
+                      <div className="rounded-2xl px-3 py-1.5 text-xs italic text-pnp-textSecondary/50 bg-white/5">
+                        Message deleted
+                      </div>
+                    ) : (
+                      <div
+                        className={`rounded-2xl px-3 py-2 text-sm break-words ${isMe ? "text-white rounded-br-md" : "bg-white/10 text-white rounded-bl-md"}`}
+                        style={isMe ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
+                      >
+                        {msg.media_url && msg.media_type && (
+                          <div className="mb-1">
+                            <MediaMessage mediaUrl={msg.media_url} mediaType={msg.media_type} thumbUrl={msg.media_thumb_url} onExpandImage={(url) => setLightboxUrl(url)} isMe={isMe} />
+                          </div>
+                        )}
+                        {msg.content && <p>{msg.content}</p>}
+                        <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
+                          <span className={`text-[10px] ${isMe ? "text-white/50" : "text-pnp-textSecondary/60"}`}>{timeStr}</span>
+                          {msg.edited_at && <span className={`text-[10px] ${isMe ? "text-white/40" : "text-pnp-textSecondary/50"}`}>(edited)</span>}
                         </div>
-                      )}
-                      {msg.content && <p>{msg.content}</p>}
-                      {/* Timestamp — only show on last message of a group or non-grouped */}
-                      {(!isGrouped || idx === messages.length - 1 || (messages[idx + 1] && String(messages[idx + 1].sender_id) !== String(msg.sender_id))) && (
-                        <p className={`text-[10px] mt-0.5 ${isMe ? "text-white/50" : "text-pnp-textSecondary/60"}`}>{timeStr}</p>
-                      )}
-                    </div>
+                      </div>
+                    )}
+
+                    {/* Reactions display */}
+                    {!msg.is_deleted && msg.reactions && msg.reactions.length > 0 && (
+                      <div className={`flex flex-wrap gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
+                        {msg.reactions.map((r) => {
+                          const iReacted = r.users.some((u) => String(u.id) === String(myDbId));
+                          const key = `${msg.id}-${r.emoji}`;
+                          return (
+                            <button
+                              key={r.emoji}
+                              onClick={() => handleReaction(msg.id, r.emoji)}
+                              className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs transition-all active:scale-90 ${recentlyReacted.has(key) ? "scale-110" : ""}`}
+                              style={{
+                                background: iReacted ? "rgba(212,0,122,0.2)" : "rgba(255,255,255,0.08)",
+                                border: `1px solid ${iReacted ? "rgba(212,0,122,0.5)" : "rgba(255,255,255,0.1)"}`,
+                              }}
+                            >
+                              <span>{r.emoji}</span>
+                              <span className={`font-semibold ${iReacted ? "text-pnp-accent" : "text-pnp-textSecondary"}`}>{r.count}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -334,7 +508,7 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
         </div>
       )}
 
-      {/* Input bar — uses theme background */}
+      {/* Input bar */}
       <div className="flex items-end gap-2 px-3 py-2.5 border-t border-pnp-border flex-shrink-0 bg-pnp-background pb-safe">
         <input ref={mediaInputRef} type="file" accept="image/*,video/*,audio/*" className="hidden" onChange={handleMediaSelect} />
         <button type="button" onClick={() => mediaInputRef.current?.click()} className="p-2 rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 active:scale-90 transition-all flex-shrink-0" aria-label="Attach media">
@@ -366,6 +540,98 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
           )}
         </button>
       </div>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <>
+          <div className="fixed inset-0 z-[50]" onClick={() => setContextMenu(null)} />
+          <div
+            className="fixed z-[51] rounded-2xl shadow-2xl overflow-hidden"
+            style={{
+              left: Math.min(contextMenu.x, window.innerWidth - 200 - 8),
+              top: Math.min(contextMenu.y, window.innerHeight - 260 - 8),
+              minWidth: 180,
+              background: "#2C2C2E",
+              border: "1px solid rgba(255,255,255,0.1)",
+            }}
+          >
+            {/* Quick reaction bar */}
+            <div className="flex items-center gap-1 px-2 py-2 border-b border-white/5">
+              {QUICK_REACTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  onClick={() => handleReaction(contextMenu.msg.id, emoji)}
+                  className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-white/10 active:scale-90 transition-all text-xl"
+                >
+                  {emoji}
+                </button>
+              ))}
+              <button
+                onClick={() => openEmojiPicker(contextMenu.msg.id, contextMenu.x, contextMenu.y)}
+                className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-white/10 active:scale-90 transition-all text-pnp-textSecondary"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+              </button>
+            </div>
+            {/* Delete option — sender only */}
+            {String(contextMenu.msg.sender_id) === String(myDbId) && (
+              <button
+                onClick={() => handleDeleteMsg(contextMenu.msg)}
+                className="w-full px-4 py-2.5 text-sm text-left text-red-400 hover:bg-white/10 transition-colors flex items-center gap-3"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Delete
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Full emoji picker */}
+      {emojiPickerMsgId !== null && (
+        <>
+          <div className="fixed inset-0 z-[60]" onClick={() => setEmojiPickerMsgId(null)} />
+          <div
+            className="fixed z-[61] rounded-2xl shadow-2xl overflow-hidden"
+            style={{
+              left: emojiPickerPos.x,
+              top: emojiPickerPos.y,
+              width: 280,
+              background: "#1C1C1E",
+              border: "1px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
+              <p className="text-[11px] font-semibold text-pnp-textSecondary uppercase tracking-wider">Reactions</p>
+              <button onClick={() => setEmojiPickerMsgId(null)} className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10 text-pnp-textSecondary">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto" style={{ maxHeight: 240 }}>
+              {EMOJI_CATEGORIES.map((cat) => (
+                <div key={cat.label} className="px-2 pb-2">
+                  <p className="text-[10px] font-semibold text-pnp-textSecondary/60 px-1 pt-1.5 pb-1 uppercase tracking-wider">{cat.label}</p>
+                  <div className="flex flex-wrap gap-0.5">
+                    {cat.emojis.map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => { handleReaction(emojiPickerMsgId!, emoji); setEmojiPickerMsgId(null); }}
+                        className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-white/10 active:scale-90 transition-all text-xl"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Lightbox */}
       {lightboxUrl && (

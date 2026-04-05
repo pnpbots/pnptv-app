@@ -148,25 +148,49 @@ const listStreams = async (req, res) => {
       })
       .filter(Boolean);
 
-    // Augment offline streams with host info from Redis (24h TTL key live:host:<ref>)
+    // Augment streams with metadata and host info from Redis
     const redis = getRedis();
     const streams = await Promise.all(
       baseStreams.map(async (s) => {
-        if (s.isLive) return s;
+        // Fetch metadata and thumbnail for all streams
+        let metadata = {};
+        let thumbUrl = null;
+        try {
+          const [metaRaw, thumbRaw] = await Promise.all([
+            redis.get(`stream:meta:${s.id}`),
+            redis.get(`stream:thumb:${s.id}`),
+          ]);
+          if (metaRaw) {
+            try { metadata = JSON.parse(metaRaw); } catch { /* ignore */ }
+          }
+          thumbUrl = thumbRaw;
+        } catch { /* ignore */ }
+
+        const enriched = {
+          ...s,
+          name: metadata.title || s.name,
+          description: metadata.description || s.description,
+          tags: metadata.tags || [],
+          thumbnailUrl: thumbUrl || null,
+        };
+
+        if (s.isLive) return enriched;
+
+        // For offline streams, also check for host info (24h TTL key live:host:<ref>)
         try {
           const hostedRef = await redis.get(`live:host:${s.id}`);
-          if (!hostedRef) return s;
+          if (!hostedRef) return enriched;
           const safeHostedRef = sanitizeRefId(hostedRef);
-          if (!safeHostedRef) return s;
+          if (!safeHostedRef) return enriched;
           const target = baseStreams.find((t) => t.id === safeHostedRef);
           return {
-            ...s,
+            ...enriched,
             hostedChannelRef: safeHostedRef,
             hostedChannelName: target?.name || safeHostedRef,
             hostedHlsUrl: target?.hlsUrl || `${publicUrl}/memfs/${safeHostedRef}.m3u8`,
           };
         } catch {
-          return s;
+          return enriched;
         }
       })
     );

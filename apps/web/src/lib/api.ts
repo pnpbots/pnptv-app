@@ -850,7 +850,7 @@ export function sharePostToX(postId: number): Promise<{
   tweetUrl?: string;
   error?: string;
 }> {
-  return request(`/api/social/posts/${postId}/share-x`, { method: "POST" });
+  return request(`/api/webapp/social/posts/${postId}/share-x`, { method: "POST" });
 }
 
 export function getProfile(): Promise<{ success: boolean; profile: UserProfile }> {
@@ -1963,24 +1963,16 @@ export function searchDmMessages(
   return request(`/api/webapp/dm/conversation/${partnerId}/search?q=${encodeURIComponent(q)}`);
 }
 
-// ── DM Video Calls ──────────────────────────────────────────────────────────
+// ── DM Message Reactions ─────────────────────────────────────────────────────
 
-export function startDmCall(
-  partnerId: string
-): Promise<{ success: boolean; meetingUrl: string; callId: string }> {
-  return request(`/api/webapp/dm/${partnerId}/call`, { method: "POST" });
-}
-
-export function getActiveDmCall(
-  partnerId: string
-): Promise<{ success: boolean; active: boolean; meetingUrl?: string; callId?: string }> {
-  return request(`/api/webapp/dm/${partnerId}/call/active`);
-}
-
-export function endDmCall(
-  partnerId: string
-): Promise<{ success: boolean }> {
-  return request(`/api/webapp/dm/${partnerId}/call/end`, { method: "POST" });
+export function toggleDmMessageReaction(
+  messageId: number,
+  emoji: string
+): Promise<{ added: boolean; reactions: Array<{ emoji: string; count: number; users: Array<{ id: string; username: string }> }> }> {
+  return request(`/api/webapp/dm/messages/${messageId}/react`, {
+    method: "POST",
+    body: { emoji },
+  });
 }
 
 // ── Chat Message Reactions ────────────────────────────────────────────────────
@@ -3094,7 +3086,7 @@ export interface CanvaExportJob {
 
 export function getXLoginUrl(): string {
   const base = import.meta.env.VITE_API_URL || "https://pnptv.app";
-  return `${base}/api/webapp/auth/x/start`;
+  return `${base}/api/webapp/auth/x/start?redirect=true`;
 }
 
 export function unlinkX(): Promise<{ success: boolean }> {
@@ -3250,6 +3242,8 @@ export interface XAutoCampaign {
   created_by_username?: string;
   media_folder_id?: string;
   persona_type?: "santino" | "lex" | "generic";
+  consecutive_failures?: number;
+  paused_reason?: string;
   created_at: string;
   updated_at: string;
 }
@@ -5340,10 +5334,6 @@ export function linkTelegramGroup(
 
 export function getVideoChatStatus(groupId: number): Promise<{ active: boolean; inviteLink: string | null }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/video-chat-status`);
-}
-
-export function startTelegramVideoCall(groupId: number): Promise<{ success: boolean; telegramInviteLink: string }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/call`, { method: "POST" });
 }
 
 // ── Online Users ──────────────────────────────────────────────────────────────

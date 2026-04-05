@@ -157,6 +157,7 @@ export function StudioChatPanel({
 }: StudioChatPanelProps) {
   const {
     messages,
+    tips,
     viewerCount,
     isConnected,
     reconnecting,
@@ -249,6 +250,22 @@ export function StudioChatPanel({
           {visibleTip && (
             <div className="px-3 pt-2">
               <TipBanner tip={visibleTip} />
+            </div>
+          )}
+
+          {/* ── Recent tips horizontal strip (improvement #8) ─────────── */}
+          {tips.length > 0 && (
+            <div className="px-3 pt-2">
+              <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                {tips.slice(-10).reverse().map((t) => (
+                  <div
+                    key={t.id}
+                    className="flex-shrink-0 px-2 py-1 rounded-lg bg-pnp-warning/10 border border-pnp-warning/20 text-[9px] font-bold text-pnp-warning"
+                  >
+                    {t.username}: {t.amount}T
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

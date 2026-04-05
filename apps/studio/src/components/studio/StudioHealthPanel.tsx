@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import type { StreamStats } from "@/hooks/useStreamer";
-import { BitrateSparkline, StatRow, formatDuration } from "./shared";
+import { BitrateSparkline, StatRow, formatDuration, ShareIcon, ExternalLinkIcon } from "./shared";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -13,6 +13,7 @@ export interface StudioHealthPanelProps {
   durationSec: number;
   viewerCount: number;
   sessionEarnings: number;
+  channel: { ref: string } | null;
 }
 
 // ─── Health color helper ────────────────────────────────────────────────────────
@@ -34,8 +35,27 @@ export function StudioHealthPanel({
   durationSec,
   viewerCount,
   sessionEarnings,
+  channel,
 }: StudioHealthPanelProps) {
   const hColor = healthColor(health);
+  const [copied, setCopied] = useState(false);
+
+  const publicUrl = channel 
+    ? `${import.meta.env.VITE_APP_URL || "https://pnptv.app"}/live/${channel.ref}`
+    : null;
+
+  const handleShare = async () => {
+    if (!publicUrl) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Watch my live stream on PNPtv!", url: publicUrl });
+      } catch { /* ignore */ }
+    } else {
+      navigator.clipboard.writeText(publicUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   return (
     <div className="glass-card-sm p-4 space-y-3">
@@ -108,6 +128,28 @@ export function StudioHealthPanel({
           monospace
         />
       </dl>
+
+      {/* Actions (improvement #10) */}
+      {channel && (
+        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-pnp-border/30">
+          <button
+            onClick={handleShare}
+            className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-pnp-surface border border-pnp-border hover:bg-pnp-surfaceHover transition-colors text-[10px] font-bold text-pnp-textPrimary"
+          >
+            <ShareIcon className="w-3.5 h-3.5 text-pnp-accent" />
+            {copied ? "COPIED!" : "SHARE"}
+          </button>
+          <a
+            href={publicUrl!}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-pnp-surface border border-pnp-border hover:bg-pnp-surfaceHover transition-colors text-[10px] font-bold text-pnp-textPrimary"
+          >
+            <ExternalLinkIcon className="w-3.5 h-3.5 text-pnp-accent" />
+            VIEW LIVE
+          </a>
+        </div>
+      )}
     </div>
   );
 }

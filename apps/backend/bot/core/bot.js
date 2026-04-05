@@ -816,6 +816,82 @@ const startBot = async () => {
       }
       return next();
     });
+
+    // ── Telegram video chat events → Webapp bridge ───────────────────────────
+    // Catches video_chat_started / video_chat_ended / video_chat_participants_invited
+    // service messages and emits real-time Socket.IO events to webapp clients.
+    bot.on('message', async (ctx, next) => {
+      // Only handle group/supergroup service messages
+      if (ctx.chat.type !== 'group' && ctx.chat.type !== 'supergroup') return next();
+
+      const msg = ctx.message;
+      // Only care about video chat service messages
+      const isVideoEvent = msg.video_chat_started || msg.video_chat_ended || msg.video_chat_participants_invited;
+      if (!isVideoEvent) return next();
+
+      const chatId = ctx.chat.id;
+      try {
+        const { query: dbQuery } = require('../../config/postgres');
+        const socketIO = require('../services/socketSingleton').get();
+        if (!socketIO) return next();
+
+        // Resolve hangout group via Redis-cached lookup (same pattern as message bridge)
+        const { getRedis } = require('../../config/redis');
+        const redis = getRedis();
+        const cacheKey = `tg-hangout-link:${chatId}`;
+        let hangoutId = null;
+
+        const cached = await redis.get(cacheKey);
+        if (cached === 'none') return next();
+        if (cached) {
+          hangoutId = parseInt(cached, 10);
+        } else {
+          const { rows } = await dbQuery(
+            'SELECT id FROM hangout_groups WHERE telegram_chat_id = $1',
+            [chatId]
+          );
+          if (rows.length === 0) {
+            await redis.set(cacheKey, 'none', 'EX', 60);
+            return next();
+          }
+          hangoutId = rows[0].id;
+          await redis.set(cacheKey, String(hangoutId), 'EX', 60);
+        }
+
+        const room = `hangout:${hangoutId}`;
+
+        if (msg.video_chat_started) {
+          // Fetch invite link from DB to embed in the event
+          const { rows: groupRows } = await dbQuery(
+            'SELECT telegram_invite_link FROM hangout_groups WHERE id = $1',
+            [hangoutId]
+          );
+          const inviteLink = groupRows[0]?.telegram_invite_link || null;
+
+          const firstName = ctx.from?.first_name || ctx.from?.username || 'Someone';
+          const username = ctx.from?.username || null;
+
+          socketIO.to(room).emit('hangout:call:started', {
+            groupId: hangoutId,
+            startedBy: { firstName, username },
+            inviteLink,
+          });
+          logger.info(`[TG Video Bridge] Call started in hangout ${hangoutId} by ${firstName}`);
+
+        } else if (msg.video_chat_ended) {
+          socketIO.to(room).emit('hangout:call:ended', { groupId: hangoutId });
+          logger.info(`[TG Video Bridge] Call ended in hangout ${hangoutId}`);
+
+        } else if (msg.video_chat_participants_invited) {
+          const count = msg.video_chat_participants_invited?.users?.length ?? 1;
+          socketIO.to(room).emit('hangout:call:participant-joined', { groupId: hangoutId, count });
+          logger.info(`[TG Video Bridge] ${count} participant(s) invited to call in hangout ${hangoutId}`);
+        }
+      } catch (err) {
+        logger.error('[TG Video Bridge] Error', { error: err.message, chatId });
+      }
+      return next();
+    });
     // ── End Telegram → Webapp bridge ───────────────────────────────────────────
 
     // Register handlers

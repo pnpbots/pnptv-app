@@ -927,6 +927,10 @@ export default function SocialPostCard({
         postId={post.id}
         postContent={post.content}
         authorName={post.author_first_name || post.author_username}
+        mediaType={post.media_type}
+        videoThumbnailUrl={post.video_thumbnail_url}
+        mediaUrl={post.media_url}
+        isOwnPost={isOwn}
         isOpen={showShareModal}
         onClose={() => setShowShareModal(false)}
       />

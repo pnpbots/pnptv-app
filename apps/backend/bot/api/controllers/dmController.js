@@ -44,21 +44,48 @@ const getConversation = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const partnerId = await resolveUserId(req.params.partnerId) || req.params.partnerId;
   const { cursor } = req.query;
+  const currentUserId = String(user.id);
   try {
     const { rows } = await query(
-      `SELECT id, sender_id, recipient_id, content, media_url, media_type, is_read, created_at
-       FROM direct_messages
-       WHERE ((sender_id=$1 AND recipient_id=$2) OR (sender_id=$2 AND recipient_id=$1))
-         AND is_deleted = false
-         ${cursor ? 'AND created_at < $3' : ''}
-       ORDER BY created_at DESC LIMIT 30`,
+      `SELECT dm.id, dm.sender_id, dm.recipient_id,
+              dm.content, dm.is_deleted, dm.edited_at,
+              dm.media_url, dm.media_type, dm.media_mime, dm.media_thumb_url,
+              dm.is_read, dm.created_at,
+              rxn.reactions
+       FROM direct_messages dm
+       LEFT JOIN LATERAL (
+         SELECT json_agg(json_build_object(
+           'emoji', sub.emoji,
+           'count', sub.cnt,
+           'users', sub.users
+         )) AS reactions
+         FROM (
+           SELECT dr.emoji,
+                  COUNT(*)::int AS cnt,
+                  json_agg(json_build_object('id', u.id, 'username', u.username)) AS users
+           FROM dm_reactions dr
+           JOIN users u ON u.id = dr.user_id
+           WHERE dr.message_id = dm.id
+           GROUP BY dr.emoji
+         ) sub
+       ) rxn ON true
+       WHERE ((dm.sender_id=$1 AND dm.recipient_id=$2) OR (dm.sender_id=$2 AND dm.recipient_id=$1))
+         ${cursor ? 'AND dm.created_at < $3' : ''}
+       ORDER BY dm.created_at DESC LIMIT 30`,
       cursor ? [user.id, partnerId, cursor] : [user.id, partnerId]
     );
+
+    // Normalize: deleted messages show placeholder, reactions always array
+    const messages = rows.reverse().map((m) => ({
+      ...m,
+      content: m.is_deleted ? null : m.content,
+      reactions: Array.isArray(m.reactions) ? m.reactions : [],
+    }));
 
     // Mark messages as read
     await DmService.markAsRead(user.id, partnerId);
 
-    return res.json({ success: true, messages: rows.reverse() });
+    return res.json({ success: true, messages });
   } catch (err) {
     logger.error('getConversation error', err);
     return res.status(500).json({ error: 'Failed to load conversation' });
@@ -102,18 +129,10 @@ const sendMessage = async (req, res) => {
     // Deliver to recipient via Socket.IO if available
     const io = req.app.get('io');
     if (io) {
-      io.to(`user:${message.recipient_id}`).emit('dm:received', {
-        id: message.id,
-        sender_id: message.sender_id,
-        recipient_id: message.recipient_id,
-        content: message.content,
-        created_at: message.created_at,
-        sender: {
-          id: user.id,
-          username: user.username,
-          firstName: user.firstName || user.first_name,
-          photoUrl: user.photoUrl || user.photo_url,
-        }
+      io.to(`user:${message.recipient_id}`).emit('dm:message', {
+        ...message,
+        senderName: user.firstName || user.first_name || user.username || 'User',
+        senderPhoto: user.photoUrl || user.photo_url || null,
       });
     }
 

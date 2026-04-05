@@ -78,6 +78,7 @@ export default function Stream() {
   const [dashTipSuccess, setDashTipSuccess] = useState(false);
   const dashTipPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dashTipCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [isTheaterMode, setIsTheaterMode] = useState(false);
   const [streamError, setStreamError] = useState(false);
 
   // Dash token wallet
@@ -166,6 +167,7 @@ export default function Stream() {
             description: webrtcMatch.description || "",
             hlsUrl: "", // Not used for WebRTC
             isLive: true,
+            thumbnailUrl: webrtcMatch.photoUrl || null,
           });
           setUseWebRTC(true);
           setError(null);
@@ -199,6 +201,7 @@ export default function Stream() {
             description: performer.bio || "",
             hlsUrl: performer.hlsUrl,
             isLive: true,
+            thumbnailUrl: performer.photoUrl || null,
           });
           setUseWebRTC(false);
           setError(null);
@@ -235,6 +238,7 @@ export default function Stream() {
             description: offlinePerformer.bio || "",
             hlsUrl: "",
             isLive: false,
+            thumbnailUrl: offlinePerformer.photoUrl || null,
           });
           setUseWebRTC(false);
           setError(null);
@@ -795,7 +799,7 @@ export default function Stream() {
   }
 
   return (
-    <div className="page-container space-y-3">
+    <div className={`${isTheaterMode ? "max-w-none px-0 py-0" : "page-container"} space-y-3 transition-all duration-300`}>
       <Helmet>
         <title>{stream.name} — PNPtv Live</title>
         <meta name="description" content={stream.description || `Watch ${stream.name} live on PNPtv`} />
@@ -854,7 +858,7 @@ export default function Stream() {
       )}
 
       {/* Back link + share */}
-      <div className="flex items-center justify-between">
+      <div className={`flex items-center justify-between ${isTheaterMode ? "px-4 pt-3" : ""}`}>
         <button onClick={() => navigate("/live")} className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors">
           {String.fromCharCode(8592)} {t.live.backToLive}
         </button>
@@ -875,6 +879,21 @@ export default function Stream() {
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+            </svg>
+          </button>
+          {/* Theater mode button — only visible on desktop (improvement #7) */}
+          <button
+            onClick={() => setIsTheaterMode(!isTheaterMode)}
+            className="hidden md:flex items-center justify-center w-8 h-8 rounded-full bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:text-pnp-textPrimary hover:border-pnp-accent/40 transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+            aria-label={isTheaterMode ? "Exit theater mode" : "Enter theater mode"}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <rect x="3" y="6" width="18" height="12" rx="1.5" strokeDasharray={isTheaterMode ? "" : "4 2"} />
+              {isTheaterMode ? (
+                <path strokeLinecap="round" d="M10 9l-2 2 2 2m4-4l2 2-2 2" />
+              ) : (
+                <path strokeLinecap="round" d="M8 12h8" />
+              )}
             </svg>
           </button>
           {/* Raid button — only visible to the stream owner while live */}
@@ -924,8 +943,13 @@ export default function Stream() {
       </div>
 
       {/* Video Player */}
-      <div ref={videoContainerRef} className="relative -mx-4 sm:-mx-6">
-        <LivePlayer src={stream.hlsUrl} title={stream.name} overlay={overlay} />
+      <div ref={videoContainerRef} className={`relative ${isTheaterMode ? "" : "-mx-4 sm:-mx-6"}`}>
+        <LivePlayer
+          src={stream.hlsUrl}
+          title={stream.name}
+          poster={stream.thumbnailUrl || undefined}
+          overlay={overlay}
+        />
         {streamError && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-30 rounded-xl">
             <div className="text-center">
@@ -990,7 +1014,7 @@ export default function Stream() {
                   className="px-1.5 py-0.5 rounded-full text-[9px] font-medium text-white/70 border border-white/20"
                   style={{ background: "rgba(255,255,255,0.08)" }}
                 >
-                  {tag}
+                  {t.live[tag as keyof typeof t.live] || tag}
                 </span>
               ))}
             </div>
@@ -998,7 +1022,8 @@ export default function Stream() {
         </div>
       </div>
 
-      {/* ── Host mode banner — shown when offline but hosting another channel ── */}
+      <div className={`space-y-3 ${isTheaterMode ? "max-w-7xl mx-auto px-4 sm:px-6 pb-8" : ""}`}>
+        {/* ── Host mode banner — shown when offline but hosting another channel ── */}
       {!stream.isLive && hostedStream && (
         <div className="rounded-xl border border-pnp-accent/30 bg-pnp-accent/5 px-4 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
@@ -1388,6 +1413,8 @@ export default function Stream() {
           </>
         )}
       </Card>
+
+      </div>
 
       <BuyTokensModal
         isOpen={showTopUp}

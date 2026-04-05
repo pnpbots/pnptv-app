@@ -10,6 +10,7 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
 import { PermissionOnboarding } from "@/components/PermissionOnboarding";
 import { useAuth } from "@/hooks/useAuth";
+import { getSocket, connectSocket, disconnectSocket } from "@/lib/socket";
 
 function useScreenCaptureGuard() {
   useEffect(() => {
@@ -120,14 +121,59 @@ function UpdateBanner() {
   );
 }
 
+function useGlobalSocketEvents() {
+  const { isAuthenticated, logout } = useAuth();
+  const [suspendedMsg, setSuspendedMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const socket = connectSocket();
+
+    const onSessionExpired = () => {
+      disconnectSocket();
+      // Redirect to login — full page reload clears all state
+      window.location.href = "/login?reason=session_expired";
+    };
+
+    const onSuspended = (data: { message?: string }) => {
+      disconnectSocket();
+      setSuspendedMsg(data?.message || "Your account has been suspended.");
+      setTimeout(() => {
+        if (logout) logout();
+        window.location.href = "/login?reason=suspended";
+      }, 4000);
+    };
+
+    socket.on("auth:session_expired", onSessionExpired);
+    socket.on("auth:suspended", onSuspended);
+    return () => {
+      socket.off("auth:session_expired", onSessionExpired);
+      socket.off("auth:suspended", onSuspended);
+    };
+  }, [isAuthenticated]);
+
+  return { suspendedMsg };
+}
+
 function AppOverlays() {
   const { isAuthenticated } = useAuth();
+  const { suspendedMsg } = useGlobalSocketEvents();
   useDocumentDir();
   return (
     <>
       <UpdateBanner />
       <PermissionOnboarding isAuthenticated={isAuthenticated} />
       <NotificationPermissionPrompt isAuthenticated={isAuthenticated} />
+      {suspendedMsg && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-6">
+          <div className="bg-[#1C1C1E] border border-red-500/40 rounded-2xl p-6 max-w-sm w-full text-center space-y-3">
+            <p className="text-2xl">⛔</p>
+            <p className="text-red-400 font-semibold">Account Suspended</p>
+            <p className="text-pnp-textSecondary text-sm">{suspendedMsg}</p>
+            <p className="text-pnp-textSecondary text-xs">Redirecting to login…</p>
+          </div>
+        </div>
+      )}
     </>
   );
 }

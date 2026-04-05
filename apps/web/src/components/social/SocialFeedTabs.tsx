@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from "react";
+import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { PostComposer } from "@/components/PostComposer";
 import SocialPostCard from "@/components/social/SocialPostCard";
@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useNearbyDistances } from "@/components/NearbyBadge";
+import { getSocket, connectSocket } from "@/lib/socket";
 
 export interface SocialFeedTabsProps {
   currentUserId: string;
@@ -124,6 +125,27 @@ export default function SocialFeedTabs({
     loadFeed();
   }, [loadFeed]);
 
+  // ── Real-time socket events ─────────────────────────────────────────────────
+  const [hasNewPosts, setHasNewPosts] = useState(false);
+
+  useEffect(() => {
+    // Skip real-time updates for hashtag/hangout filtered feeds (too specific)
+    if (hashtagFilter || hangoutGroupId) return;
+    const socket = connectSocket();
+
+    const onNewPost = () => setHasNewPosts(true);
+    const onReaction = (data: { postId: number; reactions: any[] }) => {
+      setPosts((prev) => prev.map((p) => p.id === data.postId ? { ...p, reactions: data.reactions } : p));
+    };
+
+    socket.on("feed:new_post", onNewPost);
+    socket.on("reaction:post", onReaction);
+    return () => {
+      socket.off("feed:new_post", onNewPost);
+      socket.off("reaction:post", onReaction);
+    };
+  }, [hashtagFilter, hangoutGroupId]);
+
   const handleLoadMore = useCallback(() => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
@@ -201,6 +223,20 @@ export default function SocialFeedTabs({
             }}
           />
         </div>
+      )}
+
+      {/* New posts pill */}
+      {hasNewPosts && !isLoading && (
+        <button
+          onClick={() => { setHasNewPosts(false); setPosts([]); setNextCursor(null); setIsLoading(true); loadFeed(); }}
+          className="w-full mb-3 py-2 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all active:scale-95"
+          style={{ background: "linear-gradient(135deg,#D4007A,#E69138)" }}
+        >
+          <svg className="w-4 h-4 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+          </svg>
+          New posts — tap to refresh
+        </button>
       )}
 
       {/* Feed */}
