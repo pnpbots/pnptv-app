@@ -40,6 +40,8 @@ import {
   updateMemberRole,
   getHangoutFeed,
   getVideoChatStatus,
+  getMatrixToken,
+  getOrCreateHangoutRoom,
   togglePostLike,
   deleteSocialPost,
   getGroupMessages,
@@ -67,6 +69,7 @@ import { CreateEventModal } from "@/components/events/CreateEventModal";
 import { EventDetailModal } from "@/components/events";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
+import { VideoCallButton } from "@/components/hangouts/VideoCallButton";
 
 type View = "list" | "chat";
 
@@ -1017,6 +1020,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Dedicated error states for non-upload errors
   const [discoverError, setDiscoverError] = useState<string | null>(null);
 
+  // Element Call (Matrix) — embedded iframe video call
+  const [inCall, setInCall] = useState(false);
+  const [callLoading, setCallLoading] = useState(false);
+  const [matrixRoomId, setMatrixRoomId] = useState<string | null>(null);
+  const [matrixCreds, setMatrixCreds] = useState<{ userId: string; accessToken: string; homeserverUrl: string; deviceId?: string } | null>(null);
+
   // Telegram video chat status — driven by Socket.IO events (real-time)
   const [telegramCallActive, setTelegramCallActive] = useState(false);
   // Popover for the disabled call button (no telegramChatId)
@@ -1066,12 +1075,42 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       .catch(() => {});
   }, []);
 
+  // ─── Element Call (Matrix) — start/leave handlers ────────────────────────
+  const handleStartCall = useCallback(async () => {
+    if (!activeGroup) return;
+    setCallLoading(true);
+    setChatError(null);
+    try {
+      const [tokenRes, roomRes] = await Promise.all([
+        getMatrixToken(),
+        getOrCreateHangoutRoom(activeGroup.id),
+      ]);
+      if (!tokenRes.success || !roomRes.success) throw new Error("Failed to prepare call");
+      setMatrixCreds({
+        userId: tokenRes.matrixUserId,
+        accessToken: tokenRes.accessToken,
+        homeserverUrl: tokenRes.homeserverUrl,
+        deviceId: tokenRes.deviceId,
+      });
+      setMatrixRoomId(roomRes.roomId);
+      setInCall(true);
+    } catch {
+      setChatError("Could not start video call. Please try again.");
+    } finally {
+      setCallLoading(false);
+    }
+  }, [activeGroup]);
+
   // ─── Telegram video chat status — initial fetch on group open ───────────
   // Polling replaced by real-time Socket.IO events (hangout:call:started/ended).
   // We still do one fetch on mount to restore state if a call was already active.
 
   useEffect(() => {
     // Always reset all call state when switching groups
+    setInCall(false);
+    setMatrixRoomId(null);
+    setMatrixCreds(null);
+    setCallLoading(false);
     setTelegramCallActive(false);
     setCallStartTime(null);
     setCallStartedBy(null);
@@ -1495,6 +1534,41 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       isAdmin;
 
     return (
+      <>
+      {/* Element Call — full-screen iframe overlay (z-[50] sits above chat, below nav) */}
+      {inCall && matrixRoomId && matrixCreds && (
+        <div className="fixed inset-0 lg:left-72 z-[50] bg-black flex flex-col">
+          {/* Header bar */}
+          <div className="flex items-center gap-3 px-4 py-2.5 flex-shrink-0 bg-[#1C1C1E] border-b border-white/10">
+            <svg className="w-5 h-5 text-pnp-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white truncate">{activeGroup.name}</p>
+              <p className="text-xs text-pnp-textSecondary">Video Call · tap 📹 inside to start</p>
+            </div>
+            <button
+              onClick={() => setInCall(false)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 active:scale-95 transition-all flex-shrink-0"
+              aria-label="Leave call"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              Leave
+            </button>
+          </div>
+          {/* Element Web iframe */}
+          <iframe
+            key={`${matrixRoomId}-${matrixCreds.userId}`}
+            src={`/element-login.html#hs=${encodeURIComponent(matrixCreds.homeserverUrl)}&uid=${encodeURIComponent(matrixCreds.userId)}&token=${encodeURIComponent(matrixCreds.accessToken)}&room=${encodeURIComponent(matrixRoomId)}${matrixCreds.deviceId ? '&did=' + encodeURIComponent(matrixCreds.deviceId) : ''}`}
+            className="flex-1 min-h-0 w-full border-0"
+            allow="microphone; camera; clipboard-write; encrypted-media; display-capture; autoplay; speaker-selection"
+            title="Hangout Video Call"
+          />
+        </div>
+      )}
+
       <div className="fixed inset-0 lg:left-72 flex flex-col bg-pnp-background z-[30] overflow-hidden chat-overlay-safe">
         {/* Chat header — clean two-section layout: left (nav+info) / right (actions) */}
         <div className="flex items-center px-1.5 sm:px-3 py-1.5 sm:py-2 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
@@ -1558,66 +1632,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
           {/* Right: call + menu — 44px min touch targets */}
           <div className="flex items-center flex-shrink-0">
-            {/* Video call button — single icon, 3 states */}
-            {!activeGroup.telegramChatId ? (
-              <div className="relative">
-                <button
-                  onClick={() => setShowNoTgPopover((v) => !v)}
-                  className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all opacity-40"
-                  aria-label="No Telegram group linked"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
-                  </svg>
-                </button>
-                {showNoTgPopover && (
-                  <>
-                    <div className="fixed inset-0 z-30" onClick={() => setShowNoTgPopover(false)} />
-                    <div
-                      className="absolute right-0 top-10 z-40 rounded-xl p-3 shadow-xl w-64"
-                      style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}
-                    >
-                      <p className="text-xs font-semibold text-white mb-1">Link a Telegram group first</p>
-                      <p className="text-[11px] text-pnp-textSecondary leading-relaxed">
-                        Add <span className="text-white font-semibold">@PNPLatinoTV_Bot</span> to your Telegram group as an admin, then send:
-                      </p>
-                      <p className="mt-1.5 px-2 py-1 rounded text-[11px] font-mono font-semibold text-pnp-accent" style={{ background: "rgba(212,0,122,0.12)" }}>
-                        /link {activeGroup.id}
-                      </p>
-                    </div>
-                  </>
-                )}
-              </div>
-            ) : telegramCallActive ? (
-              <a
-                href={activeGroup.telegramInviteLink ? getTelegramDeepLink(activeGroup.telegramInviteLink) : `https://t.me/${activeGroup.telegramChatId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-11 h-11 flex items-center justify-center rounded-full active:scale-95 transition-all relative"
-                style={{ background: "rgba(52,199,89,0.2)" }}
-                title="Join active Telegram video call"
-                aria-label="Join active Telegram video call"
-              >
-                <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
-                </svg>
-                <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-              </a>
-            ) : (
-              <a
-                href={activeGroup.telegramInviteLink ? getTelegramDeepLink(activeGroup.telegramInviteLink) : `https://t.me/${activeGroup.telegramChatId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => { setShowCallToast(true); setTimeout(() => setShowCallToast(false), 4000); }}
-                className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all"
-                title="Start a video call from Telegram"
-                aria-label="Start Telegram video call"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="#29A8E2" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
-                </svg>
-              </a>
-            )}
+            {/* Video call button — Element Call (embedded) */}
+            <VideoCallButton
+              hasActiveCall={inCall}
+              onStartCall={handleStartCall}
+              isLoading={callLoading}
+            />
 
             {/* Telegram quick-link — merged into menu on mobile, shown on sm+ */}
             {activeGroup.telegramInviteLink && (
@@ -2444,6 +2464,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           </div>
         )}
       </div>
+      </>
     );
   }
 
