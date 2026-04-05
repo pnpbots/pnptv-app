@@ -21,27 +21,35 @@ async function getLinkedHangout(chatId) {
     const { getRedis } = require('../../config/redis');
     const { query: dbQuery } = require('../../../config/postgres');
     const redis = getRedis();
-    const cacheKey = `tg-hangout-link:${chatId}`;
+    // Use a separate key for the full object (rules included) so the bridge's
+    // tg-hangout-link:<chatId> integer cache in bot.js is not disrupted.
+    const fullCacheKey = `tg-hangout-full:${chatId}`;
+    const noneKey = `tg-hangout-link:${chatId}`;
 
-    const cached = await redis.get(cacheKey);
-    if (cached === 'none') return null;
+    // Fast-path: if the simple bridge cache says 'none', no need to hit DB
+    const noneCheck = await redis.get(noneKey);
+    if (noneCheck === 'none') return null;
+
+    const cached = await redis.get(fullCacheKey);
     if (cached) {
-      const [id, ...nameParts] = cached.split(':');
-      return { hangoutId: parseInt(id, 10), hangoutName: nameParts.join(':') || null };
+      try {
+        const parsed = JSON.parse(cached);
+        return { hangoutId: parsed.id, hangoutName: parsed.name || null, hangoutRules: parsed.rules || null };
+      } catch (_) { /* fall through to DB */ }
     }
 
     const { rows } = await dbQuery(
-      'SELECT id, name FROM hangout_groups WHERE telegram_chat_id = $1 LIMIT 1',
+      'SELECT id, name, rules FROM hangout_groups WHERE telegram_chat_id = $1 LIMIT 1',
       [chatId]
     );
     if (rows.length === 0) {
-      await redis.set(cacheKey, 'none', 'EX', 300);
+      await redis.set(noneKey, 'none', 'EX', 300);
       return null;
     }
 
-    const { id, name } = rows[0];
-    await redis.set(cacheKey, `${id}:${name || ''}`, 'EX', 300);
-    return { hangoutId: id, hangoutName: name || null };
+    const { id, name, rules } = rows[0];
+    await redis.set(fullCacheKey, JSON.stringify({ id, name: name || null, rules: rules || null }), 'EX', 300);
+    return { hangoutId: id, hangoutName: name || null, hangoutRules: rules || null };
   } catch (err) {
     logger.debug('getLinkedHangout error:', err.message);
     return null;
@@ -243,6 +251,7 @@ function groupBehaviorMiddleware() {
           lang: userLang,
           hangoutId: linkedHangout.hangoutId,
           hangoutName: linkedHangout.hangoutName,
+          rules: linkedHangout.hangoutRules,
         });
 
         try {
@@ -278,6 +287,7 @@ function groupBehaviorMiddleware() {
             lang: userLang,
             hangoutId: linkedHangout.hangoutId,
             hangoutName: linkedHangout.hangoutName,
+            rules: linkedHangout.hangoutRules,
           });
 
           try {

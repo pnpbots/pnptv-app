@@ -926,6 +926,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [newTags, setNewTags] = useState<string[]>([]);
   const [newIsPaid, setNewIsPaid] = useState(false);
   const [newPrice, setNewPrice] = useState("");
+  const [newRules, setNewRules] = useState("");
   const [createSuccess, setCreateSuccess] = useState<{ id: number; name: string } | null>(null);
 
   // Discover groups
@@ -999,6 +1000,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [settingsMembersLoading, setSettingsMembersLoading] = useState(false);
   const [settingsName, setSettingsName] = useState("");
   const [settingsDesc, setSettingsDesc] = useState("");
+  const [settingsRules, setSettingsRules] = useState("");
   const [settingsIsPublic, setSettingsIsPublic] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -1255,7 +1257,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     setCreateError(null);
     try {
       const paidPrice = newIsPaid ? parseFloat(newPrice) || 0 : 0;
-      const result = await createHangoutGroup(newName.trim(), newDesc.trim(), newIsPublic, newIsPaid, paidPrice);
+      const result = await createHangoutGroup(newName.trim(), newDesc.trim(), newIsPublic, newIsPaid, paidPrice, newRules.trim() || undefined);
       const createdGroup = result?.group;
       // If tags were selected, apply them after creation
       if (newTags.length > 0 && createdGroup?.id) {
@@ -1270,6 +1272,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setNewIsPublic(true);
       setNewIsPaid(false);
       setNewPrice("");
+      setNewRules("");
       setNewTags([]);
       loadGroups();
     } catch (err) {
@@ -1366,6 +1369,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const openGroupSettings = useCallback(async (group: HangoutGroup) => {
     setSettingsName(group.name);
     setSettingsDesc(group.description || "");
+    setSettingsRules(group.rules || "");
     setSettingsIsPublic(group.isPublic);
     setSettingsError(null);
     setSettingsSuccess(false);
@@ -1391,9 +1395,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         name: settingsName.trim(),
         description: settingsDesc.trim(),
         isPublic: settingsIsPublic,
+        rules: settingsRules.trim() || undefined,
       });
-      setActiveGroup((prev) => prev ? { ...prev, name: settingsName.trim(), description: settingsDesc.trim(), isPublic: settingsIsPublic } : prev);
-      setGroups((prev) => prev.map((g) => g.id === activeGroup.id ? { ...g, name: settingsName.trim(), description: settingsDesc.trim(), isPublic: settingsIsPublic } : g));
+      setActiveGroup((prev) => prev ? { ...prev, name: settingsName.trim(), description: settingsDesc.trim(), isPublic: settingsIsPublic, rules: settingsRules.trim() || null } : prev);
+      setGroups((prev) => prev.map((g) => g.id === activeGroup.id ? { ...g, name: settingsName.trim(), description: settingsDesc.trim(), isPublic: settingsIsPublic, rules: settingsRules.trim() || null } : g));
       setSettingsSuccess(true);
       setTimeout(() => setSettingsSuccess(false), 2500);
     } catch (err) {
@@ -1401,7 +1406,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     } finally {
       setSettingsSaving(false);
     }
-  }, [activeGroup, settingsName, settingsDesc, settingsIsPublic, settingsSaving]);
+  }, [activeGroup, settingsName, settingsDesc, settingsRules, settingsIsPublic, settingsSaving]);
 
   const handleGroupAvatarUpload = useCallback(async (file: File) => {
     if (!activeGroup || settingsAvatarUploading) return;
@@ -1703,6 +1708,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                         setShowGroupMenu(false);
                         setSettingsName(activeGroup.name);
                         setSettingsDesc(activeGroup.description || "");
+                        setSettingsRules(activeGroup.rules || "");
                         setSettingsError(null);
                         setSettingsSuccess(false);
                         setShowSettings(true);
@@ -2026,6 +2032,23 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       </div>
                     </div>
 
+                    {/* Group Rules — visible to all members */}
+                    {activeGroup.rules && (
+                      <div>
+                        <p className="text-xs font-semibold text-pnp-textSecondary mb-2 uppercase tracking-wider">Group Rules</p>
+                        <div
+                          style={{
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '12px',
+                            padding: '12px',
+                          }}
+                        >
+                          <p className="text-sm text-white/80" style={{ whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>{activeGroup.rules}</p>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Owner/Mod settings */}
                     {(String(activeGroup.creatorId) === String(user?.dbId) || isAdmin) && (
                       <>
@@ -2050,6 +2073,34 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                               placeholder="Description (optional)"
                               className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors resize-none"
                             />
+                            <div>
+                              <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>
+                                Group Rules <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '11px' }}>(optional)</span>
+                              </label>
+                              <textarea
+                                value={settingsRules}
+                                onChange={(e) => setSettingsRules(e.target.value.slice(0, 1000))}
+                                maxLength={1000}
+                                rows={3}
+                                placeholder="e.g. Respect each other · No sharing outside the group · Keep it consensual"
+                                style={{
+                                  width: '100%',
+                                  background: 'rgba(255,255,255,0.05)',
+                                  border: '1px solid rgba(255,255,255,0.1)',
+                                  borderRadius: '12px',
+                                  padding: '10px 12px',
+                                  color: '#fff',
+                                  fontSize: '14px',
+                                  resize: 'vertical',
+                                  fontFamily: 'inherit',
+                                  outline: 'none',
+                                  boxSizing: 'border-box',
+                                }}
+                              />
+                              <div style={{ textAlign: 'right', fontSize: '11px', color: 'rgba(255,255,255,0.3)', marginTop: '2px' }}>
+                                {settingsRules.length}/1000
+                              </div>
+                            </div>
                             {settingsError && (
                               <p className="text-xs text-red-400">{settingsError}</p>
                             )}
@@ -2776,6 +2827,36 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               </div>
             </div>
           )}
+
+          {/* Group Rules */}
+          <div>
+            <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: 'rgba(255,255,255,0.7)' }}>
+              Group Rules <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '11px' }}>(optional, shown to new members)</span>
+            </label>
+            <textarea
+              value={newRules}
+              onChange={e => setNewRules(e.target.value.slice(0, 1000))}
+              placeholder="e.g. Respect each other · No sharing outside the group · Keep it consensual"
+              maxLength={1000}
+              rows={3}
+              style={{
+                width: '100%',
+                background: 'rgba(255,255,255,0.08)',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: '8px',
+                padding: '10px 12px',
+                color: '#fff',
+                fontSize: '14px',
+                resize: 'vertical',
+                fontFamily: 'inherit',
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+            <div style={{ textAlign: 'right', fontSize: '11px', color: 'rgba(255,255,255,0.35)', marginTop: '4px' }}>
+              {newRules.length}/1000
+            </div>
+          </div>
 
           {createError && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">

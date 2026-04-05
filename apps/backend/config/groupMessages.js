@@ -42,7 +42,7 @@ const getGroupMenuTitle = (lang) => {
     : 'PNPtv - Choose an option:';
 };
 
-const getHangoutChatRedirectMessage = ({ username, lang, hangoutId = null, hangoutName = null }) => {
+const getHangoutChatRedirectMessage = ({ username, lang, hangoutId = null, hangoutName = null, rules = null }) => {
   const language = normalizeLang(lang);
   const appUrl = process.env.WEB_DOMAIN
     ? process.env.WEB_DOMAIN.replace(/\/$/, '')
@@ -52,24 +52,25 @@ const getHangoutChatRedirectMessage = ({ username, lang, hangoutId = null, hango
     ? `${appUrl}/chat/${hangoutId}`
     : `${appUrl}/?view=hangouts`;
 
-  const groupLabel = hangoutName ? ` *${hangoutName}*` : '';
+  const rulesBlockEn = rules ? `📋 *Group rules:*\n${rules}\n\n` : '';
+  const rulesBlockEs = rules ? `📋 *Reglas del grupo:*\n${rules}\n\n` : '';
 
   if (language === 'es') {
     return {
-      text: `📱 @${username} este grupo está conectado al Hangout${groupLabel} de la app PNPtv.\n\nPor favor usa la app para chatear — los mensajes del grupo no se ven ahí.`,
+      text: `🧜‍♀️ *Cristina AI agent dice:*\n\n¡Hola @${username}! Este grupo está conectado al Hangout *${hangoutName || 'PNPtv'}* en la app PNPtv — tu rincón privado de la comunidad queer PNP.\n\n💬 *¿Qué es un Hangout?*\nUn espacio privado en PNPtv con chat en vivo, feed de medios, videollamadas y tu propio ambiente. Este grupo de Telegram es un puente — los mensajes aquí se reflejan en la app en tiempo real.\n\n📱 *El chat completo, las reacciones y las llamadas viven en la app.* Abre tu Hangout allí para la experiencia completa.\n\n🔑 *¿Tienes membresía y tu propio grupo de Telegram?* Puedes crear tu propio Hangout en la app PNPtv y vincularlo — tu comunidad obtiene un espacio privado con reglas personalizadas, feed y videollamadas.\n\n✨ *Ventajas de PNPtv:* Feeds privados · Videollamadas · Contenido de creadores · Miembros cercanos · Soporte IA\n\n${rulesBlockEs}`,
       buttonText: hangoutName ? `💬 Abrir ${hangoutName}` : '💬 Abrir Hangout',
       buttonUrl: hangoutUrl,
     };
   }
 
   return {
-    text: `📱 @${username} this group is connected to the${groupLabel} Hangout in the PNPtv app.\n\nPlease use the app to chat — group messages don't appear there.`,
+    text: `🧜‍♀️ *Cristina AI agent says:*\n\nHey @${username}! This group is linked to the *${hangoutName || 'PNPtv'}* Hangout inside the PNPtv app — your private corner of the queer PNP community.\n\n💬 *What's a Hangout?*\nA private space in PNPtv with live chat, a media feed, video calls, and your own community vibe. This Telegram group is a bridge to it — messages here are mirrored to the app in real time.\n\n📱 *Chat, reactions, calls and the full feed live in the app.* Open your Hangout there for the complete experience.\n\n🔑 *Have a membership + your own Telegram group?* You can create your own Hangout in the PNPtv app and link it — your community gets a private space with custom rules, a media feed, and video calls.\n\n✨ *PNPtv advantages:* Private feeds · Video calls · Creator content · Nearby members · AI support\n\n${rulesBlockEn}`,
     buttonText: hangoutName ? `💬 Open ${hangoutName}` : '💬 Open Hangout',
     buttonUrl: hangoutUrl,
   };
 };
 
-const getHangoutCommandRedirectMessage = ({ lang, hangoutId = null, hangoutName = null }) => {
+const getHangoutCommandRedirectMessage = ({ lang, hangoutId = null, hangoutName = null, rules = null }) => {
   const language = normalizeLang(lang);
   const appUrl = process.env.WEB_DOMAIN
     ? process.env.WEB_DOMAIN.replace(/\/$/, '')
@@ -79,18 +80,19 @@ const getHangoutCommandRedirectMessage = ({ lang, hangoutId = null, hangoutName 
     ? `${appUrl}/chat/${hangoutId}`
     : `${appUrl}/?view=hangouts`;
 
-  const groupLabel = hangoutName ? ` *${hangoutName}*` : '';
+  const rulesBlockEn = rules ? `📋 *Group rules:*\n${rules}\n\n` : '';
+  const rulesBlockEs = rules ? `📋 *Reglas del grupo:*\n${rules}\n\n` : '';
 
   if (language === 'es') {
     return {
-      text: `📱 Este grupo está conectado al Hangout${groupLabel} de la app PNPtv. Los comandos del bot no están disponibles aquí.\n\nUsa la app para todas las funciones.`,
+      text: `🧜‍♀️ *Cristina AI agent dice:*\n\nLos comandos del bot no están disponibles en este grupo de Telegram — todo vive en el espacio *${hangoutName || 'PNPtv'}* dentro de la app PNPtv.\n\nUsa la app para chat, medios, videollamadas y todas las funciones del bot.\n\n${rulesBlockEs}`,
       buttonText: hangoutName ? `💬 Abrir ${hangoutName}` : '💬 Abrir Hangout',
       buttonUrl: hangoutUrl,
     };
   }
 
   return {
-    text: `📱 This group is connected to the${groupLabel} Hangout in the PNPtv app. Bot commands are not available here.\n\nUse the app for all features.`,
+    text: `🧜‍♀️ *Cristina AI agent says:*\n\nBot commands aren't available in this Hangout's Telegram group — everything lives in the *${hangoutName || 'PNPtv'}* space inside the PNPtv app.\n\nUse the app for chat, media, video calls, and all bot features.\n\n${rulesBlockEn}`,
     buttonText: hangoutName ? `💬 Open ${hangoutName}` : '💬 Open Hangout',
     buttonUrl: hangoutUrl,
   };

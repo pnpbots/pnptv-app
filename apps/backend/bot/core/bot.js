@@ -670,6 +670,47 @@ const startBot = async () => {
     // ── Telegram → Webapp hangout chat bridge ────────────────────────────────
     // When a message arrives in a linked Telegram group, insert it into
     // chat_messages and broadcast to webapp clients via Socket.IO.
+
+    /**
+     * Download a Telegram CDN file and save it locally for the hangout media feed.
+     * Images are processed through sharp (resize + WebP conversion).
+     * Videos are saved as-is.
+     *
+     * @param {string} telegramFileUrl - Direct URL to the Telegram CDN file
+     * @param {'image'|'video'} mediaType - The type of media
+     * @param {number} hangoutId - Hangout group ID (used in filename)
+     * @param {string|number} chatMsgId - chat_messages.id (used in filename for deduplication)
+     * @returns {Promise<string>} Public URL path (e.g. /uploads/posts/tg-h1-m42.webp)
+     */
+    const downloadAndSaveHangoutMedia = async (telegramFileUrl, mediaType, hangoutId, chatMsgId) => {
+      const sharp = require('sharp');
+      const uploadsDir = path.join(__dirname, '../../../public/uploads/posts');
+      fs.mkdirSync(uploadsDir, { recursive: true });
+
+      const response = await fetch(telegramFileUrl);
+      if (!response.ok) {
+        throw new Error(`Telegram CDN fetch failed: ${response.status} ${response.statusText}`);
+      }
+
+      if (mediaType === 'image') {
+        const filename = `tg-h${hangoutId}-m${chatMsgId}.webp`;
+        const destPath = path.join(uploadsDir, filename);
+        const buffer = Buffer.from(await response.arrayBuffer());
+        await sharp(buffer)
+          .resize(800, 800, { fit: 'inside' })
+          .webp({ quality: 70 })
+          .toFile(destPath);
+        return `/uploads/posts/${filename}`;
+      } else {
+        // video — save raw
+        const filename = `tg-h${hangoutId}-m${chatMsgId}.mp4`;
+        const destPath = path.join(uploadsDir, filename);
+        const buffer = Buffer.from(await response.arrayBuffer());
+        fs.writeFileSync(destPath, buffer);
+        return `/uploads/posts/${filename}`;
+      }
+    };
+
     bot.on('message', async (ctx, next) => {
       // Only handle group/supergroup messages
       if (ctx.chat.type !== 'group' && ctx.chat.type !== 'supergroup') return next();
@@ -723,16 +764,58 @@ const startBot = async () => {
         const isValidPhoto = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
         const photoUrl = isValidPhoto(rawPhoto) ? rawPhoto : null;
 
+        const room = `hangout:${hangoutId}`;
+
         // Auto-add Telegram user as hangout member if they're a registered PNPtv user
         if (userId) {
-          await dbQuery(
+          const addResult = await dbQuery(
             `INSERT INTO hangout_group_members (group_id, user_id, role)
              VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING`,
             [hangoutId, userId]
           );
-        }
+          // Send welcome message only if this is a first-time join
+          if (addResult.rowCount > 0) {
+            (async () => {
+              try {
+                const { rows: grpRows } = await dbQuery('SELECT name, rules FROM hangout_groups WHERE id = $1', [hangoutId]);
+                if (!grpRows.length) return;
+                const { name: grpName, rules: grpRules } = grpRows[0];
+                const rulesBlock = grpRules
+                  ? `📋 *Group rules:*\n${grpRules}`
+                  : `No special rules set yet — just respect and good vibes! 🌈`;
+                const displayFirst = firstName || username || 'there';
+                const welcomeText =
+                  `🧜‍♀️ *Cristina AI agent says:*\n\n` +
+                  `Welcome to *${grpName}*, ${displayFirst}! 🎉\n\n` +
+                  `I'm Cristina, your PNPtv AI guide. Here's what you need to know:\n\n` +
+                  `📱 *Use the PNPtv app* for the full experience — live chat, media feed, video calls, and more. This Telegram group mirrors the conversation, but the full features are in the app.\n\n` +
+                  `💡 *Tip:* Photos and videos shared here automatically appear in the group's media feed. Text messages stay in chat. Everything is only visible to members.\n\n` +
+                  `${rulesBlock}\n\n` +
+                  `Questions? Say "Hey Cristina" in the app anytime.`;
 
-        const room = `hangout:${hangoutId}`;
+                const { rows: ins } = await dbQuery(
+                  `INSERT INTO chat_messages (room, user_id, username, first_name, content)
+                   VALUES ($1, 'cristina-system', 'cristina', 'Cristina', $2) RETURNING id, created_at`,
+                  [room, welcomeText]
+                );
+                if (socketIO && ins[0]) {
+                  socketIO.to(room).emit('chat:message', {
+                    id: ins[0].id, room,
+                    user_id: 'cristina-system', username: 'cristina', first_name: 'Cristina',
+                    photo_url: null, content: welcomeText, created_at: ins[0].created_at,
+                  });
+                }
+                // Also send TG DM
+                if (botInstance && telegramId) {
+                  await botInstance.telegram.sendMessage(telegramId, welcomeText, { parse_mode: 'Markdown' })
+                    .catch(() => {}); // user may have DMs disabled
+                }
+              } catch (wErr) {
+                logger.warn('[TG Bridge] Welcome message failed', { error: wErr.message, hangoutId });
+              }
+            })();
+          }
+        }
 
         // ── Extract content from various Telegram message types ──
         let textContent = null;
@@ -828,6 +911,66 @@ const startBot = async () => {
 
         // Broadcast to webapp clients
         socketIO.to(room).emit('chat:message', chatMsg);
+
+        // ── Auto-promote media to hangout feed ──────────────────────────────────────
+        // Photos and videos from Telegram are downloaded locally and published as
+        // social posts in the hangout feed. source_message_id deduplicates.
+        if (mediaUrl && (mediaType === 'image' || mediaType === 'video') && userId) {
+          const chatMsgId = chatMsg.id;
+          (async () => {
+            try {
+              const SocialPostService = require('../services/socialPostService');
+              const localUrl = await downloadAndSaveHangoutMedia(mediaUrl, mediaType, hangoutId, chatMsgId);
+              await SocialPostService.createPost(
+                userId, textContent || null, localUrl, mediaType,
+                null, null, false, false, true, null, null, null,
+                hangoutId, chatMsgId
+              );
+              socketIO.to(room).emit('hangout:feed:new_post', { groupId: hangoutId });
+              logger.info(`[TG→Feed] Media promoted to hangout ${hangoutId} feed`, { chatMsgId });
+            } catch (feedErr) {
+              // Unique constraint violation = already promoted (idempotent)
+              if (feedErr.code !== '23505') {
+                logger.warn('[TG→Feed] Failed to promote media to feed', { error: feedErr.message, chatMsgId: chatMsg.id });
+              }
+            }
+          })();
+        }
+
+        // ── Bridge TG replies to media social posts ──────────────────────────────────
+        // If this message is a reply to a TG message that has a social post,
+        // create a social post reply so the thread appears in the hangout feed.
+        if (msg.reply_to_message && textContent && userId) {
+          const replyTgMsgId = msg.reply_to_message.message_id;
+          (async () => {
+            try {
+              const SocialPostService = require('../services/socialPostService');
+              // Find chat_message for the replied-to TG message
+              const { rows: parentChatRows } = await dbQuery(
+                `SELECT id FROM chat_messages
+                 WHERE room = $1 AND (media_metadata->>'telegramMsgId')::bigint = $2 LIMIT 1`,
+                [room, replyTgMsgId]
+              );
+              if (!parentChatRows.length) return;
+              // Find social post linked to that chat message
+              const { rows: parentPostRows } = await dbQuery(
+                `SELECT id FROM social_posts WHERE source_message_id = $1 LIMIT 1`,
+                [parentChatRows[0].id]
+              );
+              if (!parentPostRows.length) return;
+              await SocialPostService.createPost(
+                userId, textContent, null, null,
+                parentPostRows[0].id, null,
+                false, false, true, null, null, null,
+                hangoutId, null
+              );
+              socketIO.to(room).emit('hangout:feed:new_post', { groupId: hangoutId });
+              logger.info(`[TG→Feed] Reply bridged to social post ${parentPostRows[0].id}`, { hangoutId });
+            } catch (replyErr) {
+              logger.warn('[TG→Feed] Reply bridge failed', { error: replyErr.message });
+            }
+          })();
+        }
 
         // Touch activity timestamp
         await dbQuery('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [hangoutId]);

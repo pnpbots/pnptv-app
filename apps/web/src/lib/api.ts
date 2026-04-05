@@ -756,6 +756,7 @@ export interface UserProfile {
   postCount?: number;
   wofPhotoConsent?: boolean;
   contentDisclaimer?: boolean;
+  hasTelegram?: boolean;
   display_name?: string;
   // Creator fields
   creatorStatus?: string;
@@ -859,6 +860,7 @@ export function getProfile(): Promise<{ success: boolean; profile: UserProfile }
 
 export function updateProfile(
   fields: Partial<{
+    username: string;
     firstName: string;
     lastName: string;
     bio: string;
@@ -1310,6 +1312,7 @@ export interface HangoutGroup {
   telegramInviteLink?: string | null;
   isPaid?: boolean;
   priceUsd?: number;
+  rules?: string | null;
 }
 
 export interface MessageReaction {
@@ -1362,11 +1365,12 @@ export function createHangoutGroup(
   description?: string,
   isPublic?: boolean,
   isPaid?: boolean,
-  priceUsd?: number
+  priceUsd?: number,
+  rules?: string
 ): Promise<{ success: boolean; group: HangoutGroup }> {
   return request("/api/webapp/hangouts/groups", {
     method: "POST",
-    body: { name, description, isPublic, isPaid, priceUsd },
+    body: { name, description, isPublic, isPaid, priceUsd, rules },
   });
 }
 
@@ -1437,7 +1441,7 @@ export function deleteHangoutGroup(id: number): Promise<{ success: boolean }> {
 
 export function updateHangoutGroup(
   groupId: number,
-  data: { name?: string; description?: string; isPublic?: boolean }
+  data: { name?: string; description?: string; isPublic?: boolean; rules?: string }
 ): Promise<{ success: boolean }> {
   return request(`/api/webapp/hangouts/groups/${groupId}`, { method: "PATCH", body: data });
 }

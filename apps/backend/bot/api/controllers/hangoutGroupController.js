@@ -53,6 +53,59 @@ const normalizeMessage = (m) => ({
   photo_url: isValidPhotoUrl(m.photo_url) ? m.photo_url : null,
 });
 
+/**
+ * Send a Cristina welcome message into the hangout chat and optionally DM the user via Telegram.
+ * Fire-and-forget — never throws, never blocks the caller.
+ */
+async function sendHangoutWelcome(groupId, groupName, groupRules, userId, firstName) {
+  try {
+    const rulesBlockEn = groupRules
+      ? `📋 *Group rules:*\n${groupRules}`
+      : `No special rules set yet — just respect and good vibes! 🌈`;
+
+    const welcomeText = `🧜‍♀️ *Cristina AI agent says:*\n\nWelcome to *${groupName}*, ${firstName || 'friend'}! 🎉\n\nI'm Cristina, your PNPtv AI guide. Here's what you need to know:\n\n📱 *Use the PNPtv app* for the full experience — live chat, media feed, video calls, and more. This Telegram group mirrors the conversation, but the full features are in the app.\n\n💡 *Tip:* Photos and videos shared here automatically appear in the group's media feed. Text messages stay in chat. Everything is only visible to members.\n\n${rulesBlockEn}\n\nQuestions? Say "Hey Cristina" in the app anytime.`;
+
+    // Insert into chat_messages for the in-app chat feed
+    await query(
+      `INSERT INTO chat_messages (room, user_id, username, first_name, content)
+       VALUES ($1, 'cristina-system', 'cristina', 'Cristina', $2)`,
+      [`hangout:${groupId}`, welcomeText]
+    );
+
+    // Emit via Socket.IO to live clients in the hangout room
+    const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+    if (io) {
+      io.to(`hangout:${groupId}`).emit('chat:message', {
+        room: `hangout:${groupId}`,
+        user_id: 'cristina-system',
+        username: 'cristina',
+        first_name: 'Cristina',
+        content: welcomeText,
+        created_at: new Date().toISOString(),
+        id: Date.now(),
+      });
+    }
+
+    // DM the user on Telegram if they have a linked account (fire-and-forget)
+    if (userId) {
+      (async () => {
+        try {
+          const { rows: userRows } = await query('SELECT telegram FROM users WHERE id = $1', [userId]);
+          if (userRows[0]?.telegram) {
+            const { getBotInstance } = require('../../core/bot');
+            const bot = getBotInstance();
+            if (bot) {
+              await bot.telegram.sendMessage(userRows[0].telegram, welcomeText, { parse_mode: 'Markdown' });
+            }
+          }
+        } catch (_e) { /* silent */ }
+      })();
+    }
+  } catch (err) {
+    logger.warn('sendHangoutWelcome failed (non-critical):', err.message);
+  }
+}
+
 // GET /api/webapp/hangouts/groups
 // Unread counts are tracked via Redis (set by matrixMessageController + hangoutMediaController).
 // Messages live in Matrix — no chat_messages dependency.
@@ -117,20 +170,21 @@ const listGroups = async (req, res) => {
 // POST /api/webapp/hangouts/groups
 const createGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { name, description = '', isPublic = true, isPaid = false, priceUsd = 0 } = req.body;
+  const { name, description = '', isPublic = true, isPaid = false, priceUsd = 0, rules } = req.body;
 
   if (!name?.trim()) return res.status(400).json({ error: 'Group name is required' });
 
   // Validate price
   const sanitizedPrice = isPaid ? Math.max(0, Math.min(9999.99, Number(priceUsd) || 0)) : 0;
+  const sanitizedRules = rules ? String(rules).trim().slice(0, 1000) || null : null;
 
   try {
     // Hangout creation is open to all authenticated users
     const { rows } = await query(
-      `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members, is_paid, price_usd)
-       VALUES ($1, $2, $3, false, $4, 200000, $5, $6)
+      `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members, rules, is_paid, price_usd)
+       VALUES ($1, $2, $3, false, $4, 200000, $5, $6, $7)
        RETURNING *`,
-      [name.trim().slice(0, 100), description.trim().slice(0, 500), user.id, isPublic !== false, !!isPaid, sanitizedPrice]
+      [name.trim().slice(0, 100), description.trim().slice(0, 500), user.id, isPublic !== false, sanitizedRules, !!isPaid, sanitizedPrice]
     );
 
     const group = rows[0];
@@ -156,6 +210,9 @@ const createGroup = async (req, res) => {
       logger.warn('createGroup: Matrix room creation failed (will retry on first chat open)', { groupId: group.id, error: matrixErr.message });
     }
 
+    // Send Cristina welcome message to the creator (fire-and-forget)
+    sendHangoutWelcome(group.id, group.name, group.rules, user.id, user.firstName || user.first_name || user.username);
+
     return res.json({
       success: true,
       group: {
@@ -173,6 +230,7 @@ const createGroup = async (req, res) => {
         activeCallId: null,
         telegramChatId: null,
         telegramInviteLink: null,
+        rules: group.rules || null,
       },
     });
   } catch (err) {
@@ -256,6 +314,7 @@ const getGroup = async (req, res) => {
         telegramInviteLink: g.telegram_invite_link || null,
         isPaid: !!g.is_paid,
         priceUsd: Number(g.price_usd) || 0,
+        rules: g.rules || null,
       },
       members: members.map(m => ({ ...m, photo_url: isValidPhotoUrl(m.photo_url) ? m.photo_url : null })),
     });
@@ -344,6 +403,14 @@ const joinGroup = async (req, res) => {
         message: `${user.firstName || user.first_name || user.username} joined ${group.name}`,
         metadata: { groupName: group.name },
       });
+    }
+
+    // Send Cristina welcome message (fire-and-forget)
+    {
+      const { rows: wRows } = await query('SELECT name, rules FROM hangout_groups WHERE id = $1', [groupId]).catch(() => ({ rows: [] }));
+      if (wRows[0]) {
+        sendHangoutWelcome(groupId, wRows[0].name, wRows[0].rules || null, user.id, user.firstName || user.first_name || user.username);
+      }
     }
 
     // Sync Matrix room membership — fire-and-forget (non-blocking, non-fatal)
@@ -1418,7 +1485,7 @@ const updateGroupSettings = async (req, res) => {
   try {
     if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
 
-    const { slowModeSeconds, isReadOnly, allowMedia, allowMemberInvites, autoDeleteHours, tags, isPublic, name, description, feedVisibility } = req.body;
+    const { slowModeSeconds, isReadOnly, allowMedia, allowMemberInvites, autoDeleteHours, tags, isPublic, name, description, feedVisibility, rules } = req.body;
 
     const sets = [];
     const vals = [];
@@ -1434,13 +1501,14 @@ const updateGroupSettings = async (req, res) => {
     if (name !== undefined && name.trim()) { sets.push(`name = $${idx++}`); vals.push(name.trim().slice(0, 100)); }
     if (description !== undefined) { sets.push(`description = $${idx++}`); vals.push((description || '').trim().slice(0, 500)); }
     if (feedVisibility !== undefined && ['public', 'shadow', 'ghost'].includes(feedVisibility)) { sets.push(`feed_visibility = $${idx++}`); vals.push(feedVisibility); }
+    if (rules !== undefined) { sets.push(`rules = $${idx++}`); vals.push(rules ? String(rules).trim().slice(0, 1000) || null : null); }
 
     if (sets.length === 0) return res.status(400).json({ error: 'No settings to update' });
 
     vals.push(groupId);
     const { rows } = await query(
       `UPDATE hangout_groups SET ${sets.join(', ')} WHERE id = $${idx} AND is_main = false
-       RETURNING id, name, description, is_public, slow_mode_seconds, is_read_only, allow_media, allow_member_invites, auto_delete_hours, tags, feed_visibility`,
+       RETURNING id, name, description, is_public, slow_mode_seconds, is_read_only, allow_media, allow_member_invites, auto_delete_hours, tags, feed_visibility, rules`,
       vals
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found or is main' });
@@ -1453,6 +1521,18 @@ const updateGroupSettings = async (req, res) => {
       name: name !== undefined ? name.trim().slice(0, 100) : undefined,
       description: description !== undefined ? (description || '').trim().slice(0, 500) : undefined,
     }).catch(err => logger.warn('syncRoomSettings failed (non-critical):', err.message));
+
+    // Invalidate tg-hangout-full cache for any linked Telegram group so rules propagate immediately
+    if (rules !== undefined || name !== undefined) {
+      try {
+        const { getRedis } = require('../../../config/redis');
+        const redis = getRedis();
+        const { rows: tgRows } = await query('SELECT telegram_chat_id FROM hangout_groups WHERE id = $1', [groupId]);
+        if (tgRows[0]?.telegram_chat_id) {
+          await redis.del(`tg-hangout-full:${tgRows[0].telegram_chat_id}`);
+        }
+      } catch (_e) { /* non-critical */ }
+    }
 
     return res.json({ success: true, settings: rows[0] });
   } catch (err) {
