@@ -51,17 +51,6 @@ const sendHangoutMessage = async (req, res) => {
   const trimmed = content.trim();
 
   try {
-    // Entitlement check
-    const userRole = (user.role || '').toLowerCase();
-    const isAdminUser = userRole === 'admin' || userRole === 'superadmin';
-    if (!isAdminUser) {
-      const EntitlementAccessService = require('../../services/entitlementAccessService');
-      const hasAccess = await EntitlementAccessService.hasEntitlement(String(user.id), 'pnp-member');
-      if (!hasAccess) {
-        return res.status(403).json({ success: false, error: 'Member subscription required', code: 'MEMBER_REQUIRED' });
-      }
-    }
-
     // Membership check — also rejects banned members
     const { rows: memberRows } = await query(
       'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned IS NULL OR is_banned = false)',
@@ -249,39 +238,6 @@ const sendDmMessage = async (req, res) => {
       }
     }
 
-    // Free-tier daily DM limit
-    const EntitlementAccessService = require('../../services/entitlementAccessService');
-    const hasDmMembership = isAdminSender ||
-      await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member');
-    const isFreeUser = !hasDmMembership;
-
-    let remaining = null;
-    let limit = null;
-
-    if (isFreeUser) {
-      const redis = getRedis();
-      const today = new Date().toISOString().slice(0, 10);
-      const dmKey = `pnptv:dm_limit:${user.id}:${today}`;
-      const createdAt = user.created_at || user.createdAt;
-      let dmLimit = 3;
-      if (createdAt) {
-        const daysSince = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
-        if (daysSince > 14) dmLimit = 1;
-      }
-      const newCount = await redis.incr(dmKey);
-      if (newCount === 1) await redis.expire(dmKey, 86400);
-      if (newCount > dmLimit) {
-        await redis.decr(dmKey);
-        return res.status(429).json({
-          success: false,
-          error: 'Daily message limit reached. Upgrade for unlimited messaging.',
-          code: 'DM_LIMIT_REACHED',
-        });
-      }
-      remaining = dmLimit - newCount;
-      limit = dmLimit;
-    }
-
     // ── Send to Matrix (the ONLY message store) ──
     const [senderRow, recipientRow2] = await Promise.all([
       query(`SELECT id, telegram, username, first_name, matrix_user_id, matrix_access_token
@@ -340,11 +296,7 @@ const sendDmMessage = async (req, res) => {
       }
     })();
 
-    const result = { success: true, matrixEventId };
-    if (remaining !== null) result.remaining = remaining;
-    if (limit !== null) result.limit = limit;
-
-    return res.status(201).json(result);
+    return res.status(201).json({ success: true, matrixEventId });
   } catch (err) {
     if (err.statusCode) {
       return res.status(err.statusCode).json({ success: false, error: err.message, code: err.code });

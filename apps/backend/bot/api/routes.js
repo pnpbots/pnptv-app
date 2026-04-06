@@ -2920,7 +2920,7 @@ app.get('/api/webapp/social/feed/following',           requireSessionAuth, async
 // Web App Direct Messages
 app.get('/api/webapp/messages/threads', requireSessionAuth, asyncHandler(directMessagesController.getThreads));
 app.get('/api/webapp/messages/thread/:otherUserId', requireSessionAuth, asyncHandler(directMessagesController.getMessages));
-app.post('/api/webapp/messages/send', requireFreeTierDmLimit, asyncHandler(directMessagesController.sendMessage));
+app.post('/api/webapp/messages/send', requireSessionAuth, asyncHandler(directMessagesController.sendMessage));
 app.delete('/api/webapp/messages/:messageId', requireSessionAuth, asyncHandler(directMessagesController.deleteMessage));
 app.put('/api/webapp/messages/thread/:otherUserId/read', requireSessionAuth, asyncHandler(directMessagesController.markThreadAsRead));
 
@@ -4260,7 +4260,7 @@ app.get('/api/webapp/hangouts/groups/discover', requireSessionAuth, asyncHandler
 // join-by-invite must be before /:id to avoid :code being captured as :id
 app.post('/api/webapp/hangouts/groups/join-by-invite/:code', requireSessionAuth, asyncHandler(hangoutGroupController.joinByInvite));
 app.get('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.getGroup));
-app.post('/api/webapp/hangouts/groups/:id/join', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.joinGroup));
+app.post('/api/webapp/hangouts/groups/:id/join', requireSessionAuth, asyncHandler(hangoutGroupController.joinGroup));
 app.post('/api/webapp/hangouts/groups/:id/leave', requireSessionAuth, asyncHandler(hangoutGroupController.leaveGroup));
 app.delete('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.deleteGroup));
 app.patch('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.updateGroup));
@@ -4272,29 +4272,28 @@ app.post('/api/webapp/hangouts/groups/:id/request-join', requireSessionAuth, asy
 app.get('/api/webapp/hangouts/groups/:id/requests', requireSessionAuth, asyncHandler(hangoutGroupController.getJoinRequests));
 app.post('/api/webapp/hangouts/groups/:id/requests/:requestId/:action', requireSessionAuth, asyncHandler(hangoutGroupController.handleJoinRequest));
 
-// ── Hangout Group Chat ───────────────────────────────────────────────────────
-app.get('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.getMessages));
+// ── Hangout Group Chat — open to all authenticated users ─────────────────────
+app.get('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, asyncHandler(hangoutGroupController.getMessages));
 // search MUST be registered before /:msgId routes so "search" is not parsed as a msgId
-app.get('/api/webapp/hangouts/groups/:id/messages/search', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.searchMessages));
-app.patch('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.editMessage));
-app.delete('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.deleteMessage));
-app.post('/api/webapp/hangouts/groups/:id/messages/:msgId/react', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.toggleReaction));
+app.get('/api/webapp/hangouts/groups/:id/messages/search', requireSessionAuth, asyncHandler(hangoutGroupController.searchMessages));
+app.patch('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, asyncHandler(hangoutGroupController.editMessage));
+app.delete('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, asyncHandler(hangoutGroupController.deleteMessage));
+app.post('/api/webapp/hangouts/groups/:id/messages/:msgId/react', requireSessionAuth, asyncHandler(hangoutGroupController.toggleReaction));
 app.post('/api/webapp/hangouts/groups/:id/link-telegram', requireSessionAuth, asyncHandler(hangoutGroupController.linkTelegramGroup));
 app.post('/api/webapp/hangouts/groups/:id/unlink-telegram', requireSessionAuth, asyncHandler(hangoutGroupController.unlinkTelegramGroup));
 app.get('/api/webapp/hangouts/groups/:id/video-chat-status', requireSessionAuth, asyncHandler(hangoutGroupController.getVideoChatStatus));
-app.get('/api/webapp/hangouts/groups/:id/messages/:msgId/reactions', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.getReactions));
-app.post('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.sendMessage));
+app.get('/api/webapp/hangouts/groups/:id/messages/:msgId/reactions', requireSessionAuth, asyncHandler(hangoutGroupController.getReactions));
+app.post('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, asyncHandler(hangoutGroupController.sendMessage));
 // Media upload for hangout group chat (images 10 MB / videos 50 MB, per-hangout dirs)
 app.post(
   '/api/webapp/hangouts/groups/:id/media',
   requireSessionAuth,
-  requireMemberTier,
   uploadLimiter,
   uploadHangoutMedia,
   asyncHandler(hangoutMediaController.uploadHangoutMedia)
 );
 // Mark group messages as read
-app.post('/api/webapp/hangouts/groups/:id/read', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.markAsRead));
+app.post('/api/webapp/hangouts/groups/:id/read', requireSessionAuth, asyncHandler(hangoutGroupController.markAsRead));
 // Hangout group management (kick is registered above at line 4268 — duplicate removed)
 app.post('/api/webapp/hangouts/groups/:id/ban', requireSessionAuth, asyncHandler(hangoutGroupController.banMember));
 app.post('/api/webapp/hangouts/groups/:id/unban', requireSessionAuth, asyncHandler(hangoutGroupController.unbanMember));
@@ -4323,7 +4322,6 @@ app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, asy
 app.post(
   '/api/webapp/dm/media/:recipientId',
   requireSessionAuth,
-  requireFreeTierDmLimit,
   uploadLimiter,
   uploadChatMedia,
   asyncHandler(chatMediaController.sendDmMediaMessage)
@@ -4483,7 +4481,7 @@ app.get('/api/webapp/dm/threads', requireSessionAuth, asyncHandler(dmController.
 app.get('/api/webapp/dm/conversation/:partnerId/search', requireSessionAuth, asyncHandler(dmController.searchDmMessages));
 app.get('/api/webapp/dm/conversation/:partnerId', requireSessionAuth, asyncHandler(dmController.getConversation));
 app.get('/api/webapp/dm/user/:partnerId', requireSessionAuth, asyncHandler(dmController.getPartnerInfo));
-app.post('/api/webapp/dm/send/:recipientId', requireFreeTierDmLimit, asyncHandler(dmController.sendMessage));
+app.post('/api/webapp/dm/send/:recipientId', requireSessionAuth, asyncHandler(dmController.sendMessage));
 // DM message management (edit / delete)
 app.patch('/api/webapp/dm/messages/:msgId', requireSessionAuth, asyncHandler(dmController.editDmMessage));
 app.delete('/api/webapp/dm/messages/:msgId', requireSessionAuth, asyncHandler(dmController.deleteDmMessage));
