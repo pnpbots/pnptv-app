@@ -756,6 +756,7 @@ export interface UserProfile {
   postCount?: number;
   wofPhotoConsent?: boolean;
   contentDisclaimer?: boolean;
+  autoShareToX?: boolean;
   hasTelegram?: boolean;
   display_name?: string;
   // Creator fields
@@ -889,6 +890,7 @@ export function updatePrivacy(settings: {
   showDob?: boolean;
   allowMessages?: boolean;
   showInterests?: boolean;
+  autoShareToX?: boolean;
 }): Promise<{ success: boolean; privacy: Record<string, boolean> }> {
   return request("/api/webapp/privacy", { method: "PATCH", body: settings });
 }

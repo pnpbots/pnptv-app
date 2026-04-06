@@ -23,7 +23,7 @@ import React, {
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
-import { checkAuthStatus, getXStatus, sharePostToX, getOwnChannels, type SocialPostItem, type CreatorChannel } from "@/lib/api";
+import { checkAuthStatus, getXStatus, sharePostToX, getOwnChannels, getProfile, type SocialPostItem, type CreatorChannel } from "@/lib/api";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -295,7 +295,16 @@ export function PostComposer({
       });
     getXStatus()
       .then((res) => {
-        setXHasWriteScope(res.status.linked && res.status.hasWriteScope);
+        const hasScope = res.status.linked && res.status.hasWriteScope;
+        setXHasWriteScope(hasScope);
+        if (hasScope) {
+          // Pre-check cross-post if user has enabled "share to X by default"
+          getProfile()
+            .then((profileRes) => {
+              if (profileRes.profile.autoShareToX) setCrossPostX(true);
+            })
+            .catch(() => {});
+        }
       })
       .catch(() => {
         setXHasWriteScope(false);

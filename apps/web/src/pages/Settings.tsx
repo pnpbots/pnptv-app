@@ -9,6 +9,7 @@ import {
   getProfile,
   getMyReferral,
   updateProfile,
+  updatePrivacy,
   updateLanguage,
   deleteAccount,
   eraseMyAccount,
@@ -108,6 +109,10 @@ export default function Settings() {
   const [contentDisclaimer, setContentDisclaimer] = useState(false);
   const [contentDisclaimerSaving, setContentDisclaimerSaving] = useState(false);
 
+  const [autoShareToX, setAutoShareToX] = useState(false);
+  const [autoShareToXSaving, setAutoShareToXSaving] = useState(false);
+  const [xHandle, setXHandle] = useState<string | null>(null);
+
   // ── Notification Preferences state ───────────────────────────────────────
   type ChannelPrefs = { inApp: boolean; bot: boolean; email: boolean; push: boolean };
   type NotifPrefs = Record<string, ChannelPrefs | { enabled: boolean; start: string; end: string }>;
@@ -194,6 +199,8 @@ export default function Settings() {
         setMemberSince(profile.memberSince ?? null);
         setWofConsent(profile.wofPhotoConsent ?? false);
         setContentDisclaimer(profile.contentDisclaimer ?? false);
+        setAutoShareToX(profile.autoShareToX ?? false);
+        setXHandle(profile.xHandle ?? null);
         setSelectedLang((profile.language as Lang) ?? (user?.language as Lang) ?? "en");
 
         if (referralRes) {
@@ -301,6 +308,19 @@ export default function Settings() {
       setWofConsentSaving(false);
     }
   }, [wofConsent]);
+
+  const handleAutoShareToXToggle = useCallback(async () => {
+    const newValue = !autoShareToX;
+    setAutoShareToXSaving(true);
+    try {
+      await updatePrivacy({ autoShareToX: newValue });
+      setAutoShareToX(newValue);
+    } catch {
+      // Revert silently
+    } finally {
+      setAutoShareToXSaving(false);
+    }
+  }, [autoShareToX]);
 
   const handleSaveDpns = useCallback(async () => {
     const handle = dpnsInput.trim();
@@ -569,6 +589,34 @@ export default function Settings() {
             onChange={handleContentDisclaimerToggle}
             disabled={contentDisclaimerSaving || contentDisclaimer}
             accentColor="#D4007A"
+          />
+        </div>
+
+        {/* Auto-share posts to X */}
+        <div
+          className="flex items-center justify-between rounded-lg px-3 py-3 mt-3"
+          style={{ background: "rgba(0,0,0,0.25)", border: "1px solid rgba(255,255,255,0.1)" }}
+        >
+          <div className="flex-1 min-w-0 mr-3">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <p className="text-sm font-medium text-white">Share posts to X by default</p>
+              {xHandle && (
+                <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: "rgba(255,255,255,0.08)", color: "#8E8E93" }}>
+                  @{xHandle}
+                </span>
+              )}
+            </div>
+            <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+              {xHandle
+                ? "Automatically cross-post new posts to your X account when published."
+                : "Add your X account in Edit Profile first to enable cross-posting."}
+            </p>
+          </div>
+          <Toggle
+            checked={autoShareToX}
+            onChange={handleAutoShareToXToggle}
+            disabled={autoShareToXSaving || !xHandle}
+            accentColor="#000000"
           />
         </div>
       </Section>

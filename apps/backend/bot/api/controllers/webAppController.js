@@ -1683,12 +1683,14 @@ const getProfile = async (req, res) => {
         country: p.country || null,
         email: p.email || null,
         privacy: p.privacy || {},
+        autoShareToX: !!(p.privacy?.autoShareToX),
         creatorStatus: p.creator_status || 'none',
         creatorType: p.creator_type || null,
         creatorPriceUsd: p.creator_price_usd ? parseFloat(p.creator_price_usd) : null,
         creatorVerified: p.creator_verified || false,
         creatorFeatured: p.creator_featured || false,
         creatorSubscriberCount: p.creator_subscriber_count || 0,
+        hasTelegram: !!p.telegram,
         performerData,
       },
     });
@@ -1797,10 +1799,31 @@ const updateProfile = async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
 
   // Server-side max-length validation
-  const MAX_LENGTHS = { firstName: 100, lastName: 100, bio: 500, locationText: 200, xHandle: 50, instagramHandle: 50, tiktokHandle: 50, youtubeHandle: 100, city: 100, country: 100 };
+  const MAX_LENGTHS = { username: 30, firstName: 100, lastName: 100, bio: 500, locationText: 200, xHandle: 50, instagramHandle: 50, tiktokHandle: 50, youtubeHandle: 100, city: 100, country: 100 };
   for (const [key, max] of Object.entries(MAX_LENGTHS)) {
     if (req.body[key] && typeof req.body[key] === 'string' && req.body[key].length > max) {
       return res.status(400).json({ error: `${key} exceeds maximum length of ${max} characters` });
+    }
+  }
+
+  // Validate and check uniqueness of username if provided
+  if (req.body.username !== undefined && req.body.username !== '') {
+    // Username can only be set once manually — if already set, reject
+    const currentRow = await query('SELECT username FROM users WHERE id = $1', [user.id]);
+    const currentUsername = currentRow.rows[0]?.username;
+    if (currentUsername && currentUsername.trim() !== '' && currentUsername.toUpperCase() !== 'ANONYMOUS') {
+      return res.status(403).json({ error: 'Username cannot be changed once set. Link your Telegram account to use your Telegram username.' });
+    }
+    const rawUsername = String(req.body.username).trim();
+    if (!/^[a-zA-Z0-9_]{3,30}$/.test(rawUsername)) {
+      return res.status(400).json({ error: 'Username must be 3–30 characters and contain only letters, numbers, or underscores' });
+    }
+    const existing = await query(
+      `SELECT id FROM users WHERE UPPER(username) = UPPER($1) AND id != $2 AND is_deleted IS NOT TRUE AND username != '' AND UPPER(username) != 'ANONYMOUS'`,
+      [rawUsername, user.id]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'That username is already taken' });
     }
   }
 
@@ -1821,8 +1844,9 @@ const updateProfile = async (req, res) => {
   }
 
   try {
-    const allowed = ['firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle', 'wofPhotoConsent', 'contentDisclaimer', 'language', 'dateOfBirth', 'city', 'country'];
+    const allowed = ['username', 'firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle', 'wofPhotoConsent', 'contentDisclaimer', 'language', 'dateOfBirth', 'city', 'country'];
     const colMap  = {
+      username: 'username',
       firstName: 'first_name', lastName: 'last_name', bio: 'bio',
       locationText: 'location_name', interests: 'interests',
       xHandle: 'twitter', instagramHandle: 'instagram', tiktokHandle: 'tiktok', youtubeHandle: 'youtube',

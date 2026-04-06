@@ -2852,7 +2852,7 @@ app.patch('/api/webapp/privacy', asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
 
-  const ALLOWED_KEYS = ['showBio', 'showOnline', 'showLocation', 'showDob', 'allowMessages', 'showInterests'];
+  const ALLOWED_KEYS = ['showBio', 'showOnline', 'showLocation', 'showDob', 'allowMessages', 'showInterests', 'autoShareToX'];
   const updates = {};
   for (const key of ALLOWED_KEYS) {
     if (typeof req.body[key] === 'boolean') updates[key] = req.body[key];
