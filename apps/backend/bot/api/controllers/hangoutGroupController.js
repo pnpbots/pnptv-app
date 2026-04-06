@@ -955,8 +955,8 @@ const sendMessage = async (req, res) => {
     // Attach reply_to preview if replying
     if (parsedReplyToId) {
       const { rows: replyRows } = await query(
-        'SELECT first_name, username, content FROM chat_messages WHERE id = $1',
-        [parsedReplyToId]
+        'SELECT first_name, username, content FROM chat_messages WHERE id = $1 AND room = $2',
+        [parsedReplyToId, room]
       );
       if (replyRows[0]) {
         msg.reply_to = { name: replyRows[0].first_name || replyRows[0].username || 'User', content: (replyRows[0].content || '[media]').slice(0, 100) };
@@ -2082,6 +2082,16 @@ async function getVideoChatStatus(req, res) {
 
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
 
+    // CRIT-02: membership gate — Telegram invite links must not leak to non-members
+    const role = (user.role || '').toLowerCase();
+    if (role !== 'admin' && role !== 'superadmin') {
+      const { rows: memberCheck } = await query(
+        'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned IS NULL OR is_banned=false)',
+        [groupId, user.id]
+      );
+      if (memberCheck.length === 0) return res.status(403).json({ error: 'Not a member of this group' });
+    }
+
     const { telegram_chat_id, telegram_invite_link } = rows[0];
 
     if (!telegram_chat_id) {
@@ -2102,6 +2112,7 @@ async function getVideoChatStatus(req, res) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: telegram_chat_id }),
+        signal: AbortSignal.timeout(5000),
       });
       const data = await resp.json();
       active = !!(data.ok && data.result && data.result.video_chat && data.result.video_chat.has_participants);
@@ -2135,13 +2146,19 @@ async function unlinkTelegramGroup(req, res) {
       return res.status(403).json({ error: 'Only the group owner can unlink a Telegram group' });
     }
 
+    // Fetch old telegram_chat_id before clearing so we can invalidate the correct cache key
+    const { rows: oldRows } = await query(
+      `SELECT telegram_chat_id FROM hangout_groups WHERE id = $1`, [groupId]
+    );
     await query(
       `UPDATE hangout_groups SET telegram_chat_id = NULL, telegram_invite_link = NULL WHERE id = $1`,
       [groupId]
     );
 
     invalidateLinkedCache();
-    _videoChatCache.delete(String(groupId));
+    if (oldRows[0]?.telegram_chat_id) {
+      _videoChatCache.delete(String(oldRows[0].telegram_chat_id));
+    }
 
     return res.json({ success: true });
   } catch (err) {

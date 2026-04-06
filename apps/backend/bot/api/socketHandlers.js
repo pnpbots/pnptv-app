@@ -444,8 +444,8 @@ function initSocketIO(io) {
         // Attach reply_to preview if replying
         if (parsedReplyToId) {
           const { rows: replyRows } = await query(
-            'SELECT first_name, username, content FROM chat_messages WHERE id = $1',
-            [parsedReplyToId]
+            'SELECT first_name, username, content FROM chat_messages WHERE id = $1 AND room = $2',
+            [parsedReplyToId, `hangout:${groupId}`]
           );
           if (replyRows[0]) {
             msg.reply_to = { name: replyRows[0].first_name || replyRows[0].username || 'User', content: (replyRows[0].content || '[media]').slice(0, 100) };

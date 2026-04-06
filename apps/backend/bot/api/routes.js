@@ -4294,9 +4294,8 @@ app.post(
   asyncHandler(hangoutMediaController.uploadHangoutMedia)
 );
 // Mark group messages as read
-app.post('/api/webapp/hangouts/groups/:id/read', requireSessionAuth, asyncHandler(hangoutGroupController.markAsRead));
-// Hangout group management
-app.post('/api/webapp/hangouts/groups/:id/kick', requireSessionAuth, asyncHandler(hangoutGroupController.kickMember));
+app.post('/api/webapp/hangouts/groups/:id/read', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.markAsRead));
+// Hangout group management (kick is registered above at line 4268 — duplicate removed)
 app.post('/api/webapp/hangouts/groups/:id/ban', requireSessionAuth, asyncHandler(hangoutGroupController.banMember));
 app.post('/api/webapp/hangouts/groups/:id/unban', requireSessionAuth, asyncHandler(hangoutGroupController.unbanMember));
 app.post('/api/webapp/hangouts/groups/:id/mute', requireSessionAuth, asyncHandler(hangoutGroupController.muteMember));

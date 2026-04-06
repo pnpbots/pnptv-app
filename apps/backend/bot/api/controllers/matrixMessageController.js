@@ -62,9 +62,9 @@ const sendHangoutMessage = async (req, res) => {
       }
     }
 
-    // Membership check
+    // Membership check — also rejects banned members
     const { rows: memberRows } = await query(
-      'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+      'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned IS NULL OR is_banned = false)',
       [groupId, user.id]
     );
     if (memberRows.length === 0) {

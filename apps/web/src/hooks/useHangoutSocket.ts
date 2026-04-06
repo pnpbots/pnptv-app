@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { connectSocket } from "@/lib/socket";
-import type { MessageReaction } from "@/lib/api";
 
 interface OnlineMember {
   userId: string;
@@ -45,11 +44,6 @@ export function useHangoutSocket(
   const [isConnected, setIsConnected] = useState(false);
   const [onlineMembers, setOnlineMembers] = useState<OnlineMember[]>([]);
 
-  // Message update callbacks (set by Chat.tsx via returned setters)
-  const messageEditCb = useRef<((data: { messageId: number; content: string; editedAt: string; editCount: number }) => void) | null>(null);
-  const messageDeleteCb = useRef<((data: { messageId: number; deletedBy: string; forAll: boolean }) => void) | null>(null);
-  const reactionUpdateCb = useRef<((data: { messageId: number; reactions: MessageReaction[] }) => void) | null>(null);
-  const readReceiptCb = useRef<((data: { userId: string; lastReadMessageId: number }) => void) | null>(null);
 
   // Feature 1: Screen share state — name of the user currently sharing, or null
   const [screenShareUser, setScreenShareUser] = useState<string | null>(null);
@@ -150,43 +144,6 @@ export function useHangoutSocket(
       }
     };
 
-    // Server sends { call: { id, roomName, createdAt, ... }, startedBy: { ... } }
-    const onCallStarted = (data: {
-      call?: { id: string; roomName: string; createdAt?: string };
-      callId?: string;
-      roomName?: string;
-      createdAt?: string;
-    }) => {
-      const roomName = data.call?.roomName ?? data.roomName ?? null;
-      if (roomName && !ROOM_NAME_PATTERN.test(roomName)) return;
-      setCallState({
-        isActive: true,
-        participantCount: 0,
-        participants: [],
-        callId: data.call?.id ?? data.callId ?? null,
-        roomName,
-        endReason: null,
-      });
-      // Feature 2: capture timestamp — prefer nested call object, fall back to top-level
-      const ts = data.call?.createdAt ?? data.createdAt ?? null;
-      setCallStartedAt(ts);
-      // Reset participants when a new call starts
-      setCallParticipants([]);
-      setScreenShareUser(null);
-    };
-
-    const onCallEnded = (data?: { callId?: string; reason?: string }) => {
-      setCallState((prev) => {
-        // Only reset if this matches our known call (or no callId provided)
-        if (data?.callId && prev.callId && prev.callId !== data.callId) return prev;
-        return { ...EMPTY_CALL, endReason: data?.reason || null };
-      });
-      // Clear call-scoped state
-      setCallStartedAt(null);
-      setCallParticipants([]);
-      setScreenShareUser(null);
-    };
-
     // Feature 3: Server sends full participant snapshot
     const onCallParticipants = (data: { participants: CallParticipant[] }) => {
       if (!Array.isArray(data.participants)) return;
@@ -197,29 +154,6 @@ export function useHangoutSocket(
           photoUrl: String(p.photoUrl || ""),
         }))
       );
-    };
-
-    const onCallJoined = (data: {
-      participantCount?: number;
-      user?: CallParticipant;
-    }) => {
-      setCallState((prev) => ({
-        ...prev,
-        participantCount: data.participantCount ?? prev.participantCount + 1,
-      }));
-      // Feature 3: add joiner to rich participant list if server provides user info
-      if (data.user?.userId) {
-        const joiner: CallParticipant = {
-          userId: String(data.user.userId).slice(0, 64),
-          name: String(data.user.name || "").slice(0, 100),
-          photoUrl: String(data.user.photoUrl || ""),
-        };
-        setCallParticipants((prev) => {
-          // Avoid duplicates
-          if (prev.some((p) => p.userId === joiner.userId)) return prev;
-          return [...prev, joiner];
-        });
-      }
     };
 
     const onParticipantLeft = (data: {
@@ -245,36 +179,15 @@ export function useHangoutSocket(
       setScreenShareUser(data.sharing ? String(data.userId).slice(0, 64) : null);
     };
 
-    // Telegram-style message update events
-    const onMessageEdited = (data: { messageId: number; content: string; editedAt: string; editCount: number }) => {
-      messageEditCb.current?.(data);
-    };
-    const onMessageDeleted = (data: { messageId: number; deletedBy: string; forAll: boolean }) => {
-      messageDeleteCb.current?.(data);
-    };
-    const onReactionUpdated = (data: { messageId: number; reactions: MessageReaction[] }) => {
-      reactionUpdateCb.current?.(data);
-    };
-    const onReadUpdate = (data: { userId: string; lastReadMessageId: number }) => {
-      readReceiptCb.current?.(data);
-    };
-
     // Register ALL listeners BEFORE emitting join
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("hangout:typing", onTyping);
     socket.on("hangout:presence", onPresence);
     socket.on("hangout:call:active", onCallActive);
-    socket.on("hangout:call:started", onCallStarted);
-    socket.on("hangout:call:ended", onCallEnded);
-    socket.on("hangout:call:joined", onCallJoined);
     socket.on("hangout:call:participant:left", onParticipantLeft);
     socket.on("hangout:call:participants", onCallParticipants);
     socket.on("hangout:call:screenshare", onScreenShare);
-    socket.on("hangout:message:edited", onMessageEdited);
-    socket.on("hangout:message:deleted", onMessageDeleted);
-    socket.on("hangout:reaction:updated", onReactionUpdated);
-    socket.on("hangout:read:update", onReadUpdate);
 
     // Now emit join — if already connected, emit directly; otherwise onConnect handles it
     // Guard behind userId: an unauthenticated socket must not join a private room
@@ -292,16 +205,9 @@ export function useHangoutSocket(
       socket.off("hangout:typing", onTyping);
       socket.off("hangout:presence", onPresence);
       socket.off("hangout:call:active", onCallActive);
-      socket.off("hangout:call:started", onCallStarted);
-      socket.off("hangout:call:ended", onCallEnded);
-      socket.off("hangout:call:joined", onCallJoined);
       socket.off("hangout:call:participant:left", onParticipantLeft);
       socket.off("hangout:call:participants", onCallParticipants);
       socket.off("hangout:call:screenshare", onScreenShare);
-      socket.off("hangout:message:edited", onMessageEdited);
-      socket.off("hangout:message:deleted", onMessageDeleted);
-      socket.off("hangout:reaction:updated", onReactionUpdated);
-      socket.off("hangout:read:update", onReadUpdate);
 
       // Clear typing timers and map
       typingTimers.current.forEach((t) => clearTimeout(t));
@@ -383,32 +289,6 @@ export function useHangoutSocket(
     [groupId, userId]
   );
 
-  // Setters for message update callbacks (used by Chat.tsx)
-  const onMessageEdit = useCallback(
-    (cb: ((data: { messageId: number; content: string; editedAt: string; editCount: number }) => void) | null) => {
-      messageEditCb.current = cb;
-    },
-    []
-  );
-  const onMessageDelete = useCallback(
-    (cb: ((data: { messageId: number; deletedBy: string; forAll: boolean }) => void) | null) => {
-      messageDeleteCb.current = cb;
-    },
-    []
-  );
-  const onReactionUpdate = useCallback(
-    (cb: ((data: { messageId: number; reactions: MessageReaction[] }) => void) | null) => {
-      reactionUpdateCb.current = cb;
-    },
-    []
-  );
-  const onReadReceipt = useCallback(
-    (cb: ((data: { userId: string; lastReadMessageId: number }) => void) | null) => {
-      readReceiptCb.current = cb;
-    },
-    []
-  );
-
   const mergedTypingUsers = useMemo(() => typingUsers, [typingUsers]);
 
   return {
@@ -425,14 +305,9 @@ export function useHangoutSocket(
     // Feature 3
     callParticipants,
     emitMarkRead,
-    // Telegram-style message management
     emitEditMessage,
     emitDeleteMessage,
     emitReaction,
     emitReadMessage,
-    onMessageEdit,
-    onMessageDelete,
-    onReactionUpdate,
-    onReadReceipt,
   };
 }

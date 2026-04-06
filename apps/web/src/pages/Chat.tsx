@@ -245,7 +245,7 @@ function HangoutChatPanel({
     const room = `hangout:${groupId}`;
 
     const onChatMessage = (msg: GroupMessage) => {
-      if (msg.room !== room) return;
+      if (msg.room && msg.room !== room) return;
       setMessages((prev) => prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]);
       if (isNearBottom.current) {
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
@@ -313,14 +313,24 @@ function HangoutChatPanel({
     setChatError(null);
     try {
       if (editingMsg) {
-        await editGroupMessage(groupId, editingMsg.id, inputText.trim());
+        const editData = await editGroupMessage(groupId, editingMsg.id, inputText.trim());
+        if (editData?.message) {
+          setMessages((prev) =>
+            prev.map((m) => m.id === editData.message.id ? editData.message : m)
+          );
+        }
         setEditingMsg(null);
       } else if (mediaFile) {
         await sendGroupMediaMessage(groupId, mediaFile, inputText.trim() || undefined);
         setMediaFile(null);
         if (mediaPreview) { URL.revokeObjectURL(mediaPreview); setMediaPreview(null); }
       } else {
-        await sendGroupMessage(groupId, inputText.trim(), replyTo?.id ?? null);
+        const sendData = await sendGroupMessage(groupId, inputText.trim(), replyTo?.id ?? null);
+        if (sendData?.message) {
+          setMessages((prev) =>
+            prev.some((m) => m.id === sendData.message.id) ? prev : [...prev, sendData.message]
+          );
+        }
       }
       setInputText("");
       setReplyTo(null);
@@ -1503,7 +1513,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         setHangoutFeedNextCursor(res.nextCursor);
         setHangoutFeedLoaded(true);
       }
-    } catch { /* silent */ }
+    } catch {
+      setHangoutFeedLoaded(true);
+    }
     setHangoutFeedLoading(false);
   }, [activeGroup]);
 
@@ -1639,7 +1651,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           <div className="flex items-center flex-shrink-0">
             {/* Video call button — Element Call (embedded) */}
             <VideoCallButton
-              hasActiveCall={inCall}
+              hasActiveCall={inCall || telegramCallActive}
+              participantCount={inCall ? 0 : callParticipantCount}
               onStartCall={handleStartCall}
               isLoading={callLoading}
             />
