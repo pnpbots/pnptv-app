@@ -84,15 +84,15 @@ router.post('/milestones/:id/respond', authGuard, creatorController.respondToMil
 
 // ── Admin routes ──────────────────────────────────────────────────────────────
 // IMPORTANT: static paths must come BEFORE /:creatorId/* param routes
-router.get('/applications', authGuard, roleGuard('admin', 'superadmin'), creatorController.listApplications);
-router.post('/applications/:id/approve', authGuard, roleGuard('admin', 'superadmin'), creatorController.approveApplication);
-router.post('/applications/:id/reject', authGuard, roleGuard('admin', 'superadmin'), creatorController.rejectApplication);
-router.get('/active', authGuard, roleGuard('admin', 'superadmin'), creatorController.listActiveCreators);
+router.get('/applications', authGuard, roleGuard('creator', 'admin', 'superadmin'), creatorController.listApplications);
+router.post('/applications/:id/approve', authGuard, roleGuard('creator', 'admin', 'superadmin'), creatorController.approveApplication);
+router.post('/applications/:id/reject', authGuard, roleGuard('creator', 'admin', 'superadmin'), creatorController.rejectApplication);
+router.get('/active', authGuard, roleGuard('creator', 'admin', 'superadmin'), creatorController.listActiveCreators);
 
 // Enrollment management
-router.get('/enrollments', authGuard, roleGuard('admin', 'superadmin'), creatorController.listEnrollments);
-router.post('/enrollments/:id/approve', authGuard, roleGuard('admin', 'superadmin'), creatorController.approveEnrollment);
-router.post('/enrollments/:id/reject', authGuard, roleGuard('admin', 'superadmin'), creatorController.rejectEnrollment);
+router.get('/enrollments', authGuard, roleGuard('creator', 'admin', 'superadmin'), creatorController.listEnrollments);
+router.post('/enrollments/:id/approve', authGuard, roleGuard('creator', 'admin', 'superadmin'), creatorController.approveEnrollment);
+router.post('/enrollments/:id/reject', authGuard, roleGuard('creator', 'admin', 'superadmin'), creatorController.rejectEnrollment);
 
 // ── Param routes LAST ─────────────────────────────────────────────────────────
 router.get('/:creatorId/strikes', authGuard, roleGuard('admin', 'superadmin'), creatorController.getStrikes);

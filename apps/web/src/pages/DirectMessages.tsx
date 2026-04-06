@@ -336,7 +336,7 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
     <div className="flex flex-col" style={{ height: "calc(100dvh - 3.5rem - 4rem)" }}>
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
-        <button onClick={() => navigate("/dm")} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all flex-shrink-0" aria-label="Back">
+        <button onClick={() => navigate("/dm")} className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all flex-shrink-0" aria-label="Back">
           <svg className="w-5 h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
@@ -521,9 +521,9 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
           onChange={(e) => { setMessageInput(e.target.value); emitTyping(); }}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
           placeholder="Type a message..."
-          className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-4 py-2.5 text-sm resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-24"
+          className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-4 py-2.5 resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-24"
           rows={1}
-          style={{ minHeight: "40px" }}
+          style={{ minHeight: "40px", fontSize: "16px" }}
         />
         <button
           type="button"
@@ -548,9 +548,10 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
           <div
             className="fixed z-[51] rounded-2xl shadow-2xl overflow-hidden"
             style={{
-              left: Math.min(contextMenu.x, window.innerWidth - 200 - 8),
+              left: Math.min(contextMenu.x, Math.max(8, window.innerWidth - 196 - 8)),
               top: Math.min(contextMenu.y, window.innerHeight - 260 - 8),
-              minWidth: 180,
+              minWidth: Math.min(180, window.innerWidth - 24),
+              maxWidth: "calc(100vw - 24px)",
               background: "#2C2C2E",
               border: "1px solid rgba(255,255,255,0.1)",
             }}
@@ -598,9 +599,9 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
           <div
             className="fixed z-[61] rounded-2xl shadow-2xl overflow-hidden"
             style={{
-              left: emojiPickerPos.x,
+              left: Math.max(8, Math.min(emojiPickerPos.x, window.innerWidth - Math.min(280, window.innerWidth - 16) - 8)),
               top: emojiPickerPos.y,
-              width: 280,
+              width: Math.min(280, window.innerWidth - 16),
               background: "#1C1C1E",
               border: "1px solid rgba(255,255,255,0.12)",
             }}
@@ -729,7 +730,8 @@ function ThreadListView() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search conversations..."
-              className="w-full bg-white/5 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary/50 rounded-xl pl-9 pr-3 py-2 outline-none focus:ring-1 focus:ring-pnp-accent/50 transition-colors"
+              className="w-full bg-white/5 text-pnp-textPrimary placeholder-pnp-textSecondary/50 rounded-xl pl-9 pr-3 py-2 outline-none focus:ring-1 focus:ring-pnp-accent/50 transition-colors"
+              style={{ fontSize: "16px" }}
             />
             {search && (
               <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-pnp-textSecondary hover:text-white">

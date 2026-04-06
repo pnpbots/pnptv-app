@@ -87,10 +87,19 @@ const superadminGuard = async (req, res, next) => {
   return roleGuard(ROLES.SUPERADMIN)(req, res, next);
 };
 
+// creatorAdminGuard — allows creator, admin, and superadmin.
+// Used to protect admin routes that creators may access (stats, moderation,
+// support, notifications, creator subscriptions, creator applications).
+// Uses the list-based API roleGuard (not rank-based) to avoid unintentionally
+// granting access to future roles added at rank >= 2.
+const _apiRoleGuard = require('../api/middleware/roleGuard');
+const creatorAdminGuard = _apiRoleGuard('creator', 'admin', 'superadmin');
+
 module.exports = {
   roleGuard,
   permissionGuard,
   adminGuard,
   moderatorGuard,
-  superadminGuard
+  superadminGuard,
+  creatorAdminGuard
 };

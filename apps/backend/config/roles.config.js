@@ -2,6 +2,7 @@ const ROLES = {
   SUPERADMIN: 'superadmin',
   ADMIN: 'admin',
   MODERATOR: 'moderator',
+  CREATOR: 'creator',
   MODEL: 'model',
   USER: 'user'
 };
@@ -42,6 +43,7 @@ const ROLE_HIERARCHY = {
   [ROLES.SUPERADMIN]: 4,
   [ROLES.ADMIN]: 3,
   [ROLES.MODERATOR]: 2,
+  [ROLES.CREATOR]: 2,
   [ROLES.MODEL]: 1,
   [ROLES.USER]: 0
 };

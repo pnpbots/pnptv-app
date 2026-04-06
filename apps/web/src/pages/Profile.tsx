@@ -792,8 +792,8 @@ export default function Profile() {
               onFocus={() => { if (searchQuery.trim().length >= 2) setSearchOpen(true); }}
               onKeyDown={(e) => { if (e.key === "Escape") setSearchOpen(false); }}
               placeholder={p.searchPeople}
-              className="w-full pl-10 pr-10 py-2.5 rounded-xl text-sm text-white placeholder-[#8E8E93] focus:outline-none focus:ring-1 focus:ring-[#D4007A]/50"
-              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}
+              className="w-full pl-10 pr-10 py-2.5 rounded-xl text-white placeholder-[#8E8E93] focus:outline-none focus:ring-1 focus:ring-[#D4007A]/50"
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", fontSize: "16px" }}
             />
             {searchQuery && (
               <button

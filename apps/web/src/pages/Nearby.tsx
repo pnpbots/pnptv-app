@@ -1287,8 +1287,8 @@ export default function Nearby() {
               <select
                 value={onlineRegion}
                 onChange={(e) => setOnlineRegion(e.target.value)}
-                className="w-full pl-3 pr-8 py-2 rounded-xl text-sm text-pnp-textPrimary border border-white/10 appearance-none focus:outline-none focus:border-pnp-accent transition-colors"
-                style={{ background: "rgba(255,255,255,0.05)" }}
+                className="w-full pl-3 pr-8 py-2 rounded-xl text-pnp-textPrimary border border-white/10 appearance-none focus:outline-none focus:border-pnp-accent transition-colors"
+                style={{ background: "rgba(255,255,255,0.05)", fontSize: "16px" }}
                 aria-label="Filter by region"
               >
                 <option value="">All regions ({onlineUsers.length} online)</option>

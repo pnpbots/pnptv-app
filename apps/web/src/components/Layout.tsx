@@ -602,9 +602,9 @@ function SidebarDmChat({ userId, myDbId, onBack }: SidebarDmChatProps) {
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }
           }}
           placeholder="Type a message..."
-          className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-3 py-2 text-xs resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-20"
+          className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-3 py-2 resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-20"
           rows={1}
-          style={{ minHeight: "36px" }}
+          style={{ minHeight: "36px", fontSize: "16px" }}
         />
 
         <button
@@ -953,40 +953,14 @@ export function Layout() {
           </button>
           <NotificationBell />
 
-          {/* Profile avatar — opens slide-out menu */}
+          {/* Hamburger — opens slide-out menu */}
           <button
             onClick={() => setMobileMenuOpen(true)}
-            className="relative ml-0.5 p-0.5 rounded-full transition-all active:scale-95"
+            className="relative ml-0.5 p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors active:scale-95"
             aria-label="Open menu"
             aria-expanded={mobileMenuOpen}
           >
-            {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
-              <img
-                src={user.photoUrl}
-                alt=""
-                className="w-8 h-8 rounded-full object-cover ring-2 ring-pnp-border"
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }}
-              />
-            ) : null}
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
-              style={{
-                background: "linear-gradient(135deg, #D4007A, #E69138)",
-                color: "#fff",
-                display: user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? "none" : undefined,
-              }}
-            >
-              {(user?.displayName || "U")[0].toUpperCase()}
-            </div>
-            {/* Unread badge — hangouts only (DMs have their own icon now) */}
-            {(() => {
-              const hangoutUnread = hangoutGroups.reduce((sum, g) => sum + (g.unreadCount ?? 0), 0);
-              return hangoutUnread > 0 ? (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-0.5 bg-[#D4007A] rounded-full text-[9px] font-bold text-white flex items-center justify-center shadow-lg shadow-[#D4007A]/40">
-                  {hangoutUnread > 99 ? "99+" : hangoutUnread}
-                </span>
-              ) : null;
-            })()}
+            <HamburgerIcon />
           </button>
         </div>
       </header>
@@ -1004,7 +978,7 @@ export function Layout() {
           {/* Panel — slides in from right */}
           <div
             ref={mobileMenuRef}
-            className="relative w-72 h-full flex flex-col glass-nav border-l border-pnp-border animate-fade-in-up"
+            className="relative w-[min(288px,85vw)] h-full flex flex-col glass-nav border-l border-pnp-border animate-fade-in-up"
             style={{ animationDuration: "0.18s" }}
           >
             {/* Header */}
@@ -1060,119 +1034,126 @@ export function Layout() {
               </button>
             </div>
 
-            {/* Scrollable nav body — switches between conversation hub and inline DM chat */}
-            {inlineDmUserId ? (
-              <div className="flex-1 min-h-0 flex flex-col">
-                <SidebarDmChat
-                  userId={inlineDmUserId}
-                  myDbId={user?.dbId ?? ""}
-                  onBack={() => {
-                    setInlineDmUserId(null);
-                    getMessageThreads()
-                      .then((res) => {
-                        if (res.success) {
-                          setThreads(res.threads);
-                          setDmUnread(res.threads.filter((th) => th.unreadCount > 0).length);
-                        }
-                      })
-                      .catch(() => {});
-                  }}
-                />
-              </div>
-            ) : (
-              <>
-                <nav className="flex-1 overflow-y-auto flex flex-col min-h-0" aria-label="Mobile navigation">
-                  {/* ── Conversation Hub ─────────────────────────────────── */}
-                  <div className="px-3 pt-2 pb-1 flex flex-col flex-1 min-h-0">
-                    {/* Filter tabs */}
-                    <div className="flex gap-1 mb-2 flex-shrink-0">
-                      {(["all", "dms", "hangouts"] as const).map((filter) => {
-                        const label =
-                          filter === "all"
-                            ? t.nav.filterAll
-                            : filter === "dms"
-                              ? t.nav.filterDMs
-                              : t.nav.filterHangouts;
-                        const isActive = conversationFilter === filter;
-                        return (
-                          <button
-                            key={filter}
-                            onClick={() => setConversationFilter(filter)}
-                            className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                              isActive
-                                ? "text-white"
-                                : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                            }`}
-                            style={isActive ? { background: "#D4007A" } : {}}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
+            {/* Scrollable link menu */}
+            <nav className="flex-1 overflow-y-auto" aria-label="Mobile navigation">
+              <div className="px-3 py-3 space-y-4">
 
-                    {/* Conversation list */}
-                    <MobileConversationList
-                      filter={conversationFilter}
-                      threads={threads}
-                      hangoutGroups={hangoutGroups}
-                      hangoutGroupsLoading={hangoutGroupsLoading}
-                      onNavigate={(path, type) => {
-                        if (type === "dm") {
-                          const dmUserId = path.replace("/dm/", "");
-                          setInlineDmUserId(dmUserId);
-                        } else {
-                          setMobileMenuOpen(false);
-                          setInlineDmUserId(null);
-                          navigate(path);
-                        }
-                      }}
-                      noConversationsLabel={t.nav.noConversations}
-                    />
-                  </div>
-                </nav>
+                {/* ── Discover ─────────────────────────────────────────── */}
+                <div>
+                  <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Discover</p>
+                  {[
+                    { to: "/channels", label: "Channels" },
+                    { to: "/main-stage", label: t.nav.mainStage },
+                    { to: "/media", label: t.nav.prime },
+                  ].map((link) => (
+                    <NavLink
+                      key={link.to}
+                      to={link.to}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={({ isActive }: { isActive: boolean }) =>
+                        `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                        }`
+                      }
+                    >
+                      {link.label}
+                    </NavLink>
+                  ))}
+                </div>
 
-                {/* Bottom section: secondary links + admin + profile */}
-                <div className="flex-shrink-0 border-t border-pnp-border">
-                  {/* Compact secondary links row */}
-                  <div className="px-3 pt-2 pb-1 flex flex-wrap gap-x-3 gap-y-0.5">
-                    {mobileSecondaryLinks.map((link) => (
+                {/* ── Account ──────────────────────────────────────────── */}
+                <div>
+                  <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Account</p>
+                  {[
+                    { to: "/settings", label: t.nav.settings || "Settings" },
+                    { to: "/support", label: t.nav.help || "Help & Support" },
+                  ].map((link) => (
+                    <NavLink
+                      key={link.to}
+                      to={link.to}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={({ isActive }: { isActive: boolean }) =>
+                        `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                        }`
+                      }
+                    >
+                      {link.label}
+                    </NavLink>
+                  ))}
+                </div>
+
+                {/* ── Community ────────────────────────────────────────── */}
+                <div>
+                  <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Community</p>
+                  {[
+                    { to: "/community-resources", label: "Community Resources" },
+                    { to: "/about", label: "About PNPtv!" },
+                    { to: "/blog", label: "Blog" },
+                  ].map((link) => (
+                    <NavLink
+                      key={link.to}
+                      to={link.to}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={({ isActive }: { isActive: boolean }) =>
+                        `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                        }`
+                      }
+                    >
+                      {link.label}
+                    </NavLink>
+                  ))}
+                </div>
+
+                {/* ── Legal ────────────────────────────────────────────── */}
+                <div>
+                  <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Legal</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 px-2">
+                    {[
+                      { to: "/terms", label: "Terms" },
+                      { to: "/privacy", label: "Privacy" },
+                      { to: "/community-guidelines", label: "Guidelines" },
+                      { to: "/content-policy", label: "Content Policy" },
+                      { to: "/dmca", label: "DMCA" },
+                      { to: "/refunds", label: "Refunds" },
+                    ].map((link) => (
                       <NavLink
                         key={link.to}
                         to={link.to}
                         onClick={() => setMobileMenuOpen(false)}
                         className={({ isActive }: { isActive: boolean }) =>
-                          `text-[11px] transition-colors ${
-                            isActive
-                              ? "text-pnp-textPrimary"
-                              : "text-pnp-textSecondary/50 hover:text-pnp-textSecondary"
+                          `text-xs py-1 transition-colors ${
+                            isActive ? "text-pnp-textPrimary" : "text-pnp-textSecondary/60 hover:text-pnp-textSecondary"
                           }`
                         }
                       >
                         {link.label}
                       </NavLink>
                     ))}
-                    {isAdmin && (
-                      <NavLink
-                        to="/admin"
-                        onClick={() => setMobileMenuOpen(false)}
-                        className={({ isActive }: { isActive: boolean }) =>
-                          `text-[11px] font-semibold transition-colors ${
-                            isActive
-                              ? "nav-active"
-                              : "text-pnp-textSecondary/50 hover:text-pnp-textSecondary"
-                          }`
-                        }
-                      >
-                        {t.nav.admin}
-                      </NavLink>
-                    )}
                   </div>
-
-                  <div className="pb-2" />
                 </div>
-              </>
-            )}
+
+                {/* ── Admin (conditional) ───────────────────────────────── */}
+                {isAdmin && (
+                  <div>
+                    <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Admin</p>
+                    <NavLink
+                      to="/admin"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={({ isActive }: { isActive: boolean }) =>
+                        `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                        }`
+                      }
+                    >
+                      {t.nav.admin}
+                    </NavLink>
+                  </div>
+                )}
+
+              </div>
+            </nav>
           </div>
         </div>
       )}

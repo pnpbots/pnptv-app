@@ -36,7 +36,8 @@ export function SearchBar({ value, onChange, placeholder = "Search...", debounce
         value={local}
         onChange={(e) => handleChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-pnp-border bg-pnp-surface text-pnp-textPrimary placeholder-pnp-textSecondary text-sm focus:outline-none focus:border-pnp-accent"
+        className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-pnp-border bg-pnp-surface text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-pnp-accent"
+        style={{ fontSize: "16px" }}
       />
       {local && (
         <button

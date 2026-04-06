@@ -302,7 +302,7 @@ export default function UserManagement() {
           <select
             value={filters.tier || ""}
             onChange={(e) => handleFilterChange("tier", e.target.value)}
-            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
           >
             <option value="">All Tiers</option>
             <option value="PRIME">PRIME</option>
@@ -317,7 +317,7 @@ export default function UserManagement() {
           <select
             value={filters.status || ""}
             onChange={(e) => handleFilterChange("status", e.target.value)}
-            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
           >
             <option value="">All Statuses</option>
             <option value="active">Active</option>
@@ -332,7 +332,7 @@ export default function UserManagement() {
           <select
             value={filters.plan || ""}
             onChange={(e) => handleFilterChange("plan", e.target.value)}
-            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
           >
             <option value="">All Plans</option>
             <option value="__none__">No Plan</option>
@@ -346,7 +346,7 @@ export default function UserManagement() {
           <select
             value={filters.role || ""}
             onChange={(e) => handleFilterChange("role", e.target.value)}
-            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
           >
             <option value="">All Roles</option>
             <option value="superadmin">Superadmin</option>
@@ -429,7 +429,7 @@ export default function UserManagement() {
               <select
                 value={upgradeForm.planId}
                 onChange={(e) => setUpgradeForm((prev) => ({ ...prev, planId: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+                className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
               >
                 {plans.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -444,7 +444,7 @@ export default function UserManagement() {
                 type="date"
                 value={upgradeForm.expiry}
                 onChange={(e) => setUpgradeForm((prev) => ({ ...prev, expiry: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+                className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
               />
             </div>
           </div>

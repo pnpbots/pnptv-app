@@ -2184,7 +2184,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                               onChange={(e) => setSettingsName(e.target.value)}
                               maxLength={80}
                               placeholder="Group name"
-                              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors"
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors"
+                            style={{ fontSize: "16px" }}
                             />
                             <textarea
                               value={settingsDesc}
@@ -2192,7 +2193,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                               maxLength={500}
                               rows={2}
                               placeholder="Description (optional)"
-                              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors resize-none"
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors resize-none"
+                              style={{ fontSize: "16px" }}
                             />
                             <div>
                               <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>
@@ -2211,7 +2213,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                                   borderRadius: '12px',
                                   padding: '10px 12px',
                                   color: '#fff',
-                                  fontSize: '14px',
+                                  fontSize: '16px',
                                   resize: 'vertical',
                                   fontFamily: 'inherit',
                                   outline: 'none',
@@ -2833,8 +2835,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder={t.chat.groupNamePlaceholder}
-              className="w-full bg-white/5 rounded-xl px-3 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 transition-colors"
+              className="w-full bg-white/5 rounded-xl px-3 py-2.5 text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 transition-colors"
               maxLength={100}
+              style={{ fontSize: "16px" }}
             />
           </div>
 
@@ -2849,9 +2852,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               value={newDesc}
               onChange={(e) => setNewDesc(e.target.value)}
               placeholder={t.chat.groupDescriptionPlaceholder}
-              className="w-full bg-white/5 rounded-xl px-3 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 resize-none transition-colors"
+              className="w-full bg-white/5 rounded-xl px-3 py-2.5 text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 resize-none transition-colors"
               rows={2}
               maxLength={500}
+              style={{ fontSize: "16px" }}
             />
           </div>
 
@@ -3376,7 +3380,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     type="text"
                     value={discoverQuery}
                     placeholder="Search groups by name..."
-                    className="w-full bg-white/5 rounded-lg pl-9 pr-3 py-2 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 transition-colors"
+                    className="w-full bg-white/5 rounded-lg pl-9 pr-3 py-2 text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 transition-colors"
+                    style={{ fontSize: "16px" }}
                     onChange={(e) => setDiscoverQuery(e.target.value)}
                   />
                   {discoverQuery && (
@@ -3571,7 +3576,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                 onChange={(e) => setEditingName(e.target.value)}
                 maxLength={80}
                 placeholder="Group name"
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-sm text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors"
+                style={{ fontSize: "16px" }}
               />
               <textarea
                 value={editingDesc}
@@ -3579,7 +3585,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                 maxLength={500}
                 rows={3}
                 placeholder="Description (optional)"
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-sm text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors resize-none"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors resize-none"
+                style={{ fontSize: "16px" }}
               />
               {editingError && <p className="text-xs text-red-400">{editingError}</p>}
             </div>

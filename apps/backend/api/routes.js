@@ -29,7 +29,7 @@ const ageVerificationController = require('./controllers/ageVerificationControll
 const healthController = require('./controllers/healthController');
 const hangoutsController = require('./controllers/hangoutsController');
 const eventsController = require('./controllers/eventsController');
-const { adminGuard } = require('../middleware/guards');
+const { adminGuard, creatorAdminGuard } = require('../middleware/guards');
 const xOAuthRoutes = require('./xOAuthRoutes');
 const adminUserRoutes = require('./routes/adminUserRoutes');
 const userManagementRoutes = require('./routes/userManagementRoutes');
@@ -1493,11 +1493,11 @@ app.get('/api/auth-status', authStatusLimiter, (req, res, next) => {
 }, checkAuthStatus);
 
 // Admin check endpoint (for frontend role gate)
-// Uses adminGuard which queries DB — never trusts the stale session role.
-// adminGuard returns 403 for non-admins; frontend treats any non-200 as isAdmin: false.
+// Uses creatorAdminGuard — allows creator, admin, and superadmin.
+// Returns the role so the frontend can distinguish creator-admin from full admin.
 const adminCheckLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, keyGenerator: (req) => req.ip, standardHeaders: true, legacyHeaders: false });
-app.get('/api/admin/check', adminCheckLimiter, adminGuard, (req, res) => {
-  res.json({ isAdmin: true });
+app.get('/api/admin/check', adminCheckLimiter, creatorAdminGuard, (req, res) => {
+  res.json({ isAdmin: true, role: req.user.role });
 });
 
 // X OAuth routes (admin-guarded for account management, public alias for callback)
@@ -3632,7 +3632,7 @@ const webappAdminController = require('./controllers/webappAdminController');
 const primeController = require('./controllers/primeController');
 
 // Admin endpoints with session-based authentication
-app.get('/api/webapp/admin/stats', adminGuard, asyncHandler(webappAdminController.getStats));
+app.get('/api/webapp/admin/stats', creatorAdminGuard, asyncHandler(webappAdminController.getStats));
 app.get('/api/webapp/admin/demographics', adminGuard, asyncHandler(webappAdminController.getDemographics));
 app.get('/api/webapp/admin/users', adminGuard, asyncHandler(webappAdminController.listUsers));
 // Bulk user operations — registered BEFORE :id routes to avoid route shadowing
@@ -3642,10 +3642,10 @@ app.put('/api/webapp/admin/users/:id', adminGuard, asyncHandler(webappAdminContr
 app.post('/api/webapp/admin/users/:id/ban', adminGuard, asyncHandler(webappAdminController.banUser));
 app.get('/api/webapp/admin/users/:id/payments', adminGuard, asyncHandler(webappAdminController.getUserPayments));
 app.delete('/api/webapp/admin/users/:id', adminGuard, asyncHandler(webappAdminController.deleteUser));
-app.get('/api/webapp/admin/posts', adminGuard, asyncHandler(webappAdminController.listPosts));
-app.delete('/api/webapp/admin/posts/:id', adminGuard, asyncHandler(webappAdminController.deletePost));
-app.get('/api/webapp/admin/hangouts', adminGuard, asyncHandler(webappAdminController.listHangouts));
-app.delete('/api/webapp/admin/hangouts/:id', adminGuard, asyncHandler(webappAdminController.endHangout));
+app.get('/api/webapp/admin/posts', creatorAdminGuard, asyncHandler(webappAdminController.listPosts));
+app.delete('/api/webapp/admin/posts/:id', creatorAdminGuard, asyncHandler(webappAdminController.deletePost));
+app.get('/api/webapp/admin/hangouts', creatorAdminGuard, asyncHandler(webappAdminController.listHangouts));
+app.delete('/api/webapp/admin/hangouts/:id', creatorAdminGuard, asyncHandler(webappAdminController.endHangout));
 
 // Nearby Places management
 const nearbyPlacesAdminController = require('./controllers/nearbyPlacesAdminController');
@@ -3685,10 +3685,10 @@ app.post('/api/webapp/admin/x-campaigns/:id/duplicate', adminGuard, asyncHandler
 // NOTE: static-path routes (/summary, /payouts/process-all) MUST be registered
 // before the /:creatorId param route to prevent Express matching them as a creatorId.
 const creatorSubscriptionAdminController = require('./controllers/creatorSubscriptionAdminController');
-app.get('/api/webapp/admin/creator-subscriptions/summary', adminGuard, asyncHandler(creatorSubscriptionAdminController.getPlatformSummary));
+app.get('/api/webapp/admin/creator-subscriptions/summary', creatorAdminGuard, asyncHandler(creatorSubscriptionAdminController.getPlatformSummary));
 app.post('/api/webapp/admin/creator-subscriptions/payouts/process-all', adminGuard, asyncHandler(creatorSubscriptionAdminController.processAllPayouts));
-app.get('/api/webapp/admin/creator-subscriptions', adminGuard, asyncHandler(creatorSubscriptionAdminController.listCreators));
-app.get('/api/webapp/admin/creator-subscriptions/:creatorId', adminGuard, asyncHandler(creatorSubscriptionAdminController.getCreatorDetail));
+app.get('/api/webapp/admin/creator-subscriptions', creatorAdminGuard, asyncHandler(creatorSubscriptionAdminController.listCreators));
+app.get('/api/webapp/admin/creator-subscriptions/:creatorId', creatorAdminGuard, asyncHandler(creatorSubscriptionAdminController.getCreatorDetail));
 app.post('/api/webapp/admin/creator-subscriptions/:creatorId/payout', adminGuard, asyncHandler(creatorSubscriptionAdminController.processCreatorPayout));
 app.post('/api/webapp/admin/creator-subscriptions/:creatorId/subscriptions/:subscriptionId/cancel', adminGuard, asyncHandler(creatorSubscriptionAdminController.cancelSubscription));
 app.post('/api/webapp/admin/creator-subscriptions/:creatorId/subscriptions/:subscriptionId/extend', adminGuard, asyncHandler(creatorSubscriptionAdminController.extendSubscription));
@@ -3852,7 +3852,7 @@ app.post('/api/webapp/admin/mono/chat', adminGuard, asyncHandler(async (req, res
 }));
 
 // ── Admin Support Dashboard ──────────────────────────────────────────────────
-app.get('/api/webapp/admin/support/stats', adminGuard, asyncHandler(async (req, res) => {
+app.get('/api/webapp/admin/support/stats', creatorAdminGuard, asyncHandler(async (req, res) => {
   const SupportTopicModel = require('../models/supportTopicModel');
   const pool = getPool();
 
@@ -3893,7 +3893,7 @@ app.get('/api/webapp/admin/support/stats', adminGuard, asyncHandler(async (req, 
   });
 }));
 
-app.get('/api/webapp/admin/support/tickets', adminGuard, asyncHandler(async (req, res) => {
+app.get('/api/webapp/admin/support/tickets', creatorAdminGuard, asyncHandler(async (req, res) => {
   const pool = getPool();
   const { status, priority, category, search, limit: lim, page: pg } = req.query;
 
@@ -3956,7 +3956,7 @@ app.get('/api/webapp/admin/support/tickets', adminGuard, asyncHandler(async (req
   res.json({ success: true, tickets, hasMore: offset + rows.length < total, total });
 }));
 
-app.get('/api/webapp/admin/support/tickets/:userId/messages', adminGuard, asyncHandler(async (req, res) => {
+app.get('/api/webapp/admin/support/tickets/:userId/messages', creatorAdminGuard, asyncHandler(async (req, res) => {
   const SupportTicketMessageModel = require('../models/supportTicketMessageModel');
   const raw = await SupportTicketMessageModel.getByUserId(req.params.userId);
   const messages = (raw || []).map(m => ({
@@ -3969,7 +3969,7 @@ app.get('/api/webapp/admin/support/tickets/:userId/messages', adminGuard, asyncH
   res.json({ success: true, messages });
 }));
 
-app.post('/api/webapp/admin/support/tickets/:userId/reply', adminGuard, asyncHandler(async (req, res) => {
+app.post('/api/webapp/admin/support/tickets/:userId/reply', creatorAdminGuard, asyncHandler(async (req, res) => {
   const { content } = req.body;
   if (!content || typeof content !== 'string' || !content.trim() || content.length > 2000) {
     return res.status(400).json({ success: false, error: 'Message required (max 2000 chars)' });
@@ -4029,7 +4029,7 @@ app.post('/api/webapp/admin/support/tickets/:userId/reply', adminGuard, asyncHan
   });
 }));
 
-app.patch('/api/webapp/admin/support/tickets/:userId', adminGuard, asyncHandler(async (req, res) => {
+app.patch('/api/webapp/admin/support/tickets/:userId', creatorAdminGuard, asyncHandler(async (req, res) => {
   const SupportTopicModel = require('../models/supportTopicModel');
   const userId = req.params.userId;
   const { status, priority, category } = req.body;
@@ -4092,7 +4092,7 @@ app.delete('/api/webapp/admin/users/:userId/make-creator', adminGuard, asyncHand
 app.get('/api/webapp/my-entitlements', requireSessionAuth, asyncHandler(webappAdminController.getMyEntitlements));
 
 // Admin push broadcast
-app.post('/api/webapp/admin/notifications/push', adminGuard, asyncHandler(webappAdminController.sendPushNotification));
+app.post('/api/webapp/admin/notifications/push', creatorAdminGuard, asyncHandler(webappAdminController.sendPushNotification));
 
 // POST /api/webapp/admin/notifications/digest/test — trigger digest email for a user (SMTP test)
 app.post('/api/webapp/admin/notifications/digest/test', adminGuard, asyncHandler(async (req, res) => {

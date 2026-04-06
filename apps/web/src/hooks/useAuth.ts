@@ -32,6 +32,7 @@ interface AuthState {
   user: PnptvUser | null;
   isAuthenticated: boolean;
   isAdmin: boolean;
+  isCreatorAdmin: boolean;
   isLoading: boolean;
   login: () => Promise<void>;
   logout: () => Promise<void>;
@@ -169,12 +170,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const isAdmin = !!user && (user.role === "admin" || user.role === "superadmin");
+  const isAdmin = !!user && (user.role === "admin" || user.role === "superadmin" || user.role === "creator");
+  const isCreatorAdmin = !!user && user.role === "creator";
 
   const value: AuthState = {
     user,
     isAuthenticated: !!user,
     isAdmin,
+    isCreatorAdmin,
     isLoading,
     login: handleLogin,
     logout: handleLogout,

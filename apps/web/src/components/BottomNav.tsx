@@ -86,7 +86,7 @@ export function BottomNav() {
               to={item.to}
               end
               className={() =>
-                `flex flex-col items-center gap-0.5 px-3 py-1 transition-colors ${
+                `flex flex-col items-center justify-center gap-0.5 px-3 min-h-[44px] transition-colors ${
                   active
                     ? "nav-active"
                     : "text-pnp-textSecondary hover:text-pnp-textPrimary"

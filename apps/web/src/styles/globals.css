@@ -46,6 +46,8 @@
   input, textarea, [contenteditable="true"] {
     -webkit-user-select: text;
     user-select: text;
+    /* Prevent iOS Safari from zooming on focus — 16px minimum required */
+    font-size: max(16px, 1rem);
   }
 
   h1, h2, h3 {
