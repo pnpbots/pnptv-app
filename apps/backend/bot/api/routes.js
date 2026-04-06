@@ -57,6 +57,7 @@ const applyRoutes = require('./routes/applyRoutes');
 const castingRoutes = require('./routes/castingRoutes');
 const elementRoutes = require('./routes/elementRoutes');
 const matrixController = require('./controllers/matrixController');
+const matrixMessageController = require('./controllers/matrixMessageController');
 const creatorRoutes = require('./routes/creatorRoutes');
 const gamificationRoutes = require('./routes/gamificationRoutes');
 const canvaRoutes = require('./routes/canvaRoutes');
@@ -7012,7 +7013,8 @@ app.get('/api/webapp/matrix/token', requireSessionAuth, asyncHandler(matrixContr
 app.post('/api/webapp/matrix/dm/:userId', requireSessionAuth, asyncHandler(matrixController.getOrCreateDmRoom));
 app.post('/api/webapp/matrix/hangout-room/:groupId', requireSessionAuth, asyncHandler(matrixController.getOrCreateHangoutRoom));
 app.post('/api/webapp/matrix/hangout-room/:groupId/sync-members', requireSessionAuth, asyncHandler(matrixController.syncHangoutRoomMembers));
-// Matrix message routes removed — messages now stored directly in PG via REST + Socket.IO
+app.post('/api/webapp/matrix/hangout/:groupId/message', requireSessionAuth, asyncHandler(matrixMessageController.sendHangoutMessage));
+app.post('/api/webapp/matrix/dm/:userId/message',       requireSessionAuth, asyncHandler(matrixMessageController.sendDmMessage));
 
 // Creator monetization routes
 app.use('/api/webapp/creator', creatorRoutes);
