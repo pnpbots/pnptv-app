@@ -11,6 +11,7 @@ import { useTier } from "@/hooks/useTier";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useHangoutSocket } from "@/hooks/useHangoutSocket";
+import type { WebRtcPeer } from "@/hooks/useHangoutSocket";
 import { useI18n } from "@/lib/i18n";
 import {
   getHangoutGroups,
@@ -82,7 +83,7 @@ function getTelegramDeepLink(inviteLink: string): string {
 
 // ─── RemotePeerVideo ─────────────────────────────────────────────────────────
 
-function RemotePeerVideo({ peer }: { peer: import('@/hooks/useHangoutSocket').WebRtcPeer }) {
+function RemotePeerVideo({ peer }: { peer: WebRtcPeer }) {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   React.useEffect(() => {
     if (videoRef.current && peer.stream) {
