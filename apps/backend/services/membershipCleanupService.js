@@ -1,0 +1,950 @@
+const UserModel = require('../models/userModel');
+const { query } = require('../config/postgres');
+const logger = require('../utils/logger');
+const BusinessNotificationService = require('./businessNotificationService');
+
+/**
+ * Membership Cleanup Service
+ * Handles automatic membership status updates and channel access management
+ */
+class MembershipCleanupService {
+  static bot = null;
+  static primeChannelId = process.env.PRIME_CHANNEL_ID;
+
+  /**
+   * Initialize the service with bot instance
+   * @param {Telegraf} bot - Bot instance
+   */
+  static initialize(bot) {
+    this.bot = bot;
+    logger.info('Membership cleanup service initialized', {
+      primeChannelId: this.primeChannelId
+    });
+    this.startScheduler();
+  }
+
+  /**
+   * Schedule runFullCleanup() to run daily at 03:00 UTC.
+   * On startup, syncAllMembershipStatuses() is called once to fix any
+   * consistency drift that accumulated while the service was offline.
+   * @returns {NodeJS.Timeout} The initial setTimeout ref (for graceful shutdown)
+   */
+  static startScheduler() {
+    // Run an immediate sync on startup to correct any drift
+    this.syncAllMembershipStatuses().catch((err) => {
+      logger.error('MembershipCleanupService: startup sync failed', { error: err.message });
+    });
+
+    const msUntilNextCleanupTime = () => {
+      const CLEANUP_HOUR_UTC = 3; // 03:00 UTC daily
+      const now  = new Date();
+      const next = new Date(Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        CLEANUP_HOUR_UTC, 0, 0, 0,
+      ));
+      if (next.getTime() <= now.getTime()) {
+        next.setUTCDate(next.getUTCDate() + 1);
+      }
+      return Math.max(next.getTime() - now.getTime(), 60_000);
+    };
+
+    const delay    = msUntilNextCleanupTime();
+    const nextFire = new Date(Date.now() + delay).toISOString();
+    logger.info(`MembershipCleanupService: daily cleanup scheduled at ${nextFire} (03:00 UTC)`);
+
+    const timeoutRef = setTimeout(() => {
+      MembershipCleanupService.runFullCleanup();
+      setInterval(() => MembershipCleanupService.runFullCleanup(), 24 * 60 * 60 * 1000);
+    }, delay);
+
+    return timeoutRef;
+  }
+
+  /**
+   * Run full membership cleanup
+   * - Updates subscription statuses (active/churned/free)
+   * - Kicks churned users from PRIME channel
+   * @returns {Promise<Object>} Cleanup results
+   */
+  static async runFullCleanup() {
+    logger.info('Starting full membership cleanup...');
+
+    const results = {
+      statusUpdates: { toChurned: 0, toFree: 0, errors: 0 },
+      channelKicks: { kicked: 0, failed: 0, skipped: 0 },
+      startTime: new Date(),
+      endTime: null
+    };
+
+    try {
+      // Step 1: Update subscription statuses
+      const statusResults = await this.updateAllSubscriptionStatuses();
+      results.statusUpdates = statusResults;
+
+      // Step 2: Add missing PRIME users to the channel
+      if (this.bot && this.primeChannelId) {
+        const addResults = await this.addMissingUsersToPrimeChannel();
+        results.channelAdds = addResults;
+      } else {
+        logger.warn('Skipping channel adds: Bot or PRIME_CHANNEL_ID not configured');
+      }
+
+      // Step 3: Kick churned/expired users from PRIME channel
+      if (this.bot && this.primeChannelId) {
+        const kickResults = await this.kickExpiredUsersFromPrimeChannel();
+        results.channelKicks = kickResults;
+      } else {
+        logger.warn('Skipping channel kicks: Bot or PRIME_CHANNEL_ID not configured');
+      }
+
+      results.endTime = new Date();
+      const duration = (results.endTime - results.startTime) / 1000;
+
+      logger.info('Membership cleanup completed', {
+        duration: `${duration}s`,
+        statusUpdates: results.statusUpdates,
+        channelAdds: results.channelAdds,
+        channelKicks: results.channelKicks
+      });
+
+      // Business channel notification
+      BusinessNotificationService.notifyCleanupSummary(results).catch(() => {});
+
+      return results;
+    } catch (error) {
+      logger.error('Error in full membership cleanup:', error);
+      results.endTime = new Date();
+      return results;
+    }
+  }
+
+  /**
+   * Check if the bot has access to the PRIME channel
+   * @returns {Promise<boolean>} True if bot can access the channel
+   */
+  static async verifyChannelAccess() {
+    if (!this.bot || !this.primeChannelId) return false;
+    try {
+      await this.bot.telegram.getChat(this.primeChannelId);
+      return true;
+    } catch (error) {
+      logger.error('Bot cannot access PRIME channel — is the bot still an admin?', {
+        channelId: this.primeChannelId,
+        error: error.message
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Check if a Telegram API error is a benign "user not in channel" type error
+   * that should be counted as a skip, not a failure
+   * @param {Error} error - The Telegram error
+   * @returns {boolean}
+   */
+  static isBenignUserError(error) {
+    const code = error.response?.error_code;
+    const desc = (error.response?.description || error.message || '').toLowerCase();
+
+    // 400 errors that mean "user not in channel" or "can't interact with user"
+    if (code === 400) {
+      const benignPatterns = [
+        'user not found',
+        'participant_id_invalid',
+        'peer_id_invalid',
+        'chat not found',
+        'user_id_invalid',
+        'member list is inaccessible',
+      ];
+      return benignPatterns.some(p => desc.includes(p));
+    }
+
+    // 403 errors related to user blocking the bot or privacy settings
+    if (code === 403) {
+      const benignPatterns = [
+        'bot was blocked',
+        'user is deactivated',
+        'bot can\'t initiate',
+      ];
+      return benignPatterns.some(p => desc.includes(p));
+    }
+
+    return false;
+  }
+
+  /**
+   * Add active Prime members to the PRIME channel if they are not already members
+   * @returns {Promise<Object>} Add results
+   */
+  static async addMissingUsersToPrimeChannel() {
+    const results = { added: 0, failed: 0, skipped: 0 };
+
+    if (!this.bot || !this.primeChannelId) {
+      logger.warn('Cannot add users: Bot or PRIME_CHANNEL_ID not configured');
+      return results;
+    }
+
+    // Verify bot can access the channel before iterating all users
+    const hasAccess = await this.verifyChannelAccess();
+    if (!hasAccess) {
+      logger.error('Skipping PRIME channel additions: bot has no access to the channel. Re-add the bot as admin.');
+      return results;
+    }
+
+    try {
+      // Get all active Prime users from the database
+      const primeUsers = await query(`
+        SELECT id, username FROM users
+        WHERE subscription_status = 'active' AND tier = 'PRIME'
+        ORDER BY id LIMIT 500
+      `);
+
+      logger.info(`Found ${primeUsers.rows.length} active Prime users to check for PRIME channel access`);
+
+      for (const user of primeUsers.rows) {
+        try {
+          // Check if user is in the PRIME channel
+          const chatMember = await this.bot.telegram.getChatMember(this.primeChannelId, user.id);
+
+          // If user is not in the channel (left, kicked, or never joined), add them
+          if (['left', 'kicked'].includes(chatMember.status)) {
+            // To add a user, we create an invite link and send it to them
+            const inviteLink = await this.bot.telegram.createChatInviteLink(this.primeChannelId, {
+              member_limit: 1,
+              expire_date: Math.floor(Date.now() / 1000) + 3600 // 1 hour expiry
+            });
+
+            await this.bot.telegram.sendMessage(user.id,
+              `🎉 ¡Tu acceso al canal PRIME ha sido restaurado!\n\nUsa este enlace de un solo uso para unirte:\n${inviteLink.invite_link}`
+            );
+
+            results.added++;
+            logger.info(`Sent invite link to user ${user.id} (${user.username || 'no username'}) for PRIME channel`);
+
+            // Rate limit protection
+            await new Promise(resolve => setTimeout(resolve, 100));
+          } else {
+            results.skipped++;
+          }
+        } catch (error) {
+          if (this.isBenignUserError(error)) {
+            results.skipped++;
+          } else {
+            results.failed++;
+            logger.error(`Error processing user ${user.id} for PRIME channel addition:`, {
+              message: error.message,
+              description: error.response?.description,
+              error_code: error.response?.error_code
+            });
+          }
+        }
+      }
+
+      logger.info('PRIME channel additions completed', results);
+      return results;
+    } catch (error) {
+      logger.error('Error adding users to PRIME channel:', error);
+      return results;
+    }
+  }
+  
+  /**
+   * Update subscription statuses for all users
+   * - active + expired plan_expiry → churned
+   * - expired status → churned (standardize)
+   * - Lifetime pass users remain active (no expiry)
+   * @returns {Promise<Object>} Update results
+   */
+  static async updateAllSubscriptionStatuses() {
+    const results = { toChurned: 0, toFree: 0, errors: 0 };
+
+    try {
+      // Find users with 'active' status but expired plan_expiry (excluding lifetime, but NOT lifetime100)
+      // lifetime100 users with expired plan_expiry should be downgraded to member, not churned
+      const expiredActiveUsers = await query(`
+        SELECT id, username, subscription_status, plan_expiry, plan_id
+        FROM users
+        WHERE subscription_status = 'active'
+        AND plan_expiry IS NOT NULL
+        AND plan_expiry <= NOW()
+        AND plan_id != 'lifetime100'
+        AND plan_id NOT ILIKE '%lifetime%'
+        AND plan_id NOT ILIKE '%life-time%'
+      `);
+
+      logger.info(`Found ${expiredActiveUsers.rows.length} users with expired 'active' subscriptions`);
+
+      // Update expired active users to 'churned'
+      for (const user of expiredActiveUsers.rows) {
+        try {
+          await UserModel.updateSubscription(user.id, {
+            status: 'churned',
+            planId: user.plan_id, // Keep plan_id for history
+            expiry: user.plan_expiry // Keep expiry for history
+          });
+          results.toChurned++;
+          logger.info(`Updated user ${user.id} (${user.username || 'no username'}) to churned`);
+        } catch (error) {
+          results.errors++;
+          logger.error(`Error updating user ${user.id} to churned:`, error);
+        }
+      }
+
+      // Handle lifetime100 users with expired PRIME bonus — downgrade to member (not churned)
+      const lifetime100ExpiredPrime = await query(`
+        SELECT id, username FROM users
+        WHERE plan_id = 'lifetime100'
+          AND subscription_status = 'active'
+          AND tier = 'PRIME'
+          AND plan_expiry IS NOT NULL
+          AND plan_expiry <= NOW()
+      `);
+
+      for (const user of lifetime100ExpiredPrime.rows) {
+        try {
+          await query(
+            `UPDATE users SET tier = 'member', plan_expiry = NULL, updated_at = NOW() WHERE id = $1`,
+            [user.id]
+          );
+          logger.info(`Downgraded lifetime100 user ${user.id} (${user.username || 'no username'}) from PRIME to member (bonus expired)`);
+        } catch (error) {
+          results.errors++;
+          logger.error(`Error downgrading lifetime100 user ${user.id}:`, error);
+        }
+      }
+
+      // Find users with 'expired' status and update to 'churned'
+      // Lifetime plan holders are excluded — they should never be churned
+      const expiredStatusUsers = await query(`
+        SELECT id, username, plan_expiry, plan_id
+        FROM users
+        WHERE subscription_status = 'expired'
+          AND plan_id NOT ILIKE '%lifetime%'
+          AND plan_id NOT ILIKE '%life-time%'
+          AND plan_id != 'lifetime100'
+      `);
+
+      logger.info(`Found ${expiredStatusUsers.rows.length} users with 'expired' status to convert to 'churned'`);
+
+      for (const user of expiredStatusUsers.rows) {
+        try {
+          await UserModel.updateSubscription(user.id, {
+            status: 'churned',
+            planId: user.plan_id,
+            expiry: user.plan_expiry
+          });
+          results.toChurned++;
+          logger.info(`Updated user ${user.id} (${user.username || 'no username'}) from expired to churned`);
+        } catch (error) {
+          results.errors++;
+          logger.error(`Error updating user ${user.id} from expired to churned:`, error);
+        }
+      }
+
+      logger.info('Subscription status updates completed', results);
+      return results;
+    } catch (error) {
+      logger.error('Error updating subscription statuses:', error);
+      return results;
+    }
+  }
+
+  /**
+   * Kick churned and expired users from PRIME channel
+   * @returns {Promise<Object>} Kick results
+   */
+  static async kickExpiredUsersFromPrimeChannel() {
+    const results = { kicked: 0, failed: 0, skipped: 0 };
+
+    if (!this.bot || !this.primeChannelId) {
+      logger.warn('Cannot kick users: Bot or PRIME_CHANNEL_ID not configured');
+      return results;
+    }
+
+    // Verify bot can access the channel before iterating all users
+    const hasAccess = await this.verifyChannelAccess();
+    if (!hasAccess) {
+      logger.error('Skipping PRIME channel kicks: bot has no access to the channel. Re-add the bot as admin.');
+      return results;
+    }
+
+    try {
+      // Get all churned users (formerly had subscription)
+      const churnedUsers = await query(`
+        SELECT id, username FROM users
+        WHERE subscription_status IN ('churned', 'expired')
+        ORDER BY id LIMIT 500
+      `);
+
+      logger.info(`Found ${churnedUsers.rows.length} churned/expired users to check for PRIME channel access`);
+
+      for (const user of churnedUsers.rows) {
+        try {
+          // Check if user is in the PRIME channel
+          const chatMember = await this.bot.telegram.getChatMember(this.primeChannelId, user.id);
+
+          // Only kick if they're actually a member (not already kicked/left)
+          if (['member', 'restricted'].includes(chatMember.status)) {
+            await this.bot.telegram.banChatMember(this.primeChannelId, user.id);
+            // Immediately unban to allow re-joining if they resubscribe
+            await this.bot.telegram.unbanChatMember(this.primeChannelId, user.id);
+
+            results.kicked++;
+            logger.info(`Kicked user ${user.id} (${user.username || 'no username'}) from PRIME channel`);
+
+            // Notify user they were removed
+            try {
+              await this.sendRemovalNotice(user.id);
+            } catch (notifyError) {
+              // Don't fail if notification fails
+              logger.debug(`Could not notify user ${user.id} of removal:`, notifyError.message);
+            }
+
+            // Rate limit protection
+            await new Promise(resolve => setTimeout(resolve, 100));
+          } else {
+            results.skipped++;
+          }
+        } catch (error) {
+          if (this.isBenignUserError(error)) {
+            results.skipped++;
+          } else {
+            results.failed++;
+            logger.error(`Error processing user ${user.id} for PRIME channel:`, {
+              message: error.message,
+              description: error.response?.description,
+              error_code: error.response?.error_code
+            });
+          }
+        }
+      }
+
+      logger.info('PRIME channel cleanup completed', results);
+      return results;
+    } catch (error) {
+      logger.error('Error kicking users from PRIME channel:', error);
+      return results;
+    }
+  }
+
+  /**
+   * Send removal notice to user
+   * @param {number} userId - User ID
+   */
+  static async sendRemovalNotice(userId) {
+    if (!this.bot) return;
+
+    const message = `⚠️ **Membership Expired**
+
+Your PRIME membership has expired and your access to the exclusive PRIME channel has been removed.
+
+💎 **Miss your PRIME benefits?**
+Reactivate your membership to regain access to:
+• Exclusive content channel
+• Full-length videos
+• Premium features
+
+Type /subscribe to view membership plans and reactivate your access!`;
+
+    await this.bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
+  }
+
+  /**
+   * Sync ALL users' membership status and tier
+   * This is a comprehensive fix that ensures all users have correct status/tier based on plan_expiry
+   * - Users with plan_expiry > NOW() → 'active' status, 'Prime' tier
+   * - Users with lifetime plans (no expiry or plan_id contains 'lifetime') → 'active' status, 'Prime' tier
+   * - Users with plan_expiry <= NOW() → 'churned' status, 'Free' tier
+   * - Users with no subscription → 'free' status, 'Free' tier
+   * @returns {Promise<Object>} Sync results
+   */
+  static async syncAllMembershipStatuses() {
+    const results = {
+      toActive: 0,
+      toChurned: 0,
+      toFree: 0,
+      alreadyCorrect: 0,
+      entitlementsConsumed: 0,
+      errors: 0,
+      startTime: new Date()
+    };
+
+    try {
+      logger.info('Starting comprehensive membership status sync...');
+
+      // ── Collect lifetime-protected user IDs from user_entitlements ──
+      // These users MUST NOT be modified by any sync step.
+      let lifetimeUserIds = [];
+      try {
+        const ltResult = await query(`
+          SELECT DISTINCT user_id FROM user_entitlements WHERE is_lifetime = true
+        `);
+        lifetimeUserIds = ltResult.rows.map(r => r.user_id);
+      } catch (e) {
+        // Table may not exist yet — fall back to plan_id-based exclusion only
+        logger.warn('user_entitlements table not available, falling back to plan_id lifetime check', { error: e.message });
+      }
+
+      // Build parameterized lifetime exclusion.
+      // lifetimeUserIds is a plain JS array of user ID strings. Passing the array as a
+      // single bound parameter with the ANY($N::text[]) construct is safe against injection.
+      // When the array is empty we skip the clause entirely — ALL($N::text[]) on an empty
+      // array would erroneously match every row.
+      const hasLifetimeIds = lifetimeUserIds.length > 0;
+      // Param index placeholder is substituted per-query below. We use a sentinel token
+      // $LIFETIME_IDS that each query replaces with its actual bind-parameter index.
+      // Ensure all IDs are strings so node-pg doesn't infer integer[]
+      const lifetimeUserIdStrings = lifetimeUserIds.map(String);
+      const lifetimeExclusionTemplate = hasLifetimeIds
+        ? `AND id != ALL($LIFETIME_IDS)`
+        : '';
+
+      /**
+       * Build a safe parameterized query with the lifetime exclusion clause.
+       * @param {string} sql - SQL string containing '$LIFETIME_IDS' as a placeholder token
+       * @param {Array}  baseParams - Bound parameters that appear before the lifetime array
+       * @returns {{ text: string, values: Array }}
+       */
+      const buildQuery = (sql, baseParams = []) => {
+        if (!hasLifetimeIds) {
+          return { text: sql.replace('$LIFETIME_IDS', ''), values: baseParams };
+        }
+        const nextIdx = baseParams.length + 1;
+        return {
+          text: sql.replace('$LIFETIME_IDS', `$${nextIdx}::text[]`),
+          values: [...baseParams, lifetimeUserIdStrings],
+        };
+      };
+
+      // Step 1a: Activate member-tier users (member_monthly plan with valid expiry)
+      const q1a = buildQuery(`
+        UPDATE users
+        SET subscription_status = 'active',
+            tier = 'member',
+            updated_at = NOW()
+        WHERE plan_expiry IS NOT NULL
+          AND plan_expiry > NOW()
+          AND plan_id = 'member_monthly'
+          AND (subscription_status != 'active' OR tier != 'member')
+          ${lifetimeExclusionTemplate}
+        RETURNING id, username
+      `);
+      const activateMemberResult = await query(q1a.text, q1a.values);
+      results.toActive += activateMemberResult.rowCount;
+      if (activateMemberResult.rowCount > 0) {
+        logger.info(`Activated ${activateMemberResult.rowCount} member-tier users`);
+      }
+
+      // Step 1b: Activate PRIME users (non-member plans with valid expiry)
+      const q1b = buildQuery(`
+        UPDATE users
+        SET subscription_status = 'active',
+            tier = 'PRIME',
+            updated_at = NOW()
+        WHERE plan_expiry IS NOT NULL
+          AND plan_expiry > NOW()
+          AND (plan_id IS NULL OR plan_id != 'member_monthly')
+          AND (subscription_status != 'active' OR tier != 'PRIME')
+          AND plan_id NOT ILIKE '%lifetime%'
+          AND plan_id NOT ILIKE '%life-time%'
+          AND plan_id != 'lifetime100'
+          ${lifetimeExclusionTemplate}
+        RETURNING id, username
+      `);
+      const activateResult = await query(q1b.text, q1b.values);
+      results.toActive += activateResult.rowCount;
+      if (activateResult.rowCount > 0) {
+        logger.info(`Activated ${activateResult.rowCount} PRIME users with valid subscriptions`);
+      }
+
+      // Step 2a: Update lifetime100 users — they are lifetime MEMBER, not PRIME
+      // If plan_expiry is set and still valid, they get PRIME (bonus period);
+      // otherwise they stay as member
+      const lifetime100WithPrimeResult = await query(`
+        UPDATE users
+        SET subscription_status = 'active',
+            tier = 'PRIME',
+            updated_at = NOW()
+        WHERE plan_id = 'lifetime100'
+          AND plan_expiry IS NOT NULL
+          AND plan_expiry > NOW()
+          AND (subscription_status != 'active' OR tier != 'PRIME')
+        RETURNING id, username
+      `);
+      results.toActive += lifetime100WithPrimeResult.rowCount;
+      if (lifetime100WithPrimeResult.rowCount > 0) {
+        logger.info(`Activated ${lifetime100WithPrimeResult.rowCount} lifetime100 users with PRIME bonus`);
+      }
+
+      const lifetime100MemberResult = await query(`
+        UPDATE users
+        SET subscription_status = 'active',
+            tier = 'member',
+            updated_at = NOW()
+        WHERE plan_id = 'lifetime100'
+          AND (plan_expiry IS NULL OR plan_expiry <= NOW())
+          AND (subscription_status != 'active' OR tier != 'member')
+          AND id NOT IN (
+            SELECT DISTINCT user_id FROM user_entitlements
+            WHERE is_lifetime = true AND is_consumed = false
+          )
+        RETURNING id, username
+      `);
+      results.toActive += lifetime100MemberResult.rowCount;
+      if (lifetime100MemberResult.rowCount > 0) {
+        logger.info(`Activated ${lifetime100MemberResult.rowCount} lifetime100 users as member tier`);
+      }
+
+      // Step 2b: Update other lifetime users to 'active' PRIME (plan_id contains 'lifetime' but NOT lifetime100)
+      // Exclude users with lifetime entitlements (the DB trigger blocks tier changes on those)
+      try {
+        const lifetimeResult = await query(`
+          UPDATE users
+          SET subscription_status = 'active',
+              tier = 'PRIME',
+              updated_at = NOW()
+          WHERE (plan_id ILIKE '%lifetime%' OR plan_id ILIKE '%life-time%')
+            AND plan_id != 'lifetime100'
+            AND (subscription_status != 'active' OR tier != 'PRIME')
+            AND id NOT IN (
+              SELECT DISTINCT user_id FROM user_entitlements
+              WHERE is_lifetime = true AND is_consumed = false
+            )
+          RETURNING id, username
+        `);
+        results.toActive += lifetimeResult.rowCount;
+        if (lifetimeResult.rowCount > 0) {
+          logger.info(`Activated ${lifetimeResult.rowCount} lifetime users`);
+        }
+      } catch (ltErr) {
+        logger.warn(`Lifetime sync skipped (trigger protection): ${ltErr.message}`);
+      }
+
+      // Step 3: Mark expired entitlements as consumed
+      try {
+        const consumeResult = await query(`
+          UPDATE user_entitlements
+          SET is_consumed = true, updated_at = NOW()
+          WHERE is_lifetime = false
+            AND is_consumed = false
+            AND expires_at IS NOT NULL
+            AND expires_at <= NOW()
+          RETURNING id, user_id, add_on_id
+        `);
+        results.entitlementsConsumed = consumeResult.rowCount;
+        if (consumeResult.rowCount > 0) {
+          logger.info(`Marked ${consumeResult.rowCount} expired entitlements as consumed`);
+          // Log to subscription_audit_log
+          for (const row of consumeResult.rows) {
+            try {
+              await query(`
+                INSERT INTO subscription_audit_log (user_id, actor_id, actor_type, action, reason)
+                VALUES ($1, 'system', 'system', 'expire', $2)
+              `, [row.user_id, JSON.stringify({ add_on_id: row.add_on_id, entitlement_id: row.id })]);
+            } catch (_) { /* non-critical */ }
+          }
+        }
+      } catch (e) {
+        logger.warn('Could not consume expired entitlements (table may not exist)', { error: e.message });
+      }
+
+      // Step 4: Update users with expired subscriptions to 'churned'
+      const q4 = buildQuery(`
+        UPDATE users
+        SET subscription_status = 'churned',
+            tier = 'free',
+            updated_at = NOW()
+        WHERE plan_expiry IS NOT NULL
+          AND plan_expiry <= NOW()
+          AND plan_id NOT ILIKE '%lifetime%'
+          AND plan_id NOT ILIKE '%life-time%'
+          AND subscription_status NOT IN ('churned', 'free')
+          ${lifetimeExclusionTemplate}
+        RETURNING id, username
+      `);
+      const churnResult = await query(q4.text, q4.values);
+      results.toChurned += churnResult.rowCount;
+      if (churnResult.rowCount > 0) {
+        logger.info(`Churned ${churnResult.rowCount} users with expired subscriptions`);
+      }
+
+      // Step 5: Ensure 'free' tier for all churned users
+      const q5 = buildQuery(`
+        UPDATE users
+        SET tier = 'free',
+            updated_at = NOW()
+        WHERE subscription_status IN ('churned', 'expired', 'free')
+          AND tier != 'free'
+          AND plan_id NOT ILIKE '%lifetime%'
+          AND plan_id NOT ILIKE '%life-time%'
+          AND plan_id != 'lifetime100'
+          ${lifetimeExclusionTemplate}
+        RETURNING id
+      `);
+      const fixChurnedTierResult = await query(q5.text, q5.values);
+      if (fixChurnedTierResult.rowCount > 0) {
+        logger.info(`Fixed tier for ${fixChurnedTierResult.rowCount} churned/free users`);
+      }
+
+      // Step 6: Convert old 'expired' status to 'churned' for consistency
+      const q6 = buildQuery(`
+        UPDATE users
+        SET subscription_status = 'churned',
+            updated_at = NOW()
+        WHERE subscription_status = 'expired'
+          AND plan_id NOT ILIKE '%lifetime%'
+          AND plan_id NOT ILIKE '%life-time%'
+          AND plan_id != 'lifetime100'
+          ${lifetimeExclusionTemplate}
+        RETURNING id
+      `);
+      const expiredToChurnedResult = await query(q6.text, q6.values);
+      if (expiredToChurnedResult.rowCount > 0) {
+        results.toChurned += expiredToChurnedResult.rowCount;
+        logger.info(`Converted ${expiredToChurnedResult.rowCount} 'expired' status to 'churned'`);
+      }
+
+      // Step 7: Ensure users without any plan are set to 'free'
+      const q7 = buildQuery(`
+        UPDATE users
+        SET subscription_status = 'free',
+            tier = 'free',
+            updated_at = NOW()
+        WHERE plan_id IS NULL
+          AND plan_expiry IS NULL
+          AND subscription_status NOT IN ('free')
+          ${lifetimeExclusionTemplate}
+        RETURNING id
+      `);
+      const freeResult = await query(q7.text, q7.values);
+      results.toFree += freeResult.rowCount;
+      if (freeResult.rowCount > 0) {
+        logger.info(`Set ${freeResult.rowCount} users to 'free' status`);
+      }
+
+      // Step 8: Tier↔Status consistency enforcement
+      // Rule: PRIME tier MUST have subscription_status='active'
+      const q8a = buildQuery(`
+        UPDATE users
+        SET subscription_status = 'active',
+            updated_at = NOW()
+        WHERE tier = 'PRIME'
+          AND subscription_status != 'active'
+          ${lifetimeExclusionTemplate}
+        RETURNING id, username, subscription_status AS old_status
+      `);
+      const fixPrimeStatus = await query(q8a.text, q8a.values);
+      if (fixPrimeStatus.rowCount > 0) {
+        logger.warn(`Fixed ${fixPrimeStatus.rowCount} PRIME users with wrong subscription_status`, {
+          users: fixPrimeStatus.rows.map(r => ({ id: r.id, oldStatus: r.old_status }))
+        });
+      }
+
+      // Rule: churned/free status MUST NOT have PRIME or member tier
+      const q8b = buildQuery(`
+        UPDATE users
+        SET tier = 'free',
+            updated_at = NOW()
+        WHERE subscription_status IN ('churned', 'free')
+          AND tier IN ('PRIME', 'member')
+          AND tier != 'banned'
+          ${lifetimeExclusionTemplate}
+        RETURNING id, username, tier AS old_tier
+      `);
+      const fixChurnedPrime = await query(q8b.text, q8b.values);
+      if (fixChurnedPrime.rowCount > 0) {
+        logger.warn(`Fixed ${fixChurnedPrime.rowCount} churned/free users with wrong tier`, {
+          users: fixChurnedPrime.rows.map(r => ({ id: r.id, oldTier: r.old_tier }))
+        });
+      }
+
+      results.endTime = new Date();
+      const duration = (results.endTime - results.startTime) / 1000;
+
+      logger.info('Membership status sync completed', {
+        duration: `${duration}s`,
+        toActive: results.toActive,
+        toChurned: results.toChurned,
+        toFree: results.toFree,
+        entitlementsConsumed: results.entitlementsConsumed,
+        lifetimeProtected: lifetimeUserIds.length,
+        errors: results.errors
+      });
+
+      return results;
+    } catch (error) {
+      logger.error('Error in membership status sync:', error);
+      results.errors++;
+      results.endTime = new Date();
+      return results;
+    }
+  }
+
+  /**
+   * Get membership statistics
+   * @returns {Promise<Object>} Membership stats
+   */
+  static async getStats() {
+    try {
+      const result = await query(`
+        SELECT
+          subscription_status,
+          COUNT(*) as count,
+          COUNT(CASE WHEN plan_expiry > NOW() THEN 1 END) as active_plan,
+          COUNT(CASE WHEN plan_expiry <= NOW() THEN 1 END) as expired_plan,
+          COUNT(CASE WHEN plan_id LIKE '%lifetime%' THEN 1 END) as lifetime
+        FROM users
+        GROUP BY subscription_status
+        ORDER BY count DESC
+      `);
+
+      return {
+        byStatus: result.rows,
+        timestamp: new Date()
+      };
+    } catch (error) {
+      logger.error('Error getting membership stats:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get churned users sorted by last payment date
+   * Helps identify inactive churned users for re-engagement campaigns
+   * @param {number} daysSincePayment - Days since last payment (default: 30)
+   * @param {number} limit - Max records to return
+   * @returns {Promise<Array>} Churned users with payment info
+   */
+  static async getInactiveChurnedUsers(daysSincePayment = 30, limit = 100) {
+    try {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - daysSincePayment);
+
+      const result = await query(
+        `SELECT
+          id, username, email, subscription_status, tier,
+          last_payment_date, last_payment_amount, last_payment_method,
+          created_at,
+          EXTRACT(DAY FROM (NOW() - last_payment_date)) as days_since_payment
+        FROM users
+        WHERE subscription_status IN ('churned', 'expired', 'free')
+          AND last_payment_date IS NOT NULL
+          AND last_payment_date < $1
+        ORDER BY last_payment_date ASC
+        LIMIT $2`,
+        [cutoffDate, limit]
+      );
+
+      return result.rows;
+    } catch (error) {
+      logger.error('Error fetching inactive churned users:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get churn analysis statistics
+   * Shows breakdown of inactive users by payment method
+   * @returns {Promise<Object>} Churn statistics
+   */
+  static async getChurnAnalysis() {
+    try {
+      const result = await query(`
+        SELECT
+          last_payment_method as payment_method,
+          COUNT(*) as churned_count,
+          COUNT(CASE WHEN last_payment_date > NOW() - INTERVAL '30 days' THEN 1 END) as recent_30d,
+          COUNT(CASE WHEN last_payment_date > NOW() - INTERVAL '60 days' THEN 1 END) as recent_60d,
+          COUNT(CASE WHEN last_payment_date > NOW() - INTERVAL '90 days' THEN 1 END) as recent_90d,
+          MIN(last_payment_date) as oldest_payment,
+          MAX(last_payment_date) as newest_payment,
+          AVG(last_payment_amount) as avg_payment_amount
+        FROM users
+        WHERE subscription_status IN ('churned', 'expired', 'free')
+          AND last_payment_date IS NOT NULL
+        GROUP BY last_payment_method
+        ORDER BY churned_count DESC
+      `);
+
+      return {
+        byMethod: result.rows,
+        timestamp: new Date()
+      };
+    } catch (error) {
+      logger.error('Error getting churn analysis:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get users who need re-engagement emails
+   * Identifies active premium users approaching expiry without recent payment
+   * @returns {Promise<Array>} Users for re-engagement
+   */
+  static async getUsersForReEngagement() {
+    try {
+      const result = await query(`
+        SELECT
+          id, username, email, language,
+          plan_expiry,
+          last_payment_date,
+          EXTRACT(DAY FROM (plan_expiry - NOW())) as days_until_expiry,
+          EXTRACT(DAY FROM (NOW() - last_payment_date)) as days_since_payment,
+          last_payment_method
+        FROM users
+        WHERE subscription_status = 'active'
+          AND plan_expiry IS NOT NULL
+          AND plan_expiry > NOW()
+          AND plan_expiry < NOW() + INTERVAL '14 days'
+          AND last_payment_date IS NOT NULL
+        ORDER BY plan_expiry ASC
+        LIMIT 500
+      `);
+
+      return result.rows;
+    } catch (error) {
+      logger.error('Error getting re-engagement users:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get subscription renewal statistics
+   * Shows payment trends and renewal rates
+   * @param {Date} startDate - Start of analysis period
+   * @param {Date} endDate - End of analysis period
+   * @returns {Promise<Object>} Renewal statistics
+   */
+  static async getRenewalStats(startDate, endDate) {
+    try {
+      const result = await query(
+        `SELECT
+          last_payment_method,
+          COUNT(*) as total_users,
+          COUNT(CASE WHEN last_payment_date >= $1 AND last_payment_date <= $2 THEN 1 END) as renewed,
+          COUNT(CASE WHEN subscription_status = 'active' THEN 1 END) as active_now,
+          COUNT(CASE WHEN subscription_status IN ('churned', 'expired') THEN 1 END) as churned,
+          ROUND(100.0 * COUNT(CASE WHEN subscription_status = 'active' THEN 1 END) / COUNT(*), 2) as retention_rate,
+          AVG(last_payment_amount) as avg_payment
+        FROM users
+        WHERE last_payment_date IS NOT NULL
+        GROUP BY last_payment_method
+        ORDER BY total_users DESC`,
+        [startDate, endDate]
+      );
+
+      return {
+        byMethod: result.rows,
+        period: { startDate, endDate },
+        timestamp: new Date()
+      };
+    } catch (error) {
+      logger.error('Error getting renewal statistics:', error);
+      return null;
+    }
+  }
+}
+
+module.exports = MembershipCleanupService;

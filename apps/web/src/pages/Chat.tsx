@@ -40,8 +40,7 @@ import {
   updateMemberRole,
   getHangoutFeed,
   getVideoChatStatus,
-  getMatrixToken,
-  getOrCreateHangoutRoom,
+  dropToFeed,
   togglePostLike,
   deleteSocialPost,
   getGroupMessages,
@@ -79,6 +78,31 @@ function getTelegramDeepLink(inviteLink: string): string {
   // https://t.me/+HASH → tg://join?invite=HASH
   const match = inviteLink.match(/t\.me\/\+(.+)/);
   return match ? `tg://join?invite=${match[1]}` : inviteLink;
+}
+
+// ─── RemotePeerVideo ─────────────────────────────────────────────────────────
+
+function RemotePeerVideo({ peer }: { peer: import('@/hooks/useHangoutSocket').WebRtcPeer }) {
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  React.useEffect(() => {
+    if (videoRef.current && peer.stream) {
+      videoRef.current.srcObject = peer.stream;
+    }
+  }, [peer.stream]);
+  return (
+    <div className="relative rounded-xl overflow-hidden bg-black/40 flex items-center justify-center">
+      {peer.stream ? (
+        <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+      ) : (
+        <div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white" style={{ background: 'rgba(212,0,122,0.3)' }}>
+          {(peer.displayName || '?')[0].toUpperCase()}
+        </div>
+      )}
+      <span className="absolute bottom-2 left-2 text-[11px] text-white/80 bg-black/40 px-2 py-0.5 rounded-full">
+        {peer.displayName}
+      </span>
+    </div>
+  );
 }
 
 // ─── HangoutChatPanel (PostgreSQL + Socket.IO) ──────────────────────────────
@@ -444,6 +468,17 @@ function HangoutChatPanel({
     } catch { /* silent */ }
   };
 
+  const handleShareToFeed = async (msg: GroupMessage) => {
+    setContextMenu(null);
+    try {
+      await dropToFeed(groupId, msg.id);
+      setChatError('Shared to group feed!');
+      setTimeout(() => setChatError(null), 2500);
+    } catch {
+      setChatError('Could not share to feed. Try again.');
+    }
+  };
+
   const isValidPhoto = (p: string | null | undefined) => p && (p.startsWith("/") || p.startsWith("http"));
 
   return (
@@ -691,6 +726,17 @@ function HangoutChatPanel({
                 title="More emojis"
               >+</button>
             </div>
+            {contextMenu.msg.media_url && (
+              <button
+                onClick={() => handleShareToFeed(contextMenu.msg)}
+                className="w-full px-4 py-2.5 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
+              >
+                <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
+                </svg>
+                Share to Feed
+              </button>
+            )}
             <button
               onClick={() => startReply(contextMenu.msg)}
               className="w-full px-4 py-2.5 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
@@ -942,7 +988,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Discover groups
   const [discoverList, setDiscoverList] = useState<DiscoverGroup[]>([]);
   const [discoverQuery, setDiscoverQuery] = useState("");
-  const [showDiscover, setShowDiscover] = useState(false);
+  const [showDiscover, setShowDiscover] = useState(true);
   const [discoverLoading, setDiscoverLoading] = useState(false);
   const [discoverTagFilter, setDiscoverTagFilter] = useState<string | null>(null);
 
@@ -957,10 +1003,17 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Group members (loaded on chat open for member management panels)
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
 
-  // Socket hook — presence + socket connection state (video calls now handled natively in Telegram)
+  // Socket hook — presence + socket connection state + WebRTC
   const {
     isConnected,
     onlineMembers,
+    webRtcPeers,
+    localStream,
+    inWebRtcCall,
+    startWebRtcCall,
+    leaveWebRtcCall,
+    toggleMic,
+    toggleCam,
   } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId);
 
   // Video call / general chat error
@@ -1032,11 +1085,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Dedicated error states for non-upload errors
   const [discoverError, setDiscoverError] = useState<string | null>(null);
 
-  // Element Call (Matrix) — embedded iframe video call
-  const [inCall, setInCall] = useState(false);
-  const [callLoading, setCallLoading] = useState(false);
-  const [matrixRoomId, setMatrixRoomId] = useState<string | null>(null);
-  const [matrixCreds, setMatrixCreds] = useState<{ userId: string; accessToken: string; homeserverUrl: string; deviceId?: string } | null>(null);
+  // WebRTC mic/cam toggle state + local video element ref
+  const [micEnabled, setMicEnabled] = useState(true);
+  const [camEnabled, setCamEnabled] = useState(true);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
 
   // Telegram video chat status — driven by Socket.IO events (real-time)
   const [telegramCallActive, setTelegramCallActive] = useState(false);
@@ -1087,31 +1139,30 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       .catch(() => {});
   }, []);
 
-  // ─── Element Call (Matrix) — start/leave handlers ────────────────────────
+  // ─── WebRTC call handlers ──────────────────────────────────────────────────
   const handleStartCall = useCallback(async () => {
     if (!activeGroup) return;
-    setCallLoading(true);
-    setChatError(null);
+    const displayName = user?.firstName || user?.username || 'User';
     try {
-      const [tokenRes, roomRes] = await Promise.all([
-        getMatrixToken(),
-        getOrCreateHangoutRoom(activeGroup.id),
-      ]);
-      if (!tokenRes.success || !roomRes.success) throw new Error("Failed to prepare call");
-      setMatrixCreds({
-        userId: tokenRes.matrixUserId,
-        accessToken: tokenRes.accessToken,
-        homeserverUrl: tokenRes.homeserverUrl,
-        deviceId: tokenRes.deviceId,
-      });
-      setMatrixRoomId(roomRes.roomId);
-      setInCall(true);
+      await startWebRtcCall(displayName);
+      setTelegramCallActive(true);
+      setCallStartTime(new Date());
+      setCallPanelDismissed(false);
+      setCallStartedBy(displayName);
     } catch {
-      setChatError("Could not start video call. Please try again.");
-    } finally {
-      setCallLoading(false);
+      setChatError('Could not access camera/microphone. Please check permissions.');
     }
-  }, [activeGroup]);
+  }, [activeGroup, startWebRtcCall, user]);
+
+  const handleLeaveCall = useCallback(() => {
+    leaveWebRtcCall();
+    setTelegramCallActive(false);
+    setCallStartTime(null);
+    setCallStartedBy(null);
+    setCallParticipantCount(0);
+    setCallPanelDismissed(true);
+    setCallDuration('0:00');
+  }, [leaveWebRtcCall]);
 
   // ─── Telegram video chat status — initial fetch on group open ───────────
   // Polling replaced by real-time Socket.IO events (hangout:call:started/ended).
@@ -1119,10 +1170,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
   useEffect(() => {
     // Always reset all call state when switching groups
-    setInCall(false);
-    setMatrixRoomId(null);
-    setMatrixCreds(null);
-    setCallLoading(false);
     setTelegramCallActive(false);
     setCallStartTime(null);
     setCallStartedBy(null);
@@ -1202,6 +1249,13 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     return () => clearInterval(iv);
   }, [telegramCallActive, callStartTime]);
 
+  // Attach local stream to video element when it changes
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
+
   // Reset call state when switching groups
   useEffect(() => {
     setTelegramCallActive(false);
@@ -1246,7 +1300,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     setIsLoading(true);
     loadGroups().finally(() => setIsLoading(false));
     loadHangoutEvents();
-  }, [loadGroups, loadHangoutEvents]);
+    loadDiscover();
+  }, [loadGroups, loadHangoutEvents, loadDiscover]);
 
   // Deep-link: auto-open group from /chat/:groupId
   const deepLinkHandled = useRef(false);
@@ -1552,37 +1607,90 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
     return (
       <>
-      {/* Element Call — full-screen iframe overlay (z-[50] sits above chat, below nav) */}
-      {inCall && matrixRoomId && matrixCreds && (
-        <div className="fixed inset-0 lg:left-72 z-[50] bg-black flex flex-col">
-          {/* Header bar */}
-          <div className="flex items-center gap-3 px-4 py-2.5 flex-shrink-0 bg-[#1C1C1E] border-b border-white/10">
-            <svg className="w-5 h-5 text-pnp-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-white truncate">{activeGroup.name}</p>
-              <p className="text-xs text-pnp-textSecondary">Video Call · tap 📹 inside to start</p>
+      {/* WebRTC Video Call Overlay — tgcalls-compatible browser WebRTC */}
+      {inWebRtcCall && (
+        <div className="fixed inset-0 z-[100] bg-black flex flex-col" style={{ background: '#1C1C1E' }}>
+          {/* Video grid */}
+          <div className="flex-1 min-h-0 grid gap-1 p-2" style={{
+            gridTemplateColumns: webRtcPeers.length === 0 ? '1fr' : webRtcPeers.length <= 1 ? '1fr 1fr' : 'repeat(2, 1fr)',
+          }}>
+            {/* Local video */}
+            <div className="relative rounded-xl overflow-hidden bg-black/40 flex items-center justify-center">
+              <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+              {!camEnabled && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/70">
+                  <div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white" style={{ background: 'rgba(212,0,122,0.3)' }}>
+                    {(user?.firstName || 'Y')[0].toUpperCase()}
+                  </div>
+                </div>
+              )}
+              <span className="absolute bottom-2 left-2 text-[11px] text-white/80 bg-black/40 px-2 py-0.5 rounded-full">You</span>
             </div>
+
+            {/* Remote peers */}
+            {webRtcPeers.map(peer => (
+              <RemotePeerVideo key={peer.peerId} peer={peer} />
+            ))}
+
+            {/* Waiting state when no peers yet */}
+            {webRtcPeers.length === 0 && (
+              <div className="flex flex-col items-center justify-center text-white/50 gap-3">
+                <div className="w-12 h-12 border-2 border-white/20 border-t-pnp-accent rounded-full animate-spin" />
+                <p className="text-sm">Waiting for others to join…</p>
+              </div>
+            )}
+          </div>
+
+          {/* Controls bar */}
+          <div className="flex items-center justify-center gap-4 py-4 flex-shrink-0">
+            {/* Mic toggle */}
             <button
-              onClick={() => setInCall(false)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 active:scale-95 transition-all flex-shrink-0"
-              aria-label="Leave call"
+              onClick={() => { const next = !micEnabled; setMicEnabled(next); toggleMic(next); }}
+              className="w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-90"
+              style={{ background: micEnabled ? 'rgba(255,255,255,0.15)' : 'rgba(255,59,48,0.8)' }}
+              aria-label={micEnabled ? 'Mute microphone' : 'Unmute microphone'}
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              {micEnabled ? (
+                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                </svg>
+              ) : (
+                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                </svg>
+              )}
+            </button>
+
+            {/* Camera toggle */}
+            <button
+              onClick={() => { const next = !camEnabled; setCamEnabled(next); toggleCam(next); }}
+              className="w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-90"
+              style={{ background: camEnabled ? 'rgba(255,255,255,0.15)' : 'rgba(255,59,48,0.8)' }}
+              aria-label={camEnabled ? 'Disable camera' : 'Enable camera'}
+            >
+              {camEnabled ? (
+                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              ) : (
+                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 01-2.25-2.25V9m12.841 9.091L16.5 19.5m-1.409-1.409c.407-.407.659-.97.659-1.591v-9a2.25 2.25 0 00-2.25-2.25h-9c-.621 0-1.184.252-1.591.659" />
+                </svg>
+              )}
+            </button>
+
+            {/* End call */}
+            <button
+              onClick={handleLeaveCall}
+              className="w-16 h-16 rounded-full flex items-center justify-center transition-all active:scale-90"
+              style={{ background: 'linear-gradient(135deg, #FF3B30, #FF2D55)' }}
+              aria-label="End call"
+            >
+              <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
               </svg>
-              Leave
             </button>
           </div>
-          {/* Element Web iframe */}
-          <iframe
-            key={`${matrixRoomId}-${matrixCreds.userId}`}
-            src={`/element-login.html#hs=${encodeURIComponent(matrixCreds.homeserverUrl)}&uid=${encodeURIComponent(matrixCreds.userId)}&token=${encodeURIComponent(matrixCreds.accessToken)}&room=${encodeURIComponent(matrixRoomId)}${matrixCreds.deviceId ? '&did=' + encodeURIComponent(matrixCreds.deviceId) : ''}`}
-            className="flex-1 min-h-0 w-full border-0"
-            allow="microphone; camera; clipboard-write; encrypted-media; display-capture; autoplay; speaker-selection"
-            title="Hangout Video Call"
-          />
         </div>
       )}
 
@@ -1649,12 +1757,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
           {/* Right: call + menu — 44px min touch targets */}
           <div className="flex items-center flex-shrink-0">
-            {/* Video call button — Element Call (embedded) */}
+            {/* Video call button — WebRTC native */}
             <VideoCallButton
-              hasActiveCall={inCall || telegramCallActive}
-              participantCount={inCall ? 0 : callParticipantCount}
+              hasActiveCall={inWebRtcCall || telegramCallActive}
+              participantCount={inWebRtcCall ? webRtcPeers.length + 1 : callParticipantCount}
               onStartCall={handleStartCall}
-              isLoading={callLoading}
+              isLoading={false}
             />
 
             {/* Telegram quick-link — merged into menu on mobile, shown on sm+ */}
@@ -2552,12 +2660,23 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             {t.chat.hangoutsSubtitle}
           </p>
         </div>
-        {isPrime && (
+        {isPrime ? (
           <button
             onClick={() => setShowCreate(!showCreate)}
             className="btn-gradient px-3 py-1.5 rounded-lg text-white text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent active:scale-95 transition-transform"
           >
             {t.chat.newGroup}
+          </button>
+        ) : (
+          <button
+            onClick={() => navigate("/subscribe")}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-white/10 bg-white/5 hover:bg-white/10 active:scale-95 transition-all text-pnp-textSecondary"
+            title="Upgrade to Prime to create hangouts"
+          >
+            <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+            New Group
           </button>
         )}
       </div>
@@ -3098,12 +3217,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       </span>
                     )}
                   </div>
-                  {/* Description — hidden on mobile, visible on sm+ */}
+                  {/* Description */}
                   {!group.isWallOfFame && group.description && (
-                    <p className="hidden sm:block text-xs text-pnp-textSecondary truncate mt-0.5">{group.description}</p>
+                    <p className="text-xs text-pnp-textSecondary truncate mt-0.5">{group.description}</p>
                   )}
                   {!group.isMain && !group.isWallOfFame && (group.tags || []).length > 0 && (
-                    <div className="hidden sm:flex flex-wrap gap-0.5 mt-0.5">
+                    <div className="flex flex-wrap gap-0.5 mt-0.5">
                       {(group.tags || []).slice(0, 3).map((tag: string) => (
                         <span key={tag} className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/10 text-pnp-textSecondary">{tag}</span>
                       ))}
@@ -3189,14 +3308,13 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           onClick={() => {
             const next = !showDiscover;
             setShowDiscover(next);
-            if (next && discoverList.length === 0) loadDiscover();
             if (!next) { setDiscoverQuery(""); setDiscoverTagFilter(null); }
           }}
-          className="flex items-center gap-2 mb-3 group"
+          className="flex items-center gap-2 mb-3 group w-full"
           aria-expanded={showDiscover}
           aria-controls="discover-groups-list"
         >
-          <h2 className="text-sm font-semibold text-pnp-textSecondary group-hover:text-pnp-textPrimary transition-colors">
+          <h2 className="text-sm font-semibold text-pnp-textPrimary group-hover:text-white transition-colors flex-1 text-left">
             {t.chat.discoverGroups}
           </h2>
           <svg
@@ -3234,17 +3352,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             ) : (
               <>
                 {/* Discover search */}
-                <div className="mb-3">
-                  <input
-                    type="text"
-                    value={discoverQuery}
-                    placeholder="Search groups by name..."
-                    className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 transition-colors"
-                    onChange={(e) => setDiscoverQuery(e.target.value)}
-                  />
-                </div>
-                {/* Tag filter row */}
-                <div className="flex flex-wrap gap-1.5 mb-3">
+                {/* Tag filter chips — shown above search for quick filtering */}
+                <div className="flex flex-wrap gap-1.5 mb-2.5">
                   {[...new Set(["chill", "party", "dating", "music", "gaming", "art", "fitness", "travel", ...discoverList.flatMap((g: any) => g.tags || [])])].map((tag) => (
                     <button
                       key={tag}
@@ -3258,6 +3367,28 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       {tag}
                     </button>
                   ))}
+                </div>
+                <div className="mb-3 relative">
+                  <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-pnp-textSecondary pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <input
+                    type="text"
+                    value={discoverQuery}
+                    placeholder="Search groups by name..."
+                    className="w-full bg-white/5 rounded-lg pl-9 pr-3 py-2 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent/50 transition-colors"
+                    onChange={(e) => setDiscoverQuery(e.target.value)}
+                  />
+                  {discoverQuery && (
+                    <button
+                      onClick={() => setDiscoverQuery("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-pnp-textSecondary hover:bg-white/20 transition-colors"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
                 {discoverList
                   .filter((g) => {

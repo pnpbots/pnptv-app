@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { Card, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { PermissionGate } from "@/components/PermissionGate";
 import { getSocket } from "@/lib/socket";
+import { useHangoutSocket } from "@/hooks/useHangoutSocket";
+import type { WebRtcPeer } from "@/hooks/useHangoutSocket";
 
 import {
   joinCommunityRoom,
@@ -15,7 +17,6 @@ import {
   approveKnock,
   denyKnock,
   clipMoment,
-  getVideoChatStatus,
   getHangoutGroups,
   type CommunityRoomInfo,
   type StagePermissions,
@@ -29,6 +30,22 @@ function getTelegramDeepLink(inviteLink: string): string {
   return match ? `tg://join?invite=${match[1]}` : inviteLink;
 }
 
+// ─── Remote peer video tile ──────────────────────────────────────────────────
+function RemotePeerTile({ peer }: { peer: WebRtcPeer }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (videoRef.current && peer.stream) videoRef.current.srcObject = peer.stream;
+  }, [peer.stream]);
+  return (
+    <div className="relative rounded-xl overflow-hidden bg-black/40 flex items-center justify-center">
+      {peer.stream
+        ? <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+        : <div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white" style={{ background: 'rgba(212,0,122,0.3)' }}>{(peer.displayName || '?')[0].toUpperCase()}</div>}
+      <span className="absolute bottom-2 left-2 text-[11px] text-white/80 bg-black/40 px-2 py-0.5 rounded-full">{peer.displayName}</span>
+    </div>
+  );
+}
+
 export default function MainStage() {
   const { user, isAuthenticated } = useAuth();
   const { isPrime, isMember, isFree, isAdmin } = useTier();
@@ -37,8 +54,6 @@ export default function MainStage() {
     Array<{ userId: string; displayName: string; role: string; tier?: string; avatarUrl?: string; joinedAt: string }>
   >([]);
   const [loading, setLoading] = useState(false);
-  const [joined, setJoined] = useState(false);
-  const [iframeSrc, setIframeSrc] = useState("");
   const [roomInfo, setRoomInfo] = useState<CommunityRoomInfo | null>(null);
   const [error, setError] = useState("");
   const [occupancyError, setOccupancyError] = useState(false);
@@ -49,19 +64,40 @@ export default function MainStage() {
   const [showClipModal, setShowClipModal] = useState(false);
   const [clipCaption, setClipCaption] = useState('');
   const [clipLoading, setClipLoading] = useState(false);
+  const [stageModeLoading, setStageModeLoading] = useState(false);
   const [knockQueue, setKnockQueue] = useState<Array<{ userId: string; displayName: string }>>([]);
   const [mainGroup, setMainGroup] = useState<HangoutGroup | null>(null);
-  const [telegramCallActive, setTelegramCallActive] = useState(false);
+
+  // WebRTC call state (tgcalls-compatible browser WebRTC)
+  const [micEnabled, setMicEnabled] = useState(true);
+  const [camEnabled, setCamEnabled] = useState(true);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+
+  const {
+    inWebRtcCall,
+    webRtcPeers,
+    localStream,
+    startWebRtcCall,
+    leaveWebRtcCall,
+    toggleMic,
+    toggleCam,
+  } = useHangoutSocket(mainGroup?.id ?? null, user?.dbId);
 
   useEffect(() => {
-    getCommunityRoomOccupancy()
-      .then((res) => {
-        setOccupancy(res.occupancy?.activeUsers ?? 0);
-        setOccupancyUsers(res.occupancy?.users ?? []);
-      })
-      .catch(() => {
-        setOccupancyError(true);
-      });
+    if (localVideoRef.current && localStream) localVideoRef.current.srcObject = localStream;
+  }, [localStream]);
+
+  useEffect(() => {
+    const fetchOccupancy = () => {
+      getCommunityRoomOccupancy()
+        .then((res) => {
+          setOccupancy(res.occupancy?.activeUsers ?? 0);
+          setOccupancyUsers(res.occupancy?.users ?? []);
+        })
+        .catch(() => setOccupancyError(true));
+    };
+    fetchOccupancy();
+    const occupancyInterval = setInterval(fetchOccupancy, 30000);
 
     getStageState()
       .then((res) => { if (res.stageState) setStageState(res.stageState); })
@@ -74,22 +110,10 @@ export default function MainStage() {
         if (main) setMainGroup(main);
       })
       .catch(() => {});
+
+    return () => clearInterval(occupancyInterval);
   }, []);
 
-  // Poll Telegram video chat status for main group
-  useEffect(() => {
-    if (!mainGroup?.telegramChatId) return;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const res = await getVideoChatStatus(mainGroup.id);
-        if (!cancelled) setTelegramCallActive(res.active);
-      } catch { /* silent */ }
-    };
-    poll();
-    const interval = setInterval(poll, telegramCallActive ? 15000 : 30000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [mainGroup?.id, mainGroup?.telegramChatId, telegramCallActive]);
 
   const handleJoinClick = () => {
     if (!user) return;
@@ -102,50 +126,41 @@ export default function MainStage() {
     setLoading(true);
     setError("");
     try {
-      // Open Telegram group for video calls
-      const tgLink = mainGroup?.telegramInviteLink;
-      if (!tgLink) {
-        setError("No Telegram group linked to Main Stage. Contact admin.");
+      if (!mainGroup?.id) {
+        setError("Main Stage group not found. Contact admin.");
         return;
       }
-      // Open Telegram deep link
-      window.open(getTelegramDeepLink(tgLink), "_blank");
-
-      // Also join socket room for stage events
+      // Join Socket.IO stage room for mode/knock events
       const socket = getSocket();
       if (socket) {
         socket.emit('mainstage:join');
         socket.on('mainstage:mode-changed', (data: { mode: string; master: any }) => {
           setStageState({ mode: data.mode as StageState['mode'], master: data.master });
         });
-        // Knock-to-speak feedback for the requesting user
         socket.on('mainstage:knock:approved', () => setKnockStatus('approved'));
         socket.on('mainstage:knock:denied', () => setKnockStatus('denied'));
-        // Admin: incoming knock queue management
         socket.on('mainstage:knock:new', (data: { userId: string; displayName: string }) => {
           setKnockQueue((q) => q.some((k) => k.userId === data.userId) ? q : [...q, data]);
         });
         socket.on('mainstage:knock:resolved', (data: { targetUserId: string }) => {
           setKnockQueue((q) => q.filter((k) => k.userId !== data.targetUserId));
         });
-        // Clip dropped — show a brief notification
         socket.on('mainstage:clip-dropped', (data: { displayName: string }) => {
           setError(`🎬 ${data.displayName || 'Someone'} dropped a clip!`);
           setTimeout(() => setError(''), 4000);
         });
       }
-
-      setJoined(true);
-      setIframeSrc("telegram"); // flag that we're in Telegram mode
+      // Start WebRTC call via tgcalls-compatible browser WebRTC
+      const displayName = user.firstName || user.username || 'User';
+      await startWebRtcCall(displayName);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to join room");
+      setError(e instanceof Error ? e.message : "Could not access camera/microphone. Check permissions.");
     } finally {
       setLoading(false);
     }
-  }, [user, mainGroup]);
+  }, [user, mainGroup, startWebRtcCall]);
 
   const handleLeave = () => {
-    // Clean up socket listeners
     const socket = getSocket();
     if (socket) {
       socket.emit('mainstage:leave');
@@ -156,9 +171,7 @@ export default function MainStage() {
       socket.off('mainstage:knock:resolved');
       socket.off('mainstage:clip-dropped');
     }
-
-    setJoined(false);
-    setIframeSrc("");
+    leaveWebRtcCall();
     setRoomInfo(null);
     setPermissions(null);
     setKnockStatus('idle');
@@ -173,158 +186,191 @@ export default function MainStage() {
       .catch(() => {});
   };
 
-  // ─── Joined: fullscreen with side panel + mod bot ──────────────────────
+  // ─── In-call: fullscreen WebRTC video grid ──────────────────────────────────
 
-  if (joined && iframeSrc) {
+  if (inWebRtcCall) {
     return (
-      <div className="fixed inset-0 z-[34] bg-black flex">
-        <Helmet>
-          <title>Main Stage | PNPtv</title>
-        </Helmet>
+      <div className="fixed inset-0 z-[34] flex flex-col" style={{ background: '#1C1C1E' }}>
+        <Helmet><title>Main Stage | PNPtv</title></Helmet>
 
-        {/* Center: Telegram video call view */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Header bar */}
-          <div className="flex items-center justify-between px-4 py-2 bg-[#1C1C1E] border-b border-white/5 flex-shrink-0 gap-2">
-            <div className="flex items-center gap-3">
-              <svg className="w-5 h-5 text-pnp-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-              <div>
-                <h2 className="text-pnp-textPrimary font-bold text-base leading-tight">Main Stage</h2>
-                <p className="text-pnp-textSecondary text-xs">Video calls via Telegram</p>
-              </div>
-              {telegramCallActive && (
-                <div className="flex items-center gap-2 px-3 py-1 bg-green-500/20 border border-green-500/40 rounded-full">
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                  <span className="text-green-400 text-xs font-medium">LIVE</span>
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 flex-shrink-0 gap-2" style={{ background: '#1C1C1E' }}>
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
+            </span>
+            <span className="text-white font-bold text-sm">Main Stage</span>
+            <span className="text-white/40 text-xs">{webRtcPeers.length + 1} in call</span>
+          </div>
+          {stageState?.mode && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 text-white/60 uppercase tracking-wide">{stageState.mode}</span>
+          )}
+        </div>
+
+        {/* Video grid — spotlight for 1:1, grid otherwise */}
+        {webRtcPeers.length === 1 ? (
+          /* Spotlight mode: remote peer fills view, local is PiP corner */
+          <div className="flex-1 min-h-0 relative p-2">
+            <div className="w-full h-full rounded-xl overflow-hidden">
+              <RemotePeerTile peer={webRtcPeers[0]} />
+            </div>
+            <div className="absolute bottom-4 right-4 w-24 h-32 rounded-xl overflow-hidden bg-black/40 shadow-xl ring-2 ring-black/50 z-10">
+              <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+              {!camEnabled && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/70">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ background: 'rgba(212,0,122,0.3)' }}>
+                    {(user?.firstName || 'Y')[0].toUpperCase()}
+                  </div>
                 </div>
               )}
+              <span className="absolute bottom-1 left-1.5 text-[9px] text-white/70 bg-black/50 px-1.5 py-0.5 rounded-full">You</span>
             </div>
-            <Button variant="secondary" size="sm" onClick={handleLeave}>
-              Back
-            </Button>
           </div>
-
-          {/* Telegram call area */}
-          <div className="flex-1 w-full relative flex flex-col items-center justify-center gap-4 p-8 bg-pnp-background">
-            <div className="flex flex-col items-center gap-4 max-w-sm text-center">
-              <div className="w-20 h-20 rounded-full flex items-center justify-center" style={{ background: "rgba(41,168,226,0.15)" }}>
-                <svg className="w-10 h-10" viewBox="0 0 24 24" fill="#29A8E2">
-                  <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z"/>
-                </svg>
-              </div>
-
-              {telegramCallActive ? (
-                <>
-                  <h3 className="text-pnp-textPrimary font-bold text-lg">Call is Live!</h3>
-                  <p className="text-pnp-textSecondary text-sm">
-                    A video call is happening right now in the PNPtv Telegram group. Tap below to join.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <h3 className="text-pnp-textPrimary font-bold text-lg">Main Stage on Telegram</h3>
-                  <p className="text-pnp-textSecondary text-sm">
-                    Open the PNPtv Telegram group and tap the video icon to start or join a call.
-                  </p>
-                </>
+        ) : (
+          <div className="flex-1 min-h-0 grid gap-1 p-2" style={{
+            gridTemplateColumns: webRtcPeers.length === 0 ? '1fr' : 'repeat(2, 1fr)',
+          }}>
+            {/* Local tile */}
+            <div className="relative rounded-xl overflow-hidden bg-black/40 flex items-center justify-center">
+              <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+              {!camEnabled && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/70">
+                  <div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white" style={{ background: 'rgba(212,0,122,0.3)' }}>
+                    {(user?.firstName || 'Y')[0].toUpperCase()}
+                  </div>
+                </div>
               )}
-
-              {mainGroup?.telegramInviteLink && (
-                <a
-                  href={getTelegramDeepLink(mainGroup.telegramInviteLink)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white text-sm transition-all active:scale-95"
-                  style={{ background: telegramCallActive ? "#34C759" : "linear-gradient(135deg, #29A8E2, #0088CC)" }}
-                >
-                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z"/>
-                  </svg>
-                  {telegramCallActive ? "Join Live Call" : "Open in Telegram"}
-                </a>
-              )}
+              <span className="absolute bottom-2 left-2 text-[11px] text-white/80 bg-black/40 px-2 py-0.5 rounded-full">You</span>
             </div>
 
-            {/* Knock-to-speak overlay buttons */}
-            {knockStatus === 'idle' && isMember && !isPrime && !isAdmin && (
-              <button
-                onClick={async () => {
-                  setKnockStatus('pending');
-                  try { await knockToSpeak(); } catch { setKnockStatus('idle'); }
-                }}
-                className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-4 py-2 text-white rounded-full shadow-lg transition-opacity hover:opacity-90"
-                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-              >
-                <span>Request to Speak</span>
-              </button>
-            )}
-            {knockStatus === 'pending' && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-4 py-2 bg-[#2C2C2E] border border-white/10 text-white rounded-full shadow-lg">
-                <span className="w-2 h-2 bg-[#FFD60A] rounded-full animate-pulse" />
-                <span>Waiting for approval...</span>
-              </div>
-            )}
-            {knockStatus === 'approved' && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-4 py-2 bg-[#30D158]/20 border border-[#30D158]/50 text-[#30D158] rounded-full shadow-lg">
-                <span className="w-2 h-2 bg-[#30D158] rounded-full animate-pulse" />
-                <span>You're live! Speak now</span>
-              </div>
-            )}
-            {knockStatus === 'denied' && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-4 py-2 bg-[#FF453A]/20 border border-[#FF453A]/50 text-[#FF453A] rounded-full shadow-lg">
-                <span>Request denied</span>
+            {/* Remote peers */}
+            {webRtcPeers.map(peer => <RemotePeerTile key={peer.peerId} peer={peer} />)}
+
+            {/* Waiting state */}
+            {webRtcPeers.length === 0 && (
+              <div className="flex flex-col items-center justify-center text-white/50 gap-3">
+                <div className="w-10 h-10 border-2 border-white/20 border-t-pnp-accent rounded-full animate-spin" />
+                <p className="text-sm">Waiting for others to join…</p>
+                <p className="text-xs text-white/30">Share the stage link for others to join</p>
               </div>
             )}
           </div>
+        )}
+
+        {/* Knock/status banners */}
+        {knockStatus === 'pending' && (
+          <div className="mx-4 mb-2 flex items-center gap-2 px-4 py-2 bg-[#2C2C2E] border border-white/10 text-white rounded-full">
+            <span className="w-2 h-2 bg-[#FFD60A] rounded-full animate-pulse" />
+            <span className="text-sm">Waiting for approval...</span>
+          </div>
+        )}
+        {knockStatus === 'approved' && (
+          <div className="mx-4 mb-2 flex items-center gap-2 px-4 py-2 bg-[#30D158]/20 border border-[#30D158]/50 text-[#30D158] rounded-full">
+            <span className="w-2 h-2 bg-[#30D158] rounded-full animate-pulse" />
+            <span className="text-sm">You're live! Speak now</span>
+          </div>
+        )}
+
+        {/* Admin: raise-hand queue in-call */}
+        {(isAdmin || isPrime) && knockQueue.length > 0 && (
+          <div className="mx-4 mb-2 flex flex-col gap-1.5 px-3 py-2.5 bg-[#2C2C2E] border border-white/10 rounded-xl">
+            <p className="text-[10px] font-semibold text-white/50 uppercase tracking-wider">
+              Raise Hand · {knockQueue.length} waiting
+            </p>
+            {knockQueue.map((k) => (
+              <div key={k.userId} className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-pnp-accent flex-shrink-0" style={{ background: 'rgba(212,0,122,0.2)' }}>
+                  {k.displayName[0].toUpperCase()}
+                </div>
+                <span className="flex-1 text-sm text-white truncate">{k.displayName}</span>
+                <button
+                  onClick={async () => { try { await approveKnock(k.userId); setKnockQueue((q) => q.filter((x) => x.userId !== k.userId)); } catch { /* silent */ } }}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-white active:scale-95 transition-all"
+                  style={{ background: 'rgba(48,209,88,0.25)', color: '#30D158' }}
+                >Let in</button>
+                <button
+                  onClick={async () => { try { await denyKnock(k.userId); setKnockQueue((q) => q.filter((x) => x.userId !== k.userId)); } catch { /* silent */ } }}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold active:scale-95 transition-all"
+                  style={{ background: 'rgba(255,59,48,0.2)', color: '#FF3B30' }}
+                >Deny</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Controls */}
+        <div className="flex items-center justify-center gap-4 py-4 flex-shrink-0">
+          {/* Mic */}
+          <button
+            onClick={() => { const next = !micEnabled; setMicEnabled(next); toggleMic(next); }}
+            className="w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-90"
+            style={{ background: micEnabled ? 'rgba(255,255,255,0.15)' : 'rgba(255,59,48,0.8)' }}
+          >
+            {micEnabled
+              ? <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /></svg>
+              : <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>
+            }
+          </button>
+
+          {/* Camera */}
+          <button
+            onClick={() => { const next = !camEnabled; setCamEnabled(next); toggleCam(next); }}
+            className="w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-90"
+            style={{ background: camEnabled ? 'rgba(255,255,255,0.15)' : 'rgba(255,59,48,0.8)' }}
+          >
+            {camEnabled
+              ? <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+              : <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 01-2.25-2.25V9m12.841 9.091L16.5 19.5m-1.409-1.409c.407-.407.659-.97.659-1.591v-9a2.25 2.25 0 00-2.25-2.25h-9c-.621 0-1.184.252-1.591.659" /></svg>
+            }
+          </button>
+
+          {/* Knock to speak (members only) */}
+          {knockStatus === 'idle' && isMember && !isPrime && !isAdmin && (
+            <button
+              onClick={async () => { setKnockStatus('pending'); try { await knockToSpeak(); } catch { setKnockStatus('idle'); } }}
+              className="h-14 px-5 rounded-full text-white text-sm font-semibold transition-all active:scale-90"
+              style={{ background: 'linear-gradient(135deg, #D4007A, #E69138)' }}
+            >
+              Raise Hand
+            </button>
+          )}
+
+          {/* End call */}
+          <button
+            onClick={handleLeave}
+            className="w-16 h-16 rounded-full flex items-center justify-center transition-all active:scale-90"
+            style={{ background: 'linear-gradient(135deg, #FF3B30, #FF2D55)' }}
+          >
+            <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
+            </svg>
+          </button>
+
+          {/* Clip moment (admin/prime only) */}
+          {(isAdmin || isPrime) && (
+            <button
+              onClick={() => setShowClipModal(true)}
+              className="w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-90 bg-white/10 hover:bg-white/20"
+              title="Clip this moment"
+            >
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5V6a3.75 3.75 0 10-7.5 0v4.5m11.356-1.993l1.263 12c.07.665-.45 1.243-1.119 1.243H4.25a1.125 1.125 0 01-1.12-1.243l1.264-12A1.125 1.125 0 015.513 7.5h12.974c.576 0 1.059.435 1.119 1.007z" />
+              </svg>
+            </button>
+          )}
         </div>
 
         {/* Clip modal */}
         {showClipModal && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-            onClick={() => setShowClipModal(false)}
-          >
-            <div
-              className="bg-[#2C2C2E] border border-white/10 rounded-xl p-6 w-full max-w-sm mx-4 space-y-4"
-              onClick={e => e.stopPropagation()}
-            >
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowClipModal(false)}>
+            <div className="bg-[#2C2C2E] border border-white/10 rounded-xl p-6 w-full max-w-sm mx-4 space-y-4" onClick={e => e.stopPropagation()}>
               <h3 className="text-lg font-bold text-pnp-textPrimary">Clip This Moment</h3>
               <p className="text-pnp-textSecondary text-sm">Post a live announcement to the social feed</p>
-              <input
-                type="text"
-                value={clipCaption}
-                onChange={(e) => setClipCaption(e.target.value)}
-                placeholder="What's happening?"
-                maxLength={280}
-                className="w-full px-3 py-2 bg-[#1C1C1E] border border-white/10 rounded-lg text-white placeholder-[#8E8E93] text-sm focus:outline-none focus:border-[#5ED1C4]"
-              />
+              <input type="text" value={clipCaption} onChange={e => setClipCaption(e.target.value)} placeholder="What's happening?" maxLength={280} className="w-full px-3 py-2 bg-[#1C1C1E] border border-white/10 rounded-lg text-white placeholder-[#8E8E93] text-sm focus:outline-none focus:border-[#5ED1C4]" />
               <div className="flex gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowClipModal(false)}
-                  className="flex-1"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={!clipCaption.trim() || clipLoading}
-                  onClick={async () => {
-                    setClipLoading(true);
-                    try {
-                      await clipMoment(clipCaption.trim());
-                      setShowClipModal(false);
-                      setClipCaption('');
-                    } catch {}
-                    setClipLoading(false);
-                  }}
-                  className="flex-1"
-                >
-                  {clipLoading ? 'Posting...' : 'Drop It'}
-                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setShowClipModal(false)} className="flex-1">Cancel</Button>
+                <Button size="sm" disabled={!clipCaption.trim() || clipLoading} onClick={async () => { setClipLoading(true); try { await clipMoment(clipCaption.trim()); setShowClipModal(false); setClipCaption(''); } catch {} setClipLoading(false); }} className="flex-1">{clipLoading ? 'Posting...' : 'Drop It'}</Button>
               </div>
             </div>
           </div>
@@ -531,38 +577,13 @@ export default function MainStage() {
             </p>
           )}
 
-          {/* Active Telegram call banner */}
-          {telegramCallActive && mainGroup?.telegramInviteLink && (
-            <div
-              className="flex items-center gap-3 px-4 py-2.5 rounded-xl"
-              style={{ background: "rgba(52,199,89,0.12)", border: "1px solid rgba(52,199,89,0.2)" }}
-            >
-              <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-400" />
-              </span>
-              <p className="flex-1 text-xs font-medium" style={{ color: "#34C759" }}>
-                Video call is live in Telegram
-              </p>
-              <a
-                href={getTelegramDeepLink(mainGroup.telegramInviteLink)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs font-bold px-3 py-1 rounded-lg transition-all hover:opacity-90 active:scale-95 flex-shrink-0"
-                style={{ background: "#34C759", color: "#fff" }}
-              >
-                Join
-              </a>
-            </div>
-          )}
-
           {isAuthenticated ? (
             <Button
               onClick={handleJoinClick}
               disabled={loading}
               className="w-full"
             >
-              {loading ? "Opening Telegram..." : telegramCallActive ? "Join Live Call on Telegram" : occupancy > 0 ? `Join ${occupancy} on Main Stage` : "Open Main Stage on Telegram"}
+              {loading ? "Starting call…" : occupancy > 0 ? `Join ${occupancy} on Main Stage` : "Join Main Stage"}
             </Button>
           ) : (
             <p className="text-pnp-textSecondary text-sm text-center py-2">
@@ -571,6 +592,48 @@ export default function MainStage() {
           )}
         </div>
       </Card>
+
+      {/* Admin Stage Control */}
+      {isAdmin && (
+        <Card className="p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-pnp-textPrimary">Stage Control</h3>
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide" style={{ background: 'rgba(212,0,122,0.12)', color: '#D4007A' }}>Admin</span>
+          </div>
+          <p className="text-xs text-pnp-textSecondary">Set the mood for all viewers watching right now.</p>
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              { mode: 'ambient' as const, label: 'Ambient', icon: '🌊', desc: 'Chill vibes' },
+              { mode: 'community' as const, label: 'Community', icon: '🌈', desc: 'Open hangout' },
+              { mode: 'dj-live' as const, label: 'DJ Live', icon: '🎧', desc: 'Live DJ set' },
+            ]).map(({ mode, label, icon, desc }) => {
+              const isActive = stageState?.mode === mode;
+              return (
+                <button
+                  key={mode}
+                  disabled={stageModeLoading || isActive}
+                  onClick={async () => {
+                    setStageModeLoading(true);
+                    try {
+                      await apiSetStageMode(mode);
+                      setStageState((s) => s ? { ...s, mode } : { mode, master: null });
+                    } catch { /* silent */ } finally { setStageModeLoading(false); }
+                  }}
+                  className={`flex flex-col items-center gap-1 p-3 rounded-xl border transition-all active:scale-95 disabled:opacity-60 disabled:cursor-default ${
+                    isActive
+                      ? 'border-pnp-accent/50 bg-pnp-accent/10'
+                      : 'border-white/10 bg-white/5 hover:bg-white/10'
+                  }`}
+                >
+                  <span className="text-xl">{icon}</span>
+                  <span className={`text-[11px] font-semibold leading-tight ${isActive ? 'text-pnp-accent' : 'text-pnp-textPrimary'}`}>{label}</span>
+                  <span className="text-[10px] text-pnp-textSecondary leading-tight">{desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       {/* Who's in the room — detailed list */}
       {!occupancyError && occupancyUsers.length > 0 && (
