@@ -4,11 +4,19 @@ const { randomUUID } = require('crypto');
 const XAutoCampaignService = require('../../services/xAutoCampaignService');
 const XPostService = require('../../services/xPostService');
 const logger = require('../../../utils/logger');
+const { getRedis } = require('../../../config/redis');
 
 const ITEMS_PER_PAGE = 20;
+const DELETE_JOB_TTL = 60 * 60; // 1 hour
+const DELETE_JOB_KEY = (id) => `x:delete-job:${id}`;
 
-// In-memory tracking for background post-deletion jobs (admin-only, low-volume)
-const deleteJobs = new Map();
+const getDeleteJob = async (jobId) => {
+  const raw = await getRedis().get(DELETE_JOB_KEY(jobId));
+  return raw ? JSON.parse(raw) : null;
+};
+const setDeleteJob = async (jobId, data, ttl = DELETE_JOB_TTL) => {
+  await getRedis().set(DELETE_JOB_KEY(jobId), JSON.stringify(data), 'EX', ttl);
+};
 
 const getStats = async (req, res) => {
   try {
@@ -301,7 +309,7 @@ const startDeleteAccountPosts = async (req, res) => {
     }
 
     const jobId = randomUUID();
-    deleteJobs.set(jobId, {
+    await setDeleteJob(jobId, {
       accountId,
       timeRange,
       status: 'running',
@@ -313,21 +321,18 @@ const startDeleteAccountPosts = async (req, res) => {
     });
 
     // Kick off in background — fire-and-forget
-    XPostService.deleteAccountPosts(accountId, timeRange, (progress) => {
-      const job = deleteJobs.get(jobId);
-      if (job) Object.assign(job, progress);
-    }).then((result) => {
-      const job = deleteJobs.get(jobId);
+    XPostService.deleteAccountPosts(accountId, timeRange, async (progress) => {
+      const job = await getDeleteJob(jobId);
+      if (job) await setDeleteJob(jobId, { ...job, ...progress });
+    }).then(async (result) => {
+      const job = await getDeleteJob(jobId);
       if (job) {
-        Object.assign(job, result, { status: 'completed', completedAt: new Date().toISOString() });
+        await setDeleteJob(jobId, { ...job, ...result, status: 'completed', completedAt: new Date().toISOString() }, 30 * 60);
       }
-      // Auto-cleanup after 30 minutes
-      setTimeout(() => deleteJobs.delete(jobId), 30 * 60 * 1000);
-    }).catch((err) => {
-      const job = deleteJobs.get(jobId);
+    }).catch(async (err) => {
+      const job = await getDeleteJob(jobId);
       if (job) {
-        job.status = 'failed';
-        job.error = err.message;
+        await setDeleteJob(jobId, { ...job, status: 'failed', error: err.message }, 30 * 60);
       }
       logger.error('Background X post deletion failed', { jobId, accountId, error: err.message });
     });
@@ -350,7 +355,7 @@ const startDeleteAccountPosts = async (req, res) => {
 const getDeleteJobStatus = async (req, res) => {
   try {
     const { jobId } = req.params;
-    const job = deleteJobs.get(jobId);
+    const job = await getDeleteJob(jobId);
     if (!job) return res.status(404).json({ error: 'Job not found or expired' });
     return res.json({ success: true, ...job });
   } catch (error) {
