@@ -2,6 +2,7 @@ const WithdrawalModel = require('../models/withdrawalModel');
 const ModelEarningsModel = require('../models/modelEarningsModel');
 const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
+const emailService = require('./emailService');
 
 class WithdrawalService {
   /**
@@ -11,8 +12,11 @@ class WithdrawalService {
 
   /**
    * Create withdrawal request
+   * @param {string} modelId
+   * @param {string} method - 'bank_transfer' | 'daimo' | other
+   * @param {Object} paymentDetails - optional extra details e.g. { daimo_address }
    */
-  static async requestWithdrawal(modelId, method = 'bank_transfer') {
+  static async requestWithdrawal(modelId, method = 'bank_transfer', paymentDetails = {}) {
     try {
       // Check pending balance
       const pendingEarnings = await ModelEarningsModel.getPendingEarnings(modelId);
@@ -32,23 +36,22 @@ class WithdrawalService {
         );
       }
 
-      // Validate bank details for bank_transfer method
-      if (method === 'bank_transfer') {
-        const userResult = await query(
-          `SELECT bank_account_owner, bank_account_number, bank_code
-           FROM users WHERE id = $1`,
-          [modelId]
-        );
+      // For daimo method, require a wallet address
+      if (method === 'daimo' && !paymentDetails.daimo_address) {
+        throw new Error('Daimo wallet address is required for crypto withdrawals');
+      }
 
-        const user = userResult.rows[0];
-        if (
-          !user ||
-          !user.bank_account_owner ||
-          !user.bank_account_number ||
-          !user.bank_code
-        ) {
-          throw new Error('Bank account details not configured');
-        }
+      // Fetch user email for notifications
+      const userResult = await query(
+        `SELECT email, payout_method FROM users WHERE id = $1`,
+        [modelId]
+      );
+      const user = userResult.rows[0];
+
+      // Build reason string that embeds payment details so _executeWithdrawal can read them
+      let reason = `Auto-withdrawal of ${pendingEarnings.length} earnings records`;
+      if (method === 'daimo' && paymentDetails.daimo_address) {
+        reason += ` | daimo_address:${paymentDetails.daimo_address}`;
       }
 
       // Create withdrawal request
@@ -58,7 +61,7 @@ class WithdrawalService {
         amountCop: totalCop,
         method,
         status: 'pending',
-        reason: `Auto-withdrawal of ${pendingEarnings.length} earnings records`,
+        reason,
       });
 
       logger.info('Withdrawal request created', {
@@ -67,6 +70,53 @@ class WithdrawalService {
         amountUsd: totalUsd,
         earningsCount: pendingEarnings.length,
       });
+
+      // Send email notifications (non-blocking — failures must not abort the request)
+      const adminEmail = 'support@pnptv.app';
+      const creatorEmail = user?.email;
+
+      const adminHtml = `
+        <h2>New Withdrawal Request — PNPtv</h2>
+        <p>A creator has requested a payout. Please review and process manually.</p>
+        <table cellpadding="6" style="border-collapse:collapse;font-family:sans-serif;font-size:14px;">
+          <tr><td><strong>Withdrawal ID</strong></td><td>${emailService.escapeHtml(withdrawal.id)}</td></tr>
+          <tr><td><strong>Creator ID</strong></td><td>${emailService.escapeHtml(String(modelId))}</td></tr>
+          <tr><td><strong>Creator Email</strong></td><td>${emailService.escapeHtml(creatorEmail || 'N/A')}</td></tr>
+          <tr><td><strong>Amount (USD)</strong></td><td>$${totalUsd.toFixed(2)}</td></tr>
+          <tr><td><strong>Earnings Count</strong></td><td>${pendingEarnings.length}</td></tr>
+          <tr><td><strong>Method</strong></td><td>${emailService.escapeHtml(method)}</td></tr>
+          ${method === 'daimo' && paymentDetails.daimo_address ? `<tr><td><strong>Daimo Address</strong></td><td>${emailService.escapeHtml(paymentDetails.daimo_address)}</td></tr>` : ''}
+          <tr><td><strong>Requested At</strong></td><td>${new Date().toISOString()}</td></tr>
+        </table>
+        <p style="margin-top:16px;color:#888;">Log into the PNPtv admin panel to approve or reject this request.</p>
+      `;
+
+      emailService.send({
+        to: adminEmail,
+        subject: `[PNPtv] New Withdrawal Request — $${totalUsd.toFixed(2)} (${method})`,
+        html: adminHtml,
+      }).catch(err => logger.error('Failed to send admin withdrawal request email:', err));
+
+      if (creatorEmail && emailService.isEmailSafe(creatorEmail)) {
+        const creatorHtml = `
+          <h2>Your withdrawal request was received — PNPtv</h2>
+          <p>Hi! We've received your payout request. Our team will review and process it shortly.</p>
+          <table cellpadding="6" style="border-collapse:collapse;font-family:sans-serif;font-size:14px;">
+            <tr><td><strong>Amount</strong></td><td>$${totalUsd.toFixed(2)} USD</td></tr>
+            <tr><td><strong>Method</strong></td><td>${emailService.escapeHtml(method.replace('_', ' '))}</td></tr>
+            <tr><td><strong>Status</strong></td><td>Pending Review</td></tr>
+            <tr><td><strong>Reference</strong></td><td>${emailService.escapeHtml(withdrawal.id)}</td></tr>
+          </table>
+          <p style="margin-top:16px;">You'll receive another email once your payout has been processed. If you have questions, reply to this email or contact support@pnptv.app.</p>
+          <p style="color:#888;font-size:12px;">PNPtv — pnptv.app</p>
+        `;
+
+        emailService.send({
+          to: creatorEmail,
+          subject: `[PNPtv] Payout request received — $${totalUsd.toFixed(2)}`,
+          html: creatorHtml,
+        }).catch(err => logger.error('Failed to send creator withdrawal confirmation email:', err));
+      }
 
       return {
         withdrawal,
@@ -134,8 +184,6 @@ class WithdrawalService {
       // Mark as processing
       await WithdrawalModel.updateWithdrawalStatus(withdrawalId, 'processing');
 
-      // TODO: Integrate with payment processor (ePayco, Daimo, bank transfer)
-      // This is a placeholder - actual implementation depends on method
       const result = await this._executeWithdrawal(withdrawal);
 
       if (result.success) {
@@ -187,43 +235,136 @@ class WithdrawalService {
   }
 
   /**
-   * Execute actual withdrawal (placeholder for payment processors)
+   * Execute actual withdrawal — sends admin alert email for manual processing.
+   * All methods (bank_transfer, daimo, paypal, etc.) are processed manually by admin.
+   * The admin is notified via email with all payout details; the creator is also notified.
    */
   static async _executeWithdrawal(withdrawal) {
     try {
-      // Get user bank details
       const userResult = await query(
-        `SELECT bank_account_owner, bank_account_number, bank_code, email
-         FROM users WHERE id = $1`,
+        `SELECT email, payout_method FROM users WHERE id = $1`,
         [withdrawal.modelId]
       );
 
       const user = userResult.rows[0];
       if (!user) {
-        throw new Error('User not found');
+        throw new Error('User not found for withdrawal');
       }
 
-      // TODO: Implement actual payment processor calls
-      // For now, return mock success
-      if (withdrawal.method === 'bank_transfer') {
-        return {
-          success: true,
-          transactionId: `TXN-${Date.now()}`,
-          externalReference: `BANK-${withdrawal.modelId}-${Date.now()}`,
-        };
+      const adminEmail = 'support@pnptv.app';
+      const creatorEmail = user.email;
+      const method = withdrawal.method || 'bank_transfer';
+      const amountUsd = parseFloat(withdrawal.amountUsd || 0).toFixed(2);
+      const withdrawalId = withdrawal.id;
+      const now = new Date().toISOString();
+
+      // Extract daimo address embedded in reason field (set during requestWithdrawal)
+      let daimoAddress = null;
+      if (method === 'daimo' && withdrawal.reason) {
+        const match = withdrawal.reason.match(/daimo_address:([^\s|]+)/);
+        if (match) daimoAddress = match[1];
       }
 
-      if (withdrawal.method === 'paypal') {
-        return {
-          success: true,
-          transactionId: `PPL-${Date.now()}`,
-          externalReference: `PAYPAL-${user.email}`,
-        };
+      // Build admin notification email
+      const methodLabel = method === 'bank_transfer' ? 'Bank Transfer'
+        : method === 'daimo' ? 'Daimo (Crypto / USDC on Optimism)'
+        : method === 'paypal' ? 'PayPal'
+        : method.replace(/_/g, ' ');
+
+      const daimoRow = daimoAddress
+        ? `<tr><td style="padding:6px;color:#555;"><strong>Daimo Address</strong></td><td style="padding:6px;">${emailService.escapeHtml(daimoAddress)}</td></tr>`
+        : '';
+
+      const adminHtml = `
+        <div style="font-family:sans-serif;font-size:14px;color:#222;max-width:600px;">
+          <h2 style="color:#D4007A;">PNPtv — Creator Payout Processing Required</h2>
+          <p>A withdrawal has been approved and is ready for manual processing. Please action this payment and then mark it as completed in the admin panel.</p>
+          <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;margin:16px 0;">
+            <tr style="background:#f5f5f5;">
+              <td style="padding:6px;color:#555;"><strong>Withdrawal ID</strong></td>
+              <td style="padding:6px;">${emailService.escapeHtml(withdrawalId)}</td>
+            </tr>
+            <tr>
+              <td style="padding:6px;color:#555;"><strong>Creator ID</strong></td>
+              <td style="padding:6px;">${emailService.escapeHtml(String(withdrawal.modelId))}</td>
+            </tr>
+            <tr style="background:#f5f5f5;">
+              <td style="padding:6px;color:#555;"><strong>Creator Email</strong></td>
+              <td style="padding:6px;">${emailService.escapeHtml(creatorEmail || 'N/A')}</td>
+            </tr>
+            <tr>
+              <td style="padding:6px;color:#555;"><strong>Amount (USD)</strong></td>
+              <td style="padding:6px;font-weight:bold;color:#D4007A;">$${amountUsd}</td>
+            </tr>
+            <tr style="background:#f5f5f5;">
+              <td style="padding:6px;color:#555;"><strong>Payment Method</strong></td>
+              <td style="padding:6px;">${emailService.escapeHtml(methodLabel)}</td>
+            </tr>
+            ${daimoRow}
+            <tr>
+              <td style="padding:6px;color:#555;"><strong>Processing Time</strong></td>
+              <td style="padding:6px;">${now}</td>
+            </tr>
+          </table>
+          <p style="color:#888;font-size:12px;">
+            After completing the transfer, update the withdrawal status to <strong>completed</strong> in the admin panel and enter the transaction reference.<br>
+            Withdrawal ID: <code>${emailService.escapeHtml(withdrawalId)}</code>
+          </p>
+        </div>
+      `;
+
+      try {
+        await emailService.send({
+          to: adminEmail,
+          subject: `[PNPtv] ACTION REQUIRED: Process payout $${amountUsd} via ${methodLabel} — ID ${withdrawalId}`,
+          html: adminHtml,
+        });
+        logger.info('Admin withdrawal processing email sent', { withdrawalId, method });
+      } catch (emailErr) {
+        logger.error('Failed to send admin withdrawal processing email:', emailErr);
+        // Do not fail the withdrawal — log and continue
       }
+
+      // Notify creator that their payout is being processed
+      if (creatorEmail && emailService.isEmailSafe(creatorEmail)) {
+        const creatorHtml = `
+          <div style="font-family:sans-serif;font-size:14px;color:#222;max-width:600px;">
+            <h2 style="color:#D4007A;">Your PNPtv payout is being processed</h2>
+            <p>Great news! Your withdrawal request has been approved and our team is now processing your payment.</p>
+            <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;margin:16px 0;">
+              <tr style="background:#f5f5f5;">
+                <td style="padding:6px;color:#555;"><strong>Amount</strong></td>
+                <td style="padding:6px;font-weight:bold;">$${amountUsd} USD</td>
+              </tr>
+              <tr>
+                <td style="padding:6px;color:#555;"><strong>Method</strong></td>
+                <td style="padding:6px;">${emailService.escapeHtml(methodLabel)}</td>
+              </tr>
+              <tr style="background:#f5f5f5;">
+                <td style="padding:6px;color:#555;"><strong>Reference</strong></td>
+                <td style="padding:6px;"><code>${emailService.escapeHtml(withdrawalId)}</code></td>
+              </tr>
+            </table>
+            <p>Payouts are typically completed within 1–3 business days. You'll receive a confirmation email once the funds have been sent.</p>
+            <p style="color:#888;font-size:12px;">Questions? Reply to this email or reach us at support@pnptv.app</p>
+          </div>
+        `;
+
+        emailService.send({
+          to: creatorEmail,
+          subject: `[PNPtv] Your payout of $${amountUsd} is being processed`,
+          html: creatorHtml,
+        }).catch(err => logger.error('Failed to send creator processing email:', err));
+      }
+
+      // Generate a PENDING transaction ID — admin will update with real transaction ID
+      const transactionId = `PENDING-${withdrawalId.substring(0, 8).toUpperCase()}-${Date.now()}`;
+      const externalReference = `awaiting-manual-processing:${method}`;
 
       return {
-        success: false,
-        error: 'Unsupported withdrawal method',
+        success: true,
+        transactionId,
+        externalReference,
       };
     } catch (error) {
       logger.error('Error executing withdrawal:', error);

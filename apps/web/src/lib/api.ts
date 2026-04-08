@@ -1811,6 +1811,43 @@ export function searchUsers(
   );
 }
 
+export interface GlobalSearchResult {
+  success: boolean;
+  users: Array<{
+    id: string;
+    username: string;
+    first_name: string;
+    last_name: string | null;
+    photo_file_id: string | null;
+    pnptv_id: string;
+  }>;
+  creators: Array<{
+    id: string;
+    user_id: string;
+    display_name: string;
+    username: string;
+    photo_url: string | null;
+    category: string | null;
+    verified: boolean;
+  }>;
+  posts: Array<{
+    id: string;
+    content: string;
+    author_id: string;
+    author_username: string;
+    author_name: string;
+    author_photo: string | null;
+    created_at: string;
+    media_count: number;
+  }>;
+}
+
+export function searchAll(q: string, limit = 8): Promise<GlobalSearchResult> {
+  return request(
+    `/api/webapp/search?q=${encodeURIComponent(q)}&limit=${limit}`
+  );
+}
+
 export function followUser(userId: string): Promise<{
   success: boolean;
   isFollowing: boolean;
@@ -3064,14 +3101,15 @@ export function getWithdrawableAmount(): Promise<{
 }
 
 export function requestWithdrawal(
-  method = "bank_transfer"
+  method = "bank_transfer",
+  paymentDetails: Record<string, string> = {}
 ): Promise<{
   success: boolean;
   data: { withdrawal: ModelWithdrawal; earningsCount: number };
 }> {
   return request("/api/model/withdrawal/request", {
     method: "POST",
-    body: { method },
+    body: { method, paymentDetails },
   });
 }
 

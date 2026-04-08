@@ -269,7 +269,7 @@ class ModelController {
   static async requestWithdrawal(req, res) {
     try {
       const modelId = req.user?.id;
-      const { method = 'bank_transfer' } = req.body;
+      const { method = 'bank_transfer', paymentDetails = {} } = req.body;
 
       if (!modelId) {
         return res.status(401).json({
@@ -281,7 +281,7 @@ class ModelController {
         });
       }
 
-      const result = await WithdrawalService.requestWithdrawal(modelId, method);
+      const result = await WithdrawalService.requestWithdrawal(modelId, method, paymentDetails);
 
       logger.info('Withdrawal requested', {
         withdrawalId: result.withdrawal.id,

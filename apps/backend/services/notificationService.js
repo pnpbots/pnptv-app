@@ -1,6 +1,7 @@
 const UserService = require('./userService');
 const PermissionService = require('./permissionService');
 const logger = require('../utils/logger');
+const PushNotificationService = require('./pushNotificationService');
 
 /**
  * Notification Service - Handles all user notifications
@@ -21,16 +22,21 @@ class NotificationService {
         return false;
       }
 
-      // In a real implementation, this would send messages to each admin
-      // For now, we'll just log it
       logger.info(`Notification to ${admins.length} admins: ${message}`, {
         action,
         adminCount: admins.length
       });
 
-      // TODO: Implement actual notification sending via Telegram
-      // This would require bot instance access
-      
+      // Fire push notifications to all admins (non-blocking)
+      const adminIds = admins.map((a) => String(a.id || a.userId || a.user_id)).filter(Boolean);
+      if (adminIds.length > 0) {
+        PushNotificationService.sendToUsers(adminIds, {
+          title: 'PNPtv Admin Alert',
+          body: message,
+          url: '/admin',
+        }).catch((err) => logger.warn('Admin push notification failed', { error: err.message }));
+      }
+
       return true;
     } catch (error) {
       logger.error('Error notifying admins:', error);
@@ -54,15 +60,19 @@ class NotificationService {
         return false;
       }
 
-      // Log the notification
       logger.info(`Notification to user ${userId}: ${message}`, {
         userId,
         username: user.username,
         options
       });
 
-      // TODO: Implement actual notification sending
-      
+      // Fire push notification (non-blocking)
+      PushNotificationService.sendToUser(String(userId), {
+        title: 'PNPtv',
+        body: message,
+        url: options.url || '/',
+      }).catch((err) => logger.warn('User push notification failed', { userId, error: err.message }));
+
       return true;
     } catch (error) {
       logger.error('Error notifying user:', error);

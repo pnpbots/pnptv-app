@@ -1238,28 +1238,11 @@ Thank you for staying with us! 🙏`;
         throw new Error('Invalid webhook signature');
       }
 
-      // C-04: Distinguish between events that must be acknowledged (return 200/success:true)
-      // and those that are genuinely unimplemented. Returning 503/success:false for
-      // payment.success, subscription.created, and subscription.updated causes Cybersource
-      // to mark the endpoint as broken and stop sending future events.
-      //
-      // TODO: Implement full processing for payment.success, subscription.created, and
-      // subscription.updated (entitlement grant, history record, user notification).
-      // For now, acknowledge them immediately to keep the Cybersource integration healthy.
       const eventType = webhookData.eventType;
-      const acknowledgeOnlyEvents = [
-        'payment.success',
-        'subscription.created',
-        'subscription.updated',
-      ];
+
       const genuinelyUnimplementedEvents = [
         'payment.failed',
       ];
-
-      if (acknowledgeOnlyEvents.includes(eventType)) {
-        logger.warn('Cybersource webhook event acknowledged but not yet fully processed', { eventType, eventId });
-        return { success: true, acknowledged: true, message: `Event type '${eventType}' received; full processing pending` };
-      }
 
       if (genuinelyUnimplementedEvents.includes(eventType)) {
         logger.warn('Cybersource webhook event not yet implemented', { eventType });
@@ -1271,6 +1254,81 @@ Thank you for staying with us! 🙏`;
       }
 
       switch (eventType) {
+        case 'payment.success': {
+          // Acknowledge webhook even on internal errors — Cybersource will stop sending
+          // future events if we return non-200. All errors are caught and logged below.
+          try {
+            const { userId, planId, amount, currency, subscriptionId } = webhookData.data || {};
+            if (userId && planId) {
+              const PaymentService = require('./paymentService');
+              await PaymentService.grantEntitlementsForPlan(userId, planId, 'cybersource_payment');
+              logger.info('Cybersource payment.success: entitlements granted', {
+                eventId, userId, planId, amount, currency, subscriptionId,
+              });
+            } else {
+              logger.warn('Cybersource payment.success: missing userId or planId, skipping entitlement grant', {
+                eventId, dataKeys: Object.keys(webhookData.data || {}),
+              });
+            }
+          } catch (err) {
+            logger.error('Cybersource payment.success: error processing entitlements (webhook still acknowledged)', {
+              eventId, error: err.message,
+            });
+          }
+          return { success: true };
+        }
+
+        case 'subscription.created': {
+          try {
+            const { userId, planId, subscriptionId, periodEnd } = webhookData.data || {};
+            if (!userId || !planId) {
+              logger.warn('Cybersource subscription.created: missing userId or planId', {
+                eventId, dataKeys: Object.keys(webhookData.data || {}),
+              });
+              return { success: true };
+            }
+            if (subscriptionId) {
+              await query(
+                `UPDATE recurring_subscriptions SET status = 'active', updated_at = NOW()
+                 WHERE id = $1 AND status != 'cancelled'`,
+                [subscriptionId]
+              );
+            }
+            const PaymentService = require('./paymentService');
+            await PaymentService.grantEntitlementsForPlan(userId, planId, 'cybersource_subscription');
+            logger.info('Cybersource subscription.created: entitlements granted', {
+              eventId, userId, planId, subscriptionId, periodEnd,
+            });
+          } catch (err) {
+            logger.error('Cybersource subscription.created: error processing (webhook still acknowledged)', {
+              eventId, error: err.message,
+            });
+          }
+          return { success: true };
+        }
+
+        case 'subscription.updated': {
+          try {
+            const { userId, planId, subscriptionId, newPeriodEnd } = webhookData.data || {};
+            if (!userId || !planId) {
+              logger.warn('Cybersource subscription.updated: missing userId or planId', {
+                eventId, dataKeys: Object.keys(webhookData.data || {}),
+              });
+              return { success: true };
+            }
+            const PaymentService = require('./paymentService');
+            await PaymentService.grantEntitlementsForPlan(userId, planId, 'cybersource_subscription_update');
+            logger.info('Cybersource subscription.updated: entitlements extended', {
+              eventId, userId, planId, subscriptionId, newPeriodEnd,
+            });
+          } catch (err) {
+            logger.error('Cybersource subscription.updated: error processing (webhook still acknowledged)', {
+              eventId, error: err.message,
+            });
+          }
+          return { success: true };
+        }
+
         case 'subscription.cancelled': {
           // Validate required fields before acting on unvalidated webhook payload.
           const { subscriptionId, userId: webhookUserId } = webhookData.data || {};

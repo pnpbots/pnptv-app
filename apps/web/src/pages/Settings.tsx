@@ -18,6 +18,9 @@ import {
   getWalletBalance,
   getWalletHistory,
   linkDPNS,
+  getVapidKey,
+  subscribePush,
+  unsubscribePush,
   type ReferralStats,
   type BlockedUser,
   type EraseAccountReceipt,
@@ -179,6 +182,29 @@ export default function Settings() {
     try { return localStorage.getItem("pnp_newsletter_subscribed") === "1"; } catch { return false; }
   });
   const [newsletterLoading, setNewsletterLoading] = useState(false);
+
+  // ── Browser push notifications state ─────────────────────────────────
+  type PushState = "unsupported" | "denied" | "enabled" | "disabled";
+  const [pushState, setPushState] = useState<PushState>("disabled");
+  const [pushLoading, setPushLoading] = useState(false);
+
+  // ── Detect current push subscription state on mount ─────────────────────
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setPushState("unsupported");
+      return;
+    }
+    if (Notification.permission === "denied") {
+      setPushState("denied");
+      return;
+    }
+    navigator.serviceWorker.ready.then((reg) => {
+      reg.pushManager.getSubscription().then((sub) => {
+        setPushState(sub ? "enabled" : "disabled");
+      }).catch(() => setPushState("disabled"));
+    }).catch(() => setPushState("disabled"));
+  }, [isAuthenticated]);
 
   // ── Load data ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -466,6 +492,45 @@ export default function Settings() {
     } catch { /* silent — toggle reverts visually */ }
     finally { setNewsletterLoading(false); }
   }, [user, newsletterSubscribed]);
+
+  const handlePushToggle = useCallback(async () => {
+    if (pushLoading || pushState === "unsupported" || pushState === "denied") return;
+
+    setPushLoading(true);
+    try {
+      if (pushState === "enabled") {
+        // Unsubscribe
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          await unsubscribePush(sub.endpoint).catch(() => {});
+          await sub.unsubscribe();
+        }
+        setPushState("disabled");
+      } else {
+        // Request permission
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") {
+          setPushState(permission === "denied" ? "denied" : "disabled");
+          return;
+        }
+        // Fetch VAPID key and subscribe
+        const { publicKey } = await getVapidKey();
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: publicKey,
+        });
+        await subscribePush(sub.toJSON() as { endpoint: string; keys: { auth: string; p256dh: string } });
+        setPushState("enabled");
+      }
+    } catch (err) {
+      // Silent — state reverts
+      console.warn("Push toggle error:", err);
+    } finally {
+      setPushLoading(false);
+    }
+  }, [pushLoading, pushState]);
 
   // ── Auth guard ────────────────────────────────────────────────────────────
 
@@ -960,6 +1025,41 @@ export default function Settings() {
             disabled={newsletterLoading || !user?.email}
             accentColor="#D4007A"
           />
+        </div>
+
+        {/* Browser push notifications */}
+        <div className="flex items-center justify-between mt-4">
+          <div className="flex-1 min-w-0 mr-4">
+            <p className="text-sm text-white font-medium">Browser Notifications</p>
+            <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+              {pushState === "unsupported"
+                ? "Push notifications are not supported in this browser."
+                : pushState === "denied"
+                ? "Notifications blocked. Allow them in your browser settings."
+                : pushState === "enabled"
+                ? "You will receive push notifications for messages and invites."
+                : "Enable to get notified about messages and hangout invites."}
+            </p>
+          </div>
+          {pushState === "unsupported" || pushState === "denied" ? (
+            <span
+              className="text-xs px-2.5 py-1 rounded-full flex-shrink-0"
+              style={{
+                background: "rgba(255,255,255,0.07)",
+                color: "#8E8E93",
+                border: "1px solid rgba(255,255,255,0.12)",
+              }}
+            >
+              {pushState === "unsupported" ? "N/A" : "Blocked"}
+            </span>
+          ) : (
+            <Toggle
+              checked={pushState === "enabled"}
+              onChange={handlePushToggle}
+              disabled={pushLoading}
+              accentColor="#5ED1C4"
+            />
+          )}
         </div>
       </Section>
 

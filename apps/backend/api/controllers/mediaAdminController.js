@@ -7,6 +7,25 @@ const path = require('path');
 const fs = require('fs').promises;
 const { v4: uuidv4 } = require('uuid');
 const FileType = require('file-type');
+const ffmpeg = require('fluent-ffmpeg');
+
+/**
+ * Extract duration in seconds from an audio or video file using ffprobe.
+ * Resolves to 0 on any error so uploads are never blocked by metadata failures.
+ * @param {string} filePath - Absolute path to the file on disk
+ * @returns {Promise<number>} Duration in whole seconds, or 0
+ */
+function getMediaDuration(filePath) {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err || !metadata?.format?.duration) {
+        resolve(0);
+      } else {
+        resolve(Math.round(metadata.format.duration));
+      }
+    });
+  });
+}
 
 /**
  * Media and Radio Admin Controller
@@ -160,13 +179,15 @@ const uploadMedia = async (req, res) => {
     const filePath = path.join(uploadDir, fileName);
     await fs.writeFile(filePath, req.file.buffer);
 
+    const duration = await getMediaDuration(filePath);
+
     // Create media record in database
     const mediaData = {
       title,
       artist: artist || 'Unknown',
       url: `/uploads/media/${fileName}`, // Relative URL to the uploaded file
       type: type || 'audio',
-      duration: 0, // TODO: Extract from file metadata
+      duration,
       coverUrl: null,
       description: description || null,
       category: category || 'general',

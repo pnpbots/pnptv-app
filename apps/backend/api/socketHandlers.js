@@ -620,6 +620,15 @@ function initSocketIO(io) {
           fromName,
           fromPhotoUrl: user.photoUrl || user.photo_url || null,
         });
+
+        // Fire push notification to the invited user (non-blocking)
+        const PushNotificationService = require('../services/pushNotificationService');
+        PushNotificationService.sendToUser(String(targetUserId), {
+          title: 'Hangout invite',
+          body: `${fromName} invited you to join ${groupName}`,
+          url: '/hangouts',
+          tag: `hangout-invite-${gid}`,
+        }).catch(() => {});
       } catch (err) {
         logger.error('hangout:invite error', err);
       }
@@ -1058,11 +1067,22 @@ function initSocketIO(io) {
         const message = await DmService.sendMessage(user.id, recipientId, { content: content.trim() }, { isAdmin });
 
         // Emit to recipient's personal room for real-time delivery
+        const dmSenderName = user.firstName || user.first_name || user.username || 'User';
         io.to(`user:${recipientId}`).emit('dm:message', {
           ...message,
-          senderName: user.firstName || user.first_name || user.username || 'User',
+          senderName: dmSenderName,
           senderPhoto: user.photoUrl || user.photo_url || null,
         });
+
+        // Fire push notification to recipient (non-blocking)
+        const PushNotificationService = require('../services/pushNotificationService');
+        const dmText = String(message.content || '');
+        PushNotificationService.sendToUser(String(recipientId), {
+          title: dmSenderName,
+          body: dmText.slice(0, 120),
+          url: '/messages',
+          tag: `dm-${user.id}`,
+        }).catch(() => {});
 
         // Confirm to sender with the saved message
         socket.emit('dm:sent', { success: true, message });

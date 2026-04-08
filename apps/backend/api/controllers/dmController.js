@@ -154,6 +154,25 @@ const createDmVideoCallInvite = async (req, res) => {
     const calleeId = String(partnerId);
     // Deterministic room name — same for both participants regardless of who initiates
     const roomName = `dm-${Math.min(Number(callerId), Number(calleeId))}-${Math.max(Number(callerId), Number(calleeId))}`;
+
+    // Dedup: if an active call already exists, return it without creating a duplicate
+    const existing = await getRedis().get(`${DM_CALL_KEY_PREFIX}${roomName}`);
+    if (existing) {
+      const existingCall = JSON.parse(existing);
+      const displayName = user.firstName || user.first_name || user.username || 'PNPtv User';
+      const token = await generateToken(roomName, callerId, displayName, true);
+      return res.json({
+        success: true,
+        roomName,
+        callLink: buildDmCallLink(roomName, existingCall.callerId, existingCall.calleeId),
+        callerId: existingCall.callerId,
+        calleeId: existingCall.calleeId,
+        expiresAt: existingCall.expiresAt,
+        token,
+        livekitUrl: LIVEKIT_WS_URL,
+      });
+    }
+
     const createdAt = new Date();
     const expiresAt = new Date(createdAt.getTime() + DM_CALL_TTL_SECONDS * 1000).toISOString();
     const callLink = buildDmCallLink(roomName, callerId, calleeId);
@@ -257,13 +276,24 @@ const sendMessage = async (req, res) => {
 
     // Deliver to recipient via Socket.IO if available
     const io = req.app.get('io');
+    const senderName = user.firstName || user.first_name || user.username || 'User';
     if (io) {
       io.to(`user:${message.recipient_id}`).emit('dm:message', {
         ...message,
-        senderName: user.firstName || user.first_name || user.username || 'User',
+        senderName,
         senderPhoto: user.photoUrl || user.photo_url || null,
       });
     }
+
+    // Fire push notification to recipient (non-blocking)
+    const PushNotificationService = require('../../services/pushNotificationService');
+    const messageText = String(message.content || '');
+    PushNotificationService.sendToUser(String(message.recipient_id), {
+      title: senderName,
+      body: messageText.slice(0, 120),
+      url: '/messages',
+      tag: `dm-${user.id}`,
+    }).catch(() => {});
 
     return res.json({ success: true, message, remaining: req.dmLimit?.remaining ?? null });
   } catch (err) {
